@@ -78,10 +78,10 @@ mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
-// `psi_search` hooks of `run_call`.
+// `psi_search` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod pssm_hooks;
 // rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
-// hooks of `search_cli` and `run_call`.
+// hooks of `search_cli`, `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod rps_hooks;
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
 // `search`, and the round's outcome hook of `run_call`.

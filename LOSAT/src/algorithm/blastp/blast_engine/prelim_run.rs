@@ -153,8 +153,20 @@ pub(super) struct PrelimOutcome {
 ///         } else {
 ///             retval = CPrelimSearchRunner(*m_InternalData, opts_memento.get())();
 /// ```
+/// A database's threads are chosen in its driver (`database::search_blocks`). For a subject set
+/// NCBI uses one thread (`-subject` resets `-num_threads`):
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3224-3227
+/// ```c++
+///         // This is temporarily ignored (per SB-635)
+///         if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+///             m_NumThreads != CThreadable::kMinNumThreads) {
+///             m_NumThreads = CThreadable::kMinNumThreads;
+/// ```
+/// No NCBI counterpart: `use_parallel`, the pool for a subject set, whose output is the one
+/// thread's.
 pub(super) fn run_preliminary<K, O>(
-    run: &PrelimRun<'_>,
+    stage: &PrelimRun<'_>,
     process_subject: &K,
     process_own_subject: &O,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
@@ -214,7 +226,7 @@ where
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         total_db_len,
-    } = *run;
+    } = *stage;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -245,11 +257,12 @@ where
     let use_parallel = false;
 
     // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
-    // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
+    // which the ordinary traceback in `run_call` after this stage hands on, and each query's
+    // outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
-    // A database of several volumes: its merged lists are not sorted or cut below, and it prints
-    // no query warnings; so even when no batch is searched (every query invalid), as NCBI merges
-    // the volumes' empty results (review A of PS12a, S2's rpsblast half).
+    // A database of several volumes: its merged lists are not sorted or cut in `run_call` after
+    // this stage, and it prints no query warnings; so even when no batch is searched (every query
+    // invalid), as NCBI merges the volumes' empty results (review A of PS12a, S2's rpsblast half).
     let mut rps_multi_volume = args.rps_search.is_some()
         && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
     if let Some(rps) = args.rps_search.as_deref() {
@@ -383,10 +396,11 @@ where
         // search (`x_query_blocks.rs`), and its HSPs' query coordinates are relative to its
         // context (`blastp_adjust_initial_hsp_offsets`), so only the query's index moves
         // (`query_split::rebase_hit_list`). Nothing is written before the redo and the reports
-        // below, which run over all queries as after one table. A sequence file that cannot be
-        // read fails a block's search (`database::PreliminaryReadError`, handed on by the block):
-        // it is this call's error, made with this call's batches and reports
-        // (`preliminary_search_error`), as where one table finds it.
+        // in `run_call` after this stage, which run over all queries as after one table. A
+        // sequence file that cannot be read fails a block's search
+        // (`database::PreliminaryReadError`, handed on by the block): it is this call's error,
+        // made with this call's batches and reports (`preliminary_search_error`), as where one
+        // table finds it.
         // The blocks run (`LOSAT_X_REACH`): recorded here, not where they are planned, so that a
         // call whose blocks do not run (no valid query of a database, or an error of the set-up)
         // does not record them.

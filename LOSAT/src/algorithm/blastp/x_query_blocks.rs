@@ -288,20 +288,20 @@
 //! 10, 18 and 20, custom tabular fields that read more of `-db`'s definition lines, `-query_loc`,
 //! several outputs with `-db`, a run that a check before the first block leaves to it), runs its
 //! preliminary stage in the same blocks of whole batches (`blast_engine.rs` `x_prelim_block_plan`
-//! and the block loop of `run_call`, item SC8b-2; blastp only): each block is a call of the
-//! preliminary stage only (`PrelimOnly::Block`) with its own lookup table, diagonal table and
-//! scratch, freed when it returns, and its compact hit lists move to their queries among all
-//! queries (`query_split::rebase_hit_list`: only the query's index moves, the HSPs' query
-//! coordinates are relative to their context). The argument above is the preliminary stage's: a
-//! query's preliminary hit list is the same in a block as in the search of all queries, whatever
-//! report follows. The redo, the traceback and the reports then run once over all queries, with
-//! the contexts, search spaces, cutoffs and batches of all queries, as after one table (the
-//! contexts without a table, `x_blocks_contexts`, are each builder's), so no report byte, report
-//! order or error order depends on the blocks: nothing is written before the hit lists are joined,
-//! the set-up's checks and refusals come before the first block, and a sequence file that a block
-//! cannot read is the error of the search of all queries (`preliminary_search_error`). The plan is
-//! made by the search of all queries only (`BlastpReports::x_plan_blocks`), never again inside a
-//! block (whose words would close it on a smaller most).
+//! and the block loop of `run_preliminary`, `blast_engine/prelim_run.rs`, item SC8b-2; blastp
+//! only): each block is a call of the preliminary stage only (`PrelimOnly::Block`) with its own
+//! lookup table, diagonal table and scratch, freed when it returns, and its compact hit lists move
+//! to their queries among all queries (`query_split::rebase_hit_list`: only the query's index
+//! moves, the HSPs' query coordinates are relative to their context). The argument above is the
+//! preliminary stage's: a query's preliminary hit list is the same in a block as in the search of
+//! all queries, whatever report follows. The redo, the traceback and the reports then run once over
+//! all queries, with the contexts, search spaces, cutoffs and batches of all queries, as after one
+//! table (the contexts without a table, `x_blocks_contexts`, are each builder's), so no report
+//! byte, report order or error order depends on the blocks: nothing is written before the hit lists
+//! are joined, the set-up's checks and refusals come before the first block, and a sequence file
+//! that a block cannot read is the error of the search of all queries (`preliminary_search_error`).
+//! The plan is made by the search of all queries only (`BlastpReports::x_plan_blocks`), never again
+//! inside a block (whose words would close it on a smaller most).
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it; also before a batch

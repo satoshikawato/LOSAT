@@ -113,8 +113,7 @@ impl<'a> QueryBatch<'a> {
             batch: Some(self),
             // A batch's contexts and a search's subjects are counted in `u32`, as `InitHSP`
             // counts the subject.
-            ctx: ctx as u32,
-            s_idx: s_idx as u32,
+            at: (ctx as u32 as u64) | ((s_idx as u32 as u64) << 32),
         }
     }
 
@@ -360,10 +359,25 @@ pub(crate) fn refusal() -> anyhow::Error {
 #[derive(Clone, Copy)]
 pub(crate) struct InBatch<'a> {
     batch: Option<&'a QueryBatch<'a>>,
-    ctx: u32,
-    /// The subject, whose search a refusal fails. (Two words in all, which a call passes in
-    /// registers.)
-    s_idx: u32,
+    /// The context (the low 32 bits) and the subject, whose search a refusal fails (the high 32
+    /// bits): one word, so that the struct is a pair of scalars, which a call passes in two
+    /// registers (with three fields it goes through memory at every out-of-line call of the unit
+    /// path's extensions).
+    at: u64,
+}
+
+impl InBatch<'_> {
+    /// The context.
+    #[inline(always)]
+    fn ctx(self) -> usize {
+        self.at as u32 as usize
+    }
+
+    /// The subject.
+    #[inline(always)]
+    fn s_idx(self) -> usize {
+        (self.at >> 32) as usize
+    }
 }
 
 impl InBatch<'static> {
@@ -371,11 +385,7 @@ impl InBatch<'static> {
     /// only where NCBI's walk would go on past an end (`InBatch::left_at_bound`,
     /// `InBatch::right_at_bound`; `extend_hit_one_hit_alone`, `extend_hit_two_hit_reference`);
     /// the tests, and `x_two_hit_cells`, which counts the cells of the same walks.
-    pub(crate) const ALONE: Self = Self {
-        batch: None,
-        ctx: 0,
-        s_idx: 0,
-    };
+    pub(crate) const ALONE: Self = Self { batch: None, at: 0 };
 }
 
 impl InBatch<'_> {
@@ -399,10 +409,10 @@ impl InBatch<'_> {
     ) -> bool {
         match self.batch {
             Some(batch) => {
-                if q_off < s_off && self.ctx > 0 {
+                if q_off < s_off && self.ctx() > 0 {
                     batch.walk_left(
-                        self.ctx as usize,
-                        self.s_idx as usize,
+                        self.ctx(),
+                        self.s_idx(),
                         sc,
                         s_seq,
                         s_off - q_off,
@@ -444,8 +454,8 @@ impl InBatch<'_> {
         match self.batch {
             Some(batch) if s_at < s_seq.len() => (
                 batch.walk_right(
-                    self.ctx as usize,
-                    self.s_idx as usize,
+                    self.ctx(),
+                    self.s_idx(),
                     sc,
                     s_seq,
                     s_at,

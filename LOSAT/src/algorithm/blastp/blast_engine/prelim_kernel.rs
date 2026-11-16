@@ -200,11 +200,15 @@ impl BlastpPrelimKernel<'_> {
         // ```
         let subject_sequence = &subject.aa_seq[1..];
         let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1002,1016-1017,1021-1022
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1439-1442
         // ```c
-        // Int2 BLAST_OneSubjectUpdateParameters(EBlastProgramType program_number,
-        //                     Uint4 subject_length,
-        // ...
+        // if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+        //                seq_arg.seq->length, score_options, query_info,
+        //                sbp, hit_params, word_params,
+        //                eff_len_params)) != 0)
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1016-1017,1021-1022
+        // ```c
         // BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
         //                                hit_params);
         // ...
@@ -212,15 +216,20 @@ impl BlastpPrelimKernel<'_> {
         //      subject_length, word_params);
         // ```
         //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:939-945,372-373
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:939-941,945-946,369,372-374
         // ```c
         // new_cutoff = BLAST_SpougeEtoS(cbs_stretch*evalue, kbp, sbp->gbp,
-        //                     query_info->contexts[context].query_length,
-        //                     avg_subject_length);
+        //             query_info->contexts[context].query_length,
+        //             avg_subject_length);
+        // ...
         // params->cutoffs[context].cutoff_score = new_cutoff;
+        // params->cutoffs[context].cutoff_score_max = new_cutoff;
+        // ...
+        // new_cutoff = gap_trigger;
         // ...
         // new_cutoff = MIN(new_cutoff,
-        //                                  hit_params->cutoffs[context].cutoff_score_max);
+        //                  hit_params->cutoffs[context].cutoff_score_max);
+        // curr_cutoffs->cutoff_score = new_cutoff;
         // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
         // ```c
@@ -369,7 +378,7 @@ impl BlastpPrelimKernel<'_> {
                     // ```
                     let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
                     let diag_entry = &mut scratch.diag_array[diag_coord];
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:777-782,787-802
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:777-782,787-800,802
                     // ```c
                     // diff = subject_offset -
                     //     (diag_array[diag_coord].last_hit - diag_offset);
@@ -387,6 +396,7 @@ impl BlastpPrelimKernel<'_> {
                     //     }
                     //     diag_array[diag_coord].last_hit =
                     //         s_last_off - (wordsize - 1) + diag_offset;
+                    // ...
                     // }
                     // ```
                     let diff = subject_offset - (diag_entry.last_hit() - subject_diag_offset);
@@ -936,12 +946,13 @@ impl BlastpPrelimKernel<'_> {
         // ```
         ncbi_qsort_init_hsps_by_score(&mut init_hsps);
         let init_hsps = if args.chaining && args.matrix_name == "BLOSUM62" {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3718-3726
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3718-3722,3726
             // ```c
             // if (ext_params->options->chaining &&
             //     is_prot && strcmp(score_params->options->matrix, "BLOSUM62") == 0) {
             //     status = s_ChainingAlignment(query_info, gap_align, score_params,
             //                                  hit_params, word_params, init_hitlist);
+            //     ...
             // }
             // ```
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:569-576
@@ -970,7 +981,7 @@ impl BlastpPrelimKernel<'_> {
         } else {
             init_hsps
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3740-3753,3788
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3740-3744,3748,3753,3788
         // ```c
         // restricted_align_array =
         //     (Boolean*)calloc(Blast_GetQueryIndexFromContext(
@@ -978,23 +989,31 @@ impl BlastpPrelimKernel<'_> {
         //                                         program_number) + 1,
         //                      sizeof(Boolean));
         // for (i = 0;i < init_hitlist->total;i++) {
+        //     ...
         //     init_hsp = &init_hitlist->init_hsp_array[i];
         //     ...
         // }
         // ```
         let mut restricted_align_array = std::mem::take(&mut scratch.restricted_align_array);
         if blastp_restricted_align_enabled(args.app, args.evalue) {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3736-3753,3788-3792
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3736-3744,3748,3753,3788-3792
             // ```c
             // if (hit_params->restricted_align && !score_params->options->is_ooframe) {
+            //     int i;
+            //     Boolean* found = calloc(query_info->last_context + 1, sizeof(Boolean));
+            //
             //     restricted_align_array =
             //         (Boolean*)calloc(Blast_GetQueryIndexFromContext(
             //                                             query_info->last_context,
             //                                             program_number) + 1,
             //                          sizeof(Boolean));
             //     for (i = 0;i < init_hitlist->total;i++) {
+            //         ...
             //         init_hsp = &init_hitlist->init_hsp_array[i];
             //         ...
+            //     }
+            //     if (found) {
+            //         free(found);
             //     }
             // }
             // ```
@@ -1028,9 +1047,10 @@ impl BlastpPrelimKernel<'_> {
             std::mem::take(&mut scratch.preliminary_hsp_counts_by_query);
         preliminary_hsp_counts_by_query.clear();
         preliminary_hsp_counts_by_query.resize(query_ids.len(), 0);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1497,1542
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482,1490-1497,1542
         // ```c
         // if (!gapped_calculation) {
+        //     ...
         //     /* The following must be performed for any ungapped
         //        search with a nucleotide database. */
         //     status =
@@ -1110,8 +1130,10 @@ impl BlastpPrelimKernel<'_> {
             // ```c
             // tmp_hsp.query.offset = q_start;
             // tmp_hsp.query.end = q_end;
+            // tmp_hsp.query.frame = query_info->contexts[context].frame;
             // tmp_hsp.subject.offset = s_start;
             // tmp_hsp.subject.end = s_end;
+            // tmp_hsp.subject.frame = subject->frame;
             // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
             //                                   hit_options->min_diag_separation))
             // ```
@@ -1131,8 +1153,10 @@ impl BlastpPrelimKernel<'_> {
             // ```c
             // tmp_hsp.query.offset = q_start;
             // tmp_hsp.query.end = q_end;
+            // tmp_hsp.query.frame = query_info->contexts[context].frame;
             // tmp_hsp.subject.offset = s_start;
             // tmp_hsp.subject.end = s_end;
+            // tmp_hsp.subject.frame = subject->frame;
             // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
             //                                   hit_options->min_diag_separation))
             // ```
@@ -1199,7 +1223,7 @@ impl BlastpPrelimKernel<'_> {
                 mode,
                 &mut scratch.preliminary_gap_scratch,
             );
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3945,3949-3953
             // ```c
             // max_offset =
             //    BlastGetStartForGappedAlignment(query_tmp.sequence,
@@ -1211,6 +1235,7 @@ impl BlastpPrelimKernel<'_> {
             // init_hsp->offsets.qs_offsets.s_off +=
             //     max_offset - init_hsp->offsets.qs_offsets.q_off;
             // init_hsp->offsets.qs_offsets.q_off = max_offset;
+            // ...
             // status = s_BlastProtGappedAlignment(program_number, &query_tmp,
             //                                     subject, gap_align,
             //                                     score_params, init_hsp,
@@ -1477,14 +1502,14 @@ impl BlastpPrelimKernel<'_> {
                     &values.search_spaces[q_idx],
                     values.sum_stats.map(|sum_stats| &sum_stats.preliminary),
                 );
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1522-1525,1535
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-888,899
                 // ```c
                 // Blast_HSPListGetEvalues(program_number, query_info,
-                //                         stat_length, hsp_list,
-                //                         gapped_calculation, FALSE,
-                //                         sbp, 0, 1.0);
+                //                                  stat_length, hsp_list_out,
+                //                                  score_options->gapped_calculation,
+                //                                  isRPS, gap_align->sbp, 0, scale_factor);
                 // ...
-                // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+                // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
                 // ```
                 //
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:654,662-668
@@ -1493,6 +1518,10 @@ impl BlastpPrelimKernel<'_> {
                 // ...
                 // if (hsp->evalue > cutoff) {
                 //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                // } else {
+                //     if (index > hsp_cnt)
+                //         hsp_array[hsp_cnt] = hsp_array[index];
+                //     hsp_cnt++;
                 // }
                 // ```
                 reap_hsplist_by_evalue(&mut compact_hsp_list, values.prelim_evalue);

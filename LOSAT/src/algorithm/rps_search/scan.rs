@@ -289,33 +289,29 @@ impl RpsBuckets {
         s_bits: u32,
     ) -> (u32, u32) {
         let numhits = cell[0] as usize;
-        let g1_q = self.g1_q;
         if cell[0] <= RPS_HITS_PER_CELL {
             for &entry in &cell[1 + taken as usize..=numhits] {
                 let q_off = entry_q_off(entry);
-                if q_off >= g1_q {
+                if !self.add(q_off, s_bits) {
                     return (taken, q_off);
                 }
-                self.add(q_off, s_bits);
                 taken += 1;
             }
         } else {
             if taken == 0 {
                 // The first hit is in the cell, the others in the overflow array.
                 let q_off = entry_q_off(cell[1]);
-                if q_off >= g1_q {
+                if !self.add(q_off, s_bits) {
                     return (0, q_off);
                 }
-                self.add(q_off, s_bits);
                 taken = 1;
             }
             let start = cell[2] as usize / std::mem::size_of::<i32>();
             for &entry in &table.overflow[start + taken as usize - 1..start + numhits - 1] {
                 let q_off = entry_q_off(entry);
-                if q_off >= g1_q {
+                if !self.add(q_off, s_bits) {
                     return (taken, q_off);
                 }
-                self.add(q_off, s_bits);
                 taken += 1;
             }
         }
@@ -381,10 +377,10 @@ impl RpsBuckets {
     /// }
     /// ```
     #[inline(always)]
-    fn add(&mut self, q_off: u32, s_bits: u32) {
+    fn add(&mut self, q_off: u32, s_bits: u32) -> bool {
         let bucket = q_off_bucket(q_off).wrapping_sub(self.g0);
         if bucket >= self.heads.len() {
-            self.outside_the_group(q_off);
+            return self.past_the_group(q_off);
         }
         if self.heads[bucket].fill as usize >= BLOCK_ENTRIES {
             self.close(bucket);
@@ -392,16 +388,23 @@ impl RpsBuckets {
         let head = &mut self.heads[bucket];
         head.block[head.fill as usize] = s_bits | (q_off & BUCKET_MASK);
         head.fill += 1;
+        true
     }
 
-    /// A hit outside the buckets of the group: only a table whose cells are not in groups in
-    /// order reaches it (`seqdb::rps` regroups such a table when the volume is opened), so the
-    /// volume's files were not opened as the search needs.
+    /// `add` found `q_off` outside the buckets of the group (the one range test of a hit, where
+    /// the dev loop has its bounds check): `false` when it lies past the group, the end of the
+    /// entries of its cell that belong to the group (the cells are in groups in order). A position
+    /// before the group means the table's cells are not: only a table that `seqdb::rps` did not
+    /// regroup when the volume was opened reaches it, so the volume's files were not opened as the
+    /// search needs.
     #[cold]
     #[inline(never)]
-    fn outside_the_group(&self, q_off: u32) -> ! {
+    fn past_the_group(&self, q_off: u32) -> bool {
+        if q_off >= self.g1_q {
+            return false;
+        }
         panic!(
-            "RPS scan: a hit at position {q_off} lies outside the buckets {}..{} of its group; \
+            "RPS scan: a hit at position {q_off} lies before the buckets {}..{} of its group; \
              the profile table's cells must be in groups of buckets in order \
              (`seqdb::rps::regroup_cells`, applied when the volume is opened)",
             self.g0,

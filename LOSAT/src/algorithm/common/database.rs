@@ -7211,7 +7211,13 @@ mod taxdb_prepass_tests {
             ("good", Some(false)),
             ("high_bytes_latin1", Some(false)),
             ("high_bytes_utf8", Some(false)),
-            ("offset_next_past_end", Some(true)),
+            // The record of 9606 runs past the end of taxdb.btd but not past its mapped page, and
+            // 10090's ends before it begins: no lookup fails (`TaxDb::any_lookup_may_fail`; the
+            // index's offsets do not increase, which the pass's former stricter copy answered
+            // with a hold, review 2 of K4h L1).
+            ("offset_next_past_end", Some(false)),
+            // An empty taxdb.btd maps no page: a lookup reads past it.
+            ("btd_empty", Some(true)),
             ("bad_magic", Some(false)),
             // Not checked: whatever the pass says, the answer is the database side's.
             ("unsorted_adjacent", None),
@@ -7227,7 +7233,7 @@ mod taxdb_prepass_tests {
                         assert!(!taxdb_may_refuse(&db), "{taxonomy} {name}");
                     }
                 }
-                // Only the record past the end refuses.
+                // Only the record past the mapped end refuses.
                 if name == "sprot_mixtax" && expected.is_some() {
                     assert_eq!(side, expected, "{taxonomy}");
                 }

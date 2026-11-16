@@ -5,6 +5,7 @@ pub mod db_subject;
 pub mod defline;
 pub mod diag_log;
 pub mod hit_sort;
+pub mod ostream;
 pub mod outfmt6;
 pub mod pairwise;
 pub(crate) mod query_anchored;

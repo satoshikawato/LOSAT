@@ -205,7 +205,7 @@ fn x_window_jobs_per_thread() -> usize {
 const X_JOB_MATCHES: usize = 4;
 
 /// What the redo of a search reads besides the preliminary hit lists and the heaps: the values
-/// the one-thread loop of `run_resolved_in_pool` reads.
+/// that `redo_run::one_thread_redo` reads (made of `redo_run::RedoInputs` in `x_windows_redo`).
 pub(crate) struct XRedoParSearch<'a, P> {
     pub pool: &'a SearchPool<'a>,
     pub threads: usize,
@@ -221,7 +221,7 @@ pub(crate) struct XRedoParSearch<'a, P> {
     pub gapped_params: &'a KarlinParams,
     pub gapped_gumbel: Option<&'a BlastGumbelBlk>,
     pub evalue: f64,
-    /// `build_redo_align_params` of `run_resolved_in_pool`.
+    /// `build_redo_align_params` of `run_call` (`RedoInputs`).
     pub build_redo_align_params: &'a P,
     pub timing: bool,
     /// `postprocess_preliminary_hits`' `engine_positives` (the Seq-aligns are requested).

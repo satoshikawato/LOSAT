@@ -1,0 +1,1 @@
+- BLASTN's scans of a lookup table laid out as packed CSR (megablast against many subjects, as in mlst, MOB-suite and BlobToolKit, and ABRicate's `-task blastn`) look a word up in the table's presence bits once instead of twice: mlst's searches run 2.6-3.4 % faster, MOB-suite and BlobToolKit 2.4 %, ABRicate 1.4-1.9 % (one thread). Reports do not change.

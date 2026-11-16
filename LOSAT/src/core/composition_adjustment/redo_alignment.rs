@@ -2428,8 +2428,11 @@ fn x_take_lane_range(
 }
 
 // No NCBI counterpart: number of Newton inputs gathered per TBLASTN prefetch (at least); it does not
-// change any value NCBI computes.
-const X_LANES_PREFETCH_INPUTS: usize = 32;
+// change any value NCBI computes. Each prefetch adds its results to the thread's glibc arena at
+// once, and the space they leave seldom fits the next prefetch's, so fewer prefetches push the
+// arena's top less often (line EB s26: with 16 / 32 / 64 / 128 inputs, the peak of TBLASTN
+// `-subject` at 64 threads was +17 % / base / -3 % / +18 %; 128 holds too many results at once).
+const X_LANES_PREFETCH_INPUTS: usize = 64;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1176-1198
 // ```c

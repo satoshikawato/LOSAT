@@ -303,7 +303,8 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
   block, or once per query and round of psiblast. It calls `run_call`, whose
-  `process_subject` does the preliminary search of a subject (the stage's drivers, the choice of the
+  `process_subject` does the preliminary search of a subject (its gapped half, from the order of its
+  ungapped hits to its HSP lists, is in `blast_engine/prelim_kernel.rs`; the stage's drivers, the choice of the
   pool and the call's branch: the calls of RPS-BLAST's and the PSSM search's hooks, the query blocks,
   a database's blocks and the subject loops, are in `blast_engine/prelim_run.rs`); the traceback, the
   composition redo (its parameters, its plan and all its paths are in `blast_engine/redo_run.rs`)

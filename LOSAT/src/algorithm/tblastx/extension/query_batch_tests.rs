@@ -428,7 +428,7 @@ fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
                     q_right,
                     x_drop,
                     false,
-                    Pass::First,
+                    true,
                 );
                 (got, alone, model, first)
             }};
@@ -446,11 +446,11 @@ fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
         // The first pass gives the batch's result, or asks for the batch only with an X-drop
         // above 32,768.
         match first {
-            Ok(r) => {
+            (r, false) => {
                 assert_eq!(r, got, "round {round}: first pass");
                 assert!(!was_refused, "round {round}: first pass");
             }
-            Err(_) => {
+            (_, true) => {
                 assert!(x_drop > -BLAST_SCORE_MIN, "round {round}: again");
                 again += 1;
             }

@@ -35,13 +35,13 @@
 //!
 //! The searches so walk a context alone first (`InBatch::ALONE`, `Pass::First`): a walk that ends at
 //! the context's end tests, from its own sum, best and X-drop, whether the NULLB's step would break
-//! it (`nullb_goes_on_left`, `nullb_goes_on_right`), and only where it would not does the search go
-//! on from there on the batch (`Pass::Resume` with the walk's end, `WalkEnd`); the walks' loops keep
-//! no other values. The two-hit extension's second pass is out of line in the extension
-//! (`extend_hit_two_hit_reference`); the one-hit scan calls its own (`word_finder::one_hit_in_batch`)
-//! so that it records the first pass's result from its registers: with one result for both passes
-//! the first pass's went through memory at every extension (X2c, `-window_size 0`, +1.4 %
-//! instructions).
+//! it (`nullb_goes_on_left`, `nullb_goes_on_right`), and only where it would not does the search
+//! take the batch; the walks' loops keep no other values. The one-hit extension goes on from the
+//! walk's end (`Pass::Resume` with `WalkEnd`; the scan calls its second pass itself,
+//! `word_finder::one_hit_in_batch`, so that it records the first pass's result from its registers:
+//! with one result for both passes the first pass's went through memory at every extension, X2c,
+//! `-window_size 0`, +1.4 % instructions); the two-hit extension walks both again on the batch
+//! (`extend_hit_two_hit_reference`).
 //!
 //! A walk past the NULLB that scores no higher than its best leaves the extension's result as it
 //! was, except that the right walk's stop (`s_last_off`, and through it the diagonal's `last_hit`
@@ -485,9 +485,10 @@ impl InBatch<'_> {
 
 /// Where a walk of a search's first pass, on a context alone, ended at the context's end and NCBI's
 /// could go on (`InBatch::left_at_bound`, `InBatch::right_at_bound`): its best sum and length, its
-/// count (the right walk's; 0 for the left walk) and its sum there. The second pass goes on from
-/// there on the query batch (`Pass::Resume`): a walk past a NULLB that scores higher refuses the
-/// search, so the best and the length stand, and only the right walk's count can change.
+/// count (the right walk's; 0 for the left walk) and its sum there. The one-hit extension's second
+/// pass goes on from there on the query batch (`Pass::Resume`): a walk past a NULLB that scores
+/// higher refuses the search, so the best and the length stand, and only the right walk's count
+/// can change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WalkEnd {
     pub(crate) max_score: i32,
@@ -504,14 +505,12 @@ pub(crate) enum Again {
     Right(WalkEnd, WalkEnd),
 }
 
-/// The pass of an extension (`extend_hit_one_hit`, `extend_hit_two_hit_reference`): the first,
-/// on a context alone, which stops at a walk that asks for the batch; the second, which goes on
-/// from there (`Resume`); or both walks in one pass (`Whole`, the debug output's).
+/// The pass of the one-hit extension (`one_hit::one_hit_walks`): the first, on a context alone,
+/// which stops at a walk that asks for the batch; or the second, which goes on from there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Pass {
     First,
     Resume(Again),
-    Whole,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:906-912 (`s_BlastAaExtendLeft`)

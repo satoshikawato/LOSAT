@@ -207,7 +207,7 @@ fn one_hit_walks<S: TbxScore>(
             left
         }
         Pass::Resume(Again::Right(left, _)) => left,
-        Pass::First | Pass::Whole => {
+        Pass::First => {
             let (max_score, disp, again) =
                 extend_left_ungapped(sc, q_seq, qb, s_seq, q_left_off, s_left_off, score, x_drop);
             let left = WalkEnd {

@@ -7927,7 +7927,12 @@ fn x_query_block_plan(
     // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0. (The second
     // has parsed Seq-ids, which the block search never takes, `database::x_titles_allow_blocks`:
     // it refuses in the search of all queries, before any byte.)
+    // A subject set whose tabular id lookup fails (`check_failed_lookups`) or, for outfmt 0 to 4,
+    // whose title of punctuation `check_shown_subject_titles` refuses takes the search of all
+    // queries, which refuses before any byte: there LOSAT Web's format that the argv does not ask
+    // for fails alone (`FormatRefusal`), and the block search's outputs fail the call.
     let tabular = kinds.contains(&XBlockReport::Tabular);
+    let pairwise = kinds.contains(&XBlockReport::Pairwise);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
@@ -7935,6 +7940,9 @@ fn x_query_block_plan(
                     .iter()
                     .any(|subject| !matches!(subject.subject_tabular_id(true), Ok(Some(_))))
             {
+                return None;
+            }
+            if pairwise && check_shown_subject_titles(0..subjects.len(), subjects).is_err() {
                 return None;
             }
         }

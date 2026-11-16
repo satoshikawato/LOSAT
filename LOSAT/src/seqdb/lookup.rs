@@ -694,6 +694,47 @@ impl SeqDb {
             skip_unindexed: false,
         })
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:190-198
+    // ```c++
+    // CSeqDBVol::x_OpenStrFile(void) const{
+    //     CFastMutexGuard mtx_gurad(m_MtxStr);
+    //     if (m_IsamStr.NotEmpty()) {
+    //     	m_IsamStr->AddReference();
+    //     }
+    //     else if(CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 's') &&
+    //             m_Idx->GetNumOIDs() != 0) {
+    //         m_IsamStr = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 's', eStringId);
+    //     }
+    // }
+    // ```
+    // `x_OpenPigFile` (seqdbvol.cpp:136-145, quoted at `NumericIsam::open_pig_volume`) likewise;
+    // the GI ISAM's failure to open is caught (`NumericIsam::open_volume`). The constructor of an
+    // ISAM whose files exist throws `Error: Could not open input file` where one does not open
+    // (seqdbisam.cpp:1102-1171, quoted at `StringIsam::open`), at the first lookup that reaches
+    // the volume, which then fails on a file with NCBI's exception (the prefetch's stop,
+    // `common::database::batch_prefetch`); LOSAT keeps no failed open (`opened`), so each lookup
+    // that reaches the volume fails again.
+    /// Whether a lookup of a reported sequence's Seq-align id (`seqid_lookup`) may still fail to
+    /// open an ISAM of a volume with NCBI's exception: a volume with sequences whose string ISAM
+    /// (`.psi`/`.psd`, `.nsi`/`.nsd`: `StringIsam::index_exists`) or PIG ISAM (`.ppi`/`.ppd`) has
+    /// both files and is not open (no lookup has reached it, or its open failed). A file of an
+    /// ISAM that no lookup opened is only looked for (`Path::exists`), never opened.
+    pub fn isams_may_fail_to_open(&self) -> bool {
+        let isams = self.lookup_isams.get();
+        let protein = self.seqtype == SeqType::Protein;
+        self.volumes.iter().enumerate().any(|(at, volume)| {
+            if volume.num_oids() == 0 {
+                return false;
+            }
+            let string_open = isams.is_some_and(|isams| isams.strings[at].get().is_some());
+            let pig_open = isams.is_some_and(|isams| isams.pig[at].get().is_some());
+            (!string_open && StringIsam::index_exists(&volume.base().to_string_lossy(), protein))
+                || (!pig_open
+                    && with_extension(volume.base(), self.seqtype, "pi").exists()
+                    && with_extension(volume.base(), self.seqtype, "pd").exists())
+        })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2679-2696
@@ -898,6 +939,19 @@ impl SeqidLookup<'_> {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// Whether the accession table of one of the database's LMDB files cannot be had, so that a
+    /// lookup of a text id fails on a file (`DB contains no accession info.` of a list that puts
+    /// version 5 databases with and without the table side by side, NCBI's exception,
+    /// `LookupFailure::ncbi_message`): the databases where the prefetch of a query batch can stop
+    /// (`common::database::batch_prefetch`).
+    pub fn lacks_an_accession_table(&self) -> bool {
+        let mut kept = self.kept.borrow_mut();
+        self.envs
+            .iter()
+            .zip(kept.iter_mut())
+            .any(|((entry, env), kept)| kept.acc2oid(entry, env).is_err())
     }
 
     /// This lookup in the LMDB files that have the accession table only: where a list puts

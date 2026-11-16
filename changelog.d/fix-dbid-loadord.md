@@ -7,5 +7,7 @@
   memory addresses (the same number, ids that are not packed, more than 200 ids in the batch) that writes a message
   stays refused. Newly refused, where LOSAT wrote the stop and NCBI BLAST+ goes on: a stopping Seq-id that another
   sequence of the database holds under another Seq-align id where that sequence may be loaded
-  first (in the batch, or in a batch before), and the generated id `lcl|Query_N` of a query that
-  NCBI BLAST+ holds at that point (the batch's queries; with `-outfmt 5` also those before).
+  first (in the batch, or reported in a batch, query or psiblast round before), and the id of a
+  query that NCBI BLAST+ holds at that point (the batch's queries as read, one that `-query_loc`
+  skips included, numbered over the whole run; with `-parse_deflines` the ids of the deflines;
+  the PSSM's query of `-in_pssm`; with `-outfmt 5` also the queries before).

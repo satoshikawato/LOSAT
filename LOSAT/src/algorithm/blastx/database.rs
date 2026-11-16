@@ -657,6 +657,7 @@ impl ReportedSubjects {
                 warnings: Vec::new(),
                 source: None,
                 around: None,
+                skipped: None,
             });
             shared::keep_source(
                 &mut reported.sources,
@@ -727,21 +728,40 @@ impl ReportedSubjects {
     /// A subject whose lookup fails on a file stops the run there (`shared::batch_prefetch`):
     /// BLASTX writes each batch's reports before it searches the next, so the error of the batch
     /// of `queries` names query 0 (`native::reported_batch`; `native::reported_error` takes the
-    /// error alone).
+    /// error alone), and the run's record holds what the batches before read (`note_reported`).
     pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
+            std::iter::empty(),
             self.prefetch_subjects(batches, gapped),
             database.program,
             queries,
         )
+    }
+
+    /// The run's record of the sequences that the prefetch and the reports of the query batch
+    /// whose hit lists are `batches` read (`shared::TaxdbRun::note_reported`): BLASTX writes each
+    /// batch's reports before it searches the next and keeps none of their lists, so each batch
+    /// that does not stop is recorded for the stop of a later batch's prefetch (nothing for a
+    /// database that cannot stop).
+    pub(crate) fn note_reported(
+        &self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+    ) {
+        if database.parsed_seqids() {
+            database
+                .taxdb
+                .note_reported(&database.db, self.prefetch_subjects(batches, gapped));
+        }
     }
 
     /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
@@ -755,7 +775,7 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         shared::batch_prefetch_stop(
             &database.db,
@@ -1198,6 +1218,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
@@ -1234,6 +1255,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         };
         let hsp = |score: i32| Hsp {
             hsp: PreliminaryHsp {
@@ -1316,11 +1338,12 @@ mod tests {
                 false,
             )
             .unwrap();
+            let scope = crate::blastinput::query_batch::QueryScope::default;
             let messages = reported.batch_prefetch(
                 database,
                 &batches,
                 true,
-                &shared::PrefetchQueries::new(0..1, false).naming(0),
+                &shared::PrefetchQueries::new(0, &scope),
             );
             String::from_utf8(messages.unwrap()).unwrap()
         };

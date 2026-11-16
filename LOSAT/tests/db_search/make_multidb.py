@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -69,6 +69,17 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   stopping lookup itself (beside `ldp`, NCBI stops in a later batch too); `ldh` `gi|9000|ref|NP_000002.1|`, which holds
   the accession but whose gi (handle 9000) loads after it in one batch, so NCBI stops. `make_multidb.py
   --loadord2-only MAKEBLASTDB` builds only these (the databases of `--loadord-only` keep their dates).
+- Review 2 of line DBID loadord (DECISIONS 60 (7), (8)): version 5, `-parse_seqids`, taxid 9606. `ldq2` (`ldq2n`):
+  `lcl|Query_2` with the letters of `ldp`'s first record, the generated id of a second query; `ldx` (`ldxn`):
+  `gi|9001|ref|NP_000002.1|` (`NM_`) with random letters (seed 20261116 + 3), a holder of the stopping accession that no
+  query hits; `ldd` (`lddn`): `gi|9000|ref|NP_000002.1|` (`NM_`) with the letters of `lda` (`ldan`), a holder that the
+  first query of mix2_q.faa (mix2_qx.fna, mix2_q.fna, mix2_qt.faa) hits in a batch before the stop; `ldmy`:
+  `lcl|myprot` with the letters of `ldp`'s first record. `ldo_short.faa`: the first 40 letters of `qp1`, then the
+  letters of ../taxfilter/q.faa, so that `-query_loc 50-140` drops the first record (which keeps `Query_1`);
+  `ldo_short.fna` and `ldo_shortx.fna`: the first 120 letters of glob1 (of qp1 back-translated), then
+  ../taxfilter/q.fna, for `-query_loc 150-420`. `ldo_my.asn`: ../../fixtures/pssm/q1_tfp.asn.gz with the query's
+  local id `Query_1` changed to `myprot` (the PSSM of the globin of ../taxfilter/q.faa). `make_multidb.py
+  --loadord3-only MAKEBLASTDB` builds only these (the databases before keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -321,6 +332,54 @@ def make_loadord2(binary):
             os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
 
 
+def make_loadord3(binary):
+    """Builds ldq2, ldx, ldd, ldmy and the nucleotide ldq2n, ldxn, lddn, the queries ldo_short.faa, ldo_short.fna and
+    ldo_shortx.fna, and the PSSM ldo_my.asn (review 2 of line DBID loadord)."""
+    import gzip
+    rng = random.Random(20261116 + 3)
+
+    def letters(path, pick=lambda header: True):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path) if pick(header))
+
+    def write(name, records):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, seq in records:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+
+    qp1 = letters(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    glob1 = letters(os.path.join(HERE, "nnp.fa"), lambda header: header.split()[0] == ">FBtr0083245")
+    qp1_x = letters(os.path.join(HERE, "mix2_qx.fna"))
+    globin, globin_x = letters(os.path.join(SRC, "q.faa")), letters(os.path.join(SRC, "q.fna"))
+    for kind, suffix, prefix, own, unparsed, alphabet, length in (
+            ("prot", "", "NP", globin, qp1, "ACDEFGHIKLMNPQRSTVWY", 120),
+            ("nucl", "n", "NM", globin_x, glob1, "ACGT", 360)):
+        sets = {
+            "ldq2": [(">lcl|Query_2 loadord a local id of the form of a second generated query id", own)],
+            "ldx": [(f">gi|9001|ref|{prefix}_000002.1| loadord the accession of ldp under a gi, letters no query hits",
+                     "".join(rng.choice(alphabet) for _ in range(length)))],
+            "ldd": [(f">gi|9000|ref|{prefix}_000002.1| loadord the accession of ldp under a gi, the letters of lda", unparsed)],
+        }
+        if kind == "prot":
+            sets["ldmy"] = [(">lcl|myprot loadord the local id of the PSSM query of ldo_my.asn", own)]
+        for base, records in sets.items():
+            name = base + suffix
+            write(name + ".fa", records)
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "5", "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    write("ldo_short.faa", [(">ldo_s the first 40 letters of qp1", qp1[:40]),
+                            (">ldo_g the letters of taxfilter/q.faa", globin)])
+    write("ldo_short.fna", [(">ldo_s the first 120 letters of glob1", glob1[:120]),
+                            (">ldo_g the letters of taxfilter/q.fna", globin_x)])
+    write("ldo_shortx.fna", [(">ldo_s the first 120 letters of qp1 back-translated", qp1_x[:120]),
+                             (">ldo_g the letters of taxfilter/q.fna", globin_x)])
+    with gzip.open(os.path.join(os.path.dirname(os.path.dirname(HERE)), "fixtures", "pssm", "q1_tfp.asn.gz"), "rt") as f:
+        pssm = f.read()
+    assert pssm.count('local str "Query_1"') == 1
+    with open(os.path.join(HERE, "ldo_my.asn"), "w") as f:
+        f.write(pssm.replace('local str "Query_1"', 'local str "myprot"'))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -378,6 +437,8 @@ if __name__ == "__main__":
         make_loadord(sys.argv[2])
     elif sys.argv[1] == "--loadord2-only":
         make_loadord2(sys.argv[2])
+    elif sys.argv[1] == "--loadord3-only":
+        make_loadord3(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -385,3 +446,4 @@ if __name__ == "__main__":
         make_mixtax(sys.argv[1])
         make_loadord(sys.argv[1])
         make_loadord2(sys.argv[1])
+        make_loadord3(sys.argv[1])

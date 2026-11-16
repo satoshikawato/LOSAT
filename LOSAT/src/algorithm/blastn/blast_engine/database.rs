@@ -643,16 +643,21 @@ impl BlastnDatabase {
     /// then the warning where the prefetch fails, at a subject whose lookup fails or one without
     /// a Bioseq that a Seq-align on the query's minus strand flips (`gapped`: each HSP is a
     /// Seq-align, else a subject's first HSP decides).
+    /// `before`: the final hit lists of the batches of the call before it that the loop still
+    /// holds (none where it wrote and dropped them, LOSAT_X_RPTSTREAM, which records each batch
+    /// instead: `note_reported`), read only where the batch stops.
     pub(super) fn batch_prefetch(
         &self,
         titles: &DatabaseTitles,
+        before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
+            Self::prefetch_subjects(titles, before, gapped),
             Self::prefetch_subjects(titles, hit_lists, gapped),
             PROGRAM,
             queries,
@@ -670,15 +675,32 @@ impl BlastnDatabase {
         before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         shared::held_batch_prefetch_stop(
             &self.db,
+            &self.taxdb,
             Self::prefetch_subjects(titles, before, gapped),
             Self::prefetch_subjects(titles, hit_lists, gapped),
             PROGRAM,
             queries,
         )
+    }
+
+    /// The run's record of the sequences that the prefetch and the reports of a query batch
+    /// whose final hit lists are `hit_lists` read (`shared::TaxdbRun::note_reported`), for a later
+    /// batch's stop: where the loop writes each batch's reports and drops its lists
+    /// (LOSAT_X_RPTSTREAM), so that `batch_prefetch`'s `before` no longer holds them.
+    pub(super) fn note_reported(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+    ) {
+        if self.parsed_seqids() {
+            self.taxdb
+                .note_reported(&self.db, Self::prefetch_subjects(titles, hit_lists, gapped));
+        }
     }
 
     /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`

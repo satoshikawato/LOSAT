@@ -349,17 +349,18 @@ impl TblastnDatabase {
 
     /// The stop of the prefetch of the batch of `queries` whose reported
     /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
-    /// LOSAT's refusal (`shared::batch_prefetch`, after the prefetches of the batches before).
-    /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
-    /// before, whose final hit lists by rank are `before` (`reported`'s ranks, as `read_taxids`
-    /// reads them); TBLASTN writes those reports after the stop.
+    /// LOSAT's refusal (`shared::batch_prefetch`, after the prefetches of the batches before,
+    /// whose final hit lists by rank are `before`, `reported`'s ranks: the run's record of what
+    /// their prefetches and reports read). `at_hits`: the XML2 and JSON formats, which write the
+    /// taxonomy texts at each `Hit` (`shared::held_batch_prefetch_stop`), after the lookups of the
+    /// reports of the batches before (as `read_taxids` reads them); TBLASTN writes those reports
+    /// after the stop.
     pub(super) fn prefetch_stop_error(
         &self,
         reported: Option<&ReportedSubjects>,
         before: &[KappaResultHitList],
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
         at_hits: bool,
     ) -> anyhow::Error {
         let subjects = subjects.iter().map(|(ordinal, parsed)| {
@@ -374,24 +375,32 @@ impl TblastnDatabase {
                     )
                 })
             });
-            shared::held_batch_prefetch_stop(&self.db, before, subjects, PROGRAM, queries).err()
+            shared::held_batch_prefetch_stop(
+                &self.db,
+                &self.taxdb,
+                before,
+                subjects,
+                PROGRAM,
+                queries,
+            )
+            .err()
         } else {
-            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, queries).err()
+            let before = reported
+                .into_iter()
+                .flat_map(|reported| Self::prefetch_subjects(reported, before));
+            shared::batch_prefetch(&self.db, &self.taxdb, before, subjects, PROGRAM, queries).err()
         };
         stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
     }
 
-    /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
-    /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
-    /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
-    /// subject whose lookup fails (the protein query has no strand); the stop of the batch of `queries`.
-    pub(super) fn batch_prefetch(
-        &self,
-        reported: &ReportedSubjects,
-        hitlists: &[KappaResultHitList],
-        queries: &shared::PrefetchQueries,
-    ) -> Result<Vec<u8>> {
-        let subjects = hitlists
+    /// The sequences that the prefetch of a query batch whose final hit lists are `hitlists`
+    /// (subjects named by rank, `reported_subjects`) reads: those with HSPs in them (the protein
+    /// query has no strand).
+    fn prefetch_subjects<'s>(
+        reported: &'s ReportedSubjects,
+        hitlists: &'s [KappaResultHitList],
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
             .filter(|list| reads_subject(list, SubjectFetch::Every))
@@ -401,8 +410,30 @@ impl TblastnDatabase {
                     reported.ordinals[rank],
                     reported.parsed_subject(rank),
                 )
-            });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, queries)
+            })
+    }
+
+    /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
+    /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
+    /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
+    /// subject whose lookup fails (the protein query has no strand); the stop of the batch of
+    /// `queries`, after the batches before, whose final hit lists are `before` (read only where
+    /// the batch stops).
+    pub(super) fn batch_prefetch(
+        &self,
+        reported: &ReportedSubjects,
+        before: &[KappaResultHitList],
+        hitlists: &[KappaResultHitList],
+        queries: &shared::PrefetchQueries<'_>,
+    ) -> Result<Vec<u8>> {
+        shared::batch_prefetch(
+            &self.db,
+            &self.taxdb,
+            Self::prefetch_subjects(reported, before),
+            Self::prefetch_subjects(reported, hitlists),
+            PROGRAM,
+            queries,
+        )
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of

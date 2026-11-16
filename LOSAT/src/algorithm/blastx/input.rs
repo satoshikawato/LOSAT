@@ -56,6 +56,72 @@ pub struct FastaRecord {
     /// to, where the reader keeps them (`keep_around`, `record_letter`): `None` (8 bytes, no
     /// allocation) for every other record.
     pub around: Option<Box<LettersAround>>,
+    /// On the first record of a reader batch, the batch's records that the `-query_loc` range
+    /// skipped (`SkippedRecord`), which NCBI's reader added to its scope; `None` (8 bytes, no
+    /// allocation) for every other record.
+    pub skipped: Option<Box<Vec<SkippedRecord>>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (quoted at
+// `emit_fasta_batch`: the batch drops a record whose range starts past its end) after the
+// reader added it to its scope (blast_fasta_input.cpp:395, quoted at
+// `query_batch::QueryScope::of_shown`)
+/// A record of a reader batch that the `-query_loc` range skipped (`FastaRecord::skipped`): what
+/// NCBI's scope holds of it at the batch's prefetch, its generated local id (`Query_<n>`, its
+/// number of the run) and the Seq-ids that `-parse_deflines` read.
+#[derive(Debug, Clone)]
+pub struct SkippedRecord {
+    pub internal_id: String,
+    pub believed: Option<std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>>,
+}
+
+impl SkippedRecord {
+    /// What NCBI's scope holds of `record`, which the range skips.
+    pub fn of(record: &FastaRecord) -> Self {
+        Self {
+            internal_id: record.internal_id.clone(),
+            believed: record
+                .source
+                .as_ref()
+                .and_then(|source| source.believed.clone()),
+        }
+    }
+}
+
+/// The local ids and believed Seq-ids (`QueryScope::of_shown`) of the query records of a reader
+/// batch `records` as NCBI's reader added them to its scope: the records, then those that the
+/// range skipped (`FastaRecord::skipped`).
+pub fn shown_ids(
+    records: &[FastaRecord],
+) -> impl Iterator<
+    Item = (
+        &str,
+        Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+    ),
+> + '_ {
+    records
+        .iter()
+        .map(|record| (record.internal_id.as_str(), record.believed()))
+        .chain(records.iter().flat_map(|record| {
+            record.skipped.iter().flat_map(|skipped| {
+                skipped
+                    .iter()
+                    .map(|skipped| (skipped.internal_id.as_str(), skipped.believed.as_deref()))
+            })
+        }))
+}
+
+/// Attaches the records of a reader batch that the range skipped (`skipped`, taken) to the
+/// batch's first record `records` (`FastaRecord::skipped`); a batch of no record (NCBI's query
+/// factory refuses it, `Empty CBlastQueryVector`) drops them.
+pub fn attach_skipped(records: &mut [FastaRecord], skipped: &mut Vec<SkippedRecord>) {
+    if skipped.is_empty() {
+        return;
+    }
+    let skipped = std::mem::take(skipped);
+    if let Some(first) = records.first_mut() {
+        first.skipped = Some(Box::new(skipped));
+    }
 }
 
 /// The letters of a record on each side of the interval that a cut keeps (`FastaRecord::keep_around`):
@@ -1113,6 +1179,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     // A last batch of records that the range skipped is delivered empty (NCBI's query factory
     // then refuses it).
     if batch.read > 0 {
+        attach_skipped(&mut records, &mut batch.skipped_records);
         deliver(&records)?;
     }
     batch.release(&mut records);
@@ -1221,6 +1288,7 @@ fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
         warnings: Vec::new(),
         source: None,
         around: None,
+        skipped: None,
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:437-447
@@ -1590,11 +1658,13 @@ fn emit_fasta_batch(
             batch.length += length;
         }
         Some(RecordInterval::PastEnd) => {
-            records.pop();
+            let skipped = records.pop().expect("completed FASTA record");
             batch.skipped += 1;
+            batch.skipped_records.push(SkippedRecord::of(&skipped));
         }
     }
     if batch.length >= batch_size {
+        attach_skipped(records, &mut batch.skipped_records);
         deliver(records)?;
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-261
         // ```c++
@@ -1643,6 +1713,9 @@ struct ReaderBatch<'r> {
     read: usize,
     /// The records the range skipped so far: NCBI's reader numbers them (`Query_<n>`).
     skipped: usize,
+    /// The records of the batch that the range skipped, for its first record
+    /// (`FastaRecord::skipped`).
+    skipped_records: Vec<SkippedRecord>,
 }
 
 impl ReaderBatch<'_> {
@@ -3425,6 +3498,36 @@ mod range_tests {
             ]
         );
         assert_eq!(kept.len(), 4);
+        // The skipped `b` stays in its batch's scope, on the batch's first record (review 2 of
+        // line DBID loadord, H2; blast_fasta_input.cpp:395 adds it to the scope first), in both
+        // readers; the second batch skipped none.
+        let ids = |records: &[FastaRecord]| -> Vec<String> {
+            shown_ids(records).map(|(id, _)| id.to_owned()).collect()
+        };
+        assert_eq!(ids(&kept[..2]), ["Query_1", "Query_3", "Query_2"]);
+        assert_eq!(ids(&kept[2..]), ["Query_4", "Query_5"]);
+        let mut unkept = Vec::new();
+        read_fasta_stream_batches(
+            &mut FastaStream::new(Cursor::new(data.to_vec())),
+            false,
+            true,
+            15,
+            false,
+            Some(&range),
+            &mut |records| {
+                unkept.push(ids(records));
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            unkept,
+            [
+                vec!["Query_1", "Query_3", "Query_2"],
+                vec!["Query_4", "Query_5"]
+            ]
+        );
     }
 
     // A batch of skipped records alone is delivered empty (NCBI's query factory refuses it), also

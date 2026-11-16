@@ -2191,13 +2191,28 @@ fn search(
         // taxonomy texts at each `Hit`: of the prefetch only its stop
         // (`shared::held_batch_prefetch_stop`).
         let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
-        // The queries of a batch as NCBI's scope holds them at its prefetch: outfmt 5 keeps
-        // those of the batches before (`shared::PrefetchQueries`).
-        let prefetch_queries = |span: &std::ops::Range<usize>| {
-            crate::algorithm::common::database::PrefetchQueries::new(
-                span.clone(),
-                first_number == Some(5),
-            )
+        // The query records that NCBI's scope holds at the prefetch of the batch of the searched
+        // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): the PSSM's
+        // query of `-in_pssm` (`PsiSearch::query_scope`), else the input records that NCBI's
+        // reader added for the batch (`RangedBatch::input`: the records that `-query_loc` drops
+        // included, numbered in the run, `FastaRecord::local_id`), and in outfmt 5, whose scope
+        // the formatter keeps (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those
+        // of the batches before.
+        let xml_scope = outputs
+            .formats
+            .iter()
+            .any(|format| super::stage_e_report::format_number(format.outfmt) == 5);
+        let ranged_batches = query_input.batches(batch_size);
+        let batch_scope = |span: &std::ops::Range<usize>| {
+            if let Some(psi) = pssm.as_deref() {
+                return psi.query_scope();
+            }
+            let input = ranged_batches
+                .iter()
+                .find(|batch| batch.searched == *span)
+                .map_or(0..0, |batch| batch.input.clone());
+            let input = if xml_scope { 0..input.end } else { input };
+            crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
         };
         // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
@@ -2499,8 +2514,19 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let messages =
-                        database.batch_prefetch(reported, hitlists, &prefetch_queries(span))?;
+                    let scope = || batch_scope(span);
+                    // The batches before (`results`): their prefetches and reports, read only
+                    // where this batch stops; a call of the library's batches after the first
+                    // (`api::run_batches`) has those of the calls before unrecorded.
+                    let messages = database.batch_prefetch(
+                        reported,
+                        &results[..span.start],
+                        hitlists,
+                        &crate::algorithm::common::database::PrefetchQueries::new(
+                            span.start, &scope,
+                        )
+                        .after_unrecorded_calls(args.first_query_ordinal > 0),
+                    )?;
                     rows_open(hitlists)?;
                     if messages.is_empty() {
                         continue;
@@ -2514,11 +2540,13 @@ fn search(
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
             // The batches before are those of `results`, which the stop truncated (above).
+            let scope = || batch_scope(&span);
             let error = database.prefetch_stop_error(
                 reported.as_ref(),
                 &results,
                 &subjects,
-                &prefetch_queries(&span),
+                &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
+                    .after_unrecorded_calls(args.first_query_ordinal > 0),
                 first_xml2,
             );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {

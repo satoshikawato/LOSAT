@@ -879,6 +879,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         }
     }
 

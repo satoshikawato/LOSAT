@@ -3843,6 +3843,15 @@ pub(crate) struct TaxdbRun {
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
     rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// The sequences with parsed Seq-ids, by ordinal id, that the run has reported before a batch
+    /// whose prefetch stops ([`TaxdbRun::note_reported`]).
+    reported: std::sync::Mutex<std::collections::HashSet<u32>>,
+    /// Whether the run keeps `reported` for good: its lookup cannot be opened, or an LMDB file
+    /// has no accession table ([`TaxdbRun::keeps_reported`]).
+    keeps_reported: std::sync::OnceLock<bool>,
+    /// Whether every ISAM of a volume that a lookup can open is open, so that no lookup can fail
+    /// on one ([`TaxdbRun::keeps_reported`]).
+    isams_settled: std::sync::atomic::AtomicBool,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -4096,6 +4105,84 @@ impl TaxdbRun {
         *self.lazy.lock().expect("the taxonomy database") = None;
         *self.volume_lookups.lock().expect("the volume lookups") = VolumeLookups::default();
         self.rows_open.lock().expect("the rows' texts").clear();
+    }
+
+    /// Whether a prefetch of the run can still stop at a lookup that fails on a file with NCBI's
+    /// exception ([`batch_prefetch`]; every producer of `FoundInstead::Failed` with NCBI's message,
+    /// `HeaderReader::found_instead`): the lookup of `db` cannot be opened, or one of its LMDB
+    /// files has no accession table (`SeqidLookup::lacks_an_accession_table`), which is asked
+    /// once, at the first reported sequence with parsed Seq-ids (whose lookup has opened the
+    /// files); or an ISAM of a volume that a later lookup opens may fail to open
+    /// (`SeqDb::isams_may_fail_to_open`: a version 4 database's string ISAM or a PIG ISAM whose
+    /// files exist and that no lookup has opened yet, or that failed, NCBI's `Error: Could not
+    /// open input file`), asked again until every such ISAM is open: the record is then dropped,
+    /// as no lookup can fail on a file any more.
+    fn keeps_reported(&self, db: &SeqDb) -> bool {
+        let permanent = *self.keeps_reported.get_or_init(|| {
+            db.seqid_lookup()
+                .map_or(true, |lookup| lookup.lacks_an_accession_table())
+        });
+        if permanent {
+            return true;
+        }
+        if self
+            .isams_settled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return false;
+        }
+        if db.isams_may_fail_to_open() {
+            return true;
+        }
+        self.isams_settled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.reported
+            .lock()
+            .expect("the reported sequences")
+            .clear();
+        false
+    }
+
+    /// Records that the run has reported `subjects` (a query batch's, or a psiblast round's;
+    /// [`PrefetchSubject`], in any order), for the stop of a later batch's prefetch
+    /// ([`stop_lookup_unsure`]): NCBI's BLAST database data loader keeps the Seq-ids of every
+    /// sequence that the prefetch and the reports of those subjects loaded. A caller that searches
+    /// the queries of a run in several calls, or writes each batch's reports before it searches
+    /// the next (BLASTX), records each batch that does not stop; the callers that hold a call's
+    /// batches give the subjects of the batches before to the stop itself ([`batch_prefetch`]'s
+    /// `before`). Only the sequences with parsed Seq-ids are kept (one without them holds no id
+    /// that a lookup can fail on), and only in a run that can stop ([`TaxdbRun::keeps_reported`]):
+    /// nothing is kept, and no file is opened, for any other database.
+    pub(crate) fn note_reported<'s>(
+        &self,
+        db: &SeqDb,
+        subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+    ) {
+        let mut parsed = subjects
+            .into_iter()
+            .filter(|subject| subject.parsed.is_some())
+            .map(|subject| subject.ordinal)
+            .peekable();
+        if parsed.peek().is_none() || !self.keeps_reported(db) {
+            return;
+        }
+        self.reported
+            .lock()
+            .expect("the reported sequences")
+            .extend(parsed);
+    }
+
+    /// The sequences that [`TaxdbRun::note_reported`] recorded, in the order of their ordinal ids.
+    fn reported(&self) -> Vec<u32> {
+        let mut reported: Vec<u32> = self
+            .reported
+            .lock()
+            .expect("the reported sequences")
+            .iter()
+            .copied()
+            .collect();
+        reported.sort_unstable();
+        reported
     }
 
     /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not
@@ -4996,61 +5083,51 @@ pub(crate) fn pssm_load_texts(
 // without a Bioseq throws after every blob was loaded (`prefetch_gets_no_bioseq`): the texts of
 // the whole batch, then the warning. Either way the prefetch reads no sequence data, which no
 // text comes with (probe of line DBID pfwarn, `R/pfwarn/w0`).
-/// The queries of a query batch at its prefetch ([`batch_prefetch`]), for the stop
-/// ([`prefetch_stop`]): which queries NCBI's scope holds, and whether loads of the run before it
-/// may have registered Seq-ids in NCBI's BLAST database data loader ([`stop_lookup_unsure`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PrefetchQueries {
+/// What the stop of a query batch's prefetch ([`prefetch_stop`]) asks of the batch's queries, made
+/// by each program where it prefetches a batch ([`batch_prefetch`]).
+#[derive(Clone, Copy)]
+pub(crate) struct PrefetchQueries<'a> {
     /// The query that the stop's [`HeaderReadError`] names (the batch's first query of the
     /// searched queries of the call; BLASTX, which writes each batch's reports before it searches
     /// the next, names 0).
     pub(crate) error_query: usize,
-    /// The batch's queries, numbered from 0 in the run (query `n` is `lcl|Query_<n + 1>`).
-    pub(crate) batch: std::ops::Range<usize>,
-    /// Whether NCBI's scope still holds the queries of the batches before: outfmt 5
-    /// (`CBlastFormat::ResetScopeHistory`, quoted at [`stop_lookup_unsure`]).
-    pub(crate) keeps_queries: bool,
-    /// Whether the run may have loaded sequences before this batch's prefetch: a batch before,
-    /// or psiblast's PSSM reads of the rounds before.
-    pub(crate) loads_before: bool,
+    /// The query records that NCBI's scope holds at the batch's prefetch, asked only where the
+    /// batch stops ([`stop_lookup_unsure`]): the one owner of the ids of the queries of a scope is
+    /// `query_batch::QueryScope` (`QueryScope::of_shown_records`). They are the input records that
+    /// NCBI's reader has added for the batch (a record that `-query_loc` drops included, and the
+    /// query of a PSSM), and in outfmt 5, whose scope the formatter does not reset
+    /// (`CBlastFormat::ResetScopeHistory`, quoted at [`stop_lookup_unsure`]), those of the batches
+    /// before too; never those of the batches after.
+    scope: &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope,
+    /// Whether calls before this one reported sequences of the run that the run's record does not
+    /// hold ([`PrefetchQueries::after_unrecorded_calls`]).
+    unrecorded_calls: bool,
 }
 
-impl PrefetchQueries {
-    /// The batch of the queries `batch` of a run whose first format is outfmt 5 where `xml`: the
-    /// error names its first query, and the batches before it may have loaded sequences.
-    pub(crate) fn new(batch: std::ops::Range<usize>, xml: bool) -> Self {
+impl<'a> PrefetchQueries<'a> {
+    /// The batch whose stop names the query `error_query` and whose scope of queries at its
+    /// prefetch `scope` makes.
+    pub(crate) fn new(
+        error_query: usize,
+        scope: &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope,
+    ) -> Self {
         Self {
-            error_query: batch.start,
-            keeps_queries: xml,
-            loads_before: batch.start > 0,
-            batch,
+            error_query,
+            scope,
+            unrecorded_calls: false,
         }
     }
 
-    /// The same batch, whose stop's error names the query `query`.
-    pub(crate) fn naming(self, query: usize) -> Self {
+    /// The same batch of a call that comes after other calls of the run (`unrecorded`: the
+    /// library's batches, each searched as a call of its own with its own database handle) whose
+    /// reported sequences neither the call's batches before ([`batch_prefetch`]'s `before`) nor
+    /// the run's record ([`TaxdbRun::note_reported`]) hold: every sequence of the database may
+    /// have been loaded before the batch.
+    pub(crate) fn after_unrecorded_calls(self, unrecorded: bool) -> Self {
         Self {
-            error_query: query,
+            unrecorded_calls: self.unrecorded_calls || unrecorded,
             ..self
         }
-    }
-
-    /// The same batch, after loads of the run before it where `loads` (psiblast's PSSM reads).
-    pub(crate) fn after_loads(self, loads: bool) -> Self {
-        Self {
-            loads_before: self.loads_before || loads,
-            ..self
-        }
-    }
-
-    /// Whether NCBI's scope holds the query `lcl|Query_<number>` at the batch's prefetch.
-    fn scope_holds_query(&self, number: usize) -> bool {
-        let first = if self.keeps_queries {
-            0
-        } else {
-            self.batch.start
-        };
-        number >= 1 && (first..self.batch.end).contains(&(number - 1))
     }
 }
 
@@ -5094,25 +5171,30 @@ impl<'s> PrefetchSubject<'s> {
 ///
 /// A subject whose lookup fails on a file of the database with NCBI's own exception
 /// (`ParsedSubject::prefetch_stops`: a list of version 5 databases with and without the accession
-/// table) stops the run there: `Err` with a [`HeaderReadError`] of the batch's first query `query`
-/// (the searched queries of the call) whose error is NCBI's `BLAST Database error: <message>`
+/// table) stops the run there: `Err` with a [`HeaderReadError`] of the query that `queries` names
+/// (`PrefetchQueries::error_query`) whose error is NCBI's `BLAST Database error: <message>`
 /// (exit status 2), after the texts of the loads that NCBI's prefetch makes before it in the order
 /// of the batch's Seq-id handles ([`load_before_stop`]). Each program writes then what NCBI wrote
 /// before: the prologs, the reports of the batches before (without the epilog) and the batch's
 /// reader messages. That batch is refused where a load whose order to the stop LOSAT does not know
 /// writes a text, and where another subject's lookup throws on its id and may come before it (the
-/// prefetch catches that one and ends its loads).
-pub(crate) fn batch_prefetch<'s>(
+/// prefetch catches that one and ends its loads). `before`: the subjects that the batches of the
+/// call before this one reported, read only where the batch stops (the run's record of what its
+/// loader may hold, [`TaxdbRun::note_reported`]); a caller that records each batch itself gives
+/// none.
+pub(crate) fn batch_prefetch<'s, 'b>(
     db: &SeqDb,
     run: &TaxdbRun,
+    before: impl IntoIterator<Item = PrefetchSubject<'b>>,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
-    queries: &PrefetchQueries,
+    queries: &PrefetchQueries<'_>,
 ) -> Result<Vec<u8>> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if let Some(stopping) = stopping_subject(&subjects) {
+        run.note_reported(db, before);
         return Err(prefetch_stop(
-            db, run, &subjects, program, queries, stopping,
+            db, run, run, &subjects, program, queries, stopping,
         ));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
@@ -5250,17 +5332,19 @@ pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
 /// programs that write those reports after the stop ask [`held_batch_prefetch_stop`]. As in
 /// [`batch_prefetch`], the texts of the loads before the stop after those lookups come before the
 /// error, and the batch is refused where a load whose order LOSAT does not know writes a text.
+/// `run` also holds the subjects that the batches before reported ([`TaxdbRun::note_reported`],
+/// which BLASTX records as it writes each batch).
 pub(crate) fn batch_prefetch_stop<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
-    queries: &PrefetchQueries,
+    queries: &PrefetchQueries<'_>,
 ) -> Result<()> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     match stopping_subject(&subjects) {
         Some(stopping) => Err(prefetch_stop(
-            db, run, &subjects, program, queries, stopping,
+            db, run, run, &subjects, program, queries, stopping,
         )),
         None => Ok(()),
     }
@@ -5271,20 +5355,25 @@ pub(crate) fn batch_prefetch_stop<'s>(
 /// write the batches before a failed batch there): their lookups are recorded where the batch
 /// stops, in a run of their own ([`reports_record`]) of the subjects `before` that those batches
 /// report ([`PrefetchSubject`], in any order). Nothing is read where the batch does not stop.
+/// `run`, the run's own record, takes those subjects as the sequences that the run reported before
+/// the batch ([`TaxdbRun::note_reported`]), beside those of the calls before.
 pub(crate) fn held_batch_prefetch_stop<'s, 'b>(
     db: &SeqDb,
+    run: &TaxdbRun,
     before: impl IntoIterator<Item = PrefetchSubject<'b>>,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
-    queries: &PrefetchQueries,
+    queries: &PrefetchQueries<'_>,
 ) -> Result<()> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     let Some(stopping) = stopping_subject(&subjects) else {
         return Ok(());
     };
-    let run = reports_record(db, before, program)?;
+    let before: Vec<PrefetchSubject<'b>> = before.into_iter().collect();
+    run.note_reported(db, before.iter().copied());
+    let lookups = reports_record(db, before, program)?;
     Err(prefetch_stop(
-        db, &run, &subjects, program, queries, stopping,
+        db, &lookups, run, &subjects, program, queries, stopping,
     ))
 }
 
@@ -5518,6 +5607,23 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> Vec<LoadBef
 // `load_before_stop`): `GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved)` first, then the
 // data sources by priority, the queries' entries (`AddTopLevelSeqEntry`) before the BLAST
 // database's loader.
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2063-2068 and 1449-1468
+// ```c++
+//     else {
+//         NON_CONST_ITERATE(TSeqMatchMap, it, match_map) {
+//             if ( !it->second ) {
+//                 it->second = BestResolve(it->first);
+//             }
+//         }
+//     ...
+//     else if ( idh.HaveMatchingHandles() ) {
+//         // Try to find the best matching id (not exactly equal)
+//         CSeq_id_Handle::TMatches hset;
+//         idh.GetMatchingHandles(hset, eAllowWeakMatch);
+// ```
+// A data source without a loader (the queries' entries) finds a Bioseq of the id itself or, where
+// it holds none, of an id that the id matches weakly (`x_GetSeqMatch`), as the reports' reads
+// find a query (`refuse_id_of_a_query`'s keys, `QueryScopeKeys::own` and `weak`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313
 // ```c++
 //     if (m_FormatType != CFormattingArgs::eXml)
@@ -5526,49 +5632,46 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> Vec<LoadBef
 //     }
 // ```
 /// Why NCBI's prefetch may never make the lookup of the Seq-align id of the stopping subject
-/// `ordinal` (`parsed`) of the batch of `queries` that fails with its exception (review 1 of line
-/// DBID loadord, H1 and H2, narrowed after the kits of its fix, line DBID DECISIONS 60 (6)): its
-/// BLAST database data loader keeps every Seq-id of each sequence that the run has loaded
-/// (`RegisterIds`) and gives that sequence for the id without a lookup, and NCBI's scope finds a
-/// query by its generated local id before it asks the loader. So the lookup may not be made where
+/// `ordinal` (`parsed`) of the batch of `queries` that fails with its exception (reviews 1 and 2 of
+/// line DBID loadord, line DBID DECISIONS 60 (5) to (8)): NCBI's scope finds a query by its id
+/// before it asks the BLAST database's data loader, and that loader keeps every Seq-id of each
+/// sequence that the run has loaded (`RegisterIds`) and gives that sequence for the id without a
+/// lookup. So the lookup may not be made where
+/// - a query that the scope holds at the batch's prefetch ([`PrefetchQueries::new`]'s scope, made
+///   here only) has an id that the scope takes for the stopping id, or that the stopping id
+///   matches weakly (the keys of [`refuse_id_of_a_query`]);
 /// - a load of the batch that may come before the stop (`before` of `subjects`,
 ///   [`load_before_stop`]: `Yes` or `Unknown`) gives a sequence (the first OID of its Seq-align
 ///   id's lookup, `x_GetOid`; an unparsed subject's own) that holds an id of the stopping id's
 ///   Seq-id handle;
-/// - the run may have loaded sequences before the batch ([`PrefetchQueries::loads_before`]) and
-///   another sequence of the database that holds such an id (found in the LMDB files that have
-///   the accession table, [`crate::seqdb::SeqidLookup::in_indexed_files`]) has a Seq-align id
-///   whose lookup does not fail: a sequence whose own lookup fails loads nothing, and a copy with
-///   the same Seq-align id is the same lookup, which would have stopped the run there;
-/// - the id is `lcl|Query_N` of a query that the scope holds at the batch's prefetch
-///   ([`PrefetchQueries::scope_holds_query`]: the batch's, and in outfmt 5 those before).
+/// - another sequence of the database that holds such an id may have been loaded before the batch:
+///   the run reported it before (`reported`, [`TaxdbRun::note_reported`]: the prefetch and the
+///   reports of the batches, queries and rounds before, whose PSSMs read reported sequences only)
+///   and its own Seq-align id's lookup does not fail (a sequence whose own lookup fails loads
+///   nothing, and a copy with the same Seq-align id is the same lookup, which would have stopped
+///   the run there), or it is the first sequence that the lookup of an id of a sequence reported
+///   before gives (NCBI's reads by another id of that sequence, a superset); and, after calls
+///   whose reported sequences nothing recorded ([`PrefetchQueries::after_unrecorded_calls`]), any
+///   such sequence whose own lookup does not fail (found in the LMDB files that have the accession
+///   table, [`crate::seqdb::SeqidLookup::in_indexed_files`]).
 ///
 /// `None`: NCBI looks it up.
 fn stop_lookup_unsure(
     db: &SeqDb,
+    reported: &TaxdbRun,
     subjects: &[PrefetchSubject<'_>],
     before: &[LoadBeforeStop],
-    queries: &PrefetchQueries,
+    queries: &PrefetchQueries<'_>,
     ordinal: u32,
     parsed: &crate::report::db_subject::ParsedSubject,
 ) -> Result<Option<String>> {
-    use crate::seqid::model::{ObjectId, ParsedSeqId};
     let id = parsed.alignment_id();
-    if let ParsedSeqId::Local(ObjectId::Str(text)) = id {
-        let prefix = b"Query_".len();
-        let digits = text.get(prefix..).unwrap_or_default();
-        let number = (text[..prefix.min(text.len())].eq_ignore_ascii_case(b"Query_")
-            && digits
-                .first()
-                .is_some_and(|first| (b'1'..=b'9').contains(first))
-            && digits.iter().all(u8::is_ascii_digit))
-        .then(|| std::str::from_utf8(digits).ok()?.parse::<usize>().ok())
-        .flatten();
-        if number.is_some_and(|number| queries.scope_holds_query(number)) {
-            return Ok(Some(
-                "it is the local id of a query read without -parse_deflines (lcl|Query_N) that NCBI's scope holds at the batch's prefetch, where it finds it before it asks the database".to_owned(),
-            ));
-        }
+    let keys = parsed.query_scope_keys();
+    let scope = (queries.scope)();
+    if scope.has_key(&keys.own) || scope.has_key(&keys.weak) {
+        return Ok(Some(
+            "NCBI's scope holds a query (of the batch, or in outfmt 5 of a batch before) with an id that it takes for this one, or that this one matches weakly, at the batch's prefetch, where it finds that query before it asks the database".to_owned(),
+        ));
     }
     let handle = crate::seqid::mask_handle::mask_handle_key(id)
         .ok()
@@ -5596,42 +5699,101 @@ fn stop_lookup_unsure(
             )));
         }
     }
-    if !queries.loads_before {
+    let reported = reported.reported();
+    if reported.is_empty() && !queries.unrecorded_calls {
         return Ok(None);
     }
-    let indexed = db.seqid_lookup()?.in_indexed_files();
-    let mut holders = indexed.seqid_to_oids(id, true)?;
-    holders.extend(indexed.case_folded_oids(id)?);
-    holders.extend(indexed.case_variant_oids(id)?);
     let own = db.oid(ordinal).get();
-    // A load of the holder by its own Seq-align id, which a batch before may have made.
-    let loadable = |oid: u32| match db.read_header(db.ordinal_of(oid)) {
-        Ok(crate::seqdb::SequenceHeader::Parsed(set)) => set
-            .alignment_id()
-            .is_none_or(|id| lookup.seqid_to_oids(id, true).is_ok()),
-        _ => true,
+    // The other sequences of the database that hold such an id, found in the LMDB files that have
+    // the accession table and kept where they hold an id of the handle; the lookup's error where
+    // it fails (a version 4 database's ISAM that does not open): each sequence is then asked.
+    let indexed = db.seqid_lookup()?.in_indexed_files();
+    let holders = indexed
+        .seqid_to_oids(id, true)
+        .and_then(|mut holders| {
+            holders.extend(indexed.case_folded_oids(id)?);
+            holders.extend(indexed.case_variant_oids(id)?);
+            Ok(holders)
+        })
+        .map(|mut holders| {
+            holders.retain(|&oid| oid != own && holds(oid));
+            holders.sort_unstable();
+            holders.dedup();
+            holders
+        });
+    if holders.as_ref().is_ok_and(Vec::is_empty) {
+        return Ok(None);
+    }
+    let holder = |oid: u32| {
+        oid != own
+            && match &holders {
+                Ok(holders) => holders.binary_search(&oid).is_ok(),
+                Err(_) => holds(oid),
+            }
     };
-    Ok(holders
-        .into_iter()
-        .filter(|&oid| oid != own)
-        .find(|&oid| holds(oid) && loadable(oid))
-        .map(|oid| {
-            format!("another sequence of the database (OID {oid}) holds an id that NCBI's Seq-id handles take for it, and a load of that sequence by its own Seq-align id before the batch registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup")
-        }))
+    let ids_of = |oid_ordinal: u32| match db.read_header(oid_ordinal) {
+        Ok(crate::seqdb::SequenceHeader::Parsed(set)) => Some(set),
+        _ => None,
+    };
+    // A load of the sequence `oid` by its own Seq-align id.
+    let loadable = |oid: u32| {
+        ids_of(db.ordinal_of(oid)).is_none_or(|set| {
+            set.alignment_id()
+                .is_none_or(|id| lookup.seqid_to_oids(id, true).is_ok())
+        })
+    };
+    if queries.unrecorded_calls {
+        return Ok(match &holders {
+            Ok(holders) => holders.iter().find(|&&oid| loadable(oid)).map(|oid| {
+                format!("another sequence of the database (OID {oid}) holds an id that NCBI's Seq-id handles take for it, and a load of that sequence by its own Seq-align id in a call of the run before this one, whose reports LOSAT has no record of here, registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup")
+            }),
+            Err(error) => Some(format!(
+                "a call of the run before this one, whose reports LOSAT has no record of here, may have loaded another sequence of the database that holds an id that NCBI's Seq-id handles take for it, and LOSAT cannot look for one ({error})"
+            )),
+        });
+    }
+    let registered = |oid: u32| {
+        format!("another sequence of the database (OID {oid}) holds an id that NCBI's Seq-id handles take for it, and the run reported that sequence, or one that shares an id with it, before the batch: its load there registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup")
+    };
+    for &before in &reported {
+        let oid = db.oid(before).get();
+        if holder(oid) && loadable(oid) {
+            return Ok(Some(registered(oid)));
+        }
+    }
+    // The first sequence that a lookup of any id of a sequence reported before gives.
+    for &before in &reported {
+        let Some(set) = ids_of(before) else {
+            continue;
+        };
+        for id in set.deflines.iter().flat_map(|defline| &defline.ids) {
+            let first = lookup
+                .seqid_to_oids(id, true)
+                .ok()
+                .and_then(|oids| oids.first().copied());
+            if let Some(oid) = first.filter(|&oid| holder(oid)) {
+                return Ok(Some(registered(oid)));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// The end of a batch's prefetch at the subject `stopping` (ordinal id, definition lines) whose
 /// lookup fails on a file with NCBI's exception ([`batch_prefetch`], [`batch_prefetch_stop`]),
-/// after the lookups that `run` records: the [`HeaderReadError`] of `query` with the texts of
+/// after the lookups that `run` records and the reports that `reported` records
+/// ([`TaxdbRun::note_reported`]; the same run, or the run's own where `run` is the record of the
+/// held reports, [`held_batch_prefetch_stop`]): the [`HeaderReadError`] of `query` with the texts of
 /// the loads before the first stopping lookup in NCBI's order ([`load_before_stop`]) and NCBI's
 /// `BLAST Database error`, or LOSAT's refusal where what NCBI writes before it depends on an
 /// order that LOSAT does not know.
 fn prefetch_stop(
     db: &SeqDb,
     run: &TaxdbRun,
+    reported: &TaxdbRun,
     subjects: &[PrefetchSubject<'_>],
     program: &str,
-    queries: &PrefetchQueries,
+    queries: &PrefetchQueries<'_>,
     stopping: (u32, &crate::report::db_subject::ParsedSubject),
 ) -> anyhow::Error {
     let (ordinal, parsed) = stopping;
@@ -5660,7 +5822,15 @@ fn prefetch_stop(
         if !asked.insert(subject.ordinal) {
             continue;
         }
-        match stop_lookup_unsure(db, subjects, &before, queries, subject.ordinal, stops) {
+        match stop_lookup_unsure(
+            db,
+            reported,
+            subjects,
+            &before,
+            queries,
+            subject.ordinal,
+            stops,
+        ) {
             Ok(None) => {}
             Ok(Some(why)) => {
                 return parsed_refusal(
@@ -6895,7 +7065,15 @@ mod taxdb_prepass_tests {
                 parsed: Some(&*subject),
                 flipped,
             };
-            batch_prefetch(&db, &run, [subject], "TBLASTX", &stop_queries(0)).unwrap()
+            batch_prefetch(
+                &db,
+                &run,
+                std::iter::empty(),
+                [subject],
+                "TBLASTX",
+                &stop_queries(0),
+            )
+            .unwrap()
         };
         assert_eq!(prefetch(false), b"");
         assert_eq!(prefetch(true), warning);
@@ -6937,6 +7115,7 @@ mod taxdb_prepass_tests {
             let alone = batch_prefetch(
                 &db,
                 &run,
+                std::iter::empty(),
                 [PrefetchSubject {
                     ordinal: 0,
                     parsed: Some(&*failed),
@@ -6951,6 +7130,7 @@ mod taxdb_prepass_tests {
             let both = batch_prefetch(
                 &db,
                 &run,
+                std::iter::empty(),
                 [
                     PrefetchSubject {
                         ordinal: 0,
@@ -6983,6 +7163,7 @@ mod taxdb_prepass_tests {
                 let first = batch_prefetch(
                     &db,
                     &run,
+                    std::iter::empty(),
                     [PrefetchSubject {
                         ordinal: 1,
                         parsed: Some(&*other),
@@ -6995,6 +7176,7 @@ mod taxdb_prepass_tests {
                 let later = batch_prefetch(
                     &db,
                     &run,
+                    std::iter::empty(),
                     [
                         PrefetchSubject {
                             ordinal: 1,
@@ -7026,6 +7208,7 @@ mod taxdb_prepass_tests {
         let prefetch = batch_prefetch(
             &db,
             &run,
+            std::iter::empty(),
             [
                 PrefetchSubject {
                     ordinal: 1,
@@ -7046,6 +7229,7 @@ mod taxdb_prepass_tests {
         let plus = batch_prefetch(
             &db,
             &run,
+            std::iter::empty(),
             [PrefetchSubject {
                 ordinal: 1,
                 parsed: Some(&*bbs),
@@ -7128,20 +7312,21 @@ mod taxdb_prepass_tests {
                 "{names:?}"
             );
             let before = load_before_stop(&db, &subjects);
-            for batch in [0..1, 1..2] {
-                assert_eq!(
-                    stop_lookup_unsure(
-                        &db,
-                        &subjects,
-                        &before,
-                        &PrefetchQueries::new(batch, false),
-                        stop,
-                        parsed[stop as usize].as_ref().unwrap()
-                    )
-                    .unwrap(),
-                    None
-                );
-            }
+            // No load before the batch: the run has reported nothing (its first batch, or batches
+            // whose subjects have no parsed Seq-ids), and the scope holds none of its ids.
+            assert_eq!(
+                stop_lookup_unsure(
+                    &db,
+                    &TaxdbRun::default(),
+                    &subjects,
+                    &before,
+                    &stop_queries(0),
+                    stop,
+                    parsed[stop as usize].as_ref().unwrap()
+                )
+                .unwrap(),
+                None
+            );
         }
         // The same packed number 2 (the handles' addresses decide), one Seq-align id of two
         // sequences, more than 200 ids, and two stops (the smaller number decides).
@@ -7190,19 +7375,22 @@ mod taxdb_prepass_tests {
                 LoadBeforeStop::No
             ]
         );
-        // NCBI may never look the stopping id up (review 1 of line DBID loadord, H1 and H2, as
-        // DECISIONS 60 (6) narrowed them): `ldg`'s `gi|1|ref|NP_000002.1|` holds it, and its load
-        // registers it in NCBI's data loader: refused where the batch loads that sequence before
-        // the stop (its gi's packed number 1 is smaller), or where a batch before may have
-        // loaded it (its own Seq-align id, the gi, does not stop); a stop that the batch alone
-        // loads in its first batch is NCBI's.
+        // NCBI may never look the stopping id up (reviews 1 and 2 of line DBID loadord, as
+        // DECISIONS 60 (6) to (8) decided them): `ldg`'s `gi|1|ref|NP_000002.1|` holds it, and its
+        // load registers it in NCBI's data loader: refused where the batch loads that sequence
+        // before the stop (its gi's packed number 1 is smaller), or where the run reported it
+        // before (`TaxdbRun::note_reported`: a batch, query or round before; review 2's
+        // `B.loaded`), or after calls that nothing recorded (the library's batches); not where no
+        // batch reported it (review 2, M1: `B.never`, `P.first.it2`).
         let unsure = |db: &SeqDb,
+                      run: &TaxdbRun,
                       subjects: &[PrefetchSubject<'_>],
-                      queries: PrefetchQueries,
+                      queries: PrefetchQueries<'_>,
                       stop: u32,
                       parsed: &crate::report::db_subject::ParsedSubject| {
             stop_lookup_unsure(
                 db,
+                run,
                 subjects,
                 &load_before_stop(db, subjects),
                 &queries,
@@ -7224,11 +7412,14 @@ mod taxdb_prepass_tests {
             .unwrap() as u32;
         let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
         let held = PrefetchSubject::unflipped(holder, parsed[holder as usize].as_deref());
+        let unparsed = PrefetchSubject::unflipped(0, None);
+        assert!(parsed[0].is_none());
         let stop_parsed = parsed[stop as usize].as_ref().unwrap();
         let why = unsure(
             &db,
+            &TaxdbRun::default(),
             &[held, stopping],
-            PrefetchQueries::new(0..1, false),
+            stop_queries(0),
             stop,
             stop_parsed,
         )
@@ -7237,41 +7428,91 @@ mod taxdb_prepass_tests {
         assert_eq!(
             unsure(
                 &db,
+                &TaxdbRun::default(),
                 &[stopping],
-                PrefetchQueries::new(0..1, false),
+                stop_queries(0),
                 stop,
                 stop_parsed
             ),
             None
         );
+        // A run that reported the holder before (a batch, query or round before; the record of
+        // a run that can stop: `lda` has no accession table).
+        let loaded = TaxdbRun::default();
+        loaded.note_reported(&db, [unparsed, held]);
+        assert_eq!(loaded.reported(), [holder]);
         let why = unsure(
             &db,
+            &loaded,
             &[stopping],
-            PrefetchQueries::new(1..2, false),
+            stop_queries(1),
             stop,
             stop_parsed,
         )
         .unwrap();
-        assert!(why.contains("another sequence of the database"), "{why}");
+        assert!(why.contains("the run reported that sequence"), "{why}");
+        // A run that reported only sequences without parsed Seq-ids: nothing recorded, NCBI looks
+        // the stopping id up (M1).
+        let never = TaxdbRun::default();
+        never.note_reported(&db, [unparsed]);
+        assert!(never.reported().is_empty());
+        assert_eq!(
+            unsure(&db, &never, &[stopping], stop_queries(1), stop, stop_parsed),
+            None
+        );
+        // A call of the library's batches after others, whose reports nothing recorded.
+        let why = unsure(
+            &db,
+            &never,
+            &[stopping],
+            stop_queries(1).after_unrecorded_calls(true),
+            stop,
+            stop_parsed,
+        )
+        .unwrap();
+        assert!(
+            why.contains("whose reports LOSAT has no record of"),
+            "{why}"
+        );
         // A copy of the stopping sequence with the same Seq-align id is the same lookup: no
-        // batch before can have loaded it without stopping there (`ldp ldp`, kit case
-        // `copy.21b` of line DBID mixdb2's review 1).
-        let db = open(&["ldp", "ldp", "lda"]);
+        // batch before can have loaded it without stopping there (`ldc`, a copy of `ldp`'s
+        // record; kit case `copy.21b` of line DBID mixdb2's review 1, the rows `.copy.6`).
+        let db = open(&["ldp", "ldc", "lda"]);
         let parsed = headers_of(&db);
         let stop = accession(&parsed, "NP_000002.1");
+        let copy = parsed
+            .iter()
+            .enumerate()
+            .rposition(|(ordinal, header)| {
+                ordinal != stop as usize
+                    && header.as_ref().is_some_and(|subject| {
+                        String::from_utf8_lossy(&subject.alignment_fasta()).contains("NP_000002.1")
+                    })
+            })
+            .unwrap() as u32;
         let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
+        let copied = TaxdbRun::default();
+        copied.note_reported(
+            &db,
+            [PrefetchSubject::unflipped(
+                copy,
+                parsed[copy as usize].as_deref(),
+            )],
+        );
+        assert_eq!(copied.reported(), [copy]);
         assert_eq!(
             unsure(
                 &db,
+                &copied,
                 &[stopping],
-                PrefetchQueries::new(1..2, false),
+                stop_queries(1),
                 stop,
                 parsed[stop as usize].as_ref().unwrap()
             ),
             None
         );
-        // `ldq`'s `lcl|Query_1` is the generated id of query 0, which NCBI's scope finds in that
-        // query's batch, and in a later batch only in outfmt 5 (`ResetScopeHistory`).
+        // `ldq`'s `lcl|Query_1`: NCBI's scope finds it where it holds a query with that id
+        // (`QueryScope`, the owner of the queries' ids), never in the database.
         let db = open(&["lda", "ldq"]);
         let parsed = headers_of(&db);
         let stop = parsed
@@ -7284,24 +7525,90 @@ mod taxdb_prepass_tests {
             .unwrap() as u32;
         let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
         let stop_parsed = parsed[stop as usize].as_ref().unwrap();
-        for (queries, refused) in [
-            (PrefetchQueries::new(0..1, false), true),
-            (PrefetchQueries::new(0..2, false), true),
-            (PrefetchQueries::new(1..2, false), false),
-            (PrefetchQueries::new(1..2, true), true),
-        ] {
-            let why = unsure(&db, &[stopping], queries.clone(), stop, stop_parsed);
-            assert_eq!(why.is_some(), refused, "{queries:?}");
-            if let Some(why) = why {
-                assert!(why.contains("lcl|Query_N"), "{why}");
-            }
-        }
+        let scope_refuses = |scope: &dyn Fn() -> crate::blastinput::query_batch::QueryScope| {
+            unsure(
+                &db,
+                &TaxdbRun::default(),
+                &[stopping],
+                PrefetchQueries::new(0, scope),
+                stop,
+                stop_parsed,
+            )
+            .inspect(|why| assert!(why.contains("NCBI's scope holds a query"), "{why}"))
+            .is_some()
+        };
+        use crate::blastinput::query_batch::QueryScope;
+        let records = |fasta: &[u8], parse_deflines: bool| {
+            let config =
+                crate::blastinput::fasta_reader::ReaderConfig::query("BLASTP", true, false)
+                    .with_parse_deflines(parse_deflines);
+            let mut source =
+                crate::blastinput::fasta_reader::FastaInputSource::from_bytes(fasta, config);
+            crate::blastinput::fasta_reader::read_all(&mut source, &mut |_| Ok(())).unwrap()
+        };
+        let letters = "A".repeat(150);
+        let two = records(
+            format!(">qa\n{letters}\n>qb\n{letters}\n").as_bytes(),
+            false,
+        );
+        // The batch of query 0 (its generated id `Query_1`, `FastaRecord::local_id`), of both, or
+        // of query 1 alone (the scope of a later batch, outside outfmt 5, which keeps the batches
+        // before: `ResetScopeHistory`).
+        assert!(scope_refuses(&|| QueryScope::of_shown_records(&two[..1])));
+        assert!(scope_refuses(&|| QueryScope::of_shown_records(&two)));
+        assert!(!scope_refuses(&|| QueryScope::of_shown_records(&two[1..])));
+        // A record that `-query_loc` drops (40 letters, `-query_loc 50-140`) keeps its number and
+        // stays in its batch's scope (review 2, H2): the batch's input records, not its searched
+        // queries, make the scope.
+        let short = records(
+            format!(">qa\n{}\n>qb\n{letters}\n", "A".repeat(40)).as_bytes(),
+            false,
+        );
+        let cut = crate::blastinput::seq_range::cut_queries(
+            &short,
+            &crate::blastinput::seq_range::SequenceRange { from: 50, to: 140 },
+        );
+        let batch = cut.input.batches(u32::MAX).remove(0);
+        assert_eq!((batch.input.clone(), batch.searched.clone()), (0..2, 0..1));
+        assert_eq!(cut.records[0].local_id, "Query_2");
+        assert!(scope_refuses(&|| QueryScope::of_shown_records(
+            &short[batch.input.clone()]
+        )));
+        // With `-parse_deflines` the scope holds the ids of the deflines, and no generated id
+        // (review 2, M2: NCBI looks `lcl|Query_1` up and stops).
+        let believed = records(
+            format!(">lcl|qa\n{letters}\n>lcl|qb\n{letters}\n").as_bytes(),
+            true,
+        );
+        assert!(believed[0].believed().is_some());
+        assert!(!scope_refuses(&|| QueryScope::of_shown_records(&believed)));
+        // The PSSM's query of `-in_pssm` (review 2, H4): its Bioseq's ids, `lcl|Query_1` or
+        // `lcl|myprot`.
+        let local = |id: &str| {
+            crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(
+                id.as_bytes().to_vec(),
+            ))
+        };
+        assert!(scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "Query_1"
+        )])));
+        assert!(!scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "myprot"
+        )])));
+        // Local ids of any case are one handle (`lcl|QUERY_1`); a leading zero is another id.
+        assert!(scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "QUERY_1"
+        )])));
+        assert!(!scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "Query_01"
+        )])));
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 
-    /// The batch of the one query `query` of a run whose first format is not outfmt 5.
-    fn stop_queries(query: usize) -> PrefetchQueries {
-        PrefetchQueries::new(query..query + 1, false)
+    /// The batch whose stop names the query `query` and whose scope holds no query (a run whose
+    /// queries have none of the ids of the database).
+    fn stop_queries(query: usize) -> PrefetchQueries<'static> {
+        PrefetchQueries::new(query, &crate::blastinput::query_batch::QueryScope::default)
     }
 
     #[test]
@@ -7383,7 +7690,17 @@ mod taxdb_prepass_tests {
             let run = TaxdbRun::default();
             let alone = [subject(stop, &parsed[stop as usize])];
             assert_eq!(
-                stopped(batch_prefetch(&db, &run, alone, "BLASTN", &stop_queries(3)).map(drop)),
+                stopped(
+                    batch_prefetch(
+                        &db,
+                        &run,
+                        std::iter::empty(),
+                        alone,
+                        "BLASTN",
+                        &stop_queries(3)
+                    )
+                    .map(drop)
+                ),
                 (3, error.clone())
             );
             assert_eq!(
@@ -7410,7 +7727,15 @@ mod taxdb_prepass_tests {
                 None => {
                     assert_eq!(
                         stopped(
-                            batch_prefetch(&db, &run, both(), "BLASTN", &stop_queries(0)).map(drop)
+                            batch_prefetch(
+                                &db,
+                                &run,
+                                std::iter::empty(),
+                                both(),
+                                "BLASTN",
+                                &stop_queries(0)
+                            )
+                            .map(drop)
                         )
                         .1,
                         error
@@ -7429,6 +7754,7 @@ mod taxdb_prepass_tests {
                     assert_eq!(
                         stopped(held_batch_prefetch_stop(
                             &db,
+                            &TaxdbRun::default(),
                             std::iter::empty(),
                             both(),
                             "BLASTN",
@@ -7445,6 +7771,7 @@ mod taxdb_prepass_tests {
                         batch_prefetch(
                             &db,
                             &TaxdbRun::default(),
+                            std::iter::empty(),
                             both(),
                             "BLASTN",
                             &stop_queries(0),
@@ -7459,6 +7786,7 @@ mod taxdb_prepass_tests {
                         ),
                         held_batch_prefetch_stop(
                             &db,
+                            &TaxdbRun::default(),
                             std::iter::empty(),
                             both(),
                             "BLASTN",
@@ -7474,6 +7802,7 @@ mod taxdb_prepass_tests {
                     assert!(!batch_prefetch(
                         &db,
                         &run,
+                        std::iter::empty(),
                         [subject(other, &None)],
                         "BLASTN",
                         &stop_queries(0)
@@ -7482,7 +7811,15 @@ mod taxdb_prepass_tests {
                     .is_empty());
                     assert_eq!(
                         stopped(
-                            batch_prefetch(&db, &run, both(), "BLASTN", &stop_queries(1)).map(drop)
+                            batch_prefetch(
+                                &db,
+                                &run,
+                                std::iter::empty(),
+                                both(),
+                                "BLASTN",
+                                &stop_queries(1)
+                            )
+                            .map(drop)
                         ),
                         (1, error.clone())
                     );
@@ -7513,6 +7850,7 @@ mod taxdb_prepass_tests {
                     assert_eq!(
                         stopped(held_batch_prefetch_stop(
                             &db,
+                            &TaxdbRun::default(),
                             [subject(other, &None)],
                             both(),
                             "BLASTN",
@@ -7560,6 +7898,7 @@ mod taxdb_prepass_tests {
             batch_prefetch(
                 &db,
                 &run,
+                std::iter::empty(),
                 [subject(stop as u32, &parsed[stop]), subject(other, &throws)],
                 "BLASTN",
                 &stop_queries(0),

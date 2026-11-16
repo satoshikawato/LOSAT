@@ -10971,6 +10971,24 @@ fn run_in_pool(
                     Ok(Vec::new())
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
+                // NCBI's scope at the batch's prefetch (`shared::PrefetchQueries`), made only where it
+                // stops: the batch's input records (those that `-query_loc` drops included, each with
+                // its `Query_N` of the run, `FastaRecord::local_id`), in outfmt 5, whose scope the
+                // formatter keeps, those of the batches before too (outfmt 5 keeps the records read
+                // before the search, as `query_scopes` above).
+                let scope = || {
+                    crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                        x_query_stream::Queries::Records { input, .. } if xml => {
+                            &input[..input_end]
+                        }
+                        _ => batch_records.input(),
+                    })
+                };
+                // A call of the library's batches after the first (`api::run_batches`) searched
+                // the batches before with a database of its own, whose loads nothing here records.
+                let prefetch_queries =
+                    crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                        .after_unrecorded_calls(args.first_query_ordinal > 0);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
@@ -11030,14 +11048,10 @@ fn run_in_pool(
                     database
                         .batch_prefetch(
                             &titles,
+                            &hit_lists,
                             &batch_hit_lists,
                             !args.ungapped,
-                            // NCBI's scope at the prefetch: outfmt 5 keeps the queries of the
-                            // batches before (`shared::PrefetchQueries`).
-                            &crate::algorithm::common::database::PrefetchQueries::new(
-                                start..end,
-                                output_formats.first() == Some(&BlastnOutputFormat::Xml),
-                            ),
+                            &prefetch_queries,
                         )
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
@@ -11054,6 +11068,15 @@ fn run_in_pool(
                 // batch's prefetch (where it is on and loads a sequence) only its stop
                 // (`BlastnDatabase::batch_prefetch_stop`).
                 let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
+                // NCBI's scope at the batch's prefetch, as above.
+                let scope = || {
+                    crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                        x_query_stream::Queries::Records { input, .. } if xml => {
+                            &input[..input_end]
+                        }
+                        _ => batch_records.input(),
+                    })
+                };
                 (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
                     .then(|| {
                         database
@@ -11063,9 +11086,9 @@ fn run_in_pool(
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &crate::algorithm::common::database::PrefetchQueries::new(
-                                    start..end,
-                                    output_formats.first() == Some(&BlastnOutputFormat::Xml),
-                                ),
+                                    start, &scope,
+                                )
+                                .after_unrecorded_calls(args.first_query_ordinal > 0),
                             )
                             .map(|()| Vec::new())
                     })
@@ -11088,6 +11111,13 @@ fn run_in_pool(
                     }
                     return Err(error);
                 }
+            }
+            // EXPERIMENT (LOSAT_X_RPTSTREAM): the loop writes the batch's reports below and drops
+            // its lists, so a later batch's stop does not find them among those it holds (the
+            // prefetches' `before`): the run's record of what the batch's prefetch and reports
+            // read (`BlastnDatabase::note_reported`; nothing for a database that cannot stop).
+            if stream.acting() {
+                database.note_reported(&titles, &batch_hit_lists, !args.ungapped);
             }
         }
         // The batch numbers its queries from 0.

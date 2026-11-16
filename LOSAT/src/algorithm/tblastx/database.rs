@@ -496,39 +496,63 @@ pub(crate) fn subject_read_texts<'h>(
 /// fails or one without a Bioseq with a Seq-align whose first Std-seg has a minus query frame
 /// and a plus subject frame (`CSeq_align::GetSeqStrand` reads the first segment): `ordered`
 /// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`).
+///
+/// `before`: the reported hits of the batches of the run before it that the loop still holds
+/// (none where it wrote and dropped them, `report_stream`, which records each batch instead:
+/// `note_reported`), read only where the batch stops.
 pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
+    before: &[TblastxHsp],
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    queries: &shared::PrefetchQueries,
+    queries: &shared::PrefetchQueries<'_>,
 ) -> Result<Vec<u8>> {
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,
+        prefetch_subjects(before, titles),
         prefetch_subjects(ordered, titles),
         PROGRAM,
         queries,
     )
 }
 
-/// The stop of NCBI's prefetch of the query batch of `queries` whose reported hits are `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each
-/// `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
-/// before, whose reported hits are `before`, which TBLASTX writes after the stop (the XML formats
-/// are not streamed, `report_stream`).
+/// The stop of NCBI's prefetch of the query batch of `queries` whose reported hits are
+/// `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+/// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
+/// whose reported hits are `before`, which TBLASTX writes after the stop (the XML formats are not
+/// streamed, `report_stream`).
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
     before: &[TblastxHsp],
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    queries: &shared::PrefetchQueries,
+    queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
     shared::held_batch_prefetch_stop(
         &database.db,
+        &database.taxdb,
         prefetch_subjects(before, titles),
         prefetch_subjects(ordered, titles),
         PROGRAM,
         queries,
     )
+}
+
+/// The run's record of the sequences that the prefetch and the reports of a query batch whose
+/// reported hits are `ordered` read (`shared::TaxdbRun::note_reported`), for a later batch's
+/// stop: where the loop writes each batch's reports and drops its hits (`report_stream`), so
+/// that `batch_prefetch`'s `before` no longer holds them.
+pub(crate) fn note_reported(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+) {
+    if database.parsed_seqids() {
+        database
+            .taxdb
+            .note_reported(&database.db, prefetch_subjects(ordered, titles));
+    }
 }
 
 /// The sequences that the prefetch of the query batch whose reported hits are `ordered` reads

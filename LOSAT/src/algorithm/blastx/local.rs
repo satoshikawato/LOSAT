@@ -257,6 +257,11 @@ pub(super) fn subject_taxonomy(
 struct DatabaseReports<'a> {
     database: &'a BlastxDatabase,
     pairwise: &'a crate::report::pairwise::PairwiseDatabase,
+    /// A call of the library's batches after the first (`api::run_batches`, the arguments'
+    /// `first_query_ordinal`): the calls before searched with a database of their own, whose
+    /// loads the stop of a batch's prefetch here has no record of
+    /// (`common::database::PrefetchQueries::after_unrecorded_calls`).
+    unrecorded_calls: bool,
 }
 
 /// What `report_batches` reports: the checks of the options and of the inputs are done.
@@ -373,6 +378,9 @@ fn reader_batches(
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     let mut batch = Vec::new();
+    // The batch's records that the range skips, for its first record (`FastaRecord::skipped`):
+    // NCBI's reader added them to its scope.
+    let mut skipped = Vec::new();
     let (mut letters, mut records_read) = (0, 0);
     for record in query_records {
         let mut query = blastx_record(record, lowercase)?;
@@ -391,17 +399,22 @@ fn reader_batches(
                 query.cut_in_place(from, to + 1, keep_whole)
             }
             Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
-            Some(RecordInterval::PastEnd) => continue,
+            Some(RecordInterval::PastEnd) => {
+                skipped.push(super::input::SkippedRecord::of(&query));
+                continue;
+            }
         }
         letters += length;
         batch.push(query);
         if letters >= batch_size {
+            super::input::attach_skipped(&mut batch, &mut skipped);
             deliver(&batch)?;
             batch.clear();
             (letters, records_read) = (0, 0);
         }
     }
     if records_read > 0 {
+        super::input::attach_skipped(&mut batch, &mut skipped);
         deliver(&batch)?;
     }
     Ok(())
@@ -656,6 +669,9 @@ fn write_run(
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
     let asks = ReportedAsks::of_all(resolved);
+    // NCBI's scope of the query records at each batch's prefetch (`native::BatchScopes`).
+    let batch_scopes =
+        super::native::BatchScopes::new(xml, database.as_ref().map(|run| run.database));
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,
@@ -687,6 +703,7 @@ fn write_run(
         };
         app::check_prefetch_environment(only_archive)?;
         // A database: the batch's reported sequences, and its hit lists named by their ranks.
+        let scope = || batch_scopes.of_batch(queries);
         let mut reported = match database {
             Some(run) => Some(reported_batch(
                 run.database,
@@ -699,11 +716,13 @@ fn write_run(
                     .borrow()
                     .as_ref()
                     .map(|scopes| scopes.numbered_from(queries_before)),
-                queries_before..queries_before + queries.len(),
+                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope)
+                    .after_unrecorded_calls(run.unrecorded_calls),
                 &mut *diagnostics,
             )?),
             None => None,
         };
+        batch_scopes.reported(queries);
         let hits = match made_hits {
             true => Some(
                 report::pairwise_hits(
@@ -1092,6 +1111,7 @@ fn search_database(
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,
+                unrecorded_calls: args.first_query_ordinal > 0,
             }),
             archive,
             out: args.out.as_deref(),
@@ -1327,5 +1347,6 @@ fn blastx_record(record: &fasta_reader::FastaRecord, lowercase: bool) -> Result<
         warnings: Vec::new(),
         source: record.source.clone(),
         around: None,
+        skipped: None,
     })
 }

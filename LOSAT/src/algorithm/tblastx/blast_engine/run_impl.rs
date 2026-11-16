@@ -3617,16 +3617,25 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // The query records that NCBI's scope holds at the prefetch of the batch of the input records
+    // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
+    // reader added for the batch (the records that `-query_loc` drops included, numbered in the
+    // run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
+    // (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those of the batches before.
+    let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
+    let batch_scope = |input: std::ops::Range<usize>| {
+        let input = if xml_scope { 0..input.end } else { input };
+        crate::blastinput::query_batch::QueryScope::of_shown_records(
+            &query_runs.input_records[input],
+        )
+    };
+    // A call of the library's batches after the first (`api::run_batches`) searched the batches
+    // before with a database of its own, whose loads nothing here records.
+    let unrecorded_calls = reports.args.first_query_ordinal > 0;
     // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
     // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
-    // The queries of a batch as NCBI's scope holds them at its prefetch: outfmt 5 keeps those of
-    // the batches before (`shared::PrefetchQueries`).
-    let scope_keeps_queries = outputs.formats.first().is_some_and(|format| {
-        report::output_format(format.outfmt) == report::TblastxOutputFormat::Xml
-    });
-    let prefetch_queries = |batch: std::ops::Range<usize>| {
-        crate::algorithm::common::database::PrefetchQueries::new(batch, scope_keeps_queries)
-    };
     let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
         matches!(
             report::output_format(format.outfmt),
@@ -4120,12 +4129,14 @@ fn run_batch_loop(
                     super::super::database::seq_aligns_of(ordered),
                 )
             {
+                let scope = || batch_scope(input_start..input_end);
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
                     ordered,
                     &reports.titles.borrow(),
-                    &prefetch_queries(start..end),
+                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                        .after_unrecorded_calls(unrecorded_calls),
                 ) {
                     prefetch_failed!(error);
                 }
@@ -4220,11 +4231,14 @@ fn run_batch_loop(
                         }
                     }
                 } else if !ordered.is_empty() {
+                    let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(
                         database,
+                        &done.hits,
                         ordered,
                         &reports.titles.borrow(),
-                        &prefetch_queries(start..end),
+                        &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                            .after_unrecorded_calls(unrecorded_calls),
                     );
                     let messages = match prefetch {
                         Ok(messages) => messages,
@@ -4325,7 +4339,17 @@ fn run_batch_loop(
         if stream {
             // The batch's reports, written now, as NCBI's loop prints a batch's result sets
             // (`report_stream`), from its lists numbered from its first query as it made them.
-            // Its lists and its queries' warnings are not kept.
+            // Its lists and its queries' warnings are not kept: a later batch's stop does not find
+            // its hits among those the loop holds (the prefetches' `before`), so the run records
+            // what the batch's prefetch and reports read (`database::note_reported`; nothing for a
+            // database that cannot stop).
+            if let ShownSubjects::Database { database, .. } = &subjects.shown {
+                super::super::database::note_reported(
+                    database,
+                    &batch.hits,
+                    &reports.titles.borrow(),
+                );
+            }
             debug_assert_eq!(reports.queries_written.get(), start);
             let count = end - start;
             let batch_done = SearchedBatches {

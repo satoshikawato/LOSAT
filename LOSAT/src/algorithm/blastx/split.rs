@@ -783,6 +783,7 @@ fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord 
             .as_deref()
             .map(crate::blastinput::fasta_reader::RecordSource::without_uncut),
         around: None,
+        skipped: None,
     }
 }
 
@@ -948,6 +949,7 @@ mod x_chunk_record_tests {
                 ..RecordSource::default()
             })),
             around: None,
+            skipped: None,
         }
     }
 

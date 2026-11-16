@@ -377,6 +377,7 @@ fn kept_blocks_equal_score_block_of_the_unsplit_chunk() {
         warnings: Vec::new(),
         source: None,
         around: None,
+        skipped: None,
     };
     let sequence = random(600);
     let several = vec![
@@ -513,6 +514,7 @@ fn unported_long_subject_chunking_is_rejected_before_search() {
         warnings: Vec::new(),
         source: None,
         around: None,
+        skipped: None,
     };
     let error = super::search::search_preliminary(&records, &[subject], &o)
         .expect_err("unported subject splitting");
@@ -537,6 +539,7 @@ fn a_batch_that_is_not_searched_does_not_refuse_a_long_subject() {
         warnings: Vec::new(),
         source: None,
         around: None,
+        skipped: None,
     };
     let query = record("Query_1", vec![b'N'; 300]);
     let subject = record("Subject_1", vec![b'W'; 5_000_001]);

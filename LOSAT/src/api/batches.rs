@@ -370,10 +370,11 @@ impl Batches<'_> {
                     }
                 };
             }
-            // BLASTX's messages show the record's own id; rpsblast and rpstblastn are refused
-            // by `Program::parse`.
-            Commands::Blastx(_)
-            | Commands::Rpsblast(_)
+            // BLASTX's messages show the record's own id; its prefetch's stop asks whether the
+            // call comes after others (`local::DatabaseReports::unrecorded_calls`).
+            Commands::Blastx(args) => args.first_query_ordinal = range.start,
+            // rpsblast and rpstblastn are refused by `Program::parse`.
+            Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {}

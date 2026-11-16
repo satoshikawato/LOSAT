@@ -809,12 +809,19 @@ masked). Line NP item M4a-2c.
   another lookup that throws on its id may come before the stop, and one whose stopping id NCBI
   may never look up: another sequence of the database that holds an id of its Seq-id handle
   may be loaded first (NCBI's data loader keeps the ids of every sequence it has loaded and
-  gives that sequence for them: `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|` in the
-  batch's order, or in a batch before, or psiblast's PSSM reads; not a copy with the same
-  Seq-align id, whose load is the same lookup), or it is the generated id (`lcl|Query_1`) of a
-  query that NCBI's scope holds at the prefetch (the batch's queries, and with outfmt 5, whose
-  report keeps the scope, those of the batches before; review 1 of item loadord, H1 and H2:
-  NCBI then searches to the end, exit 0).
+  gives that sequence for them): `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|` in the
+  batch's order, or a sequence that the run reported before (in a batch, a query or a psiblast
+  round before, whose prefetch, reports and PSSM loaded it), or the first sequence that a lookup
+  of another id of such a sequence gives; not a sequence that no batch reported (NCBI then
+  stops), nor a copy with the same Seq-align id, whose load is the same lookup; and, in a call of
+  the library's query batches after the first, which has no record of the calls before, any
+  such sequence. Or a query that NCBI's scope holds at the prefetch has the stopping id, or one
+  that it matches weakly: the records that NCBI's reader read for the batch, a record that
+  `-query_loc` drops included (it keeps its number), by their generated ids (`lcl|Query_N`, the
+  numbers of the whole run, also in psiblast's rounds) or with `-parse_deflines` by the ids of
+  their deflines alone, or the query of a PSSM (`-in_pssm`, `lcl|myprot`); with outfmt 5, whose
+  report keeps the scope, also those of the batches before (reviews 1 and 2 of item loadord:
+  NCBI then searches to the end, exit 0, or blastx ends with its CSeqalign exception).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

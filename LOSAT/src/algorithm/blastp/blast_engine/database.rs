@@ -1504,25 +1504,29 @@ impl ListedTitles<'_> {
             .cloned()
     }
 
+    /// The subject of rank `rank` as a batch's prefetch reads it (a protein has no strand).
+    fn prefetch_subject(&self, rank: usize) -> shared::PrefetchSubject<'_> {
+        shared::PrefetchSubject::unflipped(self.listed.ordinals[rank], self.parsed_subject(rank))
+    }
+
     /// NCBI's prefetch of a query batch's subjects of ranks `ranks` on standard error
     /// (`shared::batch_prefetch`): the taxonomy texts of `prefetch_messages`, then the warning
     /// where the prefetch fails at a subject whose lookup fails (a protein has no strand); the
-    /// stop of the batch of `queries` (`shared::batch_prefetch`).
+    /// stop of the batch of `queries` (`shared::batch_prefetch`), after the batches of the call
+    /// before it, whose prefetches and reports read the subjects of ranks `before` (read only
+    /// where the batch stops).
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
+        before: impl IntoIterator<Item = usize>,
         ranks: impl IntoIterator<Item = usize>,
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
-            ranks.into_iter().map(|rank| {
-                shared::PrefetchSubject::unflipped(
-                    self.listed.ordinals[rank],
-                    self.parsed_subject(rank),
-                )
-            }),
+            before.into_iter().map(|rank| self.prefetch_subject(rank)),
+            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
             self.program,
             queries,
         )
@@ -1538,21 +1542,33 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         before: &[Option<BlastpHitList>],
         ranks: impl IntoIterator<Item = usize>,
-        queries: &shared::PrefetchQueries,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
-        let subject = |rank: usize| {
-            shared::PrefetchSubject::unflipped(
-                self.listed.ordinals[rank],
-                self.parsed_subject(rank),
-            )
-        };
         shared::held_batch_prefetch_stop(
             &database.db,
-            Self::reported_ranks(before).map(subject),
-            ranks.into_iter().map(subject),
+            &database.taxdb,
+            Self::reported_ranks(before).map(|rank| self.prefetch_subject(rank)),
+            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
             self.program,
             queries,
         )
+    }
+
+    /// The run's record of the subjects of ranks `ranks` that a call's batches read in their
+    /// prefetches and reports (`shared::TaxdbRun::note_reported`): psiblast's round of a query, a
+    /// call of its own, for the stop of a later round's or query's prefetch.
+    pub(super) fn note_reported(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+    ) {
+        if self.parsed.is_empty() {
+            return;
+        }
+        database.taxdb.note_reported(
+            &database.db,
+            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
+        );
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads

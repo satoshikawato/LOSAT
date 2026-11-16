@@ -140,6 +140,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRu
         filter: b"F",
         db_num: 4,
         db_len: 5000,
+        db_len_overflow: false,
         positives: matrix,
         mask_char: b'X',
     }
@@ -343,6 +344,64 @@ fn a_document_started_early_writes_its_start_once() {
             assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
         }
     }
+}
+
+#[test]
+fn the_start_refuses_the_report_sums_before_its_first_byte() {
+    // Line RG D1a-3: NCBI writes the XML2 and JSON documents' start before the search and sums the
+    // database counts when it formats the first report, after its own errors of the search (probe
+    // `fix3_d1a3/p2`): LOSAT refuses the counts it would print where NCBI's sums overflow in the
+    // document's start, before any byte, and only for a call that writes reports.
+    let mut overflow = run(None, "d");
+    overflow.db_len_overflow = true;
+    let mut int64_min = run(None, "d");
+    int64_min.db_len = i64::MIN;
+    for kind in [
+        Xml2Kind::Single16,
+        Xml2Kind::Single15,
+        Xml2Kind::Files14,
+        Xml2Kind::Files13,
+    ] {
+        let refused = |run: &XmlRun<'_>| {
+            let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+            let mut out = Vec::new();
+            let refused = writer.start(Some(run), &mut out).is_err_and(|error| {
+                error.is::<crate::algorithm::common::database::ReportSumRefusal>()
+            });
+            // A refusal writes nothing; otherwise the start is written.
+            if refused {
+                assert!(out.is_empty(), "{kind:?}");
+            } else {
+                assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+            }
+            refused
+        };
+        assert!(refused(&overflow), "{kind:?}");
+        // `-0` in the serial XML only (outfmt 14 and 16); JSON writes INT64_MIN.
+        assert_eq!(
+            refused(&int64_min),
+            matches!(kind, Xml2Kind::Single16 | Xml2Kind::Files14),
+            "{kind:?}"
+        );
+        // A call that writes no report (a run without a query) prints no count.
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        writer.start(None, &mut out).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        writer.start(Some(&run(None, "d")), &mut out).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+    }
+    let mut blast_xml = crate::report::blast_xml::BlastXmlWriter::new(0);
+    let mut out = Vec::new();
+    assert!(blast_xml.start(Some(&overflow), &mut out).is_err());
+    assert!(blast_xml.start(Some(&int64_min), &mut out).is_err());
+    let mut count = run(None, "d");
+    count.db_num = i64::from(i32::MAX) + 1;
+    assert!(blast_xml.start(Some(&count), &mut out).is_err());
+    assert!(blast_xml.start(None, &mut out).is_ok());
+    assert!(out.is_empty());
 }
 
 #[test]
@@ -1190,7 +1249,7 @@ fn many_hits_16(
         masks: &[],
     };
     let mut out = Vec::new();
-    writer.start(&mut out);
+    writer.start(None, &mut out).unwrap();
     let mut posts = writer.take_posts().posts;
     let base = out.len();
     writer

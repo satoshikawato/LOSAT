@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod reach_support;
 mod temp_support;
 use temp_support::TempPath;
 
@@ -1102,6 +1103,98 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
         rows += 1;
     }
     assert_eq!(rows, 8);
+}
+
+// The NCBI-frozen rows `db.cnt.l0paja.*` (`tests/db_search_manifest/blastp.tsv` and
+// `psiblast.tsv`, line RG D1a-3): blastp's and psiblast's query blocks over
+// `tests/db_search/dbcounts/l0paja.pal` (`LENGTH 0`: NCBI computes the statistics of each subject, in
+// each block's call). Their query `bpqb5.faa` (59,700 letters) makes two blocks only at the default
+// `LOSAT_X_BPQBLOCK` of 50,000 letters, on which the rows alone depend (the fixture script drops
+// `LOSAT_*`). Here `LOSAT_X_BPQBLOCK=1` makes each of its six NCBI batches a block whatever the
+// default, so that the blocks of the preliminary stage (outfmt 10, `PrelimOnly::Block`) and the block
+// search (outfmt 6: blastp, and psiblast's one round) run, and each run must write the bytes NCBI
+// froze, standard error included, at one and four threads. Both block paths record the switch's
+// new side (`LOSAT_X_REACH`), so each row's pair of sides is pinned: an outfmt 6 row records the
+// new side only (the block search ran and did not leave it: a blastp call that leaves it records
+// the reference side, then runs the preliminary stage in blocks, which records the new side); the
+// outfmt 10 row records both (the block search takes the reference path for outfmt 10,
+// `x_query_block_plan`, then the preliminary stage runs in blocks).
+#[test]
+fn the_frozen_rows_of_a_database_length_of_0_are_written_by_blocks() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frozen = root.join("tests/fixtures/db_search");
+    let mut rows = 0;
+    for manifest in ["blastp.tsv", "psiblast.tsv"] {
+        let text =
+            std::fs::read_to_string(root.join("tests/db_search_manifest").join(manifest)).unwrap();
+        let mut lines = text.lines().filter(|line| !line.starts_with('#'));
+        let columns: Vec<&str> = lines.next().unwrap().split('\t').collect();
+        let column = |name: &str| columns.iter().position(|c| *c == name).unwrap();
+        let (id, program, db, query, extra, format) = (
+            column("row_id"),
+            column("program"),
+            column("db"),
+            column("query"),
+            column("extra_args"),
+            column("outfmt"),
+        );
+        for line in lines.filter(|line| line.starts_with("db.cnt.l0paja.")) {
+            let cells: Vec<&str> = line.split('\t').collect();
+            let row = cells[id];
+            let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
+            let expected_err =
+                std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
+            // The sides (new, ref) of LOSAT_X_BPQBLOCK the row records (above).
+            let sides = match cells[format].split_whitespace().next() {
+                Some("6") => (true, false),
+                Some("10") => (true, true),
+                other => panic!("{row}: no sides for outfmt {other:?}"),
+            };
+            for threads in THREADS {
+                let reach = reach_support::Reach::new("l0paja");
+                let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+                for (name, _) in std::env::vars_os() {
+                    let text = name.to_string_lossy();
+                    if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
+                        || text == "BATCH_SIZE"
+                        || text.starts_with("NCBI")
+                        || text.starts_with("BLAST")
+                    {
+                        command.env_remove(name);
+                    }
+                }
+                // No `~/.ncbirc` names a taxonomy database or a BLASTDB.
+                let _files = run_files(&mut command);
+                let (reach_name, reach_dir) = reach.var();
+                let output = command
+                    .current_dir(root)
+                    .arg(cells[program])
+                    .args(["-db", cells[db], "-query", cells[query]])
+                    .args(cells[extra].split_whitespace())
+                    .args(["-outfmt", cells[format]])
+                    .args(["-num_threads", &threads.to_string()])
+                    .env("LOSAT_X_BPQBLOCK", "1")
+                    .env(reach_name, reach_dir)
+                    .output()
+                    .expect("run LOSAT");
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let what = format!("{row} threads {threads}");
+                assert!(output.status.success(), "{what}: {stderr}");
+                assert_eq!(
+                    reach.sides("LOSAT_X_BPQBLOCK"),
+                    sides,
+                    "{what}: the sides (new, ref) of LOSAT_X_BPQBLOCK"
+                );
+                assert!(
+                    output.stdout == expected_out,
+                    "{what}: the bytes of NCBI differ"
+                );
+                assert_eq!(stderr, expected_err, "{what}: standard error differs");
+            }
+            rows += 1;
+        }
+    }
+    assert_eq!(rows, 3);
 }
 
 // `-db` with a stored title of punctuation (`, ,`) on a subject with hits: outfmt 6 cannot make the

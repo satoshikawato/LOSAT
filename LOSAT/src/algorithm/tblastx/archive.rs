@@ -152,9 +152,16 @@ pub(super) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) ->
 // ```
 /// The `EffectiveSearchSpace` option of a batch whose first query has the statistics `first`
 /// (`BatchArchive::searched_space`, `StrategyExport::note_searched`): the effective search space
-/// of context 0, when NCBI searched the batch.
-pub(super) fn batch_searched_space(searched: bool, first: &TblastxQueryStats) -> Option<i64> {
-    searched.then_some(first.context0_search_space)
+/// of context 0 and that context's length in residues (`archive::RequestLength::space`), when NCBI
+/// searched the batch.
+pub(super) fn batch_searched_space(
+    searched: bool,
+    first: &TblastxQueryStats,
+) -> Option<crate::report::archive::SearchedContext0> {
+    searched.then_some(crate::report::archive::SearchedContext0 {
+        space: first.context0_search_space,
+        query_length: first.context0_aa_len,
+    })
 }
 
 pub(crate) use crate::report::archive::error_lines;

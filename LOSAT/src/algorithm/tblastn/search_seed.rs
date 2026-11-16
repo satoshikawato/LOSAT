@@ -1128,13 +1128,13 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     //
     // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
     // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
-    let scan_byte = super::x_scan_byte::x_scan_byte();
-    let presence = super::x_scan_byte::x_presence(scan_byte, lookup);
+    let scan_byte = crate::algorithm::tblastx::x_scan_byte::x_scan_byte();
+    let presence = crate::algorithm::tblastx::x_scan_byte::x_presence(scan_byte, lookup);
     // EXPERIMENT (LOSAT_X_TBNSCANRESUME): a call of the scan on presence bytes that stops on a full
     // offset array leaves its block in `held`, and the next call copies on from there instead of
     // making the block's candidates again; the array then has NCBI's size (OFFSET_ARRAY_SIZE + the
     // longest chain, lookup_wrap.c:264-266), never more entries than the plan's.
-    let resume = presence.is_some() && super::x_scan_byte::x_scan_resume();
+    let resume = presence.is_some() && crate::algorithm::tblastx::x_scan_byte::x_scan_resume();
     let capacity = if resume {
         let longest_chain = lookup.longest_chain.max(1) as usize;
         (OFFSET_ARRAY_SIZE + longest_chain).min(plan.pair_capacity)
@@ -1143,7 +1143,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     };
     // The branch-free scan writes up to X_SCAN_BF_SLACK entries after the capacity.
     let pairs_len = if presence.is_some() {
-        capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
+        capacity + crate::algorithm::tblastx::x_scan_byte::X_SCAN_BYTE_SLACK
     } else {
         capacity + crate::algorithm::tblastx::x_aascan_bf::X_SCAN_BF_SLACK
     };
@@ -1151,7 +1151,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
         pairs.resize(pairs_len, BlastOffsetPair::default());
     }
     let pair_capacity = capacity as i32;
-    let mut held = super::x_scan_byte::XScanHeld::new();
+    let mut held = crate::algorithm::tblastx::x_scan_byte::XScanHeld::new();
     // The scan calls of the unit, for LOSAT_X_STATS.
     let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
@@ -1205,7 +1205,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
         while scan_range[1] <= scan_range[2] {
             let hits = if let Some(presence) = &presence {
                 if resume {
-                    super::x_scan_byte::x_scan_one_range_held(
+                    crate::algorithm::tblastx::x_scan_byte::x_scan_one_range_held(
                         scan_byte,
                         lookup,
                         presence,
@@ -1216,7 +1216,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
                         &mut held,
                     )
                 } else {
-                    super::x_scan_byte::x_scan_one_range_byte(
+                    crate::algorithm::tblastx::x_scan_byte::x_scan_one_range_byte(
                         scan_byte,
                         lookup,
                         presence,
@@ -1240,7 +1240,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
         }
     }
     if presence.is_some() {
-        super::x_scan_byte::x_count_unit(x_calls);
+        crate::algorithm::tblastx::x_scan_byte::x_count_unit(x_calls);
     } else if crate::algorithm::tblastx::x_aascan_bf::x_stats() {
         crate::algorithm::tblastx::x_aascan_bf::x_count_unit(x_calls);
     }

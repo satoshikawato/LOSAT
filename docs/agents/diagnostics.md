@@ -488,6 +488,7 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
+export LOSAT_X_TBXSCANBYTE=1
 export LOSAT_X_TBXSTORE=1
 export LOSAT_X_TBXUNGAPSENT=1
 export LOSAT_X_TBXUNITMASK=256
@@ -5335,7 +5336,7 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_TBNSCANBYTE=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-21; `=0` turns it off; by default the AVX2 forms where the CPU has AVX2, the plain loops
   for sparse tables on x86-64 without AVX2 and in WebAssembly (from 2026-10-22), nothing on aarch64;
-  `tblastn/x_scan_byte.rs`, exactness argument in its header): for tblastn's table (word size 3,
+  `tblastx/x_scan_byte.rs`, exactness argument in its header): for tblastn's table (word size 3,
   5-bit letters) the lookup scan of the unit path (`x_scan_unit`) makes the table indexes of a block
   of 256 words from the letters directly (`l[s] << 10 | l[s+1] << 5 | l[s+2]`, 16 at a time with
   AVX2, no chain from word to word as in the rolled index) and lists the candidates from a presence
@@ -5654,7 +5655,7 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
   `=0` x1.0001 / x1.0007 / x1.0000).
 - `LOSAT_X_CHAINRUN=1` tblastn, blastx (speed; in the strict set from the pull request that added it, 2026-11-16;
-  `=0` turns it off; `tblastn/x_scan_byte.rs` `write_avx2`, `copy_avx2_run`, `X_CHAIN_RUN`): the AVX2 copy of the scan on
+  `=0` turns it off; `tblastx/x_scan_byte.rs` `write_avx2`, `copy_avx2_run`, `X_CHAIN_RUN`): the AVX2 copy of the scan on
   presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, BLASTX's direct loop under `LOSAT_X_BXSCANBYTE`) writes the first 24
   pairs of a cell of more than 3 hits (an overflow chain) as one run of six 32-byte stores, without reading the cell's
   hit count, when the overflow array holds 24 query offsets from the chain's start, and loops four pairs at a time only
@@ -5679,7 +5680,7 @@ Scheduling (each value computed by one thread with the original function; order 
   (0.993-1.020), one BUSCO protein x yeast, nf-core and Galaxy tblastn rows x1.000. None of the six BLASTX rows of the
   downstream-tool set takes the direct loop (`LOSAT_X_REACH`: no `LOSAT_X_BXSCANBYTE` side), so they are unchanged.
 - `LOSAT_X_TBNSCANRESUME=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-29;
-  `=0` turns it off; `tblastn/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
+  `=0` turns it off; `tblastx/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
   `x_scan_unit`, `OFFSET_ARRAY_SIZE`): a unit scanned on presence bytes (`LOSAT_X_TBNSCANBYTE`) keeps the block of
   words where a scan call stops on a full offset array (the block's indexes and candidates and the candidate that did
   not fit), and the next call of the same range copies on from that candidate instead of making the block's
@@ -5997,6 +5998,29 @@ Scheduling (each value computed by one thread with the original function; order 
   reference frame loop, which scans each subject frame once with the batch's table: 0.99 (47.33 ->
   46.91 s). Joined the strict set on these timings (no case slower; Owner decision of 2026-10-17 that
   the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
+- `LOSAT_X_TBXSCANBYTE=1` TBLASTX (speed; in the strict set from the pull request that added it,
+  2026-11-16, on by default; `=0` turns it off; `tblastx/x_scan_bf.rs` `x_scan_subject_byte`): the
+  unit path's group tables of the full backbone, those `LOSAT_X_TBXSCANBF` leaves to NCBI's loop
+  (presence bits in half or more of the backbone cells, `x_scan_bf_for`), are scanned with tblastn's
+  scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, `tblastx/x_scan_byte.rs` `x_scan_one_range_byte`,
+  exactness argument in its header): the table indexes of a block of 256 words made 16 at a time from
+  the letters, candidates listed from a presence vector of one byte per index (32 KB, built once per
+  group table), and each candidate copied once, NCBI's room test kept where the block could fill the
+  offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
+  it, so every call returns NCBI's pairs and scan range (test
+  `x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects`, byte arm, against
+  `s_blast_aa_scan_subject`). The offset arrays get `X_SCAN_BYTE_SLACK` (20) entries more while the
+  switch is on. AVX2 CPUs only (`x_scan_byte::x_mode`): elsewhere, and for the tables the
+  branch-free scan takes, the scan before. Timed on the
+  workstation (ad-DT-5, line DT; one booked core of node 0, same output in every run): ViPTreeGen's
+  `-num_threads 1` searches, wall time against dev 817cb3049 (warm-up and 5 rounds, arms alternating):
+  Autographivirales.40 x0.970 (48.95 s), Begomovirus.40 x0.964 (0.55 s); user-space cycles (perf stat,
+  3 rounds alternating, two runs, against dev ec6bd8123): x0.958-0.967, x0.965-0.967, ssDNA.prok.8
+  x0.966-0.972, Easyfig's tblastx example x0.984-0.986, Galaxy's small tblastx test x0.999-1.010 (its
+  tables are sparse; the same instructions). Branch misses x0.88-0.95. Heap peak (massif) the same
+  within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
+  (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
+  gave nothing more (x0.991-1.023).
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`
@@ -7429,7 +7453,7 @@ Scheduling (each value computed by one thread with the original function; order 
   87.76 / 88.12 s (x0.99-1.00).
 - `LOSAT_X_BXSCANBYTE=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-24;
   `=0` turns it off; `blastx/x_seed_scan.rs` module header, the scan is tblastn's `x_scan_one_range_byte` of
-  `LOSAT_X_TBNSCANBYTE`, `tblastn/x_scan_byte.rs`, exactness argument in its header) the direct seed loop scans the
+  `LOSAT_X_TBNSCANBYTE`, `tblastx/x_scan_byte.rs`, exactness argument in its header) the direct seed loop scans the
   standard lookup table on presence bytes: the table indexes of a block of 256 words made from the letters at once
   (16 at a time with AVX2), the candidates listed from one byte per index (32 KB, built the first time the direct
   loop scans with the table and kept with it, in `Lookup::Standard`), the hits of a block copied with one capacity

@@ -1,0 +1,1 @@
+- TBLASTX searches whose query groups fill most of the lookup table (long queries, as in ViPTreeGen's genome sets) scan the subject with the presence-byte scan tblastn uses: ViPTreeGen's searches run 3-4 % faster at one thread on CPUs with AVX2, at the same memory peak. Reports do not change.

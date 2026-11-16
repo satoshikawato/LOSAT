@@ -151,6 +151,36 @@ class Database:
         object.__setattr__(self, "name", os.fspath(self.name))
 
 
+@dataclass(frozen=True)
+class Pssm:
+    """A PSSM file as the query of a search: the value of `-in_pssm` of psiblast and tblastn.
+
+    The search reads the file as the command line reads it (psiblast's checkpoint file, as
+    `out_pssm` writes it); its one query is the PSSM's sequence, query 0 of the results.
+    """
+
+    path: str
+
+    @classmethod
+    def from_file(cls, path: str | os.PathLike[str]) -> Self:
+        """The PSSM file `path`, read when a search starts."""
+        return cls(os.fspath(path))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", os.fspath(self.path))
+
+
+def _query(query: Sequences | Pssm) -> tuple[bytes | str, str] | str:
+    if isinstance(query, Pssm):
+        return query.path
+    if not isinstance(query, Sequences):
+        raise TypeError(
+            "the query is a Sequences (from_fasta, from_text or from_pairs) "
+            f"or a Pssm (from_file), not {query!r}"
+        )
+    return _input(query, "query")
+
+
 def _input(sequences: Sequences, role: str) -> tuple[bytes | str, str]:
     if not isinstance(sequences, Sequences):
         raise TypeError(
@@ -357,8 +387,10 @@ class Search:
     """A program and its options, checked by the command line's parser.
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
-    `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-out` and `-outfmt` are
-    not options here, nor are psiblast's PSSM files (the library writes none). The search itself
+    `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are
+    not options here: the inputs are `Sequences`, `Database` and `Pssm` (the PSSM query of psiblast
+    and tblastn); psiblast's PSSM files (`out_pssm`, `out_ascii_pssm`) are written where the
+    command line writes them. The search itself
     is `run`, `batches` or `run_to_file`. The NCBI C++ Toolkit's `-logfile`, `-conffile` and
     `-dryrun` work as on the command line (`from_argv`): each search opens the file of `-logfile`
     and loads the file of `-conffile`, and `dry_run` tells a search that searches nothing.
@@ -442,7 +474,7 @@ class Search:
 
     def run(
         self,
-        query: Sequences,
+        query: Sequences | Pssm,
         subject: Sequences | Database,
         *,
         outfmt: str | Sequence[str] = (),
@@ -456,7 +488,7 @@ class Search:
         reports, hsps, stats, rounds, diagnostics = _pylosat.run(
             self._program,
             list(self._argv),
-            _input(query, "query"),
+            _query(query),
             _subject(subject),
             formats,
         )
@@ -466,7 +498,7 @@ class Search:
 
     def run_to_file(
         self,
-        query: Sequences,
+        query: Sequences | Pssm,
         subject: Sequences | Database,
         *,
         outfmt: str,
@@ -480,19 +512,19 @@ class Search:
         return _pylosat.run_to_file(
             self._program,
             list(self._argv),
-            _input(query, "query"),
+            _query(query),
             _subject(subject),
             outfmt,
             os.fspath(path),
         )
 
-    def batches(self, query: Sequences, subject: Sequences | Database) -> Batches:
+    def batches(self, query: Sequences | Pssm, subject: Sequences | Database) -> Batches:
         """The search as an iterator of `Batch`, one of NCBI's query batches at a time."""
         return Batches(
             _pylosat.Batches(
                 self._program,
                 list(self._argv),
-                _input(query, "query"),
+                _query(query),
                 _subject(subject),
             )
         )

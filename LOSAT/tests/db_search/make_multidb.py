@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -33,6 +33,29 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   Lists `sl_pxm7.txt` and `sl_pxm19.txt` (`NP_900003.1` and `gnl|BL_ORD_ID|7` / `19`: 7 plus the 12 sequences of pa),
   `sl_nxm7.txt`, `sl_ord7.txt`, `sl_ord15.txt` (7 plus the 8 of na), `sl_ord19.txt`, `sl_np5.txt` (`NP_900005.1`).
   `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these and the ones above.
+- `put` (line DBID mixdb2, review 1 H1): version 5 protein without `-parse_seqids`, the three proteins of
+  ../ids/ids_q.faa (those of ../ids/noacc_v5) with taxid 9606 (`-taxid`), so that its loads look the taxonomy up in a
+  list with `pa`.
+- `mix2_q.faa`, `mix2_qx.fna`, `mix2_q.fna`, `mix2_qt.faa` (line DBID mixdb2): two queries each, the first of which
+  hits only a database without the accession table (`-evalue 1e-10`), the second the parsed one (../taxfilter/q.faa or
+  q.fna): `qp1` of ../ids/ids_q.faa (noacc_v5, put), the same back-translated (one codon per amino acid), the
+  `FBtr0083245` record of nnp.fa (glob1), and the longest ORF of that record (153 aa).
+  `make_multidb.py --mixdb2-only MAKEBLASTDB` builds only `put` and these.
+- `nut` (line DBID mixtax): version 5 nucleotide without `-parse_seqids`, the records of nnp.fa with taxid 9606
+  (`-taxid`): `put`'s counterpart for the nucleotide programs, whose loads look the taxonomy up in a list with `na`.
+  `mix2_qc.faa` and `mix2_qcx.fna` (line DBID mixtax): the first query of mix2_q.faa and mix2_qx.fna, then one whose
+  letters are those of ../taxfilter/q.faa followed by `qp1` (back-translated in the second), which hits both `pa` and
+  `put`. `putl` and `nutl` (line DBID mixtax, review 1 L2): `qp2` of ../ids/ids_q.faa (back-translated in `nutl`) with
+  taxid 99990, the last entry of ../../seqdb/taxdb/<variant>, without the table; `mix2_ql.faa`, `mix2_qlx.fna`,
+  `mix2_ql.fna` and `mix2_qlt.faa`: the first query of mix2_q.faa, mix2_qx.fna, mix2_q.fna and mix2_qt.faa, then the
+  letters of ../taxfilter/q.faa or q.fna followed by `qp2` (back-translated in the nucleotide files), which hits `pa` or
+  `na`, `put` or `nut` and the volume `putl` or `nutl` that the first query does not.
+  `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut`, `putl`, `nutl` and these.
+- `putb` (line RG item T5c, merge 3): `put` with protein titles ending in `]` (`alpha, partial [Homo sapiens]`,
+  `chi, partial [ ]`, `MAG: (plastid) [ ]` for the three proteins of ../ids/ids_q.faa, taxid 9606): in a list with
+  `pa`, the first batch of mix2_qc.faa / mix2_qcx.fna reports `alpha, ...`, whose end NCBI's
+  `x_AdjustProteinTitleSuffix` rewrites in the tabular ids but not in the XML2 and JSON `Hit` titles (the definition
+  line's), before the second batch's prefetch stops. `make_multidb.py --mixsfx-only MAKEBLASTDB` builds only `putb`.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -51,8 +74,12 @@ def makeblastdb(binary, *args):
 
 
 def read_fasta(name):
+    return read_fasta_path(os.path.join(SRC, name))
+
+
+def read_fasta_path(path):
     records = []
-    with open(os.path.join(SRC, name)) as f:
+    with open(path) as f:
         for line in f:
             if line.startswith(">"):
                 records.append([line, []])
@@ -133,6 +160,104 @@ def make_ordsl(binary):
             f.write(text)
 
 
+def make_mixdb2(binary):
+    """Builds put and writes the queries mix2_q*.f* (line DBID mixdb2)."""
+    ids_q = os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")
+    makeblastdb(binary, "-in", ids_q, "-dbtype", "prot", "-out", "put", "-blastdb_version", "5", "-taxid", "9606",
+                "-title", "multidb put")
+    os.remove(os.path.join(HERE, "put.pjs"))
+
+    def letters(path, index=0):
+        header, lines = read_fasta_path(path)[index]
+        return header.rstrip("\n"), "".join(line.strip() for line in lines)
+
+    qp1 = letters(ids_q)[1]
+    glob1 = next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(os.path.join(HERE, "nnp.fa"))
+                 if header.split()[0] == ">FBtr0083245")
+    bases = "TCAG"
+    amino = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
+    code = {a + b + c: amino[16 * i + 4 * j + k] for i, a in enumerate(bases) for j, b in enumerate(bases)
+            for k, c in enumerate(bases)}
+    orf = ""
+    for frame in range(3):
+        protein = "".join(code.get(glob1[at:at + 3], "X") for at in range(frame, len(glob1) - 2, 3))
+        for piece in protein.split("*"):
+            start = piece.find("M")
+            if start >= 0 and len(piece) - start > len(orf):
+                orf = piece[start:]
+    codon = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGT", "H": "CAC",
+             "I": "ATC", "L": "CTG", "K": "AAA", "M": "ATG", "F": "TTC", "P": "CCG", "S": "TCT", "T": "ACC", "W": "TGG",
+             "Y": "TAC", "V": "GTT"}
+    protein_q, nucleotide_q = letters(os.path.join(SRC, "q.faa")), letters(os.path.join(SRC, "q.fna"))
+    for name, records in (
+            ("mix2_q.faa", [(">mix2_u qp1 of ids/noacc_v5 (no accession table)", qp1), protein_q]),
+            ("mix2_qx.fna", [(">mix2_u qp1 of ids/noacc_v5 back-translated", "".join(codon[a] for a in qp1)),
+                             nucleotide_q]),
+            ("mix2_q.fna", [(">mix2_u glob1 of multidb/nnp (no accession table)", glob1), nucleotide_q]),
+            ("mix2_qt.faa", [(">mix2_u the glob1 ORF of multidb/nnp", orf), protein_q])):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, seq in records:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+
+
+def make_mixtax(binary):
+    """Builds nut, putl and nutl and writes the queries mix2_qc*.f* and mix2_ql*.f* (line DBID mixtax)."""
+    makeblastdb(binary, "-in", "nnp.fa", "-dbtype", "nucl", "-out", "nut", "-blastdb_version", "5", "-taxid", "9606",
+                "-title", "multidb nut")
+    os.remove(os.path.join(HERE, "nut.njs"))
+
+    def records(name):
+        out = []
+        for header, lines in read_fasta_path(os.path.join(HERE, name)):
+            out.append((header.rstrip("\n"), "".join(line.strip() for line in lines)))
+        return out
+
+    (u_header, qp1), _ = records("mix2_q.faa")
+    (ux_header, qp1_x), _ = records("mix2_qx.fna")
+    (un_header, glob1), _ = records("mix2_q.fna")
+    (ut_header, orf), _ = records("mix2_qt.faa")
+    globin = records(os.path.join(SRC, "q.faa"))[0][1]
+    globin_x = records(os.path.join(SRC, "q.fna"))[0][1]
+    qp2 = records(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))[1][1]
+    codon = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGT", "H": "CAC",
+             "I": "ATC", "L": "CTG", "K": "AAA", "M": "ATG", "F": "TTC", "P": "CCG", "S": "TCT", "T": "ACC", "W": "TGG",
+             "Y": "TAC", "V": "GTT"}
+    qp2_x = "".join(codon[a] for a in qp2)
+    for name, kind, header, seq in (("putl", "prot", ">qp2 unrelated protein", qp2),
+                                    ("nutl", "nucl", ">qp2_x unrelated protein back-translated", qp2_x)):
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-blastdb_version", "5", "-taxid",
+                    "99990", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    for name, pair in (
+            ("mix2_qc.faa", [(u_header, qp1), (">mix2_c the letters of taxfilter/q.faa, then qp1", globin + qp1)]),
+            ("mix2_qcx.fna", [(ux_header, qp1_x),
+                              (">mix2_c the letters of taxfilter/q.fna, then qp1 back-translated", globin_x + qp1_x)]),
+            ("mix2_ql.faa", [(u_header, qp1), (">mix2_l the letters of taxfilter/q.faa, then qp2", globin + qp2)]),
+            ("mix2_qlx.fna", [(ux_header, qp1_x),
+                              (">mix2_l the letters of taxfilter/q.fna, then qp2 back-translated", globin_x + qp2_x)]),
+            ("mix2_ql.fna", [(un_header, glob1),
+                             (">mix2_l the letters of taxfilter/q.fna, then qp2 back-translated", globin_x + qp2_x)]),
+            ("mix2_qlt.faa", [(ut_header, orf), (">mix2_l the letters of taxfilter/q.faa, then qp2", globin + qp2)])):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, seq in pair:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+
+
+def make_mixsfx(binary):
+    """Builds putb (line RG item T5c, merge 3): `put` with protein titles ending in `]`."""
+    titles = ("alpha, partial [Homo sapiens]", "chi, partial [ ]", "MAG: (plastid) [ ]")
+    records = read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    with open(os.path.join(HERE, "putb.fa"), "w") as f:
+        for title, (_, lines) in zip(titles, records, strict=True):
+            seq = "".join(line.strip() for line in lines)
+            f.write(">" + title + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+    makeblastdb(binary, "-in", "putb.fa", "-dbtype", "prot", "-out", "putb", "-blastdb_version", "5", "-taxid",
+                "9606", "-title", "multidb putb")
+    os.remove(os.path.join(HERE, "putb.pjs"))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -182,6 +307,15 @@ def main(binary):
 if __name__ == "__main__":
     if sys.argv[1] == "--ordsl-only":
         make_ordsl(sys.argv[2])
+    elif sys.argv[1] == "--mixdb2-only":
+        make_mixdb2(sys.argv[2])
+    elif sys.argv[1] == "--mixtax-only":
+        make_mixtax(sys.argv[2])
+    elif sys.argv[1] == "--mixsfx-only":
+        make_mixsfx(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
+        make_mixdb2(sys.argv[1])
+        make_mixtax(sys.argv[1])
+        make_mixsfx(sys.argv[1])

@@ -12,7 +12,6 @@ mod tblastn_app;
 pub(crate) mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
 // (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
-pub(crate) mod x_scan_byte;
 // Tests of the branch-free scan, which lives in `tblastx/x_aascan_bf.rs` (they use tblastn's query
 // encoder).
 #[cfg(test)]
@@ -88,7 +87,7 @@ mod database;
 // Web ABI v1's TBLASTN (`web_api::run_pair`): the CLI's parser and run over the call's bytes.
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod web;
-pub use args::{check_options, TblastnArgs};
+pub use args::{check_options, refuse_browser_pssm_query, TblastnArgs};
 pub use tblastn_app::{run_local, run_local_database};
 // The summary lines `main` prints at exit (`LOSAT_X_TBNXLATESIMD`, `LOSAT_X_TBNUNITXLATE`).
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
@@ -101,7 +100,7 @@ pub use x_subject_store::print_summary as x_subject_store_print_summary;
 pub use crate::algorithm::tblastx::x_aascan_bf::print_summary as x_scan_bf_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
-pub use x_scan_byte::print_summary as x_scan_byte_print_summary;
+pub use crate::algorithm::tblastx::x_scan_byte::print_summary as x_scan_byte_print_summary;
 // LOSAT_X_TBNLUTLEAN: the summary line `main` prints at exit (the tables TBLASTN built lean or with
 // chains). No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use crate::algorithm::tblastx::lookup::x_tbn_lut_print_summary as x_lut_lean_print_summary;

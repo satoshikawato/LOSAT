@@ -34,8 +34,9 @@
 //! one `Xml2Writer` across the query batches (`xml2_writer`), as it passes `queries_before` to
 //! outfmt 5's. Its document start is written with the prolog, before the first batch.
 //!
-//! Every refusal (`XmlRefusal`: a byte NCBI's XML stream cannot write in a title) comes before
-//! the first byte of the document, though the query file is read batch by batch:
+//! Every refusal (`XmlRefusal`: a title NCBI's definition line generator reads past the end of,
+//! `names::Refusal`, where NCBI crashes) comes before the first byte of the document, though the
+//! query file is read batch by batch:
 //!
 //! - `prescan_queries` reads the query file once more before the search (only with outfmt 5,
 //!   13 to 16) and refuses the first query whose title the writer would refuse;
@@ -43,7 +44,7 @@
 //!   (`subjects_may_be_refused`), or some query's message would be (a title that is refused only
 //!   in the message of a query NCBI did not search), or (with `-db`) the taxonomy database is
 //!   on the search path and the lookup of the taxid of some sequence of the database would be
-//!   refused (a scientific name NCBI's XML2 cannot write, a damaged record, which outfmt 5 reads
+//!   refused (a damaged record, which outfmt 5 reads
 //!   in each batch's prefetch, `ReportedSubjects::batch_prefetch`: checked once before the
 //!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
 //!   fetches are refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`: outfmt
@@ -63,6 +64,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{ensure, Context, Result};
 
 use super::args::ResolvedOptions;
+use super::empty_rows::{row_is_empty, rows_empty, std_seg_lengths_not_accurate, SubjectLoc};
 use super::input::FastaRecord;
 use super::report::{
     display_query_residue, has_seqalign, query_endpoints, reported, ShownSubjects,
@@ -76,6 +78,7 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
+use crate::report::blast_xml::CaughtException;
 use crate::report::blast_xml::{
     filter, hit_ranges, written_queries, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp,
     XmlQuery, XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
@@ -89,9 +92,9 @@ use crate::report::serial::seqalign::seqalign_evalue;
 
 const PROGRAM: &str = "BLASTX";
 
-/// LOSAT's refusal of a title or name that NCBI's XML stream cannot write (not an error of
-/// NCBI's engine: the run ends with exit status 1 and the message, `native::report_error`
-/// passes it on).
+/// LOSAT's refusal of a title that NCBI crashes on (`names::Refusal`; not an error of NCBI's
+/// engine: the run ends with exit status 1 and the message, `native::report_error` passes it
+/// on).
 #[derive(Debug)]
 pub(super) struct XmlRefusal(String);
 
@@ -119,13 +122,15 @@ impl XmlRefusal {
 }
 
 /// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
-/// JSON document drops what it holds, so that the refusal follows no byte: a title or name NCBI's
-/// XML stream cannot write (`XmlRefusal`), a reported database sequence with parsed Seq-ids
+/// JSON document drops what it holds, so that the refusal follows no byte: a title NCBI crashes
+/// on (`XmlRefusal`), the database counts of the reports that NCBI's sums overflow
+/// (`ReportSumRefusal`), a reported database sequence with parsed Seq-ids
 /// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
 /// error the run writes what it holds, the bytes of the batches before it, as the run without a
 /// hold does (the command line's `HeldOutput`; a library call's `HeldFormats`).
 pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
     error.is::<XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
         || error.is::<TaxonomyRefusal>()
 }
@@ -139,7 +144,11 @@ fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
 /// context's nucleotide intervals moved into the record (`seq_range::record_mask`: other than an
 /// empty one and the whole interval), with the context's frame, which counts from the ends of the
 /// searched letters (`-query_loc`).
-fn query_masks(batch: &BatchResults, qidx: usize, query: &FastaRecord) -> Vec<QueryMask> {
+pub(super) fn query_masks(
+    batch: &BatchResults,
+    qidx: usize,
+    query: &FastaRecord,
+) -> Vec<QueryMask> {
     let (length, offset) = (query.sequence.len(), query.placement().offset);
     let mut masks = Vec::new();
     for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
@@ -250,15 +259,11 @@ fn subject_names(
 ) -> Result<SubjectNames> {
     match shown {
         ShownSubjects::Fasta { .. } => match subject.believed() {
-            Some(ids) => SubjectNames::of_believed(ids, subject.title.as_bytes(), true),
-            None => SubjectNames::of_record(
-                subject.internal_id.as_bytes(),
-                subject.title.as_bytes(),
-                true,
-            ),
+            Some(ids) => SubjectNames::of_believed(ids, &subject.title, true),
+            None => SubjectNames::of_record(subject.internal_id.as_bytes(), &subject.title, true),
         }
         .map_err(|refusal| refuse(refusal, "a subject title")),
-        ShownSubjects::Database { reported, .. } => match reported.parsed_subject(s_idx) {
+        ShownSubjects::Database { reported, .. } => Ok(match reported.parsed_subject(s_idx) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(s_idx)),
             None => SubjectNames::of_database_sequence(
                 reported.oid(s_idx),
@@ -267,8 +272,7 @@ fn subject_names(
                 reported.taxid(s_idx),
                 reported.taxonomy(s_idx),
             ),
-        }
-        .map_err(|refusal| refuse(refusal, "a database title")),
+        }),
     }
 }
 
@@ -894,9 +898,10 @@ fn query_text(
 ) -> Result<QueryText> {
     names::query_text(
         PROGRAM,
+        query.internal_id.as_bytes(),
         query.warning_id(),
         query.believed(),
-        query.title.as_bytes(),
+        &query.title,
         false,
         &query_messages(query, search_skipped, filtered_empty),
         has_hits,
@@ -907,9 +912,6 @@ fn query_text(
 /// What the read of the queries before the search found (`scan_queries`).
 #[derive(Default)]
 pub(super) struct QueryScan {
-    /// Some query that the documents write would be refused if NCBI had not searched its batch
-    /// (a title that only its message cannot carry): the run then holds the document.
-    pub messages_may_be_refused: bool,
     /// The run stops at a batch after this many queries of the batches before it (a reader
     /// error, or a batch that NCBI fails at its set-up): the report of the last of them is never
     /// written where the document holds it back (`written_queries`). `None` when the run reads
@@ -983,8 +985,8 @@ pub(super) fn prescan_queries(
     Ok(scan)
 }
 
-/// Refuses the first query the writer would refuse (a title with a byte NCBI's XML stream cannot
-/// write) in a report that the document writes, among the reader batches that `read` gives its
+/// Refuses the first query the writer would refuse (a title NCBI crashes on, `names::Refusal`)
+/// in a report that the document writes, among the reader batches that `read` gives its
 /// argument in order, so that no refusal can follow a written byte (`QueryScan`; the command
 /// line's `prescan_queries`, the records of `local::run_local`).
 ///
@@ -1003,10 +1005,10 @@ pub(super) fn scan_queries(
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
-    // The queries of the batches that the run writes, and the checks of the last of them while
-    // the document holds its report back: its refusal, and whether its message may be refused.
+    // The queries of the batches that the run writes, and the check of the last of them while
+    // the document holds its report back.
     let mut written = 0usize;
-    let mut held: Option<(Result<()>, bool)> = None;
+    let mut held: Option<Result<()>> = None;
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
@@ -1018,18 +1020,15 @@ pub(super) fn scan_queries(
             return Ok(());
         }
         // The next batch is written: so is the report held before it.
-        if let Some((check, may_be_refused)) = held.take() {
+        if let Some(check) = held.take() {
             check?;
-            scan.messages_may_be_refused |= may_be_refused;
         }
         for (index, query) in batch.iter().enumerate() {
             let check = query_text(query, false, false, true).map(drop);
-            let may_be_refused = query_text(query, true, false, true).is_err();
             if holds_back && index + 1 == batch.len() {
-                held = Some((check, may_be_refused));
+                held = Some(check);
             } else {
                 check?;
-                scan.messages_may_be_refused |= may_be_refused;
             }
         }
         written += batch.len();
@@ -1039,9 +1038,8 @@ pub(super) fn scan_queries(
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
         Ok(()) => {
-            if let Some((check, may_be_refused)) = held {
+            if let Some(check) = held {
                 check?;
-                scan.messages_may_be_refused |= may_be_refused;
             }
             Ok(scan)
         }
@@ -1052,22 +1050,52 @@ pub(super) fn scan_queries(
     }
 }
 
-/// Whether the title of some `-subject` would be refused if the subject had a hit.
-pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
-    subjects.iter().any(|subject| {
-        names::xml_subject_names(
-            subject.internal_id.as_bytes(),
-            subject.title.as_bytes(),
-            true,
-        )
-        .is_err()
-    })
+/// Whether the XML documents of a run (BLAST XML, outfmt 5; the XML2 and JSON documents, 13 to
+/// 16; `outfmts` are the run's format numbers) may refuse after their first byte, the decision of
+/// both the command line (`native::run_inner`, `HeldOutput::hold`) and the library
+/// (`local::write_run`, `archive::ArchiveHold`), which then hold their output so that the refusal
+/// follows no byte: with `-db` a later batch's taxonomy database or subject with parsed Seq-ids
+/// (`BlastxDatabase::later_batch_may_refuse`) or the database counts the reports would print where
+/// NCBI's sums overflow (`common::database::report_sum_refusal`, refused at the first report:
+/// `StructuredXml::start` in `write_blastx_xml`), and without it a `-subject` title
+/// (`subjects_may_be_refused`).
+pub(super) fn documents_may_refuse(
+    outfmts: &[i32],
+    database: Option<&super::database::BlastxDatabase>,
+    subjects: &[FastaRecord],
+) -> bool {
+    let documents = || {
+        outfmts
+            .iter()
+            .filter(|&&outfmt| matches!(outfmt, 5 | 13..=16))
+    };
+    if documents().next().is_none() {
+        return false;
+    }
+    match database {
+        Some(database) => {
+            let pairwise = database.pairwise_database();
+            database.later_batch_may_refuse()
+                || documents().any(|&outfmt| {
+                    crate::algorithm::common::database::report_sum_refusal(
+                        pairwise.num_sequences,
+                        pairwise.total_letters,
+                        pairwise.total_letters_overflow,
+                        outfmt,
+                    )
+                    .is_some()
+                })
+        }
+        None => subjects_may_be_refused(subjects),
+    }
 }
 
-/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); the
-/// run checks it before the search, as the Seq-annot formats check theirs.
-pub(super) fn check_database_name(name: &str) -> Result<()> {
-    names::check_database_name(PROGRAM, name).map_err(|error| XmlRefusal(error.to_string()).into())
+/// Whether the title of some `-subject` would be refused if the subject had a hit (a title whose
+/// `GenerateDefline` throws is the writers' catch, `SubjectNames::of_unknown`).
+pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
+    subjects.iter().any(|subject| {
+        names::xml_subject_names(subject.internal_id.as_bytes(), &subject.title, true).is_err()
+    })
 }
 
 /// The document of outfmt 13, 14, 15 or 16 for `outfmt` (`None` for any other format).
@@ -1155,9 +1183,10 @@ pub(super) fn xml_matrix_failure(
 /// `queries_before` queries of the batches before it) through `document` (BLAST XML, or the XML2
 /// / JSON documents) to `writer`: the document's header before the first query of the run, each
 /// query's Iteration or report, and nothing else; the end of the document is `write_epilog`'s.
-/// Everything NCBI cannot write is refused before this call's first byte, for the reports that
-/// the document writes: the query titles and messages, the titles of the subjects with hits
-/// (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A run that stops after
+/// What LOSAT refuses is refused before this call's first byte, for the reports that the document
+/// writes: a query title or a title of a subject with hits that NCBI crashes on
+/// (`names::Refusal`; with a hold, the whole run's bytes stay in memory, `HeldOutput`); every
+/// other byte NCBI's stream writes or fails at by itself (`report::serial::xml`). A run that stops after
 /// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
 /// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
 /// the first `Hit` that needs them.
@@ -1202,15 +1231,15 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         }
         return Ok(());
     };
-    let (db_name, db_num, db_len) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
+    let (db_name, db_num, db_len, db_len_overflow) = match shown {
+        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            i32::try_from(pairwise.num_sequences)?,
-            i64::try_from(pairwise.total_letters)?,
+            pairwise.num_sequences,
+            pairwise.total_letters,
+            pairwise.total_letters_overflow,
         ),
     };
-    check_database_name(&db_name)?;
     let filter = filter::filter_string(
         None,
         options.seg.filter_options(),
@@ -1221,7 +1250,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         program: "blastx",
         version: concat!("BLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: db_name.as_bytes(),
+        db_name: &db_name,
         matrix: Some(&options.matrix),
         expect: options.evalue,
         gap_open: options.gap_open,
@@ -1230,6 +1259,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: Some(&positives),
         mask_char: b'X',
     };
@@ -1240,6 +1270,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         stops,
         document.holds_back(),
     );
+    // The refusal of the database counts that the written reports would print, before any byte
+    // of the batch (`StructuredXml::start`; the XML2 and JSON documents' start came with the
+    // prolog, which a run that may refuse them holds, `native::run_inner`).
+    let mut buf: Vec<u8> = Vec::new();
+    document.start((reports > 0).then_some(&run), &mut buf)?;
+    writer.write_all(&buf)?;
+    buf.clear();
     let mut texts: Vec<QueryText> = Vec::new();
     let mut subject_cache: HashMap<usize, SubjectNames> = HashMap::new();
     for batch in batches {
@@ -1264,6 +1301,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             }
         }
     }
+    let loc = SubjectLoc::of(shown);
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     let no_notes = TaxdbNotes::default();
     let mut taxdb_printer = match shown {
@@ -1271,7 +1309,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Fasta { .. } => &no_notes,
     }
     .printer();
-    let mut buf: Vec<u8> = Vec::new();
     // The rows of one HSP at a time, reused.
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
@@ -1279,10 +1316,24 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
-                // The held report that is never written (`written_queries`).
-                document.unwritten(&mut buf)?;
-                writer.write_all(&buf)?;
+                // The held report that is never written (`written_queries`); the one held before
+                // it is written, or fails (`CaughtException`: its message follows).
+                let post = match document.unwritten(&mut buf) {
+                    Ok(()) => None,
+                    Err(error) => match error.downcast::<CaughtException>() {
+                        Ok(CaughtException(exception)) => {
+                            Some(caught_post(&document.caught_message(&exception)))
+                        }
+                        Err(error) => return Err(error),
+                    },
+                };
+                write_with_posts(&buf, document.take_posts(), writer, diagnostics)?;
                 buf.clear();
+                if let Some(post) = post {
+                    writer.flush()?;
+                    diagnostics.write_all(post.as_bytes())?;
+                    diagnostics.flush()?;
+                }
                 break;
             };
             let length = query.sequence.len();
@@ -1291,7 +1342,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let place = query.placement();
             let masks = query_masks(batch, qidx, query);
             let xml_query = XmlQuery {
-                id: query.internal_id.as_bytes(),
+                id: text.query_id(query.internal_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
@@ -1353,6 +1404,30 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .iter()
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
+                                // ```c++
+                                //         const bool kTranslated = kAlign.GetSegs().IsStd();
+                                //         if (kTranslated) {
+                                //             CRef<CSeq_align> densegAln = kAlign.CreateDensegFromStdseg();
+                                // ```
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
+                                // ```c++
+                                //         	q_start = kAlign.GetSeqStart(0) + 1;
+                                // ```
+                                // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
+                                // mapped Std-seg throws, else the empty query row's start (`-db`,
+                                // and the rows that `-subject`'s mapper leaves,
+                                // `SubjectLoc::of_list`). NCBI catches it in
+                                // `s_BlastXMLAddIteration` (`CaughtException`).
+                                if rows_empty(&hsp.hsp) {
+                                    return Err(CaughtException(
+                                        match loc.of_list(list, options.gapped) {
+                                            SubjectLoc::Interval => std_seg_lengths_not_accurate(),
+                                            SubjectLoc::Whole => row_is_empty(),
+                                        },
+                                    )
+                                    .into());
+                                }
                                 // The Seq-align's endpoints, lower first: the minus frame's
                                 // outfmt 6 order is not the XML's.
                                 let (query_from, query_to) =
@@ -1393,18 +1468,50 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 }
                 Ok(())
             });
-            // A failed query leaves its partial bytes in `buf`, which the error return drops.
-            written?;
-            posts.write(
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-760
+            // ```c++
+            // 	query_label = string("Q(")+NStr::NumericToString(index) +
+            // 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
+            // 	try{
+            //         s_BlastXMLAddIteration(bxmlout, data->GetAlignment(index), *seqloc,
+            //         ...
+            // 	}
+            // 	catch(CException &e){
+            // 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
+            // 	    return;
+            // 	}
+            // ```
+            // A query whose HSP throws (`CaughtException`): BLAST XML leaves its `Iteration`
+            // open after the `Hit`s before (each written as it is made), the XML2 and JSON
+            // documents leave its report out (`Xml2Document::report`; for `-subject`, whose
+            // report is held, where the next query's arrives); the document's message follows
+            // the report and the texts of its loads, and the next query is written. Another
+            // failed query leaves its partial bytes in `buf`, which the error return drops.
+            let caught = match written {
+                Ok(()) => None,
+                Err(error) => match error.downcast::<CaughtException>() {
+                    Ok(CaughtException(exception)) => {
+                        Some(caught_post(&document.caught_message(&exception)))
+                    }
+                    Err(error) => return Err(error),
+                },
+            };
+            posts.document(document.take_posts());
+            crate::report::query_warnings::write_posts_to(
                 &buf,
+                &posts,
+                0,
                 &mut *writer,
                 &mut *diagnostics,
-                |subject, writer, sink| match reads.as_mut() {
-                    Some(reads) => reads.subject_read(0, subject, writer, sink),
-                    None => Ok(()),
-                },
+                reads.as_mut(),
             )?;
-            // A text whose read no `Hit` placed comes after the query's report.
+            if let Some(post) = caught {
+                writer.flush()?;
+                diagnostics.write_all(post.as_bytes())?;
+                diagnostics.flush()?;
+            }
+            // A text whose read no `Hit` placed comes after the query's report; one that a cut
+            // report left out goes to NCBI's next load that makes its ask (`ReadCursor::cut`).
             if let Some(reads) = reads.as_mut() {
                 reads.before_query(1, &mut *writer, &mut *diagnostics)?;
             }
@@ -1419,16 +1526,62 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 /// writer: it writes the report held back by a `-subject` run and the document's end.
 pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
+    diagnostics: &mut dyn Write,
     queries: usize,
     xml2: Option<&mut RunXml2>,
 ) -> Result<()> {
     let mut buf = Vec::new();
-    match xml2 {
-        Some(xml2) => xml2.finish(&mut buf)?,
-        None => BlastXmlWriter::new(queries).finish(&mut buf)?,
+    let (finished, posts) = match xml2 {
+        Some(xml2) => {
+            let finished = xml2.finish(&mut buf).map_err(|error| {
+                // The held report of a `-subject` run that fails (`CaughtException`): its
+                // message, then the end of the document.
+                match error.downcast::<CaughtException>() {
+                    Ok(CaughtException(exception)) => {
+                        Ok(caught_post(&xml2.caught_message(&exception)))
+                    }
+                    Err(error) => Err(error),
+                }
+            });
+            (finished, xml2.take_posts())
+        }
+        None => (
+            BlastXmlWriter::new(queries).finish(&mut buf).map_err(Err),
+            crate::report::blast_xml::DocumentPosts::default(),
+        ),
+    };
+    let post = match finished {
+        Ok(()) => None,
+        Err(Ok(post)) => Some(post),
+        Err(Err(error)) => return Err(error),
+    };
+    if let Some(post) = post {
+        writer.flush()?;
+        diagnostics.write_all(post.as_bytes())?;
+        diagnostics.flush()?;
     }
-    writer.write_all(&buf)?;
-    Ok(())
+    write_with_posts(&buf, posts, writer, diagnostics)
+}
+
+/// Writes `buf`, a part of the document that holds no `Hit` (a held report and the document's
+/// end), with what the document's writer posted while it wrote it (`StructuredXml::take_posts`),
+/// each to `diagnostics` after the bytes before it (`query_warnings::write_posts_to`).
+fn write_with_posts(
+    buf: &[u8],
+    posts: crate::report::blast_xml::DocumentPosts,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<()> {
+    let mut hits = crate::report::query_warnings::HitPosts::default();
+    hits.document(posts);
+    crate::report::query_warnings::write_posts_to(buf, &hits, 0, writer, diagnostics, None)
+}
+
+/// NCBI's post (`ERR_POST(Error << message)`) of a structured report's caught exception
+/// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
+/// the message (which ends with the `what()` text's end of line) and the post's end of line.
+fn caught_post(message: &str) -> String {
+    format!("Error: [blastx] {message}\n")
 }
 
 #[cfg(test)]
@@ -1500,11 +1653,12 @@ mod scan_tests {
             .collect();
         FastaRecord {
             internal_id: String::new(),
-            title: title.to_string(),
+            title: title.as_bytes().to_vec(),
             sequence,
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 
@@ -1526,7 +1680,7 @@ mod scan_tests {
     #[test]
     fn the_last_query_before_a_stop_is_checked_only_where_its_report_is_written() {
         let plain = || record("plain", 300);
-        let bad = || record("caf\u{e9}", 300);
+        let bad = || record(", ,", 300);
         let refused = |scanned: Result<QueryScan>| {
             scanned.err().is_some_and(|error| error.is::<XmlRefusal>())
         };
@@ -1546,7 +1700,7 @@ mod scan_tests {
         )));
         // A later batch that NCBI fails at its set-up (no valid context, a query without
         // letters) stops the run before it, as a reader error does; its records are not read.
-        let empty = [vec![plain(), bad()], vec![record("caf\u{e9}", 0)]];
+        let empty = [vec![plain(), bad()], vec![record(", ,", 0)]];
         let found = scan(&empty, false, true).unwrap();
         assert_eq!(found.stops_after, Some(2));
         assert!(refused(scan(&empty, false, false)));
@@ -1555,7 +1709,6 @@ mod scan_tests {
         // A run that stops at its first batch writes nothing.
         let found = scan(&[], true, true).unwrap();
         assert_eq!(found.stops_after, None);
-        assert!(!found.messages_may_be_refused);
         // A run whose XML format fails for its matrix name writes no report and no title
         // (`xml_matrix_failure`, probe K4f of line RG): its batches are read, no title is checked.
         let options = super::super::stage_c_tests::options();
@@ -1565,7 +1718,6 @@ mod scan_tests {
         })
         .unwrap();
         assert_eq!(found.stops_after, None);
-        assert!(!found.messages_may_be_refused);
     }
 }
 

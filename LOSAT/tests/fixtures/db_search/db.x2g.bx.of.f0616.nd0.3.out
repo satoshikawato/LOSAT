@@ -1,0 +1,71 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2g f0616 subjects
+           1 sequences; 11 total letters
+
+
+
+Query= f0616_q
+
+Length=56
+
+
+
+For reading frame +1 of query sequence:
+
+For reading frame +3 of query sequence:
+
+Query_1  18  HCKAPVH  38
+0        8   Y.       9
+0        10  .        10
+0        10        .  10
+
+For reading frame -1 of query sequence:
+
+Query_1  41  IMHRCLAVNC  12
+0        5   M.EY.       9
+0        2    .          2
+0        10    .         10
+0        9            .  9
+0        3      .        3
+
+For reading frame -2 of query sequence:
+
+Query_1  49  KLLLCTGALQ  20
+0        3   RFMM        6
+0        6           ME  7
+0        9       .       9
+
+For reading frame -3 of query sequence:
+
+Query_1  45  CYYAPVPCSELFC  7
+0        9          .H.     11
+0        9   .H             10
+0        8              Y.  9
+0        8    .             8
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 144
+
+
+  Database: x2g f0616 subjects
+    Posted date:  Nov 15, 2026  2:20 AM
+  Number of letters in database: 11
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 2

@@ -87,6 +87,7 @@ impl PsiRoundPlan {
             ascii_path: options.out_ascii_pssm.clone(),
             save_each: options.save_each_pssm,
             pseudocount: options.pseudocount,
+            versions: options.versions.clone(),
         };
         let input = file.map(|file| super::in_pssm_files::rounds_input(file, &request));
         Some(Self {
@@ -97,8 +98,8 @@ impl PsiRoundPlan {
         })
     }
 
-    /// The PSSM files of the run, for the checks before the search (`check_pssm_titles`,
-    /// `check_pssm_files`); `None` without `-out_pssm` and `-out_ascii_pssm`.
+    /// The PSSM files of the run, for the check before the search (`check_pssm_files`); `None`
+    /// without `-out_pssm` and `-out_ascii_pssm`.
     pub(crate) fn file_request(&self) -> Option<&PssmRequest> {
         (self.request.asn_path.is_some() || self.request.ascii_path.is_some())
             .then_some(&self.request)
@@ -430,11 +431,10 @@ pub(crate) struct RoundFiles {
 
 impl RoundFiles {
     pub(crate) fn new(request: &PssmRequest, out: Option<&std::path::Path>) -> Self {
-        let stream =
-            |path: Option<&str>| path.map(|path| OutputFileReset::new(path, request.save_each));
+        let [asn, ascii] = request.streams();
         Self {
-            asn: stream(request.asn_path.as_deref()),
-            ascii: stream(request.ascii_path.as_deref()),
+            asn,
+            ascii,
             check: PssmFileCheck::new(out),
         }
     }

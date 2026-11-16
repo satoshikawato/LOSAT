@@ -421,6 +421,7 @@ impl BlastnDatabase {
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
+        // The setup's total is not negative (`DbStatistics::setup_total`).
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -431,7 +432,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: num_seqs as usize,
+            db_num_seqs: num_seqs,
         };
         Ok(Self {
             db,
@@ -642,14 +643,56 @@ impl BlastnDatabase {
     /// (`shared::batch_prefetch`): the taxonomy texts of [`BlastnDatabase::prefetch_messages`],
     /// then the warning where the prefetch fails, at a subject whose lookup fails or one without
     /// a Bioseq that a Seq-align on the query's minus strand flips (`gapped`: each HSP is a
-    /// Seq-align, else a subject's first HSP decides).
+    /// Seq-align, else a subject's first HSP decides); `xml_before`: the outfmt 5 reports before
+    /// the batch (`shared::XmlReportsBefore`).
     pub(super) fn batch_prefetch(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-    ) -> Result<Vec<u8>> {
-        let subjects = hit_lists
+        query: usize,
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+    ) -> Result<crate::report::diag_log::Posts> {
+        shared::batch_prefetch(
+            &self.db,
+            &self.taxdb,
+            Self::prefetch_subjects(titles, hit_lists, gapped),
+            PROGRAM,
+            query,
+            xml_before,
+        )
+    }
+
+    /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
+    /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
+    /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
+    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`),
+    /// which BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
+    pub(super) fn batch_prefetch_stop(
+        &self,
+        titles: &DatabaseTitles,
+        before: &[Option<BlastnHitList>],
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+        query: usize,
+    ) -> Result<()> {
+        shared::held_batch_prefetch_stop(
+            &self.db,
+            Self::prefetch_subjects(titles, before, gapped),
+            Self::prefetch_subjects(titles, hit_lists, gapped),
+            PROGRAM,
+            query,
+        )
+    }
+
+    /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`
+    /// reads (`batch_prefetch`).
+    fn prefetch_subjects<'s>(
+        titles: &'s DatabaseTitles,
+        hit_lists: &'s [Option<BlastnHitList>],
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        hit_lists
             .iter()
             .flatten()
             .flat_map(|hit_list| {
@@ -657,7 +700,7 @@ impl BlastnDatabase {
                 &hit_list.hsplist_array[..count]
             })
             .filter(|hsp_list| !hsp_list.hsps.is_empty())
-            .map(|hsp_list| {
+            .map(move |hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
                     _ => None,
@@ -672,8 +715,7 @@ impl BlastnDatabase {
                     parsed,
                     flipped,
                 }
-            });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
+            })
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -697,10 +739,10 @@ impl BlastnDatabase {
         self.db.average_length()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -712,6 +754,12 @@ impl BlastnDatabase {
     /// the schedules count; the statistics' number (`metadata`) can be another.
     pub(super) fn num_subjects(&self) -> usize {
         self.db.num_seqs() as usize
+    }
+
+    /// Whether NCBI's traceback sorts the results by e-value at its end
+    /// (`DbStatistics::sorts_results`).
+    pub(super) fn sorts_results(&self) -> bool {
+        self.db.statistics().sorts_results()
     }
 
     /// The number of sequences and the total length that the statistics read
@@ -1576,6 +1624,37 @@ pub(super) fn x_tb_range_print_summary() {
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// NCBI's fetches with `check_oid_exclusion` of a query batch's search of `database`
+/// (`shared::FetchExcluded`; `None` where they exclude nothing): the traceback's of the
+/// subjects of the preliminary hit lists (`SubjectPasses::traceback_pass`), or in an
+/// `-ungapped` search the re-evaluation's of each subject with HSPs, before the preliminary
+/// hit lists (`SubjectPasses::prelim_pass`).
+pub(super) fn fetch_excluded(database: &BlastnDatabase) -> Option<shared::FetchExcluded<'_>> {
+    shared::FetchExcluded::of(&database.db)
+}
+
+/// LOSAT's refusal of a search whose fetch with `check_oid_exclusion` cannot read the header
+/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search fails.
+pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::Error {
+    shared::FetchExcluded::refusal(failed, PROGRAM)
+}
+
+/// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
+pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<BlastnHitList>]) {
+    // Every blastn search fetches its subjects with `check_oid_exclusion`: the gapped traceback,
+    // or the ungapped re-evaluation of a nucleotide subject (`fetch_excluded`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+        return;
+    };
+    for hit_list in hit_lists.iter_mut().flatten() {
+        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+        aligned.retain(&mut hit_list.hsplist_array, |list| Some(list.oid));
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
 // ```c++
 //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
@@ -1652,6 +1731,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         tabular: output_formats
             .iter()
             .any(|format| format.tabular_reads_subject()),
+        stops_at_failed_lookup: output_formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+        }),
         pairwise,
         structured: output_formats
             .iter()
@@ -1967,12 +2050,13 @@ impl ReportedSubjects {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
-    /// written where a tabular report `reads` the subject, else its id is empty.
+    /// written where a tabular report `reads` the subject, else its id is empty; `None` where the
+    /// lookup fails (`common::tabular::SubjectId`).
     pub(super) fn tabular_subject_ids(
         &self,
         oids: crate::seqdb::OidMap<'_>,
         reads: bool,
-    ) -> Result<Vec<Arc<[u8]>>> {
+    ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
@@ -2794,9 +2878,9 @@ mod tests {
                 .tabular_subject_ids(database.db.oid_map(), true)
                 .unwrap()
                 .iter()
-                .map(|id| id.as_ref())
+                .map(|id| id.as_deref())
                 .collect::<Vec<_>>(),
-            [&b"n06"[..], b"n10"]
+            [Some(&b"n06"[..]), Some(b"n10")]
         );
         // Without the letters (the tabular formats without alignment rows): no stored data.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
@@ -2925,7 +3009,7 @@ mod tests {
         BlastnDatabase {
             metadata: SubjectMetadata {
                 db_len_total: db.total_length() as usize,
-                db_num_seqs: db.num_seqs() as usize,
+                db_num_seqs: db.num_seqs() as i32,
             },
             db,
             name: name.to_string(),

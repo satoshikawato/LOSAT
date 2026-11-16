@@ -64,8 +64,10 @@
 //! own line only when the last thing written was a closing tag (`m_EndTag`): a primitive
 //! member is one line, `<T_m>value</T_m>`.
 
-use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
+use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, StreamPosition};
 use super::real::write_xml_double;
+use crate::ncbi_exception::NcbiException;
+use crate::ncbi_str::utf8::{decode_to_ascii, Utf8Error};
 
 /// Whether `type_name`, the name that a writer gives `begin_sequence` or `variant`, stands for an
 /// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the writers pass the open member's
@@ -144,11 +146,176 @@ pub struct XmlEncoder<'b, const OBJECT: bool = false> {
     names: Vec<u8>,
     marks: Vec<usize>,
     error: Option<SerialError>,
-    /// The control characters that `visible_str_replacing` replaced (`replace`).
+    /// The control characters that `visible_str_replacing` replaced (`replace`), in the object
+    /// mode (`encoder::Traced` adds their stack trace).
     replaced: Vec<Replaced>,
     /// `replace`'s count of the ends of line: those before `lines_to` in `out`.
     lines_to: usize,
     lines: u64,
+    /// The standard-XML mode: a bit for each depth of `marks` whose tag is a CHOICE's type tag
+    /// (`variant`), for the frames of a post or an exception (`frames`).
+    choices: u64,
+    /// The control characters that NCBI's stream of outfmt 5 / 14 / 16 writes as `#` and posts,
+    /// with their stack trace (`replace`, `XmlPost`).
+    posts: Vec<XmlPost>,
+    /// The exception that the stream of outfmt 5 / 14 / 16 threw (`throw`, `XmlThrow`).
+    thrown: Option<Box<XmlThrow>>,
+}
+
+/// A control character that NCBI's XML stream of outfmt 5 / 14 / 16 writes as `#` and posts
+/// (`ReplaceVisibleChar` with `eFNP_ReplaceAndWarn`, error 803.7): the post's text
+/// (`encoder::ReplacedChar`, with the stack trace of the open tags and the stream's line) and
+/// where the byte's `#` goes in the encoder's document (`at`, from its start).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XmlPost {
+    pub at: usize,
+    pub replaced: ReplacedChar,
+}
+
+/// A frame of NCBI's object stack that the stream's exception passes on its way out
+/// (`END_OBJECT_FRAME`, `NCBI_RETHROW_SAME` with `CObjectStackFrame::GetFrameInfo`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ThrowFrame {
+    /// `WriteClassMember` (objostrxml.cpp:1530-1540): `eFrameClassMember`, the member's name.
+    Member(String),
+    /// `WriteClass` (objostrxml.cpp:1503-1520): `eFrameClass`, the class's type.
+    Class(String),
+    /// `WriteChoiceDefault`'s variant frame (choice.cpp:452-459): `eFrameChoiceVariant`.
+    Variant(String),
+    /// `WriteChoiceDefault`'s choice frame (choice.cpp:463): `eFrameChoice`, the CHOICE's type.
+    Choice(String),
+    /// `CObjectOStream::Write` (objostr.cpp:610-625): `eFrameNamed`, the root's type; an object
+    /// written with `WriteObject` (outfmt 5's `Iteration`) has none.
+    Named(String),
+}
+
+impl ThrowFrame {
+    /// The place of the frame's rethrow and its message (`GetFrameInfo`).
+    ///
+    /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:209-213
+    /// ```c++
+    ///     } catch (CException& expt) { \
+    ///         std::string msg((Stream).TopFrame().GetFrameInfo()); \
+    ///         (Stream).PopFrame(); \
+    ///         NCBI_RETHROW_SAME(expt,msg); \
+    ///     } \
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-410
+    /// ```c++
+    /// string CObjectStackFrame::GetFrameInfo(void) const
+    /// {
+    ///     string info(" Frame type= ");
+    ///     info += GetFrameTypeName();
+    ///     if (m_TypeInfo) {
+    ///         info += ", Object type= " + m_TypeInfo->GetName();
+    ///     }
+    ///     if (m_MemberId) {
+    ///         info += ", Member name= " + m_MemberId->GetName();
+    ///     }
+    ///     return info;
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1530-1540
+    /// ```c++
+    /// void CObjectOStreamXml::WriteClassMember(const CMemberId& memberId,
+    ///                                          TTypeInfo memberType,
+    ///                                          TConstObjectPtr memberPtr)
+    /// {
+    ///     BEGIN_OBJECT_FRAME2(eFrameClassMember,memberId);
+    ///
+    ///     BeginClassMember(memberType,memberId);
+    ///     WriteObject(memberPtr, memberType);
+    ///     EndClassMember();
+    ///
+    ///     END_OBJECT_FRAME();
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/choice.cpp:452-463
+    /// ```c++
+    ///         BEGIN_OBJECT_FRAME_OF2(out, eFrameChoiceVariant, variantInfo->GetId());
+    ///         out.BeginChoiceVariant(choiceType, variantInfo->GetId());
+    ///
+    ///         variantInfo->WriteVariant(out, objectPtr);
+    ///
+    ///         out.EndChoiceVariant();
+    ///         END_OBJECT_FRAME_OF(out);
+    ///     }
+    ///
+    ///     out.EndChoice();
+    ///     END_OBJECT_FRAME_OF(out);
+    /// ```
+    /// (`WriteClass`'s frame ends at objostrxml.cpp:1519, `Write`'s at objostr.cpp:621.)
+    fn rethrow(&self, exception: NcbiException) -> NcbiException {
+        let (file, line, function, info) = match self {
+            ThrowFrame::Member(name) => (
+                "src/serial/objostrxml.cpp",
+                1538,
+                "ncbi::CObjectOStreamXml::WriteClassMember",
+                format!(" Frame type= eFrameClassMember, Member name= {name}"),
+            ),
+            ThrowFrame::Class(name) => (
+                "src/serial/objostrxml.cpp",
+                1519,
+                "ncbi::CObjectOStreamXml::WriteClass",
+                format!(" Frame type= eFrameClass, Object type= {name}"),
+            ),
+            ThrowFrame::Variant(name) => (
+                "src/serial/choice.cpp",
+                459,
+                "ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault",
+                format!(" Frame type= eFrameChoiceVariant, Member name= {name}"),
+            ),
+            ThrowFrame::Choice(name) => (
+                "src/serial/choice.cpp",
+                463,
+                "ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault",
+                format!(" Frame type= eFrameChoice, Object type= {name}"),
+            ),
+            ThrowFrame::Named(name) => (
+                "src/serial/objostr.cpp",
+                621,
+                "ncbi::CObjectOStream::Write",
+                format!(" Frame type= eFrameNamed, Object type= {name}"),
+            ),
+        };
+        exception.rethrow_same(file, line, function, info)
+    }
+}
+
+/// The exception that NCBI's XML stream of outfmt 5 / 14 / 16 throws at a byte >= 0x80 that its
+/// US-ASCII encoding cannot write (`CUtf8`, `ncbi_str::utf8`): which one, where the document is
+/// cut (`at`, the bytes from the document's start that NCBI's stream wrote before it), and the
+/// frames of NCBI's object stack that it passes, innermost first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XmlThrow {
+    pub error: Utf8Error,
+    pub at: usize,
+    frames: Vec<ThrowFrame>,
+}
+
+impl XmlThrow {
+    /// The exception as it leaves the stream: thrown by `CUtf8`, rethrown by each frame.
+    pub fn exception(&self) -> NcbiException {
+        self.frames
+            .iter()
+            .fold(self.error.exception(), |exception, frame| {
+                frame.rethrow(exception)
+            })
+    }
+}
+
+/// Whether NCBI's XML stream of outfmt 5 / 14 / 16 throws where it writes the string `value`
+/// (`XmlThrow`: a byte >= 0x80 that does not decode to a US-ASCII character before the string's
+/// first NUL): the stream's own `write_string` on a scratch stream, for a question asked before
+/// the document is written (`report::blast_xml::names::iteration_cut_before_hits`).
+pub(crate) fn us_ascii_stream_throws(value: &[u8]) -> bool {
+    if value.is_ascii() {
+        return false;
+    }
+    let mut out = Vec::new();
+    let mut stream = XmlEncoder::fragment(&mut out);
+    stream.write_string::<true>(value);
+    stream.thrown.is_some()
 }
 
 impl<'b> XmlEncoder<'b, false> {
@@ -230,6 +397,171 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
             replaced: Vec::new(),
             lines_to: start,
             lines: 0,
+            choices: 0,
+            posts: Vec::new(),
+            thrown: None,
+        }
+    }
+
+    /// Whether the stream of outfmt 5 / 14 / 16 replaced a control character (`take_posts`).
+    #[inline]
+    pub fn has_posts(&self) -> bool {
+        !self.posts.is_empty()
+    }
+
+    /// The control characters that the stream of outfmt 5 / 14 / 16 replaced and posts
+    /// (`XmlPost`), which the encoder forgets.
+    pub fn take_posts(&mut self) -> Vec<XmlPost> {
+        std::mem::take(&mut self.posts)
+    }
+
+    /// The exception that the stream of outfmt 5 / 14 / 16 threw, if any (`XmlThrow`; the error
+    /// is then `SerialError::Utf8`).
+    pub fn take_thrown(&mut self) -> Option<Box<XmlThrow>> {
+        self.thrown.take()
+    }
+
+    /// The name of the open tag `index` (0 the outermost) in `names`.
+    fn open_tag_name(&self, index: usize) -> &[u8] {
+        let end = self
+            .marks
+            .get(index + 1)
+            .copied()
+            .unwrap_or(self.names.len());
+        &self.names[self.marks[index]..end]
+    }
+
+    /// The name of the member or variant of the open tag `index` (odd: the tags of a class or
+    /// CHOICE value and of its member or variant alternate): outside the standard-XML mode the
+    /// tag is the class's name, an underscore and the member's (`PrintTagName`).
+    fn open_member_name(&self, index: usize) -> String {
+        let tag = self.open_tag_name(index);
+        let name = if self.std_xml {
+            tag
+        } else {
+            &tag[self.open_tag_name(index - 1).len() + 1..]
+        };
+        String::from_utf8_lossy(name).into_owned()
+    }
+
+    /// `CObjectStack::GetStackTrace` of the stream (`encoder::Traced::stack_trace`): the root's
+    /// type, then `.name` of each open member or variant (NCBI's XML stream pushes no element
+    /// frame for an element of a named type, so no `.E`: every list of these documents but
+    /// `Target.subjects`, whose strings are never replaced, holds a named type).
+    #[cold]
+    fn asn_path(&self) -> String {
+        let mut path = String::from_utf8_lossy(self.open_tag_name(0)).into_owned();
+        for index in (1..self.marks.len()).step_by(2) {
+            path.push('.');
+            path.push_str(&self.open_member_name(index));
+        }
+        path
+    }
+
+    /// The frames of NCBI's object stack at the current byte, innermost first (`ThrowFrame`): the
+    /// open tags alternate between a class or CHOICE value (its type tag) and its member or
+    /// variant, and a document written with `Write` (all but `WriteObject`'s `object`) has the
+    /// root's named frame outside them.
+    #[cold]
+    fn frames(&self) -> Vec<ThrowFrame> {
+        let mut frames = Vec::with_capacity(self.marks.len() + 1);
+        for index in (0..self.marks.len()).rev() {
+            let choice = |depth: usize| self.choices & (1u64 << depth) != 0;
+            frames.push(if index % 2 == 1 {
+                let name = self.open_member_name(index);
+                if choice(index - 1) {
+                    ThrowFrame::Variant(name)
+                } else {
+                    ThrowFrame::Member(name)
+                }
+            } else {
+                let name = String::from_utf8_lossy(self.open_tag_name(index)).into_owned();
+                if choice(index) {
+                    ThrowFrame::Choice(name)
+                } else {
+                    ThrowFrame::Class(name)
+                }
+            });
+        }
+        if self.piece != Piece::Object && !self.marks.is_empty() {
+            frames.push(ThrowFrame::Named(
+                String::from_utf8_lossy(self.open_tag_name(0)).into_owned(),
+            ));
+        }
+        frames
+    }
+
+    /// The stream throws `error` (`XmlThrow`): the document is cut at the bytes written so far,
+    /// and nothing that follows is posted. Only the first exception counts.
+    #[cold]
+    #[inline(never)]
+    fn throw(&mut self, error: Utf8Error) {
+        if self.thrown.is_none() {
+            self.thrown = Some(Box::new(XmlThrow {
+                error,
+                at: self.out.len() - self.start,
+                frames: self.frames(),
+            }));
+        }
+        self.fail(SerialError::Utf8(error));
+    }
+
+    /// The branch of `WriteEncodedChar` for a byte >= 0x80 of the US-ASCII stream of outfmt 5 /
+    /// 14 / 16: the character that the UTF-8 sequence at the start of `src` decodes to
+    /// (`CUtf8::Decode`, `CUtf8::SymbolToChar`), verified and written as an ASCII byte is, or the
+    /// stream's exception (`throw`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:556-572
+    /// ```c++
+    /// void CObjectOStreamXml::WriteEncodedChar(const char*& src, EStringType type)
+    /// {
+    ///     EEncoding enc_in( type == eStringTypeUTF8 ? eEncoding_UTF8 : m_StringEncoding);
+    ///     EEncoding enc_out(m_Encoding == eEncoding_Unknown ? eEncoding_UTF8 : m_Encoding);
+    ///
+    ///     if (enc_in == enc_out || enc_in == eEncoding_Unknown || (*src & 0x80) == 0) {
+    ///         char s = x_VerifyChar(*src);
+    ///         if (s != '\0') {
+    ///             WriteEscapedChar(s);
+    ///         }
+    ///     } else if (enc_out != eEncoding_UTF8) {
+    ///         TUnicodeSymbol chU = (enc_in == eEncoding_UTF8) ?
+    ///             CUtf8::Decode(src) : CUtf8::CharToSymbol( *src, enc_in);
+    ///         char s = x_VerifyChar( CUtf8::SymbolToChar( chU, enc_out));
+    ///         if (s != '\0') {
+    ///             WriteEscapedChar(s);
+    ///         }
+    /// ```
+    /// (The strings are UTF-8, `m_StringEncoding`'s default, objostrxml.cpp:81, and the stream
+    /// US-ASCII, `SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:502, :786,
+    /// blastxml2_format.cpp:721, :733.) A decoded NUL (`C0 80`) writes nothing and the string
+    /// goes on.
+    ///
+    /// `src` is the rest of the string from such a byte on: each UTF-8 sequence is written so and
+    /// the ASCII bytes between them as `write_string` writes them, until the string's end, a NUL
+    /// or the throw.
+    #[cold]
+    #[inline(never)]
+    fn encoded_tail(&mut self, mut src: &[u8]) {
+        loop {
+            match decode_to_ascii(src) {
+                Ok((character, used)) => {
+                    self.write_string::<true>(&[character]);
+                    src = &src[used..];
+                }
+                Err(error) => {
+                    self.throw(error);
+                    return;
+                }
+            }
+            let ascii = src
+                .iter()
+                .position(|&byte| byte >= 0x80 || byte == 0)
+                .unwrap_or(src.len());
+            self.write_string::<true>(&src[..ascii]);
+            match src.get(ascii) {
+                Some(&byte) if byte >= 0x80 => src = &src[ascii..],
+                _ => return,
+            }
         }
     }
 
@@ -249,9 +581,16 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     ///         ReplaceVisibleChar(x, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst()) : x;
     /// }
     /// ```
+    ///
+    /// Outside the object mode the encoder posts by itself (`XmlPost`, with the stack trace of its
+    /// open tags, `asn_path`); a `fragment`'s stream wrote the declaration's line that BLAST then
+    /// erased, so its lines count one more. Nothing is posted after the stream threw (`throw`).
     #[cold]
     #[inline(never)]
     fn replace(&mut self, byte: u8) {
+        if !OBJECT && self.thrown.is_some() {
+            return;
+        }
         if self.lines_to < self.start {
             self.lines_to = self.start;
             self.lines = 0;
@@ -262,42 +601,66 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
             .filter(|&&byte| byte == b'\n')
             .count() as u64;
         self.lines_to = self.out.len();
+        let at = self.out.len() - self.start;
+        if !OBJECT {
+            let erased = u64::from(self.piece == Piece::Fragment);
+            self.posts.push(XmlPost {
+                at,
+                replaced: ReplacedChar {
+                    trace: self.asn_path(),
+                    byte,
+                    position: StreamPosition::Line(1 + erased + self.lines),
+                    string: std::sync::Arc::from(&[][..]),
+                },
+            });
+            return;
+        }
         self.replaced.push(Replaced {
             byte,
             position: StreamPosition::Line(1 + self.lines),
             with_string: false,
-            at: self.out.len() - self.start,
+            at,
         });
     }
 
-    /// The loop of `WriteString` (quoted at `visible_str`): without `REPLACE` a control
-    /// character is the error `NonVisibleChar`, with it the character is recorded (`replace`)
-    /// and `#` written in its place.
+    /// The loop of `WriteString` (quoted at `visible_str`): the string ends at its first NUL. In
+    /// the object mode a control character is the error `NonVisibleChar` without `REPLACE`, and
+    /// with it the character is recorded (`replace`) and `#` written in its place; a byte >= 0x80
+    /// is written as it is (the stream has no encoding). Outside it (outfmt 5 / 14 / 16) a
+    /// control character is always replaced and posted, and a byte >= 0x80 starts a UTF-8
+    /// sequence (`encoded_tail`), whose failure ends the string.
     #[inline(always)]
     fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
         if OBJECT && self.pending_elem {
             self.open_element();
         }
-        for &byte in value {
+        let mut bytes = value.iter();
+        while let Some(&byte) = bytes.next() {
             match byte {
                 b'&' => self.out.extend_from_slice(b"&amp;"),
                 b'<' => self.out.extend_from_slice(b"&lt;"),
                 b'>' => self.out.extend_from_slice(b"&gt;"),
                 b'\'' => self.out.extend_from_slice(b"&apos;"),
                 b'"' => self.out.extend_from_slice(b"&quot;"),
-                0 => {}
+                0 => return,
                 0x09 | 0x0a | 0x0d => {
                     self.out.extend_from_slice(b"&#x");
                     self.out.push(b"0123456789abcdef"[usize::from(byte & 0xf)]);
                     self.out.push(b';');
                 }
-                0x01..=0x1f if REPLACE => {
+                0x01..=0x1f if REPLACE || !OBJECT => {
                     self.replace(byte);
                     self.out.push(b'#');
                 }
                 0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
                 0x80..=0xff if OBJECT => self.out.push(byte),
-                0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
+                0x80..=0xff => {
+                    // The rest of the string goes through the cold path, which leaves the loop of
+                    // an ASCII string as it was.
+                    let rest = bytes.as_slice();
+                    self.encoded_tail(&value[value.len() - rest.len() - 1..]);
+                    return;
+                }
                 _ => self.out.push(byte),
             }
         }
@@ -599,6 +962,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             self.fail(SerialError::XmlUnsupported("CHOICE"));
             return;
         }
+        self.choices |= 1u64 << self.marks.len();
         self.begin_sequence(type_name);
         self.member(name, tag);
     }
@@ -613,6 +977,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         } else if self.std_xml {
             self.end_member();
             self.end_sequence();
+            self.choices &= !(1u64 << self.marks.len());
         }
     }
 
@@ -640,6 +1005,8 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             self.fail(SerialError::XmlUnsupported("CHOICE"));
             return;
         }
+        let depth = self.marks.len();
+        self.choices |= 1u64 << depth;
         self.begin_sequence(type_name);
         for item in items {
             self.member(name, tag);
@@ -647,6 +1014,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             self.end_member();
         }
         self.end_sequence();
+        self.choices &= !(1u64 << depth);
     }
 
     /// `WriteInt4`: `PutInt4`, the decimal digits.
@@ -756,14 +1124,26 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     ///             ... hi (if not 0) and lo in lower-case hex ... ';'
     /// ```
     /// A byte of 0x01-0x1F other than TAB, LF and CR is replaced by `#` with an error
-    /// message (`x_VerifyChar`, `BAD_CHAR`; `replace`): an error here, `#` and a record in
-    /// `visible_str_replacing`. A byte >= 0x80 makes the US-ASCII stream of outfmt 5
-    /// throw (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:6900-6903), an error here too; the
+    /// message (`x_VerifyChar`, `BAD_CHAR`; `replace`): in the object mode an error here, `#`
+    /// and a record in `visible_str_replacing`; in outfmt 5 / 14 / 16 always `#` and a post
+    /// (`XmlPost`). A byte >= 0x80 is decoded as UTF-8 by the US-ASCII stream of outfmt 5 / 14 /
+    /// 16, which throws where it cannot write the character (`encoded_tail`, `XmlThrow`); the
     /// archive's stream has no encoding, so `WriteEncodedChar` takes its first branch
     /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
-    /// object mode). A NUL byte ends NCBI's string (`WriteString`: `for ( const char* src =
-    /// str.c_str(); *src; ++src )`, objostrxml.cpp:927-935); LOSAT drops it and writes the rest
-    /// (whether a string that reaches this writer can hold one is still to be checked).
+    /// object mode). A NUL byte ends the string.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:927-935
+    /// ```c++
+    /// void CObjectOStreamXml::WriteString(const string& str, EStringType type)
+    /// {
+    ///     if (m_SpecialCaseWrite && x_SpecialCaseWrite()) {
+    ///         return;
+    ///     }
+    ///     for ( const char* src = str.c_str(); *src; ++src ) {
+    ///         WriteEncodedChar(src,type);
+    ///     }
+    /// }
+    /// ```
     fn visible_str(&mut self, value: &[u8]) {
         self.write_string::<false>(value);
     }

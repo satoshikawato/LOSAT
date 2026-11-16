@@ -8,7 +8,7 @@ from pathlib import Path
 import pylosat
 import pytest
 from conftest import fasta
-from pylosat import ArgumentError, Search, Sequences
+from pylosat import ArgumentError, Pssm, Search, Sequences
 
 
 def test_keywords_are_the_words_of_the_command_line():
@@ -60,20 +60,24 @@ def test_what_is_not_an_option_here_is_refused(option):
 
 
 @pytest.mark.parametrize("option", ["out_pssm", "out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm"])
-def test_psiblast_writes_no_pssm_file_here(option):
+def test_psiblast_takes_its_pssm_files(option):
     takes_a_file = option in ("out_pssm", "out_ascii_pssm")
-    with pytest.raises(TypeError, match=option):
-        Search("psiblast", **{option: "p.txt" if takes_a_file else True})
-    words = [f"-{option}", "p.txt"] if takes_a_file else [f"-{option}"]
-    with pytest.raises(ArgumentError, match="writes no PSSM file"):
-        Search.from_argv("psiblast", words)
+    words = (f"-{option}", "p.txt") if takes_a_file else (f"-{option}",)
+    assert Search("psiblast", **{option: "p.txt" if takes_a_file else True}).argv == words
+    assert Search.from_argv("psiblast", list(words)).argv == words
 
 
-def test_psiblast_takes_no_pssm_query_here():
-    with pytest.raises(TypeError, match="in_pssm"):
-        Search("psiblast", in_pssm="q.asn")
-    with pytest.raises(ArgumentError, match="the queries are given as records"):
-        Search.from_argv("psiblast", ["-in_pssm", "q.asn"])
+def test_a_pssm_query_is_an_input_not_an_option():
+    # Series Q item Q6b: the PSSM query is `Pssm`, which the search gives as `-in_pssm`.
+    for program in ("psiblast", "tblastn"):
+        with pytest.raises(TypeError, match="in_pssm"):
+            Search(program, in_pssm="q.asn")
+        with pytest.raises(ArgumentError, match="a PSSM query is given as the inputs"):
+            Search.from_argv(program, ["-in_pssm", "q.asn"])
+    with pytest.raises(TypeError, match="or a Pssm"):
+        Search("psiblast").run("q.asn", Sequences.from_text(">s\nMKT\n"))
+    with pytest.raises(ArgumentError, match="psiblast and tblastn, not by blastp"):
+        Search("blastp").run(Pssm.from_file("q.asn"), Sequences.from_text(">s\nMKT\n"))
 
 
 ROUNDS_QUERY = "outfmt0/e2e_many_query.faa"
@@ -173,4 +177,4 @@ def test_describe_is_the_engines_table():
 def test_the_option_stubs_are_those_of_the_table():
     tool = Path(__file__).resolve().parents[1] / "tools" / "generate_option_stubs.py"
     done = subprocess.run([sys.executable, str(tool), "--check"], capture_output=True)
-    assert done.returncode == 0, "run tools/generate_option_stubs.py"
+    assert done.returncode == 0, "run tools/generate_option_stubs.py\n" + done.stdout.decode()

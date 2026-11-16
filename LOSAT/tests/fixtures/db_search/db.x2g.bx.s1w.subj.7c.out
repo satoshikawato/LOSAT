@@ -1,0 +1,5 @@
+# BLASTX 2.17.0+
+# Query: o00016_q
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/x2g_s1o_s.faa)
+# Fields: query id, % query coverage per subject
+# 1 hits found

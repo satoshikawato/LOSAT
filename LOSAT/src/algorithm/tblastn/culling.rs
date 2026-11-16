@@ -201,8 +201,9 @@ impl KappaResultHitList {
     /// `-qcov_hsp_perc` and `-subject_besthit`): the HSP lists sorted by e-value, then every
     /// HSP in that order culled into a new tree with the merit `culling_limit` (without the
     /// three of the preliminary writer), and the kept HSPs made into the query's hit list
-    /// again. The lists leave in the rip order of the tree, so the caller sorts them by
-    /// e-value afterwards (NCBI's `Blast_HSPResultsSortByEvalue` after the pipes does).
+    /// again. The lists leave in the rip order of the tree; the caller sorts them by e-value
+    /// afterwards where NCBI's `Blast_HSPResultsSortByEvalue` after the pipes does (a positive
+    /// `BlastSeqSrcGetTotLen`, blast_traceback.c:1768-1772).
     ///
     /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-733
     /// ```c

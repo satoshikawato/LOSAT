@@ -44,20 +44,25 @@ pub enum SerialError {
     /// `CObjectOStreamJson::WriteDouble2` on a NaN or an infinity
     /// (`real::JsonDoubleError`).
     JsonDouble(super::real::JsonDoubleError),
-    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream (in XML a
-    /// control character other than TAB, LF and CR), which NCBI replaces by `#` with an error
-    /// message (`eFNP_ReplaceAndWarn`, `ReplacedChar`): `visible_str` reports it here; a
-    /// caller that posts NCBI's messages writes the document again through `Traced`
-    /// (`visible_str_replacing`), the other callers refuse such strings before the search.
+    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream (in the XML
+    /// object stream of the archive a control character other than TAB, LF and CR), which NCBI
+    /// replaces by `#` with an error message (`eFNP_ReplaceAndWarn`, `ReplacedChar`):
+    /// `visible_str` reports it here; a writer that posts NCBI's messages writes the document
+    /// again through `Traced` (`visible_str_replacing`: the archive, the search strategy, the
+    /// Seq-annots of outfmt 8 and 9, the mask writers, psiblast's PSSM file); for the others it
+    /// is the writer's error. (The XML streams of outfmt 5 / 14 / 16 replace and post it
+    /// themselves, `xml::XmlPost`.)
     NonVisibleChar(u8),
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
     NonFiniteReal,
-    /// A byte >= 0x80 in a string of the XML streams of outfmt 5 / 14 / 16, whose US-ASCII
-    /// encoding cannot hold it: NCBI's `CUtf8::SymbolToChar` throws (rc 255, or a document cut
-    /// after the failed element); the callers refuse such strings first, so this does not
-    /// occur. The archive's stream has no encoding and writes the byte.
-    NonAsciiChar(u8),
+    /// The exception of NCBI's US-ASCII XML stream of outfmt 5 / 14 / 16 at a byte >= 0x80 that it
+    /// cannot write (`CUtf8::DecodeFirst`, `DecodeNext` or `SymbolToChar`): the encoder keeps the
+    /// rest of what NCBI reports (`xml::XmlThrow`: where the document is cut, the frames of the
+    /// trace), which the document writers report as NCBI does at their level
+    /// (`report::blast_xml::writer`, `report::blast_xml2::writer`). The archive's stream has no
+    /// encoding and writes the byte.
+    Utf8(crate::ncbi_str::utf8::Utf8Error),
     /// A call that the XML stream does not write outside the archive's object mode (a BOOLEAN,
     /// an ENUMERATED value or a CHOICE of outfmt 5).
     XmlUnsupported(&'static str),
@@ -77,10 +82,7 @@ impl std::fmt::Display for SerialError {
                 f,
                 "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"
             ),
-            SerialError::NonAsciiChar(byte) => write!(
-                f,
-                "a character 0x{byte:02x} outside the US-ASCII range in an XML string is not supported by LOSAT"
-            ),
+            SerialError::Utf8(error) => f.write_str(error.exception().get_msg()),
             SerialError::XmlUnsupported(what) => {
                 write!(f, "an XML {what} is not supported by LOSAT")
             }
@@ -378,9 +380,10 @@ enum Frame {
 /// 14 / 16, which writes it otherwise) with NCBI's object stack, for the posts of the bytes that
 /// it replaces (`ReplacedChar`). A caller that posts NCBI's messages writes a document through
 /// it when one of its strings has such a byte (the archive and the search strategy decide that
-/// before they write, `report::archive`; the mask writers write a document again when the first
-/// writing reported `SerialError::NonVisibleChar`); it writes the strings with
-/// `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
+/// before they write, `report::archive`; the mask writers, the Seq-annots of outfmt 8 and 9
+/// (`seqalign::write_query_to`) and psiblast's PSSM file (`pssm::asn_text_posting`) write a
+/// document again when the first writing reported `SerialError::NonVisibleChar`); it writes the
+/// strings with `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
 /// the documents without such a byte are written as before.
 ///
 /// The positions count from the document's start: `flush_to` counts the bytes that it hands on

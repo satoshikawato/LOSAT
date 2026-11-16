@@ -56,7 +56,20 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::files::{run_side_files, SideFileSink};
-use crate::report::serial::xml::XML2_ROOT_ATTRIBUTES;
+use crate::report::blast_xml::writer::{DocumentPost, DocumentPosts};
+use crate::report::serial::xml::{XmlThrow, XML2_ROOT_ATTRIBUTES};
+
+/// What a report's writer hands the framing with the report's bytes (`Xml2Document::report`):
+/// what NCBI posts while it writes the report (`DocumentPost`, at offsets of the report), and the
+/// exception of a 14 side file, which ends the run when the report is written (blastxml2_format.cpp:
+/// 768-778 has no `catch`; outfmt 16's report catches its exception and posts it,
+/// `report::blast_xml2::writer`). Dropping it loses them, so it is `must_use`.
+#[derive(Clone, Debug, Default)]
+#[must_use = "a report's posts and the side file's exception go to the framing (Xml2Document::report)"]
+pub struct MadeReport {
+    pub posts: Vec<DocumentPost>,
+    pub ends_run: Option<Box<XmlThrow>>,
+}
 
 /// Which of NCBI's four document forms a run writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,8 +249,15 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
     /// A `-subject` run (`m_IsBl2Seq`): a report is written when the next one arrives.
     delayed: bool,
     pending: Vec<u8>,
+    pending_made: MadeReport,
     has_pending: bool,
+    /// The held report of a `-subject` run failed with this exception (`CaughtException`): NCBI
+    /// makes it, and fails, when it writes it.
+    pending_failure: Option<crate::ncbi_exception::NcbiException>,
     files: F,
+    /// The posts of the reports written to the output buffers since `take_posts`, and the
+    /// exception of a 14 side file that ends the run after them.
+    posts: DocumentPosts,
 }
 
 impl Xml2Document<NoSideFiles> {
@@ -272,7 +292,9 @@ pub struct Xml2Carry {
     written: u32,
     started: bool,
     pending: Vec<u8>,
+    pending_made: MadeReport,
     has_pending: bool,
+    pending_failure: Option<crate::ncbi_exception::NcbiException>,
 }
 
 impl<F: SideFiles> Xml2Document<F> {
@@ -283,7 +305,9 @@ impl<F: SideFiles> Xml2Document<F> {
             written: std::mem::take(&mut self.written),
             started: std::mem::take(&mut self.started),
             pending: std::mem::take(&mut self.pending),
+            pending_made: std::mem::take(&mut self.pending_made),
             has_pending: std::mem::take(&mut self.has_pending),
+            pending_failure: self.pending_failure.take(),
         }
     }
 
@@ -294,7 +318,16 @@ impl<F: SideFiles> Xml2Document<F> {
         self.written = carry.written;
         self.started = carry.started;
         self.pending = carry.pending;
+        self.pending_made = carry.pending_made;
         self.has_pending = carry.has_pending;
+        self.pending_failure = carry.pending_failure;
+    }
+
+    /// The posts of the reports written since the last call, at offsets of the output buffers of
+    /// the calls that wrote them, and the exception that ends the run after them
+    /// (`StructuredXml::take_posts`).
+    pub fn take_posts(&mut self) -> DocumentPosts {
+        std::mem::take(&mut self.posts)
     }
 
     pub fn with_files(kind: Xml2Kind, delayed: bool, files: F) -> Self {
@@ -304,8 +337,11 @@ impl<F: SideFiles> Xml2Document<F> {
             started: false,
             delayed,
             pending: Vec::new(),
+            pending_made: MadeReport::default(),
             has_pending: false,
+            pending_failure: None,
             files,
+            posts: DocumentPosts::default(),
         }
     }
 
@@ -345,13 +381,15 @@ impl<F: SideFiles> Xml2Document<F> {
     /// framing appends that report to `out`; `report` is left empty. NCBI writes the separator
     /// (`x_WriteXML2`, blast_format.cpp:2337-2342) before `s_FillBlastOutput` loads the report's
     /// subjects, and writes the report after those loads: what they post comes between the two.
-    /// For a `-subject` run the report is held and the one held before it is written. A failure of `make` returns it with the framing's bytes in `out` (the caller
-    /// truncates `out`) and the document's count of reports unchanged.
+    /// For a `-subject` run the report is held and the one held before it is written, with what
+    /// `make` handed with it (`MadeReport`: its posts come when it is written, after what the
+    /// call posted before). A failure of `make` returns it with the framing's bytes in `out` (the
+    /// caller truncates `out`) and the document's count of reports unchanged.
     pub fn report(
         &mut self,
         report: &mut Vec<u8>,
         out: &mut Vec<u8>,
-        make: impl FnOnce(usize, &mut Vec<u8>) -> Result<()>,
+        make: impl FnOnce(usize, &mut Vec<u8>) -> Result<MadeReport>,
     ) -> Result<()> {
         self.prolog(out);
         // The report written now: this one, or for a `-subject` run the one held before it.
@@ -359,22 +397,96 @@ impl<F: SideFiles> Xml2Document<F> {
             self.separator(out);
         }
         report.clear();
-        if let Err(error) = make(out.len(), report) {
-            report.clear();
-            return Err(error);
+        // A report that raised an exception that NCBI's report function catches
+        // (`CaughtException`) is a failed report (`failed`), held as the others are; it made no
+        // bytes and posted nothing of its stream.
+        let (mut made, failure) = match make(out.len(), report) {
+            Ok(made) => (made, None),
+            Err(error) => match error.downcast::<crate::report::blast_xml::CaughtException>() {
+                Ok(caught) => (MadeReport::default(), Some(caught.0)),
+                Err(error) => {
+                    report.clear();
+                    return Err(error);
+                }
+            },
+        };
+        // NCBI makes a report where it writes it: the making that failed now loaded no subject
+        // after the one whose HSP raised the exception (`DocumentPosts::cut`); a `-subject` run,
+        // whose report is held, reads no database.
+        if failure.is_some() && !self.delayed {
+            self.posts.cut = true;
         }
-        if self.delayed {
+        let failure = if self.delayed {
             // The report just made is held; the one held before it is written now.
             let had_pending = std::mem::replace(&mut self.has_pending, true);
             std::mem::swap(report, &mut self.pending);
+            std::mem::swap(&mut made, &mut self.pending_made);
+            let held = std::mem::replace(&mut self.pending_failure, failure);
             if !had_pending {
                 report.clear();
                 return Ok(());
             }
+            held
+        } else {
+            failure
+        };
+        if let Some(exception) = failure {
+            report.clear();
+            return self.failed(exception);
         }
-        let result = self.write(report, out);
+        let result = self.write(report, made, out);
         report.clear();
         result
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2334-2354
+    // ```c++
+    // 	if(m_FormatType == CFormattingArgs::eXml2_S) {
+    // 			BlastXML2_FormatReport(&report_data, &m_Outfile);
+    // 	}
+    // 	else if (m_FormatType == CFormattingArgs::eJson_S) {
+    // 			m_XMLFileCount++;
+    // 			if(m_XMLFileCount > 1) {
+    // 				m_Outfile << ",\n";
+    // 			}
+    // 			BlastJSON_FormatReport(&report_data, &m_Outfile);
+    // 	}
+    // 	else {
+    // 		m_XMLFileCount++;
+    // 		...
+    // 			BlastXML2_FormatReport(&report_data, file_name);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
+    // ```c++
+    // BlastXML2_FormatReport(const IBlastXML2ReportData* data, string file_name)
+    // {
+    // 	blastxml2::CBlastOutput2 bxmlout;
+    // 	ofstream out_stream;
+    // 	out_stream.open(file_name.c_str(), IOS_BASE::out);
+    // 	if(!out_stream.is_open())
+    // 		 NCBI_THROW(CArgException, eInvalidArg, "Cannot open output file");
+    //
+    // 	s_FillBlastOutput(bxmlout, data);
+    // ```
+    /// A report whose making raised `exception` where NCBI writes it: counted as written (the
+    /// separator before it stays, so a JSON document can hold `,\n,\n`); the stream forms catch
+    /// the exception (`CaughtException`, the program posts its message and goes on), the file
+    /// forms (outfmt 13 and 14) have opened the report's file, which stays empty, and end the
+    /// program with it (`CATCH_ALL`, exit status 255; the master file stays empty: no epilog)
+    /// after what the making posted (the loads of its subjects): the exception is handed back
+    /// after the posts (`DocumentPosts::ends_run`, by `query_warnings::write_hit_posts`).
+    fn failed(&mut self, exception: crate::ncbi_exception::NcbiException) -> Result<()> {
+        self.written += 1;
+        match self.kind {
+            Xml2Kind::Single16 | Xml2Kind::Single15 => {
+                Err(crate::report::blast_xml::CaughtException(exception).into())
+            }
+            Xml2Kind::Files14 | Xml2Kind::Files13 => {
+                self.files.write_file(self.written, &[])?;
+                self.posts.ends_run = Some(Box::new(exception));
+                Ok(())
+            }
+        }
     }
 
     /// Whether a report is held back until the next one arrives (a `-subject` run).
@@ -392,8 +504,12 @@ impl<F: SideFiles> Xml2Document<F> {
             return Ok(());
         }
         let pending = std::mem::take(&mut self.pending);
+        let made = std::mem::take(&mut self.pending_made);
         self.separator(out);
-        self.write(&pending, out)
+        if let Some(exception) = self.pending_failure.take() {
+            return self.failed(exception);
+        }
+        self.write(&pending, made, out)
     }
 
     /// `x_WriteXML2`'s separator of outfmt 15's reports: `,\n` before every report but the first.
@@ -404,9 +520,32 @@ impl<F: SideFiles> Xml2Document<F> {
     }
 
     /// `x_WriteXML2`: one report into the stream (after its separator, `separator`) or its own
-    /// file.
-    fn write(&mut self, report: &[u8], out: &mut Vec<u8>) -> Result<()> {
+    /// file, its posts after the bytes of the output before them (a side file's after the output
+    /// so far). A side file whose report threw is written up to the failing byte, and the
+    /// exception ends the run after the report's posts (`DocumentPosts::ends_run`, handed back by
+    /// the writer of the posts; the master file stays empty: `epilog` writes no end).
+    fn write(&mut self, report: &[u8], made: MadeReport, out: &mut Vec<u8>) -> Result<()> {
         self.written += 1;
+        let at = if self.kind.is_files() { 0 } else { 1 };
+        let base = out.len();
+        let MadeReport { posts, ends_run } = made;
+        self.posts
+            .posts
+            .extend(posts.into_iter().map(|post| DocumentPost {
+                at: base + at * post.at,
+                text: post.text,
+            }));
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
+        // ```c++
+        // 		s_FillBlastOutput(bxmlout, data);
+        // 		s_WriteXML2Object(bxmlout, &out_stream);
+        // ```
+        // The subjects' loads (`s_FillBlastOutput`) and the posts come before the exception.
+        if let Some(thrown) = ends_run {
+            self.files.write_file(self.written, report)?;
+            self.posts.ends_run = Some(Box::new(thrown.exception()));
+            return Ok(());
+        }
         match self.kind {
             Xml2Kind::Single16 | Xml2Kind::Single15 => out.extend_from_slice(report),
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
@@ -429,10 +568,32 @@ impl<F: SideFiles> Xml2Document<F> {
     /// the document's end. A run that stops at a failed batch does not call it.
     pub fn epilog(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.prolog(out);
+        // The held report that fails: the end of a stream form follows its message
+        // (`CaughtException`, returned after the end); a file form stops here.
+        let mut caught = None;
         if std::mem::replace(&mut self.has_pending, false) {
             let pending = std::mem::take(&mut self.pending);
+            let made = std::mem::take(&mut self.pending_made);
             self.separator(out);
-            self.write(&pending, out)?;
+            match self.pending_failure.take() {
+                Some(exception) => match self.failed(exception) {
+                    Err(error) if error.is::<crate::report::blast_xml::CaughtException>() => {
+                        caught = Some(error)
+                    }
+                    result => result?,
+                },
+                None => self.write(&pending, made, out)?,
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
+            // ```c++
+            // 		s_FillBlastOutput(bxmlout, data);
+            // 		s_WriteXML2Object(bxmlout, &out_stream);
+            // ```
+            // No `catch`: the held report's exception leaves `PrintEpilog` before the document's
+            // end (the master file stays empty).
+            if self.posts.ends_run.is_some() {
+                return Ok(());
+            }
         }
         match self.kind {
             Xml2Kind::Single16 => out.extend_from_slice(TAIL16),
@@ -471,6 +632,9 @@ impl<F: SideFiles> Xml2Document<F> {
                 out.extend_from_slice(b"\t]\n}");
             }
         }
-        Ok(())
+        match caught {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }

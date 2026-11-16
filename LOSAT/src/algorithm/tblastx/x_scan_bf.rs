@@ -52,7 +52,82 @@ pub(crate) fn x_tbx_scan_bf() -> bool {
 /// `X_SCAN_BF_SLACK` more when the switch is on.
 pub(crate) fn x_offset_pairs_len(array_size: i32) -> usize {
     let slack = if x_tbx_scan_bf() { X_SCAN_BF_SLACK } else { 0 };
+    // EXPERIMENT (LOSAT_X_TBXSCANBYTE): the scan on presence bytes writes up to
+    // `X_SCAN_BYTE_SLACK` entries past `array_size`.
+    let slack = if x_tbx_scan_byte().on() {
+        slack.max(crate::algorithm::tblastx::x_scan_byte::X_SCAN_BYTE_SLACK)
+    } else {
+        slack
+    };
     array_size.max(0) as usize + slack
+}
+
+// No NCBI counterpart: reads LOSAT_X_TBXSCANBYTE once (a switch of the strict set) and detects AVX2.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): how the unit path scans a group table of the full backbone
+/// (the tables NCBI's loop scanned): tblastn's scan on presence bytes (`x_scan_byte::x_mode`).
+pub(crate) fn x_tbx_scan_byte() -> crate::algorithm::tblastx::x_scan_byte::XScanByte {
+    static MODE: std::sync::OnceLock<crate::algorithm::tblastx::x_scan_byte::XScanByte> =
+        std::sync::OnceLock::new();
+    *MODE.get_or_init(|| crate::algorithm::tblastx::x_scan_byte::x_mode("LOSAT_X_TBXSCANBYTE"))
+}
+
+// No NCBI counterpart: the presence bytes of a table, made once per table.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of `lookup` when `x_tbx_scan_byte` scans
+/// it (on, the table `fits`, sparse if the mode asks), else `None` (NCBI's loop).
+pub(crate) fn x_tbx_presence(lookup: &BlastAaLookupTable) -> Option<std::sync::Arc<[u8]>> {
+    let mode = x_tbx_scan_byte();
+    if !mode.on() {
+        return None;
+    }
+    let kept = crate::algorithm::tblastx::x_scan_byte::x_table_presence(lookup);
+    let keep = crate::algorithm::tblastx::x_scan_byte::x_kept_presence(mode, &kept).is_some();
+    let taken = kept.filter(|_| keep).map(|(bytes, _)| bytes);
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXSCANBYTE", taken.is_some());
+    taken
+}
+
+// No NCBI counterpart: the record of `LOSAT_X_REACH` for a table `x_tbx_presence` is not asked
+// about (the branch-free scan takes it).
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): records a group table that keeps the scan before.
+pub(crate) fn x_reach_scan_byte_not_taken() {
+    if x_tbx_scan_byte().on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXSCANBYTE", false);
+    }
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130 (quoted at `x_scan_subject_bf`).
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): `s_blast_aa_scan_subject` with each range scanned by
+/// `x_scan_one_range_byte` on `presence` (`x_tbx_presence`). Same arguments, same result, same
+/// `s_range`; `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_scan_subject_byte(
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    subject: &[u8],
+    seq_ranges: &[(i32, i32)],
+    offset_pairs: &mut [BlastOffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    let mode = x_tbx_scan_byte();
+    let word_length = lookup.word_length;
+    let mut totalhits: i32 = 0;
+    while determine_scanning_offsets(seq_ranges, word_length, word_length, s_range) {
+        let s_last = s_range[2];
+        totalhits += crate::algorithm::tblastx::x_scan_byte::x_scan_one_range_byte(
+            mode,
+            lookup,
+            presence,
+            subject,
+            &mut offset_pairs[totalhits as usize..],
+            array_size - totalhits,
+            s_range,
+        );
+        if s_range[1] <= s_last {
+            return totalhits;
+        }
+    }
+    totalhits
 }
 
 // No NCBI counterpart: chooses between two scans with the same result (module text).
@@ -469,7 +544,8 @@ mod tests {
         array_size: usize,
         scan: &mut dyn FnMut(&mut [BlastOffsetPair], i32, &mut [i32; 3]) -> i32,
     ) -> Vec<(Vec<(u32, u32)>, [i32; 3])> {
-        let mut pairs = vec![BlastOffsetPair::default(); array_size + X_SCAN_BF_SLACK];
+        let slack = X_SCAN_BF_SLACK.max(crate::algorithm::tblastx::x_scan_byte::X_SCAN_BYTE_SLACK);
+        let mut pairs = vec![BlastOffsetPair::default(); array_size + slack];
         let mut scan_range = [0, seq_ranges[0].0, seq_ranges[0].1 - word_length];
         let mut out = Vec::new();
         while scan_range[1] <= scan_range[2] {
@@ -512,6 +588,10 @@ mod tests {
             let (mut compact, _) = build_ncbi_lookup(&queries, threshold, &karlin, true);
             let rank = x_compact(&mut compact);
             assert!(compact.backbone.len() < lookup.backbone.len());
+            // LOSAT_X_TBXSCANBYTE: the scan on presence bytes, on any table that `fits`.
+            let presence = crate::algorithm::tblastx::x_scan_byte::x_table_presence(&lookup)
+                .filter(|_| x_tbx_scan_byte().on())
+                .map(|(bytes, _)| bytes);
             let longest = lookup.longest_chain.max(1) as usize;
             // A translated frame in ncbistdaa: residues 1..=25 (X = 21, stop = 25 included),
             // sentinel 0 after the last one.
@@ -552,6 +632,15 @@ mod tests {
                         got, want,
                         "case {case} ranges {ranges:?} array_size {array_size}"
                     );
+                    if let Some(presence) = &presence {
+                        let byte_got = calls(wl, ranges, array_size, &mut |p, a, r| {
+                            x_scan_subject_byte(&lookup, presence, &subject, ranges, p, a, r)
+                        });
+                        assert_eq!(
+                            byte_got, want,
+                            "byte: case {case} ranges {ranges:?} array_size {array_size}"
+                        );
+                    }
                     // The compacted table (`x_compact`), with the scan's dispatch and with the
                     // portable rank.
                     let compact_got = calls(wl, ranges, array_size, &mut |p, a, r| {

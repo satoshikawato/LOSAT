@@ -42,6 +42,7 @@ use super::start::{CallStart, RunLog};
 use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -187,6 +188,10 @@ impl FormatObserver for BatchObserver {
     fn rounds_converged(&mut self, query: usize) {
         self.parts.rounds_converged(query);
     }
+
+    fn pssm_query(&mut self, query: &FastaRecord) {
+        self.parts.pssm_query(query);
+    }
 }
 
 /// The search of one query batch at a time (`run_batches`). Each `next` searches one batch; a
@@ -195,7 +200,8 @@ pub struct Batches<'a> {
     search: &'a Search,
     inputs: Inputs<'a>,
     sizes: BatchSizes,
-    /// The letters of each query record, which size the batches.
+    /// The letters of each query record, which size the batches (one query of no letters for a
+    /// PSSM query, one batch).
     lengths: Vec<usize>,
     /// The query records that NCBI's reader skips (`-query_loc`).
     skipped: Vec<bool>,
@@ -211,6 +217,9 @@ pub struct Batches<'a> {
     start_messages: Vec<u8>,
     /// Whether the call is a dry run: one batch of no query, with the start's messages.
     dry_run: bool,
+    /// The run's numbers of psiblast's `-save_each_pssm` files, which go on over the batches as
+    /// over the command line's (`PsiblastArgs::pssm_versions`).
+    pssm_versions: crate::algorithm::psiblast::pssm::PssmVersions,
 }
 
 /// Searches the queries one of NCBI's query batches at a time and returns the batches as an
@@ -229,11 +238,17 @@ pub struct Batches<'a> {
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     let mut start_messages = Vec::new();
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
-    let lengths: Vec<usize> = inputs
-        .query
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543 (the PSSM's query
+    // searched without a `CBlastInput`, quoted at `blastp::blast_engine::search_pssm_query`)
+    // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
+    let lengths: Vec<usize> = match inputs.pssm {
+        Some(_) => vec![0],
+        None => inputs
+            .query
+            .iter()
+            .map(|record| record.seq().len())
+            .collect(),
+    };
     if start.dry_run() {
         let log = start.take_log();
         return Ok(Batches {
@@ -250,6 +265,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             log,
             start_messages,
             dry_run: true,
+            pssm_versions: Default::default(),
         });
     }
     check_inputs(search, inputs)?;
@@ -273,8 +289,13 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         .map_err(|error| Error::search(&error))?;
     }
     let command = search.command(inputs)?;
-    let sizes = batch_sizes(&command, inputs, &mut start, &mut start_messages)
-        .map_err(|error| Error::search(&error))?;
+    // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
+    // 208-221 reads it for a FASTA query only).
+    let sizes = match inputs.pssm {
+        Some(_) => BatchSizes::Fixed(1),
+        None => batch_sizes(&command, inputs, &mut start, &mut start_messages)
+            .map_err(|error| Error::search(&error))?,
+    };
     let query_range = query_range_of(&command);
     let skipped = lengths
         .iter()
@@ -297,12 +318,13 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         start,
         start_messages,
         dry_run: false,
+        pssm_versions: Default::default(),
     })
 }
 
 impl Batches<'_> {
-    /// How many query records the inputs hold: with `Batch::query_indices`, how far the search
-    /// is.
+    /// How many queries the inputs hold (the records, or the one sequence of a PSSM file,
+    /// `Inputs::pssm`): with `Batch::query_indices`, how far the search is.
     pub fn query_count(&self) -> usize {
         self.lengths.len()
     }
@@ -317,9 +339,12 @@ impl Batches<'_> {
 
     /// Searches the batch `range`, as the command line's loop searches it.
     fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
-        let inputs = Inputs {
-            query: &self.inputs.query[range.clone()],
-            ..self.inputs
+        let inputs = match self.inputs.pssm {
+            Some(_) => self.inputs,
+            None => Inputs {
+                query: &self.inputs.query[range.clone()],
+                ..self.inputs
+            },
         };
         let mut command = self.search.command(inputs)?;
         let query_range = query_range_of(&command);
@@ -331,7 +356,20 @@ impl Batches<'_> {
             Commands::Blastp(args) => args.first_query_ordinal = range.start,
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
-            Commands::Psiblast(args) => args.first_query_ordinal = range.start,
+            Commands::Psiblast(args) => {
+                use crate::algorithm::psiblast::pssm::PssmCheckScope;
+                args.first_query_ordinal = range.start;
+                args.pssm_versions = self.pssm_versions.clone();
+                // The command line checks the PSSM files of all its queries before its first
+                // byte: the first batch checks the run's, where the command line does.
+                args.pssm_check = if self.searched_one {
+                    PssmCheckScope::Checked
+                } else {
+                    PssmCheckScope::Run {
+                        queries: self.lengths.len(),
+                    }
+                };
+            }
             // BLASTX's messages show the record's own id; rpsblast and rpstblastn are refused
             // by `Program::parse`.
             Commands::Blastx(_)
@@ -359,6 +397,7 @@ impl Batches<'_> {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut sink,

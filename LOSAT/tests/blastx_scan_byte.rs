@@ -1,6 +1,6 @@
 //! The scan on presence bytes in BLASTX's direct seed loop (`LOSAT_X_BXSCANBYTE`, in the strict
 //! set; `src/algorithm/blastx/x_seed_scan.rs` module header, tblastn's
-//! `src/algorithm/tblastn/x_scan_byte.rs` for the scan) on whole searches.
+//! `src/algorithm/tblastx/x_scan_byte.rs` for the scan) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c
@@ -312,6 +312,13 @@ fn the_scan_on_presence_bytes_gives_the_reports_of_the_scans_before() {
                     "sparse",
                     blastx(&args, &[DIRECT, SPARSE]),
                     Some((sparse, !sparse)),
+                ),
+                // The AVX2 copy without its chain runs (`LOSAT_X_CHAINRUN=0`; the direct arm has
+                // them where the CPU has AVX2).
+                (
+                    "direct, no chain runs",
+                    blastx(&args, &[DIRECT, ("LOSAT_X_CHAINRUN", "0")]),
+                    Some(default_sides(sparse)),
                 ),
                 // The default: the fused loop where it pays (AVX2), the direct loop elsewhere.
                 ("default", blastx(&args, &[]), None),

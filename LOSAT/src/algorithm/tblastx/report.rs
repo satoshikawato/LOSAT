@@ -476,6 +476,26 @@ impl<'a> SubjectLetters<'a> {
         }
     }
 
+    /// Appends the searched letters `[from, to)` of subject `s_idx` in upper case (the
+    /// query-anchored sections, `anchored::AnchoredSequences`).
+    pub(crate) fn letters_of(&self, s_idx: usize, from: usize, to: usize, out: &mut Vec<u8>) {
+        let store = match self {
+            Self::Records(records) => {
+                out.extend(
+                    records[s_idx].seq()[from..to]
+                        .iter()
+                        .map(u8::to_ascii_uppercase),
+                );
+                return;
+            }
+            Self::Stored { stores, ordinals } => &stores[ordinals[s_idx] as usize],
+            Self::Database { stores, .. } => &*stores[s_idx],
+        };
+        let mut letters = Vec::new();
+        store.letters_into(from, to, &mut letters);
+        out.extend_from_slice(&letters);
+    }
+
     /// The letters that the rows of `hsp` read and the residue offset they start at: its
     /// record's letters from 0, or a stored subject's codons of the HSP made into `window`.
     fn letters<'w>(&self, hsp: &TblastxHsp, window: &'w mut Vec<u8>) -> (&'w [u8], usize)
@@ -1012,6 +1032,24 @@ fn shown_query_masks(
         .collect()
 }
 
+/// The masks of a query as the query-anchored sections read them (`query_anchored::Mask`): the
+/// shown masks of every frame (`shown_query_masks`, those of outfmt 0's rows), each with the frame
+/// of its context.
+pub(crate) fn query_frame_masks(
+    stats: &TblastxQueryStats,
+    query_length: usize,
+    offset: usize,
+) -> Vec<crate::report::query_anchored::Mask> {
+    shown_query_masks(query_dna_masks(stats, query_length), query_length, offset)
+        .into_iter()
+        .flat_map(|(frame, ranges)| {
+            ranges
+                .into_iter()
+                .map(move |(from, to)| (from as u32, to as u32, frame))
+        })
+        .collect()
+}
+
 /// The masked regions of a query as NCBI hands them to the BLAST XML writer
 /// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): the SEG intervals of each frame in
 /// nucleotides, joined as `BlastSeqLocCombine(filter_out, 0)` joins them (only overlapping ones,
@@ -1486,7 +1524,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_titles: &[&[u8]],
     database: &str,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1565,7 +1603,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     writer: &mut W,
     hsp: &TblastxHsp,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &OutputConfig,
 ) -> io::Result<()> {
     let hit = &hsp.hit;
@@ -1574,9 +1612,8 @@ pub(crate) fn write_tabular_row<W: Write>(
     let query_id = query_ids
         .get(hit.q_idx as usize)
         .map_or(&b""[..], |id| id.as_ref());
-    let subject_id = subject_ids
-        .get(hit.s_idx as usize)
-        .map_or(&b""[..], |id| id.as_ref());
+    // A failed lookup's rows are refused before (`check_failed_lookups`).
+    let subject_id = crate::algorithm::common::tabular::printed_id(subject_ids, hit.s_idx as usize);
     write_hit_fields_bytes(
         writer,
         query_id,
@@ -1596,10 +1633,12 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5 to 16 and 20).
+/// The TBLASTX output formats (`-outfmt` 0 to 16 and 20).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
-    Pairwise,
+    /// The pairwise report (outfmt 0) and the query-anchored formats (1 to 4), which are outfmt
+    /// 0's report with another alignment section (`PairwiseView`).
+    Pairwise(crate::report::pairwise::PairwiseView),
     Tabular,
     TabularWithComments,
     /// The tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
@@ -1617,9 +1656,19 @@ pub(crate) enum TblastxOutputFormat {
     Xml2(crate::report::blast_xml2::Xml2Kind),
     /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
     Archive,
+    /// A value that TBLASTX does not write (17, and a value that NCBI cannot read), which the
+    /// command line, the library and LOSAT Web refuse before the search
+    /// (`ReportFormat::writes`, `app::report_format`): its writer refuses it, no report is
+    /// written for it.
+    Unsupported,
 }
 
 impl TblastxOutputFormat {
+    /// Whether the format is the pairwise report or a query-anchored format (outfmt 0 to 4).
+    pub(crate) fn is_pairwise(self) -> bool {
+        matches!(self, Self::Pairwise(_))
+    }
+
     /// Whether the format is a table (outfmt 6, 7, 10 and 20), which reads the tabular subject
     /// ids (`report::tabular::writes_rows`: not the organism report).
     pub(crate) fn is_tabular(self) -> bool {
@@ -1634,12 +1683,19 @@ impl TblastxOutputFormat {
     /// formatter finds by a subject's Seq-align id (`report::tabular::reads_subject`: the default
     /// fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {
-        let spec = match self {
+        self.is_tabular()
+            && crate::report::tabular::reads_subject(
+                self.tabular_spec(),
+                crate::blastinput::app::Program::Tblastx,
+            )
+    }
+
+    /// The field list of the custom tabular report (`CustomTabular`).
+    pub(crate) fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self {
             Self::CustomTabular(spec) => Some(spec),
             _ => None,
-        };
-        self.is_tabular()
-            && crate::report::tabular::reads_subject(spec, crate::blastinput::app::Program::Tblastx)
+        }
     }
 
     /// Whether the format writes the displayed identity counts of the rows
@@ -1649,7 +1705,12 @@ impl TblastxOutputFormat {
     pub(crate) fn reads_displayed_counts(self) -> bool {
         !matches!(
             self,
-            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive | Self::CustomTabular(_)
+            Self::Seqalign(_)
+                | Self::Xml
+                | Self::Xml2(_)
+                | Self::Archive
+                | Self::CustomTabular(_)
+                | Self::Unsupported
         )
     }
 
@@ -1693,7 +1754,8 @@ impl TblastxOutputFormat {
     /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
         crate::algorithm::common::database::prefetches_subjects(match self {
-            Self::Pairwise => Some(0),
+            // `s_IsPrefetchFormat` takes 1 to 4 as 0 (DECISIONS T3-4).
+            Self::Pairwise(view) => Some(view.outfmt()),
             Self::Xml => Some(5),
             Self::Tabular => Some(6),
             Self::TabularWithComments => Some(7),
@@ -1708,7 +1770,7 @@ impl TblastxOutputFormat {
             Self::Seqalign(serial) => Some(serial.outfmt()),
             // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
             // (`TaxdbPrinter`).
-            Self::Archive | Self::Xml2(_) => None,
+            Self::Archive | Self::Xml2(_) | Self::Unsupported => None,
         })
     }
 }
@@ -1751,8 +1813,18 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
             }
         }
     }
-    match choice.map(|choice| choice.number) {
-        Ok(0) => TblastxOutputFormat::Pairwise,
+    let number = choice.map(|choice| choice.number);
+    // Outfmt 0 to 4: the pairwise report and its query-anchored views (line RG T3c).
+    if let Some(view) = number
+        .as_ref()
+        .ok()
+        .and_then(|&number| crate::blastinput::app::ReportFormat::from_number(number))
+        .and_then(crate::report::pairwise::PairwiseView::of)
+    {
+        return TblastxOutputFormat::Pairwise(view);
+    }
+    match number {
+        Ok(6) => TblastxOutputFormat::Tabular,
         Ok(7) => TblastxOutputFormat::TabularWithComments,
         Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
         Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
@@ -1763,7 +1835,8 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(15) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single15),
         Ok(14) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files14),
         Ok(13) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files13),
-        _ => TblastxOutputFormat::Tabular,
+        // Never a table by default: a value the callers refuse first (`Unsupported`).
+        _ => TblastxOutputFormat::Unsupported,
     }
 }
 
@@ -1900,7 +1973,7 @@ pub(crate) fn final_hit_order(
     for ((q_idx, oid), hsps) in pairs {
         lists.add(q_idx, oid, hsps, filters);
     }
-    lists.finish(filters)
+    lists.finish(filters, true)
 }
 
 /// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:
@@ -1980,16 +2053,19 @@ pub(crate) fn final_hit_order(
 /// in OID order, with the merit `culling_max` (+3 above 1; in `i64`, where NCBI's `Int4`
 /// overflows near `INT4_MAX`, NCBI parity DECISIONS 17). The trees' HSPs then reach the hit list of the traceback in OID order, where
 /// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
-/// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
-/// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
-/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the
-/// queries are culled one after another.
+/// lists again, sorted by e-value, with the merit `culling_limit`. The pipe's lists come out in
+/// the rip order of its trees (hspfilter_culling.c:501-580); they are sorted by e-value only where
+/// NCBI sorts the results (`sorts_results`: a positive `BlastSeqSrcGetTotLen`,
+/// blast_traceback.c:1768-1772), then cut to `-max_target_seqs` (blast_traceback.c:1777), and each
+/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the queries are
+/// culled one after another.
 pub(crate) fn culled_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,
     culling_limit: i32,
     query_lengths: &[usize],
     filters: &HitFilters<'_>,
+    sorts_results: bool,
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
@@ -2051,7 +2127,11 @@ pub(crate) fn culled_hit_order(
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();
-        final_lists.sort_by_evalue();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
+        // `DbStatistics::sorts_results`)
+        if sorts_results {
+            final_lists.sort_by_evalue();
+        }
         final_lists.prune_by_size(hitlist_size);
         for mut list in final_lists.hsplist_array {
             HitListEntry::sort_by_evalue(&mut list);
@@ -2590,12 +2670,36 @@ mod tests {
 
     #[test]
     fn output_formats_are_read_after_trimming() {
-        assert_eq!(output_format(" 0"), TblastxOutputFormat::Pairwise);
+        assert_eq!(
+            output_format(" 0"),
+            TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+        );
         assert_eq!(output_format("6"), TblastxOutputFormat::Tabular);
         assert_eq!(
             output_format("7 "),
             TblastxOutputFormat::TabularWithComments
         );
+    }
+
+    // Outfmt 1 to 4 are the pairwise report's query-anchored views (line RG T3c); a value that
+    // TBLASTX does not write is never read as a table.
+    #[test]
+    fn the_query_anchored_formats_are_pairwise_views_and_others_unsupported() {
+        use crate::report::pairwise::PairwiseView;
+        for (outfmt, identity, anchored) in [
+            ("1", true, true),
+            ("2", false, true),
+            ("3", true, false),
+            (" 4 qseqid", false, false),
+        ] {
+            assert_eq!(
+                output_format(outfmt),
+                TblastxOutputFormat::Pairwise(PairwiseView::QueryAnchored { identity, anchored }),
+                "{outfmt}"
+            );
+        }
+        assert_eq!(output_format("17"), TblastxOutputFormat::Unsupported);
+        assert_eq!(output_format("99"), TblastxOutputFormat::Unsupported);
     }
 
     // NCBI blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
@@ -2609,7 +2713,10 @@ mod tests {
             (" 7 std ", TblastxOutputFormat::TabularWithComments),
             ("6 -qseqid", TblastxOutputFormat::Tabular),
             ("6 delim=", TblastxOutputFormat::Tabular),
-            ("0 qseqid", TblastxOutputFormat::Pairwise),
+            (
+                "0 qseqid",
+                TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
+            ),
             ("11 qseqid", TblastxOutputFormat::Archive),
         ] {
             assert_eq!(output_format(outfmt), format, "{outfmt}");

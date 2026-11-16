@@ -462,6 +462,7 @@ mod tests {
             ascii_path: ascii.then(|| "f.txt".to_string()),
             save_each: false,
             pseudocount: 0,
+            versions: Default::default(),
         }
     }
 

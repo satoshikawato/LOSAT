@@ -249,33 +249,16 @@ def main():
                                             [*prefixes[kind], program, "-query", roles["query"], "-subject", roles["subject"],
                                              "-outfmt", "6", "-out", "{out}", "-num_threads", str(n)])
                         assert result == reference, f"raw output differs: compressed/{program}-{kind}-n{n}-{role}{suffix}"
-    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-    # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
-    # Unported format routes must reject explicitly before starting any worker
-    # (BLASTN names what it does not support since S07+: "not supported by LOSAT").
-    # TBLASTX writes outfmt 0 and 7 since S08; they are compared with the oracle below.
-    # Custom tabular fields are written since line CLI C2 (#614, PR 2, PR 3); the taxonomy
-    # report (outfmt 18) is still LOSAT's refusal in every program.
-    for program, formats in [("blastn", ["18"]),
-                             ("tblastx", ["18"])]:
-        for index, fmt in enumerate(formats):
-            for kind, prefix in prefixes.items():
-                n = 1 if kind in ["serial", "native-serial"] else 8
-                data, log = execute(f"unsupported-format/{program}-{index}-{kind}",
-                    [*prefix, program, "-query", inputs["nuc1"], "-subject", inputs["nuc1"],
-                     "-outfmt", fmt, "-num_threads", str(n), "-out", "{out}"],
-                    {"LOSAT_WASI_THREADS_DEBUG": "1"}, expected=1)
-                assert not data and any(marker in log.lower() for marker in
-                                        ("unsupported", "not implemented", "not supported by losat"))
-                assert "spawn_attempt" not in log and "[losat-thread-pool]" not in log
+    # The organism report (-outfmt 18) is written since line RG T2 (c86dd36c1) and is compared
+    # with the oracle like the other formats; no output format is refused in these programs.
     format_failures = []
     for program, query, subject, formats, task in [
         ("blastx", "blastx-query", "aa3", ["0", "6", "7", "6 std qframe sframe btop"], None),
         ("blastp", "aa3", "aa3", ["0", "7", "6 std qlen slen positive ppos btop stitle"], None),
         ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"], None),
-        ("blastn", "nuc3", "nuc3", ["0", "7"], "megablast"),
+        ("blastn", "nuc3", "nuc3", ["0", "7", "18"], "megablast"),
         ("blastn", "nuc3", "nuc3", ["0", "7"], "blastn"),
-        ("tblastx", "nuc3", "nuc3", ["0", "7"], None),
+        ("tblastx", "nuc3", "nuc3", ["0", "7", "18"], None),
         ("tblastn", "aa1", "tblastn-subjects", ["0", "7"], None),
     ]:
         for index, fmt in enumerate(formats):

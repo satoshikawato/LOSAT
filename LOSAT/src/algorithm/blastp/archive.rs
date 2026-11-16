@@ -1,10 +1,10 @@
 //! BLASTP's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:281-283
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-283
 //! ```c++
-//!             if (isArchiveFormat) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+//!             if (fmt_args->ArchiveFormatRequested(args)) {
+//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
 //!                 m_Bah.ResetMessages();
 //!             } else {
 //! ```
@@ -190,6 +190,8 @@ pub(crate) struct FirstContext {
     /// The `EffectiveSearchSpace` option: that of the first query's context, `-searchsp` in an
     /// invalid one too.
     pub context0_space: i64,
+    /// That context's query length, 0 for an invalid one (`archive::RequestLength::space`).
+    pub context0_length: i64,
 }
 
 /// The Seq-aligns of one batch of a call (the elements of outfmt 8, without the Seq-annot).
@@ -305,7 +307,10 @@ pub(crate) fn for_each_batch(
                     ka_blocks,
                     search_space: context.search_space,
                     length_adjustment: context.length_adjustment,
-                    searched_space: searched.then_some(context.context0_space),
+                    searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                        space: context.context0_space,
+                        query_length: context.context0_length,
+                    }),
                 };
                 each(span, &batch)
             },

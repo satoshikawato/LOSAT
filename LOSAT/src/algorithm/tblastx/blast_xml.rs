@@ -134,7 +134,7 @@ pub(crate) fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };
-    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin);
+    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin).ok();
     debug_assert_eq!(
         lengths.map(|lengths| lengths.eff_searchsp),
         Some(stats.eff_searchsp),
@@ -174,9 +174,9 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
 /// Writes the document of every query of `run` (`hits` is the final list after
 /// `shift_to_records`: record coordinates, in query order) through `document` (BLAST XML, or
 /// the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
-/// header before the first query and its end after the last when `run.epilog`. Everything NCBI
-/// cannot write is refused before the first byte: the `-db` name, the query titles and
-/// messages, the titles of the subjects with hits. `all_masks`: the masks of every searched
+/// header before the first query and its end after the last when `run.epilog`. A query or
+/// subject title that NCBI crashes on (`names::Refusal`) is refused before the first byte; every
+/// other text is written as NCBI's streams write it. `all_masks`: the masks of every searched
 /// query are listed (XML2 and JSON), not those of the queries with hits alone (outfmt 5).
 /// `run.xml_taxa` holds the taxids of the database sequences that XML2 and JSON show.
 pub(crate) fn write_tblastx_xml<W: StructuredXml>(
@@ -190,15 +190,15 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
 ) -> Result<()> {
     let args = run.args;
     let taxa = run.xml_taxa;
-    let (db_name, db_num, db_len) = match &run.database {
+    let (db_name, db_num, db_len, db_len_overflow) = match &run.database {
         Some(database) => (
             database.name,
-            i32::try_from(database.pairwise.num_sequences)?,
-            i64::try_from(database.pairwise.total_letters)?,
+            database.pairwise.num_sequences,
+            database.pairwise.total_letters,
+            database.pairwise.total_letters_overflow,
         ),
-        None => ("", 0, 0),
+        None => ("", 0, 0, false),
     };
-    names::check_database_name(PROGRAM, db_name)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
     // and JSON) and :2242-2243 (BLAST XML)
     // ```c++
@@ -237,7 +237,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         program: "tblastx",
         version: concat!("TBLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: db_name.as_bytes(),
+        db_name,
         matrix: Some(matrix),
         expect: args.evalue,
         gap_open,
@@ -246,6 +246,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: positives.as_ref(),
         mask_char: b'X',
     };
@@ -280,6 +281,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         .map(|(q_idx, query)| {
             names::query_text(
                 PROGRAM,
+                query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
                 query.title(),
@@ -327,8 +329,9 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let mut masks: Vec<QueryMask> = Vec::new();
     let (mut window, mut query_row, mut subject_row): (Vec<u8>, Vec<u8>, Vec<u8>) =
         (Vec::new(), Vec::new(), Vec::new());
-    // The document's start (`StructuredXml::start`), before the first query's warnings.
-    document.start(&mut buf);
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml_run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
     for (q_idx, query) in queries.iter().enumerate() {
@@ -339,7 +342,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
             document.unwritten(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
             break;
         }
@@ -359,7 +367,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             );
         }
         let xml_query = XmlQuery {
-            id: query.local_id.as_bytes(),
+            id: text.query_id(query.local_id.as_bytes()),
             title: &text.title,
             len: i32::try_from(searched_length)?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
@@ -466,6 +474,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         });
         // A failed query leaves its partial bytes in `buf`, which the error return drops.
         written?;
+        posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(
             &buf,
             &posts,
@@ -477,7 +486,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     }
     if run.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }
@@ -495,8 +509,10 @@ mod tests {
             total: 3_000,
             count: 3,
             link_total: 3_000,
+            average: None,
             dbsize: None,
             searchsp: None,
+            statistics: None,
         };
         assert_eq!(
             query_stats(&TblastxQueryStats::default(), &numbers),
@@ -515,8 +531,10 @@ mod tests {
                 total: 3_000,
                 count,
                 link_total: 3_000,
+                average: None,
                 dbsize,
                 searchsp: None,
+                statistics: None,
             };
             let lengths = try_compute_eff_lengths_tblastx(
                 130,
@@ -530,6 +548,7 @@ mod tests {
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
                 context0_search_space: 0,
+                context0_aa_len: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

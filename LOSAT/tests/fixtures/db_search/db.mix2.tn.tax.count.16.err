@@ -1,0 +1,2 @@
+Error: [tblastn] SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+BLAST Database error: DB contains no accession info.

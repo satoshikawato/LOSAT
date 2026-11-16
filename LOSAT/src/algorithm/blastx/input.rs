@@ -1,5 +1,5 @@
 //! Local FASTA state before translation. Internal IDs and defline titles differ.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
 // ```c++
 // bool CStreamLineReader::AtEOF(void) const
@@ -44,7 +44,9 @@ use crate::ncbi_str::{is_space, truncate_spaces, truncate_spaces_begin, truncate
 // ```
 pub struct FastaRecord {
     pub internal_id: String,
-    pub title: String,
+    /// The title as read, bytes: NCBI's reader keeps a title in any encoding, and its formatters
+    /// make what they show of it (`report::defline`).
+    pub title: Vec<u8>,
     pub sequence: Vec<u8>,
     pub lowercase_masks: Vec<(i32, i32)>,
     pub warnings: Vec<InputWarning>,
@@ -52,6 +54,18 @@ pub struct FastaRecord {
     /// allocation) unless the reader was asked to keep it. A record without a defline line
     /// has none either (the archive then writes `>` and the title).
     pub source: Option<Box<crate::blastinput::fasta_reader::RecordSource>>,
+    /// The record's letters on each side of the `-query_loc` interval that `cut_in_place` cut it
+    /// to, where the reader keeps them (`keep_around`, `record_letter`): `None` (8 bytes, no
+    /// allocation) for every other record.
+    pub around: Option<Box<LettersAround>>,
+}
+
+/// The letters of a record on each side of the interval that a cut keeps (`FastaRecord::keep_around`):
+/// `before` ends at the interval's first letter, `after` starts past its last.
+#[derive(Debug, Clone)]
+pub struct LettersAround {
+    pub before: Vec<u8>,
+    pub after: Vec<u8>,
 }
 
 impl FastaRecord {
@@ -62,14 +76,17 @@ impl FastaRecord {
     }
 
     /// What `Query=` and `# Query:` show (`fasta_reader::FastaRecord::query_line`).
-    pub fn query_line(&self) -> std::borrow::Cow<'_, str> {
+    pub fn query_line(&self) -> std::borrow::Cow<'_, [u8]> {
         if self.believed().is_none() || self.title.is_empty() {
             return match self.believed() {
-                Some(_) => std::borrow::Cow::Borrowed(&self.internal_id),
+                Some(_) => std::borrow::Cow::Borrowed(self.internal_id.as_bytes()),
                 None => std::borrow::Cow::Borrowed(&self.title),
             };
         }
-        std::borrow::Cow::Owned(format!("{} {}", self.internal_id, self.title))
+        let mut line = self.internal_id.as_bytes().to_vec();
+        line.push(b' ');
+        line.extend_from_slice(&self.title);
+        std::borrow::Cow::Owned(line)
     }
 
     /// The id of the record in NCBI's warnings (`fasta_reader::FastaRecord::warning_id`).
@@ -162,6 +179,41 @@ impl FastaRecord {
         self.lowercase_masks
             .iter()
             .any(|&(left, right)| left as usize <= letter && letter <= right as usize)
+    }
+
+    /// Keeps the record's letters within `around` of its interval `[from, to_exclusive)` on each
+    /// side, which `cut_in_place` then drops (nothing for `around` 0): the letters outside a
+    /// `-query_loc` interval that `-subject`'s Seq-loc mapper reads into a query row
+    /// (`empty_rows::query_letters_around`), apart from the whole letters of `cut_in_place`'s
+    /// `keep_whole` (which the archive, the lower case of the rows and a split query's masks read).
+    pub fn keep_around(&mut self, from: usize, to_exclusive: usize, around: usize) {
+        if around == 0 {
+            return;
+        }
+        let before = &self.sequence[from.saturating_sub(around)..from];
+        let after = &self.sequence[to_exclusive..(to_exclusive + around).min(self.sequence.len())];
+        if before.is_empty() && after.is_empty() {
+            return;
+        }
+        self.around = Some(Box::new(LettersAround {
+            before: before.to_vec(),
+            after: after.to_vec(),
+        }));
+    }
+
+    /// The record's letter `at` (in the record), where the record holds it: a searched letter, or
+    /// one that its cut kept around the interval (`keep_around`).
+    pub fn record_letter(&self, at: usize) -> Option<u8> {
+        let offset = self.placement().offset;
+        let around = self.around.as_deref();
+        match at.checked_sub(offset) {
+            Some(inside) if inside < self.sequence.len() => Some(self.sequence[inside]),
+            Some(inside) => around?.after.get(inside - self.sequence.len()).copied(),
+            None => {
+                let before = &around?.before;
+                before.get(before.len().checked_sub(offset - at)?).copied()
+            }
+        }
     }
 
     /// Cuts the record to its letters `[from, to_exclusive)` in place, as NCBI searches a record
@@ -289,8 +341,9 @@ pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<Fas
     // }
     //
     // ```
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("cannot read BLASTX input {}", path.display()))?;
+    let file = anyhow::Context::with_context(std::fs::File::open(path), || {
+        format!("cannot read BLASTX input {}", path.display())
+    })?;
     parse_fasta_stream_with_warnings(
         &mut FastaStream::from_file(file),
         protein,
@@ -514,6 +567,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         false,
         None,
         None,
+        0,
         deliver,
         warn,
     )
@@ -556,6 +610,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     keep_defline: bool,
     parse_deflines: Option<BelievedRead<'_>>,
     range: Option<&SequenceRange>,
+    around: usize,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
@@ -565,6 +620,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut batch = ReaderBatch {
         range,
         keep_whole: keep_defline,
+        around,
         kept: keep_records.then(Vec::new),
         ..ReaderBatch::default()
     };
@@ -726,7 +782,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 },
             )? as usize;
             let record = current
-                .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
+                .get_or_insert_with(|| new_record(batch.number(&records), protein, Vec::new()));
             for text in messages {
                 let warning = InputWarning {
                     line: line_index + 1,
@@ -854,8 +910,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 .skip(1)
                 .position(|&b| b < b' ')
                 .map_or(title_bytes.len(), |i| i + 1);
-            let title = String::from_utf8(truncate_spaces_end(&title_bytes[..end]).to_vec())
-                .context("invalid UTF-8 FASTA title")?;
+            let title = truncate_spaces_end(&title_bytes[..end]).to_vec();
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1677
             // ```c++
             //     // check for nuc or aa sequences at the end of the title
@@ -961,8 +1016,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             raw_residues = 0;
             continue;
         }
-        let record = current
-            .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
+        let record =
+            current.get_or_insert_with(|| new_record(batch.number(&records), protein, Vec::new()));
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
@@ -1158,7 +1213,7 @@ fn read_believed_defline(
     })
 }
 
-fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
+fn new_record(index: usize, protein: bool, title: Vec<u8>) -> FastaRecord {
     FastaRecord {
         internal_id: format!(
             "{}_{n}",
@@ -1170,6 +1225,7 @@ fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
         lowercase_masks: Vec::new(),
         warnings: Vec::new(),
         source: None,
+        around: None,
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:437-447
@@ -1424,7 +1480,7 @@ mod tests {
     // ```
     fn ncbi_reader_preserves_normalized_positions_and_warnings() {
         let r = parse_fasta(b">  q description   \r\natg1-2-3ACT;rest\r\n", false, true).unwrap();
-        assert_eq!(r[0].title, "q description");
+        assert_eq!(r[0].title, b"q description");
         assert_eq!(r[0].internal_id, "Query_1");
         assert_eq!(r[0].sequence, b"ATGACT");
         assert_eq!(r[0].lowercase_masks, vec![(0, 2)]);
@@ -1530,6 +1586,7 @@ fn emit_fasta_batch(
             // The letter before the interval is the only one outside it that a split query's
             // chunks read (`split::x_chunk_masks`); a record keeps its whole letters for it.
             let keep_whole = batch.keep_whole || record.lower_case_before(from);
+            record.keep_around(from, to + 1, batch.around);
             record.cut_in_place(from, to + 1, keep_whole);
             batch.length += length;
         }
@@ -1577,6 +1634,9 @@ struct ReaderBatch<'r> {
     range: Option<&'r SequenceRange>,
     /// Whether a cut record keeps its whole letters (the archive, `FastaRecord::cut_in_place`).
     keep_whole: bool,
+    /// The letters on each side of its interval that a cut record keeps
+    /// (`FastaRecord::keep_around`).
+    around: usize,
     /// The records of the batches delivered, when the reader keeps them (and returns them all);
     /// `None` drops each batch once delivered, so that the reader holds one batch at a time.
     kept: Option<Vec<FastaRecord>>,
@@ -1863,6 +1923,9 @@ pub(crate) struct FastaStream<R: Read> {
     /// `CStreamLineReader::UngetLine`: the line that the next read gives again (the Seq-id step
     /// of `read_fasta_stream` read it and handed it back).
     unget_line: Option<Vec<u8>>,
+    /// The letters on each side of its `-query_loc` interval that each record cut to it keeps
+    /// (`FastaRecord::keep_around`, `empty_rows::query_letters_around`); 0 for none.
+    pub(crate) around: usize,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -1934,6 +1997,7 @@ impl<R: Read> FastaStream<R> {
             seq_id_role: None,
             program: super::args::ProgramName::BLASTX,
             unget_line: None,
+            around: 0,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -2751,6 +2815,7 @@ fn read_fasta_stream<R: Read>(
             stream.unget_line = Some(line);
         }
     }
+    let around = stream.around;
     let records = parse_fasta_lines(
         stream,
         protein,
@@ -2760,6 +2825,7 @@ fn read_fasta_stream<R: Read>(
         keep_defline,
         parse_deflines,
         range,
+        around,
         &mut |records| {
             delivered = true;
             deliver(records)
@@ -3469,7 +3535,7 @@ mod defline_tests {
     }
 
     /// `read` with NCBI's data loaders on (`FastaStream::seq_id_role`): the titles and letters.
-    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(String, Vec<u8>)>> {
+    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
         stream.parse_deflines = parse_deflines;
         stream.seq_id_role = Some("query");

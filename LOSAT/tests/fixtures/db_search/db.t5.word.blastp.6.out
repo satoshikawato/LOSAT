@@ -1,0 +1,8 @@
+pdq	chi,	chi,	chi,	chi,	chi,	chi, partial [ ]	0
+pdq	gnl|BL_ORD_ID|6	gnl|BL_ORD_ID|6	BL_ORD_ID:6	BL_ORD_ID:6	BL_ORD_ID:6	 	0
+pdq	(plastid)	(plastid)	(plastid)	(plastid)	(plastid)	MAG: (plastid) [ ]	0
+pdq	MAG:	MAG:	MAG:	MAG:	MAG:	  MAG:  	77777
+pdq	chi	chi	chi	chi	chi	chi, partial [ ]	77777
+pdq	gnl|BL_ORD_ID|2	gnl|BL_ORD_ID|2	BL_ORD_ID:2	BL_ORD_ID:2	BL_ORD_ID:2	TPA:	77777
+pdq	gnl|BL_ORD_ID|1	gnl|BL_ORD_ID|1	BL_ORD_ID:1	BL_ORD_ID:1	BL_ORD_ID:1	 	77777
+pdq	gnl|BL_ORD_ID|0	gnl|BL_ORD_ID|0	BL_ORD_ID:0	BL_ORD_ID:0	BL_ORD_ID:0	MAG: (plastid) [ ]	77777

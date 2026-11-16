@@ -306,7 +306,6 @@ fn parse_blastn_args(
         use_index: None,
         evalue: Some(10.0),
         percent_identity: None,
-        min_hit_length: 0,
         max_target_seqs: None,
         num_descriptions: None,
         num_alignments: None,

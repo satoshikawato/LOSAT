@@ -177,6 +177,47 @@ impl NcbiException {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
+    // ```c++
+    // #define NCBI_RETHROW_SAME(prev_exception, message)                \
+    //     do { prev_exception.AddBacklog(DIAG_COMPILE_INFO, message,    \
+    //                                    prev_exception.GetSeverity()); \
+    //     throw; }  while (0)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
+    // ```c++
+    // void CException::AddBacklog(const CDiagCompileInfo& info,
+    //                             const string& message,
+    //                             EDiagSev severity)
+    // {
+    //     const CException* prev = m_Predecessor;
+    //     m_Predecessor = x_Clone();
+    //     ...
+    //     x_Init(info, message, 0, severity);
+    // ```
+    /// `NCBI_RETHROW_SAME(self, message)` in `function` at `line` of `file`: the same exception
+    /// (its class, code and extra text) with the new place and message, the old one its
+    /// predecessor (the serial object frames' `END_OBJECT_FRAME`, `report::serial::xml`).
+    pub fn rethrow_same(
+        self,
+        file: &'static str,
+        line: u32,
+        function: &'static str,
+        message: impl Into<String>,
+    ) -> Self {
+        NcbiException {
+            site: ThrowSite {
+                file,
+                line,
+                kind: self.site.kind,
+                function: Some(function),
+            },
+            message: message.into(),
+            extra: self.extra.clone(),
+            predecessor: Some(Box::new(self)),
+        }
+    }
+
     /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
     #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
@@ -239,6 +280,21 @@ impl NcbiException {
             os.push('\n');
         }
         os
+    }
+
+    /// The exception as the error of a report's writer, where NCBI's formatter throws it while the
+    /// report is written (the merge of a query-anchored section,
+    /// `report::query_anchored::write_section`): the writers before the program's report pass
+    /// `io::Error`s on, and the report finds the exception again ([`NcbiException::of_io_error`],
+    /// `cli::NativeError::of_writer`), as NCBI's leaves the formatter for the application's
+    /// `CATCH_ALL`.
+    pub(crate) fn into_io_error(self) -> std::io::Error {
+        std::io::Error::other(self)
+    }
+
+    /// The exception that an error of a report's writer carries ([`NcbiException::into_io_error`]).
+    pub(crate) fn of_io_error(error: &std::io::Error) -> Option<&NcbiException> {
+        error.get_ref()?.downcast_ref()
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7844-7856
@@ -392,6 +448,16 @@ impl NcbiException {
         out
     }
 }
+
+/// `what()` ([`NcbiException::what`]).
+impl std::fmt::Display for NcbiException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.what())
+    }
+}
+
+/// The error of a report's writer ([`NcbiException::into_io_error`]).
+impl std::error::Error for NcbiException {}
 
 /// A message of severity `Error` with the error id `id` (`m_ErrText`, or `<err_code>.<err_subcode>`)
 /// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,

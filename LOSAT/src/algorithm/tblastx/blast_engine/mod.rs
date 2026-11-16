@@ -40,6 +40,7 @@ pub use run_impl::x_pair_par_print_summary;
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use run_impl::x_seed_release_print_summary;
 // What every report of a run needs (`blast_xml`).
+pub(crate) use run_impl::ReportDatabase;
 pub(crate) use run_impl::TblastxReportRun;
 
 // Imports used by submodules
@@ -99,8 +100,7 @@ pub(crate) use super::ncbi_cutoffs::{
     x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 pub(crate) use super::reevaluate::{
-    get_num_identities_and_positives_ungapped, hsp_test,
-    reevaluate_ungapped_hit_ncbi_translated_with,
+    get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
 pub(crate) use super::scoring::{Blosum62Score, MatrixScores, TbxScore};
@@ -204,6 +204,8 @@ pub(crate) struct TblastxQueryStats {
     /// not valid: the `EffectiveSearchSpace` option of a BLAST archive (outfmt 11) takes the
     /// first context of the batch's first query, not its first valid one.
     pub context0_search_space: i64,
+    /// That context's length in residues, 0 when it is not valid (`archive::RequestLength::space`).
+    pub context0_aa_len: i64,
     /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }
@@ -460,8 +462,13 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         //         align_length < hit_options->min_hit_length) ;
         // ```
         let percent_identity = 0.0;
-        let min_hit_length = 0usize;
-        if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
+        let min_hit_length = 0;
+        if crate::core::blast_hits::hsp_test(
+            num_ident as i64,
+            new_len as i64,
+            percent_identity,
+            min_hit_length,
+        ) {
             continue;
         }
 

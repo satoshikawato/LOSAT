@@ -79,6 +79,7 @@ pub use crate::algorithm::blastp::blast_engine::check_options as check_blastp_op
 pub use crate::algorithm::blastx::check_options as check_blastx_options;
 pub use crate::algorithm::blastx::BlastxArgs;
 pub use crate::algorithm::tblastn::check_options as check_tblastn_options;
+pub use crate::algorithm::tblastn::refuse_browser_pssm_query as refuse_tblastn_pssm_query;
 pub use crate::algorithm::tblastx::blast_engine::check_options as check_tblastx_options;
 pub use crate::utils::threading::validate_threads;
 
@@ -86,7 +87,8 @@ pub use crate::utils::threading::validate_threads;
 // of one argv share, and the routing of their outputs (`api/local_blast.rs`).
 pub use crate::api::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    with_run_pool, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
+    with_run_pool, FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink,
+    ReportOutputs,
 };
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;
@@ -115,14 +117,16 @@ pub use crate::blastinput::fasta_reader::{
 };
 pub use crate::blastinput::input_files::is_blank;
 
-/// The options of `program`'s command line that a search of records does not take: the PSSM
-/// files (psiblast's, and tblastn's `-in_pssm`, the query as a PSSM file) and the search strategy
-/// file. The library API refuses
-/// them and its `describe` leaves them out (`api::search::file_options`, the one list); the
-/// browser refuses `-in_pssm` (`tblastn::check_options`, until line PS's PSW1), and the adapter's
-/// `describe` leaves them out.
+/// The options of `program`'s command line that the browser's searches of records do not take:
+/// the search strategy file, which the library API refuses too (`api::search::file_options`), and
+/// tblastn's `-in_pssm` (the query as a PSSM file), which the browser refuses until line PS's PSW1
+/// (`tblastn::refuse_browser_pssm_query`; the library API's records take it, `api::Inputs::pssm`).
+/// The adapter's `describe` leaves them out.
 pub fn records_refused_options(program: crate::api::Program) -> &'static [&'static str] {
-    crate::api::file_options(program)
+    match program {
+        crate::api::Program::Tblastn => &["in_pssm", "export_search_strategy"],
+        program => crate::api::file_options(program),
+    }
 }
 
 // The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their

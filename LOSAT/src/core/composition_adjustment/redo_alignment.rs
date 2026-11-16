@@ -1525,7 +1525,7 @@ fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     let data_len = translation.len() - 1;
     let data = &mut translation[1..data_len];
     // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the windows of one subject overlap from query to query, so
-    // this masker takes the trim of a segment trimmed before on this thread from its memo.
+    // this masker takes the trim of a segment trimmed before (on any thread) from the memo.
     let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).x_with_trim_memo();
     let intervals = masker.mask_sequence(data);
     for interval in &intervals {
@@ -2428,8 +2428,11 @@ fn x_take_lane_range(
 }
 
 // No NCBI counterpart: number of Newton inputs gathered per TBLASTN prefetch (at least); it does not
-// change any value NCBI computes.
-const X_LANES_PREFETCH_INPUTS: usize = 32;
+// change any value NCBI computes. Each prefetch adds its results to the thread's glibc arena at
+// once, and the space they leave seldom fits the next prefetch's, so fewer prefetches push the
+// arena's top less often (line EB s26: with 16 / 32 / 64 / 128 inputs, the peak of TBLASTN
+// `-subject` at 64 threads was +17 % / base / -3 % / +18 %; 128 holds too many results at once).
+const X_LANES_PREFETCH_INPUTS: usize = 64;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1176-1198
 // ```c

@@ -226,7 +226,7 @@ impl Off {
 /// as without the switch), and for outfmt 0 the titles and, with `-lcase_masking`, the lowercase
 /// masks. None of them depends on the hit lists.
 pub(super) struct SubjectCache {
-    pub(super) ids: Option<Vec<Arc<[u8]>>>,
+    pub(super) ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>>,
     pub(super) titles: Option<Vec<Arc<[u8]>>>,
     pub(super) masks: Option<Vec<Vec<MaskedInterval>>>,
 }
@@ -437,12 +437,13 @@ pub(super) fn refused_before_reading(
     if x_debug_output(args) {
         return Some(Off::Debug);
     }
-    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20): the XML writer refuses a `-db` name,
-    // a query title or id, or the title of a subject with a hit that it cannot write as NCBI's
-    // XML (DESIGN_OF4 Q2), and those checks are made by the report call of the batch that holds
-    // the query or the subject. With several batches a later batch's refusal would come after
-    // the first batch's Iterations were written, so outfmt 5 is never streamed: the one report
-    // call after the search finds every refusal before the first byte.
+    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20; OWNER_DECISIONS 20): the XML writer
+    // refuses a query title or the title of a subject with a hit that NCBI's definition line
+    // generator reads past the end of (`names::Refusal`; every other text is written as NCBI's
+    // stream writes it, since line RG item K4h), and that check is made by the report call of the
+    // batch that holds the query or the subject. With several batches a later batch's refusal
+    // would come after the first batch's Iterations were written, so outfmt 5 is never streamed:
+    // the one report call after the search finds every refusal before the first byte.
     if output_formats
         .iter()
         .any(|format| format.is_structured_xml())
@@ -528,7 +529,9 @@ fn check(
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
     // length adjustment `a` between 0 and the smaller root of `n a^2 - (q n + db) a + c`, which is
     // at most `2 c / (q n + db) <= 2 q` (`compute_length_adjustment_ncbi`, `c <= q db`). So
-    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there.
+    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there; a negative
+    // `n` (an alias file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length, so the
+    // bound takes `|n|`.
     let metadata = source.metadata();
     let db_length = if args.db_length() > 0 {
         i128::from(args.db_length())
@@ -536,7 +539,9 @@ fn check(
         metadata.db_len_total as i128
     };
     let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
-    if (db_length.abs() + metadata.db_num_seqs as i128 * factor) * factor > i128::from(i64::MAX) {
+    if (db_length.abs() + i128::from(metadata.db_num_seqs.unsigned_abs()) * factor) * factor
+        > i128::from(i64::MAX)
+    {
         return Err(Off::SearchSpace);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
@@ -552,11 +557,17 @@ fn check(
     // module doc).
     let cache = match source {
         SubjectSource::Prepared(prepared) => {
-            // `tabular_subject_ids` of every subject, where LOSAT refuses none.
-            let ids: Option<Vec<Arc<[u8]>>> = prepared
+            // `tabular_subject_ids` of every subject, where every lookup finds its id.
+            let ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>> = prepared
                 .records
                 .iter()
-                .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
+                .map(|subject| {
+                    subject
+                        .subject_tabular_id(false)
+                        .ok()
+                        .flatten()
+                        .map(|id| Some(Arc::from(id)))
+                })
                 .collect();
             let pairwise = output_formats.iter().any(|format| format.is_pairwise());
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());
@@ -767,6 +778,7 @@ mod tests {
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors2);
         outputs.formats.push(FormatOutput {
             outfmt: "7",
+            refusal: crate::api::local_blast::FormatRefusal::FailsCall,
             sink: OutputSink::Writer(&mut two),
         });
         assert_eq!(

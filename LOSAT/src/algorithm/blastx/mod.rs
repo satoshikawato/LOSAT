@@ -453,10 +453,14 @@ mod culling;
 pub mod report;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod anchored;
 mod archive;
 // The streams of a library call's hold, which the report streams of `cli::NcbiOstream` name.
 pub(crate) use blast_xml::HeldFormatWriter;
 mod blast_xml;
+// The reports of the ungapped HSPs of length 0 that `-window_size 0` finds (NCBI's formatters'
+// exceptions, the Seq-loc mapper's rows of `-subject`).
+mod empty_rows;
 mod seqalign;
 // NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
 // field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).

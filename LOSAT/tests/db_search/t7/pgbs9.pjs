@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pgbs9",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pgbs9",
+  "number-of-letters": 450,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-15T07:46:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49907,
+  "bytes-to-cache": 548,
+  "files": [
+    "pgbs9.pdb",
+    "pgbs9.phr",
+    "pgbs9.pin",
+    "pgbs9.pog",
+    "pgbs9.pos",
+    "pgbs9.pot",
+    "pgbs9.psq",
+    "pgbs9.ptf",
+    "pgbs9.pto"
+  ]
+}

@@ -24,6 +24,12 @@ LOSAT/tests/db_search (README.md there says how they were built).
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
+- a `ncbi` row whose `covers` cell has `ncbi-near: ROW_ID` (up to a space or a ` | `): the expectation is the frozen
+  bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same search with
+  the mask one letter shorter), where NCBI's own run of the row reaches an approved NCBI defect
+  (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
+  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject). The row has no frozen files of its own; `freeze` does not run NCBI
+  for it and copies ROW_ID's columns (`near_row_id`).
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -50,13 +56,15 @@ stderr and exit status with the frozen files (and checks that each frozen file's
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
-failure's exit status counts as any other failure's, a row whose query the reader refuses is
+failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
+too (the library holds its output where the command line holds it), a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
-row whose query has a reader error after the batch that the command line refuses), and the rows that
-write PSSM files (the PSSM kinds) or pass a PSSM file option are `library-skip`: the library API
-writes no PSSM file and refuses those options (`LIBRARY_REFUSED`). psiblast's rounds (`-num_iterations` other than
-1) run through the library as on the command line.
+row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
+(`-num_iterations` other than 1), its PSSM files (the PSSM kinds) and the PSSM queries of psiblast
+and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library as on the command line;
+the rows of rpsblast and rpstblastn (the library API has no such program) and those that give both
+`-query` and `-in_pssm` (the library's query is one or the other) are `library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -168,23 +176,26 @@ def is_env_token(token: str) -> bool:
     return token.partition("=")[0] in ENV_NAMES
 
 
-def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str]] | None:
-    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...]`:
-    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`) and the files put in their
-    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux, inflated when FILE ends in .gz); None for another cell."""
+def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
+    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
+    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux, inflated when FILE ends in .gz) and
+    the alias file the run searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files,
+    `-db ALIAS`; its DBLIST names them); None for another cell."""
     if not cell.startswith("rps-gz:"):
         return None
-    names, *changes = cell.removeprefix("rps-gz:").split("!")
+    body, at, alias = cell.removeprefix("rps-gz:").partition("@")
+    names, *changes = body.split("!")
     dropped = {"." + change for change in changes if "=" not in change}
     replaced = dict(("." + change.split("=")[0], change.split("=")[1]) for change in changes if "=" in change)
-    return names.split("+"), dropped, replaced
+    return names.split("+"), dropped, replaced, (alias if at else None)
 
 
 def inflate_rps(cell: str) -> Path:
     """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
     files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
-    leaves out or replaces."""
-    names, dropped, replaced = rps_cell(cell)
+    leaves out or replaces, and the cell's alias file."""
+    names, dropped, replaced, alias = rps_cell(cell)
     rps_dir = TESTS / "db_search" / "rps"
     target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
@@ -199,6 +210,8 @@ def inflate_rps(cell: str) -> Path:
         for extension, file in replaced.items():
             data = (rps_dir / file).read_bytes()
             (target / f"{name}{extension}").write_bytes(gzip.decompress(data) if file.endswith(".gz") else data)
+    if alias is not None:
+        (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target
 
 
@@ -209,11 +222,12 @@ def rps_dir_token(row: dict[str, str]) -> bool:
 
 def subjects_argv(cell: str) -> list[str]:
     """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
-    for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the inflated directory)."""
+    (`-db ALIAS` with `@ALIAS`) for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the
+    inflated directory)."""
     if cell.startswith("subject:"):
         return ["-subject", cell.removeprefix("subject:")]
     if (rps := rps_cell(cell)) is not None:
-        return ["-db", " ".join(rps[0])]
+        return ["-db", rps[3] if rps[3] is not None else " ".join(rps[0])]
     return ["-db", cell]
 
 
@@ -301,6 +315,18 @@ def expected_text(row: dict[str, str]) -> str:
     return rest.split(" | ")[0]
 
 
+def near_row_id(row: dict[str, str]) -> str | None:
+    """The `ncbi` row whose frozen NCBI run of a near input is the expectation of `row` (`ncbi-near: ROW_ID` in its
+    covers cell), or None: the row's own frozen files."""
+    _, marker, rest = row["covers"].partition("ncbi-near: ")
+    return rest.split(" | ")[0].split()[0] if marker else None
+
+
+def frozen_id(row: dict[str, str]) -> str:
+    """The row id that names the frozen files of `row`'s expectation (`near_row_id`, else its own)."""
+    return near_row_id(row) or row["row_id"]
+
+
 def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
     return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
 
@@ -327,7 +353,7 @@ def freeze(args: argparse.Namespace) -> int:
             row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
             print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
             continue
-        if row["kind"] != "ncbi":
+        if row["kind"] != "ncbi" or near_row_id(row):
             continue
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
@@ -363,6 +389,18 @@ def freeze(args: argparse.Namespace) -> int:
         print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
+    # The rows whose expectation is a near input's NCBI run (`near_row_id`) take that row's columns, after it
+    # is frozen (it may come later in the file).
+    by_id = {row["row_id"]: row for row in rows}
+    for row in rows:
+        near = near_row_id(row)
+        if not selected(row, args) or row["kind"] != "ncbi" or not near:
+            continue
+        source = by_id.get(near)
+        if source is None or source["kind"] != "ncbi" or near_row_id(source) or source["outfmt"] != row["outfmt"]:
+            raise SystemExit(f"{row['row_id']}: ncbi-near {near} is not an ncbi row of its own run with the same outfmt")
+        row.update({key: source[key] for key in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")})
+        print(f"{row['row_id']}\tncbi-near={near}\trc={row['rc']}\tstdout={row['stdout_bytes']}")
     write_manifest(comments, rows)
     return 0
 
@@ -397,17 +435,15 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
     return (observed != 0) != (expected != 0) if library else observed != expected
 
 
-# psiblast's PSSM file options, which the library API refuses before any search
-# (`api::search::pssm_file_options`).
-LIBRARY_REFUSED = {"-out_pssm", "-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm", "-in_pssm"}
-
-
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
-    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row))
-                    or row["program"] in ("rpsblast", "rpstblastn")):
+    # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
+    # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call.
+    argv = search_argv(row)
+    if library and (row["program"] in ("rpsblast", "rpstblastn")
+                    or ("-query" in argv and "-in_pssm" in argv)):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
@@ -439,8 +475,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        # The library writes as the search goes (`api::run`): nothing holds the bytes before a
-        # refusal, as the command line holds them.
+        # A refusal follows no byte in either path (the library holds its output where the command
+        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
+        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
+        # library skips.
         if row["stdout_bytes"]:
             out_path = FROZEN / f"{row['row_id']}.out"
             out = out_path.read_bytes() if out_path.exists() else b""
@@ -448,15 +486,15 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                 problems.append("frozen .out does not match the manifest")
             if run.stdout != out:
                 problems.append("stdout " + first_difference(out, run.stdout))
-        elif run.stdout and not library:
+        elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
         if pssm and (pssms.files or pssms.stray):
             problems.append(f"a refused run wrote {[name for name, _ in pssms.files] + pssms.stray}")
         return ("differs", "; ".join(problems)) if problems else ("rejection", "")
-    out = (FROZEN / f"{row['row_id']}.out").read_bytes()
-    err_path = FROZEN / f"{row['row_id']}.err"
+    out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
+    err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.

@@ -62,7 +62,7 @@ use crate::report::seqid::SeqId;
 
 use super::asn_ber::AsnBinaryEncoder;
 use super::asn_text::AsnTextEncoder;
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, ReplacedChar, SerialError, Traced};
 use super::json::JsonEncoder;
 
 /// The serialized formats of a Seq-annot of Seq-aligns.
@@ -290,7 +290,10 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
 /// that end as the length and an offset of 0. The plus-strand subject row's starts are the
 /// record's (`s_RemapToSubjectLoc` adds the `-subject_loc` start). The query-anchored reports read
 /// them (`report::query_anchored`).
-pub(crate) fn nucleotide_row_segments(hit: &crate::common::Hit, segments: &mut Segments) -> bool {
+pub(crate) fn nucleotide_row_segments(
+    hit: &crate::common::Hit,
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
     // ```c++
     // static TSeqPos
@@ -374,25 +377,31 @@ pub(crate) fn nucleotide_row_segments(hit: &crate::common::Hit, segments: &mut S
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
     };
     collect_seq_align_data(&record, query_length, 0, false, false, segments);
-    minus
+    crate::report::query_anchored::HspStrands {
+        query_minus: minus,
+        ..Default::default()
+    }
 }
 
-/// The Dense-seg segments of a TBLASTN hit (`CreateDensegFromStdseg` of its Std-segs: the
-/// starts of `s_CollectSeqAlignData`, the subject's in nucleotides, and the lengths in residues)
-/// whose coordinates are in its records, the subject's in `subject_frame` of its record of
-/// `subject_length` nucleotides (`seq_range::record_frame`, the frame the report shows), and
-/// whether the rows' strands differ (a minus frame; the protein query row has none). NCBI makes
-/// them in the searched letters and the frame of the search and `s_RemapToSubjectLoc` adds the
-/// start of the `-subject_loc` interval (`RemapToQueryLoc` the query's): the same nucleotides as
-/// `s_GetAlignmentStart` counts in the record's frame (on the minus strand from the record's end,
-/// `original_length - 3 * (curr_pos + num) + frame + 1`), where the HSP's offset in that frame's
-/// residues is exact (the frame is that of the row's first nucleotide).
-pub(crate) fn translated_subject_row_segments(
+/// The Dense-seg segments of a hit of a translated search (`CreateDensegFromStdseg` of its
+/// Std-segs: the starts of `s_CollectSeqAlignData`, a translated row's in nucleotides, and the
+/// lengths in residues) whose coordinates are in its records, and its rows' strands and query
+/// frame. A translated row is given by its frame in its record and the record's length in
+/// nucleotides (`seq_range::record_frame`, the frame the report shows): the query's of BLASTX and
+/// TBLASTX (`query`), the subject's of TBLASTN and TBLASTX (`subject`); an untranslated row is a
+/// protein's (`None`), whose positions are the hit's. NCBI makes them in the searched letters and
+/// the frame of the search and `RemapToQueryLoc` / `s_RemapToSubjectLoc` add the starts of the
+/// `-query_loc` / `-subject_loc` intervals: the same nucleotides as `s_GetAlignmentStart` counts
+/// in the record's frame (on the minus strand from the record's end, `original_length - 3 *
+/// (curr_pos + num) + frame + 1`), where the HSP's offset in that frame's residues is exact (the
+/// frame is that of the row's first nucleotide). A row of a minus frame is on the minus strand
+/// (`s_Frame2Strand`); the query frame is the query's group (`query_anchored::Hsps`).
+pub(crate) fn translated_row_segments(
     hit: &crate::common::Hit,
-    subject_frame: i8,
-    subject_length: usize,
+    query: Option<(i8, usize)>,
+    subject: Option<(i8, usize)>,
     segments: &mut Segments,
-) -> bool {
+) -> crate::report::query_anchored::HspStrands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
     // ```c++
     // static TSeqPos
@@ -451,28 +460,41 @@ pub(crate) fn translated_subject_row_segments(
     //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
     // }
     // ```
-    let frame = i32::from(subject_frame);
-    let length = subject_length as i32;
-    let (s_low, s_high) = (
-        hit.s_start.min(hit.s_end) as i32,
-        hit.s_start.max(hit.s_end) as i32,
-    );
-    // The frame's residue of the HSP's first codon: `frame - 1 + 3 * offset` is its first
-    // nucleotide on the plus strand; `length - 3 * offset + frame + 1` its end on the minus strand.
-    let s_offset = if frame > 0 {
-        (s_low - 1 - (frame - 1)) / CODON_LENGTH
-    } else {
-        (length + frame + 1 - s_high) / CODON_LENGTH
+    // A row's offset and end in its frame's residues (`HspRecord::q_offset`, `q_end`): the
+    // residue of the HSP's first codon is `(start - (frame - 1)) / 3` on the plus strand, where
+    // `frame - 1 + 3 * offset` is its first nucleotide, and `(length + frame + 1 - high) / 3` on
+    // the minus strand, where `length - 3 * offset + frame + 1` is its end; an untranslated row's
+    // positions are its residues.
+    let row = |start: usize, end: usize, translated: Option<(i8, usize)>| {
+        let (low, high) = (start.min(end) as i32, start.max(end) as i32);
+        match translated {
+            Some((frame, length)) => {
+                let (frame, length) = (i32::from(frame), length as i32);
+                let offset = if frame > 0 {
+                    (low - 1 - (frame - 1)) / CODON_LENGTH
+                } else {
+                    (length + frame + 1 - high) / CODON_LENGTH
+                };
+                (
+                    offset,
+                    offset + (high - low + 1) / CODON_LENGTH,
+                    frame as i8,
+                    length,
+                )
+            }
+            None => (low - 1, high, 0, 0),
+        }
     };
-    let residues = (s_high - s_low + 1) / CODON_LENGTH;
+    let (q_offset, q_end, q_frame, query_length) = row(hit.q_start, hit.q_end, query);
+    let (s_offset, s_end, s_frame, subject_length) = row(hit.s_start, hit.s_end, subject);
     let record = HspRecord {
         subject: 0,
-        q_offset: hit.q_start as i32 - 1,
-        q_end: hit.q_end as i32,
+        q_offset,
+        q_end,
         s_offset,
-        s_end: s_offset + residues,
-        q_frame: 0,
-        s_frame: subject_frame,
+        s_end,
+        q_frame,
+        s_frame,
         score: hit.raw_score,
         num: 0,
         evalue: hit.e_value,
@@ -482,8 +504,91 @@ pub(crate) fn translated_subject_row_segments(
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
     };
-    collect_seq_align_data(&record, 0, length, false, true, segments);
-    frame < 0
+    collect_seq_align_data(
+        &record,
+        query_length,
+        subject_length,
+        query.is_some(),
+        subject.is_some(),
+        segments,
+    );
+    crate::report::query_anchored::HspStrands {
+        query_minus: q_frame < 0,
+        subject_minus: s_frame < 0,
+        query_frame: q_frame,
+        no_widths: false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:779-791
+// ```c++
+//             if ((*i)->IsInt()) {
+//                 const CSeq_interval& interval = (*i)->GetInt();
+//
+//                 // determine start and len
+//                 from = interval.GetFrom();
+//                 to = interval.GetTo();
+//                 starts.push_back(from);
+//                 row_len = to - from + 1;
+//                 row_lens.push_back(row_len);
+//
+//                 int width = 0;
+//                 // try to determine/check the seg_len and width
+//                 if (!seg_len) {
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:909-935
+// ```c++
+//     for (seg = 0; seg < ds.GetNumseg(); seg++) {
+//         if (!widths_determined[seg]) {
+//             for(row = 0; row < dim; row++) {
+//                 if (starts[seg * dim + row] >= 0) {
+//                     int width = widths[row];
+//                     if (width == 3) {
+//                         seg_lens[seg] /= 3;
+//                     } else if (width == 0) {
+//                         widths_failure = true;
+//                     }
+//                     break;
+//     ...
+//     if (widths_failure) {
+//         if (widths_success) {
+//             ...
+//         } else {
+//             ds.ResetWidths();
+//         }
+//     }
+// ```
+/// The Dense-seg that `CreateDensegFromStdseg` makes of the empty rows of a BLASTX HSP of length 0
+/// (`ungapped_rows_empty`) as the engine made them (`-db`, and `-subject`'s Seq-aligns that the
+/// Seq-loc mapper leaves, `mapper_rewrites_empty_rows`): each row `(from, from - 1)` has the length
+/// `to - from + 1` of 0 in the unsigned `TSeqPos`, so its one segment has length 0 and starts at
+/// the rows' `from`, and no width is determined (both are 0), which resets the widths
+/// (`HspStrands::no_widths`). The query row keeps the strand of its frame `query_frame`, the protein
+/// row has none (`write_empty_rows`). The rows' `from` in the records are the lower of each row's
+/// shown ends (the query's `(from + 1, from)` on a plus frame, `(from, from + 1)` on a minus frame,
+/// `blastx::report::query_endpoints`; the subject's `(from + 1, from)`), which hold the
+/// `-query_loc` and `-subject_loc` starts that `RemapToQueryLoc` and the mapper add.
+pub(crate) fn empty_row_segments(
+    hit: &crate::common::Hit,
+    query_frame: i8,
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
+    let q_from = hit.q_start.min(hit.q_end);
+    let s_from = hit.s_start.min(hit.s_end);
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    segments.starts.extend([q_from as i32, s_from as i32]);
+    segments.lens.push(0);
+    segments
+        .strands
+        .extend([Strand::of_frame(query_frame), Strand::Unknown]);
+    crate::report::query_anchored::HspStrands {
+        query_minus: query_frame < 0,
+        subject_minus: false,
+        query_frame,
+        no_widths: true,
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100
@@ -980,7 +1085,8 @@ fn write_user_object<E: Encoder>(enc: &mut E, type_str: &[u8], label: &[u8], dat
 ///    	retval->AddUserObject(*blast_db_info);
 /// ```
 /// A `-subject` search has no database name (`n/a`). A `-db` named `n/a` or `SRA` is
-/// refused by the programs (`check_database`), so its title is written.
+/// refused by the programs (`check_database`), so its title is written (a byte that NCBI's
+/// ASN.1 text or binary stream replaces is written as `#` with NCBI's post, `write_query_to`).
 fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
     enc.member("desc", 3);
     enc.begin_list(true);
@@ -1008,62 +1114,15 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
     enc.end_member();
 }
 
-/// LOSAT's refusals of a database search (`-db name`, title `title`: NCBI's
-/// `m_DbInfo.front().definition`, `PairwiseDatabase::definition`) for a Seq-annot format,
-/// made before the search:
-/// - a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
-///   third user object (`CreateSeqAnnotFromSeqAlignSet` above);
-/// - for the ASN.1 text, a title with a byte outside 0x20..0x7E, which NCBI's stream
-///   replaces by `#` with an error message on standard error (the default
-///   `eFNP_ReplaceAndWarn`).
-///
-/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
-/// ```c++
-/// NCBI_PARAM_ENUM_ARRAY(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE)
-/// {
-///     {"SKIP",               eFNP_Skip},
-///     ...
-/// };
-/// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE);
-/// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE, eFNP_ReplaceAndWarn);
-/// ```
-/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1871
-/// ```c++
-/// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
-///     const CObjectStack* io, const CTempString& str, char subst)
-/// {
-///     ...
-///     if ( fix_method != eFNP_Replace ) {
-///         string message;
-///         if (io != NULL) {
-///             message += io->GetStackTrace() + "\n";
-///         }
-///         message += "Bad char [0x" +
-///                    NStr::NumericToString((unsigned char)c,0,16)+
-///                    "] in string";
-/// ```
-pub fn check_database(
-    format: SerialFormat,
-    name: &str,
-    title: &[u8],
-    program: Program,
-) -> anyhow::Result<()> {
-    let number = match format {
-        SerialFormat::AsnText => 8,
-        SerialFormat::AsnBinary => 9,
-        SerialFormat::Json => 12,
-    };
+/// LOSAT's refusal of a database search (`-db name`) for a Seq-annot format, made before the
+/// search: a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
+/// third user object (`CreateSeqAnnotFromSeqAlignSet` above). The title of any other database is
+/// written as NCBI writes it, also with a byte that NCBI's stream replaces (`write_query_to`).
+pub fn check_database(format: SerialFormat, name: &str, program: Program) -> anyhow::Result<()> {
     if name.eq_ignore_ascii_case("n/a") || name.eq_ignore_ascii_case("SRA") {
         anyhow::bail!(
-            "a database named \"{name}\" (which NCBI BLAST+ describes as no database or as SRA in output format {number}) is not supported by LOSAT's {}",
-            program.name()
-        );
-    }
-    if matches!(format, SerialFormat::AsnText | SerialFormat::AsnBinary)
-        && title.iter().any(|byte| !(0x20..=0x7e).contains(byte))
-    {
-        anyhow::bail!(
-            "a database title with a character outside the visible ASCII range (which NCBI BLAST+ replaces by '#' with an error message in output format {number}) is not supported by LOSAT's {}",
+            "a database named \"{name}\" (which NCBI BLAST+ describes as no database or as SRA in output format {}) is not supported by LOSAT's {}",
+            format.outfmt(),
             program.name()
         );
     }
@@ -1699,7 +1758,7 @@ fn write_std_segs<E: Encoder>(
 ///     }
 /// ```
 /// (The subject's interval, :1363-1377, is the same with `subject_length`.)
-fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
+pub(crate) fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
     let frame = i32::from(frame);
     if frame == 0 {
         (offset, end - 1)
@@ -1713,6 +1772,88 @@ fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32
             length - CODON_LENGTH * end + frame + 1,
             length - CODON_LENGTH * offset + frame,
         )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+// ```c++
+//             if (rng.Empty()) {
+//                 NCBI_THROW(CSeqalignException, eInvalidAlignment,
+//                            "CSeq_align::GetSeqRange(): Row is empty");
+//             }
+//             return rng;
+// ```
+/// Whether the Std-seg rows of an ungapped HSP from `offset` to `end` (exclusive, in its frame's
+/// letters) are empty: an HSP of length 0, whose rows `ungapped_interval` ends one before they
+/// start (`CRange(from, from - 1)` is empty, so `CSeq_align::GetSeqRange` throws on them).
+/// BLASTX's one-hit word finder with `-window_size 0` reports such HSPs
+/// (`algorithm::blastx::empty_rows`); every other reported HSP has rows of its letters. The one
+/// predicate of every writer (`HspRecord::rows_empty`, `PairwiseHit::rows_empty`,
+/// `empty_rows::rows_empty`).
+#[inline]
+pub(crate) fn ungapped_rows_empty(offset: i64, end: i64) -> bool {
+    end == offset
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:453-460
+// ```c++
+//         // Two different lengths were found. Try to guess sequence types.
+//         if (minlen != 0  &&  maxlen != 0) {
+//             if (minlen*3 != maxlen) {
+//                 NCBI_THROW(CAnnotMapperException, eBadAlignment,
+//                     "Inconsistent seq-loc lengths in std-seg rows");
+//             }
+//             // Found both nucs and prots - make the second pass and
+//             // store widths for all sequences.
+// ```
+/// Whether `-subject`'s Seq-loc mapper (`remaps`, `RunRecord::remaps_subjects`) rewrites the
+/// empty rows of a Seq-align whose Std-segs' rows are empty or not (`rows_empty`, one per Std-seg)
+/// into the query nucleotide of `write_empty_rows` (`mapped_empty_query_nucleotide`): it learns
+/// the sequence types from a Std-seg with rows of letters only (`x_Init`'s first pass, above;
+/// an empty row's length 0 is skipped). A Seq-align of empty rows only gets no type and keeps its
+/// rows where their stop does not wrap (`algorithm::blastx::empty_rows::SubjectLoc::of_list`;
+/// where it does, BLASTX refused the report before). The one rule of the pairwise report
+/// (`pairwise::mapper_rewrites`) and the Seq-aligns (`write_seq_align_diags`).
+pub(crate) fn mapper_rewrites_empty_rows(
+    remaps: bool,
+    mut rows_empty: impl Iterator<Item = bool>,
+) -> bool {
+    remaps && rows_empty.any(|empty| !empty)
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1559
+// ```c++
+//                         if ( start_frame ) {
+//                             if (start >= start_frame) {
+//                                 // Add 1 or 2 bases to match complete codon.
+//                                 loc->SetInt().SetFuzz_from().SetAlt().push_back(start);
+//                                 start -= start_frame;
+//                             }
+//                             ...
+//                         if ( stop_frame ) {
+//                             loc->SetInt().SetFuzz_to().SetAlt().push_back(stop - 1);
+//                             stop += stop_frame;
+//                         }
+//                     }
+//                 }
+//
+//                 loc->SetInt().SetFrom(start);
+//                 // len may be 0 after dividing by width, check it before
+//                 // decrementing stop.
+//                 loc->SetInt().SetTo(stop > start ? stop - 1 : stop);
+// ```
+/// The query row of the Std-seg that `-subject`'s Seq-loc mapper makes of an HSP of length 0
+/// (`ungapped_rows_empty`) at a subject offset above 0, whose raw query row starts at `from`
+/// (`ungapped_interval`, in the searched letters): the one nucleotide `from` on a plus frame,
+/// `from - 1` on a minus frame (the mapper takes the frames from the empty protein row and pads
+/// the nucleotide row to codons, `x_GetDstStd`); the subject row stays empty. Probes: c0054 and
+/// P1's p0017, p0077, p0095, p0106 (`X/SURVEY_X2g_formats.md` 1). The one owner of that row
+/// (`write_empty_rows`, BLASTX's `qcovs`).
+pub(crate) fn mapped_empty_query_nucleotide(from: i32, frame: i8) -> i32 {
+    if frame > 0 {
+        from
+    } else {
+        from - 1
     }
 }
 
@@ -1784,6 +1925,7 @@ fn write_seq_align_diags<E: Encoder>(
     query: &QueryRecord<'_>,
     subject: &SubjectRecord<'_>,
     hsps: &[HspRecord<'_>],
+    remaps: bool,
     after_each: &mut impl FnMut(&mut E),
 ) {
     enc.element();
@@ -1794,6 +1936,7 @@ fn write_seq_align_diags<E: Encoder>(
     enc.member("segs", 3);
     enc.variant("Seq-align_segs", "std", 2);
     enc.begin_list(false);
+    let remaps = mapper_rewrites_empty_rows(remaps, hsps.iter().map(HspRecord::rows_empty));
     for hsp in hsps {
         let (q_from, q_to) =
             ungapped_interval(hsp.q_offset, hsp.q_end, hsp.q_frame, query.searched_length);
@@ -1804,22 +1947,33 @@ fn write_seq_align_diags<E: Encoder>(
             subject.searched_length,
         );
         begin_std_seg(enc, &query.id, &subject.id);
-        enc.element();
-        write_seq_interval(
-            enc,
-            &query.id,
-            q_from + query.offset,
-            q_to + query.offset,
-            Strand::of_frame(hsp.q_frame),
-        );
-        enc.element();
-        write_seq_interval(
-            enc,
-            &subject.id,
-            s_from + subject.offset,
-            s_to + subject.offset,
-            Strand::of_frame(hsp.s_frame),
-        );
+        if hsp.rows_empty() {
+            write_empty_rows(
+                enc,
+                query,
+                subject,
+                hsp,
+                remaps,
+                (q_from + query.offset, s_from + subject.offset),
+            );
+        } else {
+            enc.element();
+            write_seq_interval(
+                enc,
+                &query.id,
+                q_from + query.offset,
+                q_to + query.offset,
+                Strand::of_frame(hsp.q_frame),
+            );
+            enc.element();
+            write_seq_interval(
+                enc,
+                &subject.id,
+                s_from + subject.offset,
+                s_to + subject.offset,
+                Strand::of_frame(hsp.s_frame),
+            );
+        }
         end_std_seg_locs(enc);
         enc.member("scores", 3);
         enc.begin_list(true);
@@ -1835,6 +1989,141 @@ fn write_seq_align_diags<E: Encoder>(
     enc.end_member();
     write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
+}
+
+/// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word
+/// finder with `-window_size 0`, `algorithm::blastx::empty_rows`), whose rows start at `from`
+/// (query, subject) and end one before (`to = from - 1`, in NCBI's unsigned `TSeqPos`: a row
+/// starting at 0 ends at 4294967295). With `-subject` (`remaps`, a Seq-align with rows of letters
+/// too) NCBI's Seq-loc mapper rewrites the query row to one nucleotide with a fuzz
+/// (`mapped_empty_query_nucleotide`); the mapper's form of a subject row starting at 0 is refused
+/// before (`algorithm::blastx::empty_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1559
+/// ```c++
+///                         if ( start_frame ) {
+///                             if (start >= start_frame) {
+///                                 // Add 1 or 2 bases to match complete codon.
+///                                 loc->SetInt().SetFuzz_from().SetAlt().push_back(start);
+///                                 start -= start_frame;
+///                             }
+///                             else {
+///                                 // Skip the first incomplete codon.
+///                                 start += 3 - start_frame;
+///                             }
+///                         }
+///                         if ( stop_frame ) {
+///                             loc->SetInt().SetFuzz_to().SetAlt().push_back(stop - 1);
+///                             stop += stop_frame;
+///                         }
+///                     }
+///                 }
+///
+///                 loc->SetInt().SetFrom(start);
+///                 // len may be 0 after dividing by width, check it before
+///                 // decrementing stop.
+///                 loc->SetInt().SetTo(stop > start ? stop - 1 : stop);
+/// ```
+/// Probes (`X/SURVEY_X2g_formats.md` 1): a plus frame gives the query row `(Q, Q)` with
+/// `fuzz-to alt {Q-2}`, a minus frame `(Q-1, Q-1)` with `fuzz-from alt {Q}`
+/// (`mapped_empty_query_nucleotide`); the subject row stays.
+#[cold]
+#[inline(never)]
+fn write_empty_rows<E: Encoder>(
+    enc: &mut E,
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+    remaps: bool,
+    (q_from, s_from): (i32, i32),
+) {
+    let q_strand = Strand::of_frame(hsp.q_frame);
+    let q_from = q_from as u32;
+    enc.element();
+    if remaps {
+        let at = mapped_empty_query_nucleotide(q_from as i32, hsp.q_frame) as u32;
+        let fuzz = if hsp.q_frame > 0 {
+            (None, Some(q_from.wrapping_sub(2)))
+        } else {
+            (Some(q_from), None)
+        };
+        write_seq_interval_pos(enc, &query.id, (at, at), q_strand, fuzz);
+    } else {
+        write_seq_interval_pos(
+            enc,
+            &query.id,
+            (q_from, q_from.wrapping_sub(1)),
+            q_strand,
+            (None, None),
+        );
+    }
+    let s_from = s_from as u32;
+    enc.element();
+    write_seq_interval_pos(
+        enc,
+        &subject.id,
+        (s_from, s_from.wrapping_sub(1)),
+        Strand::of_frame(hsp.s_frame),
+        (None, None),
+    );
+}
+
+/// A Seq-interval whose `from` and `to` are NCBI's unsigned `TSeqPos`, with the `alt` fuzzes
+/// `fuzz` (`fuzz-from`, `fuzz-to`) of the Seq-loc mapper (`write_empty_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:106-120
+/// ```text
+/// Int-fuzz ::= CHOICE {
+///     p-m INTEGER ,                    -- plus or minus fixed amount
+///     ...
+///     alt SET OF INTEGER }             -- set of alternatives for the integer
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-99
+/// ```text
+/// Seq-interval ::= SEQUENCE {
+///     from INTEGER ,
+///     to INTEGER ,
+///     strand Na-strand OPTIONAL ,
+///     id Seq-id ,    -- WARNING: this used to be optional
+///     fuzz-from Int-fuzz OPTIONAL ,
+///     fuzz-to Int-fuzz OPTIONAL }
+/// ```
+fn write_seq_interval_pos<E: Encoder>(
+    enc: &mut E,
+    id: &SeqId<'_>,
+    (from, to): (u32, u32),
+    strand: Strand,
+    fuzz: (Option<u32>, Option<u32>),
+) {
+    enc.variant("Seq-loc", "int", 3);
+    enc.begin_sequence("Seq-interval");
+    enc.member("from", 0);
+    enc.big_int(i64::from(from));
+    enc.end_member();
+    enc.member("to", 1);
+    enc.big_int(i64::from(to));
+    enc.end_member();
+    enc.member("strand", 2);
+    enc.begin_named("Na-strand");
+    enc.enumerated(strand.name(), strand.value());
+    enc.end_named();
+    enc.end_member();
+    enc.member("id", 3);
+    id.write(enc);
+    enc.end_member();
+    for (name, tag, alt) in [("fuzz-from", 4, fuzz.0), ("fuzz-to", 5, fuzz.1)] {
+        let Some(alt) = alt else { continue };
+        enc.member(name, tag);
+        enc.variant("Int-fuzz", "alt", 4);
+        enc.begin_list(true);
+        enc.element();
+        enc.big_int(i64::from(alt));
+        enc.end_list();
+        enc.end_variant();
+        enc.end_member();
+    }
+    enc.end_sequence();
+    enc.end_variant();
 }
 
 /// The `ext` of a Seq-align under a positive list (`seqids`, `SubjectRecord::use_this_seqid`):
@@ -2079,6 +2368,7 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
                 query,
                 &subjects[list[0].subject as usize],
                 list,
+                run.remaps_subjects(),
                 &mut after_each,
             );
             after_each(enc);
@@ -2227,7 +2517,23 @@ pub fn write_query(
 }
 
 /// Writes the document of one query to `writer` through `buf`, which is cleared first: what
-/// `write_query` makes, or nothing when the query has no Seq-align.
+/// `write_query` makes, or nothing when the query has no Seq-align. A document with a string byte
+/// that NCBI's ASN.1 text or binary stream writes as `#` with an error message (the default
+/// `eFNP_ReplaceAndWarn`: a database title, a `-parse_deflines` local id with DEL, ...) is
+/// written again through `Traced` (`write_query_posting`), with NCBI's posts of those bytes on
+/// `diagnostics`; a document without one is written as before.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
+/// ```c++
+/// NCBI_PARAM_ENUM_ARRAY(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE)
+/// {
+///     {"SKIP",               eFNP_Skip},
+///     ...
+/// };
+/// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE);
+/// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE, eFNP_ReplaceAndWarn);
+/// ```
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_query_to(
     format: SerialFormat,
     run: &RunRecord<'_>,
@@ -2236,25 +2542,146 @@ pub(crate) fn write_query_to(
     hsps: &[HspRecord<'_>],
     buf: &mut Vec<u8>,
     writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    if write_query(format, run, query, subjects, hsps, buf)? {
-        writer.write_all(buf)?;
+    match write_query(format, run, query, subjects, hsps, buf) {
+        Ok(true) => writer.write_all(buf)?,
+        Ok(false) => {}
+        Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
+            let document = QueryDocument {
+                run,
+                query,
+                subjects,
+                hsps,
+            };
+            write_query_posting(format, byte, &document, buf, writer, diagnostics)?;
+        }
+        Err(error) => return Err(error.into()),
     }
     Ok(())
 }
 
+/// The records of one query's Seq-annot.
+struct QueryDocument<'r, 'a> {
+    run: &'r RunRecord<'a>,
+    query: &'r QueryRecord<'a>,
+    subjects: &'r [SubjectRecord<'a>],
+    hsps: &'r [HspRecord<'a>],
+}
+
+/// `write_query_to` of a document that the plain encoder of `format` stopped on (the byte `byte`,
+/// `NonVisibleChar`): written again through `Traced` into `buf`, and handed to `writer` with
+/// NCBI's post of each replaced byte (`ReplacedChar::post` with the application's prefix,
+/// `options::RequestKind::application`, the one table of the applications' names) on
+/// `diagnostics` where NCBI posts it: after the bytes of the document
+/// that NCBI's buffer (`COStreamBuffer`, `out_buffer`) had written to its output by then, the
+/// output flushed (`cerr` is tied to `cout`; `Traced::flush_to`). NCBI writes each query's
+/// Seq-annot with an object stream of its own (`m_Outfile << MSerial_AsnText << *annot`, quoted at
+/// the module), so the positions (`line N`, `byte N`) and the buffer start again with each query's
+/// document. The JSON stream escapes such a byte (objostrjson.cpp:731-760), so its encoder never
+/// stops on one.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
+/// ```c++
+/// void CObjectOStreamAsn::WriteString(const char* ptr, size_t length)
+/// {
+///     m_Output.PutChar('"');
+///     CTempString original(ptr, length);
+///     size_t valid=0;
+///     while ( length > 0 ) {
+///         char c = *ptr;
+///         if ( x_FixCharsMethod() != eFNP_Allow ) {
+///             if ( !GoodVisibleChar(c) ) {
+///                 if (valid == 0) {
+/// #if SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_WRITING
+///                     valid = CUtf8::EvaluateSymbolLength(CTempString(ptr,length));
+/// #endif
+///                     if (valid == 0) {
+///                         c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, original, x_FixCharsSubst());
+///                     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:843-861
+/// ```c++
+///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
+///         size_t done = 0;
+///         for ( size_t i = 0; i < length; ++i ) {
+///             char c = str[i];
+///             if ( !GoodVisibleChar(c) ) {
+///                 ...
+///                 if ( i > done ) {
+///                     WriteBytes(str.data() + done, i - done);
+///                 }
+///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
+///                 if (c != 0) {
+///                     WriteByte(c);
+///                 }
+/// ```
+#[cold]
+#[inline(never)]
+fn write_query_posting(
+    format: SerialFormat,
+    byte: u8,
+    document: &QueryDocument<'_, '_>,
+    buf: &mut Vec<u8>,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> anyhow::Result<()> {
+    buf.clear();
+    let prefix =
+        crate::report::archive::options::RequestKind::from(document.run.program).application();
+    let post = |replaced: &ReplacedChar| {
+        diagnostics.write_all(&replaced.post(Some(prefix)))?;
+        diagnostics.flush()
+    };
+    match format {
+        SerialFormat::AsnText => write_traced(
+            Traced::new(AsnTextEncoder::new(buf), 0).posting(post),
+            document,
+            writer,
+        ),
+        SerialFormat::AsnBinary => write_traced(
+            Traced::new(AsnBinaryEncoder::new(buf), 0).posting(post),
+            document,
+            writer,
+        ),
+        SerialFormat::Json => Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte)).into()),
+    }
+}
+
+/// The document written through `enc` (`Traced` with its post function) and handed to `writer`
+/// with the posts; nothing on an error of the encoder.
+fn write_traced<E: Encoder>(
+    mut enc: E,
+    document: &QueryDocument<'_, '_>,
+    writer: &mut dyn Write,
+) -> anyhow::Result<()> {
+    write_seq_annot(
+        &mut enc,
+        document.run,
+        document.query,
+        document.subjects,
+        document.hsps,
+    );
+    if let Some(error) = enc.error() {
+        return Err(SeqAlignError::Serial(error).into());
+    }
+    enc.flush_to(writer, true)?;
+    Ok(())
+}
+
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it. `records` fills the subject and HSP records of the hit list of
-/// query `q_idx` (replacing their contents) for `write_query_to`; a query without a hit list
-/// writes nothing but its warnings.
+/// query's warnings before it and NCBI's posts of the bytes that its stream replaces in the query's
+/// document after them (`write_query_to`, on the warnings' sink). `records` fills the subject and
+/// HSP records of the hit list of query `q_idx` (replacing their contents) for `write_query_to`; a
+/// query without a hit list writes nothing but its warnings.
 pub(crate) fn write_hit_list_seqaligns<'a, L>(
     format: SerialFormat,
     run: &RunRecord<'_>,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
     writer: &mut dyn Write,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     mut records: impl FnMut(usize, &'a L, &mut Vec<SubjectRecord<'a>>, &mut Vec<HspRecord<'a>>),
 ) -> anyhow::Result<()> {
     let mut subject_records: Vec<SubjectRecord<'a>> = Vec::new();
@@ -2262,9 +2689,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         let Some(hit_list) = hit_list else {
             continue;
         };
@@ -2277,6 +2702,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
             &hsp_records,
             &mut buf,
             &mut *writer,
+            &mut *warnings.sink,
         )?;
     }
     Ok(())

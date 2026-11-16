@@ -32,7 +32,7 @@ pub struct BlastDefline {
     pub ids: Vec<ParsedSeqId>,
     /// The number of bytes of the Seq-id strings that read as '#'.
     pub replaced_id_bytes: usize,
-    /// `taxid`, as `seqid::ber::taxid_value` reads it.
+    /// `taxid` (NCBI's `TTaxId`, an `int`; `seqid::ber::Reader::int`).
     pub taxid: Option<i32>,
     pub memberships: Option<Vec<i32>>,
     /// `links`: further taxids of the definition line (`GetTaxIds`).
@@ -389,8 +389,8 @@ impl DeflineSet {
         self.taxonomy_order(target).next()
     }
 
-    /// `taxonomy_lookups` as an iterator.
-    fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
+    /// `taxonomy_lookups` as an iterator (the maskers' reader walks it without a list).
+    pub(crate) fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
         let front = target.and_then(|target| {
             self.deflines
                 .iter()

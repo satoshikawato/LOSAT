@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.30
+- Version: 1.39
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -63,9 +63,55 @@
   1.29 2026-11-15 (the rejection of a sequence that a seqid list keeps while matching none of its
   lines, of 1.6, also where a list's `gnl|BL_ORD_ID|n` reaches a line in a volume whose first OID is
   not 0, which NCBI's header read numbers differently from the lookup; line DBID item ordsl,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6)
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6);
   1.30 2026-11-15 (the explicit rejection of RPSBLAST's Smith-Waterman redo that NCBI repeats
-  without end, rule 3, line PS item PS11c-3; Owner-delegated, line PS `DECISIONS.md` 63)
+  without end, rule 3, line PS item PS11c-3; Owner-delegated, line PS `DECISIONS.md` 63);
+  1.31 2026-11-15 (the stop of a batch's prefetch at a Seq-id that a version 5 list without the
+  accession table in one of its databases cannot look up is written as NCBI writes it; the
+  refusal of 1.25 narrowed to the prefetch off and to the orders of loads that LOSAT does not
+  model; line DBID item mixdb2, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.32 2026-11-15 (the sequence that a positive seqid list keeps while matching none of its lines,
+  of 1.6 and 1.29, is no longer an explicit rejection: NCBI's result is deterministic, and LOSAT
+  reproduces it, rule 2; a negative list's stays refused; line DBID item lineless, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.33 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
+  line RG item X2g, with the refusals of decisions X2g-4 and X2g-5 of that line and the tables of
+  X2g-5's one alignment ported by X2g-7: Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.34 2026-11-16 (the sequence that a negative seqid list keeps while removing all its lines, of
+  1.6, 1.29 and 1.32, is no longer an explicit rejection: NCBI's fetches exclude it, and LOSAT
+  reproduces them, rule 2; line DBID item lineless2, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07);
+  1.35 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
+  end, at a scanned word of 11 or more; the Owner's decision of 2026-11-15 「M4a Q1=B」, line NP
+  item M4a-2c);
+  1.36 2026-11-16 (the refusal of 1.31 of a stopping batch whose other sequences' loads write texts
+  of the taxonomy database narrowed in the JSON and XML2 formats, outfmt 13 to 16, to the texts
+  after the lookups of the batches before, as in the other formats: a stop after a batch that
+  opened the taxonomy database is written as NCBI writes it; line DBID item mixtax,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.37 2026-11-16 (a subject whose title, or for an empty database title its name in the taxonomy
+  database, NCBI's `GenerateDefline` cannot decode: the tabular rows and XML values of NCBI's
+  catches reproduced, rule 2, and the rows at which NCBI stops or prints an uninitialised taxid
+  refused, rule 3; line RG item T7, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.38 2026-11-16 (the end of a database protein's title that `x_AdjustProteinTitleSuffix`
+  rewrites from the tax ids, which version 1.10 listed among the explicit rejections of
+  deterministic results of rule 2, moved to the results ported under rule 4, line RG item T5c;
+  a name written there that `GenerateDefline` cannot decode fails the lookup as in 1.37;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; written 2026-11-14 as
+  1.26);
+  1.39 2026-11-16 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
+  strand drop, the spread of a subject's masks and TBLASTX's merge of a query record that is also a
+  subject into the query's sequence reproduced, with the two exceptions that this merge can throw
+  (the report up to the query's description table, then NCBI's error, exit 255; 2026-11-16, T3c
+  fix 2, in place of fix 1's explicit rejection), rule 2; and the rule-2 rejection of a query's id
+  of 1.24 and 1.28 in BLASTX and TBLASTX; BLASTX's HSPs of length 0 of 1.33 in these views
+  reproduced, rule 2, with the explicit rejection of a section whose merge NCBI frees a segment in,
+  rule 3 (2026-11-16: the split of T3c after X2g, and `FillUnalignedRegions`'s free of T3c fix 3);
+  Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -535,7 +581,180 @@ here, and names the widening that PS16a made for protein queries.
     except the line that echoes the input file's name. NCBI's binary prints the same there: its compiled
     loop shows no wrap in this output, which the undefined behaviour allows.
 
+## Approved exception (BLASTN `-db_hard_mask`, a mask that runs to the end, version 1.35)
+
+Version 1.35. The Owner decided on 2026-11-15 (line NP `DECISIONS.md` 45, words 「M4a Q1=B」) question
+Q1 of M4a-2b (PR #1173): option B, the search over the range before the mask at a scanned word of 11
+or more, blastn-short keeping the refusal. Not taken: option A, refusing the shape for every task
+(it refuses searches that NCBI ends normally, such as a transcript database whose poly-A tails are
+masked). Line NP item M4a-2c.
+
+13. **`-db_hard_mask`: a chunk from the start of a sequence whose mask runs to its end.** With
+    `-db_hard_mask` NCBI cuts each database sequence at its masks into chunks
+    (`s_GetNextSubjectChunk`, `blast_engine.c:221-276`). A sequence whose first mask with letters runs
+    to its end, with at most 5,000,000 letters before it and no other mask before it than masks of no
+    letters at 0 (masked whole, or a masked tail such as a poly-A tail), gets one chunk from 0 that ends
+    at the mask, and for that chunk the test of the "no chunking" branch (`offset == 0 && residual == 0
+    && next == full_range.right`, `blast_engine.c:264-268`) holds: its `seq_ranges` are the soft
+    ranges, which `-db_hard_mask` leaves as the full range (`blast_engine.c:162`), while
+    `subject->length` is the chunk's: NCBI uses two lengths for one subject. The preliminary stage
+    reads the subject's stored letters in the mapped volume file, unmasked (`seqsrc_seqdb.cpp:326-330,
+    375`, `seqdbvol.cpp:1817`: masks reach the engine only as ranges), and the scan
+    (`na_ungapped.c:1647-1668`) and the word checks (`s_BlastNaExtend`, `s_TypeOfWord`, bounded by the
+    scan's end, `na_ungapped.c:1123, 508-554, 1683`) read them from 0 to the full length: the letters
+    under the mask are read as they are stored, nothing outside the sequence (valgrind finds no error in
+    such runs). The extensions take the chunk's length (`na_ungapped.c:165, 213-214`,
+    `blast_gapalign.c:2784, 4021`), and so does the interval tree of the gapped HSPs, `[0, a + 1]`
+    (`blast_gapalign.c:3830-3831`). Three effects follow:
+    - a word that crosses the mask's start, or lies inside the mask, is found and extended up to the
+      mask's start: NCBI reports a row that its normal chunks of the near input (the mask one letter
+      shorter) do not find, where the alignment has fewer letters before the mask than a word;
+    - the diagonal table keeps those words' ends, up to the full length past its offset
+      (`na_ungapped.c:757, 768`), while `Blast_ExtendWordExit` moves the offset on by the chunk's
+      length and the window only (`blast_extend.c:172`, called at `na_ungapped.c:1686`), so the
+      subject that the same thread searches next loses its seeds on those diagonals (`na_ungapped.c:672`).
+      Each thread has its own table (`blast_engine.c:1002, 1377`) and takes the next database
+      sequences as it asks for them (`seqdbimpl.cpp:301-395`, `prelim_stage.cpp:142-188`), so at two
+      threads and more which subject loses its hits changes from run to run;
+    - two preliminary HSPs past the tree's end with the same query range are never separated: the
+      tree's node `[l, r]` with `l > r` keeps its middle at `r` (`blast_itree.c:95, 107`), each insertion
+      splits again and doubles the node pool (`blast_itree.c:70-79`) until the allocation fails; the
+      search then stops (`blast_gapalign.c:4087-4090`, `blast_engine.c:1469-1478`) and frees the
+      subject's block (`blast_engine.c:1595`), whose sequence pointer, marked allocated although it
+      points into the mapped volume (`seqsrc_seqdb.cpp:392`, `blast_util.c:225-227`), is passed to
+      `free()`: NCBI BLAST+ 2.17.0 ends with `free(): invalid pointer`, `munmap_chunk(): invalid
+      pointer` (SIGABRT) or SIGSEGV, at blastn-short's word 7 and at words of 11 and more alike.
+    At a scanned word (the word size, or the discontiguous template's length)
+    of 11 letters or more (megablast, blastn, dc-megablast) LOSAT scans that chunk as NCBI scans every
+    other hard chunk, from its start to its end: the range before the mask, which NCBI's normal chunks
+    also search in the near input whose mask is one letter shorter. Its extensions and its diagonal
+    state take that one length, so the subjects searched after it are searched as without it, at every
+    thread count, and the search ends normally (exit 0). The traceback reads every masked
+    letter as `B`, as NCBI's traceback does (`s_SeqDBMaskSequence`, `seqdbvol.cpp:1518-1585`). Below
+    a scanned word of 11 (blastn-short's 7) LOSAT refuses such a database before it writes anything,
+    as it did for every word before version 1.35 (rule 3). `blastinput::db_mask::
+    TAIL_MASK_SEARCHED_WORD`, `algorithm::blastn::blast_engine::run::next_hard_chunk`.
+    Evidence (NCBI BLAST+ 2.17.0, each run capped; inputs, scripts and results in the line's task
+    folder, `M/m4a2b/q1` and `M/m4a2c`):
+    - The question's corpus: 300 random subjects of 300 to 2,000 letters, each with one tail mask of
+      12 letters to two thirds of the subject (200 of random letters, 100 with a masked poly-A tail),
+      and a query across the mask's start that runs to the subject's end. At words of 11 and more
+      NCBI's output of the tail mask, its output of the near input and LOSAT's are the same bytes in
+      all 900 runs. At word 7, NCBI's output of the tail mask differs from the near input's in 29 of
+      300 runs and NCBI crashes in 71.
+    - Tails of 1 to 4 letters (200 subjects, queries that match to the subject's end): LOSAT's
+      output is NCBI's own in all 600 runs at words of 11 and more. The near input's alignment reaches
+      the subject's last letter, which is not masked there, in 50, 97 and 97 of the 200 runs
+      (megablast, blastn, dc-megablast); NCBI's run of the tail mask and LOSAT's read it as `B`.
+    - Alignments with few letters before the mask (200 subjects of 30 to 150 letters whose chunk
+      before the mask holds 0 to all but 12 of their letters, queries over the whole subject; and 200
+      subjects of 300 to 2,000 letters whose queries hold 4 to 60 letters before the mask and 60 in
+      it): NCBI's output of the tail mask equals LOSAT's, the near input's, in 115, 177 and 116, and
+      in 113, 178 and 105 of the 200 runs (megablast, blastn, dc-megablast). In the others NCBI adds a
+      row from a word across the mask's start, checked against the masked letters and cut at the
+      mask's start, often shorter than the word (12 letters at megablast's 28), which its normal
+      chunks of the near input do not find; LOSAT gives the near input's rows there.
+    - The row follows the stored letters under the mask: with those letters complemented, NCBI's
+      extra row goes away (the O1 survey of M4a-2c, `M/m4a2c/O1_SURVEY.md` §3.1).
+    - The next subject: a tail-masked subject X (mask after 20 letters) followed by an unmasked Y that
+      holds the query's first 300 letters on the same diagonal (fixture `edge9`): NCBI drops Y's
+      300-letter 100 % row (E-value 5.6e-162) in 20 of 20 runs at `-num_threads 1`, 3 of 20 at 2 and 5
+      of 20 at 4 threads (two different outputs at 2 and at 4); with the near mask Y's row is in all 40
+      runs, and so it is with Y alone, Y before X, or Y's copy on the next diagonal. LOSAT prints Y's row,
+      the near input's output, in 180 of 180 runs (megablast, blastn, dc-megablast at 1, 2 and 4
+      threads, 20 runs each).
+    - A crash at words of 11 and more: two copies of the query inside a tail mask (fixture `edge10`):
+      NCBI SIGSEGV (exit 139) in megablast, blastn and dc-megablast; one copy, or the near mask, exit 0
+      and no row. LOSAT: exit 0 and the near input's output (no row) at 1 and 4 threads. Under
+      valgrind the same run shows the node pool doubling, "BLAST ran out of memory" and an invalid
+      `free()` of an address in the mapped `.nsq`, the mechanism of blastn-short's 71 crashes too.
+    - The fixture databases: NCBI crashes in each of 10 runs of edge2's algorithm 16 (s4 masked
+      whole) and edge4's 11 (the mask after an empty mask at 0) in megablast, blastn and
+      dc-megablast, and of `mask_nucl_mv`'s 11 (m04's tail) in megablast and dc-megablast; LOSAT
+      writes NCBI's bytes of the near input there.
+    Fixture rows `db.dbmask.hard.tail.*` and `db.dbmask.hard.whole.*` of
+    `LOSAT/tests/db_search_manifest/blastn.tsv`: NCBI's bytes, or with `ncbi-near:` those of NCBI's
+    run of the near input (the rows `db.dbmask.hard.near.*`; `LOSAT/tests/db_search_fixtures.py`), `edge9`'s and
+    `edge10`'s (`db.dbmask.hard.tail.edge9.6`, `db.dbmask.hard.tail.edge10.6`) among them;
+    `db.dbmask.hard.rej.tail.*.short.6` and `db.dbmask.hard.rej.whole.*.short.6`, the refusal at word 7.
+    Unit tests `the_hard_mask_shapes_follow_ncbi_s_chunks` and
+    `a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle`
+    (`LOSAT/src/blastinput/db_mask_tests.rs`), `hard_masked_chunks_follow_ncbi_s_get_next_subject_chunk`
+    and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
+    (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
+
 ## Reproduced as NCBI (rule 2)
+
+- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.39, 2026-11-15, line RG item T3c,
+  DECISIONS T3-6): NCBI adds TBLASTX's HSPs of each query frame with `CAlnMix::fForceTranslation`
+  (`eTranslateNucToNucAlignment`, showalign.cpp:2058-2063), whose `CAlnMixMatches::Add` throws
+  "Unable to mix strands when forcing translation!" for an HSP whose subject strand differs from
+  the sign of the subject's strand score so far, the strand of its first HSP in that frame
+  (`alnmatch.cpp:191-205`); `DisplaySeqalign` catches it and leaves the HSP out of the section
+  (`showalign.cpp:2073-2076`), while the description table and outfmt 0 show it. The throw comes
+  after `m_DsCnt++`, so the HSPs after it keep their numbers. LOSAT leaves the same HSPs out
+  (`report::query_anchored::aln_mix`; probes `tx.s.f1`, `tx.t3c.s.f1`; fixture rows
+  `db.of1.tx.s.f*`). BLASTX's HSPs of a minus query frame are added with `fNegativeStrand`, which
+  `Add` reads as `fForceTranslation` (`alnmix.hpp:77,102`): their query rows run from high to low, and
+  none is left out (a protein row has no strand).
+- TBLASTX `-outfmt 1` to `4` of a query record that is also a `-subject` record under
+  `-parse_deflines` (version 1.39, line RG item T3c fix 1): without `fPreserveRows`
+  (`fForceTranslation`, showalign.cpp:2058-2063) `CAlnMixSequences::Add` makes no other row for the
+  record's subject row (alnseq.cpp:173-196), so both rows of its HSPs with itself are the query's one
+  `CAlnMixSeq`. No sequence then holds as many Dense-segs as the mix (alnmerger.cpp:108-127: no
+  single refseq), `x_SetSeqFrame` of the second row compares it with the first (alnmerger.cpp:
+  1272-1276) and takes the query's own row, and `x_SecondRowFits` gives that row the first such HSP
+  and every later one a new extra row of the query's sequence. The first one's subject positions are
+  the query's own starts on the diagonal (`this position already exists`, alnmerger.cpp:753-771), so
+  the record's alignment with itself in each query frame disappears into the query row, and its
+  other alignments with itself are rows labelled with the record above the other subjects' rows.
+  NCBI writes that section with exit 0, from the inputs alone; LOSAT writes the same
+  (`report::query_anchored::aln_mix`; the review of T3c's cases `x.self.*`, `t.self.*`,
+  `v.self.b1.f1`, the probes `tx.t3c.self.*`, the 13 rows `pd.self.tblastx.*` of
+  `tests/outfmt0_manifest.tsv` in formats 1 and 3; fixture rows `db.of1.tx.self.*`).
+- The same TBLASTX sections where that merge throws (version 1.39, 2026-11-16, line RG item T3c
+  fix 2, in place of fix 1's explicit rejection). The first HSP of the record with itself that the
+  merge takes (the longest, ties in their order, an HSP of the other strand included) goes to the
+  query's own row, and its walk can create a start whose segment already has that row
+  (`CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.`,
+  alnmerger.cpp:779-794, a repeat whose copies `-query_loc` and `-subject_loc` keep apart, a
+  palindrome) or join segments of the query's row into a loop that `CAlnMixSegments::Build` meets
+  (`CAlnMixSegments::Build(): Internal error: Infinite loop detected.`, alnsegments.cpp:162-169, a
+  tandem repeat). Only `Add` is in `DisplaySeqalign`'s `try`, not `Merge` (showalign.cpp:2060-2083):
+  the exception leaves the formatter before the section's first byte, and the application's
+  `CATCH_ALL` reports `Error: NCBI C++ Exception` and exits with 255, its stream flushed. So NCBI's
+  output is deterministic: the reports of the queries before (the batches before and the batch's
+  queries before), the query's heading and description table, no epilog; standard error the
+  warnings so far, then the exception (the same bytes to a file, a pipe and `-out`, with 400 queries
+  before and with `BATCH_SIZE=500`: review 2 of T3c fix 1, `T/t3/review2_t3c/probes/buf/`). LOSAT
+  runs the same merge and writes the same (`report::query_anchored::write_section` fails with
+  NCBI's exception, `cli::NativeError::of_writer`; the review's 936 cases where NCBI throws, its
+  108 `mg*` cases of both exceptions, the probes `T/t3/fix1_t3c/cases_fix1.tsv`; fixture rows
+  `db.of1.tx.throw.*`).
+- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.39, DECISIONS T3-6): a subject's masks
+  (the `-lcase_masking` runs of a `-subject` record, BLASTN's `-db_soft_mask`) are placed on the columns of the subject's first row that
+  meets each and shown in lower case on those columns of every row of the subject
+  (`x_FillLocList`, showalign.cpp:4291-4338; `x_OutputSeq`, :2486-2523), also on its rows of other
+  HSPs, where the letters are not masked (probes `bn.lc2.f2`, `bn.t3b.lc.*`, `bx.t3c.slc.*`).
+- BLASTX `-outfmt 1` to `4` with the HSPs of length 0 of `-ungapped -window_size 0` (version 1.39,
+  2026-11-16, line RG item T3c after X2g, 1.33): the description table and the sorts stop the report
+  as in outfmt 0 (`Row is empty`, the Dense-seg's exception). Past the table, the section makes a
+  Dense-seg of every aligned HSP before its first byte and outside its `try`
+  (showalign.cpp:2002-2009): `-subject`'s mapped Std-seg throws there (`Seq_align.cpp:801`, exit
+  255). The Dense-seg of empty rows as made (`-db`, and `-subject`'s that the mapper leaves) has one
+  segment of length 0 and no widths (`Seq_align.cpp:774-934`), so `DisplaySeqalign` puts it in the
+  group of the query's frame +1 whatever its frame (showalign.cpp:2010-2041) and adds it with
+  `fPreserveRows`. Its match is merged last (score 0): at the query's own frame row of that group it
+  is a segment of length 0 that shows nothing (a frame +1 HSP at query offset 0 starts the frame +1
+  row there, and the unaligned letters fill up to the next HSP), at another nucleotide a query row
+  of that frame (`x_SetSeqFrame`) without a subject row (`x_CreateDenseg` drops the empty one).
+  The anchored views (1, 2) show no such row; the flat views (3, 4) translate it as a row after row
+  0 with BLASTX's database genetic code 0 (`CBlastOptionsLocal::SetProgram`), which throws
+  `Unable to find genetic code number 0` inside the group's `try`: the group shows its heading
+  `For reading frame +1` alone. A section of such HSPs only is an alignment of no columns
+  (`(int)GetAlnStop()` is -1): its blank line alone. LOSAT writes the same (probes
+  `T/t3/x2g/`: 1,880 cases of the X2g fixtures' inputs and of the X2g-1 probe P1's pairs, 1,662 of
+  P1's 277 pairs with such HSPs, 18 of two queries; fixture rows `db.x2g.bx.of.*`).
 
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
   = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum
@@ -557,10 +776,90 @@ here, and names the widening that PS16a made for protein queries.
   the volume do not count; two or more volumes never do) (line DI-8 `DECISIONS.md` 18; line
   DBID item gisl, 2026-11-15).
 
+- A sequence that a positive seqid list (`-seqidlist`) keeps while matching none of its
+  definition lines (a pdb molecule named without its chain, a local id in other letters, a
+  Swiss-Prot name on a version 4 database, a list's `gnl|BL_ORD_ID|n` that the accession table
+  resolves by the stored number to a sequence in a volume whose first OID is not 0, whose lines
+  NCBI's header read tests with the volume's first OID added, `seqdbvol.cpp:2222-2236`, of 1.29):
+  the sequence is searched and its length counts in the statistics, but NCBI's filtered header
+  leaves it no Seq-id, and `BlastHitList2SeqAlign_OMF` makes no Seq-align of its hits
+  (`blast_seqalign.cpp:1582-1586`; the post is at the `Info` level and not printed). The hits leave
+  every report, the prefetch, the taxonomy lookups and psiblast's PSSM without a word, after they
+  took their places in the hit list before the cut to `-max_target_seqs` (psiblast's Seq-aligns are
+  made of the longer preliminary hit list, so its cut comes after: they take none there). Versions
+  1.6 and 1.29 made this an explicit rejection; version 1.32 reproduces it in the six search
+  programs, each of which drops such hit lists where NCBI makes the Seq-aligns
+  (`SeqDb::keeps_line`, `algorithm::common::database::SeqAligned`; line DBID item lineless, probe of
+  1,375 runs: 6 programs, 15 lists of the five kinds, 20 formats, `-max_target_seqs` 1 and 3, a
+  query without hits). A read of such a sequence's lines still refuses, and no report reaches it.
+
+- A sequence that a negative seqid list (`-negative_seqidlist`) keeps while removing every one
+  of its definition lines (a sequence whose every line has only a gi or a ti, which
+  `CSeqDBNegativeList::FindId` does not match by type; a `BL_ORD_ID` line of a volume whose first
+  OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
+  seqdbimpl.cpp:1909-1946; on a version 5 database, the ids left after the gis are dropped), so
+  the subject fetches with `check_oid_exclusion` (`seqsrc_seqdb.cpp:302-313`) exclude it: the
+  gapped traceback's (blast_traceback.c:1567-1577), the composition-based redo's
+  (blast_kappa.c:1378, 3560-3575) and the ungapped re-evaluation's of a nucleotide subject
+  (blast_hits.c:2651-2665). The sequence is searched and counts in the statistics; a gapped
+  search's preliminary hit list holds it, and it takes no place in the final one; an ungapped
+  search of a nucleotide database frees its HSPs before the preliminary hit list. A protein
+  subject of an ungapped search (blastx `-ungapped`) is fetched by none of them and leaves at the
+  Seq-aligns, as a positive list's does. Versions 1.6, 1.29 and 1.32 made this an explicit
+  rejection; version 1.34 reproduces it in the six search programs, each of which removes such
+  subjects where NCBI fetches them (`SeqDb::excludes_lineless_at_fetch`,
+  `algorithm::common::database::FetchExcluded`; line DBID item lineless2). Under such a list
+  NCBI's fetch reads the header of every subject it fetches, so a header that cannot be read
+  (a damaged record, a `BL_ORD_ID` line with a string tag in a later volume) ends NCBI's search
+  there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
+  where the subject is not reported; LOSAT refuses such a search at the same place. The
+  composition-based redo fetches only the matches that its early termination test leaves, and
+  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
+  NCBI ends it without reading that header.
+
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
   (`MIN(MAX(2*h,10),h+50)` in `Int4`) wraps and becomes 10.
+- A subject whose `GenerateDefline` throws (version 1.37, 2026-11-16, line RG item T7): a title,
+  or for a database sequence with an empty stored title the scientific name from which NCBI makes
+  it (since version 1.38 also the name that `x_AdjustProteinTitleSuffix` writes at the end of a
+  protein title ending in ` [ ]`, line RG item T5c), in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
+  0x8F, 0x90 or 0x9D; `NStr::HtmlDecode` throws, `ncbistr.cpp:4528-4534`). The tabular formats
+  ask it where `CShowBlastDefline::GetSeqIdList` replaces an id (`showdefline.cpp:218-242`): a
+  `-subject` record whose title's first word starts with `Subject_`, or read with
+  `-parse_deflines` with the id `lcl|Subject_N` (NCBI keeps the parsed local id and generates the
+  title from the rest of the defline: `s7` for `>lcl|Subject_9 TPA: s7 third ~`) (`SetSubjectId`,
+  for `sseqid`, `sgi`, `sacc` or `saccver`), and a database sequence without parsed Seq-ids or
+  with an `lcl|Subject_N` id (`SetSubjectId` where the subject Bioseq's ids hold it, and
+  `x_SetSubjectIds` for `sallseqid`, `sallgi` or `sallacc`, which pushes the ids of the
+  definition lines before the first that holds it). The catch of `SetFields`
+  (`tabular.cpp:862-875`) adds the Seq-align id to the `sall*` lists of the rows before
+  (`SetSubjectId(list)`, `tabular.cpp:1374-1378`; after `x_SetSubjectIds` cleared them and pushed
+  those lines where that threw) and returns: the row prints `Unknown` for `sseqid`, 0 for `sgi`, the scores, the query's
+  ids, `qcovs`, `qcovus` and `qcovhsp`, `qlen` where a query id field or `qcovhsp` is asked (else
+  0), `slen` 0 (where only `x_SetSubjectIds` threw, the length and the subject's own `sseqid`,
+  `sgi`, `sacc`, `saccver`), the zeros of `x_ResetFields`
+  (`pident` 0.000, `ppos` 0.00, `frames` 0/0, `sstrand` N/A, empty letters and BTOP), and the titles
+  and taxonomy of the last row of the query's (or psiblast round's) report that found its subject
+  (`N/A` before one). In XML the catches write the Seq-id: outfmt 5 `Hit_id` `lcl|Subject_N`,
+  `Hit_def` and `Hit_accession` `Unknown`, `Hit_len` 0 (`blastxml_format.cpp:398-407`), a query's
+  Seq-loc id (`lcl|Query_N`; with `-parse_deflines` the best of its ids, `lcl|qbad`,
+  `gb|AB000099.1|`, `gi|4504347` of `gi|4504347|ref|NP_000549.1|`) and `No definition line`
+  (`:550-566`); XML2 and JSON a `HitDescr` with the id alone and the sequence's length
+  (`blastxml2_format.cpp:410-415`), a query's id without a title (`:584-596`). Outfmt 0, 11 and 18
+  were NCBI's before (`Unknown`, the line in place of each alignment), but for a `-parse_deflines`
+  record with an `lcl|Subject_N` id, whose line names the Seq-align id (`Subject_9`, LOSAT wrote
+  `Subject_1`). BLASTX reads such a title as its bytes, as the other programs do. Each stream of
+  LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
+  and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
+  the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
+  (`docs/web/abi_v2.md` §7). That holds for these checks of the formats. A Web run still fails
+  as a whole, where the CLI completes the argv's format, in two more cases: (a) a format fails in
+  the middle of its report, `-sorthits` with a description total above 99999 bits in outfmt 0
+  (all programs), or an NCBI error of outfmt 0 alone such as BLASTX `Row is empty`; dev had both;
+  (b) a stream that the Web adds fails alone after it sent a chunk (BLASTX, a later query batch
+  with an undecodable `Subject_` title). These are current limits.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -597,25 +896,6 @@ here, and names the widening that PS16a made for protein queries.
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
   oracle cases, the reason holds in all).
 
-- A sequence that a seqid list keeps while matching none of its definition lines (a pdb
-  molecule named without its chain, a local id in other letters, a Swiss-Prot name on a
-  version 4 database, a sequence whose every line has only a gi or a ti under a negative
-  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table resolves by the
-  stored number, of `makeblastdb -input_type blastdb` or of a FASTA id `gnl|BL_ORD_ID|n`, to a
-  sequence in a volume whose first OID is not 0 (a later volume, or a later database of the
-  list), whose lines NCBI's header read tests with the volume's first OID added
-  (`seqdbvol.cpp:2222-2236`), and a negative list's line removed there the same way; where such
-  a sequence keeps another line, LOSAT writes the lines NCBI keeps): NCBI's
-  filtered header leaves no line, `GetBioseq` returns null
-  (`seqdbvol.cpp:1370-1376`) and the sequence's hits leave every report without notice
-  while its length counts in the statistics. LOSAT refuses the search with the sequence
-  named (`the seqid list keeps sequence N of the volume but none of its definition lines, and
-  NCBI leaves its hits out of the report without notice`): a positive list before the
-  search, a negative list when such a sequence is to be reported (version 1.6, line DI-8
-  `DECISIONS.md` 17 and 22). The result is deterministic, but it loses hits without a
-  word, which no report can show; a user who wants NCBI's report names the chain or the
-  stored id.
-
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
   -parse_seqids`: NCBI searches it, and before it writes a batch's reports (every format but
@@ -624,17 +904,29 @@ here, and names the widening that PS16a made for protein queries.
   `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
   name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
   DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
-  `Unknown` for such a hit, and then the outfmt 0 alignments stop with that error, the tabular
-  formats crash (`CCoreException`, exit 255) and the JSON and XML2 documents end with its trace.
+  `Unknown` for such a hit, and then outfmt 0 to 4, 13, 14 and 17 stop with that error, outfmt 6
+  crashes (`CCoreException`, exit 255), the JSON and XML2 documents 15 and 16 end with its trace
+  (exit 0), and 5, 7, 10 and 18 go on (exit 0).
   Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
   with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
   NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
   for them); `-seqidlist` and `-negative_seqidlist` of accessions stop it up front with the same
   error. LOSAT searches such a list as NCBI does (line DBID item mixdb, probe of 4,080 runs:
-  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
-  whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
-  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
-  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
+  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and, where the
+  batch's prefetch is on, stops as NCBI does: the prologs and the reports of the batches before
+  (without the epilog, in every format that prefetches, the JSON and XML2 documents and side
+  files too), the batch's reader messages and the error (line DBID item mixdb2, probe of 4,800
+  runs; psiblast's PSSM drops such a sequence's letters with `Failed to retrieve sequence`, as
+  NCBI's). It refuses a run where the reports read such a Seq-id with the prefetch off (`... whose
+  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch
+  stops with a BLAST Database error, and where the prefetch is off its formatters fail to read
+  it)`), and a stopping batch whose other sequences' loads write texts of the
+  taxonomy database (after the lookups of the batches before: their prefetch, or in the JSON and
+  XML2 formats their reports, since version 1.36) or whose other lookups throw on their ids
+  (NCBI's prefetch loads them in the order of its Seq-id handles, which decides what it writes
+  before the error).
+  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
+  versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other
@@ -833,6 +1125,54 @@ here, and names the widening that PS16a made for protein queries.
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
+- BLASTX `-outfmt 1` to `4` with `-ungapped -window_size 0` (version 1.39, 2026-11-16, line RG item
+  T3c after X2g and T3c fix 3, Owner-delegated, rule 3 as 1.23): an HSP of length 0 among the
+  aligned subjects whose segment of length 0 NCBI's merge of the section frees while it still reads
+  it. A row's map of starts (`CAlnMixStarts`) holds its segments by `CRef`, `m_Segments` by raw
+  pointer (alnsegments.hpp:67,80,89), so a write into a map that replaces a segment's last `CRef`
+  frees it. That happens in two places:
+  - The split. An HSP of length 0 whose query row starts at the first nucleotide of a codon of an
+    HSP of the query's frame +1: its match (merged with that frame's HSPs, above) starts at or
+    inside a segment of letters of that row, and `x_Merge` "splits" the segment at the match's
+    length of 0 (alnmerger.cpp:580-614): `SetStarts()[start + 0] = seg` replaces each row's
+    reference to the segment, whose rows are all on the query's strand, so the last one frees it
+    while `ITERATE` still walks its `m_StartIts`. SIGSEGV in every such probe (37 of the 1,880
+    cases in each of the four views, 98 of the grid's 277 searches, the second query of
+    `x2g_ord_q2.fna`).
+  - `FillUnalignedRegions` (alnsegments.cpp:286-334). An HSP of length 0 whose segment its query
+    row's next segment does not follow at once (unaligned letters between them): the fill of that
+    stretch starts at the segment's own start (`new_start = prev_start + prev_len * width`, with a
+    length of 0), so `row->SetStarts()[new_start] = seg` (:323) replaces the row's reference to the
+    segment. It is the last one unless the segment is the last that `x_Merge` made (its local
+    `CRef<CAlnMixSegment> seg`, alnmerger.cpp:161, alive until `x_CreateDenseg` has returned,
+    :822-830). Besides `seg`, only the rows' maps hold a segment then, and none holds one of length
+    0 elsewhere: on the first row, whose segments `x_MinimizeGaps` never takes
+    (alnsegments.cpp:254-256), such a segment has one start (the walk of a match's second row does
+    not run for a length of 0, alnmerger.cpp:752); the first frame group's other query rows hold
+    segments of length 0 only, which `x_MinimizeGaps` makes into one segment per run that nothing
+    on those rows follows, so no fill starts at one. (A map that still holds a replaced segment at
+    another start of its row keeps it alive: where a run of `x_MinimizeGaps` ends at a segment that
+    shares a row with an earlier one, each new segment is bound at both starts,
+    alnsegments.cpp:478-480, :526, and a later fill can write at the earlier one. That happens to
+    segments of letters, as in an alignment with an insertion next to a deletion, and frees
+    nothing.) `x_CreateDenseg` then reads the freed segment through `m_Segments`
+    (alnmerger.cpp:1196-1210). Official NCBI BLAST+
+    2.17.0 exits 139 (SIGSEGV), and valgrind finds the invalid reads of a block "free'd by
+    `CAlnMixSegments::FillUnalignedRegions()`" (review 3 of T3c: the 8 runs of its seed-11 fuzz
+    with `-strand minus -num_descriptions 0`, cases `r11_001` and `r11_019`); where the segment is
+    still held, or no fill starts at it, NCBI exits 0 and valgrind is clean (`r21_173`, `r21_322`,
+    `r21_381`, review 4's `r41_079` on the default strand and the x2g case f3147 at query offset 0,
+    held by `seg`; `r21_470`, `r11_003`).
+
+  No checkable result in either place. LOSAT runs the same merge and refuses (exit 1) where it
+  reaches that split or replaces that last reference
+  (`report::query_anchored::aln_mix::MixError::NcbiFreesSegment`, the predicate
+  `aln_mix::Mix::held`), before the first byte of the reports of the search's call (as 1.23),
+  unless the report of a query before it ends with NCBI's exception, where NCBI stops first
+  (`pairwise::blastx_anchored_stop`; fixture rows `db.x2g.bx.of.p0127.nd0.1`,
+  `db.x2g.bx.of.ord.n1a5.1`, `db.x2g.bx.of.ord2.n1a5.3`, `db.x2g.bx.of.r11_001.nd0m.1`,
+  `db.x2g.bx.of.r11_019.nd0m.3`).
+
 - RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
   item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more
   preliminary HSPs when the e-value of a score of 0 passes `-evalue` (the query's search space
@@ -849,6 +1189,18 @@ here, and names the widening that PS16a made for protein queries.
   of a profile in the RPS traceback come. Where that cell scores 0 or less, NCBI's redo fails at the round of score 0
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).
+
+- The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
+  1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the
+  field list, which the default fields of 6, 7 and 10 have (`saccver`). NCBI BLAST+ 2.17.0 takes the
+  label of `FindBestChoice` of the empty `m_SubjectId`, a null pointer (`tabular.cpp:174-185`;
+  `CCoreException::eNullPtr`, `ncbiobj.cpp:1010`), and stops with exit status 255 and a stack trace
+  of its build after the row's earlier fields. Also `staxid` of such a row when it is the first row
+  of its query's (or round's) report: `m_SubjectTaxId` is printed before any row set it
+  (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). LOSAT
+  refuses (exit 1) before the query batch's report, where it refused every such subject before
+  1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
+  subjects: one alone, the first, the last or two give the same rows.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
@@ -869,17 +1221,16 @@ would port:
   and `qcovus` as one subject's, and PSIBLAST's cut to `-max_target_seqs` counts them as one
   subject.
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
-  BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28), of a query read
-  with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch), and in
-  outfmt 1 to 4 of BLASTP, BLASTN and TBLASTN with the id or display id `lcl|Query_N` of a query
-  read without it (TBLASTN's merge then reads the protein query's letters as nucleotides, probe
-  `tn.t3b.d.qid.f1`): NCBI shows the query's title and letters for the
+  BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28, of BLASTX and
+  TBLASTX since version 1.39), of a query read with `-parse_deflines` in the query batch that
+  reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP, BLASTN, BLASTX, TBLASTN
+  and TBLASTX with the id or display id `lcl|Query_N` of a query read without it (TBLASTN's merge
+  then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's and
+  TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
+  `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
-  that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
-  empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
 
 ## Ported (rule 4)
 
@@ -891,6 +1242,70 @@ would port:
   order) and deletes them in its re-evaluation (a
   length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
   refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
+- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.33, 2026-11-15, line RG item
+  X2g): the same HSPs of the one-hit word finder. NCBI links them with the others in the first
+  `BLAST_LinkHsps` and reaps them by their E-values; `Blast_HSPListReevaluateUngapped` does not
+  rescore them (the subject is a protein) and deletes those of negative length in `Blast_HSPTest`
+  (`blast_hits.c:993-1000,2719`: the alignment length is below `min_hit_length`, which is 0), so
+  they are never reported. `Blast_HSPListSubjectBestHit` (`-subject_besthit`) sees them too
+  (`blast_hits.c:2569`). LOSAT panicked on these searches and now gives NCBI's output. No merge
+  divides by a sum of lengths of 0 here: NCBI never splits the query of an ungapped search
+  (`split_query_cxx.cpp:60-61`), and LOSAT refuses subjects that NCBI would search in chunks.
+  Those of length 0 are kept and reported; their Std-seg rows end one before they start
+  (`x_UngappedHSPToStdSeg`). LOSAT now writes them as NCBI's formatters do. With `-db` the
+  Seq-aligns stay as made: tabular rows of empty ranges (a subject whose only HSP it is shows the
+  query's Seq-align id and fields at 0: `x_SetQueryCovSeqalign` throws on the empty row and
+  `SetFields` leaves before its alignment block), Seq-aligns whose empty rows end at `TSeqPos`
+  4294967295, `CSeq_align::GetSeqRange`'s `Row is empty` (`Seq_align.cpp:227`, exit status 255)
+  where `qcovs` and outfmt 0's description table read the rows, and a block without rows past
+  that table, and the same exception where outfmt 0's `-sorthits` and `-sorthsps` sorts read them
+  (`SortSeqalignForSortableFormat`: `-sorthits 4`, `-sorthsps 2` and `4`). With `-subject` NCBI's
+  Seq-loc mapper rewrites the query row to one nucleotide with a fuzz
+  (`seq_align_mapper_base.cpp:1538-1559`): `CreateDensegFromStdseg`'s exception
+  (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and sorts (`-sorthits 3`,
+  `-sorthsps 3`; `-sorthsps 4` gives 227 as with `-db`) and the XML make a Dense-seg of it, that
+  nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0, the message
+  on stderr, the query's report cut or left out), outfmt 13 and 14 do not (an empty side file,
+  exit status 255). A subject whose every HSP has length 0 has a Seq-align without a row of
+  letters: with `-db` NCBI's prefetch finds its subject row empty and writes `Error pre-fetching
+  sequence data` (every format but 8, 9, 11 and 12; 8, 9 and 12 too with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive is never prefetched); LOSAT writes the same. With
+  `-subject` the mapper finds no sequence type in such a subject and takes both rows as
+  nucleotides; the stop of an empty row's segment, of the unknown length -1, is `start + m_Len - 1`
+  in the unsigned `TSeqPos` (`seq_align_mapper_base.cpp:1067-1068`), which wraps only for an HSP
+  at the first or second letter of the searched range (counted from a `-subject_loc` interval's
+  start). Further in, the mapper keeps the segment's length -1 and its scores, the Seq-align stays
+  as made, and `-subject` gives `-db`'s output, the prefetch's warning too; LOSAT writes it with
+  `-db`'s port. Where it wraps, the mapper maps the subject row to the end of its interval: one HSP
+  becomes an alignment without scores
+  of the rest of the subject's letters against as many query nucleotides (from the start of the
+  empty query row up, or on a minus strand ending two below it, as the mapper moves the other rows
+  of a segment of unknown length; an E-value of 0.0, a bit score of -1.0, a score of -1; identities
+  where a nucleotide letter equals an amino acid letter, positives by the matrix; past the query's
+  last nucleotide the gap character; a minus-strand row that would start before the query's first
+  nucleotide wraps, and NCBI then writes the caught row of the query's Seq-align id, `Row is empty`
+  for `qcovs` or the Dense-seg's exception). LOSAT writes the tabular rows (outfmt 6, 7, 10, 20) of
+  that alignment as NCBI does (decision X2g-7), reading the query record's letters outside a
+  `-query_loc` interval where the row does (the cut keeps the longest subject interval's letters and
+  one more on each side). LOSAT refuses the rest of `-subject`'s mapped alignments. Decision X2g-4:
+  an HSP of length 0 at the first letter of the searched range of a subject with HSPs of letters, which
+  the mapper cuts into two alignments without scores (the mapper knows such a subject as a protein
+  and counts its start in nucleotides, three per letter, so its stop wraps at the first letter
+  only). Decision X2g-5: a subject whose every HSP has length 0, one of them at the first or second
+  letter of the searched range, in every format but the tables and outfmt 18, and in the tables
+  where it has two or more (more rows, exceptions and out-of-memory stops). NCBI's
+  output there is partly not defined (on the 4 GiB limit of the line's probes `BLAST ran out of
+  memory`, exit status 4, for a segment of about 2^32 letters), and the rest comes from alignments
+  that the mapper makes by accident.
+- The end of a database protein's title ending in `]` that `x_AdjustProteinTitleSuffix` rewrites
+  from the Bioseq's first tax id (with or without a taxonomy database), where a report shows the
+  generated title (the outfmt 0 heading of a definition line without a title, outfmt 18, a tabular
+  id that the title's first word replaces; version 1.38): ported by line RG item T5c on
+  2026-11-14; version 1.10 listed it above as a deterministic result that LOSAT refused. Where the
+  name that it writes makes the title one that `GenerateDefline` cannot decode (`chi, partial [ ]`
+  with the taxid 100009 of `tests/seqdb/taxdb/t5`), the lookup fails as in rule 2's item of version
+  1.37: `Unknown` in the tabular ids and the alignment skipped in the outfmt 0 heading (rows
+  `db.t5.sfu.*`, `db.t5.sfux.*`).
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

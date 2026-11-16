@@ -11,26 +11,29 @@
 //! This module is a child of `run` for the types it keeps private (`BlastnSubjectRef`,
 //! `SubjectCtx`, `PrelimHit`, `SubjectScratch`, `SubjectHits`, the e-value helpers).
 //! `traceback_subject` is the statements of `search_subject`'s traceback side, in their order;
-//! what it reads that is the same for every subject of a batch is `TraceBatch`, built once per
-//! batch, and what `search_subject` read of the call is `SubjectCtx`. The values the other two
-//! functions read are the fields of `traceback_finish::TracebackCtx`, which `traceback_subject`
-//! builds.
+//! what it reads of a batch is `TraceBatch` (or `special_subject`'s copy with the statistics of
+//! each subject), and what `search_subject` read of the call is `SubjectCtx`. The values the
+//! other two functions read are the fields of `traceback_finish::TracebackCtx`, which
+//! `traceback_subject` builds.
 
 use super::traceback_finish::TracebackCtx;
 use super::{
     adjust_blastn_offsets, calculate_blastn_context_statistics, encode_iupac_to_blastna,
-    traceback_list, ungapped, x_blastna_into_pool, BlastnHsp, BlastnSubjectRef, ContextKarlin,
-    GapAlignScratch, PrelimHit, SubjectCtx, SubjectHits, SubjectScratch,
+    traceback_list, ungapped, x_blastna_into_pool, BlastnHsp, BlastnSubjectRef, BlastnTiming,
+    ContextKarlin, FastaRecord, GapAlignScratch, PrelimHit, QueryContext, SubjectCtx, SubjectHits,
+    SubjectScratch,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::utils::threading::SearchPool;
 use indicatif::ProgressBar;
 
-/// What the traceback of a subject reads that is the same for every subject of the batch, in groups
-/// below. Built once per batch by `search_query_batch`, beside `prelim_subject::PrelimBatch`, with
-/// the names there (the types that `TracebackCtx`, `traceback_list::TraceSchedule` and
-/// `traceback_list::TraceDrive` take); every field is a shared reference or a `Copy` value, so the
-/// struct is `Sync`, as `search_subject`, which reads it, must be.
+/// What the traceback of a subject reads of its batch, in groups below. Built once per batch by
+/// `search_query_batch`, beside `prelim_subject::PrelimBatch`, with the names there (the types
+/// that `TracebackCtx`, `traceback_list::TraceSchedule` and `traceback_list::TraceDrive` take);
+/// with the statistics of each subject also once per subject, by `SubjectPasses::special_subject`:
+/// a copy with the subject's own cutoffs (and, in an `-ungapped` search, spaces). Every field is a
+/// shared reference or a `Copy` value, so the struct is `Sync`, as `search_subject`, which reads
+/// it, must be.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1436-1440
 /// (`BLAST_ComputeTraceback_MT`'s parameters)
@@ -54,6 +57,17 @@ pub(super) struct TraceBatch<'a> {
     pub(super) query_concat_length: usize,
     pub(super) search_karlin_ref: &'a Vec<ContextKarlin>,
     pub(super) round_down_evalue_score: bool,
+    /// The queries and their contexts (as `PrelimBatch` holds them), each context's effective
+    /// search space, cutoff and hit-saving cutoff (`batch_setup::batch_cutoffs`: the setup's; in
+    /// an `-ungapped` search, which has no traceback, the preliminary stage's, `PrelimBatch`'s; in
+    /// `special_subject`'s copy the subject's own cutoffs), and the LOSAT_TIMING counters (`None`
+    /// when timing is off).
+    pub(super) queries: &'a [FastaRecord],
+    pub(super) query_contexts: &'a [QueryContext],
+    pub(super) query_eff_searchsp: &'a Vec<i64>,
+    pub(super) cutoff_scores: &'a Vec<i32>,
+    pub(super) hit_saving_cutoff_scores: &'a Vec<i32>,
+    pub(super) timing_ref: Option<&'a BlastnTiming>,
     /// The alignment: the score matrix, the reward and penalty, the gap costs, the X-dropoff of the
     /// traceback and the aligner (dynamic programming or greedy).
     pub(super) score_matrix: &'a BlastnaMatrix,
@@ -63,10 +77,9 @@ pub(super) struct TraceBatch<'a> {
     pub(super) gap_extend: i32,
     pub(super) x_drop_final: i32,
     pub(super) use_dp: bool,
-    /// The hit-saving options: the minimum percent identity and length, the interval tree's
-    /// diagonal separation and the e-value threshold.
+    /// The hit-saving options: the minimum percent identity, the interval tree's diagonal
+    /// separation and the e-value threshold.
     pub(super) percent_identity: f64,
-    pub(super) min_hit_length: usize,
     pub(super) min_diag_separation: i32,
     pub(super) evalue_threshold: f64,
     /// The schedule on the pool: whether the speculative batches may run, the rule of
@@ -148,7 +161,6 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         x_drop_final,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
         speculative_traceback,
@@ -161,20 +173,19 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         debug_mode,
         blastn_debug,
         blastn_trace_enabled,
-    } = batch;
-    let &SubjectCtx {
-        s_idx,
-        s_id,
-        s_len_full,
         queries,
         query_contexts,
         query_eff_searchsp,
         cutoff_scores,
         hit_saving_cutoff_scores,
         timing_ref,
-        timing_enabled,
-        ..
+    } = batch;
+    let &SubjectCtx {
+        s_idx,
+        s_id,
+        s_len_full,
     } = subject_ctx;
+    let timing_enabled = timing_ref.is_some();
     // EXPERIMENT (LOSAT_X_BNTBRANGE): set when a traceback alignment met a fence.
     let x_fenced = subject.x_fenced;
     // A subject shorter than a word kept nothing (the preliminary stage returned before its
@@ -185,7 +196,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
 
     // BLASTN debug: Log cutoff scores for this query-subject pair
     if blastn_debug {
-        subject_ctx.debug_cutoffs();
+        subject_ctx.debug_cutoffs(cutoff_scores);
     }
 
     let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
@@ -245,7 +256,6 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         score_matrix,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
     };

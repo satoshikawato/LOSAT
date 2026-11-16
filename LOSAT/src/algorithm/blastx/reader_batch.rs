@@ -34,6 +34,10 @@ pub(crate) struct ReaderBatchShape {
     pub(crate) word_cutoff_min: Option<i32>,
     /// `hit_params->cutoff_score_min` of the batch (the composition redo).
     pub(crate) redo_cutoff_min: Option<i32>,
+    /// Each context of the batch, in order: its length, whether it is valid and its ungapped
+    /// Karlin block, of which the statistics of each subject take the batch's word cutoff minimum
+    /// (`parameters::subject_word_cutoff_min`; empty before the units are prepared).
+    pub(crate) batch_contexts: Vec<(usize, bool, KarlinParams)>,
     /// NCBI's error of the batch's set-up when the score block cannot load the `-matrix` of an
     /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
     /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
@@ -189,6 +193,7 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: options
                 .unknown_matrix
                 .then(|| super::query_setup::matrix_error_message(records, options).into()),
@@ -216,9 +221,17 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: layout.matrix_error.clone(),
         };
         for unit in units {
+            shape.batch_contexts.extend(
+                unit.prepared
+                    .contexts
+                    .iter()
+                    .zip(&unit.params)
+                    .map(|(context, p)| (context.length, p.valid, p.ungapped)),
+            );
             for p in unit.params.iter().filter(|p| p.valid) {
                 if p.ungapped.lambda > 0.0
                     && shape
@@ -289,13 +302,46 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        let computed =
-            (|| subject_parameters(&prepared, &mut minima, options, subjects.numbers()?, None))();
+        // The word cutoffs are the preliminary stage's, with its option spaces where they differ
+        // from the setup's (`parameters::preliminary_spaces`); the redo reads the setup's.
+        let mut word_minima = None;
+        let computed = (|| {
+            let numbers = subjects.numbers()?;
+            subject_parameters(&prepared, &mut minima, options, numbers, None)?;
+            if ungapped_link {
+                if let Some(spaces) = super::parameters::preliminary_spaces(
+                    &prepared,
+                    &params,
+                    options,
+                    numbers,
+                    matches!(subjects, Subjects::Stream(_)),
+                )? {
+                    let mut preliminary = params.clone();
+                    subject_parameters(
+                        &prepared,
+                        &mut preliminary,
+                        options,
+                        numbers,
+                        Some(&spaces),
+                    )?;
+                    word_minima = Some(preliminary);
+                }
+            }
+            anyhow::Ok(())
+        })();
         match computed {
-            Ok(_) => {
+            Ok(()) => {
                 let valid = || minima.iter().filter(|p| p.valid);
                 word_cutoff_min = ungapped_link
-                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .then(|| {
+                        word_minima
+                            .as_ref()
+                            .unwrap_or(&minima)
+                            .iter()
+                            .filter(|p| p.valid)
+                            .map(|p| p.word_cutoff)
+                            .min()
+                    })
                     .flatten();
                 redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
             }
@@ -414,11 +460,12 @@ mod tests {
             .collect();
         FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence,
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 
@@ -537,6 +584,7 @@ mod tests {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: None,
         }));
         assert_eq!(

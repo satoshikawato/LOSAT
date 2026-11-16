@@ -1,8 +1,9 @@
 //! TBLASTX's ungapped extensions past the end of a query frame (`tblastx::extension::QueryBatch`):
 //! the searches that LOSAT refuses because such an extension scores higher in the next frame of the
-//! query batch (PD-LOSAT-NCBI-DEFECTS, rule 3), at 1, 4 and 8 threads. The searches where it does
-//! not, which NCBI BLAST+ 2.17.0 reports as LOSAT does, are rows `x2c.tblastx.*` of
-//! `tests/outfmt0_manifest.tsv`.
+//! query batch (PD-LOSAT-NCBI-DEFECTS, rule 3), at 1, 4, 8 and 16 threads. The searches where it
+//! does not, which NCBI BLAST+ 2.17.0 reports as LOSAT does, are rows `x2c.tblastx.*` of
+//! `tests/outfmt0_manifest.tsv`; one of them also runs here at 16 threads, where the unit path
+//! splits the query's frames into several context groups.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:841 and :897
 //! ```c
@@ -44,7 +45,7 @@ fn manifest_path(relative: &str) -> PathBuf {
 /// variable but `LOSAT_BLASTX_WORKER_LOG` (a binary built with the `blastx-worker-probe` feature
 /// needs that file name once a search has more than one thread; it selects nothing) and none of the
 /// other variables that change a search (the list of `tests/blastn_window_masker.rs`).
-fn tblastx(case: &str, args: &[&str], threads: u32) -> Output {
+fn tblastx(case: &str, args: &[&str], outfmt: &str, threads: u32) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -87,18 +88,18 @@ fn tblastx(case: &str, args: &[&str], threads: u32) -> Output {
             "tests/fasta/outfmt0/x2c_{case}_s.fna"
         )))
         .args(args)
-        .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .args(["-outfmt", outfmt, "-num_threads", &threads.to_string()])
         .output()
         .expect("run LOSAT");
     let _ = std::fs::remove_file(&log);
     output
 }
 
-/// The search of `case` with `args` is refused at 1, 4 and 8 threads: exit status 1, no report, the
-/// refusal's message.
+/// The search of `case` with `args` is refused at 1, 4, 8 and 16 threads: exit status 1, no report,
+/// the refusal's message.
 fn refused(case: &str, args: &[&str]) {
-    for threads in [1, 4, 8] {
-        let output = tblastx(case, args, threads);
+    for threads in [1, 4, 8, 16] {
+        let output = tblastx(case, args, "6", threads);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.code(),
@@ -174,4 +175,42 @@ fn a_one_hit_extension_that_gains_in_the_previous_frame_is_refused() {
         .chain(["-window_size", "0"])
         .collect();
     refused("d7k", &args);
+}
+
+/// `f48` (row `x2c.tblastx.f48.6`): the right walk of R/R (4,800 letters, 49,995 bits) from frame
+/// 1 goes on past the NULLB over P/P in frame 2 without scoring higher, and its stop covers every
+/// P/P hit, so NCBI reports no P/P HSP. At 16 threads the unit path puts the two frames in
+/// different context groups; the units run again in group order on one table
+/// (`x_pair_par::x_units_in_order`) and give NCBI BLAST+ 2.17.0's rows, as at 1 thread.
+#[test]
+fn a_right_walk_past_the_nullb_covers_the_next_frames_hits_at_every_thread_count() {
+    let expected = std::fs::read(manifest_path(
+        "tests/fixtures/outfmt0/x2c.tblastx.f48.6.out",
+    ))
+    .expect("the frozen rows of x2c.tblastx.f48.6");
+    let args = [
+        "-seg",
+        "no",
+        "-threshold",
+        "999",
+        "-xdrop_ungap",
+        "20000",
+        "-evalue",
+        "1e-40",
+    ];
+    for threads in [1, 16] {
+        let output = tblastx(
+            "f48",
+            &args,
+            "6 qframe sframe qstart qend sstart send evalue bitscore",
+            threads,
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "threads {threads}: {stderr}");
+        assert!(stderr.is_empty(), "threads {threads}: {stderr}");
+        assert!(
+            output.stdout == expected,
+            "threads {threads}: the rows differ from NCBI BLAST+ 2.17.0's"
+        );
+    }
 }

@@ -676,7 +676,7 @@ impl<M: TbxScore> XPairPar<M> {
             s_idx: inp.s_idx,
             s_len: inp.s_len,
             sc: self.sc,
-            query_batch: QueryBatch::new(inp.contexts, inp.failure, inp.s_idx),
+            query_batch: inp.query_batch(),
         };
         let mut b = XPendBatch {
             c: [XCand::default(); BATCH],
@@ -905,6 +905,7 @@ mod tests {
                 s_idx: 0,
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
+                passed: None,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

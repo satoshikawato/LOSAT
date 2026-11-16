@@ -214,6 +214,7 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
                 s_idx,
                 s_len,
                 failure: x_read_failure,
+                passed: None,
             };
             x_lap.lap(XStage::Prepare);
             let x_units = x.run_subject_units(&x_subject, parallel_pool);

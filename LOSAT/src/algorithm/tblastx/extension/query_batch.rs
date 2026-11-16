@@ -46,6 +46,7 @@
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::scoring::TbxScore;
 use crate::algorithm::tblastx::subjects::XReadFailure;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The byte between two contexts of NCBI's query batch (`NULLB`, ncbi_std.h), which is also each
 /// context buffer's sentinel in LOSAT.
@@ -56,6 +57,9 @@ const NULLB: u8 = 0;
 pub(crate) struct QueryBatch<'a> {
     contexts: &'a [QueryContext],
     failure: &'a XReadFailure,
+    /// The unit path's note of a right walk that went on past a NULLB (`QueryBatch::noting`;
+    /// x_pair_par.rs, `x_units_in_order`), or None.
+    passed: Option<&'a AtomicBool>,
     s_idx: usize,
 }
 
@@ -67,9 +71,20 @@ impl<'a> QueryBatch<'a> {
         failure: &'a XReadFailure,
         s_idx: usize,
     ) -> Self {
+        Self::noting(contexts, failure, None, s_idx)
+    }
+
+    /// As `new`, and where `passed` is given, every right walk that goes on past a NULLB sets it.
+    pub(crate) fn noting(
+        contexts: &'a [QueryContext],
+        failure: &'a XReadFailure,
+        passed: Option<&'a AtomicBool>,
+        s_idx: usize,
+    ) -> Self {
         Self {
             contexts,
             failure,
+            passed,
             s_idx,
         }
     }
@@ -187,10 +202,33 @@ impl<'a> QueryBatch<'a> {
     // starts its walk past its context's end, `extend_hit_one_hit`), and the batch ends at its last
     // context's letters (`query->length`). Returns NCBI's `i` at the end of the walk.
     /// The right walk of context `ctx` past its end, and its stop; refuses the search where it
-    /// scores higher.
+    /// scores higher. A walk that goes on past the NULLB after the context's letters sets
+    /// `passed` (its stop then lies past the context, where the cell of its diagonal masks the
+    /// later hits of the diagonal: x_pair_par.rs, module doc item 3).
     #[cold]
     #[inline(never)]
     fn walk_right<S: TbxScore>(
+        &self,
+        ctx: usize,
+        sc: S,
+        s_seq: &[u8],
+        s_at: usize,
+        q_at: usize,
+        j: usize,
+        score: i32,
+        max_score: i32,
+        x_drop: i32,
+    ) -> usize {
+        let i = self.walk_right_steps(ctx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop);
+        if let (Some(passed), true) = (self.passed, i > j) {
+            passed.store(true, Ordering::Relaxed);
+        }
+        i
+    }
+
+    /// The steps of `walk_right`.
+    #[inline(always)]
+    fn walk_right_steps<S: TbxScore>(
         &self,
         ctx: usize,
         sc: S,

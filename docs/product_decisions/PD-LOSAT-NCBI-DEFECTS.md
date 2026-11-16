@@ -741,11 +741,19 @@ masked). Line NP item M4a-2c.
   not reported. A left walk that scores no higher past the NULLB changes nothing. The one-hit
   extension (`-window_size 0`) starts its right walk one past a word whose running score never
   rises above 0 (`q_right_off` stays `q_off + word_size`, `aa_ungapped.c:1030-1031,1073-1076`): for
-  such a word at a frame's end, on the next frame's first letter, at any X-drop. LOSAT's walks go
-  on into the batch in the same way (`tblastx::extension::QueryBatch`), in the reference frame
-  loop and in the units. Fixture rows `x2c.tblastx.*` of `tests/outfmt0_manifest.tsv`; the unit
-  tests of `LOSAT/src/algorithm/tblastx/extension/query_batch_tests.rs` compare the two-hit and
-  one-hit extensions with NCBI's functions on the batch's buffer.
+  such a word at a frame's end, on the next frame's first letter, at any X-drop. Such a word is an
+  exact match of `X` and `*` letters that starts with `X` (`XXX`, `X*X`); no input made NCBI
+  BLAST+ 2.17.0 take one at a frame's end as a seed (a query frame ending in `NNNNNNNNN` against a
+  subject with the same word, as `-subject` and from a database), so this case follows NCBI's
+  source and was not seen in its output. LOSAT's walks go on into the batch in the same way
+  (`tblastx::extension::QueryBatch`), in the reference frame loop and in the units; where a unit
+  of a query batch split into several context groups sees a right walk go on past a NULLB, the
+  subject's units run again in group order on one table of the batch's diagonals, so the hits it
+  covers in another group's frames are left out as in NCBI's one table, at every `-num_threads`
+  (`x_pair_par.rs`, module doc item 3). Fixture rows `x2c.tblastx.*` of
+  `tests/outfmt0_manifest.tsv`; the unit tests of
+  `LOSAT/src/algorithm/tblastx/extension/query_batch_tests.rs` compare the two-hit and one-hit
+  extensions with NCBI's functions on the batch's buffer.
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
@@ -1048,8 +1056,9 @@ masked). Line NP item M4a-2c.
   higher there ... is not supported by LOSAT's TBLASTX") where such an extension first scores
   higher, and the query batch's search fails as at a failed read of a subject (the reports of the
   batches before are written), the same at every `-num_threads` (`tests/tblastx_query_batch.rs`,
-  1, 4 and 8 threads, and the one-hit word finder). It takes a raw X-drop above 32,768, or the
-  one-hit extension's walk from a word at a frame's end whose running score never rises above 0.
+  1, 4, 8 and 16 threads, and the one-hit word finder). It takes a raw X-drop above 32,768, or the
+  one-hit extension's walk from a word at a frame's end whose running score never rises above 0
+  (from NCBI's source; not seen in its output, the rule-2 item above).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

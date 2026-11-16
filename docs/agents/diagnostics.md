@@ -1654,6 +1654,14 @@ Rebuilding less:
   buffer below 1 MiB, freed when its stage (or the window's segment, or the `map_init` run) ends. NCBI reads the
   sequences in place in the mapped volume (seqsrc_seqdb.cpp:375, seqdbvol.cpp:1817) and allocates each search
   thread's structures once (blast_engine.c:1376-1378). With `=0` every block is a new buffer (`read_block`).
+  Measured on the workstation (line NP C4-3, dev bc182b374, node 1, 11 rounds, dev / null / head rotated; every output
+  equal to NCBI 2.17.0's): task-clock many40 megablast x0.991 (10/11 rounds faster), the mlst example x0.994 (10/11),
+  syn `-task blastn` x0.998 (10/11); syn megablast, many40 `-db_hard_mask`, SILVA at 1 and 16 threads and the zebrafish
+  genome at one thread within the null arm (x0.999-1.003; null x1.000-1.006). Callgrind: syn megablast -3.0 % instructions (block reads'
+  `memset` 14.1 M -> 2.1 M), mlst -1.7 % (54.5 M -> 2.1 M); perf counts glibc's `rep stosb` as few instructions, so
+  user-space instructions are flat. Max RSS (21 runs, 61 for syn at 16 threads): many40 at one thread +68 KiB
+  (+0.39 %; with `MALLOC_MMAP_THRESHOLD_` fixed equal: glibc raises its mmap threshold when the kept buffer is freed at
+  the end of the stage instead of after the first block), mlst -0.9 MiB, the others equal within the runs' spread.
   Every pooled buffer is written before it is read (zeroed and read into, or BLASTNA letters written whole), so values
   and order never change; it only chooses where the bytes live and when they are freed. Not mapped: the merge of the
   folded strips (`x_pair_seed_part.rs`) and the per-query sorts of `LOSAT_X_QGROUPPAR`. With other allocators (macOS,

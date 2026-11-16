@@ -506,6 +506,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-strand` and `-sum_stats`: `tblastx`.
 - `-best_hit_overhang` and `-best_hit_score_edge`: all five programs.
 - `-subject_besthit`: `blastp`, `tblastn`, `tblastx`.
+- An ungapped extension that passes the end of a query frame into the frame next to it in the query batch and scores higher there: `tblastx`, with a raw `-xdrop_ungap` above 32,768 (with BLOSUM62 about 15,000 bits or more). NCBI BLAST+ 2.17.0 keeps such an alignment in the frame where it started, with query coordinates outside that frame, and then writes coordinates past the query or leaves the alignment out of every report ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.36). An extension that passes into the next frame without scoring higher there gives NCBI BLAST+'s output.
 
 **Query and subject**
 - `-query_loc` and `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16: `blastx` (0, 6, 7, 10 and 20 work).

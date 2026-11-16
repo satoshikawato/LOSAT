@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.35
+- Version: 1.36
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -85,7 +85,11 @@
   2026-09-29, restated 2026-10-07);
   1.35 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
   end, at a scanned word of 11 or more; the Owner's decision of 2026-11-15 「M4a Q1=B」, line NP
-  item M4a-2c)
+  item M4a-2c);
+  1.36 2026-11-16 (TBLASTX's ungapped extension past the end of a query frame into the next frame
+  of the query batch: reproduced where it scores no higher there, rule 2, and an explicit
+  rejection where it does, rule 3; line RG item X2c, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -720,6 +724,28 @@ masked). Line NP item M4a-2c.
   LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
   NCBI ends it without reading that header.
 
+- TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.36,
+  2026-11-16, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and
+  `s_BlastAaExtendRight` count the letters of the query batch, not of the frame (`n = MIN(s_off,
+  q_off)` and `n = MIN(subject->length - s_off, query->length - q_off)` with offsets into the
+  batch, `aa_ungapped.c:841,897`). A walk that reaches the end of its frame without a break scores
+  the NULLB between it and the next frame (`BLAST_SCORE_MIN`, `blast_stat.c:1559-1576`; one NULLB
+  between two frames with letters, `blast_setup_cxx.cpp:65-88`) and, while that does not break it,
+  the next frame's letters, up to the batch's first letter or the end of its last frame. With a
+  raw X-drop of 32,768 or less (with BLOSUM62 below about 15,000 bits of `-xdrop_ungap`) the
+  NULLB always ends the walk with the values of a walk that stops at the frame's end. With a
+  larger one, a right walk that reaches the frame's end above 32,768 goes on; where it scores no
+  higher there, only its stop moves (`*s_last_off = s_off + i`), and the diagonal's `last_hit`
+  then covers the next frame's hits on that diagonal (`aa_ungapped.c:593-597`), which NCBI does
+  not extend: a pair of letters that a long similar pair just before the frame's end runs into is
+  not reported. A left walk that scores no higher past the NULLB changes nothing. The one-hit
+  extension (`-window_size 0`) starts its right walk one past a word whose running score never
+  rises above 0 (`q_right_off` stays `q_off + word_size`, `aa_ungapped.c:1030-1031,1073-1076`): for
+  such a word at a frame's end, on the next frame's first letter, at any X-drop. LOSAT's walks go
+  on into the batch in the same way (`tblastx::extension::QueryBatch`), in the reference frame
+  loop and in the units. Fixture rows `x2c.tblastx.*` of `tests/outfmt0_manifest.tsv`; the unit
+  tests of `LOSAT/src/algorithm/tblastx/extension/query_batch_tests.rs` compare the two-hit and
+  one-hit extensions with NCBI's functions on the batch's buffer.
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
@@ -1003,6 +1029,27 @@ masked). Line NP item M4a-2c.
   of a profile in the RPS traceback come. Where that cell scores 0 or less, NCBI's redo fails at the round of score 0
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).
+
+- TBLASTX, an ungapped extension that scores higher past the end of its query frame, in the frame
+  next to it in the query batch (version 1.36, 2026-11-16, line RG item X2c, Owner-delegated, line
+  RG `DECISIONS.md` X2c-1; the walks are those of the rule-2 item above): the HSP then spans two
+  frames. NCBI keeps it in the frame of its seed with query offsets outside that frame
+  (`s_AdjustInitialHSPOffsets`, `blast_gapalign.c:2384-2392`, whose `ASSERT(q_start >= 0)` is
+  compiled out of release builds), re-evaluates it on the batch (`Blast_HSPListReevaluateUngapped`,
+  `blast_hits.c:2609-2725`), and its formatters take its coordinates from those offsets
+  (`blast_seqalign.cpp:1344-1376`). One that starts in the frame before a minus frame is written
+  with query coordinates past the query and no identities (`0.000 7040 7040 0 42245 21126 1
+  21120` for a query of 21,122 bases, input `x2c_e7k`), one that ends in the frame after its own
+  with an end past the query (`14404 43206` of 28,803, `x2c_g48`), and one of a plus frame that
+  starts in the frame before is left out of every report (`x2c_d7k`; where the Seq-align layer
+  drops it was not found), while it takes its place among the HSPs and its extension covers the
+  hits it passed. No checkable result: LOSAT refuses the search (exit 1, "an ungapped extension
+  that passes the end of a query frame into the frame next to it in the query batch and scores
+  higher there ... is not supported by LOSAT's TBLASTX") where such an extension first scores
+  higher, and the query batch's search fails as at a failed read of a subject (the reports of the
+  batches before are written), the same at every `-num_threads` (`tests/tblastx_query_batch.rs`,
+  1, 4 and 8 threads, and the one-hit word finder). It takes a raw X-drop above 32,768, or the
+  one-hit extension's walk from a word at a frame's end whose running score never rises above 0.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

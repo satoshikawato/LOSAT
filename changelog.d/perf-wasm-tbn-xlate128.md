@@ -1,0 +1,1 @@
+- Web (WebAssembly): TBLASTN translates the `-db` subjects 16 codons at a time with simd128, as the native build does 32 at a time with AVX2: a 1-thread search of one human protein against the human genome is about 12 % faster in Node (`LOSAT_X_TBNXLATE128`, on by default; also used by x86-64 CPUs without AVX2); the native AVX2 builds and the reports do not change.

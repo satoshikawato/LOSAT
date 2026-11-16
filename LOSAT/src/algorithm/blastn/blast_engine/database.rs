@@ -728,17 +728,20 @@ impl BlastnDatabase {
 
     /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
     /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
-    /// texts at each `Hit` (`shared::batch_prefetch_stop`).
+    /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
+    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`),
+    /// which BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
     pub(super) fn batch_prefetch_stop(
         &self,
         titles: &DatabaseTitles,
+        before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         query: usize,
     ) -> Result<()> {
-        shared::batch_prefetch_stop(
+        shared::held_batch_prefetch_stop(
             &self.db,
-            &self.taxdb,
+            Self::prefetch_subjects(titles, before, gapped),
             Self::prefetch_subjects(titles, hit_lists, gapped),
             PROGRAM,
             query,

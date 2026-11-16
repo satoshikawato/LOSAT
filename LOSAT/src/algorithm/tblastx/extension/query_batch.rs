@@ -77,7 +77,9 @@ const NULLB_SCORE: i32 = BLAST_SCORE_MIN;
 /// The query batch of a search, as its two-hit and one-hit extensions read it: the batch's
 /// contexts, and where the search reports an extension that LOSAT refuses. The searches make it
 /// once per batch (or per subject on the unit path, `noting`); an extension reads it through
-/// `QueryBatch::at`, with its subject.
+/// `QueryBatch::at`, with its subject. `Copy`: it holds references only (a subject's
+/// `WordFinderCx` copies the batch's).
+#[derive(Clone, Copy)]
 pub(crate) struct QueryBatch<'a> {
     contexts: &'a [QueryContext],
     failure: &'a XReadFailure,

@@ -722,7 +722,7 @@ fn pssm_with_parameters(
             num_columns: letters.len() as i32,
             row_labels: None,
             by_row: Some(false),
-            query: Some(SeqEntry::Seq(PssmQuery {
+            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
                 ids: vec![query.id.clone()],
                 descr: Some(vec![Seqdesc::Title(query.title.to_vec())]),
                 inst: SeqInst::new(
@@ -732,7 +732,7 @@ fn pssm_with_parameters(
                     Some(SeqData::Ncbistdaa(letters.to_vec())),
                 ),
                 annot: None,
-            })),
+            }))),
             intermediate_data: Some(intermediate_data),
             final_data: Some(PssmFinalData {
                 scores: pssm.scores.iter().flatten().copied().collect(),

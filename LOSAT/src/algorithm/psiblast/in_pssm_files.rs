@@ -430,7 +430,7 @@ mod tests {
                 num_columns: columns as i32,
                 row_labels: None,
                 by_row: Some(false),
-                query: Some(SeqEntry::Seq(PssmQuery {
+                query: Some(SeqEntry::Seq(Box::new(PssmQuery {
                     ids: vec![ParsedSeqId::Local(id)],
                     descr: None,
                     inst: SeqInst::new(
@@ -440,7 +440,7 @@ mod tests {
                         Some(SeqData::Ncbistdaa(vec![12; columns])),
                     ),
                     annot: None,
-                })),
+                }))),
                 intermediate_data: Some(PssmIntermediateData {
                     freq_ratios: (0..columns * rows).map(|i| i as f64).collect(),
                     ..PssmIntermediateData::default()

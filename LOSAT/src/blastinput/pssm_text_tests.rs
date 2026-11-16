@@ -142,7 +142,7 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
             num_columns: 1,
             row_labels: None,
             by_row: Some(false),
-            query: Some(SeqEntry::Seq(PssmQuery {
+            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
                 ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
                     b"Query_7".to_vec(),
                 ))],
@@ -154,7 +154,7 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
                     Some(SeqData::Ncbistdaa(vec![12])),
                 ),
                 annot: None,
-            })),
+            }))),
             intermediate_data: Some(PssmIntermediateData {
                 weighted_res_freqs_per_pos: Some(vec![0.0, 0.25]),
                 freq_ratios: vec![0.0, 1.5],

@@ -122,7 +122,7 @@ pub struct PssmQuery {
 // ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum SeqEntry {
-    Seq(PssmQuery),
+    Seq(Box<PssmQuery>),
     Set(Value),
 }
 
@@ -130,7 +130,7 @@ impl SeqEntry {
     /// The Bioseq of the `seq` variant.
     pub fn seq(&self) -> Option<&PssmQuery> {
         match self {
-            SeqEntry::Seq(query) => Some(query),
+            SeqEntry::Seq(query) => Some(query.as_ref()),
             SeqEntry::Set(_) => None,
         }
     }
@@ -138,7 +138,7 @@ impl SeqEntry {
     /// The Bioseq of the `seq` variant, moved out.
     pub fn into_seq(self) -> Option<PssmQuery> {
         match self {
-            SeqEntry::Seq(query) => Some(query),
+            SeqEntry::Seq(query) => Some(*query),
             SeqEntry::Set(_) => None,
         }
     }
@@ -146,7 +146,7 @@ impl SeqEntry {
     /// The Bioseq of the `seq` variant, to change.
     pub fn seq_mut(&mut self) -> Option<&mut PssmQuery> {
         match self {
-            SeqEntry::Seq(query) => Some(query),
+            SeqEntry::Seq(query) => Some(query.as_mut()),
             SeqEntry::Set(_) => None,
         }
     }

@@ -206,7 +206,7 @@ fn seq_entry(value: Value) -> SeqEntry {
     }
     const T: u16 = named::BIOSEQ;
     let mut get = |name: &str| take(&mut bioseq, T, name);
-    SeqEntry::Seq(PssmQuery {
+    SeqEntry::Seq(Box::new(PssmQuery {
         ids: list(get("id").expect("mandatory"))
             .into_iter()
             .map(|id| match id {
@@ -229,7 +229,7 @@ fn seq_entry(value: Value) -> SeqEntry {
         }),
         inst: seq_inst(get("inst").expect("mandatory")),
         annot: get("annot").map(list),
-    })
+    }))
 }
 
 fn seq_inst(mut value: Value) -> SeqInst {

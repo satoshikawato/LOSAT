@@ -680,7 +680,7 @@ pub(crate) fn psi_search_and_object(
     // NCBI's `CInvalidChoiceSelection` (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 `r4/probe` s06, s07,
     // s11: after the object manager's messages, psiblast after its prolog).
     let query = match entry {
-        SeqEntry::Seq(query) => Some(query),
+        SeqEntry::Seq(query) => Some(query.as_ref()),
         SeqEntry::Set(_) => {
             if annot.abort.is_none() {
                 annot.abort = Some(super::annot_index::Abort::of(

@@ -1242,14 +1242,14 @@ fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
             num_columns: 1,
             row_labels: None,
             by_row: None,
-            query: Some(SeqEntry::Seq(PssmQuery {
+            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
                 ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
                     b"Query_1".to_vec(),
                 ))],
                 descr: Some(vec![Seqdesc::Title(title.to_vec())]),
                 inst: SeqInst::new(("raw", 2), ("aa", 3), Some(1), None),
                 annot: None,
-            })),
+            }))),
             intermediate_data: None,
             final_data: None,
         },

@@ -7221,7 +7221,7 @@ fn search(
             ),
         args.app.name(),
     );
-    let mut batches = match args.app {
+    let batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // ```c++
         //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);

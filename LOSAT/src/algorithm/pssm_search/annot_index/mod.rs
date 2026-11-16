@@ -248,7 +248,7 @@ pub(crate) fn index_annots(
         inst: SeqInst::new(("raw", 2), ("aa", 3), None, None),
         annot: Some(annots.to_vec()),
     };
-    index_entry(program, &SeqEntry::Seq(query), true)
+    index_entry(program, &SeqEntry::Seq(Box::new(query)), true)
 }
 
 impl Indexer<'_> {

@@ -277,7 +277,8 @@ impl BlastpSubjectParameters {
     }
 }
 
-/// What `run_call`'s kernel (`search_subject`) reads of the preliminary statistics: the word and
+/// What `run_call`'s kernel (`BlastpPrelimKernel::search_subject`, `blast_engine/prelim_kernel.rs`)
+/// reads of the preliminary statistics: the word and
 /// hit-saving cutoffs of each context, the search spaces, the preliminary e-value and psiblast's
 /// sum statistics; the setup's (made once per call) or a subject's own
 /// (`BlastpSubjectParameters::values`). One pointer per subject, so that the default path reads

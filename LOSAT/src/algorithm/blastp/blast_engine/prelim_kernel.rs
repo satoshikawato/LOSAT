@@ -94,7 +94,9 @@ pub(super) struct BlastpPrelimKernel<'a> {
     // The scan's lookup table, the context of each offset of the concatenated query, the ungapped
     // X-drop of each context, the window and the word size, the query block of LOSAT_X_BPUNGAPSENT's
     // sentinel walks, the diagonals' mask, the span of the queries (the interval tree's bounds) and
-    // the scan ranges of `-lcase_masking`'s subjects.
+    // the scan ranges of `-lcase_masking`'s subjects. `x_ungap_sent` is made from
+    // `x_dropoff_per_context` (`call_setup::scan_shape`): the SAFETY of the sentinel walks reads the
+    // one through the other.
     pub(super) lookup: &'a BlastpRuntimeLookup,
     pub(super) x_context_table: &'a XContextTable,
     pub(super) x_dropoff_per_context: &'a Vec<i32>,
@@ -151,7 +153,8 @@ impl BlastpPrelimKernel<'_> {
         subject_result: &mut BlastpSubjectResult,
         values: &BlastpPrelimValues<'_>,
     ) {
-        // `run_call`'s values as the closure read them: a reference or a `Copy` value each.
+        // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
+        // each.
         let Self {
             args,
             contexts,
@@ -243,7 +246,8 @@ impl BlastpPrelimKernel<'_> {
         // Dispatch point: the two-hit test reads the lookup cells in place
         // (`x_seed_fused::x_scan_two_hit`, and `x_seed_fused_compressed::x_scan_two_hit_compressed`
         // for the compressed table of blastp-fast) and this closure takes the hits that need the
-        // context check and the extension, with the same body as the reference closure below.
+        // context check and the extension (`x_candidate_of!` below; `x_candidate_sent!` with the
+        // sentinel walks).
         // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
         // The two-hit test of a hit that needs the context check and the extension, with the
         // extension `$extend` (and its leading arguments): `extend_two_hit_blosum62` for BLOSUM62,
@@ -271,7 +275,7 @@ impl BlastpPrelimKernel<'_> {
                         .get_with_start(query_offset)
                         .unwrap_or_else(|| {
                             let idx = blastp_context_idx_for_query_offset_with_bounds(
-                                &contexts,
+                                contexts.as_slice(),
                                 context_lookup_bounds,
                                 query_offset,
                             );
@@ -292,7 +296,7 @@ impl BlastpPrelimKernel<'_> {
                     // ```
                     let Some(ungapped_hit) = $extend(
                         $($lead,)?
-                        &concatenated_query,
+                        concatenated_query.as_slice(),
                         subject_raw,
                         usize::try_from(last_hit + word_size)
                             .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
@@ -387,7 +391,7 @@ impl BlastpPrelimKernel<'_> {
                     //     word_params->cutoffs + curr_context;
                     // ```
                     let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
-                        &contexts,
+                        contexts.as_slice(),
                         context_lookup_bounds,
                         query_offset,
                     );
@@ -403,7 +407,7 @@ impl BlastpPrelimKernel<'_> {
                     // ```
                     let Some(ungapped_hit) = $extend(
                         $($lead,)?
-                        &concatenated_query,
+                        concatenated_query.as_slice(),
                         subject_raw,
                         usize::try_from(query_offset)
                             .expect("NCBI BLAST one-hit query offset must be non-negative"),
@@ -485,7 +489,7 @@ impl BlastpPrelimKernel<'_> {
                         .get_with_start(query_offset)
                         .unwrap_or_else(|| {
                             let idx = blastp_context_idx_for_query_offset_with_bounds(
-                                &contexts,
+                                contexts.as_slice(),
                                 context_lookup_bounds,
                                 query_offset,
                             );
@@ -887,7 +891,8 @@ impl BlastpPrelimKernel<'_> {
         subject_result: &mut BlastpSubjectResult,
         mut init_hsps: Vec<InitHSP>,
     ) {
-        // `run_call`'s values as the closure read them: a reference or a `Copy` value each.
+        // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
+        // each.
         let Self {
             args,
             query_ids,

@@ -98,8 +98,10 @@
   2026-10-07);
   1.38 2026-11-16 (that refusal narrowed to the loads whose order NCBI takes from the addresses
   of its Seq-id handles: the texts of the loads before the stopping lookup in the order of the
-  handles are written as NCBI writes them; line DBID item loadord, Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07)
+  handles are written as NCBI writes them, and of several stopping ids the first that NCBI looks
+  up ends the loads; refused, a stopping id that NCBI may never look up, as its scope or its data
+  loader, which keeps the ids of what the run loaded, finds it first; line DBID item loadord,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -834,7 +836,7 @@ masked). Line NP item M4a-2c.
   files too), the batch's reader messages and the error (line DBID item mixdb2, probe of 4,800
   runs; psiblast's PSSM drops such a sequence's letters with `Failed to retrieve sequence`, as
   NCBI's). Before the error come the taxonomy database's texts of the loads that the prefetch
-  makes before the stopping lookup (since version 1.37, line DBID item loadord, probe of 184
+  makes before the stopping lookup (since version 1.38, line DBID item loadord, probe of 184
   runs, all six programs): it loads a batch's Seq-align ids, up to 200 of them, in the order of
   their Seq-id handles, those that its mapper packs (gi, an accession of a prefix and digits
   without a name or release, a `general` id with an integer tag or a string tag of at least
@@ -849,22 +851,29 @@ masked). Line NP item M4a-2c.
   than 200 Seq-align ids, which NCBI sorts by `CSortableSeq_id` and loads in pieces of 100)
   writes a text of the taxonomy database (after the lookups of the batches before: their
   prefetch, or in the JSON and XML2 formats their reports, since version 1.36), one where
-  another lookup that throws on its id may come before the stop, and one whose stopping id NCBI
-  may never look up: another sequence of the database that holds an id of its Seq-id handle
+  another lookup that throws on its id may come before the stop, and one whose stopping ids NCBI
+  may all never look up: another sequence of the database that holds an id of its Seq-id handle
   may be loaded first (NCBI's data loader keeps the ids of every sequence it has loaded and
   gives that sequence for them): `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|` in the
-  batch's order, or a sequence that the run reported before (in a batch, a query or a psiblast
-  round before, whose prefetch, reports and PSSM loaded it), or the first sequence that a lookup
-  of another id of such a sequence gives; not a sequence that no batch reported (NCBI then
-  stops), nor a copy with the same Seq-align id, whose load is the same lookup; and, in a call of
-  the library's query batches after the first, which has no record of the calls before, any
-  such sequence. Or a query that NCBI's scope holds at the prefetch has the stopping id, or one
+  batch's order, or a sequence that the run loaded before (in a batch, a query or a psiblast
+  round before: every subject of its Seq-aligns where its prefetch is on, else, with
+  `PRE_FETCH_SEQS_LIMIT`, the subjects that its reports' rows read, none for `6 qseqid evalue`,
+  and those that psiblast's PSSM includes), or the first sequence that a lookup of another id of
+  such a sequence gives; not a sequence that no batch loaded (NCBI then stops), nor a copy with
+  the same Seq-align id, whose load is the same lookup; and, in a call of the library's query
+  batches after the first, which has no record of the calls before, any such sequence. Or a query that NCBI's scope holds at the prefetch has the stopping id, or one
   that it matches weakly: the records that NCBI's reader read for the batch, a record that
   `-query_loc` drops included (it keeps its number), by their generated ids (`lcl|Query_N`, the
   numbers of the whole run, also in psiblast's rounds) or with `-parse_deflines` by the ids of
   their deflines alone, or the query of a PSSM (`-in_pssm`, `lcl|myprot`); with outfmt 5, whose
   report keeps the scope, also those of the batches before (reviews 1 and 2 of item loadord:
-  NCBI then searches to the end, exit 0, or blastx ends with its CSeqalign exception).
+  NCBI then searches to the end, exit 0, or blastx ends with its CSeqalign exception). Where a
+  batch has several stopping ids, NCBI's loads end at the first lookup that it makes, in the
+  order of the handles (review 3 of item loadord): a stopping id before it that NCBI may skip so
+  does not refuse the batch by itself, but the loads from the first stopping id to the one that
+  NCBI surely looks up, and the sequence that the skipped lookup is given instead, are loads of
+  an unknown order (refused where one writes a text), and the stops that the loads may end at
+  must fail with one message.
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

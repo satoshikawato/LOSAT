@@ -713,26 +713,29 @@ impl SeqDb {
     // ISAM whose files exist throws `Error: Could not open input file` where one does not open
     // (seqdbisam.cpp:1102-1171, quoted at `StringIsam::open`), at the first lookup that reaches
     // the volume, which then fails on a file with NCBI's exception (the prefetch's stop,
-    // `common::database::batch_prefetch`); LOSAT keeps no failed open (`opened`), so each lookup
-    // that reaches the volume fails again.
-    /// Whether a lookup of a reported sequence's Seq-align id (`seqid_lookup`) may still fail to
-    /// open an ISAM of a volume with NCBI's exception: a volume with sequences whose string ISAM
+    // `common::database::batch_prefetch`).
+    /// Whether a lookup of a reported sequence's Seq-align id (`seqid_lookup`) may fail to open an
+    /// ISAM of a volume with NCBI's exception: a volume with sequences whose string ISAM
     /// (`.psi`/`.psd`, `.nsi`/`.nsd`: `StringIsam::index_exists`) or PIG ISAM (`.ppi`/`.ppd`) has
-    /// both files and is not open (no lookup has reached it, or its open failed). A file of an
-    /// ISAM that no lookup opened is only looked for (`Path::exists`), never opened.
+    /// both files and one of them does not open. Each file is opened (`File::open`) and closed,
+    /// never read; a file that opens now opens at the lookup (review 3 of line DBID loadord, M1:
+    /// asked once for the run, `TaxdbRun::prefetch_can_stop`).
     pub fn isams_may_fail_to_open(&self) -> bool {
-        let isams = self.lookup_isams.get();
         let protein = self.seqtype == SeqType::Protein;
-        self.volumes.iter().enumerate().any(|(at, volume)| {
+        let fails = |files: [std::path::PathBuf; 2]| {
+            files.iter().all(|file| file.exists())
+                && files.iter().any(|file| std::fs::File::open(file).is_err())
+        };
+        self.volumes.iter().any(|volume| {
             if volume.num_oids() == 0 {
                 return false;
             }
-            let string_open = isams.is_some_and(|isams| isams.strings[at].get().is_some());
-            let pig_open = isams.is_some_and(|isams| isams.pig[at].get().is_some());
-            (!string_open && StringIsam::index_exists(&volume.base().to_string_lossy(), protein))
-                || (!pig_open
-                    && with_extension(volume.base(), self.seqtype, "pi").exists()
-                    && with_extension(volume.base(), self.seqtype, "pd").exists())
+            StringIsam::file_names(&volume.base().to_string_lossy(), protein)
+                .is_ok_and(|(index, data)| fails([index, data]))
+                || fails([
+                    with_extension(volume.base(), self.seqtype, "pi"),
+                    with_extension(volume.base(), self.seqtype, "pd"),
+                ])
         })
     }
 }

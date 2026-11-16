@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -80,6 +80,11 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   ../taxfilter/q.fna, for `-query_loc 150-420`. `ldo_my.asn`: ../../fixtures/pssm/q1_tfp.asn.gz with the query's
   local id `Query_1` changed to `myprot` (the PSSM of the globin of ../taxfilter/q.faa). `make_multidb.py
   --loadord3-only MAKEBLASTDB` builds only these (the databases before keep their dates).
+- Review 3 of line DBID loadord (DECISIONS 60 (10)): version 5, `-parse_seqids`, taxid 9606, the letters of `ldp`'s
+  first record, the stopping accessions beside it in one batch: `ldr` (`ldrn`) `ref|NP_000001.1|` (`NM_`, packed 1,
+  before `ldp`'s 2), `lds` (`ldsn`) `ref|NP_000003.1|` (packed 3, after it), and `ldi` (`ldin`)
+  `gi|1|ref|NP_000003.1|`, a holder of `lds`'s accession whose gi (handle 1) loads before both. `make_multidb.py
+  --loadord4-only MAKEBLASTDB` builds only these (the databases before keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -380,6 +385,29 @@ def make_loadord3(binary):
         f.write(pssm.replace('local str "Query_1"', 'local str "myprot"'))
 
 
+def make_loadord4(binary):
+    """Builds ldr, lds, ldi and their nucleotide counterparts ldrn, ldsn, ldin (review 3 of line DBID loadord)."""
+
+    def letters(path):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path))
+
+    for kind, suffix, prefix, globin in (("prot", "", "NP", letters(os.path.join(SRC, "q.faa"))),
+                                         ("nucl", "n", "NM", letters(os.path.join(SRC, "q.fna")))):
+        sets = {
+            "ldr": [(f">ref|{prefix}_000001.1| loadord an accession of packed number 1, before ldp's", globin)],
+            "lds": [(f">ref|{prefix}_000003.1| loadord an accession of packed number 3, after ldp's", globin)],
+            "ldi": [(f">gi|1|ref|{prefix}_000003.1| loadord the accession of lds under a gi that loads first", globin)],
+        }
+        for base, records in sets.items():
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                for header, seq in records:
+                    f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "5", "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -439,6 +467,8 @@ if __name__ == "__main__":
         make_loadord2(sys.argv[2])
     elif sys.argv[1] == "--loadord3-only":
         make_loadord3(sys.argv[2])
+    elif sys.argv[1] == "--loadord4-only":
+        make_loadord4(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -447,3 +477,4 @@ if __name__ == "__main__":
         make_loadord(sys.argv[1])
         make_loadord2(sys.argv[1])
         make_loadord3(sys.argv[1])
+        make_loadord4(sys.argv[1])

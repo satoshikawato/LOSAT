@@ -2202,15 +2202,16 @@ fn search(
             .formats
             .iter()
             .any(|format| super::stage_e_report::format_number(format.outfmt) == 5);
-        let ranged_batches = query_input.batches(batch_size);
+        // The batches are made here only (review 3 of line DBID loadord, M1).
         let batch_scope = |span: &std::ops::Range<usize>| {
             if let Some(psi) = pssm.as_deref() {
                 return psi.query_scope();
             }
-            let input = ranged_batches
-                .iter()
+            let input = query_input
+                .batches(batch_size)
+                .into_iter()
                 .find(|batch| batch.searched == *span)
-                .map_or(0..0, |batch| batch.input.clone());
+                .map_or(0..0, |batch| batch.input);
             let input = if xml_scope { 0..input.end } else { input };
             crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
         };
@@ -2393,6 +2394,16 @@ fn search(
         // those refusals do; without `taxdb.bti` nothing is read. A failed batch is not reported
         // and prefetches nothing (`failed`, a header file or the sequence file that NCBI cannot
         // read during the batch's search).
+        // Which rows of the first format read the subjects' Bioseqs where a batch's prefetch is off
+        // (`TabularSpec::subject_fetch`; every row of a format that is not a field list): what the
+        // reports of such a batch load (`shared::batch_loads`).
+        let first_rows = outputs
+            .formats
+            .first()
+            .and_then(|format| super::tabular::tabular_spec(format.outfmt))
+            .map_or(SubjectFetch::Every, |spec| {
+                spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
+            });
         if let (Some(reported), Some(database)) = (&reported, database) {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
             // ```c++
@@ -2469,9 +2480,7 @@ fn search(
                         if !taxdb_found {
                             continue;
                         }
-                        let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
-                            spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
-                        });
+                        let rows = first_rows;
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
                             if hitlist
@@ -2515,12 +2524,17 @@ fn search(
                         continue;
                     }
                     let scope = || batch_scope(span);
-                    // The batches before (`results`): their prefetches and reports, read only
-                    // where this batch stops; a call of the library's batches after the first
-                    // (`api::run_batches`) has those of the calls before unrecorded.
+                    // The batches before (`results`): what NCBI's data loader loaded for them
+                    // (`super::database::LoadedBefore`), read only where this batch stops; a call
+                    // of the library's batches after the first (`api::run_batches`) has those of
+                    // the calls before unrecorded.
                     let messages = database.batch_prefetch(
                         reported,
-                        &results[..span.start],
+                        super::database::LoadedBefore {
+                            results: &results[..span.start],
+                            spans: &batch_spans,
+                            rows: first_rows,
+                        },
                         hitlists,
                         &crate::algorithm::common::database::PrefetchQueries::new(
                             span.start, &scope,
@@ -2543,7 +2557,11 @@ fn search(
             let scope = || batch_scope(&span);
             let error = database.prefetch_stop_error(
                 reported.as_ref(),
-                &results,
+                super::database::LoadedBefore {
+                    results: &results,
+                    spans: &batch_spans,
+                    rows: first_rows,
+                },
                 &subjects,
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
                     .after_unrecorded_calls(args.first_query_ordinal > 0),

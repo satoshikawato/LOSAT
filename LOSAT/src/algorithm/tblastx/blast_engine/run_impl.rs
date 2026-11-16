@@ -4272,7 +4272,11 @@ fn run_batch_loop(
                     let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(
                         database,
-                        &done.hits,
+                        super::super::database::LoadedBefore {
+                            hits: &done.hits,
+                            spans: &done.spans,
+                            rows,
+                        },
                         ordered,
                         &reports.titles.borrow(),
                         &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
@@ -4379,13 +4383,14 @@ fn run_batch_loop(
             // (`report_stream`), from its lists numbered from its first query as it made them.
             // Its lists and its queries' warnings are not kept: a later batch's stop does not find
             // its hits among those the loop holds (the prefetches' `before`), so the run records
-            // what the batch's prefetch and reports read (`database::note_reported`; nothing for a
-            // database that cannot stop).
+            // what NCBI's data loader loaded for the batch (`database::note_loaded`; nothing for
+            // a database that cannot stop).
             if let ShownSubjects::Database { database, .. } = &subjects.shown {
-                super::super::database::note_reported(
+                super::super::database::note_loaded(
                     database,
                     &batch.hits,
                     &reports.titles.borrow(),
+                    rows,
                 );
             }
             debug_assert_eq!(reports.queries_written.get(), start);

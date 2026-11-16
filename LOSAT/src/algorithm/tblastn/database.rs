@@ -349,16 +349,16 @@ impl TblastnDatabase {
 
     /// The stop of the prefetch of the batch of `queries` whose reported
     /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
-    /// LOSAT's refusal (`shared::batch_prefetch`, after the prefetches of the batches before,
-    /// whose final hit lists by rank are `before`, `reported`'s ranks: the run's record of what
-    /// their prefetches and reports read). `at_hits`: the XML2 and JSON formats, which write the
-    /// taxonomy texts at each `Hit` (`shared::held_batch_prefetch_stop`), after the lookups of the
-    /// reports of the batches before (as `read_taxids` reads them); TBLASTN writes those reports
+    /// LOSAT's refusal (`shared::batch_prefetch`, after the batches before, `before`: the run's
+    /// record of what NCBI's BLAST database data loader loaded for them, `LoadedBefore`).
+    /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+    /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
+    /// before (as `read_taxids` reads them, every reported subject); TBLASTN writes those reports
     /// after the stop.
     pub(super) fn prefetch_stop_error(
         &self,
         reported: Option<&ReportedSubjects>,
-        before: &[KappaResultHitList],
+        before: LoadedBefore<'_>,
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
         queries: &shared::PrefetchQueries<'_>,
         at_hits: bool,
@@ -368,7 +368,7 @@ impl TblastnDatabase {
         });
         let stopped = if at_hits {
             let before = reported.into_iter().flat_map(|reported| {
-                reported_ranks(before).map(|rank| {
+                reported_ranks(before.results).map(|rank| {
                     shared::PrefetchSubject::unflipped(
                         reported.ordinals[rank],
                         reported.parsed_subject(rank),
@@ -387,7 +387,7 @@ impl TblastnDatabase {
         } else {
             let before = reported
                 .into_iter()
-                .flat_map(|reported| Self::prefetch_subjects(reported, before));
+                .flat_map(|reported| Self::loaded_subjects(reported, before));
             shared::batch_prefetch(&self.db, &self.taxdb, before, subjects, PROGRAM, queries).err()
         };
         stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
@@ -395,15 +395,17 @@ impl TblastnDatabase {
 
     /// The sequences that the prefetch of a query batch whose final hit lists are `hitlists`
     /// (subjects named by rank, `reported_subjects`) reads: those with HSPs in them (the protein
-    /// query has no strand).
+    /// query has no strand), or, as its reports read them where the prefetch is off, those whose
+    /// rows read them (`rows`, `reads_subject`).
     fn prefetch_subjects<'s>(
         reported: &'s ReportedSubjects,
         hitlists: &'s [KappaResultHitList],
+        rows: SubjectFetch,
     ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
         hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
-            .filter(|list| reads_subject(list, SubjectFetch::Every))
+            .filter(move |list| reads_subject(list, rows))
             .map(|list| {
                 let rank = list.oid as usize;
                 shared::PrefetchSubject::unflipped(
@@ -413,24 +415,41 @@ impl TblastnDatabase {
             })
     }
 
+    /// The sequences that NCBI's BLAST database data loader loaded for the query batches `before`
+    /// (`shared::batch_loads` of each batch: the subjects of its Seq-aligns where its prefetch is
+    /// on, else those that its reports' rows read; review 3 of line DBID loadord, H2).
+    fn loaded_subjects<'s>(
+        reported: &'s ReportedSubjects,
+        before: LoadedBefore<'s>,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        before
+            .spans
+            .iter()
+            .filter(move |span| span.end <= before.results.len())
+            .flat_map(move |span| {
+                let hitlists = &before.results[span.clone()];
+                let rows = shared::batch_loads(seq_aligns_of(hitlists), before.rows);
+                Self::prefetch_subjects(reported, hitlists, rows)
+            })
+    }
+
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
     /// subject whose lookup fails (the protein query has no strand); the stop of the batch of
-    /// `queries`, after the batches before, whose final hit lists are `before` (read only where
-    /// the batch stops).
+    /// `queries`, after the batches before, `before` (read only where the batch stops).
     pub(super) fn batch_prefetch(
         &self,
         reported: &ReportedSubjects,
-        before: &[KappaResultHitList],
+        before: LoadedBefore<'_>,
         hitlists: &[KappaResultHitList],
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
-            Self::prefetch_subjects(reported, before),
-            Self::prefetch_subjects(reported, hitlists),
+            Self::loaded_subjects(reported, before),
+            Self::prefetch_subjects(reported, hitlists, SubjectFetch::Every),
             PROGRAM,
             queries,
         )
@@ -459,6 +478,18 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
             .iter()
             .any(|payload| rows.reads(usize::try_from(payload.num_ident).unwrap_or(0))),
     }
+}
+
+/// The query batches of a call before a batch's prefetch, for the run's record of what NCBI's
+/// BLAST database data loader loaded for them (`TblastnDatabase::loaded_subjects`): their final
+/// hit lists by searched query (`results`, named by rank), the searched queries of each batch
+/// (`spans`; those past `results` are not of them), and which rows of the first format read a
+/// subject where a batch's prefetch is off (`rows`, `TabularSpec::subject_fetch`).
+#[derive(Clone, Copy)]
+pub(super) struct LoadedBefore<'a> {
+    pub(super) results: &'a [KappaResultHitList],
+    pub(super) spans: &'a [std::ops::Range<usize>],
+    pub(super) rows: SubjectFetch,
 }
 
 /// The headers of the database sequences that the final hit lists of the query batches searched

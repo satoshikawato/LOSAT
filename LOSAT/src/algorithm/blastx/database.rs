@@ -135,6 +135,13 @@ impl BlastxDatabase {
         self.parsed_seqids
     }
 
+    /// Whether a batch's prefetch can stop at a lookup that fails on a file with NCBI's exception
+    /// (`shared::TaxdbRun::prefetch_can_stop`, decided once for the run): a database with parsed
+    /// Seq-ids whose lookups can fail so.
+    pub(crate) fn prefetch_can_stop(&self) -> bool {
+        self.parsed_seqids && self.taxdb.prefetch_can_stop(&self.db)
+    }
+
     /// The `-db` value as NCBI keeps it.
     pub(crate) fn name(&self) -> &str {
         &self.name
@@ -736,7 +743,8 @@ impl ReportedSubjects {
     /// A subject whose lookup fails on a file stops the run there (`shared::batch_prefetch`):
     /// BLASTX writes each batch's reports before it searches the next, so the error of the batch
     /// of `queries` names query 0 (`native::reported_batch`; `native::reported_error` takes the
-    /// error alone), and the run's record holds what the batches before read (`note_reported`).
+    /// error alone), and the run's record holds what NCBI's data loader loaded for the batches before
+    /// (`note_loaded`).
     pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
@@ -754,21 +762,35 @@ impl ReportedSubjects {
         )
     }
 
-    /// The run's record of the sequences that the prefetch and the reports of the query batch
-    /// whose hit lists are `batches` read (`shared::TaxdbRun::note_reported`): BLASTX writes each
-    /// batch's reports before it searches the next and keeps none of their lists, so each batch
-    /// that does not stop is recorded for the stop of a later batch's prefetch (nothing for a
-    /// database that cannot stop).
-    pub(crate) fn note_reported(
+    /// The run's record of the sequences that NCBI's BLAST database data loader loaded for the
+    /// query batch whose hit lists are `batches` (`shared::TaxdbRun::note_loaded`): BLASTX writes
+    /// each batch's reports before it searches the next and keeps none of their lists, so each
+    /// batch that does not stop is recorded for the stop of a later batch's prefetch (nothing for
+    /// a database that cannot stop). `rows`: what the batch's loads read of the lists that the
+    /// reports show (`SubjectFetch::Every` where its prefetch read them; where it is off, or
+    /// failed before it loaded anything, the rows of its reports; review 3 of line DBID loadord,
+    /// H2).
+    pub(crate) fn note_loaded(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
+        rows: SubjectFetch,
     ) {
         if database.parsed_seqids() {
-            database
-                .taxdb
-                .note_reported(&database.db, self.prefetch_subjects(batches, gapped));
+            database.taxdb.note_loaded(
+                &database.db,
+                batches
+                    .iter()
+                    .flat_map(|batch| batch.queries.iter().flatten())
+                    .filter(move |list| super::report::reads_list(list, gapped, rows))
+                    .map(|list| {
+                        shared::PrefetchSubject::unflipped(
+                            self.ordinals[list.oid],
+                            self.parsed_subject(list.oid),
+                        )
+                    }),
+            );
         }
     }
 
@@ -878,11 +900,7 @@ impl ReportedSubjects {
                     }
                     None => lists
                         .iter()
-                        .filter(|list| {
-                            list.hsps.iter().any(|hsp| {
-                                super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
-                            })
-                        })
+                        .filter(|list| super::report::reads_list(list, gapped, rows))
                         .map(|list| list.oid as u32)
                         .collect(),
                 };

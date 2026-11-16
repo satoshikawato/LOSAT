@@ -10918,6 +10918,15 @@ fn run_in_pool(
             // after those messages (`BlastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
+            // Which rows of the first format read the subjects' Bioseqs where a batch's prefetch
+            // is off (`TabularSpec::subject_fetch`; every row of a format that is not a field
+            // list): what the reports of such a batch load (`shared::batch_loads`).
+            let first_rows = match output_formats.first() {
+                Some(BlastnOutputFormat::CustomTabular(spec)) => {
+                    spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+                }
+                _ => crate::report::tabular::SubjectFetch::Every,
+            };
             let prefetch = if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
@@ -11009,13 +11018,7 @@ fn run_in_pool(
                         // No prefetch, and the reports' fetches look nothing up.
                         Ok(Vec::new())
                     } else {
-                        let fetches = match output_formats.first() {
-                            Some(BlastnOutputFormat::CustomTabular(spec)) => {
-                                spec.subject_fetch(crate::blastinput::app::Program::Blastn)
-                                    != crate::report::tabular::SubjectFetch::Never
-                            }
-                            _ => true,
-                        };
+                        let fetches = first_rows != crate::report::tabular::SubjectFetch::Never;
                         batch_hit_lists
                             .iter()
                             .enumerate()
@@ -11050,7 +11053,11 @@ fn run_in_pool(
                     database
                         .batch_prefetch(
                             &titles,
-                            &hit_lists,
+                            database::LoadedBefore {
+                                hit_lists: &hit_lists,
+                                spans: &batch_spans,
+                                rows: first_rows,
+                            },
                             &batch_hit_lists,
                             !args.ungapped,
                             &prefetch_queries,
@@ -11116,10 +11123,10 @@ fn run_in_pool(
             }
             // EXPERIMENT (LOSAT_X_RPTSTREAM): the loop writes the batch's reports below and drops
             // its lists, so a later batch's stop does not find them among those it holds (the
-            // prefetches' `before`): the run's record of what the batch's prefetch and reports
-            // read (`BlastnDatabase::note_reported`; nothing for a database that cannot stop).
+            // prefetches' `before`): the run's record of what NCBI's data loader loaded for the
+            // batch (`BlastnDatabase::note_loaded`; nothing for a database that cannot stop).
             if stream.acting() {
-                database.note_reported(&titles, &batch_hit_lists, !args.ungapped);
+                database.note_loaded(&titles, &batch_hit_lists, !args.ungapped, first_rows);
             }
         }
         // The batch numbers its queries from 0.

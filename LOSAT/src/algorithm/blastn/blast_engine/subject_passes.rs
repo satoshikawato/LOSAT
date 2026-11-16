@@ -90,6 +90,18 @@ pub(super) struct SpecialStatistics<'a> {
     pub(super) subject_space_overflow: &'a crate::stats::setup::SubjectSpaceOverflow,
 }
 
+/// What the finish of a database sequence's HSP list in an `-ungapped` search reads besides the
+/// batch (`SubjectPasses::x_ungapped_database_stage`), made once per preliminary pass by
+/// `prelim_into`: the database, the fetch's exclusion of the sequences that the negative seqid list
+/// keeps without a line, and the first error of the pass's fetches.
+struct UngappedStage<'a> {
+    database: &'a database::BlastnDatabase,
+    excluded: Option<crate::algorithm::common::database::FetchExcluded<'a>>,
+    /// The first error of reading a database sequence again (`BlastnDatabase::with_blastna`) or of
+    /// its fetch (`database::fetch_refusal`): the one of the smallest ordinal stays.
+    error: std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+}
+
 /// What the passes over a batch's subjects read of the batch, built once by `search_query_batch`
 /// (shared references and `Copy` values, so the struct is `Sync`: the passes run on the pool).
 ///
@@ -274,9 +286,12 @@ impl SubjectPasses<'_> {
     /// and spaces of the preliminary stage's option spaces, or, in the traceback, the subject's own
     /// cutoffs of the traceback's option spaces with the setup's spaces (the traceback batch's) for its
     /// e-values. The stage's batch is copied with them (`PrelimBatch` and the pass's `ScanBatch`, or
-    /// `TraceBatch`), so the default path's batches keep the batch's values. An overflow of the
-    /// subject's search space is noted (`subject_space_overflow`) and the subject has no HSPs. The
-    /// callers call it apart (`stats::setup::apart`), so that the default path keeps its code.
+    /// `TraceBatch`), so the default path's batches keep the batch's values. The preliminary stage of
+    /// an `-ungapped` search (`ungapped`) finishes the subject's list with the same copy
+    /// (`x_ungapped_database_stage`), so the subject's own statistics are made once, here. An
+    /// overflow of the subject's search space is noted (`subject_space_overflow`, LOSAT's refusal
+    /// after the pass) and the subject has no HSPs. The callers call it apart
+    /// (`stats::setup::apart`), so that the default path keeps its code.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
     /// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (quoted at `stats::setup::subject_eff_lengths`)
@@ -288,6 +303,7 @@ impl SubjectPasses<'_> {
         scan: Option<&ScanBatch<'_>>,
         prelim_source: Option<&Vec<PrelimHit>>,
         special: &SpecialStatistics<'_>,
+        ungapped: Option<&UngappedStage<'_>>,
     ) -> (Option<SubjectHits>, Vec<PrelimHit>) {
         if !self.any_valid_context {
             return (None, Vec::new());
@@ -341,11 +357,16 @@ impl SubjectPasses<'_> {
                 reduced_cutoff_scores: &cutoffs.3,
                 ..*scan
             });
-            SubjectPasses {
+            let passes = SubjectPasses {
                 prelim_batch: &prelim_batch,
                 ..*self
+            };
+            let (subject_hits, mut prelim_hits) =
+                passes.search_subject::<UNGAPPED>(s_idx, subject, state, scan.as_ref(), None);
+            if let Some(stage) = ungapped {
+                passes.x_ungapped_database_stage(stage, s_idx as u32, &mut prelim_hits);
             }
-            .search_subject::<UNGAPPED>(s_idx, subject, state, scan.as_ref(), None)
+            (subject_hits, prelim_hits)
         }
     }
 
@@ -487,8 +508,12 @@ impl SubjectPasses<'_> {
     }
 
     /// The finish of a database sequence's HSP list in an `-ungapped` search (the other instance never
-    /// calls it): the sequence is read again, unpacked (BLASTNA), when its HSP list is not empty only, and
-    /// re-evaluated there.
+    /// calls it), when its HSP list is not empty only: a sequence that the fetch excludes
+    /// (`stage.excluded`) loses its HSPs unread; any other is read again, unpacked (BLASTNA), and
+    /// re-evaluated there with the word cutoffs and spaces it was searched with (`self.prelim_batch`:
+    /// the batch's, or `special_subject`'s copy with the subject's own). A read error, or a header
+    /// that the fetch cannot read (`database::fetch_refusal`), goes to `stage.error` (the one of the
+    /// smallest ordinal stays) and the sequence has no HSPs.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480,1490-1493
     /// ```c
@@ -499,13 +524,28 @@ impl SubjectPasses<'_> {
     ///          status =
     ///             Blast_HSPListReevaluateUngapped(
     /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
+    /// ```c
+    ///       	seq_arg.oid = subject_blk->oid;
+    /// ...
+    ///         seq_arg.check_oid_exclusion = TRUE;
+    /// ...
+    ///       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    ///       		for (index = 0; index < hspcnt; ++index) {
+    ///       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+    ///       		}
+    ///       		Blast_HSPListPurgeNullHSPs(hsp_list);
+    ///       		return 0;
+    ///       	}
+    /// ```
     fn x_ungapped_database_stage(
         &self,
-        database: &database::BlastnDatabase,
+        stage: &UngappedStage<'_>,
         ordinal: u32,
-        subject_length: usize,
         hits: &mut Vec<PrelimHit>,
-    ) -> Result<()> {
+    ) {
+        // The preliminary stage's word cutoffs and spaces (`Blast_HSPListReevaluateUngapped` and the
+        // e-values of an ungapped search, blast_engine.c:1492-1497).
         let &PrelimBatch {
             encoded_queries_blastna,
             encoded_queries_nomask,
@@ -519,45 +559,58 @@ impl SubjectPasses<'_> {
             ..
         } = self.prelim_batch;
         if hits.is_empty() {
-            return Ok(());
+            return;
         }
-        // The preliminary stage's word cutoffs and spaces (`Blast_HSPListReevaluateUngapped` and the
-        // e-values of an ungapped search, blast_engine.c:1492-1497): the batch's (`PrelimBatch`), or
-        // the subject's own with the statistics of each subject (`SpecialStatistics::subject_statistics`).
-        let x_subject;
-        let (word_cutoffs, eff_spaces): (&[i32], &[i64]) = match self.special {
-            None => (cutoff_scores, query_eff_searchsp),
-            Some(special) => {
-                x_subject = (special.subject_statistics)(subject_length, special.option_spaces)?;
-                (&x_subject.0 .0, &x_subject.1)
-            }
+        let excluded = match stage.excluded.as_ref() {
+            Some(excluded) => excluded
+                .excludes(ordinal)
+                .map_err(|error| database::fetch_refusal((ordinal, error))),
+            None => Ok(false),
         };
-        database.with_blastna(ordinal, self.db_hard_mask, |s_blastna| {
-            ungapped_subject_stage(
-                hits,
-                s_blastna,
-                encoded_queries_blastna,
-                encoded_queries_nomask,
-                score_matrix,
-                word_cutoffs,
-                percent_identity,
-                |prelim| {
-                    let eff_searchsp = eff_spaces
-                        .get(prelim.context_idx as usize)
-                        .copied()
-                        .unwrap_or(0);
-                    calculate_blastn_context_statistics(
-                        prelim.prelim_score,
-                        &search_karlin_ref[prelim.context_idx as usize].gapped,
-                        eff_searchsp,
-                        round_down_evalue_score,
-                    )
-                    .1
-                },
-                evalue_threshold,
-            );
-            self.x_ungapped_query_coverage(hits);
-        })
+        let finished = excluded.and_then(|excluded| {
+            if excluded {
+                hits.clear();
+                return Ok(());
+            }
+            stage
+                .database
+                .with_blastna(ordinal, self.db_hard_mask, |s_blastna| {
+                    ungapped_subject_stage(
+                        hits,
+                        s_blastna,
+                        encoded_queries_blastna,
+                        encoded_queries_nomask,
+                        score_matrix,
+                        cutoff_scores,
+                        percent_identity,
+                        |prelim| {
+                            let eff_searchsp = query_eff_searchsp
+                                .get(prelim.context_idx as usize)
+                                .copied()
+                                .unwrap_or(0);
+                            calculate_blastn_context_statistics(
+                                prelim.prelim_score,
+                                &search_karlin_ref[prelim.context_idx as usize].gapped,
+                                eff_searchsp,
+                                round_down_evalue_score,
+                            )
+                            .1
+                        },
+                        evalue_threshold,
+                    );
+                    self.x_ungapped_query_coverage(hits);
+                })
+        });
+        if let Err(error) = finished {
+            hits.clear();
+            let mut first = stage.error.lock().expect("the error cell is not poisoned");
+            if first
+                .as_ref()
+                .is_none_or(|(smallest, _)| ordinal < *smallest)
+            {
+                *first = Some((ordinal, error));
+            }
+        }
     }
 
     /// The preliminary pass of the batch: the lists of `split_prelim_lists` (a split batch's query chunks
@@ -678,125 +731,56 @@ impl SubjectPasses<'_> {
                     self.prelim_batch.use_parallel,
                 );
                 let new_scratch = || self.new_scratch();
+                // An ungapped search finishes each sequence's HSP list after its search, on the
+                // passes it was searched with (`x_ungapped_database_stage`, the default kernel's
+                // or `special_subject`'s).
+                let ungapped = UNGAPPED.then(|| UngappedStage {
+                    database,
+                    excluded: database::fetch_excluded(database),
+                    error: std::sync::Mutex::new(None),
+                });
                 // The database's blocks with `$kernel` for each subject: the batch's statistics
                 // (`default_kernel`), or the subject's own apart (`special_kernel`), chosen once
                 // per call.
                 macro_rules! database_prelim_blocks {
-                    ($kernel:ident, $add:expr) => {
-                        if UNGAPPED {
-                            // The first error of reading a database sequence again for the
-                            // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
-                            let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
-                                std::sync::Mutex::new(None);
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
-                            // ```c
-                            //       	seq_arg.oid = subject_blk->oid;
-                            // ...
-                            //         seq_arg.check_oid_exclusion = TRUE;
-                            // ...
-                            //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-                            //       		for (index = 0; index < hspcnt; ++index) {
-                            //       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-                            //       		}
-                            //       		Blast_HSPListPurgeNullHSPs(hsp_list);
-                            //       		return 0;
-                            //       	}
-                            // ```
-                            // The re-evaluation's fetch of a sequence with HSPs excludes one that
-                            // the negative seqid list keeps without a line
-                            // (`database::fetch_excluded`): its HSPs are freed before the
-                            // preliminary hit lists, and it is not read. A header that the fetch
-                            // cannot read ends the search (`fetch_refusal`, kept in the error cell
-                            // as a read error is).
-                            let excluded = database::fetch_excluded(database);
-                            // The callback of the database's preliminary pass in an ungapped
-                            // search: the search of the sequence as for a default search, then
-                            // the finish of its HSP list when it has HSPs left
-                            // (`x_ungapped_database_stage`). A read error goes to the cell
-                            // `x_ungapped_error` (the one of the smallest ordinal stays) and the
-                            // sequence has no HSPs. The default search has its own callback (the
-                            // default branch has its own closure, so that the default instance of
-                            // this function holds no capture of this one).
-                            database::search_blocks(
-                                database,
-                                parallel_pool,
-                                use_parallel,
-                                &new_scratch,
-                                &|state: &mut SubjectState,
-                                  ordinal: u32,
-                                  subject: BlastnSubjectRef<'_>| {
-                                    let (_, mut prelim_hits) =
-                                        $kernel(ordinal as usize, subject, state);
-                                    let fetched = match excluded.as_ref() {
-                                        Some(excluded) if !prelim_hits.is_empty() => excluded
-                                            .excludes(ordinal)
-                                            .map_err(|error| {
-                                                database::fetch_refusal((ordinal, error))
-                                            }),
-                                        _ => Ok(false),
-                                    };
-                                    let fetched = fetched.and_then(|excluded| {
-                                        if excluded {
-                                            prelim_hits.clear();
-                                            return Ok(());
-                                        }
-                                        self.x_ungapped_database_stage(
-                                            database,
-                                            ordinal,
-                                            subject.length,
-                                            &mut prelim_hits,
-                                        )
-                                    });
-                                    if let Err(error) = fetched {
-                                        let mut first = x_ungapped_error
-                                            .lock()
-                                            .expect("the error cell is not poisoned");
-                                        if first
-                                            .as_ref()
-                                            .is_none_or(|(smallest, _)| ordinal < *smallest)
-                                        {
-                                            *first = Some((ordinal, error));
-                                        }
-                                        return None;
-                                    }
-                                    (!prelim_hits.is_empty()).then_some(prelim_hits)
-                                },
-                                $add,
-                            )
-                            .and_then(|()| {
-                                match x_ungapped_error
-                                    .lock()
-                                    .expect("the error cell is not poisoned")
-                                    .take()
-                                {
-                                    Some((_, error)) => Err(error),
-                                    None => Ok(()),
-                                }
-                            })
-                        } else {
-                            database::search_blocks(
-                                database,
-                                parallel_pool,
-                                use_parallel,
-                                &new_scratch,
-                                &|state: &mut SubjectState,
-                                  ordinal: u32,
-                                  subject: BlastnSubjectRef<'_>| {
-                                    let (_, prelim_hits) =
-                                        $kernel(ordinal as usize, subject, state);
-                                    (!prelim_hits.is_empty()).then_some(prelim_hits)
-                                },
-                                $add,
-                            )
-                        }
+                    ($kernel:ident) => {
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &|state: &mut SubjectState,
+                              ordinal: u32,
+                              subject: BlastnSubjectRef<'_>| {
+                                let (_, prelim_hits) = $kernel(ordinal as usize, subject, state);
+                                (!prelim_hits.is_empty()).then_some(prelim_hits)
+                            },
+                            &mut add,
+                        )
                     };
                 }
                 let default_kernel =
                     |s_idx: usize, subject: BlastnSubjectRef<'_>, state: &mut SubjectState| {
-                        self.search_subject::<UNGAPPED>(s_idx, subject, state, Some(&scan), None)
+                        let (subject_hits, mut prelim_hits) = self.search_subject::<UNGAPPED>(
+                            s_idx,
+                            subject,
+                            state,
+                            Some(&scan),
+                            None,
+                        );
+                        if UNGAPPED {
+                            if let Some(stage) = ungapped.as_ref() {
+                                self.x_ungapped_database_stage(
+                                    stage,
+                                    s_idx as u32,
+                                    &mut prelim_hits,
+                                );
+                            }
+                        }
+                        (subject_hits, prelim_hits)
                     };
-                match self.special {
-                    None => database_prelim_blocks!(default_kernel, &mut add),
+                let searched = match self.special {
+                    None => database_prelim_blocks!(default_kernel),
                     Some(special) => {
                         let special_kernel =
                             |s_idx: usize,
@@ -810,12 +794,27 @@ impl SubjectPasses<'_> {
                                         Some(&scan),
                                         None,
                                         special,
+                                        ungapped.as_ref(),
                                     )
                                 })
                             };
-                        database_prelim_blocks!(special_kernel, &mut add)
+                        database_prelim_blocks!(special_kernel)
                     }
-                }
+                };
+                // An ungapped search's first error of reading a sequence again, after the
+                // blocks' own.
+                searched.and_then(|()| {
+                    match ungapped.as_ref().and_then(|stage| {
+                        stage
+                            .error
+                            .lock()
+                            .expect("the error cell is not poisoned")
+                            .take()
+                    }) {
+                        Some((_, error)) => Err(error),
+                        None => Ok(()),
+                    }
+                })
             }
         }
     }
@@ -914,6 +913,7 @@ impl SubjectPasses<'_> {
                                     None,
                                     Some(kept),
                                     special,
+                                    None,
                                 )
                             }),
                         };

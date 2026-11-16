@@ -157,6 +157,9 @@ pub enum OutputSink<'a> {
         &'a mut (dyn Write + Send),
         crate::report::blast_xml2::SideFileSink,
     ),
+    /// The command line's report stream (`-out` or standard output), which writes as NCBI's
+    /// stream does (`report::ostream::ReportStream`); otherwise as `Writer`.
+    Report(&'a mut crate::report::ostream::ReportStream),
 }
 
 impl OutputSink<'_> {
@@ -176,7 +179,17 @@ impl OutputSink<'_> {
             OutputSink::File(path) => Box::new(BufWriter::new(File::create(path)?)),
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => Box::new(&mut **writer),
             OutputSink::Out(out) => Box::new(&mut **out),
+            OutputSink::Report(stream) => Box::new(&mut **stream),
         })
+    }
+
+    /// The command line's report stream behind the sink (`OutputSink::Report`), which takes
+    /// NCBI's regions and flushes (`report::ostream::ReportWrite`).
+    pub(crate) fn report_handle(&self) -> Option<crate::report::ostream::ReportHandle> {
+        match self {
+            OutputSink::Report(stream) => Some(stream.handle()),
+            _ => None,
+        }
     }
 
     /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
@@ -192,7 +205,10 @@ impl OutputSink<'_> {
     pub(crate) fn is_writer(&self) -> bool {
         matches!(
             self,
-            OutputSink::Writer(_) | OutputSink::Files(..) | OutputSink::Out(_)
+            OutputSink::Writer(_)
+                | OutputSink::Files(..)
+                | OutputSink::Out(_)
+                | OutputSink::Report(_)
         )
     }
 }
@@ -798,6 +814,7 @@ impl ReportOutputs<'_> {
                         OutputSink::File(path) => OutputSink::File(path),
                         OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
                         OutputSink::Out(out) => OutputSink::Out(out),
+                        OutputSink::Report(stream) => OutputSink::Report(stream),
                         OutputSink::Files(writer, sink) => {
                             OutputSink::Files(&mut **writer, sink.clone())
                         }

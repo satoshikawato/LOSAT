@@ -1876,7 +1876,7 @@ pub(super) fn render_queries_with(
 // ```
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -2285,7 +2285,7 @@ fn pairwise_metadata(
 //         formatter.PrintProlog();
 // ```
 pub(crate) fn write_prolog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],

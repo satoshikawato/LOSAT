@@ -5420,12 +5420,6 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast and rpsblast refuse 1 to 4 before their
-    // search): the stream of NCBI's `CBlastFormat`.
-    let pairwise =
-        format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
-    // The organism report's `-out` file is written as NCBI's buffer writes it.
-    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
     // custom tabular report of a delimiter, which `normalized` drops, reads the value as given, as
     // NCBI does (`tabular::custom_tabular_spec`).
@@ -5458,11 +5452,11 @@ pub fn run(
     } else {
         choice.normalized()
     };
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, args.app.post_name(), &args.outfmt);
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+            ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
         search_cli(
             args,
             list,
@@ -5475,6 +5469,8 @@ pub fn run(
     };
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = stream.finish(result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -5497,27 +5493,7 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
-    // ```c
-    //     catch (const std::ios::failure&) {                                      \
-    //         LOG_POST(Error << "BLAST failed to write output");                  \
-    //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-    //     }                                                                       \
-    // ```
-    // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
-    // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-    if stream.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    result
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -5539,25 +5515,24 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
+        let mut report =
+            crate::cli::ReportStream::of_cli(out_file, args.app.post_name(), &args.outfmt);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
             &lines,
             &mut report,
         );
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &BlastpArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| {
-            crate::cli::create_out_file(path, Some(args.app.name())).map(std::io::BufWriter::new)
-        })
+        .map(|path| crate::cli::create_out_file(path, Some(args.app.name())))
         .transpose()
 }
 
@@ -8670,7 +8645,7 @@ fn write_pairwise_prologs(
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(args.app, number).is_some() {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
                 crate::NCBI_BLAST_VERSION,
@@ -8786,7 +8761,7 @@ fn write_reports_without_queries(
                     .0
             }
         };
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match outfmt {
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
@@ -13047,7 +13022,7 @@ fn run_call(
                 //     : m_FormatType(format_type), ..., m_Outfile(outfile),
                 //       m_NumSummary(num_summary), ...
                 // ```
-                let mut writer = format.sink.open()?;
+                let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
                 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:187
                 // ```c++
                 //         formatter.SetLineLength(fmt_args->GetLineLength());
@@ -13235,7 +13210,7 @@ fn run_call(
                         crate::report::pairwise::psiblast_round::write_psiblast_round_report(
                             &rows,
                             window,
-                            &mut *writer,
+                            &mut writer,
                             &pairwise_config,
                             &pairwise_queries,
                             &query_titles,

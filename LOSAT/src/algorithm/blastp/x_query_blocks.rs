@@ -696,6 +696,7 @@ impl<'a> XBlockSink<'a> {
                 Self::Writer(&mut **writer)
             }
             OutputSink::Out(out) => Self::Writer(&mut **out),
+            OutputSink::Report(stream) => Self::Writer(&mut **stream),
         }
     }
 

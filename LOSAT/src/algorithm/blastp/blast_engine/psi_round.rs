@@ -871,9 +871,9 @@ fn write_round_epilogs(
             num_descriptions: args.num_descriptions,
             num_alignments: args.num_alignments,
         };
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         crate::report::pairwise::psiblast_round::write_psiblast_epilog(
-            &mut *writer,
+            &mut writer,
             &report,
             pairwise_database.as_ref(),
         )?;

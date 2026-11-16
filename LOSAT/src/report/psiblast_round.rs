@@ -20,6 +20,7 @@ use super::{
     DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
 use crate::report::query_warnings::SubjectReadHook;
 use crate::report::x_pairwise_par::QueryGroup;
@@ -27,7 +28,17 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 /// The report's writer: the caller's stream behind a type that no default report writes through.
-struct RoundWriter<'w>(&'w mut dyn Write);
+struct RoundWriter<'w>(&'w mut dyn ReportWrite);
+
+impl ReportWrite for RoundWriter<'_> {
+    fn site(&mut self, site: crate::report::ostream::Site) -> io::Result<()> {
+        self.0.site(site)
+    }
+
+    fn ncbi_flush(&mut self) -> io::Result<()> {
+        self.0.ncbi_flush()
+    }
+}
 
 impl Write for RoundWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -69,7 +80,7 @@ pub(crate) struct ReportRound<'a> {
 pub(crate) fn write_psiblast_round_report(
     hits: &[PairwiseHit],
     query_range: std::ops::Range<usize>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
     query_titles: &[Arc<[u8]>],
@@ -139,10 +150,13 @@ pub(crate) fn write_psiblast_round_report(
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
             let aligned = group.subject_order.len().min(report.num_alignments);
+            let mut display = DisplaySeqalign::default();
             for &s_idx in &group.subject_order[..aligned] {
                 read(s_idx, &mut *writer)?;
+                display.enter(writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
             }
+            display.leave(writer)?;
             sections.foot(writer, q_idx)?;
         }
     }
@@ -541,7 +555,7 @@ impl RoundSections<'_> {
 //         formatter.PrintEpilog(opt);
 // ```
 pub(crate) fn write_psiblast_epilog(
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {

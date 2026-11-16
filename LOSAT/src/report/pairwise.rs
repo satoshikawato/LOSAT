@@ -32,6 +32,7 @@ use crate::stats::{BlastGumbelBlk, KarlinParams};
 //     retval('U', 'C') = retval('C', 'C');
 //     retval('C', 'U') = retval('C', 'C');
 // ```
+use crate::report::ostream::ReportWrite;
 use crate::utils::matrix::protein_display_score;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -1967,6 +1968,23 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:391-395
+// ```c++
+//     if (m_IsBl2Seq && !m_IsDbScan) {
+//         return;
+//     }
+//
+//     m_Outfile << NcbiEndl << NcbiEndl;
+// ```
+/// The two `NcbiEndl` after the version line of `PrintProlog`'s references: two line feeds,
+/// each a flush of NCBI's (`ReportWrite::ncbi_flush`).
+fn write_prolog_endl(writer: &mut (impl ReportWrite + ?Sized)) -> io::Result<()> {
+    writeln!(writer)?;
+    writer.ncbi_flush()?;
+    writeln!(writer)?;
+    writer.ncbi_flush()
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:73-111
 // ```c
 // if (m_Program == "psiblast" || m_Program == "blastp") {
@@ -1979,7 +1997,7 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 // "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Schaffer, ..."
 // "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, ..."
 // ```
-fn write_blastp_pairwise_intro<W: Write>(
+fn write_blastp_pairwise_intro<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     program: &str,
@@ -1991,8 +2009,11 @@ fn write_blastp_pairwise_intro<W: Write>(
         return write_rpsblast_pairwise_intro(writer, version);
     }
     writeln!(writer, "BLASTP {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    write_prolog_endl(writer)?;
     writeln!(
         writer,
         "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
@@ -2059,10 +2080,13 @@ fn write_blastp_pairwise_intro<W: Write>(
 // psiblast's, deltablast's and blastp's only)
 /// The prolog of rpsblast's pairwise report: the program line and the Gapped BLAST reference
 /// only.
-fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+fn write_rpsblast_pairwise_intro<W: ReportWrite>(writer: &mut W, version: &str) -> io::Result<()> {
     writeln!(writer, "RPSBLAST {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    write_prolog_endl(writer)?;
     writeln!(
         writer,
         "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
@@ -2127,10 +2151,13 @@ fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io:
 /// psiblast's outfmt 0 intro: the program, the gapped BLAST reference, the reference of the
 /// compositionally adjusted matrices and the reference of composition-based statistics "starting
 /// in round 2", each wrapped at 68 columns (`x_WrapOutputLine`) as NCBI writes them.
-fn write_psiblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+fn write_psiblast_pairwise_intro<W: ReportWrite>(writer: &mut W, version: &str) -> io::Result<()> {
     writeln!(writer, "PSIBLAST {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    write_prolog_endl(writer)?;
     writeln!(
         writer,
         "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
@@ -2314,7 +2341,7 @@ fn write_flatfile_wrapped<W: Write + ?Sized>(
 
 /// The outfmt 0 prolog of blastp (the version, the references and the database), which
 /// NCBI writes before it reads the first query batch (blast_format.cpp, `PrintProlog`).
-pub fn write_blastp_pairwise_prolog<W: Write>(
+pub fn write_blastp_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     program: &str,
@@ -2817,7 +2844,7 @@ fn write_final_database_report<W: Write>(
 /// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
 /// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
 /// blastp and psiblast (the report's `gapped_karlin`).
-pub fn write_blastp_pairwise_report<W: Write>(
+pub fn write_blastp_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -2863,7 +2890,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
 /// with its last. `anchored`: the sequences of the query-anchored sections (`config.view` of
 /// outfmt 1 to 4; `None` for outfmt 0).
 #[allow(clippy::too_many_arguments)]
-pub fn write_blastp_pairwise_window<W: Write>(
+pub fn write_blastp_pairwise_window<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     query_range: std::ops::Range<usize>,
     writer: &mut W,
@@ -4085,10 +4112,13 @@ fn write_blastn_description_table<W: Write>(
 // ```
 // The reference is printed after "Reference: " and wrapped at 68 columns
 // (blastfmtutil.cpp:116-121); the layout is that of `write_translated_pairwise_intro`.
-fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
+fn write_megablast_pairwise_intro(writer: &mut impl ReportWrite, version: &str) -> io::Result<()> {
     writeln!(writer, "BLASTN {version}")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    write_prolog_endl(writer)?;
     writeln!(
         writer,
         "Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb"
@@ -4271,7 +4301,7 @@ fn write_blastn_final_footer<W: Write>(
 ///         /*** Process the input ***/
 ///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
 /// ```
-pub fn write_blastn_pairwise_prolog<W: Write>(
+pub fn write_blastn_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     megablast: bool,
@@ -4328,7 +4358,7 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub fn write_blastn_pairwise_report<W: Write>(
+pub fn write_blastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -4667,7 +4697,7 @@ pub struct TblastxPairwiseReport {
 ///
 ///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
 /// ```
-pub fn write_tblastx_pairwise_prolog<W: Write>(
+pub fn write_tblastx_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     database_name: &str,
@@ -5072,7 +5102,7 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
 // Kept out of line: this runs only for outfmt 0.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub fn write_tblastx_pairwise_report<W: Write>(
+pub fn write_tblastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -6251,7 +6281,7 @@ mod tests {
 /// NCBI writes before it reads the first query batch (as `write_tblastx_pairwise_prolog`).
 /// `program` is the program line's name: `TBLASTN`, or `PSITBLASTN` with `-in_pssm`
 /// (`Blast_ProgramNameFromType`, blast_format.cpp:94).
-pub fn write_tblastn_pairwise_prolog<W: Write>(
+pub fn write_tblastn_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     program: &str,
     version: &str,
@@ -6278,7 +6308,7 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
 /// the sources from which NCBI makes an empty stored title, `stored_source`); the
 /// `query_name` of `queries` is not read. `program` is the program line's name (`TBLASTN`, or
 /// `PSITBLASTN` with `-in_pssm`).
-pub fn write_tblastn_pairwise_report<W: Write>(
+pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     program: &str,
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -6804,7 +6834,7 @@ fn write_tblastn_alignment<W: Write>(
 //                                           m_Outfile);
 // ```
 fn write_translated_pairwise_intro(
-    writer: &mut impl Write,
+    writer: &mut impl ReportWrite,
     program: &str,
     version: &str,
 ) -> io::Result<()> {
@@ -6824,14 +6854,7 @@ fn write_translated_pairwise_intro(
     // ```c++
     //     m_Outfile << NcbiEndl << NcbiEndl;
     // ```
-    writeln!(writer)?;
-    writer.flush()?;
-    writeln!(writer)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
-    // ```c++
-    //     m_Outfile << NcbiEndl << NcbiEndl;
-    // ```
-    writer.flush()?;
+    write_prolog_endl(writer)?;
     writeln!(
         writer,
         "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
@@ -6930,7 +6953,7 @@ pub struct BlastxPairwiseOptions {
 /// order of the reports (`q_idx` is the index in `queries`). `probe` marks each subject's
 /// heading and each HSP, `hits[i]` being HSP `first_hsp + i`, without changing the written bytes.
 #[allow(clippy::too_many_arguments)]
-pub fn write_blastx_pairwise_report<W: Write>(
+pub fn write_blastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     stderr: &mut dyn Write,
@@ -7062,10 +7085,12 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 },
             )?;
             writeln!(writer)?;
+            let mut display = crate::report::ostream::DisplaySeqalign::default();
             for oid in order.iter().take(options.num_alignments) {
                 if let Some(reads) = reads.as_mut() {
                     reads.subject_read(qidx, *oid, &mut writer, &mut *stderr)?;
                 }
+                display.enter(&mut writer)?;
                 let shits = &grouped[oid];
                 let first = shits[0];
                 let hsp_indices = indices.get(oid).map_or(&[][..], Vec::as_slice);
@@ -7173,6 +7198,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     }
                 }
             }
+            display.leave(&mut writer)?;
         }
         write_blastx_query_footer(
             &mut writer,
@@ -7209,7 +7235,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
 /// `program` is the program line's name: `BLASTX`, or `RPSTBLASTN`, whose prolog is BLASTX's (the
 /// Gapped BLAST reference only, blast_format.cpp:416-426 quoted at `write_translated_pairwise_intro`).
 pub fn write_blastx_prolog(
-    writer: &mut impl Write,
+    writer: &mut impl ReportWrite,
     program: &str,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,

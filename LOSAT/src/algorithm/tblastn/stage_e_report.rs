@@ -1386,7 +1386,7 @@ fn pairwise_hits(
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     hits: &[PairwiseHit],
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],

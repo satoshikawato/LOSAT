@@ -43,7 +43,7 @@ pub use run_impl::x_seed_release_print_summary;
 pub(crate) use run_impl::TblastxReportRun;
 
 // Imports used by submodules
-pub(crate) use anyhow::{Context, Result};
+pub(crate) use anyhow::Result;
 pub(crate) use indicatif::ProgressBar;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c

@@ -384,13 +384,7 @@ impl TblastnArgs {
             }
             RunIo::Memory { query, .. } => Input::Bytes(query),
         };
-        // The organism report's `-out` file is written as NCBI's buffer writes it.
-        let tax_report = format == Some(app::ReportFormat::TaxFormat);
-        let mut stream = report_stream(&args, &io, tax_report)?;
-        // Outfmt 0 to 4: the pairwise report (`report::pairwise::PairwiseView`).
-        let pairwise = format
-            .and_then(crate::report::pairwise::PairwiseView::of)
-            .is_some();
+        let mut stream = report_stream(&args, &io)?;
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
@@ -402,7 +396,7 @@ impl TblastnArgs {
         let strategy = args.strategy.clone();
         let result = {
             let mut outputs =
-                ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+                ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
             search_cli(
                 args,
                 list,
@@ -417,6 +411,8 @@ impl TblastnArgs {
         };
         // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
         let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+        // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+        let result = stream.finish(result);
         // NCBI writes an error archive after the archives of the batches before when the
         // application stops with one of its own errors, and when the run ends with messages that
         // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -437,25 +433,7 @@ impl TblastnArgs {
                 }
             }
         }
-        let flushed = std::io::Write::flush(&mut stream);
-        // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
-        // ```c
-        //     catch (const std::ios::failure&) {                                      \
-        //         LOG_POST(Error << "BLAST failed to write output");                  \
-        //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-        //     }                                                                       \
-        // ```
-        // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
-        // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-        if stream.failed && (pairwise || tax_report) {
-            return Err(crate::cli::NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".to_string(),
-            }
-            .into());
-        }
-        result?;
-        flushed.context("failed to write the output")
+        result
     }
 }
 
@@ -558,9 +536,9 @@ fn write_run_error_archive(
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
-    if let Ok(mut report) = report_stream(args, io, false) {
+    if let Ok(mut report) = report_stream(args, io) {
         let _ = write_error_archive(io, handle, error, &lines, &mut report);
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
@@ -584,26 +562,23 @@ fn write_error_archive(
 
 /// The report stream of a run: the `-out` file (created) or standard output, or the report
 /// in memory (`RunIo::Memory`).
-fn report_stream(
-    args: &TblastnArgs,
-    io: &RunIo<'_>,
-    tax_report: bool,
-) -> Result<crate::cli::ReportStream> {
+fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::ReportStream> {
     Ok(match io {
-        RunIo::Files => crate::cli::ReportStream::of_cli(open_out_file(args)?, tax_report),
-        RunIo::Memory { report, .. } => crate::cli::ReportStream {
-            inner: Box::new(MemoryReport(report.clone())),
-            failed: false,
-        },
+        RunIo::Files => {
+            crate::cli::ReportStream::of_cli(open_out_file(args)?, "tblastn", &args.outfmt)
+        }
+        RunIo::Memory { report, .. } => {
+            crate::cli::ReportStream::memory(Box::new(MemoryReport(report.clone())), "tblastn")
+        }
     })
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")).map(std::io::BufWriter::new))
+        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")))
         .transpose()
 }
 
@@ -1352,7 +1327,7 @@ fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
                 program,

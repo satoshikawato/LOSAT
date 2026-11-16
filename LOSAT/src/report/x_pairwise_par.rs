@@ -69,6 +69,7 @@ use std::sync::{Arc, OnceLock};
 use super::pairwise::PairwiseHit;
 use super::query_warnings::{QueryWarnings, SubjectReadHook};
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::utils::threading::SearchPool;
 
 #[cfg(all(
@@ -483,7 +484,7 @@ pub(crate) trait QuerySections: Sync {
 /// the report's hit list; the first is query `first_query`) between a writer's prolog and
 /// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write<S: QuerySections, W: Write>(
+pub(crate) fn write<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -524,7 +525,7 @@ pub(crate) fn write<S: QuerySections, W: Write>(
 }
 
 /// The serial writer: each query's warnings and parts on `writer`, in order.
-fn write_serial<S: QuerySections, W: Write>(
+fn write_serial<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -549,6 +550,7 @@ fn write_serial<S: QuerySections, W: Write>(
         };
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
+            let mut display = DisplaySeqalign::default();
             if sections.merges_alignments() {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003
                 // ```c++
@@ -567,15 +569,18 @@ fn write_serial<S: QuerySections, W: Write>(
                     for &s_idx in aligned {
                         read(s_idx, &mut *writer)?;
                     }
+                    display.enter(writer)?;
                     sections.alignments(writer, q_idx, group)?;
                 }
             } else {
                 for &s_idx in group.aligned(sections.num_alignments()) {
                     read(s_idx, &mut *writer)?;
+                    display.enter(writer)?;
                     let hsps = group.subject_hits[&s_idx].len();
                     sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
                 }
             }
+            display.leave(writer)?;
             sections.foot(writer, q_idx)?;
         }
     }
@@ -825,7 +830,7 @@ fn map<T: Sync, R: Send>(
 /// formatted on `pool` in chunks of at most the budget's estimated bytes (at least one piece),
 /// each chunk written in order by the calling thread before the next. Returns the numbers of
 /// chunks and pieces.
-fn write_parallel<S: QuerySections, W: Write>(
+fn write_parallel<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -850,7 +855,7 @@ fn write_parallel<S: QuerySections, W: Write>(
 /// `write_parallel` with windows and chunks of `budget` and pieces of `piece_bytes` estimated
 /// bytes.
 #[allow(clippy::too_many_arguments)]
-fn write_parallel_with<S: QuerySections, W: Write>(
+fn write_parallel_with<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -866,6 +871,7 @@ fn write_parallel_with<S: QuerySections, W: Write>(
         .iter()
         .map(|query_hits| query_estimate(query_hits))
         .collect();
+    let mut display = DisplaySeqalign::default();
     for window in query_windows(&estimates, budget) {
         let groups = map(pool, &hits_by_query[window.clone()], |query_hits| {
             QueryGroup::for_sections(query_hits, subject_titles, sections)
@@ -896,6 +902,10 @@ fn write_parallel_with<S: QuerySections, W: Write>(
                 format_piece(sections, groups[piece.query - first].as_ref(), piece, marks)
             });
             for (piece, formatted) in chunk.iter().zip(buffers) {
+                match piece.part {
+                    Part::Alignments(..) | Part::Section => display.enter(&mut *writer)?,
+                    Part::Head | Part::Foot => display.leave(&mut *writer)?,
+                }
                 if piece.part == Part::Head {
                     if let Some(warnings) = warnings.as_deref_mut() {
                         warnings.before_query(piece.query, &mut *writer)?;
@@ -1154,6 +1164,8 @@ mod tests {
     /// One log of the report and the warnings' texts in the order written.
     #[derive(Clone, Default)]
     struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl ReportWrite for Log {}
 
     impl Write for Log {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {

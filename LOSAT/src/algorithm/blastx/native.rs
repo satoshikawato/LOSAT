@@ -211,6 +211,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
         // an engine error.
         error
+    } else if error
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure)
+    {
+        // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
+        error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {
@@ -391,7 +397,6 @@ fn run_inner(
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
-    let tax_report = choice.number == 18;
     let mut stderr: Box<dyn Write + '_> = match &archive {
         Some(handle) => {
             archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
@@ -479,25 +484,26 @@ fn run_inner(
     // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
-    let stream = match out_file {
-        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?),
-        None if tax_report => crate::cli::NcbiOstream::standard_output(),
-        out_file => {
-            let destination: Box<dyn Write> = match out_file {
-                None => Box::new(io::stdout().lock()),
-                Some(path) => Box::new(create(path)?),
-            };
-            crate::cli::NcbiOstream::buffered(match structured_xml {
-                true => Box::new(
+    let device = crate::cli::ReportStream::of_cli(
+        out_file.map(create).transpose()?,
+        program.lower,
+        &args.outfmt,
+    );
+    let stream = match structured_xml {
+        true => {
+            let report = device.handle();
+            crate::cli::NcbiOstream::before_report(
+                Box::new(
                     held.insert(super::blast_xml::HeldOutput::new(
-                        destination,
+                        Box::new(device),
                         side_files.clone(),
                     ))
                     .clone(),
                 ),
-                false => destination,
-            })
+                report,
+            )
         }
+        false => crate::cli::NcbiOstream::report(device),
     };
     // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
     // document gets the texts written in the meantime where NCBI writes them. The structured
@@ -2171,6 +2177,11 @@ pub fn run(
     let result = run_inner(args, settings, &mut output, &mut archive, &mut strategy);
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = match output.as_ref().and_then(|output| output.report_handle()) {
+        Some(report) => report.finish(result),
+        None => result,
+    };
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {

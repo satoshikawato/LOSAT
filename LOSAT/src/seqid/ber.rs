@@ -1,7 +1,9 @@
 //! BER decoding of the header record of a BLAST database (`.phr` / `.nhr`): the reader of
 //! the encoding (`Reader`, shared with the ordinal-id decoder of `seqdb::header`) and the
 //! decoder of a whole `Blast-def-line-set` with every member and every Seq-id alternative
-//! (`decode_full_set`).
+//! (`decode_full_set`). An INTEGER is read as NCBI's `ReadInt4` / `ReadInt8` read it, at the
+//! width of the member's NCBI type (`read_std_signed`, which the mask-file reader of
+//! `writedb::mask_info` shares).
 //!
 //! NCBI writes the record with `MSerial_AsnBinary`: EXPLICIT context tags, indefinite length
 //! (`80 ... 00 00`) on every constructed value, definite length on INTEGER and VisibleString,
@@ -39,8 +41,9 @@ use super::model::{
     PdbSeqId, TextseqId,
 };
 
-// NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:71-130
+// NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:70-130
 // ```c++
+//         eApplication        = 1 << 6,
 //         eContextSpecific    = 2 << 6,
 //         ...
 //         eConstructed        = 1 << 5,
@@ -58,6 +61,8 @@ use super::model::{
 //         eEndOfContentsByte      = 0,
 // ```
 const TAG_INTEGER: u8 = 2;
+/// `MakeTagByte(eApplication, ePrimitive, eInteger)`, which `ExpectIntegerTag` also takes.
+const TAG_APPLICATION_INTEGER: u8 = (1 << 6) | TAG_INTEGER;
 const TAG_VISIBLE_STRING: u8 = 26;
 pub(crate) const TAG_SEQUENCE: u8 = (1 << 5) | 16;
 pub(crate) const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
@@ -75,7 +80,7 @@ const DEFLINE_LINKS: u8 = 4;
 const DEFLINE_OTHER_INFO: u8 = 5;
 pub(crate) const DEFLINE_LAST_MEMBER: u8 = DEFLINE_OTHER_INFO;
 /// The names of the members of `Blast-def-line`, by tag.
-const DEFLINE_MEMBERS: [&str; 6] = [
+pub(crate) const DEFLINE_MEMBERS: [&str; 6] = [
     "title",
     "seqid",
     "taxid",
@@ -300,64 +305,88 @@ impl<'a> Reader<'a> {
         self.take(length)
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:476-512
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:145-160
     // ```c++
-    // void ReadStdSigned(CObjectIStreamAsnBinary& in, T& data)
+    // inline
+    // void CObjectIStreamAsnBinary::ExpectIntegerTag(void)
     // {
-    //     size_t length = in.ReadShortLength();
-    //     if ( length == 0 ) {
-    //         in.ThrowError(in.fFormatError, "zero length of number");
-    //     }
-    //     T n;
-    //     if ( length > sizeof(data) ) {
-    //         // skip
-    //         --length;
-    //         Int1 c = in.ReadSByte();
-    //         if ( c != 0 && c != -1 ) {
-    //             in.ThrowError(in.fOverflow, "overflow error");
+    //     ...
+    //     Uint1 tag = StartTag(PeekTagByte());
+    //     Uint1 exp = MakeTagByte(  eUniversal, ePrimitive, eInteger);
+    //     if (tag != exp) {
+    //         if (tag != MakeTagByte(eApplication, ePrimitive, eInteger)) {
+    //             UnexpectedSysTagByte(exp);
     //         }
-    //         ...
+    //         SetSpecialCaseUsed(CObjectIStream::eReadAsBigInt);
     //     }
-    //     else {
-    //         --length;
-    //         n = in.ReadSByte();
+    // ```
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:337-345
+    // ```c++
+    // size_t CObjectIStreamAsnBinary::ReadShortLength(void)
+    // {
+    //     TByte byte = FlushTag();
+    //     if ( byte >= 0x80 ) {
+    //         UnexpectedLongLength();
     //     }
-    //     while ( length > 0 ) {
-    //         --length;
-    //         n = (n << 8) | in.ReadByte();
-    //     }
-    //     data = n;
-    //     in.EndOfTag();
+    //     return StartTagData(byte);
     // }
     // ```
-    // An INTEGER wider than eight content bytes is rejected instead of being
-    // reduced as above; each caller checks the range of its member.
-    pub(crate) fn integer(&mut self) -> Result<i64, BerError> {
-        self.expect_tag(TAG_INTEGER, "an INTEGER")?;
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:569-575
+    // ```c++
+    // Int4 CObjectIStreamAsnBinary::ReadInt4(void)
+    // {
+    //     ExpectIntegerTag();
+    //     Int4 data;
+    //     ReadStdSigned(*this, data);
+    //     return data;
+    // }
+    // ```
+    /// An INTEGER as NCBI's `ReadInt4` (`width` 4) or `ReadInt8` (`width` 8) reads it: the tag
+    /// of an INTEGER or of an application INTEGER (`eReadAsBigInt` changes nothing in the value),
+    /// a short length, the value by `read_std_signed`. Errors carry NCBI's texts
+    /// (`UnexpectedLongLength`: "ShortLength expected"); another tag keeps this reader's text.
+    fn std_signed(&mut self, width: usize) -> Result<i64, BerError> {
+        let tag = self.tag()?;
+        if tag != TAG_INTEGER && tag != TAG_APPLICATION_INTEGER {
+            return Err(self.error(format!(
+                "tag 0x{tag:02x} where an INTEGER (0x{TAG_INTEGER:02x}) is expected"
+            )));
+        }
         let first = self.byte()?;
         if first >= INDEFINITE_LENGTH_BYTE {
-            return Err(self.error("long length of number"));
+            return Err(self.error("ShortLength expected"));
         }
-        let length = usize::from(first);
-        if length == 0 {
-            return Err(self.error("zero length of number"));
+        match read_std_signed(usize::from(first), width, || self.byte()) {
+            Ok(value) => Ok(value),
+            Err(StdSignedError::ZeroLength) => Err(self.error("zero length of number")),
+            Err(StdSignedError::Overflow) => Err(self.error("overflow error")),
+            Err(StdSignedError::Read(error)) => Err(error),
         }
-        if length > std::mem::size_of::<i64>() {
-            return Err(self.error("overflow error"));
-        }
-        let bytes = self.take(length)?;
-        let mut n = i64::from(bytes[0] as i8);
-        for &byte in &bytes[1..] {
-            n = (n << 8) | i64::from(byte);
-        }
-        Ok(n)
     }
 
-    /// An INTEGER member that NCBI reads into an `int`.
-    fn int(&mut self, what: &str) -> Result<i32, BerError> {
-        let value = self.integer()?;
-        i32::try_from(value)
-            .map_err(|_| self.error(format!("{what} {value} does not fit a 32-bit integer")))
+    /// An INTEGER member that NCBI reads into an `int` (`ReadInt4`): the taxid (`TTaxId`), the
+    /// lists of `Blast-def-line`, and every INTEGER of a Seq-id but the GI. A value outside
+    /// `int` fails as in NCBI ("overflow error").
+    pub(crate) fn int(&mut self) -> Result<i32, BerError> {
+        let value = self.std_signed(std::mem::size_of::<i32>())?;
+        // `read_std_signed` of width 4 keeps at most four content bytes: the value is an `int`.
+        Ok(value as i32)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:585-591
+    // ```c++
+    // Int8 CObjectIStreamAsnBinary::ReadInt8(void)
+    // {
+    //     ExpectIntegerTag();
+    //     Uint8 data;
+    //     ReadStdSigned(*this, data);
+    //     return data;
+    // }
+    // ```
+    /// An INTEGER member that NCBI reads into an `Int8` (`ReadInt8`): the GI (`TGi`, an `Int8`
+    /// with `NCBI_INT8_GI`, corelib/ncbimisc.hpp:975-1003).
+    fn int8(&mut self) -> Result<i64, BerError> {
+        self.std_signed(std::mem::size_of::<i64>())
     }
 
     pub(crate) fn open_context(&mut self, number: u8, what: &str) -> Result<End, BerError> {
@@ -424,6 +453,101 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Why `read_std_signed` stops: one of NCBI's two errors, or the byte source's own.
+pub(crate) enum StdSignedError<E> {
+    /// `fFormatError`, "zero length of number".
+    ZeroLength,
+    /// `fOverflow`, "overflow error".
+    Overflow,
+    /// The byte source failed (the data ends inside the value).
+    Read(E),
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
+// ```c++
+// template<typename T>
+// void ReadStdSigned(CObjectIStreamAsnBinary& in, T& data)
+// {
+//     size_t length = in.ReadShortLength();
+//     if ( length == 0 ) {
+//         in.ThrowError(in.fFormatError, "zero length of number");
+//     }
+//     T n;
+//     if ( length > sizeof(data) ) {
+//         // skip
+//         --length;
+//         Int1 c = in.ReadSByte();
+//         if ( c != 0 && c != -1 ) {
+//             in.ThrowError(in.fOverflow, "overflow error");
+//         }
+//         while ( length > sizeof(data) ) {
+//             --length;
+//             if ( in.ReadSByte() != c ) {
+//                 in.ThrowError(in.fOverflow, "overflow error");
+//             }
+//         }
+//         --length;
+//         n = in.ReadSByte();
+//         if ( ((n ^ c) & 0x80) != 0 ) {
+//             in.ThrowError(in.fOverflow, "overflow error");
+//         }
+//     }
+//     else {
+//         --length;
+//         n = in.ReadSByte();
+//     }
+//     while ( length > 0 ) {
+//         --length;
+//         n = (n << 8) | in.ReadByte();
+//     }
+//     data = n;
+//     in.EndOfTag();
+// }
+// ```
+/// NCBI's `ReadStdSigned` after its `ReadShortLength`: the INTEGER of `length` content bytes,
+/// taken one at a time from `byte`, read into a signed type of `width` bytes (`sizeof(T)`: 4 for
+/// `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
+/// beyond the width are taken only as the sign extension of the value; anything else is an
+/// overflow. The one port of the function: the header reader (`Reader::int`) and the mask-file
+/// reader (`writedb::mask_info::ber`) read their INTEGERs with it.
+pub(crate) fn read_std_signed<E>(
+    mut length: usize,
+    width: usize,
+    mut byte: impl FnMut() -> Result<u8, E>,
+) -> Result<i64, StdSignedError<E>> {
+    if length == 0 {
+        return Err(StdSignedError::ZeroLength);
+    }
+    let mut next = || byte().map_err(StdSignedError::Read);
+    let mut n: i64;
+    if length > width {
+        length -= 1;
+        let c = next()? as i8;
+        if c != 0 && c != -1 {
+            return Err(StdSignedError::Overflow);
+        }
+        while length > width {
+            length -= 1;
+            if next()? as i8 != c {
+                return Err(StdSignedError::Overflow);
+            }
+        }
+        length -= 1;
+        n = i64::from(next()? as i8);
+        if (n ^ i64::from(c)) & 0x80 != 0 {
+            return Err(StdSignedError::Overflow);
+        }
+    } else {
+        length -= 1;
+        n = i64::from(next()? as i8);
+    }
+    while length > 0 {
+        length -= 1;
+        n = (n << 8) | i64::from(next()?);
+    }
+    Ok(n)
+}
+
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:724-738
 // ```c++
 //         for(string::iterator i = str.begin(); i < to; ++i) {
@@ -451,12 +575,6 @@ pub(crate) fn fix_visible_chars(value: &[u8]) -> Vec<u8> {
 /// The number of bytes of a stored VisibleString that `fix_visible_chars` replaces.
 pub(crate) fn replaced_bytes(value: &[u8]) -> usize {
     value.iter().filter(|c| !(b' '..=b'~').contains(c)).count()
-}
-
-/// The `taxid` of a definition line as LOSAT keeps it: NCBI's `TTaxId` is an `int`; a value
-/// outside it, which makeblastdb does not write, reads as `i32::MAX`.
-pub(crate) fn taxid_value(value: i64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
@@ -513,7 +631,7 @@ fn decode_defline(ber: &mut Reader<'_>) -> Result<BlastDefline, BerError> {
                     defline.ids.push(id);
                 }
             }
-            DEFLINE_TAXID => defline.taxid = Some(taxid_value(ber.integer()?)),
+            DEFLINE_TAXID => defline.taxid = Some(ber.int()?),
             DEFLINE_MEMBERSHIPS => defline.memberships = Some(int_list(ber, "memberships")?),
             DEFLINE_LINKS => defline.links = Some(int_list(ber, "links")?),
             _ => defline.other_info = Some(int_list(ber, "other-info")?),
@@ -527,17 +645,23 @@ fn decode_defline(ber: &mut Reader<'_>) -> Result<BlastDefline, BerError> {
 }
 
 /// A `SEQUENCE OF INTEGER` member of `Blast-def-line` (NCBI's `list<int>`).
-fn int_list(ber: &mut Reader<'_>, what: &str) -> Result<Vec<i32>, BerError> {
+pub(crate) fn int_list(ber: &mut Reader<'_>, what: &str) -> Result<Vec<i32>, BerError> {
     let end = ber.open_sequence(what)?;
     let mut values = Vec::new();
     while !ber.at_end(end)? {
-        values.push(ber.int(what)?);
+        values.push(ber.int()?);
     }
     Ok(values)
 }
 
 /// Decodes one `Seq-id`; `replaced` counts the bytes of its strings that NCBI's reader
 /// replaces (`fix_visible_chars`).
+///
+/// Not inlined: inlined into the member closure of `decode_defline` (the release build does
+/// since the INTEGER reads became small), it keeps that closure, which runs for every member,
+/// out of `decode_full_set`, with a 1.3 KiB frame: about 100 instructions more per record
+/// (callgrind of `blastdbcmd -entry all`, RG-T5c fix 2).
+#[inline(never)]
 pub(crate) fn decode_seq_id(
     ber: &mut Reader<'_>,
     replaced: &mut usize,
@@ -545,8 +669,8 @@ pub(crate) fn decode_seq_id(
     let (alternative, end) = ber.open_alternative("Seq-id", 19)?;
     let id = match alternative {
         0 => ParsedSeqId::Local(decode_object_id(ber, replaced)?),
-        1 => ParsedSeqId::Gibbsq(ber.int("gibbsq")?),
-        2 => ParsedSeqId::Gibbmt(ber.int("gibbmt")?),
+        1 => ParsedSeqId::Gibbsq(ber.int()?),
+        2 => ParsedSeqId::Gibbmt(ber.int()?),
         3 => ParsedSeqId::Giim(decode_giimport_id(ber, replaced)?),
         4 => ParsedSeqId::Genbank(decode_textseq_id(ber, replaced)?),
         5 => ParsedSeqId::Embl(decode_textseq_id(ber, replaced)?),
@@ -555,7 +679,7 @@ pub(crate) fn decode_seq_id(
         8 => ParsedSeqId::Patent(decode_patent_seq_id(ber, replaced)?),
         9 => ParsedSeqId::Other(decode_textseq_id(ber, replaced)?),
         10 => ParsedSeqId::General(decode_dbtag(ber, replaced)?),
-        11 => ParsedSeqId::Gi(ber.integer()?),
+        11 => ParsedSeqId::Gi(ber.int8()?),
         12 => ParsedSeqId::Ddbj(decode_textseq_id(ber, replaced)?),
         13 => ParsedSeqId::Prf(decode_textseq_id(ber, replaced)?),
         14 => ParsedSeqId::Pdb(decode_pdb_seq_id(ber, replaced)?),
@@ -578,7 +702,7 @@ fn string(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Vec<u8>, BerErro
 fn decode_object_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<ObjectId, BerError> {
     let (alternative, end) = ber.open_alternative("Object-id", 1)?;
     let id = match alternative {
-        0 => ObjectId::Id(ber.int("Object-id.id")?),
+        0 => ObjectId::Id(ber.int()?),
         _ => ObjectId::Str(string(ber, replaced)?),
     };
     ber.close(end, "Object-id")?;
@@ -610,7 +734,7 @@ fn decode_textseq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Texts
             0 => id.name = Some(string(ber, replaced)?),
             1 => id.accession = Some(string(ber, replaced)?),
             2 => id.release = Some(string(ber, replaced)?),
-            _ => id.version = Some(ber.int("Textseq-id.version")?),
+            _ => id.version = Some(ber.int()?),
         }
         Ok(())
     })?;
@@ -626,7 +750,7 @@ fn decode_giimport_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Giim
         &["id", "db", "release"],
         |ber, member| {
             match member {
-                0 => id = Some(ber.int("Giimport-id.id")?),
+                0 => id = Some(ber.int()?),
                 1 => db = Some(string(ber, replaced)?),
                 _ => release = Some(string(ber, replaced)?),
             }
@@ -647,7 +771,7 @@ fn decode_patent_seq_id(
     let (mut seqid, mut cit) = (None, None);
     ber.members(end, "Patent-seq-id", &["seqid", "cit"], |ber, member| {
         match member {
-            0 => seqid = Some(ber.int("Patent-seq-id.seqid")?),
+            0 => seqid = Some(ber.int()?),
             _ => cit = Some(decode_id_pat(ber, replaced)?),
         }
         Ok(())
@@ -699,7 +823,7 @@ fn decode_pdb_seq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<PdbSe
     ber.members(end, "PDB-seq-id", &names, |ber, member| {
         match member {
             0 => mol = Some(string(ber, replaced)?),
-            1 => chain = Some(ber.int("PDB-seq-id.chain")?),
+            1 => chain = Some(ber.int()?),
             2 => rel = Some(decode_date(ber, replaced)?),
             _ => chain_id = Some(string(ber, replaced)?),
         }
@@ -727,13 +851,13 @@ fn decode_date(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Date, BerEr
             let names = ["year", "month", "day", "season", "hour", "minute", "second"];
             ber.members(std_end, "Date-std", &names, |ber, member| {
                 match member {
-                    0 => year = Some(ber.int("Date-std.year")?),
-                    1 => month = Some(ber.int("Date-std.month")?),
-                    2 => day = Some(ber.int("Date-std.day")?),
+                    0 => year = Some(ber.int()?),
+                    1 => month = Some(ber.int()?),
+                    2 => day = Some(ber.int()?),
                     3 => season = Some(string(ber, replaced)?),
-                    4 => hour = Some(ber.int("Date-std.hour")?),
-                    5 => minute = Some(ber.int("Date-std.minute")?),
-                    _ => second = Some(ber.int("Date-std.second")?),
+                    4 => hour = Some(ber.int()?),
+                    5 => minute = Some(ber.int()?),
+                    _ => second = Some(ber.int()?),
                 }
                 Ok(())
             })?;
@@ -753,4 +877,199 @@ fn decode_date(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Date, BerEr
     };
     ber.close(end, "Date")?;
     Ok(date)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_full_set, read_std_signed, Reader, StdSignedError};
+    use crate::seqdb::header::decode_deflines_as;
+    use std::path::Path;
+
+    /// The header record of one sequence without parsed Seq-ids as makeblastdb writes it (the
+    /// title `t`, `gnl|BL_ORD_ID|0`), with `member` where makeblastdb writes the taxid `[2]`
+    /// and `after` (members 3 to 5) after it.
+    fn record_with(member: &[u8], after: &[u8]) -> Vec<u8> {
+        let mut record = vec![0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x01, b't', 0, 0];
+        record.extend_from_slice(&[0xa1, 0x80, 0x30, 0x80, 0xaa, 0x80, 0x30, 0x80, 0xa0, 0x80]);
+        record.extend_from_slice(&[0x1a, 0x09]);
+        record.extend_from_slice(b"BL_ORD_ID");
+        record.extend_from_slice(&[0, 0, 0xa1, 0x80, 0xa0, 0x80, 0x02, 0x01, 0x00]);
+        record.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        record.extend_from_slice(member);
+        record.extend_from_slice(after);
+        record.extend_from_slice(&[0, 0, 0, 0]);
+        record
+    }
+
+    /// `record_with` the inner bytes `inner` of an indefinite `[2]`.
+    fn taxid_record(inner: &[u8]) -> Vec<u8> {
+        let mut member = vec![0xa2, 0x80];
+        member.extend_from_slice(inner);
+        member.extend_from_slice(&[0, 0]);
+        record_with(&member, &[])
+    }
+
+    fn hex(text: &str) -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// The taxid that both decoders read from `record` (`None`: the line has none), or the
+    /// message of their error, which must be the same.
+    fn read_taxid(record: &[u8]) -> Result<Option<i32>, String> {
+        let full = decode_full_set(record).map(|set| set.deflines[0].taxid);
+        let ordinal = decode_deflines_as(record, Path::new("t.phr"), 0, true);
+        match (full, ordinal) {
+            (Ok(taxid), Ok(deflines)) => {
+                assert_eq!(deflines[0].taxid, taxid.unwrap_or(0));
+                Ok(taxid)
+            }
+            (Err(error), Err(ordinal)) => {
+                let at = format!("header record, byte {}: ", error.pos);
+                assert!(ordinal.to_string().contains(&at), "{error} / {ordinal}");
+                Err(error.message)
+            }
+            (full, ordinal) => panic!("the decoders differ: {full:?} / {ordinal:?}"),
+        }
+    }
+
+    // The 21 encodings of the taxid of probe RG-T5c (remaining-gaps-20261112/T/taxid_t5c.md):
+    // NCBI BLAST+ 2.17.0 reads the first nine (blastdbcmd `%T`, the reports of the record) and
+    // fails on the others at the record wherever it reads the header (`ReadInt4`:
+    // `ExpectIntegerTag`, `ReadShortLength`, `ReadStdSigned` into an `int`).
+    #[test]
+    fn every_taxid_encoding_reads_as_ncbis_read_int4_reads_it() {
+        let read = [
+            ("base", "02022586", Some(9606)),
+            ("app42", "42022586", Some(9606)),
+            ("sx9", "0209000000000000002586", Some(9606)),
+            ("sx8", "02080000000000002586", Some(9606)),
+            ("nonmin4", "020400002586", Some(9606)),
+            ("neg1", "0201ff", Some(-1)),
+        ];
+        for (name, inner, taxid) in read {
+            assert_eq!(read_taxid(&taxid_record(&hex(inner))), Ok(taxid), "{name}");
+        }
+        // `[2]` with a definite length; no `[2]`.
+        let definite = record_with(&hex("a20402022586"), &[]);
+        assert_eq!(read_taxid(&definite), Ok(Some(9606)), "defl");
+        assert_eq!(read_taxid(&record_with(&[], &[])), Ok(None), "absent");
+
+        let failed = [
+            ("ovf9", "0209010000000000002586", "overflow error"),
+            ("big5", "02050080000000", "overflow error"),
+            ("nbig5", "0205ff7fffffff", "overflow error"),
+            ("zero", "0200", "zero length of number"),
+            ("longlen", "0281022586", "ShortLength expected"),
+            ("indef", "028025860000", "ShortLength expected"),
+            (
+                "vstr",
+                "1a024142",
+                "tag 0x1a where an INTEGER (0x02) is expected",
+            ),
+            (
+                "octet",
+                "04022586",
+                "tag 0x04 where an INTEGER (0x02) is expected",
+            ),
+            (
+                "enum",
+                "0a022586",
+                "tag 0x0a where an INTEGER (0x02) is expected",
+            ),
+            (
+                "cons",
+                "3080020225860000",
+                "tag 0x30 where an INTEGER (0x02) is expected",
+            ),
+            ("extra", "02022586020105", "unexpected data after"),
+            ("empty", "", "tag 0x00 where an INTEGER (0x02) is expected"),
+        ];
+        for (name, inner, message) in failed {
+            let error = read_taxid(&taxid_record(&hex(inner))).expect_err(name);
+            assert!(error.contains(message), "{name}: {error}");
+        }
+        // `[2]` as a primitive tag before the INTEGER.
+        let primitive = record_with(&hex("8202022586"), &[]);
+        assert!(read_taxid(&primitive).is_err(), "prim");
+    }
+
+    /// The other INTEGER members are read at the width of their NCBI type: the lists of
+    /// `Blast-def-line` (`list<int>`) by both decoders, the ordinal id (`Object-id.id`, an `int`),
+    /// the GI (`Int8`).
+    #[test]
+    fn integer_members_read_at_the_width_of_their_ncbi_type() {
+        let taxid = hex("a280020225860000");
+        // memberships `[3] SEQUENCE OF INTEGER`: a value within `int`, then one outside it.
+        let lists = record_with(&taxid, &hex("a380308002010500000000"));
+        assert_eq!(read_taxid(&lists), Ok(Some(9606)));
+        let wide = record_with(&taxid, &hex("a38030800205008000000000000000"));
+        assert_eq!(read_taxid(&wide), Err("overflow error".to_string()));
+        assert_eq!(
+            decode_full_set(&lists).unwrap().deflines[0].memberships,
+            Some(vec![5])
+        );
+        // The ordinal id: the application tag and sign extension read as NCBI reads them.
+        let ordinal = |integer: &str| {
+            let mut record = record_with(&taxid, &[]);
+            let at = record
+                .windows(3)
+                .position(|window| window == [0x02, 0x01, 0x00])
+                .unwrap();
+            record.splice(at..at + 3, hex(integer));
+            decode_deflines_as(&record, Path::new("t.phr"), 0, true)
+                .map(|lines| lines[0].volume_ordinal)
+        };
+        assert_eq!(ordinal("420100").unwrap(), 0);
+        assert_eq!(ordinal("02050000000000").unwrap(), 0);
+        let error = ordinal("02050080000000").unwrap_err().to_string();
+        assert!(error.contains("overflow error"), "{error}");
+        // The GI, an `Int8`: nine bytes of sign extension; a value outside `Int8`.
+        let gi = |integer: &str| Reader::new(&hex(integer)).int8();
+        assert_eq!(gi("0209007fffffffffffffff"), Ok(i64::MAX));
+        assert_eq!(gi("0209ff8000000000000000"), Ok(i64::MIN));
+        assert_eq!(gi("420500ffffffff"), Ok(0xffff_ffff));
+        assert_eq!(
+            gi("020900ffffffffffffffff").unwrap_err().message,
+            "overflow error"
+        );
+    }
+
+    /// `read_std_signed` stops where NCBI's `ReadStdSigned` throws: at the first byte that is
+    /// no sign extension, before it needs a byte that is not there.
+    #[test]
+    fn read_std_signed_stops_where_ncbis_throws() {
+        let read = |bytes: &[u8], length: usize, width: usize| {
+            let mut taken = 0;
+            let result = read_std_signed(length, width, || {
+                let byte = bytes.get(taken).copied().ok_or(taken);
+                taken += 1;
+                byte
+            });
+            let result = match result {
+                Ok(value) => Ok(value),
+                Err(StdSignedError::ZeroLength) => Err("zero"),
+                Err(StdSignedError::Overflow) => Err("overflow"),
+                Err(StdSignedError::Read(_)) => Err("end"),
+            };
+            (result, taken)
+        };
+        assert_eq!(read(&[], 0, 4), (Err("zero"), 0));
+        assert_eq!(read(&[0x80], 1, 4), (Ok(-128), 1));
+        assert_eq!(read(&[0xff, 0xff, 0xff, 0xff, 0xfe], 5, 4), (Ok(-2), 5));
+        assert_eq!(read(&[0xff, 0xff, 0xff, 0xff, 0xff], 5, 4), (Ok(-1), 5));
+        assert_eq!(
+            read(&[0x7f, 0xff, 0xff, 0xff], 4, 4),
+            (Ok(i64::from(i32::MAX)), 4)
+        );
+        // The first byte is no sign; a later byte differs from it; the sign changes.
+        assert_eq!(read(&[0x01], 5, 4), (Err("overflow"), 1));
+        assert_eq!(read(&[0x00, 0x01], 6, 4), (Err("overflow"), 2));
+        assert_eq!(read(&[0xff, 0x7f], 5, 4), (Err("overflow"), 2));
+        // The data ends before the value does.
+        assert_eq!(read(&[0x00, 0x00], 6, 4), (Err("end"), 3));
+        assert_eq!(read(&[0x25], 2, 4), (Err("end"), 2));
+    }
 }

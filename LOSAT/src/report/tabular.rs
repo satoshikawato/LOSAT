@@ -1090,7 +1090,7 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
 /// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails.
 pub fn failed_database_title(oid: impl std::fmt::Display) -> String {
     format!(
-        "database sequence {oid} has a title (or, for an empty one, a name in the taxonomy database from which NCBI BLAST+ makes it) in no encoding that NCBI BLAST+ recognises"
+        "database sequence {oid} has a title (or a name in the taxonomy database from which NCBI BLAST+ makes an empty one or the end of a protein title ending in ']') in no encoding that NCBI BLAST+ recognises"
     )
 }
 

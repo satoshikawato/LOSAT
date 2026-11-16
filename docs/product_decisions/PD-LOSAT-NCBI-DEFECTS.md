@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.38
+- Version: 1.39
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -96,7 +96,13 @@
   catches reproduced, rule 2, and the rows at which NCBI stops or prints an uninitialised taxid
   refused, rule 3; line RG item T7, Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07);
-  1.38 2026-11-17 (TBLASTX's ungapped extension past the end of a query frame into the next frame
+  1.38 2026-11-16 (the end of a database protein's title that `x_AdjustProteinTitleSuffix`
+  rewrites from the tax ids, which version 1.10 listed among the explicit rejections of
+  deterministic results of rule 2, moved to the results ported under rule 4, line RG item T5c;
+  a name written there that `GenerateDefline` cannot decode fails the lookup as in 1.37;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; written 2026-11-14 as
+  1.26)
+  1.39 2026-11-17 (TBLASTX's ungapped extension past the end of a query frame into the next frame
   of the query batch: reproduced where it scores no higher there, rule 2, and an explicit
   rejection where it does, rule 3, the Owner's decision of 2026-11-16 on line RG's question
   Q-X2c; line RG item X2c, the reproduction Owner-delegated, standing instruction 2026-09-29,
@@ -736,7 +742,7 @@ masked). Line NP item M4a-2c.
   LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
   NCBI ends it without reading that header.
 
-- TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.38,
+- TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.39,
   2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and
   `s_BlastAaExtendRight` count the letters of the query batch, not of the frame (`n = MIN(s_off,
   q_off)` and `n = MIN(subject->length - s_off, query->length - q_off)` with offsets into the
@@ -773,7 +779,8 @@ masked). Line NP item M4a-2c.
   (`MIN(MAX(2*h,10),h+50)` in `Int4`) wraps and becomes 10.
 - A subject whose `GenerateDefline` throws (version 1.37, 2026-11-16, line RG item T7): a title,
   or for a database sequence with an empty stored title the scientific name from which NCBI makes
-  it, in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
+  it (since version 1.38 also the name that `x_AdjustProteinTitleSuffix` writes at the end of a
+  protein title ending in ` [ ]`, line RG item T5c), in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
   0x8F, 0x90 or 0x9D; `NStr::HtmlDecode` throws, `ncbistr.cpp:4528-4534`). The tabular formats
   ask it where `CShowBlastDefline::GetSeqIdList` replaces an id (`showdefline.cpp:218-242`): a
   `-subject` record whose title's first word starts with `Subject_`, or read with
@@ -1051,7 +1058,7 @@ masked). Line NP item M4a-2c.
   conversion `(int)` of its product, which sets the merged score, is undefined (C11 6.3.1.4;
   x86-64 gives `INT_MIN`, which the `MAX` with the old score then ignores). LOSAT refuses the
   search (exit 1) where that merge would happen, after the reports of the query batches before
-  (since version 1.38, as the refusal of an extension past a query frame's end; before, they were
+  (since version 1.39, as the refusal of an extension past a query frame's end; before, they were
   written only where the reports were streamed). Every other merge of such HSPs is NCBI's (`Int4`
   lengths, a density that may be negative or raised by a negative length, an HSP of length 0
   that absorbs another and becomes positive).
@@ -1106,7 +1113,7 @@ masked). Line NP item M4a-2c.
   subjects: one alone, the first, the last or two give the same rows.
 
 - TBLASTX, an ungapped extension that scores higher past the end of its query frame, in the frame
-  next to it in the query batch (version 1.38, 2026-11-17, line RG item X2c; the Owner's decision
+  next to it in the query batch (version 1.39, 2026-11-17, line RG item X2c; the Owner's decision
   of 2026-11-16 20:00 JST on line RG's question Q-X2c, 「ごめんAで」: refuse, the results of the query
   batches before are written; line RG `DECISIONS.md` X2c-1 and X2c-Q; the walks are those of the
   rule-2 item above): the HSP then spans two frames. NCBI keeps it in the frame of its seed with
@@ -1157,9 +1164,6 @@ would port:
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
-  that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
-  empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
 
 ## Ported (rule 4)
 
@@ -1226,6 +1230,15 @@ would port:
   output there is partly not defined (on the 4 GiB limit of the line's probes `BLAST ran out of
   memory`, exit status 4, for a segment of about 2^32 letters), and the rest comes from alignments
   that the mapper makes by accident.
+- The end of a database protein's title ending in `]` that `x_AdjustProteinTitleSuffix` rewrites
+  from the Bioseq's first tax id (with or without a taxonomy database), where a report shows the
+  generated title (the outfmt 0 heading of a definition line without a title, outfmt 18, a tabular
+  id that the title's first word replaces; version 1.38): ported by line RG item T5c on
+  2026-11-14; version 1.10 listed it above as a deterministic result that LOSAT refused. Where the
+  name that it writes makes the title one that `GenerateDefline` cannot decode (`chi, partial [ ]`
+  with the taxid 100009 of `tests/seqdb/taxdb/t5`), the lookup fails as in rule 2's item of version
+  1.37: `Unknown` in the tabular ids and the alignment skipped in the outfmt 0 heading (rows
+  `db.t5.sfu.*`, `db.t5.sfux.*`).
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

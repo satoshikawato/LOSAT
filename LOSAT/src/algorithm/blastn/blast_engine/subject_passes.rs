@@ -740,64 +740,64 @@ impl SubjectPasses<'_> {
                     excluded: database::fetch_excluded(database),
                     error: std::sync::Mutex::new(None),
                 });
-                // The database's blocks with `$kernel` for each subject.
+                // The database's blocks with the kernel `$search` (a subject's search, given
+                // its ordinal, its sequence and the worker's scratch), written into the blocks'
+                // callback, so that the callback captures what the kernel reads and no closure
+                // of it (one load less per subject).
                 macro_rules! database_prelim_blocks {
-                    ($kernel:ident) => {
+                    (|$ordinal:ident, $subject:ident, $state:ident| $search:expr) => {
                         database::search_blocks(
                             database,
                             parallel_pool,
                             use_parallel,
                             &new_scratch,
-                            &|state: &mut SubjectState,
-                              ordinal: u32,
-                              subject: BlastnSubjectRef<'_>| {
-                                let (_, prelim_hits) = $kernel(ordinal as usize, subject, state);
+                            &|$state: &mut SubjectState,
+                              $ordinal: u32,
+                              $subject: BlastnSubjectRef<'_>| {
+                                let (_, prelim_hits) = $search;
                                 (!prelim_hits.is_empty()).then_some(prelim_hits)
                             },
                             &mut add,
                         )
                     };
                 }
-                // The kernel, chosen once per call: the batch's statistics (`default_kernel`, which
-                // captures the passes and `scan` only, so that the default path's loop is the one
-                // without the statistics of each subject), the same with the finish of each list
-                // of an ungapped search (`ungapped_kernel`), or the statistics of each subject
-                // apart (`special_kernel`, which finishes on its copy of the batch).
-                let default_kernel =
-                    |s_idx: usize, subject: BlastnSubjectRef<'_>, state: &mut SubjectState| {
-                        self.search_subject::<UNGAPPED>(s_idx, subject, state, Some(&scan), None)
-                    };
+                // The kernel, chosen once per call: the batch's statistics, the same with the
+                // finish of each list of an ungapped search, or the statistics of each subject
+                // apart (`special_subject`, which finishes on its copy of the batch).
                 let searched = match (self.special, ungapped.as_ref()) {
-                    (None, None) => database_prelim_blocks!(default_kernel),
-                    (None, Some(stage)) => {
-                        let ungapped_kernel =
-                            |s_idx: usize,
-                             subject: BlastnSubjectRef<'_>,
-                             state: &mut SubjectState| {
-                                let mut found = default_kernel(s_idx, subject, state);
-                                self.x_ungapped_database_stage(stage, s_idx as u32, &mut found.1);
-                                found
-                            };
-                        database_prelim_blocks!(ungapped_kernel)
-                    }
+                    (None, None) => database_prelim_blocks!(|ordinal, subject, state| self
+                        .search_subject::<UNGAPPED>(
+                            ordinal as usize,
+                            subject,
+                            state,
+                            Some(&scan),
+                            None
+                        )),
+                    (None, Some(stage)) => database_prelim_blocks!(|ordinal, subject, state| {
+                        let mut found = self.search_subject::<UNGAPPED>(
+                            ordinal as usize,
+                            subject,
+                            state,
+                            Some(&scan),
+                            None,
+                        );
+                        self.x_ungapped_database_stage(stage, ordinal, &mut found.1);
+                        found
+                    }),
                     (Some(special), stage) => {
-                        let special_kernel =
-                            |s_idx: usize,
-                             subject: BlastnSubjectRef<'_>,
-                             state: &mut SubjectState| {
-                                crate::stats::setup::apart(|| {
-                                    self.special_subject::<UNGAPPED>(
-                                        s_idx,
-                                        subject,
-                                        state,
-                                        Some(&scan),
-                                        None,
-                                        special,
-                                        stage,
-                                    )
-                                })
-                            };
-                        database_prelim_blocks!(special_kernel)
+                        database_prelim_blocks!(|ordinal, subject, state| {
+                            crate::stats::setup::apart(|| {
+                                self.special_subject::<UNGAPPED>(
+                                    ordinal as usize,
+                                    subject,
+                                    state,
+                                    Some(&scan),
+                                    None,
+                                    special,
+                                    stage,
+                                )
+                            })
+                        })
                     }
                 };
                 // An ungapped search's first error of reading a sequence again, after the

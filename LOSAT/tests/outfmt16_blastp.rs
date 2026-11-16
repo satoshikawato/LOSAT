@@ -1,7 +1,9 @@
 //! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTP: what the frozen-fixture rows cannot show.
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the documents
-//! of a run with no query, and the searches LOSAT refuses before the first byte (a byte >= 0x80 in
-//! a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30)
+//! of a run with no query, and the title of punctuation alone that LOSAT refuses before the first byte
+//! (NCBI crashes on it; the titles, taxonomy names and `-db` names with a byte >= 0x80 or a control byte
+//! are written as NCBI writes them: the rows `db.xb.blastp.*` and `db.sa.x16_taxid.nonascii.*` of
+//! `db_search_manifest/blastp.tsv` and `tests/xml_dbname.rs`)
 //! and the taxonomy database of a `-db` taxid (DECISIONS 28). The bytes of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16`
 //! (`badbatch_{sub,db}_{15,16}.out`: `BATCH_SIZE=100 blastp -query qprot_bad.faa -subject
 //! sprot.faa | -db db/sprot -num_threads 1 -outfmt N`, run in that directory).
@@ -184,28 +186,33 @@ fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
 const PROTEIN: &[u8] = b"MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
 const OTHER_PROTEIN: &[u8] = b"WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM";
 
+/// The title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of.
+const PUNCTUATION: &[u8] = b", ,";
+
 fn refused(output: &Output, what: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{what}: {stderr}");
     assert!(output.stdout.is_empty(), "{what}: nothing is written");
     assert!(
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTP"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTP"
         )),
         "{stderr}"
     );
 }
 
-/// Q2: a byte >= 0x80 in a title or the `-db` name is refused for 15 and 16 as for 5, before the
-/// first byte (NCBI cuts the 16 document at the byte, and writes the 15 one in UTF-8 after
-/// guessing the encoding).
+/// The title that NCBI BLAST+ 2.17.0 cannot make (punctuation alone: `x_CleanAndCompress` reads past
+/// the end of it and NCBI crashes) is refused for 15 and 16 as for 5, before the first byte, at one,
+/// four, eight and sixteen threads, as a query's title (first or second) or the title of a subject
+/// that has a hit. (The titles NCBI does write are the rows `db.xb.*`, and the `-db` name
+/// `tests/xml_dbname.rs`.)
 #[test]
-fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
+fn a_title_of_punctuation_is_refused_in_15_and_16() {
     let dir = temp_dir("q2");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
     for format in ["15", "16"] {
         // a query title, first or second; UTF-8 and Latin-1
-        for title in ["caf\u{e9} ".as_bytes(), b"caf\xe9"] {
+        for title in [PUNCTUATION] {
             for position in 0..2 {
                 let mut records: Vec<(&[u8], &[u8])> =
                     vec![(b"q1 ok", PROTEIN), (b"q2 ok", PROTEIN)];
@@ -232,10 +239,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
         fasta(&query, &[(b"q1 ok", PROTEIN)]);
         fasta(
             &subject,
-            &[
-                (b"s1 ok", OTHER_PROTEIN),
-                ("s2 caf\u{e9}".as_bytes(), PROTEIN),
-            ],
+            &[(b"s1 ok", OTHER_PROTEIN), (PUNCTUATION, PROTEIN)],
         );
         let output = run_in(
             &dir,
@@ -251,32 +255,6 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
             &[],
         );
         refused(&output, "a subject title");
-    }
-    // the -db name
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
-    let copy = dir.join("residues_caf\u{e9}");
-    for extension in ["phr", "pin", "psq"] {
-        fs::copy(
-            tests.join(format!("residues.{extension}")),
-            format!("{}.{extension}", copy.display()),
-        )
-        .expect("copy database");
-    }
-    for format in ["15", "16"] {
-        let output = run_in(
-            &dir,
-            &[
-                "blastp",
-                "-query",
-                tests.join("residues_q.faa").to_str().unwrap(),
-                "-db",
-                copy.to_str().unwrap(),
-                "-outfmt",
-                format,
-            ],
-            &[],
-        );
-        refused(&output, "a database name");
     }
     fs::remove_dir_all(dir).ok();
 }

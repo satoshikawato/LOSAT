@@ -188,7 +188,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, of the database counts a report
+        // LOSAT's refusal of a title NCBI's XML crashes on, of the database counts a report
         // would print where NCBI's sums overflow (`ReportSumRefusal`), of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), of a tabular
@@ -209,7 +209,8 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
-        // the formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
+        // an exception of NCBI's XML stream, `blast_xml::writer::run_ending_exception`, or the
+        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
         // an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
@@ -655,11 +656,6 @@ fn run_inner(
     ) {
         crate::report::serial::seqalign::check_database(serial, database.name(), Program::Blastx)?;
     }
-    // LOSAT's refusal of a database name that BLAST XML (outfmt 5, 15 and 16) cannot write,
-    // before the search (`blast_xml::check_database_name`).
-    if let (Some(database), true) = (database.as_ref(), structured_xml) {
-        super::blast_xml::check_database_name(database.name())?;
-    }
     // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
     // reads of the file before the search share (`QueryStreamSettings`).
     let query_settings = QueryStreamSettings {
@@ -677,7 +673,7 @@ fn run_inner(
     };
     let batch_size = crate::blastinput::app::query_batch_size(default_batch_size as u32)
         .map(|size| size as usize);
-    // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
+    // LOSAT's other refusals of BLAST XML (a title NCBI crashes on, `names::Refusal`)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
     // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids
@@ -764,7 +760,6 @@ fn run_inner(
         if xml_matrix.is_none()
             && super::blast_xml::documents_may_refuse(
                 &[choice.number],
-                scan.messages_may_be_refused,
                 database.as_ref(),
                 &subjects,
             )
@@ -1537,7 +1532,7 @@ pub(super) fn reported_batch(
             let messages = reported
                 .batch_prefetch(database, results, options.gapped)
                 .map_err(reported_error)?;
-            diagnostics.write_all(&messages)?;
+            messages.write(diagnostics, None)?;
         }
     } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's

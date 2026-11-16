@@ -1,0 +1,15 @@
+# TBLASTX 2.17.0+
+# Query: ndq query of the duplicated nucleotide record
+# Database: tests/db_search/t5/nall
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 9 hits found
+ndq	BL_ORD_ID:8	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:7	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:6	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:5	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:4	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:3	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:2	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:1	100.000	220	0	0	1	660	1	660	7.26e-177	604
+ndq	BL_ORD_ID:0	100.000	220	0	0	1	660	1	660	7.26e-177	604
+# BLAST processed 1 queries

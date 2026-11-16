@@ -294,8 +294,9 @@ struct RunReports<'a> {
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 }
 
-/// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI cannot write before
-/// the first byte, in the reports that they write; a `-subject` XML2 or JSON document never writes
+/// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI crashes on
+/// (`names::Refusal`) before the first byte, in the reports that they write; a `-subject` XML2 or
+/// JSON document never writes
 /// the last query of a run that stops at a later batch (`blast_xml::scan_queries`, on the records
 /// in memory, read into the search's reader batches as the command line's `prescan_queries` reads
 /// the file, and at the same place: before the subjects' warnings). With outfmt 5 among the
@@ -426,7 +427,6 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         shown,
         ref database,
         out,
-        ref xml_scan,
         ..
     } = run;
     // Whether every format is the archive, which NCBI writes without the prefetch (`render`).
@@ -451,19 +451,17 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             crate::cli::NcbiOstream::sink(&mut format.sink)
         })
         .collect::<io::Result<Vec<_>>>()?;
-    // A run whose XML documents could still refuse after their first byte (a `-subject` title, the
-    // message of a query that NCBI does not search, a later batch's taxonomy database or subject
-    // with parsed Seq-ids, the database counts of the reports: `blast_xml::documents_may_refuse`,
-    // the command line's decision too) holds every format in order (`blast_xml::HeldFormats`), as
-    // the command line holds its document (`blast_xml::HeldOutput`), so that the refusal follows
-    // no byte.
+    // A run whose XML documents could still refuse after their first byte (a `-subject` title, a
+    // later batch's taxonomy database or subject with parsed Seq-ids, the database counts of the
+    // reports: `blast_xml::documents_may_refuse`, the command line's decision too) holds every
+    // format in order (`blast_xml::HeldFormats`), as the command line holds its document
+    // (`blast_xml::HeldOutput`), so that the refusal follows no byte.
     let outfmts: Vec<i32> = resolved
         .iter()
         .map(|options| i32::from(options.outfmt))
         .collect();
     let xml_may_refuse = super::blast_xml::documents_may_refuse(
         &outfmts,
-        xml_scan.messages_may_be_refused,
         database.as_ref().map(|run| run.database),
         subjects,
     );
@@ -1068,9 +1066,6 @@ fn search_database(
                 database.name(),
                 Program::Blastx,
             )?;
-        }
-        if matches!(choice.number, 5 | 15 | 16) {
-            super::blast_xml::check_database_name(database.name())?;
         }
     }
     if query_records.is_empty() {

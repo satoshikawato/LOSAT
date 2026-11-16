@@ -36,7 +36,7 @@ FASTA files:
 - `bx_prescan_data_q.fna`, `bx_prescan_gap_q.fna`: a data line, or the gap line `>?5`, before any defline,
   then the record `r1` whose title is not US-ASCII (`café x`), the BLASTX queries of `db.bxprescan.*`: with
   `-parse_deflines` NCBI stops at line 1 (`Input doesn't start with a defline or comment`) in every format,
-  before any title is written. `bx_prescan_badgi_q.fna`: the record `r0` with that title, then `>gi|abc`, which
+  before any title is written (and before it fails on that one). `bx_prescan_badgi_q.fna`: the record `r0` with that title, then `>gi|abc`, which
   NCBI cannot read as a Seq-id under `-parse_deflines` (`Could not construct seq-id from 'gi|abc'`): in one batch
   the error comes before `r0` is written, with `BATCH_SIZE=1` after; with `BATCH_SIZE=0` (`db.bxprescan.bs0.*`, without
   `-parse_deflines`) NCBI reads no query and stops with `Empty CBlastQueryVector`. `bx_prescan_badgi_big_q.fna`: the same with
@@ -412,7 +412,20 @@ both subjects) so that a subject is a `Hit` of two queries. The rows `db.sa.x16_
 `BLASTDB=tests/seqdb/taxdb/<variant>` in `extra_args` (a `BLASTDB=DIR` token is the environment variable of both programs,
 not an argument): `good`, `bad_magic`, `count_larger`, `no_btd`, `empty_fields`, `offset_last_past_end` and
 `tests/seqdb/taxdb_xml2/no_9606` (`make_taxdb.py write` of `taxdb.tsv` without the row of 9606). The rows `.nonascii.*`
-(`high_bytes_utf8`) are LOSAT refusals: NCBI aborts its XML2 writer there.
+(`high_bytes_utf8`, the scientific name of 9606 has bytes >= 0x80) are frozen from NCBI like the others (K4h): its XML2
+writer stops at the byte (outfmt 16 is cut there with a `Frame type= eFrameNamed` post and exit status 0, outfmt 14
+leaves the side file cut and exits 255), its JSON writer copies the bytes (outfmt 15 and 13).
+
+K4h (titles with bytes >= 0x80 or control bytes in the XML family): `xb/` holds the inputs of the rows `db.xb.*`, made by
+`make_xb_inputs.py` (its docstring names the byte classes: `u2`, `u2end`, `l1x`, `c01first`, `ent1`, `x81`, `ovl3`; a query
+title against a clean `-subject` or `-db`, a `-subject` title with a hit, a `-subject` title that no hit reaches). `xb_p` and
+`xb_n` (only `.phr .pin .psq` and `.nhr .nin .nsq` kept) are the databases of the `-db` rows, made with
+`makeblastdb -in xb/xb_sp_clean.faa -dbtype prot -out xb_p -title "xb proteins" -blastdb_version 4` and
+`makeblastdb -in xb/xb_sn_clean.fna -dbtype nucl -out xb_n -title "xb nucleotides" -blastdb_version 4`. Every row is frozen from
+NCBI BLAST+ 2.17.0 (`freeze --only db.xb.`), the trace lines of its exceptions naming NCBI's own build path, which LOSAT prints.
+`xb/e2/` (K4h review 3, case E2: rows `db.xb.e2.*`) holds the BLASTP and BLASTN queries of `e2probe.py prep` (remaining-gaps
+K/k4h/review3/e2): q0 without hits, q1 titled `q1 a\xc3\xa9b z` that hits only `multidb/put` (`nut`), q2 that hits `multidb/pa` (`na`)
+and `put` (`nut`); `qmp` has the ASCII title `q1 ab z`, `qm1`'s q2 hits only `pa` (`na`), `qm2`'s only `put` (`nut`).
 
 OF5a part 2 (XML2 and JSON of BLASTN): `x16_ntitles.fna` (three records: an empty definition line, a title with an
 ampersand, angle brackets and quotes, and `.`) and `x16_ntaxid.fna` with its query `x16_ntaxid_q.fna` (`qn1` hits both
@@ -596,12 +609,70 @@ the version 5 databases `t5/nmix` and `t5/pmix` (rows `db.t5.mix.*`, blastdbcmd 
 (taxids 100001 and 100002; the first without a taxid; the first untitled and the second titled; the other way round)
 and one line of each Seq-id kind whose title NCBI makes from the source (`tpg`, `emb`, `gi` for `-show_gis`, `pdb`
 without and with a chain, `lcl|Subject_1`, `gnl`; in `pmix` also `sp`, `ref|NP_`, `ref|WP_`), and the version 4
-database `t5/psuffix` (blastdbcmd only) of one record whose first line, without a taxid, has a title ending in
-`, partial [Bacillus sp.]` (the search programs refuse its outfmt 0 heading, `ParsedSubject::title_suffix_adjusted`).
-The title is made from the Bioseq's first source, the first
+database `t5/psuffix` of one record whose first line, without a taxid, has a title ending in
+`, partial [Bacillus sp.]` (blastdbcmd case `T512`; row `db.t5.psuffix.blastp.0`: the outfmt 0 heading of its untitled
+second line, `AB362002.1 alpha [Bacillus sp.]`). The title is made from the Bioseq's first source, the first
 positive taxid in `x_GetTaxDefline`'s order of the lines that the taxid list keeps (`-taxids 100002` and
 `-negative_taxids 100001` with `-no_taxid_expansion`, which NCBI applies to a version 5 database only), with
 `blastdbcmd -target_only` the target's line first and the others after it.
+
+Protein titles ending in `]` (line RG item T5c; rows `db.t5.sfx.*`, `db.t5.sfs.*`, `db.t5.psuffix.*`, blastdbcmd cases
+`T515`-`T518`, segmasker rows `db_t5c_*`): `t5/make_t5.py NCBI_BIN --suffix-only` writes `t5/psfx` (version 5,
+`-parse_seqids`, `-taxid_map`: records of a titled line and an untitled one, whose outfmt 0 heading and outfmt 18 show
+the titled line's title as `GenerateDefline` makes it, and `lcl|Subject_9nn` records, whose tabular ids are its first
+word) and `t5/psfs_100002`, `psfs_77777`, `psfs_none` (version 4 without `-parse_seqids`, `-taxid`; the alias
+`t5/psfs`: the tabular ids that replace `gnl|BL_ORD_ID|n`). NCBI's `x_AdjustProteinTitleSuffix` rewrites the end of
+such a title from the Bioseq's first source, also without a name: a title ending in ` [<name>]` (any case) or ` [ ]`
+loses it, then an organelle in parentheses of NCBI's list (`(mitochondrion)`, not `(virus)` or `(chromosome)`) and
+`, partial`, and gets ` [<name>]` back where the taxonomy database names the taxid (`alpha, partial [Bacillus sp.]` ->
+`alpha [Bacillus sp.]`; without the taxonomy database `zeta protein, partial [ ]` -> `zeta protein`, and the rows
+`.nt.` show the rest unchanged); ` []` stays. The description (`fLeavePrefixSuffix`), outfmt 5, 13 to 16, `stitle`
+and the stored headings show the title as stored.
+
+Titles without a first word (fix 1 of line RG item T5c; rows `db.t5.word.*`): `t5/make_t5.py NCBI_BIN --word-only`
+writes `t5/pword_77777` and `t5/pword_none` (version 4 without `-parse_seqids`, `-taxid 77777` and none; the alias
+`t5/pword`) of the titles ` ` (one space), `TPA:`, `MAG: (plastid) [ ]`, `chi, partial [ ]` and `  MAG:  `. Where the
+title that `GenerateDefline` makes has no first word (a title of spaces, a prefix alone, `MAG: (plastid) [ ]` cut to
+`MAG:` by `x_AdjustProteinTitleSuffix` with the source of taxid 77777), NCBI keeps the sequence's `gnl|BL_ORD_ID|n` in
+`sseqid` and `sallseqid` and writes `BL_ORD_ID:n` in `sacc`, `saccver` and `sallacc`; the nucleotide rows search
+`t5/nclean` and `t5/nall`, whose empty titles of a taxid that the taxonomy database does not name (or without one)
+give no word either.
+
+Taxids in other encodings (fix 2 of line RG item T5c; rows `db.t5.taxid.*`, blastdbcmd cases `T519`-`T524`, segmasker
+and dustmasker rows `db_t5c_taxid_*`): `t5/make_t5.py NCBI_BIN --taxid-only` writes the version 4 databases
+`t5/ptx_<name>` and `t5/ntx_<name>` (without `-parse_seqids`, `-taxid 9606`, two records with the letters of
+`ids/pdup.faa` and `ids/ndup.fna`) and rewrites the `taxid [2]` of the first record (and the header offsets of the
+index): `app42` (the application INTEGER tag `0x42`) and `sx9` (nine content bytes, seven of them sign extension),
+which NCBI's `ReadInt4` reads as 9606, and `big5` (2^31 in five bytes), on which NCBI fails (`eOverflow`: `TTaxId` is
+an `int`) wherever it reads the header: exit 255 in the reports of the record (LOSAT's `losat-rejection` rows, exit 1),
+`Error: [blastdbcmd] error while reading taxid` (exit 1). Probe: `remaining-gaps-20261112/T/taxid_t5c.md`.
+
+Rewritten ends that NCBI cannot decode (merge 4 of line RG item T5c with item T7; rows `db.t5.sfu.*`, `db.t5.sfux.*`):
+`t5/make_t5.py NCBI_BIN --sfu-only` writes `t5/psfu_100009` (version 4 without `-parse_seqids`, `-taxid 100009`; the
+alias `t5/psfu`) of `chi, partial [ ]`, `hypothetical protein [ ]` and `kappa, partial [Homo sapiens]`, and `t5/psfux`
+(version 4, `-parse_seqids`, `-taxid_map`) of `lcl|Subject_901 chi, partial [ ]` (taxid 100009), a titled line `gb|AC400031.1|
+omega, partial [ ]` followed by the untitled `gb|AD400031.1|` (taxid 100009) and `lcl|Subject_904 delta, partial [Homo
+sapiens]` (taxid 100001). With `../seqdb/taxdb/t5`, `x_AdjustProteinTitleSuffix` writes the name of 100009 (`Bad \x81
+name`) at the end of a ` [ ]` title, and `GenerateDefline` cannot decode the result: the tabular lookup fails (`Unknown`,
+the Seq-align id after the `sall*` lists of the row before), the default fields stop at `saccver` (NCBI exit 255,
+LOSAT's rejection) and the outfmt 0 heading of the untitled line is `Sequence with id AC400031 no longer exists in
+database...alignment skipped`. Without a taxonomy database the ` [ ]` end goes (`chi`, `hypothetical`). makeblastdb
+2.17.0 stores a title byte such as 0x81 as `#`, so a stored database title never carries such a byte itself.
+
+Rewritten ends whose names hold bytes outside US-ASCII or control bytes (merge 5 of line RG item T5c with item K4h; rows
+`db.t5.k5.*`, `db.t5.k5s.*`, `db.t5.k5x.*`): `t5/make_t5.py NCBI_BIN --k5-only` writes the taxonomy database
+`../seqdb/taxdb/k5` (`k5.tsv`: `taxdb.tsv`'s rows and 5001 `Caf\xc3\xa9 sp.`, 5002 `Ctl\x07 name`, 5003 `Bad \x81 name`,
+each with such bytes in all four names; 99990 stays the last entry), the version 4 databases `t5/pk5_<taxid>` (without
+`-parse_seqids`, `-taxid` 99990, 5001, 5002, 77777 and 9606; the alias `t5/pk5`), `t5/pk5x` (`-taxid 5003`) and
+`t5/pk5s` (`-parse_seqids`, `-taxid_map`: `lcl|Subject_9nn` records and titled lines followed by untitled ones) of titles
+ending in `]`, and the queries `t5/k5_qa` and `t5/k5_qc` (`.faa`, `.fna` back-translated): q0 without hits, q1 with the
+title `q1 a\xc3\xa9b z` (`qa`) or `q1 c\x07d z` (`qc`) hitting every record, q2 hitting only the records of group A (10
+in `pk5`). The tabular word of `MAG: (plastid) [ ]` with 5001 is `[Caf\xc3\xa9`; XML2 writes a control byte of a
+`sciname` as `#` with NCBI's 803.7 post and throws on the UTF-8 one and on 0x81 (outfmt 16 goes on); JSON writes them
+(`\u0007`). With `../seqdb/taxdb/offset_last_past_end` and `-outfmt 5`, q1's `Iteration` is left out at its title and
+the offset error of taxid 99990 comes at q2's load (`PRE_FETCH_SEQS_LIMIT=0`) or at its batch's prefetch (`BATCH_SIZE=1
+PRE_FETCH_SEQS_LIMIT=10`). Probe: `remaining-gaps-20261112/T/merge5_t5c.md` (645 cases, NCBI 2.17.0 and LOSAT at 1
+and 4 threads).
 
 Subjects and queries whose title NCBI cannot decode (line RG item T7; rows `db.t7.*`): `t7/` holds the inputs of the
 survey probe of T7 (its `gen.py`): `nq.fna`, `pq.faa` and their two-query forms `nq2x.fna`, `pq2x.faa`; `nqbad.fna`,

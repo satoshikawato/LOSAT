@@ -1658,17 +1658,6 @@ fn open_search_database(
             }
         }
     }
-    // The BLAST XML (outfmt 5, and the XML2 and JSON documents of 16 and 15) cannot write a
-    // `-db` name outside US-ASCII: refused before the search (`names::check_database_name`).
-    if let Some(database) = database.as_ref() {
-        if outputs
-            .formats
-            .iter()
-            .any(|format| report::output_format(format.outfmt).is_structured_xml())
-        {
-            crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
-        }
-    }
     Ok(database)
 }
 
@@ -2739,12 +2728,7 @@ fn write_tblastx_outputs(
         // and the Seq-annots' streams replace (`write_tblastx_archives`,
         // `seqalign::write_query_to`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(
-                output_format,
-                report::TblastxOutputFormat::Xml2(_)
-                    | report::TblastxOutputFormat::Archive
-                    | report::TblastxOutputFormat::Seqalign(_)
-            )
+            || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
@@ -4332,12 +4316,34 @@ fn run_batch_loop(
                         }
                     }
                 } else if !ordered.is_empty() {
+                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
+                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    let xml_cut = |query: usize| {
+                        query_records.get(query).is_some_and(|record| {
+                            crate::report::blast_xml::names::iteration_cut_before_hits(
+                                record.local_id.as_bytes(),
+                                record.warning_id(),
+                                record.believed(),
+                                &record.title,
+                                false,
+                            )
+                        })
+                    };
+                    let reads = reports.reads.borrow();
+                    let xml_before = (first_report
+                        == Some(crate::blastinput::app::ReportFormat::Xml))
+                    .then(|| crate::algorithm::common::database::XmlReportsBefore {
+                        reads: &reads,
+                        cut: &xml_cut,
+                    });
                     let prefetch = super::super::database::batch_prefetch(
                         database,
                         ordered,
                         &reports.titles.borrow(),
                         start,
+                        xml_before.as_ref(),
                     );
+                    drop(reads);
                     let messages = match prefetch {
                         Ok(messages) => messages,
                         Err(error) => prefetch_failed!(error),
@@ -4345,7 +4351,7 @@ fn run_batch_loop(
                     if plural_names && !ordered.is_empty() {
                         database.open_for_tabular_rows()?;
                     }
-                    warnings[start].lines(&messages);
+                    warnings[start].append(&messages);
                 }
             }
         }

@@ -177,6 +177,47 @@ impl NcbiException {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
+    // ```c++
+    // #define NCBI_RETHROW_SAME(prev_exception, message)                \
+    //     do { prev_exception.AddBacklog(DIAG_COMPILE_INFO, message,    \
+    //                                    prev_exception.GetSeverity()); \
+    //     throw; }  while (0)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
+    // ```c++
+    // void CException::AddBacklog(const CDiagCompileInfo& info,
+    //                             const string& message,
+    //                             EDiagSev severity)
+    // {
+    //     const CException* prev = m_Predecessor;
+    //     m_Predecessor = x_Clone();
+    //     ...
+    //     x_Init(info, message, 0, severity);
+    // ```
+    /// `NCBI_RETHROW_SAME(self, message)` in `function` at `line` of `file`: the same exception
+    /// (its class, code and extra text) with the new place and message, the old one its
+    /// predecessor (the serial object frames' `END_OBJECT_FRAME`, `report::serial::xml`).
+    pub fn rethrow_same(
+        self,
+        file: &'static str,
+        line: u32,
+        function: &'static str,
+        message: impl Into<String>,
+    ) -> Self {
+        NcbiException {
+            site: ThrowSite {
+                file,
+                line,
+                kind: self.site.kind,
+                function: Some(function),
+            },
+            message: message.into(),
+            extra: self.extra.clone(),
+            predecessor: Some(Box::new(self)),
+        }
+    }
+
     /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
     #[cfg(test)]
     pub fn site(&self) -> ThrowSite {

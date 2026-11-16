@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "pR3",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in.fa",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-16T18:25:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37183,
+  "bytes-to-cache": 218,
+  "files": [
+    "pR3.pdb",
+    "pR3.phr",
+    "pR3.pin",
+    "pR3.pot",
+    "pR3.psq",
+    "pR3.ptf",
+    "pR3.pto"
+  ]
+}

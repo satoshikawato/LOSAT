@@ -77,7 +77,7 @@
 //! pool> words=<their words>` (the build times are in `[TIMING] disc_lookup_build`, the CSR's in
 //! its `loop` or `pool_fill`).
 
-use super::{build_unmasked_ranges, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
+use super::{build_unmasked_ranges, x_range_words, DiscWords, PvArrayType, PV_ARRAY_MASK};
 #[cfg(test)]
 use super::{disc_longest_chain, fill_disc_mb_tables, DiscTables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
@@ -627,25 +627,19 @@ fn each_word(words: &DiscWords<'_>, mut f: impl FnMut(usize, u32)) {
             .unwrap_or(&[]);
         let query_offset = words.query_offsets[q_idx].max(0) as usize;
         for (range_start, range_end) in build_unmasked_ranges(seq.len(), masks) {
-            let mut accum: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in range_start..range_end {
-                let val = seq[pos];
-                if (val & BLAST2NA_MASK) != 0 {
-                    accum = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-                accum = (accum << 2) | val as u64;
-                valid_bases += 1;
-                if valid_bases < template_length {
-                    continue;
-                }
-                // The 1-based start of the word in the concatenated query.
-                let index = (query_offset + pos + 2 - template_length) as u32;
-                let ecode1 = compute_discontiguous_index(accum, words.template_type) as usize;
-                f(ecode1, index);
-            }
+            x_range_words(
+                &seq[range_start..range_end],
+                template_length,
+                u64::MAX,
+                || {},
+                |accum, i| {
+                    let pos = range_start + i;
+                    // The 1-based start of the word in the concatenated query.
+                    let index = (query_offset + pos + 2 - template_length) as u32;
+                    let ecode1 = compute_discontiguous_index(accum, words.template_type) as usize;
+                    f(ecode1, index);
+                },
+            );
         }
     }
 }

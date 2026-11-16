@@ -112,9 +112,10 @@ pub fn decode_defline_set(
     decode_deflines_as(record, path, oid, false)
 }
 
-/// The `taxid` of each definition line of one sequence's record (0 for none), which the XML2
-/// and JSON formats show (`Hit` description). It is decoded apart from `decode_defline_set`,
-/// which skips it, so that no other report reads it.
+/// The `taxid` of each definition line of one sequence's record (0 for none): the decode of the
+/// definition lines with the taxid (`decode_deflines_as`, as `Volume::deflines` reads them), of
+/// which it keeps the taxids, for the reads that need nothing else (the XML2 and JSON `Hit`
+/// description, `Volume::defline_taxids`, and the taxonomy pre-pass of their reports).
 pub fn decode_defline_taxids(record: &[u8], path: &Path, oid: u32) -> Result<Vec<i32>, SeqDbError> {
     Ok(decode_deflines_as(record, path, oid, true)?
         .into_iter()

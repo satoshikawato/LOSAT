@@ -880,8 +880,10 @@ impl Volume {
         decode_deflines_as(&record, &path, oid, false)
     }
 
-    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid` (the
-    /// decode of `defline_taxids`, which also gives the titles).
+    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid`, as NCBI's
+    /// `x_GetHdrAsn1` reads the record (`header::decode_deflines_as`; `defline_taxids` keeps the
+    /// taxids of the same decode). The reads of the stored titles (`deflines`, `visit_deflines_as`)
+    /// decode the taxid; only `stored_deflines` skips it.
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");

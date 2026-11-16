@@ -981,13 +981,20 @@ fn x_partition_staged(
                 // bucket b start at the bucket's start or at c - 15.
                 let lo = (bucket_starts[b] as usize).max((c + 1).saturating_sub(LINE));
                 let from = LINE - 1 - (c - lo);
-                // SAFETY: lo..=c lie in bucket b's slots (`bucket_starts[b]..bucket_starts[b + 1]`).
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        stage[b].0.as_ptr().add(from).cast::<i32>(),
-                        out.add(lo),
-                        LINE - from,
-                    );
+                if from == 0 {
+                    // A whole line: a copy of a constant 64 bytes (inline, no memmove call).
+                    // SAFETY: lo..=c = lo..lo + 16 lie in bucket b's slots.
+                    unsafe {
+                        out.add(lo)
+                            .cast::<[u32; LINE]>()
+                            .write_unaligned(stage[b].0);
+                    }
+                } else {
+                    // The bucket's first line, from its start.
+                    for k in from..LINE {
+                        // SAFETY: lo..=c lie in bucket b's slots.
+                        unsafe { out.add(lo + k - from).write(stage[b].0[k] as i32) };
+                    }
                 }
             }
         }
@@ -1005,13 +1012,9 @@ fn x_partition_staged(
             continue;
         }
         let from = slot - (c - lo);
-        // SAFETY: lo..c lie in bucket b's slots.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                stage[b].0.as_ptr().add(from).cast::<i32>(),
-                out.add(lo),
-                c - lo,
-            );
+        for k in from..slot {
+            // SAFETY: lo..c lie in bucket b's slots.
+            unsafe { out.add(lo + k - from).write(stage[b].0[k] as i32) };
         }
     }
 }

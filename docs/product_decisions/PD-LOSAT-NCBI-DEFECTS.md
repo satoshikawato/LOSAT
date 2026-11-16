@@ -791,21 +791,27 @@ masked). Line NP item M4a-2c.
   files too), the batch's reader messages and the error (line DBID item mixdb2, probe of 4,800
   runs; psiblast's PSSM drops such a sequence's letters with `Failed to retrieve sequence`, as
   NCBI's). Before the error come the taxonomy database's texts of the loads that the prefetch
-  makes before the stopping lookup (since version 1.37, line DBID item loadord, probe of 168
-  runs): it loads a batch's Seq-align ids, up to 200 of them, in the order of their Seq-id
-  handles, those that its mapper packs (gi, an accession of a prefix and digits,
-  `gnl|BL_ORD_ID|n`) by their number (`gnl|BL_ORD_ID|0` after every other number) and the
-  others after them, and ends at the first lookup that fails. It refuses a run where the reports
-  read such a Seq-id with the prefetch off (`... whose lookup in the database fails (DB contains
-  no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where
-  the prefetch is off its formatters fail to read it)`), a stopping batch where a load whose
-  order to the stop NCBI takes from the addresses of its handles (the same packed number as the
-  stopping id's, or neither packed, which changes from one command line to another; a Seq-align
-  id of two sequences; every load of a batch of more than 200 Seq-align ids, which NCBI sorts
-  by `CSeq_id::CompareOrdered` and loads in pieces of 100) writes a text of the taxonomy
-  database (after the lookups of the batches before: their prefetch, or in the JSON and XML2
-  formats their reports, since version 1.36), and one where another lookup that throws on its
-  id may come before the stop.
+  makes before the stopping lookup (since version 1.37, line DBID item loadord, probe of 184
+  runs, all six programs): it loads a batch's Seq-align ids, up to 200 of them, in the order of
+  their Seq-id handles, those that its mapper packs (gi, an accession of a prefix and digits
+  without a name or release, a `general` id with an integer tag or a string tag of at least
+  three digits; a tag of 0 or less, such as `gnl|BL_ORD_ID|0`, after every positive number) by
+  their number and the others after them, and ends at the first lookup that fails. It refuses a
+  run where the reports read such a Seq-id with the prefetch off (`... whose lookup in the
+  database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
+  BLAST Database error, and where the prefetch is off its formatters fail to read it)`), a
+  stopping batch where a load whose order to the stop NCBI takes from the addresses of its
+  handles (the same packed number as the stopping id's, or neither packed, which changes from
+  one command line to another; a Seq-align id of two sequences; every load of a batch of more
+  than 200 Seq-align ids, which NCBI sorts by `CSortableSeq_id` and loads in pieces of 100)
+  writes a text of the taxonomy database (after the lookups of the batches before: their
+  prefetch, or in the JSON and XML2 formats their reports, since version 1.36), one where
+  another lookup that throws on its id may come before the stop, and one whose stopping id NCBI
+  may never look up: another sequence of the database holds an id of its Seq-id handle (NCBI's
+  data loader keeps the ids of every sequence it has loaded and gives that sequence for them,
+  `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|`), or it is a local id of the form of a
+  generated query id (`lcl|Query_1`, which NCBI's scope finds among the queries; review 1 of
+  item loadord, H1 and H2: NCBI then searches to the end, exit 0).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

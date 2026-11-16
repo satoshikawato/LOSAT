@@ -625,6 +625,9 @@ pub struct SeqidLookup<'a> {
     envs: Vec<(&'a LmdbEntry, Env<'a, DbFile>)>,
     /// What the lookups keep of each LMDB file of `envs` (`LmdbKept`).
     kept: std::cell::RefCell<Vec<LmdbKept>>,
+    /// Whether the text-id lookups pass over an LMDB file without the accession table
+    /// ([`SeqidLookup::in_indexed_files`]) instead of failing as NCBI's.
+    skip_unindexed: bool,
 }
 
 /// What a `SeqidLookup` keeps of one LMDB file between its lookups.
@@ -688,6 +691,7 @@ impl SeqDb {
             },
             kept: std::cell::RefCell::new(envs.iter().map(|_| LmdbKept::default()).collect()),
             envs,
+            skip_unindexed: false,
         })
     }
 }
@@ -841,7 +845,9 @@ impl SeqidLookup<'_> {
         let mut oids = Vec::new();
         let mut kept = self.kept.borrow_mut();
         for ((entry, env), kept) in self.envs.iter().zip(kept.iter_mut()) {
-            let db = kept.acc2oid(entry, env)?;
+            let Some(db) = self.acc2oid_of(kept, entry, env)? else {
+                continue;
+            };
             let found = entry.case_variant_oids_in(env, &db, &key, from, &mut kept.prefixes)?;
             oids.extend(
                 found
@@ -859,7 +865,9 @@ impl SeqidLookup<'_> {
         let mut oids = Vec::new();
         let mut kept = self.kept.borrow_mut();
         for ((entry, env), kept) in self.envs.iter().zip(kept.iter_mut()) {
-            let db = kept.acc2oid(entry, env)?;
+            let Some(db) = self.acc2oid_of(kept, entry, env)? else {
+                continue;
+            };
             let found = entry.oids_of(env, &db, key)?;
             oids.extend(
                 found
@@ -869,6 +877,37 @@ impl SeqidLookup<'_> {
             );
         }
         Ok(oids)
+    }
+
+    /// The `acc2oid` database of one LMDB file (`LmdbKept::acc2oid`): `None` for a file without
+    /// the accession table where the lookup passes over such files ([`Self::in_indexed_files`]).
+    fn acc2oid_of(
+        &self,
+        kept: &mut LmdbKept,
+        entry: &LmdbEntry,
+        env: &Env<'_, DbFile>,
+    ) -> Result<Option<super::lmdb_read::Db>, SeqDbError> {
+        match kept.acc2oid(entry, env) {
+            Ok(db) => Ok(Some(db)),
+            Err(error)
+                if self.skip_unindexed
+                    && error.ncbi_message().as_deref()
+                        == Some(super::tax_files::NO_ACCESSION_INFO) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// This lookup in the LMDB files that have the accession table only: where a list puts
+    /// version 5 databases with and without it side by side, NCBI's lookup of a text id fails
+    /// (`DB contains no accession info.`), but the sequences of the other files that hold such an
+    /// id are those whose loads register it in NCBI's BLAST database data loader
+    /// (`common::database::stop_lookup_unsure`). A file without the table holds no text id.
+    pub fn in_indexed_files(mut self) -> Self {
+        self.skip_unindexed = true;
+        self
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1381-1459

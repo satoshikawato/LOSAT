@@ -1500,6 +1500,21 @@ fn prefetch_seqs_limit() -> Option<i32> {
     crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
 }
 
+/// Whether a Seq-id of the sequence `ordinal` of `db` is one `CSeq_id_Handle` with the key
+/// `handle` (`seqid::mask_handle::mask_handle_key`).
+fn holds_handle(db: &SeqDb, ordinal: u32, handle: &[u8]) -> bool {
+    let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = db.read_header(ordinal) else {
+        return false;
+    };
+    set.deflines
+        .iter()
+        .flat_map(|defline| &defline.ids)
+        .any(|id| {
+            crate::seqid::mask_handle::mask_handle_key(id)
+                .is_ok_and(|key| key.as_deref() == Some(handle))
+        })
+}
+
 impl<'a> HeaderReader<'a> {
     /// The reader of the headers of `db`.
     pub(crate) fn new(db: &'a SeqDb) -> Self {
@@ -1942,16 +1957,7 @@ impl<'a> HeaderReader<'a> {
     /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
     /// (`seqid::mask_handle::mask_handle_key`).
     fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
-        let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
-            return false;
-        };
-        set.deflines
-            .iter()
-            .flat_map(|defline| &defline.ids)
-            .any(|id| {
-                crate::seqid::mask_handle::mask_handle_key(id)
-                    .is_ok_and(|key| key.as_deref() == Some(handle))
-            })
+        holds_handle(self.db, ordinal, handle)
     }
 
     /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
@@ -5311,11 +5317,13 @@ fn stopping_subject<'s>(
 // address of the handle's info. Each load asks the BLAST database for the id's OID first, so the
 // first id in that order whose lookup fails with NCBI's exception ends the loads, and the loads
 // before it have written their texts (probe of line DBID loadord, `R/loadord/logs/probe.tsv`:
-// `gnl|BL_ORD_ID|1` and `|2` load before `ref|NP_000003.1|`, `|4` to `|7` never, `|3` either way from
-// run to run; every packed id before `pdb|1ABC|A`, `sp|P00007.1|NAME_X` and `lcl|abc`). More ids
-// are sorted by `CSeq_id::CompareOrdered` first and loaded in pieces of 100 (the probe's 201 ids:
-// the first 100 `gnl|BL_ORD_ID|n` before `dbj|AB000001.1|`, which the 200 load after it), an
-// order that LOSAT does not model.
+// `gnl|BL_ORD_ID|1` and `|2` load before `ref|NP_000003.1|`, `|4` to `|7` never, `|3` before it
+// with one command line and after it with another (`-outfmt 6` and `0`); every packed id before
+// `pdb|1ABC|A`, `sp|P00007.1|NAME_X` and `lcl|abc`). More ids are first sorted by
+// `CSortableSeq_id` (seq_id_sort.cpp: a `general` id by its database and tag parts, the others by
+// `CSeq_id_Handle::PLessOrdered`) and loaded in pieces of 100, an order that LOSAT does not
+// model: of the probe's 201 ids, the first 100 `gnl|BL_ORD_ID|n` load before `dbj|AB000001.1|`
+// (a `ddbj` id sorts after every `general` one), where 200 ids load it first.
 /// Whether NCBI's prefetch of a batch that stops ([`prefetch_stop`]) loads one of the batch's
 /// other subjects before the first lookup that stops it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5406,7 +5414,7 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> Vec<LoadBef
             if stops(subject) {
                 LoadBeforeStop::No
             } else if ids > PREFETCH_ONE_MAP_IDS {
-                LoadBeforeStop::Unknown("the batch has more than 200 Seq-align ids, which NCBI's prefetch loads in pieces of 100 in the order of CSeq_id::CompareOrdered")
+                LoadBeforeStop::Unknown("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100")
             } else if shared.contains(&subject.ordinal) {
                 LoadBeforeStop::Unknown("another subject of the batch has the same Seq-align id")
             } else if *order < first_stop {
@@ -5418,6 +5426,79 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> Vec<LoadBef
             }
         })
         .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-387
+// ```c++
+// int CBlastDbDataLoader::x_GetOid(const CSeq_id_Handle& idh)
+// {
+//     {
+//         CMutexGuard guard(s_Oid_Mutex);
+//         TIdMap::iterator iter = m_Ids.find(idh);
+//         if ( iter != m_Ids.end() ) {
+//             return iter->second;
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:98-110
+// ```c++
+// CCachedSequence::RegisterIds(CBlastDbDataLoader::TIdMap & idmap)
+// {
+//     ...
+//     ITERATE(CBioseq::TId, seqid, ids) {
+//         idmap[CSeq_id_Handle::GetHandle(**seqid)] = m_OID;
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297 (quoted in part at
+// `load_before_stop`): `GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved)` first, then the
+// data sources by priority, the queries' entries (`AddTopLevelSeqEntry`) before the BLAST
+// database's loader.
+/// Why NCBI's prefetch may never make the lookup of the Seq-align id of the stopping subject
+/// `ordinal` (`parsed`) that fails with its exception (review 1 of line DBID loadord, H1 and H2):
+/// its BLAST database data loader keeps every Seq-id of each sequence that the run has loaded
+/// (`RegisterIds`) and gives that sequence for the id without a lookup, so where another sequence
+/// of the database holds an id of the same Seq-id handle (found in the LMDB files that have the
+/// accession table, [`crate::seqdb::SeqidLookup::in_indexed_files`]), its load before (an earlier
+/// batch, an earlier handle of this one, a report's read) ends the stop; and NCBI's scope finds a
+/// query by its generated local id `lcl|Query_N` before it asks the loader (the batch's queries,
+/// and in outfmt 5 those of the batches before). `None`: NCBI looks it up.
+fn stop_lookup_unsure(
+    db: &SeqDb,
+    ordinal: u32,
+    parsed: &crate::report::db_subject::ParsedSubject,
+) -> Result<Option<String>> {
+    use crate::seqid::model::{ObjectId, ParsedSeqId};
+    let id = parsed.alignment_id();
+    if let ParsedSeqId::Local(ObjectId::Str(text)) = id {
+        let generated = text.len() > b"Query_".len()
+            && text[..b"Query_".len()].eq_ignore_ascii_case(b"Query_")
+            && text[b"Query_".len()..].iter().all(u8::is_ascii_digit);
+        if generated {
+            return Ok(Some(
+                "it is a local id of the form that a query read without -parse_deflines gets (lcl|Query_N), which NCBI's scope finds among the queries before it asks the database".to_owned(),
+            ));
+        }
+    }
+    let lookup = db.seqid_lookup()?.in_indexed_files();
+    let mut holders = lookup.seqid_to_oids(id, true)?;
+    holders.extend(lookup.case_folded_oids(id)?);
+    holders.extend(lookup.case_variant_oids(id)?);
+    let own = db.oid(ordinal).get();
+    let handle = crate::seqid::mask_handle::mask_handle_key(id)
+        .ok()
+        .flatten();
+    Ok(holders
+        .into_iter()
+        .filter(|&oid| oid != own)
+        .find(|&oid| {
+            handle
+                .as_deref()
+                .is_none_or(|handle| holds_handle(db, db.ordinal_of(oid), handle))
+        })
+        .map(|oid| {
+            format!("another sequence of the database (OID {oid}) holds an id that NCBI's Seq-id handles take for it, and a load of that sequence before it registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup")
+        }))
 }
 
 /// The end of a batch's prefetch at the subject `stopping` (ordinal id, definition lines) whose
@@ -5448,12 +5529,39 @@ fn prefetch_stop(
             program,
         )
     };
+    let mut asked = std::collections::HashSet::new();
+    for subject in subjects {
+        let Some(stops) = subject
+            .parsed
+            .filter(|parsed| parsed.prefetch_stops().is_some())
+        else {
+            continue;
+        };
+        if !asked.insert(subject.ordinal) {
+            continue;
+        }
+        match stop_lookup_unsure(db, subject.ordinal, stops) {
+            Ok(None) => {}
+            Ok(Some(why)) => {
+                return parsed_refusal(
+                    db.oid(subject.ordinal),
+                    &format!(
+                        "has the Seq-align id {}, whose lookup in the database fails ({}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), but which NCBI's prefetch may not look up: {why}",
+                        String::from_utf8_lossy(&stops.alignment_fasta()),
+                        stops.prefetch_stops().unwrap_or_default()
+                    ),
+                    program,
+                );
+            }
+            Err(error) => return error,
+        }
+    }
     let before = load_before_stop(db, subjects);
     if subjects.iter().zip(&before).any(|(subject, before)| {
         *before != LoadBeforeStop::No
             && subject.parsed.is_some_and(|parsed| parsed.prefetch_fails())
     }) {
-        return refuse("another of them has an id whose lookup throws, which the prefetch catches and which ends its loads, and which may come before it");
+        return refuse("another of them has an id whose lookup throws, which the prefetch catches and which ends its loads, and which comes before it or may");
     }
     // The loads before the stop, then those whose order LOSAT does not know. The bytes of a set of
     // loads do not depend on their order ([`prefetch_messages`]: a text comes with the run's first
@@ -5479,9 +5587,16 @@ fn prefetch_stop(
             };
             (why, subject.ordinal, subject.parsed)
         });
-    let reads = match subject_read_texts(db, run, loads, false, program) {
-        Ok(reads) => reads,
-        Err(error) => return error,
+    // Nothing loads before the stop: no read, so no refusal of the run's taxonomy cache either
+    // (review 1 of line DBID loadord, L5: NCBI writes its error alone).
+    let loads: Vec<_> = loads.collect();
+    let reads = if loads.is_empty() {
+        Vec::new()
+    } else {
+        match subject_read_texts(db, run, loads, false, program) {
+            Ok(reads) => reads,
+            Err(error) => return error,
+        }
     };
     let mut text = String::new();
     for (why, read) in reads {
@@ -6821,6 +6936,154 @@ mod taxdb_prepass_tests {
             0,
         );
         assert_eq!(text(plus.unwrap()), "");
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
+        // Line DBID loadord (tests/db_search/make_multidb.py --loadord-only): `ldp` holds
+        // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|`; the unparsed `qp1` is
+        // `gnl|BL_ORD_ID|0` beside it in `lda ldp`, `|1` in `ldb ldp` and `|2` in `ldp ldu`.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-load-order-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let open = |names: &[&str]| {
+            let search = SearchPath::new(&cwd, None, None).unwrap();
+            let list: Vec<String> = names
+                .iter()
+                .map(|name| {
+                    root()
+                        .join("db_search/multidb")
+                        .join(name)
+                        .to_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        };
+        let headers_of =
+            |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
+                let headers = HeaderReader::new(db);
+                (0..db.num_seqs())
+                    .map(
+                        |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                            ReportedHeader::Parsed(subject) => Some(subject),
+                            _ => None,
+                        },
+                    )
+                    .collect()
+            };
+        let accession = |parsed: &[Option<
+            std::sync::Arc<crate::report::db_subject::ParsedSubject>,
+        >],
+                         number: &str| {
+            parsed
+                .iter()
+                .position(|header| {
+                    header.as_ref().is_some_and(|subject| {
+                        subject.prefetch_stops().is_some()
+                            && String::from_utf8_lossy(&subject.alignment_fasta()).contains(number)
+                    })
+                })
+                .unwrap() as u32
+        };
+        for (names, want) in [
+            (["lda", "ldp"], LoadBeforeStop::No),
+            (["ldb", "ldp"], LoadBeforeStop::Yes),
+        ] {
+            let db = open(&names);
+            let parsed = headers_of(&db);
+            let stop = accession(&parsed, "NP_000002.1");
+            let unparsed = parsed.iter().rposition(Option::is_none).unwrap() as u32;
+            let subjects = [
+                PrefetchSubject::unflipped(unparsed, None),
+                PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref()),
+            ];
+            assert_eq!(
+                load_before_stop(&db, &subjects),
+                [want, LoadBeforeStop::No],
+                "{names:?}"
+            );
+            assert_eq!(
+                stop_lookup_unsure(&db, stop, parsed[stop as usize].as_ref().unwrap()).unwrap(),
+                None
+            );
+        }
+        // The same packed number 2 (the handles' addresses decide), one Seq-align id of two
+        // sequences, more than 200 ids, and two stops (the smaller number decides).
+        let db = open(&["ldp", "ldu"]);
+        let parsed = headers_of(&db);
+        let stop = accession(&parsed, "NP_000002.1");
+        let other = accession(&parsed, "NP_000900.1");
+        let tie = PrefetchSubject::unflipped(2, None);
+        let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
+        assert!(matches!(
+            load_before_stop(&db, &[tie, stopping])[0],
+            LoadBeforeStop::Unknown(why) if why.contains("same packed number")
+        ));
+        let unstopped = (**parsed[stop as usize].as_ref().unwrap())
+            .clone()
+            .found_instead(None);
+        let copy = PrefetchSubject::unflipped(other, Some(&unstopped));
+        assert!(matches!(
+            load_before_stop(&db, &[stopping, copy])[1],
+            LoadBeforeStop::Unknown(why) if why.contains("the same Seq-align id")
+        ));
+        // `gnl|BL_ORD_ID|3` and on (packed 3 and more, after the stop): 200 distinct ids in one
+        // map, 201 in pieces.
+        let unparsed: Vec<PrefetchSubject<'_>> = (3..204)
+            .map(|ordinal| PrefetchSubject::unflipped(ordinal, None))
+            .collect();
+        let mut many = unparsed.clone();
+        many.push(stopping);
+        assert!(load_before_stop(&db, &many)[..201]
+            .iter()
+            .all(|before| matches!(
+                before,
+                LoadBeforeStop::Unknown(why) if why.contains("more than 200")
+            )));
+        let mut few = unparsed[..199].to_vec();
+        few.push(stopping);
+        assert!(load_before_stop(&db, &few)
+            .iter()
+            .all(|before| *before == LoadBeforeStop::No));
+        let later = PrefetchSubject::unflipped(other, parsed[other as usize].as_deref());
+        assert_eq!(
+            load_before_stop(&db, &[later, tie, stopping]),
+            [
+                LoadBeforeStop::No,
+                load_before_stop(&db, &[tie, stopping])[0],
+                LoadBeforeStop::No
+            ]
+        );
+        // NCBI may never look the stopping id up (review 1 of line DBID loadord): `ldg`'s
+        // `gi|1|ref|NP_000002.1|` holds it (its load registers it in NCBI's data loader), and
+        // `ldq`'s `lcl|Query_1` is a generated query id that NCBI's scope finds.
+        let db = open(&["lda", "ldg", "ldp"]);
+        let parsed = headers_of(&db);
+        let stop = accession(&parsed, "NP_000002.1");
+        let why = stop_lookup_unsure(&db, stop, parsed[stop as usize].as_ref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(why.contains("another sequence of the database"), "{why}");
+        let db = open(&["lda", "ldq"]);
+        let parsed = headers_of(&db);
+        let stop = parsed
+            .iter()
+            .position(|header| {
+                header
+                    .as_ref()
+                    .is_some_and(|s| s.prefetch_stops().is_some())
+            })
+            .unwrap() as u32;
+        let why = stop_lookup_unsure(&db, stop, parsed[stop as usize].as_ref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(why.contains("lcl|Query_N"), "{why}");
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

@@ -183,9 +183,10 @@ error: DB contains no accession info.` (exit 2) after the prologs and the report
 before (line DBID item mixdb2), and with the texts of the taxonomy database of the loads that NCBI's
 prefetch makes before the stopping lookup, in the order of the Seq-id handles of the batch's Seq-align
 ids (line DBID item loadord); refused is a run whose reports read such a Seq-id with the prefetch
-off, and a stopping batch where a load whose order to the stop NCBI takes from the addresses of
+off, a stopping batch where a load whose order to the stop NCBI takes from the addresses of
 its Seq-id handles writes such a text, or where a lookup that throws on its id may come before the
-stop (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+stop, and one whose stopping id NCBI may never look up (another sequence holds an id of its handle,
+or a local id of the form `lcl|Query_N`) (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an

@@ -59,7 +59,11 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   `ldp` (`ldpn`), which loads after the stop; `ldb` (`ldbn`) a random sequence and then that one, at OID 1, which loads
   before it; `ldu` (`ldun`) that one alone, sorted after `ldp` (`ldpn`), at OID 2: the same packed number 2, which NCBI
   orders by the address of the handles. Without `-parse_seqids`, taxid 9606 (`-taxid`), so that their loads open the
-  taxonomy database. `make_multidb.py --loadord-only MAKEBLASTDB` builds only these.
+  taxonomy database. `ldg` (`ldgn`): `gi|1|ref|NP_000002.1|` (`NM_`), the letters of `ldp`'s first record under a gi whose
+  load (handle 1, before the accession's 2) registers the accession in NCBI's data loader, so that NCBI never looks it up
+  (review 1 of loadord, H1); `ldq` (`ldqn`): `lcl|Query_1` with those letters, which NCBI's scope finds among the queries
+  (H2); both `-parse_seqids`. `ldo_qc.faa`: one query, the letters of ../taxfilter/q.faa followed by `qp1`, which hits both
+  (psiblast's batch is one query). `make_multidb.py --loadord-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -271,16 +275,23 @@ def make_loadord(binary):
             "ldb": [(">loadord random letters", random_letters(alphabet, length)),
                     (">loadord the unparsed hit at OID 1", unparsed)],
             "ldu": [(">loadord the unparsed hit at OID 2", unparsed)],
+            "ldg": [(f">gi|1|ref|{prefix}_000002.1| loadord the accession of ldp under a gi", globin)],
+            "ldq": [(">lcl|Query_1 loadord a local id of the form of a generated query id", globin)],
         }
         for base, records in sets.items():
             name = base + suffix
             with open(os.path.join(HERE, name + ".fa"), "w") as f:
                 for header, seq in records:
                     f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
-            parse = ["-parse_seqids"] if base == "ldp" else []
+            parse = ["-parse_seqids"] if base in ("ldp", "ldg", "ldq") else []
             makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, *parse, "-blastdb_version", "5",
                         "-taxid", "9606", "-title", "multidb " + name)
             os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    globin = letters(os.path.join(SRC, "q.faa"))
+    with open(os.path.join(HERE, "ldo_qc.faa"), "w") as f:
+        seq = globin + qp1
+        f.write(">ldo_c the letters of taxfilter/q.faa, then qp1\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60))
+                + "\n")
 
 
 def main(binary):

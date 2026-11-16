@@ -2771,7 +2771,9 @@ mod tests {
 
     // The first header of each volume is read when the database is opened (`shared::
     // check_seqids`), as before line DBID ID2a: a header that LOSAT does not read is refused
-    // there, and only one with parsed Seq-ids is let through (review 1 of ID2a, M2).
+    // there, and only one with parsed Seq-ids is let through (review 1 of ID2a, M2). A header
+    // that NCBI's read fails on is not refused: NCBI reads no header at the opening, and fails
+    // where a report reads it (RG-T5d G3); the volume is classified by its next header.
     #[cfg(unix)]
     #[test]
     fn the_first_header_of_each_volume_is_read_at_open() {
@@ -2781,20 +2783,33 @@ mod tests {
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
-        header[0] = 0x31;
-        std::fs::write(dir.join("b.phr"), header).unwrap();
+        let header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
         std::fs::copy(fixture("prot_v4") + ".pin", dir.join("b.pin")).unwrap();
         std::fs::copy(fixture("prot_v4") + ".psq", dir.join("b.psq")).unwrap();
         let name = dir.join("b").to_str().unwrap().to_string();
         let settings = ApplicationSettings::default();
+        // NCBI's `Unexpected tag: 17, expected: 16` at byte 0.
+        let mut set_of = header.clone();
+        set_of[0] = 0x31;
+        std::fs::write(dir.join("b.phr"), &set_of).unwrap();
+        for program in ["BLASTP", "PSIBLAST"] {
+            assert!(
+                BlastpDatabase::open(&name, &settings, program).is_ok(),
+                "{program}"
+            );
+        }
+        // A UTF8String title, which NCBI's reader takes with a warning.
+        let mut utf8 = header;
+        assert_eq!(utf8[6], 0x1a);
+        utf8[6] = 0x0c;
+        std::fs::write(dir.join("b.phr"), &utf8).unwrap();
         for program in ["BLASTP", "PSIBLAST"] {
             let Err(error) = BlastpDatabase::open(&name, &settings, program) else {
-                panic!("a damaged first header opened ({program})")
+                panic!("a first header that LOSAT does not read opened ({program})")
             };
             assert!(
                 format!("{error:#}").ends_with(&format!(
-                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's {program}"
+                    "b.phr: header record, byte 6: a UTF8String where a VisibleString is expected, which NCBI's reader takes with a warning; this database is not supported by LOSAT's {program}"
                 )),
                 "{error:#}"
             );

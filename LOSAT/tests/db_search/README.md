@@ -585,8 +585,19 @@ and dustmasker rows `db_t5c_taxid_*`): `t5/make_t5.py NCBI_BIN --taxid-only` wri
 `ids/pdup.faa` and `ids/ndup.fna`) and rewrites the `taxid [2]` of the first record (and the header offsets of the
 index): `app42` (the application INTEGER tag `0x42`) and `sx9` (nine content bytes, seven of them sign extension),
 which NCBI's `ReadInt4` reads as 9606, and `big5` (2^31 in five bytes), on which NCBI fails (`eOverflow`: `TTaxId` is
-an `int`) wherever it reads the header: exit 255 in the reports of the record (LOSAT's `losat-rejection` rows, exit 1),
-`Error: [blastdbcmd] error while reading taxid` (exit 1). Probe: `remaining-gaps-20261112/T/taxid_t5c.md`.
+an `int`) wherever it reads the header: exit 255 in the reports of the record (since line RG item T5d NCBI's rows
+`db.t5.taxid.*.big5.*`, which LOSAT refused), `Error: [blastdbcmd] error while reading taxid` (exit 1). Probe:
+`remaining-gaps-20261112/T/taxid_t5c.md`.
+
+Header records that NCBI's read fails on (line RG item T5d; rows `db.t5d.*`, blastdbcmd cases `T523`-`T528`, segmasker and
+dustmasker rows `db_t5d_*`): `t5/make_t5.py NCBI_BIN --header-only` writes `t5/hd.faa` and `t5/hd.fna` (three records, the
+nucleotides the codons of the proteins), the queries `t5/hd_q.*` (query n hits record n) and `t5/hd_q1.*` (record 1 alone), and
+the version 4 databases `t5/phd_<name>` and `t5/nhd_<name>` (`-taxid 9606`) whose record of OID 1 is edited: `vstr` (the taxid's
+tag a VisibleString), `extra` (data where the taxid's end is expected), `prim` (the taxid's tag primitive), `big5` (2^31), `title`
+(the title's tag an OctetString), `cut` (the record without its last four bytes), `seqid` (`-parse_seqids`, `lcl|hd<n>`: the tag of
+the local id's string); `title_z` edits OID 0, which `hd_q1.*` never reports. NCBI writes its exception after the outfmt 0
+prolog and the reports of the batches before (`BATCH_SIZE=1` rows); `title_z` exits 0. Survey:
+`remaining-gaps-20261112/T/SURVEY_T5d.md`.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

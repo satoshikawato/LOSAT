@@ -465,7 +465,7 @@ impl<'a> BerIn<'a> {
         crate::seqid::ber::read_std_signed(length, size, || self.byte()).or_else(
             |error| match error {
                 StdSignedError::ZeroLength => format_err("zero length of number"),
-                StdSignedError::Overflow => format_err("overflow error"),
+                StdSignedError::Overflow(_) => format_err("overflow error"),
                 StdSignedError::Read(fail) => Err(fail),
             },
         )

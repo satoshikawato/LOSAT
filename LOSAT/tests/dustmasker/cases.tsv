@@ -312,3 +312,7 @@ order_seqloc_bin	-in in/order_del.fa -outfmt seqloc_asn1_bin -parse_seqids
 order_maskinfo_txt	-in in/order_del.fa -outfmt maskinfo_asn1_text -parse_seqids
 order_maskinfo_bin	-in in/order_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
 order_int_ps	-in in/order_del.fa -parse_seqids
+# Line RG item T5d (2026-11-16, the local official release; tests/db_search/t5/make_t5.py --header-only): header records that NCBI's read fails on, after the records before.
+db_t5d_vstr	-infmt blastdb -in ../db_search/t5/nhd_vstr
+db_t5d_title	-infmt blastdb -in ../db_search/t5/nhd_title
+db_t5d_seqid	-infmt blastdb -in ../db_search/t5/nhd_seqid

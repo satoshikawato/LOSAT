@@ -931,10 +931,11 @@ pub(crate) fn keep_source(
 }
 
 /// A reader error of the header of a reported sequence where the hit list of query `query`
-/// reaches it: NCBI's own is a `HeaderReadError` that names the query; LOSAT's refusals are
-/// errors of their own.
+/// reaches it: NCBI's own (a `CSeqDBException`, `SeqDbError::ncbi_message`, or the
+/// `CSerialException` of its read of the record, `SeqDbError::ncbi_exception`) is a
+/// `HeaderReadError` that names the query; LOSAT's refusals are errors of their own.
 fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::Error {
-    if error.ncbi_message().is_some() {
+    if error.ncbi_message().is_some() || error.ncbi_exception().is_some() {
         anyhow::Error::new(HeaderReadError {
             query,
             error: database_error(error, program),

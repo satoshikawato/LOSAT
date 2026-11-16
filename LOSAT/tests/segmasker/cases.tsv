@@ -519,3 +519,7 @@ db_t5c_stored_fasta_nt	-infmt blastdb -in ../db_search/t5/psfs -outfmt fasta
 # Taxids of other encodings (fix 2 of line RG item T5c): ../db_search/t5/ptx_app42 and ptx_sx9 (make_t5.py --taxid-only), whose first record's taxid NCBI's ReadInt4 reads as makeblastdb's (the application INTEGER tag 0x42, nine content bytes of sign extension). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, T5c fix 2.
 db_t5c_taxid_app42	-infmt blastdb -in ../db_search/t5/ptx_app42
 db_t5c_taxid_sx9	-infmt blastdb -in ../db_search/t5/ptx_sx9
+# Line RG item T5d (2026-11-16, the local official release; tests/db_search/t5/make_t5.py --header-only): header records that NCBI's read fails on, after the records before.
+db_t5d_vstr	-infmt blastdb -in ../db_search/t5/phd_vstr
+db_t5d_prim	-infmt blastdb -in ../db_search/t5/phd_prim
+db_t5d_cut	-infmt blastdb -in ../db_search/t5/phd_cut

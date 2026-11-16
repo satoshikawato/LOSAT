@@ -1334,7 +1334,9 @@ impl SeqDb {
     /// (`SeqDbError::is_parsed_seqids`). `Ok(true)` when some volume's first header holds
     /// parsed Seq-ids; any other error of a first header is returned. A volume whose header
     /// file cannot be opened (missing, or an `open` that fails) is not checked: NCBI opens a
-    /// header file at its first read, and the error comes there.
+    /// header file at its first read, and the error comes there. NCBI reads no header when it
+    /// opens a database: a header that its read fails on (`SeqDbError::Ncbi`) fails where a
+    /// report reads it, so the volume is classified by its next header (`first_deflines`).
     pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {
@@ -1349,13 +1351,22 @@ impl SeqDb {
         Ok(parsed)
     }
 
-    /// `deflines` of the first sequence of volume `at` (non-empty), whether a list includes it
-    /// or not, and with every definition line: the check reads the header as stored, before a
-    /// taxid list's `DeflineRule` (`Volume::stored_deflines`), which would refuse a first sequence
-    /// that the list leaves out. Its messages name the sequence's OID.
+    /// `deflines` of the first sequence of volume `at` (non-empty) whose header NCBI's read does
+    /// not fail on, whether a list includes it or not, and with every definition line: the check
+    /// reads the header as stored, before a taxid list's `DeflineRule`
+    /// (`Volume::stored_deflines`), which would refuse a first sequence that the list leaves out.
+    /// Its messages name the sequence's OID. No definition line when NCBI's read fails on every
+    /// header of the volume (each report of them fails).
     fn first_deflines(&self, at: usize) -> Result<Vec<OrdinalDefline>, SeqDbError> {
-        let oid = self.volume_starts[at];
-        self.ordinal_deflines(at, oid, self.volumes[at].stored_deflines(0))
+        let volume = &self.volumes[at];
+        for vol_oid in 0..volume.num_oids() {
+            let oid = self.volume_starts[at] + vol_oid;
+            match self.ordinal_deflines(at, oid, volume.stored_deflines(vol_oid)) {
+                Err(SeqDbError::Ncbi(_)) => {}
+                other => return other,
+            }
+        }
+        Ok(Vec::new())
     }
 
     /// Whether the database is of format version 5 (its volumes' index files name an LMDB

@@ -209,14 +209,22 @@ const CASES: &[Case] = &[
     ("T520", None, false, &["-db", "../db_search/t5/ptx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
     ("T521", None, false, &["-db", "../db_search/t5/ntx_app42", "-entry", "all", "-outfmt", "%o %T %t"], 0),
     ("T522", None, false, &["-db", "../db_search/t5/ntx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    // Line RG item T5d: header records that NCBI's read fails on (`make_t5.py --taxid-only` and
+    // `--header-only`): `Error: [blastdbcmd] ` and the message of NCBI's exception (`GetMsg()`),
+    // exit 1, after the records before (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-16).
+    ("T523", None, false, &["-db", "../db_search/t5/ptx_big5", "-entry", "all", "-outfmt", "%o %T %t"], 1),
+    ("T524", None, false, &["-db", "../db_search/t5/ntx_big5", "-entry", "all", "-outfmt", "%o %T %t"], 1),
+    ("T525", None, false, &["-db", "../db_search/t5/phd_vstr", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T526", None, false, &["-db", "../db_search/t5/phd_extra", "-entry", "all"], 1),
+    ("T527", None, false, &["-db", "../db_search/t5/phd_seqid", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T528", None, false, &["-db", "../db_search/t5/nhd_cut", "-entry", "all", "-outfmt", "%o %t"], 1),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,
 /// nothing written): NCBI's exception that names its source files (`-taxids` with an empty id,
 /// a date `CTime` does not read), NCBI's protein letters written reversed (a taxid list on a
-/// protein database read with `-dbtype guess` and `-strand minus`), the OID that NCBI's
-/// `-ipg` never sets on a database without PIG files, and a first record whose taxid is outside
-/// an `int` (`make_t5.py --taxid-only`: NCBI's `error while reading taxid`, exit 1, at that record).
+/// protein database read with `-dbtype guess` and `-strand minus`), and the OID that NCBI's
+/// `-ipg` never sets on a database without PIG files.
 #[rustfmt::skip]
 const REFUSED: &[(&str, &[&str])] = &[
     ("J101", &["-db", "j/lst/p5", "-taxids", "4840,,4841", "-no_taxid_expansion", "-outfmt", "%a %T"]),
@@ -224,8 +232,6 @@ const REFUSED: &[(&str, &[&str])] = &[
     ("J189", &["-db", "j/jd/feb30", "-metadata"]),
     ("J190", &["-db", "j/jd/bad", "-metadata"]),
     ("J204", &["-db", "j/lst/p5", "-ipg", "5"]),
-    ("T523", &["-db", "../db_search/t5/ptx_big5", "-entry", "all", "-outfmt", "%o %T %t"]),
-    ("T524", &["-db", "../db_search/t5/ntx_big5", "-entry", "all", "-outfmt", "%o %T %t"]),
 ];
 
 #[test]

@@ -80,7 +80,9 @@
   outfmt 18 and the tabular subject ids, which version 1.3 refused in databases with parsed
   Seq-ids and LOSAT wrote unchanged in the tabular ids of a database without them, and where the
   rewritten title has no first word (`MAG: (plastid) [ ]` cut to `MAG:` from the tax id) the
-  general id of line DBID ordname, in every program)
+  general id of line DBID ordname, in every program; on 2026-11-16 line RG item T5d wrote NCBI's
+  exception where NCBI's read of a header record fails, which LOSAT refused, and refused the
+  header records that NCBI's reader takes in a way LOSAT does not port)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -575,7 +577,17 @@ search code with a different subject source.
   title that gives no word), `# Database:` of outfmt 7 with the `-db` value as given.
 - Errors: NCBI's texts and exit statuses for a database that is not found or cannot be
   read, at the point where NCBI reports them (a header file is first read when the reports
-  of a query batch are made).
+  of a query batch are made). A header record that NCBI's object stream fails on (a damaged
+  record, or one that another writer encoded so: a taxid of another type or outside `int`, a
+  tag or a length NCBI's reader does not take, a record cut short) gives NCBI's
+  `CSerialException`, made where NCBI throws it (position, message, code, the frames of NCBI's
+  object stack and the backlog `error while reading <member>` of each member with a set flag),
+  as each program reports it: the search programs `Error: <what()>` with exit status 255, after
+  the outfmt 0 prolog and the reports of the batches before the batch whose reports read the
+  record; blastdbcmd `Error: [blastdbcmd] <GetMsg()>` with exit status 1 after the records
+  before; segmasker `<what()>` (exit 1); dustmasker NCBI's report of each exception and its
+  `Application's execution failed` line (exit 3). A record that no report reads fails nothing
+  (NCBI reads no header when it opens a database). Line RG item T5d.
 - `-db` with `-subject` or `-subject_loc` is a usage error (LOSAT's parser text and exit
   status 2; NCBI prints its usage and exits 1). LOSAT Web rejects `-db` until stage DB-7.
 
@@ -593,6 +605,7 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | A database of more letters than the target's `usize` (32-bit targets) | |
 | A database that cannot be searched, when the first query batch holds invalid queries only | NCBI would report that batch first; not reproduced |
 | A registry value `[BLAST] BLASTDB` that LOSAT does not read as NCBI does | |
+| A header record with a UTF8String where a VisibleString is expected, or with a tag in the long form (line RG item T5d) | NCBI reads the first with a warning (`SERIAL_READ_ANY_VISIBLESTRING_TAG`) and reads on after the second; neither is ported. makeblastdb writes neither |
 
 Known differences that remain: the reader's (section above), and a version 5 database
 copied under another name, which NCBI refuses (`Input db vol does not match lmdb vol`) and

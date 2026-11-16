@@ -129,13 +129,17 @@ impl ThrowSite {
 }
 
 /// An exception of NCBI's C++ Toolkit (`CException`): where it was thrown, its message, the
-/// extra text of its class, and the exception it was thrown for (`NCBI_RETHROW`).
+/// extra text of its class, the exception it was thrown for (`NCBI_RETHROW`, or the copy that
+/// `AddBacklog` keeps), and whether its text is the main one of the chain (`m_MainText`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NcbiException {
     site: ThrowSite,
     message: String,
-    extra: Option<String>,
+    /// A boxed `str`, so that the exception (and `seqdb::SeqDbError`, which holds one) stays as
+    /// small as before `main_text`.
+    extra: Option<Box<str>>,
     predecessor: Option<Box<NcbiException>>,
+    main_text: bool,
 }
 
 impl NcbiException {
@@ -146,6 +150,7 @@ impl NcbiException {
             message: message.into(),
             extra: None,
             predecessor: None,
+            main_text: true,
         }
     }
 
@@ -163,7 +168,7 @@ impl NcbiException {
     /// position.
     pub fn with_pos(site: ThrowSite, message: impl Into<String>, pos: usize) -> Self {
         NcbiException {
-            extra: Some(format!("m_Pos = {pos}")),
+            extra: Some(format!("m_Pos = {pos}").into_boxed_str()),
             ..Self::new(site, message)
         }
     }
@@ -174,6 +179,49 @@ impl NcbiException {
         NcbiException {
             predecessor: Some(Box::new(self)),
             ..Self::new(site, message)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
+    // ```c++
+    // void CException::AddBacklog(const CDiagCompileInfo& info,
+    //                             const string& message,
+    //                             EDiagSev severity)
+    // {
+    //     const CException* prev = m_Predecessor;
+    //     m_Predecessor = x_Clone();
+    //     if (prev) {
+    //         delete prev;
+    //     }
+    //     x_Init(info, message, 0, severity);
+    //     m_MainText = false;
+    // }
+    // ```
+    // `x_Init` sets the place and the message; the error code stays (the class's constructor
+    // sets it), and so does a `CSerialException`'s frame stack, which the frames of the stack
+    // that the exception leaves after this call extend (`seqid::ber`).
+    /// `NCBI_RETHROW_SAME(self, message)` at `site` (`AddBacklog`): the exception gets the place
+    /// of `site` and `message`, keeps its error code (`site.kind` is not used), and its
+    /// predecessor is its copy before the call, which keeps the main text of the chain.
+    pub fn backlog(self, site: ThrowSite, message: impl Into<String>) -> Self {
+        NcbiException {
+            site: ThrowSite {
+                kind: self.site.kind,
+                ..site
+            },
+            message: message.into(),
+            extra: None,
+            main_text: false,
+            predecessor: Some(Box::new(self)),
+        }
+    }
+
+    /// The exception with `extra` as the text that its class adds to the report
+    /// (`ReportExtra`: a `CSerialException`'s ` at <frames>`, `seqid::ber`).
+    pub fn with_extra(self, extra: Option<String>) -> Self {
+        NcbiException {
+            extra: extra.map(String::into_boxed_str),
+            ..self
         }
     }
 
@@ -372,22 +420,31 @@ impl NcbiException {
     // `[DEBUG] MessageFile`, ncbiapp.cpp:1654-1667); each message ends with a line feed. The
     // severity is the exceptions' `Error` (`sm_DefEnabled` is true and `sm_DefHandler` null
     // unless an application changes them, ncbiexpt.cpp:603-605). The main text is the newest
-    // exception's: `rethrow` makes an exception whose predecessor loses it (the constructor's
-    // `prev_exception->m_MainText = false`, ncbiexpt.cpp:188-189).
+    // exception of the chain, from the newest, that has it (`HasMainText`), else the oldest: an
+    // exception that `rethrow` makes has it (the constructor's `m_MainText(true)`,
+    // ncbiexpt.cpp:179), one that `backlog` makes has not, so the main text is then its
+    // predecessor's (the exception of NCBI's object stream under a member's
+    // `error while reading <member>`).
     /// `NCBI_REPORT_EXCEPTION_X(err_subcode, title, e)` in a source file whose
     /// `NCBI_USE_ERRCODE_X` is `err_code`, as an application with NCBI's default diagnostic
     /// flags posts it: `Error: (<class>::<code>) <message>` for each exception of the chain,
     /// oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
-    /// <message>` of the newest, each line ending with a line feed.
+    /// <message>` of the exception with the main text, each line ending with a line feed.
     pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
+        let chain = self.chain();
         let mut out = String::new();
-        for e in self.chain().iter().rev() {
+        for e in chain.iter().rev() {
             out.push_str(&post_error(e.site.kind, &e.text()));
         }
+        let main = chain
+            .iter()
+            .find(|e| e.main_text)
+            .or(chain.last())
+            .expect("a chain has its own exception");
         out.push_str(&err_post_x(
             err_code,
             err_subcode,
-            &format!("{title} ({}) {}", self.site.kind, self.text()),
+            &format!("{title} ({}) {}", main.site.kind, main.text()),
         ));
         out
     }

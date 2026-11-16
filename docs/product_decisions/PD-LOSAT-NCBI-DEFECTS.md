@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.37
+- Version: 1.39
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -95,7 +95,12 @@
   rewrites from the tax ids, which version 1.10 listed among the explicit rejections of
   deterministic results of rule 2, moved to the results ported under rule 4, line RG item T5c;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; written 2026-11-14 as
-  1.26)
+  1.26);
+  1.39 2026-11-16 (the read of a header record by NCBI's object stream reproduced, rule 2: a
+  definite length in the long form ends the value one byte per length byte after the first too
+  early, and the bytes after the set are not read; line RG item T5d, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after the 1.37 and 1.38 of the branches
+  of items T5c and T7, it renumbers at their merge)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -668,6 +673,19 @@ masked). Line NP item M4a-2c.
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
 ## Reproduced as NCBI (rule 2)
+
+- The header record of a database sequence as NCBI's object stream reads it
+  (`CObjectIStreamAsnBinary`, `x_GetHdrAsn1`), version 1.39 (line RG item T5d): a constructed
+  value with a definite length in the long form ends where NCBI's `ExpectIndefiniteLength` puts
+  it, at the position after the first length byte plus the length (`m_Input.GetStreamPosAsInt8()
+  + ReadLengthLong(len)`, objistrasnb.inl:296, evaluated before the other length bytes are read):
+  one byte per further length byte before the value's end, so that NCBI 2.17.0 fails on such a
+  record with `EndOfContentsByte expected` (probes c30 and c31 of
+  `remaining-gaps-20261112/T/t5d/impl/probe1`); makeblastdb writes indefinite lengths. The bytes
+  after the set are not read (`EndOfRead`; probe c25). `seqid::ber::decode_full_set` reads as
+  NCBI does, and the ordinal-id decoder of `seqdb::header` fails wherever it does; unit tests
+  `header_reads_fail_as_ncbis_object_stream_fails` and
+  `definite_lengths_read_as_ncbis_reader_reads_them` (`LOSAT/src/seqid/tests.rs`).
 
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
   = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum

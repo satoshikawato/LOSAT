@@ -52,6 +52,16 @@ and nine content bytes of sign extension, which NCBI's `ReadInt4` reads as 9606,
 bytes, which it fails on (`eOverflow`, `TTaxId` is an `int`) wherever it reads the header (probe
 `remaining-gaps-20261112/T/taxid_t5c.md` of line RG).
 
+With `--header-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --header-only`, line RG item
+T5d) it writes the version 4 databases `phd_<name>` and `nhd_<name>` of HEADER_EDITS (`-taxid
+9606`; the three records of `hd.faa` / `hd.fna`, the nucleotides the codons of the proteins, so
+that every program searches them with `hd_q.faa` / `hd_q.fna`, whose query n hits record n): the
+header record of OID 1 (OID 0 for the `_z` databases, which the queries `hd_q1.*` of record 1
+alone never report) edited where NCBI's read of it fails (a taxid tag, data where the taxid's end
+is expected, the taxid's tag primitive, 2^31 as the taxid, the title's tag, the record cut before
+its last four bytes; with `-parse_seqids` and `lcl|hd<n>` ids, the tag of the first string of
+the Seq-ids). NCBI's reports of them: `remaining-gaps-20261112/T/SURVEY_T5d.md` of line RG.
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
@@ -271,6 +281,116 @@ def taxid_main(ncbi_bin):
     os.rmdir(work)
 
 
+# The edits of `phd_<name>` / `nhd_<name>` (line RG item T5d): each takes the header record (a
+# `Blast-def-line-set` of one line as makeblastdb writes it) and gives the edited record; `parsed`
+# databases are made with `-parse_seqids`.
+def with_first_tag(record, inner_of, old, new):
+    """`record` with the tag byte `old` that first follows the member tag `inner_of` set to `new`."""
+    at = record.index(inner_of)
+    at = record.index(bytes([old]), at + len(inner_of))
+    return record[:at] + bytes([new]) + record[at + 1:]
+
+
+def with_primitive_taxid(record):
+    """`record` with the taxid `[2]` as the primitive tag 0x82 before the INTEGER."""
+    at = 4
+    while record[at] != 0xA2:
+        at = tlv_end(record, at)
+    end = tlv_end(record, at)
+    return record[:at] + b"\x82" + record[at + 2:end - 2] + record[end:]
+
+
+HEADER_EDITS = {
+    # NCBI: `unexpected tag: VisibleString (26), should be: Integer (2)`, `error while reading taxid`.
+    "vstr": (False, lambda r: with_taxid(r, "1a024142")),
+    # NCBI: `EndOfContentsByte expected` at the taxid's end (one exception).
+    "extra": (False, lambda r: with_taxid(r, "02022586020105")),
+    # NCBI: `unexpected tag: contextspecific/2 (130), should be contextspecific/constructed/0 (160)`.
+    "prim": (False, with_primitive_taxid),
+    # NCBI: `overflow error` (eOverflow).
+    "big5": (False, lambda r: with_taxid(r, "02050080000000")),
+    # NCBI: `unexpected tag: OctetString (4), should be: VisibleString (26)`, `error while reading title`.
+    "title": (False, lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x04)),
+    # NCBI: the end of the record in the taxid's member frame (`HandleEOF`, eEOF).
+    "cut": (False, lambda r: r[:-4]),
+    # NCBI: the string of `local str` (`( at [].[].local.str)`), `error while reading seqid`.
+    "seqid": (True, lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x04)),
+}
+HEADER_SEEDS = (11, 22, 33)
+
+
+def header_letters():
+    """The three proteins of `hd.faa` (120 letters each, a linear congruential stream of each seed)
+    and their nucleotides, one codon per letter."""
+    amino = "ACDEFGHIKLMNPQRSTVWY"
+    codon = dict(zip(amino, ["GCT", "TGT", "GAT", "GAA", "TTT", "GGT", "CAT", "ATT", "AAA", "CTG",
+                             "ATG", "AAT", "CCG", "CAG", "CGT", "AGC", "ACC", "GTG", "TGG", "TAT"]))
+    proteins = []
+    for seed in HEADER_SEEDS:
+        state, letters_ = seed, []
+        for _ in range(120):
+            state = (state * 1103515245 + 12345) % 2 ** 31
+            letters_.append(amino[(state >> 16) % 20])
+        proteins.append("".join(letters_))
+    return proteins, ["".join(codon[c] for c in p) for p in proteins]
+
+
+def patch_record(base, ext, oid, edit):
+    """Rewrites the header file of the version 4 database `base` with the record of `oid` edited
+    by `edit`, and the header offsets of its index file."""
+    index = bytearray(open(f"{base}.{ext}in", "rb").read())
+    version, = struct.unpack(">I", index[0:4])
+    assert version == 4, version
+    at = 8
+    for _ in range(2):  # title, date
+        at += 4 + struct.unpack(">I", index[at:at + 4])[0]
+    count, = struct.unpack(">I", index[at:at + 4])
+    at += 4 + 8 + 4  # count, total length, longest sequence
+    offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
+    headers = open(f"{base}.{ext}hr", "rb").read()
+    records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
+    records[oid] = edit(records[oid])
+    offsets = [0]
+    for record in records:
+        offsets.append(offsets[-1] + len(record))
+    index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
+    open(f"{base}.{ext}hr", "wb").write(b"".join(records))
+    open(f"{base}.{ext}in", "wb").write(bytes(index))
+
+
+def header_main(ncbi_bin):
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    for kind, seqs in (("p", proteins), ("n", nucleotides)):
+        ext = "faa" if kind == "p" else "fna"
+        with open(os.path.join(here, f"hd.{ext}"), "w") as f:
+            for n, seq in enumerate(seqs):
+                f.write(f">hd{n} record {n} of the T5d databases\n{seq}\n")
+        with open(os.path.join(here, f"hd_q.{ext}"), "w") as f:
+            for n, seq in enumerate(seqs):
+                f.write(f">q{n}\n{seq}\n")
+        with open(os.path.join(here, f"hd_q1.{ext}"), "w") as f:
+            f.write(f">q1\n{seqs[1]}\n")
+        with open(os.path.join(work, f"hdp.{ext}"), "w") as f:
+            for n, seq in enumerate(seqs):
+                f.write(f">lcl|hd{n} record {n} of the T5d databases\n{seq}\n")
+    for kind, dbtype, ext in (("p", "prot", "p"), ("n", "nucl", "n")):
+        fext = "faa" if kind == "p" else "fna"
+        for name, (parsed, edit) in HEADER_EDITS.items():
+            for suffix, oid in (("", 1), ("_z", 0)):
+                if suffix and name != "title":
+                    continue
+                fasta = os.path.join(work, f"hdp.{fext}") if parsed else os.path.join(here, f"hd.{fext}")
+                out = os.path.join(here, f"{kind}hd_{name}{suffix}")
+                makeblastdb(ncbi_bin, fasta, dbtype, 9606, out, parsed)
+                patch_record(out, ext, oid, edit)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
 def stored_main(ncbi_bin, prefix, stored):
     """The version 4 protein databases `<prefix>_<taxid>` of the titles `stored` (the letters of
     `pdup.faa`, `-taxid <taxid>`, none for `None`) and the alias `<prefix>` over them."""
@@ -460,5 +580,7 @@ if __name__ == "__main__":
         stored_main(sys.argv[1], "pword", WORD_STORED)
     elif "--taxid-only" in sys.argv[2:]:
         taxid_main(sys.argv[1])
+    elif "--header-only" in sys.argv[2:]:
+        header_main(sys.argv[1])
     else:
         main()

@@ -1623,11 +1623,31 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
 ) -> Option<XdropResult> {
     if scores.ncols() <= 16 {
         body8_rows_t::<TB, NIB, true>(
-            q, s, scores, max_m, len1, len2, gap_open, gap_extend, x_drop, check_fence, sc,
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
         )
     } else {
         body8_rows_t::<TB, NIB, false>(
-            q, s, scores, max_m, len1, len2, gap_open, gap_extend, x_drop, check_fence, sc,
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
         )
     }
 }

@@ -11,10 +11,11 @@
 //!
 //! The search reads its matrix through [`TbxScore`], chosen once before the search
 //! (`blast_engine::run_impl::run_in_pool`). BLOSUM62's instance ([`Blosum62Score`], no data)
-//! reads `blosum62_score`'s scores from their rows at a static address (`BLOSUM62_NCBISTDAA_ROWS`)
-//! and takes the paths built on BLOSUM62's scores (the batch table of TBXLUT, the table walks of TBXUNGAP with the sentinel
-//! walks of TBXUNGAPSENT, the AVX2 reevaluation). The other matrices' instance ([`MatrixScore`])
-//! reads the rows of the matrix (`protein_score_rows`): PAIRLUT builds its group tables with the matrix's scores and the
+//! reads `blosum62_score`'s scores from their rows at a static address
+//! (`BLOSUM62_NCBISTDAA_ROWS`) and takes the paths built on BLOSUM62's scores (the batch table
+//! of TBXLUT, the table walks of TBXUNGAP with the sentinel walks of TBXUNGAPSENT, the AVX2
+//! reevaluation). The other matrices' instance ([`MatrixScore`]) reads the rows of the matrix
+//! (`protein_score_rows`): PAIRLUT builds its group tables with the matrix's scores and the
 //! units of PAIRPAR run wherever `decide` takes the batch, the reference frame loop builds NCBI's
 //! table with them (`build_ncbi_lookup_for_profile`), and both two-hit extensions take the table
 //! walks of TBXUNGAP with a byte table of the matrix ([`TbxScore::table_two_hit`]).
@@ -204,8 +205,9 @@ impl TbxScore for Blosum62Score {
     }
 }
 
-/// The table of one matrix's scores for the NCBISTDAA letters, as NCBI fills its score block
-/// (`protein_score`).
+/// A matrix other than BLOSUM62, or any matrix with a word length other than 3: the matrix's
+/// scores of every two bytes as NCBI fills its score block (`protein_score`, read from
+/// `protein_score_rows`), its word length and the byte table of its two-hit walks.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:1559-1592
 /// ```c
@@ -221,7 +223,8 @@ impl TbxScore for Blosum62Score {
 ///         matrix[o_index][i] = matrix[x_index][i];
 ///         matrix[i][o_index] = matrix[i][x_index];
 /// ```
-pub(crate) struct MatrixScores {
+#[derive(Clone, Copy)]
+pub(crate) struct MatrixScore {
     matrix: ScoringMatrix,
     /// `-word_size` (`TbxScore::word`).
     word: usize,
@@ -232,7 +235,7 @@ pub(crate) struct MatrixScores {
     walk: Option<&'static MatrixWalkTable>,
 }
 
-impl MatrixScores {
+impl MatrixScore {
     /// The scores of `matrix` for a search of 3-letter words.
     #[cfg(test)]
     pub(crate) fn new(matrix: ScoringMatrix) -> Self {
@@ -250,26 +253,6 @@ impl MatrixScores {
             walk,
         }
     }
-
-    /// The scores as the search reads them.
-    pub(crate) fn scorer(&self) -> MatrixScore {
-        MatrixScore {
-            matrix: self.matrix,
-            word: self.word,
-            rows: self.rows,
-            walk: self.walk,
-        }
-    }
-}
-
-/// A matrix other than BLOSUM62, or any matrix with a word length other than 3, read from its
-/// [`MatrixScores`].
-#[derive(Clone, Copy)]
-pub(crate) struct MatrixScore {
-    matrix: ScoringMatrix,
-    word: usize,
-    rows: &'static ScoreRows,
-    walk: Option<&'static MatrixWalkTable>,
 }
 
 impl TbxScore for MatrixScore {
@@ -531,8 +514,7 @@ mod tests {
     // `-matrix`, for every two bytes.
     #[test]
     fn the_table_of_blosum62_holds_blosum62_score() {
-        let table = MatrixScores::new(ScoringMatrix::Blosum62);
-        let scorer = table.scorer();
+        let scorer = MatrixScore::new(ScoringMatrix::Blosum62);
         for a in 0..=u8::MAX {
             for b in 0..=u8::MAX {
                 assert_eq!(scorer.score(a, b), Blosum62Score.score(a, b), "{a} {b}");
@@ -545,8 +527,7 @@ mod tests {
     #[test]
     fn the_table_of_another_matrix_holds_its_scores() {
         use crate::utils::matrix::ncbistdaa::{A, GAP, W};
-        let table = MatrixScores::new(ScoringMatrix::Pam30);
-        let scorer = table.scorer();
+        let scorer = MatrixScore::new(ScoringMatrix::Pam30);
         assert_eq!(scorer.score(A, A), 6);
         assert_eq!(scorer.score(W, W), 13);
         assert_eq!(scorer.score(A, W), -13);

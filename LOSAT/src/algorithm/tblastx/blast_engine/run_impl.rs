@@ -3404,7 +3404,7 @@ fn run_in_pool(
     let matrix_scores = match args.scoring_matrix() {
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => None,
         TblastxMatrix::Table(ScoringMatrix::Blosum62) if word == 3 => None,
-        TblastxMatrix::Table(matrix) => Some(MatrixScores::with_word(matrix, word)),
+        TblastxMatrix::Table(matrix) => Some(MatrixScore::with_word(matrix, word)),
     };
     // EXPERIMENT (LOSAT_X_TBXBOARD): one board for the search's batches (tblastx/x_work_board.rs).
     // Only when the batches use it (`search_query_batch`, `x_board_batch`): with the serial chunk
@@ -3427,7 +3427,7 @@ fn run_in_pool(
             x_board.as_ref(),
         ),
         Some(scores) => search_query_batch(
-            scores.scorer(),
+            *scores,
             &args,
             &query_records[range],
             search_subjects,

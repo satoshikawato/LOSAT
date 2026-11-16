@@ -28,9 +28,31 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
     initial_score: i32,
     x_drop: i32,
 ) -> (i32, usize, Option<i32>) {
-    // The left extension of the two-hit extension (its own copy: the walk starts at the word).
-    // NCBI's form: one count `k` down over the `n` letters before the offsets (the walk's step `i`
-    // reads the letters at `k = n - 1 - i`), and the best's `k`; the length is `n - best_k`.
+    // The left walk of the two-hit and one-hit extensions, in NCBI's form: one count `k` down over
+    // the `n` letters before the offsets (the walk's step `i` reads the letters at
+    // `k = n - 1 - i`), and the best's `k`; the length is `n - best_k`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:897-920
+    // ```c
+    //     n = MIN(s_off, q_off);
+    //     best_i = n + 1;
+    //     s = subject->sequence + s_off - n;
+    //     q = query->sequence + q_off - n;
+    //     for (i = n; i >= 0; i--) {
+    //         score += matrix[q[i]][s[i]];
+    //         if (score > maxscore) {
+    //             maxscore = score;
+    //             best_i = i;
+    //         }
+    // ...
+    //         if ((maxscore - score) >= dropoff)
+    //             break;
+    //     }
+    //
+    //     *length = n - best_i + 1;
+    // ```
+    // NCBI's offsets are those of the letters before the word (`s_off - 1`, `q_off - 1`), LOSAT's
+    // one past them: LOSAT's `n` is NCBI's `n + 1`, its `k` NCBI's `i` (from the same first
+    // letter), its `best_k` NCBI's `best_i` and `n - best_k` NCBI's length.
     let n = q_off.min(s_off);
     debug_assert!(q_off <= q_seq.len() && s_off <= s_seq.len());
     // SAFETY: both callers' offsets are at most the word's end in each sequence, where the word
@@ -1004,13 +1026,13 @@ mod x_cells_tests {
             state ^= state << 17;
             state % n
         };
-        let tables: Vec<crate::algorithm::tblastx::scoring::MatrixScores> = [2, 3, 4]
+        let tables: Vec<crate::algorithm::tblastx::scoring::MatrixScore> = [2, 3, 4]
             .into_iter()
             .flat_map(|word| {
                 crate::config::ScoringMatrix::ALL
                     .into_iter()
                     .map(move |matrix| {
-                        crate::algorithm::tblastx::scoring::MatrixScores::with_word(matrix, word)
+                        crate::algorithm::tblastx::scoring::MatrixScore::with_word(matrix, word)
                     })
             })
             .collect();
@@ -1023,7 +1045,7 @@ mod x_cells_tests {
             let s: Vec<u8> = (0..s_len).map(|_| 1 + next(alphabet) as u8).collect();
             let x_drop = 1 + next(40) as i32;
             // Even rounds: BLOSUM62's instance; odd rounds: a matrix and a word length.
-            let sc = (round % 2 == 1).then(|| tables[next(tables.len() as u64) as usize].scorer());
+            let sc = (round % 2 == 1).then(|| tables[next(tables.len() as u64) as usize]);
             let word = sc.map_or(3, |sc| sc.word());
             let q_right = next((q_len - word) as u64 + 1) as usize;
             let s_right = next((s_len - word) as u64 + 1) as usize;

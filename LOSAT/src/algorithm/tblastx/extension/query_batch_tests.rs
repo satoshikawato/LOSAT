@@ -618,13 +618,9 @@ fn the_nullb_scores_blast_score_min_against_every_byte() {
         assert_eq!(Blosum62Score.score(NULLB, b), NULLB_SCORE, "{b}");
     }
     for matrix in ScoringMatrix::ALL {
-        let scores = crate::algorithm::tblastx::scoring::MatrixScores::new(matrix);
+        let scores = crate::algorithm::tblastx::scoring::MatrixScore::new(matrix);
         for b in 0..=u8::MAX {
-            assert_eq!(
-                scores.scorer().score(NULLB, b),
-                NULLB_SCORE,
-                "{matrix:?} {b}"
-            );
+            assert_eq!(scores.score(NULLB, b), NULLB_SCORE, "{matrix:?} {b}");
             assert_eq!(matrix.score(NULLB, b), NULLB_SCORE, "{matrix:?} {b}");
         }
     }

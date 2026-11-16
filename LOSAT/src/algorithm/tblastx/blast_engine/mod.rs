@@ -105,7 +105,7 @@ pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
-pub(crate) use super::scoring::{Blosum62Score, MatrixScores, TbxScore};
+pub(crate) use super::scoring::{Blosum62Score, MatrixScore, TbxScore};
 pub(crate) use super::stage_dump;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c

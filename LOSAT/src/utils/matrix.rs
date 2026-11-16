@@ -331,7 +331,7 @@ const SCORE_ROW_COUNT: usize = BLASTAA_SIZE + 1;
 /// first letter, holding the score against every byte of the second. A score is two loads and
 /// tests no code, as in NCBI's walks (`score += matrix[q[i]][s[i]]`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-849 (and :906-907)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-847 (and :903-904)
 /// ```c
 ///     for (i = 0; i < n; i++) {
 ///         score += matrix[q[i]][s[i]];
@@ -385,11 +385,17 @@ static BLOSUM62_NCBISTDAA_ROW_DATA: [[i32; 256]; SCORE_ROW_COUNT] = blosum62_ncb
 /// `blosum62_score_ncbistdaa_direct` for every two bytes, as [`ScoreRows`] at a static address.
 pub static BLOSUM62_NCBISTDAA_ROWS: ScoreRows = ScoreRows::of(&BLOSUM62_NCBISTDAA_ROW_DATA);
 
-/// `protein_score(matrix, ..)` for every two bytes, as [`ScoreRows`]: built at the first call for
-/// the matrix and kept for the process (one table of 30 KiB for each matrix used).
+/// `protein_score(matrix, ..)` for every two bytes, as [`ScoreRows`]. BLOSUM62's are the static
+/// `BLOSUM62_NCBISTDAA_ROWS` (`protein_score` gives BLOSUM62 the scores of
+/// `blosum62_score_ncbistdaa_direct` for every two bytes, as `standard_score` relies on; the tests
+/// compare them). The other matrices' are built at the first call for the matrix and kept for the
+/// process (about 31 KiB for each matrix used: 29 rows of 256 scores and 256 row pointers).
 pub fn protein_score_rows(matrix: ScoringMatrix) -> &'static ScoreRows {
     static ROWS: [OnceLock<&'static ScoreRows>; ScoringMatrix::ALL.len()] =
         [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+    if matrix == ScoringMatrix::Blosum62 {
+        return &BLOSUM62_NCBISTDAA_ROWS;
+    }
     ROWS[matrix as usize].get_or_init(|| {
         let mut data = Box::new([[0i32; 256]; SCORE_ROW_COUNT]);
         for (a, row) in data.iter_mut().enumerate() {

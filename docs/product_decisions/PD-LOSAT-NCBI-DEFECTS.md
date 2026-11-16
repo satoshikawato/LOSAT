@@ -99,6 +99,7 @@
   1.38 2026-11-16 (the end of a database protein's title that `x_AdjustProteinTitleSuffix`
   rewrites from the tax ids, which version 1.10 listed among the explicit rejections of
   deterministic results of rule 2, moved to the results ported under rule 4, line RG item T5c;
+  a name written there that `GenerateDefline` cannot decode fails the lookup as in 1.37;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; written 2026-11-14 as
   1.26)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -741,7 +742,8 @@ masked). Line NP item M4a-2c.
   (`MIN(MAX(2*h,10),h+50)` in `Int4`) wraps and becomes 10.
 - A subject whose `GenerateDefline` throws (version 1.37, 2026-11-16, line RG item T7): a title,
   or for a database sequence with an empty stored title the scientific name from which NCBI makes
-  it, in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
+  it (since version 1.38 also the name that `x_AdjustProteinTitleSuffix` writes at the end of a
+  protein title ending in ` [ ]`, line RG item T5c), in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
   0x8F, 0x90 or 0x9D; `NStr::HtmlDecode` throws, `ncbistr.cpp:4528-4534`). The tabular formats
   ask it where `CShowBlastDefline::GetSeqIdList` replaces an id (`showdefline.cpp:218-242`): a
   `-subject` record whose title's first word starts with `Subject_`, or read with
@@ -1168,7 +1170,11 @@ would port:
   from the Bioseq's first tax id (with or without a taxonomy database), where a report shows the
   generated title (the outfmt 0 heading of a definition line without a title, outfmt 18, a tabular
   id that the title's first word replaces; version 1.38): ported by line RG item T5c on
-  2026-11-14; version 1.10 listed it above as a deterministic result that LOSAT refused.
+  2026-11-14; version 1.10 listed it above as a deterministic result that LOSAT refused. Where the
+  name that it writes makes the title one that `GenerateDefline` cannot decode (`chi, partial [ ]`
+  with the taxid 100009 of `tests/seqdb/taxdb/t5`), the lookup fails as in rule 2's item of version
+  1.37: `Unknown` in the tabular ids and the alignment skipped in the outfmt 0 heading (rows
+  `db.t5.sfu.*`, `db.t5.sfux.*`).
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

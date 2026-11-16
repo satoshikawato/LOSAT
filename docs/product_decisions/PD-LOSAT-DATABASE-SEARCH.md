@@ -913,10 +913,11 @@ a result that LOSAT does not reproduce.
 | A definition line without a Seq-id (makeblastdb writes none) | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
-| A title in no encoding that NCBI recognises (or, for an empty title, the name in the taxonomy database from which NCBI makes it), for an `lcl|Subject_N` id: the rows that `SetSubjectId` cannot make (the subject Bioseq's ids hold that id), and the first row of a query's report that either `SetSubjectId` or `x_SetSubjectIds` cannot make (`sallseqid`, `sallgi` or `sallacc` of a sequence whose definition line with that id follows one with another id): `x_SetTaxInfo` comes after them in the same `try` and never runs (`tabular.cpp:839-854`) | 6, 7, 10, 20 with `sacc` or `saccver` (the default fields of 6, 7, 10); `staxid` in such a first row | Stops at the row's `sacc` or `saccver` (null pointer, exit 255); prints an uninitialised `staxid` | 3 |
+| A title in no encoding that NCBI recognises (or the name in the taxonomy database from which NCBI makes an empty title, or which `x_AdjustProteinTitleSuffix` writes at the end of a protein title ending in ` [ ]`), for an `lcl|Subject_N` id: the rows that `SetSubjectId` cannot make (the subject Bioseq's ids hold that id), and the first row of a query's report that either `SetSubjectId` or `x_SetSubjectIds` cannot make (`sallseqid`, `sallgi` or `sallacc` of a sequence whose definition line with that id follows one with another id): `x_SetTaxInfo` comes after them in the same `try` and never runs (`tabular.cpp:839-854`) | 6, 7, 10, 20 with `sacc` or `saccver` (the default fields of 6, 7, 10); `staxid` in such a first row | Stops at the row's `sacc` or `saccver` (null pointer, exit 255); prints an uninitialised `staxid` | 3 |
 
-A sequence without parsed Seq-ids or with an `lcl|Subject_N` id whose title, or whose empty title's
-name in the taxonomy database, is in no encoding that NCBI recognises is NCBI's in every format: the
+A sequence without parsed Seq-ids or with an `lcl|Subject_N` id whose title, or the name in the
+taxonomy database from which NCBI makes an empty title or the end of a protein title ending in ` [ ]`
+(line RG item T5c, rows `db.t5.sfu.*`), is in no encoding that NCBI recognises is NCBI's in every format: the
 tabular rows of NCBI's catch (`Unknown`, the Seq-align id in `sallseqid`, `gnl|BL_ORD_ID|n` or
 `Subject_N`, after the ids of the definition lines before the first that holds `lcl|Subject_N`; the
 titles and taxonomy of the row before) and refused only where NCBI stops or prints an uninitialised

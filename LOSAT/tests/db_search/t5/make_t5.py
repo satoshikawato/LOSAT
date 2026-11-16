@@ -52,6 +52,14 @@ and nine content bytes of sign extension, which NCBI's `ReadInt4` reads as 9606,
 bytes, which it fails on (`eOverflow`, `TTaxId` is an `int`) wherever it reads the header (probe
 `remaining-gaps-20261112/T/taxid_t5c.md` of line RG).
 
+With `--sfu-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --sfu-only`, merge 4 of line RG
+item T5c with item T7) it writes only the version 4 protein databases of titles ending in ` [ ]` with
+the taxid 100009, whose name (`Bad \x81 name`) NCBI's `x_AdjustProteinTitleSuffix` writes at their end
+and `GenerateDefline` then cannot decode (the lookup fails: `Unknown`): `psfu_100009` without
+`-parse_seqids` (SFU_STORED; the alias `psfu`) and `psfux` with `-parse_seqids` and `-taxid_map`
+(SFUX: an `lcl|Subject_901` record, a titled line followed by an untitled one, whose outfmt 0 heading
+NCBI skips, and a control).
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
@@ -187,6 +195,17 @@ WORD_STORED = {
     None: ["MAG: (plastid) [ ]", " ", "chi, partial [ ]"],
 }
 
+# The titles of `psfu_<taxid>` (merge 4 of line RG item T5c: the rewritten end takes a name that
+# NCBI cannot decode; `kappa, partial [Homo sapiens]` keeps its end).
+SFU_STORED = {
+    100009: ["chi, partial [ ]", "hypothetical protein [ ]", "kappa, partial [Homo sapiens]"],
+}
+# The records of `psfux` (version 4, -parse_seqids, -taxid_map), as SUFFIX.
+SFUX = [
+    [("lcl|Subject_901", "chi, partial [ ]", 100009)],
+    [("gb|AC400031.1|", "omega, partial [ ]", None), ("gb|AD400031.1|", "", 100009)],
+    [("lcl|Subject_904", "delta, partial [Homo sapiens]", 100001)],
+]
 
 # The inner bytes of the taxid `[2]` of the first record of `ptx_<name>` and `ntx_<name>` (fix 2 of
 # line RG item T5c); makeblastdb writes `02 02 25 86` (INTEGER 9606).
@@ -349,6 +368,35 @@ def suffix_main(ncbi_bin):
     os.rmdir(work)
 
 
+def sfu_main(ncbi_bin):
+    """`psfu_100009` with its alias `psfu` (`stored_main`) and `psfux` (SFUX)."""
+    stored_main(ncbi_bin, "psfu", SFU_STORED)
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    fasta, taxmap = os.path.join(work, "psfux.fa"), os.path.join(work, "psfux.map")
+    with open(fasta, "w") as f, open(taxmap, "w") as m:
+        for lines in SFUX:
+            parts = []
+            for seqid, title, taxid in lines:
+                parts.append(seqid + (" " + title if title else ""))
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+            f.write(">" + CTRL_A.join(parts) + "\n" + seq + "\n")
+    out = os.path.join(here, "psfux")
+    subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+                    "-blastdb_version", "4", "-taxid_map", taxmap, "-title", "psfux", "-out", out],
+                   check=True, stdout=subprocess.DEVNULL, env=env)
+    # makeblastdb's version 4 JSON metadata file is not read by a search.
+    if os.path.exists(out + ".pjs"):
+        os.remove(out + ".pjs")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
 def map_key(seqid):
     """The key of `-taxid_map` for the Seq-id `seqid`: its accession.version, a PDB molecule
     with `_` and its chain, the local or general tag."""
@@ -465,5 +513,7 @@ if __name__ == "__main__":
         stored_main(sys.argv[1], "pword", WORD_STORED)
     elif "--taxid-only" in sys.argv[2:]:
         taxid_main(sys.argv[1])
+    elif "--sfu-only" in sys.argv[2:]:
+        sfu_main(sys.argv[1])
     else:
         main()

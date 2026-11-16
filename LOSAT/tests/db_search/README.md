@@ -588,6 +588,18 @@ which NCBI's `ReadInt4` reads as 9606, and `big5` (2^31 in five bytes), on which
 an `int`) wherever it reads the header: exit 255 in the reports of the record (LOSAT's `losat-rejection` rows, exit 1),
 `Error: [blastdbcmd] error while reading taxid` (exit 1). Probe: `remaining-gaps-20261112/T/taxid_t5c.md`.
 
+Rewritten ends that NCBI cannot decode (merge 4 of line RG item T5c with item T7; rows `db.t5.sfu.*`, `db.t5.sfux.*`):
+`t5/make_t5.py NCBI_BIN --sfu-only` writes `t5/psfu_100009` (version 4 without `-parse_seqids`, `-taxid 100009`; the
+alias `t5/psfu`) of `chi, partial [ ]`, `hypothetical protein [ ]` and `kappa, partial [Homo sapiens]`, and `t5/psfux`
+(version 4, `-parse_seqids`, `-taxid_map`) of `lcl|Subject_901 chi, partial [ ]` (taxid 100009), a titled line `gb|AC400031.1|
+omega, partial [ ]` followed by the untitled `gb|AD400031.1|` (taxid 100009) and `lcl|Subject_904 delta, partial [Homo
+sapiens]` (taxid 100001). With `../seqdb/taxdb/t5`, `x_AdjustProteinTitleSuffix` writes the name of 100009 (`Bad \x81
+name`) at the end of a ` [ ]` title, and `GenerateDefline` cannot decode the result: the tabular lookup fails (`Unknown`,
+the Seq-align id after the `sall*` lists of the row before), the default fields stop at `saccver` (NCBI exit 255,
+LOSAT's rejection) and the outfmt 0 heading of the untitled line is `Sequence with id AC400031 no longer exists in
+database...alignment skipped`. Without a taxonomy database the ` [ ]` end goes (`chi`, `hypothetical`). makeblastdb
+2.17.0 stores a title byte such as 0x81 as `#`, so a stored database title never carries such a byte itself.
+
 Subjects and queries whose title NCBI cannot decode (line RG item T7; rows `db.t7.*`): `t7/` holds the inputs of the
 survey probe of T7 (its `gen.py`): `nq.fna`, `pq.faa` and their two-query forms `nq2x.fna`, `pq2x.faa`; `nqbad.fna`,
 `pqbad.faa` (a query title `qbad x\x81y title`); subject sets `lone` (`Subject_9 bad x\x81y title`), `bg` and `gb`

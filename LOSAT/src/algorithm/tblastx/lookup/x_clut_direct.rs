@@ -797,6 +797,82 @@ struct XWords<'a> {
         allow(dead_code)
     )]
     below_last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    /// PROBE (v4-BPF s13 K2-3, not for merge): `LOSAT_BPF_ENUM=1`: the last two positions' cells
+    /// from a table of the letter pairs sorted by their score sum (`XSuffixTable`).
+    x_suffix: Option<&'static XSuffixTable>,
+}
+
+/// PROBE (v4-BPF s13 K2-3, not for merge): for every pair (a, b) of query letters at the last two
+/// positions, the alphabet^2 pairs of compressed letters (i, j) as `matrix_sorted` ranks, sorted by
+/// `matrix_sorted[a][i] + matrix_sorted[b][j]` descending (stable), each with its cells' term
+/// `char[a][i] * A^(w - 2) + char[b][j] * A^(w - 1)`. The pairs that `neighbors`' last two loops
+/// give for a bound K are those with sum >= K: a prefix.
+struct XSuffixTable {
+    alphabet: usize,
+    word_length: usize,
+    matrix_sorted: [[i32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
+    a2: usize,
+    sums: Vec<i32>,
+    terms: Vec<u32>,
+}
+
+fn x_bpf_enum() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LOSAT_BPF_ENUM").is_ok_and(|v| v == "1"))
+}
+
+fn x_suffix_table(
+    alphabet: usize,
+    word_length: usize,
+    power: &[u32; 8],
+    info: &CompressedNeighborInfo,
+) -> Option<&'static XSuffixTable> {
+    if !x_bpf_enum() || word_length < 2 {
+        return None;
+    }
+    static T: std::sync::OnceLock<XSuffixTable> = std::sync::OnceLock::new();
+    let t = T.get_or_init(|| {
+        let a2 = alphabet * alphabet;
+        let mut sums = vec![i32::MIN; BLASTAA_SIZE * BLASTAA_SIZE * a2];
+        let mut terms = vec![0u32; BLASTAA_SIZE * BLASTAA_SIZE * a2];
+        let (p3, p4) = (power[word_length - 2], power[word_length - 1]);
+        let mut pairs: Vec<(i32, u32)> = Vec::with_capacity(a2);
+        for a in 0..BLASTAA_SIZE {
+            for b in 0..BLASTAA_SIZE {
+                pairs.clear();
+                for i in 0..alphabet {
+                    for j in 0..alphabet {
+                        pairs.push((
+                            info.matrix_sorted[a][i] + info.matrix_sorted[b][j],
+                            u32::from(info.matrix_sorted_char[a][i]) * p3
+                                + u32::from(info.matrix_sorted_char[b][j]) * p4,
+                        ));
+                    }
+                }
+                pairs.sort_by(|x, y| y.0.cmp(&x.0));
+                let base = (a * BLASTAA_SIZE + b) * a2;
+                for (k, &(sum, term)) in pairs.iter().enumerate() {
+                    sums[base + k] = sum;
+                    terms[base + k] = term;
+                }
+            }
+        }
+        XSuffixTable {
+            alphabet,
+            word_length,
+            matrix_sorted: info.matrix_sorted,
+            matrix_sorted_char: info.matrix_sorted_char,
+            a2,
+            sums,
+            terms,
+        }
+    });
+    (t.alphabet == alphabet
+        && t.word_length == word_length
+        && t.matrix_sorted == info.matrix_sorted
+        && t.matrix_sorted_char == info.matrix_sorted_char)
+        .then_some(t)
 }
 
 // No NCBI counterpart: the order of the build's work (item SC9i of line NP).
@@ -879,6 +955,7 @@ impl<'a> XWords<'a> {
             power,
             last,
             below_last,
+            x_suffix: x_suffix_table(header.alphabet, header.word_length, &power, info),
         }
     }
 
@@ -993,6 +1070,7 @@ impl<'a> XWords<'a> {
     ) {
         let query_word = word.letters();
         let curr_query_char = query_word[current_pos] as usize;
+        crate::utils::xstats::add(&crate::utils::xstats::FBP_ENUM_NODES, 1);
         score -= self.info.row_max[curr_query_char];
         let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
         let threshold = self.threshold;
@@ -1007,6 +1085,18 @@ impl<'a> XWords<'a> {
         let char_sorted = &self.info.matrix_sorted_char[curr_query_char];
         let scale = self.power[current_pos];
         if current_pos + 2 == self.length_of::<Q>() {
+            crate::utils::xstats::add(&crate::utils::xstats::FBP_SUFFIX_NODES, 1);
+            if let Some(t) = self.x_suffix {
+                // PROBE (K2-3): the pairs (i, j) with score + row[i] - row_max[b] + row_b[j] >=
+                // threshold, i.e. row[i] + row_b[j] >= threshold - score + row_max[b].
+                let b = query_word[current_pos + 1] as usize;
+                let key = threshold - score + self.info.row_max[b];
+                let base = (curr_query_char * BLASTAA_SIZE + b) * t.a2;
+                let count = t.sums[base..base + t.a2].partition_point(|&sum| sum >= key);
+                crate::utils::xstats::add(&crate::utils::xstats::FBP_SUFFIX_APPENDS, count as u64);
+                sink.many(partial, &t.terms[base..base + count]);
+                return;
+            }
             // The call for the last position, inline: the same statements as the branch above.
             let last_char = query_word[current_pos + 1] as usize;
             let last_row = &self.info.matrix_sorted[last_char][..self.alphabet];
@@ -1019,6 +1109,8 @@ impl<'a> XWords<'a> {
                 let next_score = score + letter_score - last_max;
                 let count =
                     last_row.partition_point(|&last_score| next_score + last_score >= threshold);
+                crate::utils::xstats::add(&crate::utils::xstats::FBP_SUFFIX_ROWS, 1);
+                crate::utils::xstats::add(&crate::utils::xstats::FBP_SUFFIX_APPENDS, count as u64);
                 sink.many(partial + u32::from(char_sorted[i]) * scale, &last[..count]);
             }
             return;
@@ -2336,6 +2428,21 @@ fn x_buckets_with<S: CompressedScores>(
     }
     starts[backbone_size] = total as u32;
     drop(targets);
+    // PROBE (K2-3): FNV-1a of the table's starts and hits, summed over the builds.
+    #[cfg(feature = "xstats")]
+    {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for v in starts
+            .iter()
+            .map(|&x| x as u32)
+            .chain(hits.iter().map(|&x| x as u32))
+        {
+            h = (h ^ u64::from(v)).wrapping_mul(0x0100_0000_01b3);
+        }
+        crate::utils::xstats::add(&crate::utils::xstats::FBP_TABLE_HASH, h);
+        crate::utils::xstats::add(&crate::utils::xstats::FBP_TABLES, 1);
+        crate::utils::xstats::add(&crate::utils::xstats::FBP_APPENDS, total as u64);
+    }
     let mut pv_array_bts = PV_ARRAY_BTS;
     if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));

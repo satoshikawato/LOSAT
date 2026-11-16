@@ -40,7 +40,7 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
-use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
+use crate::stats::KarlinParams;
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
@@ -206,9 +206,14 @@ impl BlastpDatabase {
         self.db.min_length()
     }
 
-    /// The total length the statistics read (`SeqDb::statistics_numbers`).
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`).
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
+    }
+
+    /// The total length the statistics' setup reads (`DbStatistics::setup_total`).
     pub(super) fn total_letters(&self) -> u64 {
-        self.db.statistics_numbers().0
+        self.statistics().setup_total as u64
     }
 
     /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
@@ -225,20 +230,15 @@ impl BlastpDatabase {
         self.db.filtered_empty()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
-    }
-
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
     }
 
-    /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
-    pub(super) fn statistics_num_sequences(&self) -> u32 {
-        self.db.statistics_numbers().1
+    /// The number of sequences the statistics' setup reads (`DbStatistics::setup_count`), NCBI's
+    /// `Int4`.
+    pub(super) fn statistics_num_sequences(&self) -> i32 {
+        self.statistics().setup_count
     }
 
     /// LOSAT's refusal of statistics of 0 sequences for a search of `program` without the
@@ -324,42 +324,32 @@ impl BlastpDatabase {
 // ```
 /// The length adjustment and the effective search space of a query of `query_len`
 /// letters against a database of `db_length` letters (the real total, or `-dbsize`) and
-/// `db_num_seqs` sequences, in NCBI's `Int8`: the search space as the reports print it,
-/// and as the statistics read it (a `double`). A product that does not fit `Int8`, where
-/// NCBI's arithmetic overflows, is rejected (the refusal names `program`).
+/// `db_num_seqs` sequences (NCBI's `Int4`), in NCBI's `Int8` (`stats::setup::calc_eff_lengths`):
+/// the search space as the reports print it, and as the statistics read it (a `double`). A
+/// product that does not fit `Int8`, where NCBI's arithmetic overflows, is rejected (the refusal
+/// names `program`).
 pub(super) fn blastp_database_search_space(
     query_len: usize,
     db_length: i64,
-    db_num_seqs: i64,
+    db_num_seqs: i32,
     params: &KarlinParams,
     program: &str,
 ) -> Result<(SearchSpace, i64)> {
-    let overflow = || {
-        format!(
-            "a database length of {db_length} letters with a query of {query_len} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's {program}"
-        )
-    };
-    let query_length = i64::try_from(query_len).ok().with_context(overflow)?;
-    let length_adjustment =
-        compute_length_adjustment_ncbi(query_length, db_length, db_num_seqs, params)
-            .length_adjustment;
-    let mut effective_db_length = db_num_seqs
-        .checked_mul(length_adjustment)
-        .and_then(|adjusted| db_length.checked_sub(adjusted))
-        .with_context(overflow)?;
-    if effective_db_length <= 0 {
-        effective_db_length = 1;
-    }
-    let effective_query_length = query_length - length_adjustment;
-    let effective_search_space = effective_db_length
-        .checked_mul(effective_query_length)
-        .with_context(overflow)?;
+    let query_length = i64::try_from(query_len).unwrap_or(i64::MAX);
+    let lengths = crate::stats::setup::calc_eff_lengths(
+        query_length,
+        db_length,
+        db_num_seqs,
+        params,
+        0,
+        program,
+    )?;
     Ok((
         SearchSpace {
-            effective_space: effective_search_space as f64,
-            length_adjustment,
+            effective_space: lengths.eff_searchsp as f64,
+            length_adjustment: i64::from(lengths.length_adjustment),
         },
-        effective_search_space,
+        lengths.eff_searchsp,
     ))
 }
 
@@ -1919,18 +1909,23 @@ impl ListedTitles<'_> {
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// listed subject, by rank (`shared::tabular_subject_id`); a
-    /// subject without rows gets an empty id. A subject with rows whose id LOSAT cannot write
-    /// as NCBI is an error before any format is written where a tabular report `reads` the
-    /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
-    /// that read nothing of the subject prints none of them.
+    /// subject without rows gets an empty id, one whose lookup fails none
+    /// (`common::tabular::SubjectId`: `TabularSubjectId::Unknown`, a parsed subject's
+    /// `ParsedSubject::tabular_ids`; `report::tabular::check_failed_lookups`). A subject with rows
+    /// whose id LOSAT cannot write as NCBI is an error before any format is written where a
+    /// tabular report `reads` the subject (`report::tabular::reads_subject`), else its ids are
+    /// empty: a table of fields that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         reads: bool,
-    ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
+    ) -> Result<(
+        Vec<crate::algorithm::common::tabular::SubjectId>,
+        Vec<Option<[Arc<[u8]>; 2]>>,
+    )> {
         let reported = Self::reported(hit_lists);
         let ranks = self.listed.ordinals.len();
-        let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
+        let mut ids: Vec<crate::algorithm::common::tabular::SubjectId> = Vec::with_capacity(ranks);
         // `sacc` and `saccver` of the subjects with parsed Seq-ids and of those with the general
         // id, by rank (empty without them; the others' are their `sseqid`).
         let mut accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
@@ -1938,17 +1933,18 @@ impl ListedTitles<'_> {
         let empty: Arc<[u8]> = Arc::from(&b""[..]);
         for rank in 0..ranks {
             if !reported.contains(&rank) {
-                ids.push(match self.shown {
+                ids.push(Some(match self.shown {
                     ListedShown::Lean(_) => Arc::clone(&empty),
                     ListedShown::Records(_) => Arc::from(&b""[..]),
-                });
+                }));
                 continue;
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
-                let [id, accession, version] = match subject.tabular_ids(true) {
+                // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
+                let found = match subject.tabular_ids(true) {
                     Ok(ids) => ids,
-                    Err(_) if !reads => Default::default(),
+                    Err(_) if !reads => Some(Default::default()),
                     Err(problem) => {
                         return Err(shared::parsed_refusal(
                             self.oids.oid(ordinal),
@@ -1957,11 +1953,12 @@ impl ListedTitles<'_> {
                         ))
                     }
                 };
-                ids.push(Arc::from(id));
+                ids.push(found.as_ref().map(|[id, _, _]| Arc::from(id.as_slice())));
                 if accessions.is_empty() {
                     accessions = vec![None; ranks];
                 }
-                accessions[rank] = Some([Arc::from(accession), Arc::from(version)]);
+                accessions[rank] =
+                    found.map(|[_, accession, version]| [Arc::from(accession), Arc::from(version)]);
                 continue;
             }
             let id = match shared::tabular_subject_id(
@@ -1972,12 +1969,15 @@ impl ListedTitles<'_> {
                 self.program,
             ) {
                 Err(_) if !reads => {
-                    ids.push(Arc::from(&b""[..]));
+                    ids.push(Some(Arc::from(&b""[..])));
                     continue;
                 }
                 id => id?,
             };
-            ids.push(Arc::from(id.id()));
+            ids.push(match id {
+                shared::TabularSubjectId::Unknown(_) => None,
+                ref id => Some(Arc::from(id.id())),
+            });
             if let shared::TabularSubjectId::General(_) = id {
                 if accessions.is_empty() {
                     accessions = vec![None; ranks];
@@ -2057,6 +2057,11 @@ impl ListedTitles<'_> {
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
+    }
+
+    /// The OID of the subject of rank `rank`.
+    pub(super) fn oid(&self, rank: usize) -> crate::seqdb::Oid {
+        self.oids.oid(self.listed.ordinals[rank])
     }
 
     /// The source from which NCBI makes the empty stored title of the subject of rank `rank`
@@ -2308,12 +2313,17 @@ pub(super) fn x_titles_allow_blocks(
                         .is_ok()
                     } else {
                         // A protein's word is `unnamed`, with or without the name of its source.
-                        crate::report::defline::database_subject_id(
-                            &deflines[0].title,
-                            &Default::default(),
-                            true,
+                        // A failed lookup (`SubjectWord::Unknown`) is refused by some field
+                        // lists (`report::tabular::failed_lookup_stop`): not allowed.
+                        matches!(
+                            crate::report::defline::database_subject_id(
+                                &deflines[0].title,
+                                &Default::default(),
+                                true,
+                            ),
+                            Ok(crate::report::defline::SubjectWord::Word(_)
+                                | crate::report::defline::SubjectWord::General)
                         )
-                        .is_ok()
                     }
             }
             Err(_) => false,
@@ -3949,8 +3959,8 @@ mod tests {
         let (ids, accessions) = titles.tabular_subject_ids(&hit_lists, true).unwrap();
         assert!(accessions.is_empty());
         assert_eq!(
-            ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
-            [&b"p01"[..], b"p03", b"p08", b"p10"]
+            ids.iter().map(|id| id.as_deref()).collect::<Vec<_>>(),
+            [Some(&b"p01"[..]), Some(b"p03"), Some(b"p08"), Some(b"p10")]
         );
         assert_eq!(
             titles.stitles()[0].as_ref(),

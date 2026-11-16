@@ -79,7 +79,7 @@ pub(super) struct ReportView<'a> {
     pub(super) pairwise_database: &'a Option<PairwiseDatabase>,
     pub(super) subjects: &'a [EncodedProtein],
     pub(super) subject_records: &'a [FastaRecord],
-    pub(super) subject_ids: &'a [Arc<[u8]>],
+    pub(super) subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
     pub(super) subject_accessions: &'a [Option<[Arc<[u8]>; 2]>],
     pub(super) subject_stitles: &'a [Arc<[u8]>],
     pub(super) hit_lists: &'a [Option<BlastpHitList>],

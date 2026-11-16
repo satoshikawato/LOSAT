@@ -46,7 +46,7 @@
 //! `prelim_chunk_hits` that were there, in their order; the strips scans of PAIRPAR
 //! (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup hits
 //! in the order `on_word` does. What the scan reads is `TwoStageScanInputs` (the batch's word
-//! finder, `prelim_subject::ScanBatch`, built once per batch, and the chunk's own values), and
+//! finder, `prelim_subject::ScanBatch` or its copy per subject, and the chunk's own values), and
 //! what it writes is `TwoStageScanState`, both built once per chunk. Nothing here runs on the
 //! pool.
 
@@ -60,7 +60,7 @@ use super::{
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
-/// (`ScanBatch`, built once per batch: the query block, the cutoffs, the scoring, the word lengths,
+/// (`ScanBatch`, or its copy per subject: the query block, the cutoffs, the scoring, word lengths,
 /// the scan step and window, the diagonal table's form and sizes, the diagnostics), its two-stage
 /// table, and the chunk's own values: the packed subject from the chunk's start, the chunk's
 /// length, ranges and whether the subject is masked, the chunk (its offset in the subject), the

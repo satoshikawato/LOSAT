@@ -63,6 +63,7 @@ fn try_run(
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -413,6 +414,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -434,6 +436,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt: "6",
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,

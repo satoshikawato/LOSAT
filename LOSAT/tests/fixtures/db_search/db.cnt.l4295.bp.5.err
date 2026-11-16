@@ -1,0 +1,2 @@
+Warning: [blastp] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output
+Warning: [blastp] Examining 5 or more matches is recommended

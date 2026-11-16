@@ -1,0 +1,7 @@
+# BLASTN 2.17.0+
+# Query: ndq query of the duplicated nucleotide record
+# Database: tests/db_search/t5/n_100009
+# Fields: query id, subject id, evalue
+# 1 hits found
+ndq	Unknown	0.0
+# BLAST processed 1 queries

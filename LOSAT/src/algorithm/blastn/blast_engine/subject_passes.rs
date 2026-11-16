@@ -681,8 +681,9 @@ impl SubjectPasses<'_> {
     /// The preliminary search of every subject, each subject's HSPs (with `-ungapped`, finished) given to
     /// `sink` in the order of the subjects' ids: a subject set's by `search_subjects`, a database's by
     /// `database::search_blocks` (one instance of it for each sink, each `UNGAPPED` and each kernel: the
-    /// setup's statistics or the others, `special_subject`, chosen once per call). The subject set's
-    /// and the database's drivers are the same for the HSP collector and the culling writer.
+    /// batch's statistics, or the statistics of each subject apart, `special_subject`, chosen once per
+    /// call). The subject set's and the database's drivers are the same for the HSP collector and the
+    /// culling writer.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413 (the loop on the subjects,
     /// which `search_subjects` and `database::search_blocks` replace)
@@ -893,8 +894,8 @@ impl SubjectPasses<'_> {
                       ordinal: u32,
                       subject: BlastnSubjectRef<'_>,
                       kept: &Vec<PrelimHit>| {
-                        // One test per listed subject (a subject with HSPs): the setup's statistics,
-                        // or the others apart (`special_subject`).
+                        // One test per listed subject (a subject with HSPs): the batch's statistics
+                        // (`TraceBatch`), or the statistics of each subject apart (`special_subject`).
                         let (mut subject_hits, _) = match self.special {
                             None => self.search_subject::<UNGAPPED>(
                                 ordinal as usize,

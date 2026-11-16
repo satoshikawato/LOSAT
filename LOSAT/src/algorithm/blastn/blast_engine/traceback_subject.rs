@@ -27,11 +27,13 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::utils::threading::SearchPool;
 use indicatif::ProgressBar;
 
-/// What the traceback of a subject reads that is the same for every subject of the batch, in groups
-/// below. Built once per batch by `search_query_batch`, beside `prelim_subject::PrelimBatch`, with
-/// the names there (the types that `TracebackCtx`, `traceback_list::TraceSchedule` and
-/// `traceback_list::TraceDrive` take); every field is a shared reference or a `Copy` value, so the
-/// struct is `Sync`, as `search_subject`, which reads it, must be.
+/// What the traceback of a subject reads of its batch, in groups below. Built once per batch by
+/// `search_query_batch`, beside `prelim_subject::PrelimBatch`, with the names there (the types
+/// that `TracebackCtx`, `traceback_list::TraceSchedule` and `traceback_list::TraceDrive` take);
+/// with the statistics of each subject also once per subject, by `SubjectPasses::special_subject`:
+/// a copy with the subject's own cutoffs (and, in an `-ungapped` search, spaces). Every field is a
+/// shared reference or a `Copy` value, so the struct is `Sync`, as `search_subject`, which reads
+/// it, must be.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1436-1440
 /// (`BLAST_ComputeTraceback_MT`'s parameters)
@@ -55,9 +57,11 @@ pub(super) struct TraceBatch<'a> {
     pub(super) query_concat_length: usize,
     pub(super) search_karlin_ref: &'a Vec<ContextKarlin>,
     pub(super) round_down_evalue_score: bool,
-    /// The queries and their contexts, each context's effective search space, cutoff and
-    /// hit-saving cutoff (`batch_setup::batch_cutoffs`), and the LOSAT_TIMING counters (`None`
-    /// when timing is off), as `PrelimBatch` holds them.
+    /// The queries and their contexts (as `PrelimBatch` holds them), each context's effective
+    /// search space, cutoff and hit-saving cutoff (`batch_setup::batch_cutoffs`: the setup's; in
+    /// an `-ungapped` search, which has no traceback, the preliminary stage's, `PrelimBatch`'s; in
+    /// `special_subject`'s copy the subject's own cutoffs), and the LOSAT_TIMING counters (`None`
+    /// when timing is off).
     pub(super) queries: &'a [FastaRecord],
     pub(super) query_contexts: &'a [QueryContext],
     pub(super) query_eff_searchsp: &'a Vec<i64>,

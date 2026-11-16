@@ -9820,7 +9820,8 @@ impl<'a> BlastnSubjectRef<'a> {
 /// length. Built once per call, after its early return without a valid context, for
 /// `prelim_subject::prelim_subject` or `traceback_subject::traceback_subject`; the batch's values
 /// (the queries, their contexts, the effective search spaces, the cutoffs, the LOSAT_TIMING
-/// counters) are read from the stage's batch (`PrelimBatch`, `TraceBatch`), built once per batch.
+/// counters) are read from the stage's batch (`PrelimBatch`, `TraceBatch`), built once per batch,
+/// or with the statistics of each subject from `SubjectPasses::special_subject`'s copy of it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1446
 /// (`BLAST_PreliminarySearchEngine`'s loop on the subjects)
@@ -12944,8 +12945,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         .filter(|&(_, _, kind)| kind == crate::blastinput::db_mask::MaskKind::Hard)
         .map(|(_, algo_id, _)| algo_id);
     let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
-    // What the preliminary search of a subject reads that is the same for every subject of the
-    // batch (`prelim_subject::PrelimBatch`), built once: the preliminary stage's cutoffs and
+    // What the preliminary search of a subject reads of the batch
+    // (`prelim_subject::PrelimBatch`), built once: the preliminary stage's cutoffs and
     // spaces (the setup's, or its own where they differ, `prelim_eff_searchsp`). With the
     // statistics of each subject, `SubjectPasses::special_subject` copies it with the subject's.
     let prelim_batch = prelim_subject::PrelimBatch {
@@ -13017,10 +13018,10 @@ fn search_query_batch<const UNGAPPED: bool>(
         verbose,
         debug_window,
     };
-    // What the traceback of a subject reads that is the same for every subject of the batch
-    // (`traceback_subject::TraceBatch`), built once: the setup's cutoffs and spaces, or, in an
-    // ungapped search, which has no traceback, its preliminary stage's (blast_traceback.c:1526,
-    // `perform_traceback`).
+    // What the traceback of a subject reads of the batch (`traceback_subject::TraceBatch`), built
+    // once: the setup's cutoffs and spaces, or, in an ungapped search, which has no traceback, its
+    // preliminary stage's (blast_traceback.c:1526, `perform_traceback`). With the statistics of
+    // each subject, `SubjectPasses::special_subject` copies it with the subject's.
     let (trace_cutoffs, trace_eff_searchsp) = if UNGAPPED {
         (x_prelim_cutoffs, prelim_eff_searchsp_ref)
     } else {

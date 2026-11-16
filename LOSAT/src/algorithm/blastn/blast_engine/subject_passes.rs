@@ -361,12 +361,12 @@ impl SubjectPasses<'_> {
                 prelim_batch: &prelim_batch,
                 ..*self
             };
-            let (subject_hits, mut prelim_hits) =
+            let mut found =
                 passes.search_subject::<UNGAPPED>(s_idx, subject, state, scan.as_ref(), None);
             if let Some(stage) = ungapped {
-                passes.x_ungapped_database_stage(stage, s_idx as u32, &mut prelim_hits);
+                passes.x_ungapped_database_stage(stage, s_idx as u32, &mut found.1);
             }
-            (subject_hits, prelim_hits)
+            found
         }
     }
 
@@ -739,9 +739,7 @@ impl SubjectPasses<'_> {
                     excluded: database::fetch_excluded(database),
                     error: std::sync::Mutex::new(None),
                 });
-                // The database's blocks with `$kernel` for each subject: the batch's statistics
-                // (`default_kernel`), or the subject's own apart (`special_kernel`), chosen once
-                // per call.
+                // The database's blocks with `$kernel` for each subject.
                 macro_rules! database_prelim_blocks {
                     ($kernel:ident) => {
                         database::search_blocks(
@@ -759,29 +757,29 @@ impl SubjectPasses<'_> {
                         )
                     };
                 }
+                // The kernel, chosen once per call: the batch's statistics (`default_kernel`, which
+                // captures the passes and `scan` only, so that the default path's loop is the one
+                // without the statistics of each subject), the same with the finish of each list
+                // of an ungapped search (`ungapped_kernel`), or the statistics of each subject
+                // apart (`special_kernel`, which finishes on its copy of the batch).
                 let default_kernel =
                     |s_idx: usize, subject: BlastnSubjectRef<'_>, state: &mut SubjectState| {
-                        let (subject_hits, mut prelim_hits) = self.search_subject::<UNGAPPED>(
-                            s_idx,
-                            subject,
-                            state,
-                            Some(&scan),
-                            None,
-                        );
-                        if UNGAPPED {
-                            if let Some(stage) = ungapped.as_ref() {
-                                self.x_ungapped_database_stage(
-                                    stage,
-                                    s_idx as u32,
-                                    &mut prelim_hits,
-                                );
-                            }
-                        }
-                        (subject_hits, prelim_hits)
+                        self.search_subject::<UNGAPPED>(s_idx, subject, state, Some(&scan), None)
                     };
-                let searched = match self.special {
-                    None => database_prelim_blocks!(default_kernel),
-                    Some(special) => {
+                let searched = match (self.special, ungapped.as_ref()) {
+                    (None, None) => database_prelim_blocks!(default_kernel),
+                    (None, Some(stage)) => {
+                        let ungapped_kernel =
+                            |s_idx: usize,
+                             subject: BlastnSubjectRef<'_>,
+                             state: &mut SubjectState| {
+                                let mut found = default_kernel(s_idx, subject, state);
+                                self.x_ungapped_database_stage(stage, s_idx as u32, &mut found.1);
+                                found
+                            };
+                        database_prelim_blocks!(ungapped_kernel)
+                    }
+                    (Some(special), stage) => {
                         let special_kernel =
                             |s_idx: usize,
                              subject: BlastnSubjectRef<'_>,
@@ -794,7 +792,7 @@ impl SubjectPasses<'_> {
                                         Some(&scan),
                                         None,
                                         special,
-                                        ungapped.as_ref(),
+                                        stage,
                                     )
                                 })
                             };

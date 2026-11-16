@@ -182,13 +182,15 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<super::blast_xml::XmlRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
+        || error.is::<crate::report::tabular::FailedLookupRefusal>()
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
-        // writes), of an organism report (outfmt 18, made before its first byte), or of a
-        // report of an ungapped HSP of length 0 in a form LOSAT does not write
+        // writes), of an organism report (outfmt 18, made before its first byte), of a tabular
+        // row at which NCBI stops (`report::tabular::check_failed_lookups`), or of a report of
+        // an ungapped HSP of length 0 in a form LOSAT does not write
         // (`empty_rows::EmptyRowsRefusal`): not an error of NCBI's engine or of its output
         // stream.
         error
@@ -1630,12 +1632,13 @@ pub(super) fn write_empty_subject_warnings(
     stderr: &mut dyn Write,
 ) -> Result<()> {
     for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
+        write!(
             stderr,
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            String::from_utf8_lossy(s.warning_id()),
-            s.title
+            "Warning: [blastx] {} ",
+            String::from_utf8_lossy(s.warning_id())
         )?;
+        stderr.write_all(&s.title)?;
+        writeln!(stderr, ": Subject sequence contains no data")?;
     }
     Ok(())
 }
@@ -3074,7 +3077,7 @@ mod archive_error_tests {
             num_positives: 50_000,
         });
         let query = BlastpPairwiseQuery {
-            query_name: "q".into(),
+            query_name: b"q".to_vec(),
             query_length: 150_000,
             ungapped_karlin: Default::default(),
             effective_search_space: 1,
@@ -3113,7 +3116,7 @@ mod archive_error_tests {
                 std::slice::from_ref(&query),
                 &[true],
                 &[false],
-                &[std::sync::Arc::from("s0")],
+                &[std::sync::Arc::from(&b"s0"[..])],
                 &report,
                 &BlastxPairwiseOptions {
                     word_threshold: 12.0,
@@ -3123,6 +3126,7 @@ mod archive_error_tests {
                     num_alignments: 0,
                 },
                 None,
+                &[],
                 &[],
                 None,
                 0,
@@ -3157,7 +3161,7 @@ mod reader_batch_tests {
     fn record(letters: usize) -> FastaRecord {
         FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; letters],
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

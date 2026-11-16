@@ -143,7 +143,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         let record = &xml.queries.records[q_idx];
         let text = &texts[q_idx];
         let query = XmlQuery {
-            id: record.local_id.as_bytes(),
+            id: text.id.as_deref().unwrap_or(record.local_id.as_bytes()),
             title: &text.title,
             len: xml.queries.searched_lengths[q_idx] as i32,
             stats: xml.stats[q_idx],

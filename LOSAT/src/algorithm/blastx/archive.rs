@@ -237,7 +237,7 @@ impl RequestRecord for FastaRecord {
             Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
             _ => {
                 let mut line = vec![b'>'];
-                line.extend_from_slice(self.title.as_bytes());
+                line.extend_from_slice(&self.title);
                 Cow::Owned(line)
             }
         };
@@ -246,7 +246,7 @@ impl RequestRecord for FastaRecord {
             ids: self.believed().map(|ids| ids.ids.as_slice()),
             seq_loc: self.archive_seq_loc(),
             defline,
-            title: self.title.as_bytes(),
+            title: &self.title,
             // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
             letters: self.archive_letters(),
             protein,

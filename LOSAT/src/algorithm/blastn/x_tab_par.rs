@@ -110,7 +110,7 @@ pub(crate) fn write_output<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -175,7 +175,7 @@ struct Piece {
 struct Pieces<'a> {
     hit_lists: &'a [Option<BlastnHitList>],
     query_ids: &'a [Arc<[u8]>],
-    subject_ids: &'a [Arc<[u8]>],
+    subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
     /// Header bytes of a query's first piece (0 for outfmt 6).
     header_bytes: usize,
     q_idx: usize,
@@ -196,7 +196,7 @@ impl Iterator for Pieces<'_> {
         let id_bytes = |s_idx: u32| {
             self.subject_ids
                 .get(s_idx as usize)
-                .map_or(7, |id| id.len())
+                .map_or(7, |id| id.as_deref().map_or(0, <[u8]>::len))
         };
         let query_bytes = self.query_ids.get(q_idx).map_or(7, |id| id.len()) + ROW_BYTES;
         let (list, hsp, header) = (self.list, self.hsp, self.header);
@@ -241,7 +241,7 @@ fn write_on_pool<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -489,7 +489,7 @@ mod tests {
     struct Case {
         hit_lists: Vec<Option<BlastnHitList>>,
         query_ids: Vec<Arc<[u8]>>,
-        subject_ids: Vec<Arc<[u8]>>,
+        subject_ids: Vec<crate::algorithm::common::tabular::SubjectId>,
         query_titles: Vec<Arc<[u8]>>,
         unsearched: Vec<bool>,
         warnings: Vec<crate::report::diag_log::Posts>,
@@ -499,7 +499,7 @@ mod tests {
         Case {
             hit_lists: hit_lists(rng, queries, max_rows),
             query_ids: ids("query_", queries),
-            subject_ids: ids("lcl|subject_", 3),
+            subject_ids: ids("lcl|subject_", 3).into_iter().map(Some).collect(),
             query_titles: ids("query title ", queries),
             unsearched: (0..queries).map(|_| rng.below(9) == 0).collect(),
             warnings: (0..queries)

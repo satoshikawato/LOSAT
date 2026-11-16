@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -104,6 +104,11 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   `ldyn`, version 5 without `-parse_seqids`, taxid 9606, four records of random letters (seed 20261116 + 5), and
   `ldo_e2y.fna`, whose `q1` holds glob1 and then those letters. `make_multidb.py --loadord6-only MAKEBLASTDB` builds
   only these (the databases before keep their dates).
+- Review 6 of line DBID loadord (DECISIONS 60 (17), H1): `ldv`, version 5, `-parse_seqids`, taxid 9606,
+  `gi|9002|ref|NP_000002.1|` (a holder of `ldp`'s stopping accession) with a variant of `lda`'s letters (qp1, one letter
+  in ten replaced, seed 20261116 + 7): the first query of mix2_q.faa hits it after `lda`'s exact copy, so psiblast's
+  traceback holds it beyond `-max_target_seqs 1`, which no report shows. `make_multidb.py --loadord7-only MAKEBLASTDB`
+  builds only it (the databases before keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -495,6 +500,21 @@ def make_loadord6(binary):
         write(name, [(">q0 none", nohit), (cut, repeated), (">q2 two", two)])
 
 
+def make_loadord7(binary):
+    """Builds ldv (review 6 of line DBID loadord, H1)."""
+    qp1 = next("".join(line.strip() for line in lines)
+               for header, lines in read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")))
+    rng = random.Random(20261116 + 7)
+    alphabet = "ACDEFGHIKLMNPQRSTVWY"
+    variant = "".join(rng.choice(alphabet.replace(letter, "")) if rng.random() < 0.1 else letter for letter in qp1)
+    with open(os.path.join(HERE, "ldv.fa"), "w") as f:
+        f.write(">gi|9002|ref|NP_000002.1| loadord the accession of ldp under a gi, a variant of lda's letters\n"
+                + "\n".join(variant[at:at + 60] for at in range(0, len(variant), 60)) + "\n")
+    makeblastdb(binary, "-in", "ldv.fa", "-dbtype", "prot", "-out", "ldv", "-parse_seqids", "-blastdb_version", "5",
+                "-taxid", "9606", "-title", "multidb ldv")
+    os.remove(os.path.join(HERE, "ldv.pjs"))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -560,6 +580,8 @@ if __name__ == "__main__":
         make_loadord5(sys.argv[2])
     elif sys.argv[1] == "--loadord6-only":
         make_loadord6(sys.argv[2])
+    elif sys.argv[1] == "--loadord7-only":
+        make_loadord7(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -571,3 +593,4 @@ if __name__ == "__main__":
         make_loadord4(sys.argv[1])
         make_loadord5(sys.argv[1])
         make_loadord6(sys.argv[1])
+        make_loadord7(sys.argv[1])

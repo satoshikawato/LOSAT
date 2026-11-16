@@ -767,22 +767,40 @@ impl ReportedSubjects {
     /// query batch whose hit lists are `batches` (`shared::TaxdbRun::note_loaded`): BLASTX writes
     /// each batch's reports before it searches the next and keeps none of their lists, so each
     /// batch that does not stop is recorded for the stop of a later batch's prefetch (nothing for
-    /// a database that cannot stop). `rows`: what the batch's loads read of the lists that the
-    /// reports show (`SubjectFetch::Every` where its prefetch read them; where it is off, or
-    /// failed before it loaded anything, the rows of its reports; review 3 of line DBID loadord,
-    /// H2).
+    /// a database that cannot stop). `loads`: what the batch's loads read of the lists that the
+    /// reports show (`shared::BatchLoads::Prefetched` where its prefetch read them, BLASTX's
+    /// prefetched set being its reported set; where it is off, or failed before it loaded
+    /// anything, the rows of its reports; review 3 of line DBID loadord, H2), of each query whose
+    /// report NCBI writes (`BatchLoads::of_report`: not one whose outfmt 5 report NCBI's XML stream
+    /// cut before its hits, `cuts`, by query of the reader batch; review 6, H2).
     pub(crate) fn note_loaded(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        rows: SubjectFetch,
+        loads: shared::BatchLoads,
+        cuts: shared::XmlCuts<'_>,
     ) {
         if database.parsed_seqids() {
+            let rows = match loads {
+                shared::BatchLoads::Prefetched => SubjectFetch::Every,
+                shared::BatchLoads::Read(rows) => rows,
+            };
             database.taxdb.note_loaded(&database.db, || {
                 batches
                     .iter()
-                    .flat_map(|batch| batch.queries.iter().flatten())
+                    .flat_map(move |batch| {
+                        batch
+                            .queries
+                            .iter()
+                            .enumerate()
+                            .filter_map(move |(qidx, lists)| {
+                                loads
+                                    .of_report(cuts, batch.query_ordinal + qidx)
+                                    .then_some(lists)
+                            })
+                    })
+                    .flatten()
                     .filter(move |list| super::report::reads_list(list, gapped, rows))
                     .map(|list| {
                         shared::PrefetchSubject::unflipped(

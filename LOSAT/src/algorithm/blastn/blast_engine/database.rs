@@ -693,9 +693,10 @@ impl BlastnDatabase {
 
     /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
     /// batch whose final hit lists are `hit_lists` (`shared::TaxdbRun::note_loaded`;
-    /// `shared::batch_loads` of the batch, `rows`: the first format's), for a later batch's
+    /// `loaded_subjects` of the batch alone, `rows`: the first format's), for a later batch's
     /// stop: where the loop writes each batch's reports and drops its lists (LOSAT_X_RPTSTREAM),
-    /// so that `batch_prefetch`'s `before` no longer holds them.
+    /// so that `batch_prefetch`'s `before` no longer holds them. The stream never writes outfmt 5
+    /// (`x_rpt_stream`), so no report of the batch is cut (`shared::XmlCuts::NONE`).
     pub(super) fn note_loaded(
         &self,
         titles: &DatabaseTitles,
@@ -704,16 +705,26 @@ impl BlastnDatabase {
         rows: SubjectFetch,
     ) {
         if self.parsed_seqids() {
+            let batch = [0..hit_lists.len()];
             self.taxdb.note_loaded(&self.db, || {
-                let rows = shared::batch_loads(seq_aligns_of(hit_lists, gapped), rows);
-                Self::prefetch_subjects(titles, hit_lists, gapped, rows)
+                Self::loaded_subjects(
+                    titles,
+                    LoadedBefore {
+                        hits: hit_lists,
+                        spans: &batch,
+                        rows,
+                        cuts: shared::XmlCuts::NONE,
+                    },
+                    gapped,
+                )
             });
         }
     }
 
     /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
     /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
-    /// prefetch is on, else those that its reports' rows read; review 3 of line DBID loadord, H2).
+    /// prefetch is on, else those that the rows of the reports NCBI writes read; review 3 of line
+    /// DBID loadord, H2; review 6, H2).
     fn loaded_subjects<'s>(
         titles: &'s DatabaseTitles,
         before: LoadedBefore<'s>,
@@ -722,7 +733,14 @@ impl BlastnDatabase {
         before.subjects(
             |hit_lists, span| hit_lists.get(span),
             move |_, hit_lists| seq_aligns_of(hit_lists, gapped),
-            move |_, hit_lists, rows| Self::prefetch_subjects(titles, hit_lists, gapped, rows),
+            move |_, hit_lists, loads| {
+                let rows = match loads {
+                    // BLASTN's prefetched set is its reported set.
+                    shared::BatchLoads::Prefetched => SubjectFetch::Every,
+                    shared::BatchLoads::Read(rows) => rows,
+                };
+                Self::prefetch_subjects(titles, hit_lists, gapped, rows)
+            },
         )
     }
 

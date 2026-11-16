@@ -195,9 +195,12 @@ those of the batches before; of several stopping ids, the first that NCBI surely
 the loads), and one where a load whose order to the stop LOSAT does not know would make a lookup
 of a tax id that a BLAST XML report before the batch left (outfmt 5: NCBI's XML stream cuts the
 report before its hits at a query title or id outside US-ASCII, and it makes none of its loads,
-line RG item K4h; the texts of such lookups come at the first load before the stopping lookup that
-makes the same lookup, or not at all, in every search program since review 5 of line DBID item
-loadord) (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
+line RG item K4h; the texts of such lookups come at the first load after the cut report that
+makes the same lookup: a load of the reports or prefetches of the batches between the cut report
+and the stopping batch, else a load of the stopping batch's prefetch before the stopping lookup,
+or not at all, in every search program since review 5 of line DBID item loadord; the cut report
+loads nothing, so the sequences that it shows count as loaded for no stop, since review 6)
+(`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
 line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one

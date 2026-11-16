@@ -549,21 +549,29 @@ pub(crate) fn batch_prefetch_stop(
 }
 
 /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
-/// batch whose reported hits are `ordered` (`shared::TaxdbRun::note_loaded`; [`batch_loads`] of
-/// the batch, `rows`: the first format's), for a later batch's stop: where the loop writes each
-/// batch's reports and drops its hits (`report_stream`), so that `batch_prefetch`'s `before` no
-/// longer holds them.
+/// batch whose reported hits are `ordered` (`shared::TaxdbRun::note_loaded`; [`loaded_subjects`]
+/// of the batch alone, `rows`: the first format's), for a later batch's stop: where the loop
+/// writes each batch's reports and drops its hits (`report_stream`), so that `batch_prefetch`'s
+/// `before` no longer holds them. The stream never writes outfmt 5 (`report_stream::Off`), so no
+/// report of the batch is cut (`shared::XmlCuts::NONE`); `queries` are the batch's queries as its
+/// hits number them (`q_idx`, from 0 in the batch).
 pub(crate) fn note_loaded(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
+    queries: std::ops::Range<usize>,
     titles: &DatabaseTitles,
     rows: SubjectFetch,
 ) {
     if database.parsed_seqids() {
+        let batch = [queries];
         database.taxdb.note_loaded(&database.db, || {
-            batch_loaded(
-                ordered,
-                shared::batch_loads(seq_aligns_of(ordered), rows),
+            loaded_subjects(
+                LoadedBefore {
+                    hits: ordered,
+                    spans: &batch,
+                    rows,
+                    cuts: shared::XmlCuts::NONE,
+                },
                 titles,
             )
         });
@@ -572,24 +580,26 @@ pub(crate) fn note_loaded(
 
 /// The query batches of the run before a batch's prefetch that the loop holds
 /// (`shared::LoadedBefore`, read by [`loaded_subjects`]): their reported hits in report order
-/// (`hits`, by query of the run), the queries of each batch (`spans`), and which rows of the
-/// first format read a subject where a batch's prefetch is off (`rows`).
+/// (`hits`, by query of the run), the queries of each batch (`spans`), which rows of the first
+/// format read a subject where a batch's prefetch is off (`rows`), and the outfmt 5 reports cut
+/// before their hits (`cuts`).
 pub(crate) type LoadedBefore<'a> = shared::LoadedBefore<'a, TblastxHsp>;
 
-/// The sequences that NCBI's BLAST database data loader loaded for a batch whose reported hits
-/// are `ordered` and whose loads are `loads` (`shared::batch_loads`, review 3 of line DBID
-/// loadord, H2): every subject where its prefetch is on; where it is off, those that its rows
-/// read, which LOSAT takes as all of them unless no row reads one (`SubjectFetch::Never`): rows
-/// that read a subject for its identities only (`nident`) read those of HSPs with identities,
-/// which the stores of the batch count (`run_impl`'s fetches of a batch whose prefetch is off),
-/// so every subject is a superset (TBLASTX's own: its hits carry no identities before those
-/// fetches).
+/// The sequences that NCBI's BLAST database data loader loaded for reported hits `ordered` whose
+/// loads are `loads` (`shared::batch_loads`, review 3 of line DBID loadord, H2): every subject
+/// where its batch's prefetch ran (TBLASTX's prefetched set is its reported set); where it is
+/// off, those that the rows of a report NCBI writes read (`ordered` is then one query's hits,
+/// `shared::LoadedBefore::subjects`), which LOSAT takes as all of them unless no row reads one
+/// (`SubjectFetch::Never`): rows that read a subject for its identities only (`nident`) read
+/// those of HSPs with identities, which the stores of the batch count (`run_impl`'s fetches of a
+/// batch whose prefetch is off), so every subject is a superset (TBLASTX's own: its hits carry no
+/// identities before those fetches).
 fn batch_loaded<'s>(
     ordered: &'s [TblastxHsp],
-    loads: SubjectFetch,
+    loads: shared::BatchLoads,
     titles: &'s DatabaseTitles,
 ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
-    let loaded = if loads == SubjectFetch::Never {
+    let loaded = if loads == shared::BatchLoads::Read(SubjectFetch::Never) {
         &[]
     } else {
         ordered
@@ -598,7 +608,8 @@ fn batch_loaded<'s>(
 }
 
 /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
-/// (`shared::LoadedBefore::subjects`, [`batch_loaded`] of each).
+/// (`shared::LoadedBefore::subjects`, [`batch_loaded`] of each; none of an outfmt 5 report that
+/// NCBI's XML stream cut, review 6 of line DBID loadord, H2).
 fn loaded_subjects<'s>(
     before: LoadedBefore<'s>,
     titles: &'s DatabaseTitles,

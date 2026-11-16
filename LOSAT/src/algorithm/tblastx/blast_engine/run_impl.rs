@@ -4261,8 +4261,10 @@ fn run_batch_loop(
                         }
                     }
                 } else if !ordered.is_empty() {
-                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
-                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
+                    // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
+                    // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
+                    // the texts that the cut reports left (`shared::XmlReportsBefore`).
                     let xml_cut = |query: usize| {
                         query_records.get(query).is_some_and(|record| {
                             crate::report::blast_xml::names::iteration_cut_before_hits(
@@ -4278,13 +4280,11 @@ fn run_batch_loop(
                     // The posts before each query's report: those of the prefetch of the batch
                     // it begins (`warnings`, the batches before this one).
                     let prefetched = |query: usize| warnings.get(query);
-                    let xml_before = (first_report
-                        == Some(crate::blastinput::app::ReportFormat::Xml))
-                    .then(|| crate::algorithm::common::database::XmlReportsBefore {
-                        reads: &reads,
-                        cut: &xml_cut,
-                        prefetched: &prefetched,
-                    });
+                    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
+                        first_report == Some(crate::blastinput::app::ReportFormat::Xml),
+                        &xml_cut,
+                    );
+                    let xml_before = xml_cuts.reports_before(&reads, &prefetched);
                     let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(
                         database,
@@ -4292,6 +4292,7 @@ fn run_batch_loop(
                             hits: &done.hits,
                             spans: &done.spans,
                             rows,
+                            cuts: xml_cuts,
                         },
                         ordered,
                         &reports.titles.borrow(),
@@ -4407,6 +4408,7 @@ fn run_batch_loop(
                 super::super::database::note_loaded(
                     database,
                     &batch.hits,
+                    0..end - start,
                     &reports.titles.borrow(),
                     rows,
                 );

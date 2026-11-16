@@ -426,7 +426,8 @@ impl TblastnDatabase {
 
     /// The sequences that NCBI's BLAST database data loader loaded for the query batches `before`
     /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
-    /// prefetch is on, else those that its reports' rows read; review 3 of line DBID loadord, H2).
+    /// prefetch is on, else those that the rows of the reports NCBI writes read; review 3 of line
+    /// DBID loadord, H2; review 6, H2).
     fn loaded_subjects<'s>(
         reported: &'s ReportedSubjects,
         before: LoadedBefore<'s>,
@@ -434,7 +435,14 @@ impl TblastnDatabase {
         before.subjects(
             |hitlists, span| hitlists.get(span),
             |_, hitlists| seq_aligns_of(hitlists),
-            move |_, hitlists, rows| Self::prefetch_subjects(reported, hitlists, rows),
+            move |_, hitlists, loads| {
+                let rows = match loads {
+                    // TBLASTN's prefetched set is its reported set.
+                    shared::BatchLoads::Prefetched => SubjectFetch::Every,
+                    shared::BatchLoads::Read(rows) => rows,
+                };
+                Self::prefetch_subjects(reported, hitlists, rows)
+            },
         )
     }
 
@@ -488,8 +496,9 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
 
 /// The query batches of a call before a batch's prefetch (`shared::LoadedBefore`, read by
 /// `TblastnDatabase::loaded_subjects`): their final hit lists by searched query (`hits`, named by
-/// rank), the searched queries of each batch (`spans`; those past `hits` are not of them), and
-/// which rows of the first format read a subject where a batch's prefetch is off (`rows`).
+/// rank), the searched queries of each batch (`spans`; those past `hits` are not of them),
+/// which rows of the first format read a subject where a batch's prefetch is off (`rows`), and
+/// the outfmt 5 reports cut before their hits (`cuts`).
 pub(super) type LoadedBefore<'a> = shared::LoadedBefore<'a, KappaResultHitList>;
 
 /// The headers of the database sequences that the final hit lists of the query batches searched

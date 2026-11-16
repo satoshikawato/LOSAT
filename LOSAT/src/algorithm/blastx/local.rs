@@ -731,6 +731,7 @@ fn write_run(
                 search_options,
                 asks,
                 results,
+                queries,
                 query_scopes
                     .borrow()
                     .as_ref()

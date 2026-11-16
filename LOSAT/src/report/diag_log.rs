@@ -172,11 +172,23 @@ impl Posts {
     /// are written. The texts that the loads take from the run's loads left out are theirs from
     /// now on.
     pub fn placed(&self) -> Posts {
+        self.placed_in(None)
+    }
+
+    /// [`Posts::placed`] with the texts left out in `ledger` where it is given instead of the
+    /// run's (`query_warnings::SubjectRead::placed_in`: the model of the writers).
+    pub fn placed_in(
+        &self,
+        ledger: Option<&std::sync::Arc<crate::report::query_warnings::LoadTexts>>,
+    ) -> Posts {
         let mut posts = Posts::new();
         for post in &self.0 {
             match post {
                 Post::Loads(reads) => {
-                    let text: Vec<u8> = reads.iter().flat_map(|read| read.placed()).collect();
+                    let text: Vec<u8> = reads
+                        .iter()
+                        .flat_map(|read| read.placed_in(ledger))
+                        .collect();
                     posts.lines(&text);
                 }
                 Post::Lines(lines) => posts.lines(lines),

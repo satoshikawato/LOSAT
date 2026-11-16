@@ -11083,8 +11083,10 @@ fn run_in_pool(
                     // A batch without Seq-aligns prefetches no sequence.
                     rows_open(&batch_hit_lists).map(|()| Posts::new())
                 } else {
-                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
-                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
+                    // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
+                    // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
+                    // the texts that the cut reports left (`shared::XmlReportsBefore`).
                     let xml_cut = |query: usize| {
                         queries
                             .before(&kept, start)
@@ -11102,14 +11104,11 @@ fn run_in_pool(
                     // The posts before each query's report: those of the prefetch of the
                     // batch it begins (`warnings`, the batches before this one).
                     let prefetched = |query: usize| warnings.get(query);
-                    let xml_before =
-                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)).then(
-                            || crate::algorithm::common::database::XmlReportsBefore {
-                                reads: &query_reads,
-                                cut: &xml_cut,
-                                prefetched: &prefetched,
-                            },
-                        );
+                    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
+                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)),
+                        &xml_cut,
+                    );
+                    let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
                     database
                         .batch_prefetch(
                             &titles,
@@ -11117,6 +11116,7 @@ fn run_in_pool(
                                 hits: &hit_lists,
                                 spans: &batch_spans,
                                 rows: first_rows,
+                                cuts: xml_cuts,
                             },
                             &batch_hit_lists,
                             !args.ungapped,

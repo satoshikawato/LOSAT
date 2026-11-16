@@ -111,9 +111,17 @@ impl SubjectRead {
     /// load makes ([`ReadLoad::placed`]) around the model's own (also a load of a batch's prefetch,
     /// `diag_log::Posts::loads`).
     pub fn placed(&self) -> Vec<u8> {
-        match &self.load {
-            Some(load) => load.placed(&self.text),
-            None => self.text.clone(),
+        self.placed_in(None)
+    }
+
+    /// [`SubjectRead::placed`] with the texts left out in `ledger` where it is given instead of
+    /// the run's ([`LoadTexts::left_before`], the model of the writers that walks the writers'
+    /// own steps in a ledger of its own).
+    pub fn placed_in(&self, ledger: Option<&std::sync::Arc<LoadTexts>>) -> Vec<u8> {
+        match (&self.load, ledger) {
+            (Some(load), Some(ledger)) => load.in_ledger(ledger).placed(&self.text),
+            (Some(load), None) => load.placed(&self.text),
+            (None, _) => self.text.clone(),
         }
     }
 
@@ -265,15 +273,20 @@ impl LoadTexts {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
     // `ReadCursor::cut`: a report's `Hit` loads its subject)
     /// The texts left out, in a ledger of their own, where the writers of a run that left nothing
-    /// before have written the reports of the queries below `query` and the posts before each
-    /// (`QueryWarnings::before_query`): by query, the loads of the posts written before its report
-    /// (`prefetched`, a batch's prefetch at its first query, `Posts::loads`), then its report's
-    /// reads (`reads`), none of which NCBI makes where its XML stream cut the report before its
-    /// first `Hit` (`cut`: `ReadCursor::cut`). Each load takes the texts left before it
-    /// (`ReadLoad::placed`) and a load not made leaves its own (`ReadLoad::left_out`), as the
-    /// writers' cursor does, in the same order. For a program that models a later batch's prefetch
-    /// before it writes these reports (`common::database::XmlReportsBefore`): what the run's
-    /// ledger holds at that prefetch where they are written.
+    /// before have written the reports of the queries below `query` and the posts before each:
+    /// the writers' own steps, run here before any of it is written, in that ledger
+    /// (`ReadCursor::in_ledger`). By query, the step before its report (`before_report`, the
+    /// writers' `QueryWarnings::before_query`: the reads of the reports before that they did not
+    /// place, then the posts written before its report, `prefetched`, a batch's prefetch at its
+    /// first query, `Posts::loads`), then its report: one whose outfmt 5 `Iteration` NCBI's XML
+    /// stream cut before the first `Hit` (`cut`) makes none of its reads (`ReadCursor::cut`, as
+    /// the writers' `write_posts_to` at that cut); another makes them all, at its `Hit`s or after
+    /// it (`ReadCursor::subject_read`, `ReadCursor::before_query`; the ledger sees them in the same
+    /// order either way). Last, the reads of the report before `query` that it did not place. For
+    /// a program that models a later batch's prefetch before it writes these reports
+    /// (`common::database::XmlReportsBefore`): what the run's ledger holds at that prefetch where
+    /// they are written (review 6 of line DBID loadord, L2: one walk). A cut at a later `Hit` is
+    /// the writer's alone (the model writes no report); a database title cannot make it (review 6).
     pub fn left_before<'p>(
         reads: &[QueryReads],
         cut: &dyn Fn(usize) -> bool,
@@ -281,26 +294,28 @@ impl LoadTexts {
         query: usize,
     ) -> std::sync::Arc<LoadTexts> {
         let left = std::sync::Arc::new(LoadTexts::default());
+        let mut cursor = ReadCursor::in_ledger(reads, &left);
+        // Nothing is written: the model keeps the ledger only.
+        let (mut report, mut sink) = (io::sink(), io::sink());
         for before in 0..query {
-            if let Some(posts) = prefetched(before) {
-                for read in posts.load_reads() {
-                    if let Some(load) = &read.load {
-                        load.in_ledger(&left).placed(&read.text);
-                    }
-                }
-            }
-            let made = !cut(before);
-            for read in reads_of(reads, before) {
-                if let Some(load) = &read.load {
-                    let load = load.in_ledger(&left);
-                    if made {
-                        load.placed(&read.text);
-                    } else {
-                        load.left_out(&read.text);
-                    }
-                }
+            // The posts' texts are made in the ledger; the model writes none of them.
+            let _placed = before_report(
+                Some(&mut cursor),
+                prefetched(before),
+                before,
+                &mut report,
+                &mut sink,
+            )
+            .expect("a model writes to no stream");
+            if cut(before) {
+                cursor
+                    .cut(before, &mut report, &mut sink)
+                    .expect("a model writes to no stream");
             }
         }
+        cursor
+            .before_query(query, &mut report, &mut sink)
+            .expect("a model writes to no stream");
         left
     }
 }
@@ -379,6 +394,9 @@ pub struct ReadCursor<'a> {
     next: usize,
     /// The run ended at an exception of NCBI's XML stream (`end_run`): no text is written after.
     ended: bool,
+    /// The ledger of the texts left out where it is not the run's (`in_ledger`: the model of the
+    /// writers, `LoadTexts::left_before`); `None` for the writers.
+    ledger: Option<std::sync::Arc<LoadTexts>>,
 }
 
 impl<'a> ReadCursor<'a> {
@@ -392,7 +410,26 @@ impl<'a> ReadCursor<'a> {
                 query: 0,
                 next: 0,
                 ended: false,
+                ledger: None,
             })
+    }
+
+    /// The cursor of `reads` whose loads take and leave the texts left out in `ledger` instead of
+    /// the run's: the writers' steps run by the model of the writers before they write
+    /// (`LoadTexts::left_before`).
+    fn in_ledger(reads: &'a [QueryReads], ledger: &std::sync::Arc<LoadTexts>) -> Self {
+        ReadCursor {
+            reads,
+            query: 0,
+            next: 0,
+            ended: false,
+            ledger: Some(std::sync::Arc::clone(ledger)),
+        }
+    }
+
+    /// The text of `read` where it happens (`SubjectRead::placed`, in the cursor's ledger).
+    fn placed(&self, read: &SubjectRead) -> Vec<u8> {
+        read.placed_in(self.ledger.as_ref())
     }
 
     /// Whether the report of query `query` reads a subject that may write a text.
@@ -425,7 +462,7 @@ impl<'a> ReadCursor<'a> {
         };
         let mut text = self.unwritten_before(query);
         for read in &reads[from..=from + found] {
-            text.extend(read.placed());
+            text.extend(self.placed(read));
         }
         self.next = from + found + 1;
         write_after(report, sink, &text)
@@ -457,8 +494,10 @@ impl<'a> ReadCursor<'a> {
         self.before_query(query, report, sink)?;
         let reads = reads_of(self.reads, query);
         for read in &reads[self.next.min(reads.len())..] {
-            if let Some(load) = &read.load {
-                load.left_out(&read.text);
+            match (&read.load, &self.ledger) {
+                (Some(load), Some(ledger)) => load.in_ledger(ledger).left_out(&read.text),
+                (Some(load), None) => load.left_out(&read.text),
+                (None, _) => {}
             }
         }
         self.next = reads.len();
@@ -504,11 +543,11 @@ impl<'a> ReadCursor<'a> {
         }
         let mut text = Vec::new();
         for read in reads_of(self.reads, self.query).iter().skip(self.next) {
-            text.extend(read.placed());
+            text.extend(self.placed(read));
         }
         for later in self.query + 1..query {
             for read in reads_of(self.reads, later) {
-                text.extend(read.placed());
+                text.extend(self.placed(read));
             }
         }
         (self.query, self.next) = (query, 0);
@@ -906,14 +945,14 @@ impl<'a> QueryWarnings<'a> {
     /// Writes the warnings of query `index`, after the report written so far (`report`)
     /// is flushed; a failed flush returns before them.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
-        // The texts of the reads that the reports of the queries before it did not place
-        // (`subject_read`) come after those reports.
-        if let Some(cursor) = self.reads.as_mut() {
-            cursor.before_query(index, report, &mut *self.sink)?;
-        }
-        // The texts of a prefetch's loads are made here (`Posts::placed`), where NCBI's prefetch
-        // loads the subjects: after the reports of the batches before.
-        match self.before.get(index).map(Posts::placed) {
+        let placed = before_report(
+            self.reads.as_mut(),
+            self.before.get(index),
+            index,
+            report,
+            &mut *self.sink,
+        )?;
+        match placed {
             Some(posts) if posts.has_text() => {
                 report.flush()?;
                 posts.write(&mut *self.sink, self.archive)?;
@@ -924,6 +963,32 @@ impl<'a> QueryWarnings<'a> {
             None => Ok(()),
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (quoted at `query_posts`)
+/// The writers' step before the report of query `query` (`QueryWarnings::before_query`, and the
+/// model of the writers, `LoadTexts::left_before`, which runs it before anything is written): the
+/// texts of the reads that the reports of the queries before it did not place
+/// (`ReadCursor::subject_read`), which come after those reports (to `sink`, after `report` is
+/// flushed), then the posts written before its report (`posts`), whose loads' texts (a batch's
+/// prefetch, `Posts::loads`) are made here, where NCBI's prefetch loads the subjects: after the
+/// reports of the batches before (`Posts::placed`, in the cursor's ledger). The caller writes the
+/// posts returned.
+fn before_report(
+    cursor: Option<&mut ReadCursor<'_>>,
+    posts: Option<&Posts>,
+    query: usize,
+    report: &mut dyn Write,
+    sink: &mut dyn Write,
+) -> io::Result<Option<Posts>> {
+    let ledger = match cursor {
+        Some(cursor) => {
+            cursor.before_query(query, report, sink)?;
+            cursor.ledger.as_ref()
+        }
+        None => None,
+    };
+    Ok(posts.map(|posts| posts.placed_in(ledger)))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262

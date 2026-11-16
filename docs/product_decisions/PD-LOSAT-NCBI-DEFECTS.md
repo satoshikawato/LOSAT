@@ -857,9 +857,12 @@ masked). Line NP item M4a-2c.
   may be loaded first (NCBI's data loader keeps the ids of every sequence it has loaded and
   gives that sequence for them): `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|` in the
   batch's order, or a sequence that the run loaded before (in a batch, a query or a psiblast
-  round before: every subject of its Seq-aligns where its prefetch is on, else, with
-  `PRE_FETCH_SEQS_LIMIT`, the subjects that its reports' rows read, none for `6 qseqid evalue`,
-  and those that psiblast's PSSM includes) where the lookup of its Seq-align id gives it first
+  round before: every subject of its Seq-aligns where its prefetch is on, psiblast's whole
+  traceback beyond `-max_target_seqs` too, else, with `PRE_FETCH_SEQS_LIMIT`, the subjects that
+  the rows of the reports NCBI writes read, of the hits that they show after the formatter's cut
+  to `-max_target_seqs` (none for `6 qseqid evalue`, none of a BLAST XML report whose iteration
+  NCBI's XML stream cut at a query title or id outside US-ASCII; review 6 of item loadord), and
+  those that psiblast's PSSM includes) where the lookup of its Seq-align id gives it first
   (the loader loads the first sequence that the lookup gives: of two holders of one gi, the
   first; review 4 of item loadord), or the first sequence that a lookup of an id of such a
   sequence gives; not a sequence that no batch loaded (NCBI then stops), nor a copy with

@@ -11,7 +11,8 @@
   looks the earlier one up), and so are two such Seq-ids whose lookups fail with different messages. Newly refused, where NCBI BLAST+ may never look such a Seq-id up and LOSAT cannot tell whether it goes
   on: a stopping Seq-id that another sequence of the database holds under another Seq-align id where that sequence
   may be loaded first (in the batch, or in a batch, query or psiblast round before: by its prefetch, or with
-  `PRE_FETCH_SEQS_LIMIT` by its reports and psiblast's PSSM), and the id of a query that NCBI BLAST+ holds at that
+  `PRE_FETCH_SEQS_LIMIT` by the reports that NCBI BLAST+ writes, after their cut to `-max_target_seqs`, and by
+  psiblast's PSSM), and the id of a query that NCBI BLAST+ holds at that
   point (the batch's queries as read, one that `-query_loc` skips included, numbered over the whole run; with
   `-parse_deflines` the ids of the deflines; the PSSM's query of `-in_pssm`; with `-outfmt 5` also the queries
   before).
@@ -19,10 +20,13 @@
   (with `PRE_FETCH_SEQS_LIMIT`, whose sequences it then does not load), a later query batch whose prefetch stops at
   such a Seq-id now writes, in every search program (`blastp`, `blastx`, `blastn`, `tblastn`, `tblastx`), the
   taxonomy database's messages that those loads would have written where NCBI BLAST+ writes them: at the first load
-  before the stop (in NCBI BLAST+'s order of the loads) that makes the same lookup, or not at all where only loads
-  after the stop would make it, then `BLAST Database error: DB contains no accession info.` (exit status 2); LOSAT
-  refused such a batch where any of its other loads looked a tax id up. A load whose order to the stop LOSAT does not
-  know that would write such a message stays refused.
+  after the left-out iteration that makes the same lookup, in a query batch between it and the stop (its reports or
+  its prefetch) or else in the stopping batch's prefetch before the stop (in NCBI BLAST+'s order of the loads), or not
+  at all where only loads after the stop would make it, then `BLAST Database error: DB contains no accession info.`
+  (exit status 2); LOSAT refused such a batch where any of its other loads looked a tax id up. The sequences of the
+  left-out iteration no longer count as loaded: a stop at a Seq-id that one of them holds is now NCBI BLAST+'s
+  error, as in NCBI BLAST+, where LOSAT refused it. A load whose order to the stop LOSAT does not know that would
+  write such a message stays refused.
 - A version 4 database whose string ISAM file (`.psi`, `.psd`, `.nsi`, `.nsd`) or PIG ISAM file (`.ppi`, `.ppd`) is a
   directory: a volume with such a file now has no such index, as in NCBI BLAST+, whose lookups find nothing there and go
   on to the next volume; LOSAT stopped with `BLAST Database error: Error: Could not open input file`. A reported

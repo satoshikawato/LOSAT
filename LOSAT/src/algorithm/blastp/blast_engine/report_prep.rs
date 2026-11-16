@@ -387,42 +387,11 @@ pub(super) fn prefetch_reported_subjects(
             None => blastp_hit_list_hsp_count(&hit_lists[span]),
         }
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted at
-    // `shared::batch_loads`)
-    // The subjects, by rank, that NCBI's BLAST database data loader loaded for the call's batches
-    // before the searched query `start` (`shared::LoadedBefore::subjects`, review 3 of line DBID
-    // loadord, H2): a batch whose prefetch is on loads the subjects of its Seq-aligns (psiblast's
-    // of its traceback hit lists, `prefetched_ranks`); one whose prefetch is off, those that its
-    // reports' rows read (`ListedTitles::fetched_ranks`) and the subjects that psiblast's PSSM
-    // includes (`PssmReads::one_by_one`, where a PSSM is made). Made only where the batch at
-    // `start` stops, and for the run's record of psiblast's rounds where a prefetch of the run can
-    // stop (`ListedTitles::note_loaded`).
-    let loaded = |start: usize| {
-        crate::algorithm::common::database::LoadedBefore {
-            hits: &hit_lists[..start],
-            spans: batch_ranges,
-            rows,
-        }
-        .subjects(
-            |hits, span| hits.get(span),
-            move |span, _| batch_seq_aligns(span),
-            move |span, hits, loads| match loads {
-                crate::report::tabular::SubjectFetch::Every => prefetched_ranks(span),
-                rows => {
-                    let mut ranks: Vec<usize> =
-                        database::ListedTitles::fetched_ranks(hits, rows).collect();
-                    if pssm_made {
-                        for query in span {
-                            ranks.extend_from_slice(pssm_reads.one_by_one(query));
-                        }
-                    }
-                    ranks
-                }
-            },
-        )
-    };
-    // Outfmt 5 first: a later batch's prefetch stop asks whether a report before it was cut
-    // (`shared::XmlReportsBefore`), from the reads of the queries' reports modelled here.
+    // Outfmt 5 first: whether NCBI's XML stream cuts a query's report before its hits
+    // (`shared::XmlCuts`), the one answer for the run's record of the batches' loads (`loaded`:
+    // a cut report loads nothing) and for a later batch's prefetch stop, which asks for the texts
+    // that the cut reports left (`shared::XmlReportsBefore`, from the reads of the queries'
+    // reports modelled here).
     let xml_first = first_report == Some(crate::blastinput::app::ReportFormat::Xml);
     let xml_cut = |query: usize| {
         query_records.get(query).is_some_and(|record| {
@@ -434,6 +403,49 @@ pub(super) fn prefetch_reported_subjects(
                 true,
             )
         })
+    };
+    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(xml_first, &xml_cut);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted at
+    // `shared::batch_loads`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813 (quoted at
+    // `shared::BatchLoads`: the tabular report reads the Seq-aligns after the cut to the hitlist
+    // size)
+    // The subjects, by rank, that NCBI's BLAST database data loader loaded for the call's batches
+    // before the searched query `start` (`shared::LoadedBefore::subjects`, review 3 of line DBID
+    // loadord, H2): a batch whose prefetch is on loads the subjects of its Seq-aligns (psiblast's
+    // of its traceback hit lists, `prefetched_ranks`, beyond `-max_target_seqs`); one whose
+    // prefetch is off, those that the rows of the reports NCBI writes read, of the hit lists
+    // they show (after psiblast's cut, `ListedTitles::fetched_ranks`; review 6, H1; none of an
+    // outfmt 5 report that NCBI's XML stream cut, `xml_cuts`: review 6, H2), and the subjects
+    // that psiblast's PSSM includes (`PssmReads::one_by_one`, where a PSSM is made). Made only
+    // where the batch at `start` stops, and for the run's record of psiblast's rounds where a
+    // prefetch of the run can stop (`ListedTitles::note_loaded`).
+    let loaded = |start: usize| {
+        crate::algorithm::common::database::LoadedBefore {
+            hits: &hit_lists[..start],
+            spans: batch_ranges,
+            rows,
+            cuts: xml_cuts,
+        }
+        .subjects(
+            |hits, span| hits.get(span),
+            move |span, _| batch_seq_aligns(span),
+            move |span, hits, loads| match loads {
+                crate::algorithm::common::database::BatchLoads::Prefetched => {
+                    prefetched_ranks(span)
+                }
+                crate::algorithm::common::database::BatchLoads::Read(rows) => {
+                    let mut ranks: Vec<usize> =
+                        database::ListedTitles::fetched_ranks(hits, rows).collect();
+                    if pssm_made {
+                        for query in span {
+                            ranks.extend_from_slice(pssm_reads.one_by_one(query));
+                        }
+                    }
+                    ranks
+                }
+            },
+        )
     };
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
@@ -590,12 +602,7 @@ pub(super) fn prefetch_reported_subjects(
                         .find(|(first, _)| *first == query)
                         .map(|(_, posts)| posts)
                 };
-                let xml_before =
-                    xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
-                        reads: subject_reads.queries(),
-                        cut: &xml_cut,
-                        prefetched: &prefetched,
-                    });
+                let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
                 let scope = || batch_scope(&batch.searched);
                 let queries = crate::algorithm::common::database::PrefetchQueries::new(
                     batch.searched.start,

@@ -1134,10 +1134,10 @@ mod tests {
                 let regrouped =
                     crate::seqdb::rps::regroup_cells(&table.cells, &table.overflow, group_buckets)
                         .unwrap();
-                if group_buckets < 4 {
+                if group_buckets < buckets {
                     assert!(
                         regrouped.is_some(),
-                        "shuffled lists in {group_buckets} buckets"
+                        "shuffled lists in {group_buckets} of {buckets} buckets"
                     );
                     regrouped_cases += 1;
                 }
@@ -1159,6 +1159,6 @@ mod tests {
                 );
             }
         }
-        assert_eq!(regrouped_cases, 10);
+        assert!(regrouped_cases >= 10, "{regrouped_cases} regrouped cases");
     }
 }

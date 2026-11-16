@@ -46,8 +46,8 @@ use super::empty_rows::{
 };
 use super::input::FastaRecord;
 use super::report::{
-    alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_label,
-    tabular_io_error, ShownSubjects, TabularFlushError,
+    alignment, has_seqalign, query_endpoints, query_warning, tabular_io_error, ShownSubjects,
+    TabularFlushError,
 };
 use super::runtime::BatchResults;
 use crate::cli::NativeError;
@@ -216,12 +216,66 @@ struct SubjectValues<'a> {
     taxonomy: &'a TabularTaxonomy,
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231 (`GetSeqIdList`,
+// through `SetSubjectId`)
+// ```c++
+// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+//             vector<string> title_tokens;
+//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+//             if (defline != NcbiEmptyString) {
+//                 id_token =
+//                     NStr::Split(defline, " ", title_tokens)[0];
+//             }
+// ```
+/// The subject id of the tabular rows (`sseqid`, `sacc`, `saccver`) of the `-subject` record
+/// `subject` (index `oid`) read without `-parse_deflines` (`RecordNames::subject_tabular_id`),
+/// `None` for the other subjects of `shown` (`subject_values` reads theirs). `Err` is LOSAT's
+/// refusal of a record whose id NCBI's formatter does not write (`GenerateDefline` throws on a
+/// title whose first word starts with `Subject_`), as BLASTP's (`check_tabular_subject_ids`).
+fn record_subject_id(
+    shown: &ShownSubjects<'_>,
+    subject: &FastaRecord,
+    oid: usize,
+) -> Result<Option<Vec<u8>>> {
+    match shown {
+        ShownSubjects::Fasta { parsed, .. }
+            if parsed.tabular.get(oid).is_none_or(Option::is_none) =>
+        {
+            match subject.subject_tabular_id(true) {
+                Ok(id) => Ok(Some(id)),
+                Err(crate::report::defline::UnknownEncoding) => Err(SubjectIdRefusal(format!(
+                    "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's BLASTX",
+                    oid + 1,
+                    String::from_utf8_lossy(subject.shown_id())
+                ))
+                .into()),
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+/// LOSAT's refusal of a tabular report that shows a `-subject` record whose id NCBI's formatter
+/// cannot write (`record_subject_id`): not an error of NCBI's engine (`native::report_error`).
+#[derive(Debug)]
+pub(crate) struct SubjectIdRefusal(String);
+
+impl std::fmt::Display for SubjectIdRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for SubjectIdRefusal {}
+
 /// The values of the subject `subject` (rank or index `oid`) of a report of `shown`; `slen` is the
-/// length of the record, also with `-subject_loc`.
+/// length of the record, also with `-subject_loc`. `record_id` is a `-subject` record's id
+/// (`record_subject_id`), empty for the other subjects.
 fn subject_values<'a>(
     shown: &'a ShownSubjects<'_>,
     subject: &'a FastaRecord,
     oid: usize,
+    record_id: &'a [u8],
     no_taxonomy: &'a TabularTaxonomy,
 ) -> SubjectValues<'a> {
     match shown {
@@ -241,9 +295,9 @@ fn subject_values<'a>(
         {
             let ids = parsed.tabular[oid].as_ref().expect("the guard");
             SubjectValues {
-                id: ids.ids[0].as_bytes(),
-                accession: ids.ids[1].as_bytes(),
-                accession_version: ids.ids[2].as_bytes(),
+                id: &ids.ids[0],
+                accession: &ids.ids[1],
+                accession_version: &ids.ids[2],
                 gi: parsed.subjects[oid]
                     .as_deref()
                     .map_or(0, |subject| subject.tabular_gi()),
@@ -253,10 +307,11 @@ fn subject_values<'a>(
                 taxonomy: no_taxonomy,
             }
         }
-        // A record without a title: its `sseqid` is the first word of its generated title
-        // (`report::subject_label`), its `sall*` its local id (`s_ReplaceLocalId`).
+        // A record read without `-parse_deflines`: its `sseqid`, `sacc` and `saccver` are
+        // `record_id` (`record_subject_id`); a record without a title has its local id for
+        // `sall*` (`s_ReplaceLocalId`).
         ShownSubjects::Fasta { .. } => {
-            let id = subject_label(subject).0.as_bytes();
+            let id = record_id;
             SubjectValues {
                 id,
                 accession: id,
@@ -385,6 +440,23 @@ pub(super) fn write_blastx_tabular(
     let loc = SubjectLoc::of(shown);
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let mut next_hsp = first_hsp;
+    // The refusal of a `-subject` record whose id the rows cannot write comes before the report's
+    // first byte (`record_subject_id`), as BLASTP's (`check_tabular_subject_ids`).
+    if let ShownSubjects::Fasta { .. } = shown {
+        for batch in batches {
+            for lists in &batch.queries {
+                for list in &lists[..lists.len().min(options.shown_lists())] {
+                    if list
+                        .hsps
+                        .iter()
+                        .any(|hsp| has_seqalign(hsp, options.gapped))
+                    {
+                        record_subject_id(shown, &subjects[list.oid], list.oid)?;
+                    }
+                }
+            }
+        }
+    }
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -438,7 +510,7 @@ pub(super) fn write_blastx_tabular(
                 let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,
-                    query.query_line().as_bytes(),
+                    &query.query_line(),
                     &database,
                     // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
                     (!batch.search_skipped || options.merged_volumes()).then_some(count),
@@ -467,11 +539,8 @@ pub(super) fn write_blastx_tabular(
                 let query_length = options
                     .query_range
                     .map_or(searched_length, |range| range.length());
-                let tabular_query = TabularQuery::of_ids(
-                    query.believed(),
-                    local_id(query).as_bytes(),
-                    query_length,
-                );
+                let tabular_query =
+                    TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
@@ -523,7 +592,14 @@ pub(super) fn write_blastx_tabular(
                         continue;
                     }
                     let subject = &subjects[list.oid];
-                    let values = subject_values(shown, subject, list.oid, &no_taxonomy);
+                    let record_id = record_subject_id(shown, subject, list.oid)?;
+                    let values = subject_values(
+                        shown,
+                        subject,
+                        list.oid,
+                        record_id.as_deref().unwrap_or_default(),
+                        &no_taxonomy,
+                    );
                     // The subject's Seq-loc as its Seq-align shows it (`SubjectLoc::of_list`).
                     let loc = loc.of_list(list, options.gapped);
                     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:629-640
@@ -854,14 +930,10 @@ fn write_blastx_tax_report(
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, TaxHsp, TaxPlain, TaxQuery};
     let program = options.program().upper;
-    let titles: Vec<String> = batches
+    let titles: Vec<std::borrow::Cow<'_, [u8]>> = batches
         .iter()
         .flat_map(|batch| {
-            (0..batch.queries.len()).map(|qidx| {
-                queries[batch.query_ordinal + qidx]
-                    .query_line()
-                    .into_owned()
-            })
+            (0..batch.queries.len()).map(|qidx| queries[batch.query_ordinal + qidx].query_line())
         })
         .collect();
     // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
@@ -875,7 +947,7 @@ fn write_blastx_tax_report(
             })
             .zip(&titles)
             .map(|((ordinal, lists, skipped), title)| TaxQuery {
-                title: title.as_bytes(),
+                title,
                 length: queries[ordinal].placement().length,
                 // A query of a batch that NCBI did not search has no Seq-align-set.
                 hsps: (!skipped).then(|| {
@@ -902,7 +974,7 @@ fn write_blastx_tax_report(
     let plain = |s_idx: usize| match shown {
         ShownSubjects::Fasta { .. } => TaxPlain::Record {
             local_id: subjects[s_idx].internal_id.as_bytes(),
-            title: subjects[s_idx].title.as_bytes(),
+            title: &subjects[s_idx].title,
         },
         ShownSubjects::Database { reported, .. } => TaxPlain::Stored {
             oid: reported.oid(s_idx),

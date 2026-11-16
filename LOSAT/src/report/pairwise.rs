@@ -467,7 +467,8 @@ impl From<Hit> for PairwiseHit {
 /// ```
 #[derive(Debug, Clone)]
 pub struct BlastpPairwiseQuery {
-    pub query_name: String,
+    /// What `Query=` shows: the title's bytes as they are (`RecordNames::query_line`).
+    pub query_name: Vec<u8>,
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
     pub effective_search_space: i64,
@@ -655,6 +656,18 @@ pub fn write_subject_header<W: Write>(
     Ok(())
 }
 
+/// The heading of the alignments of the `-subject` record `s_idx` (read without `-parse_deflines`)
+/// with the title `title` (`write_subject_alignments_part`, which quotes NCBI): `Ok` the title that
+/// `GenerateDefline` makes of it (flags 0), `Err` where it throws (`UnknownEncoding`) the id
+/// `Subject_N` (N = `s_idx + 1`) of the line that NCBI writes in the place of each HSP.
+pub fn record_heading(title: &[u8], protein: bool, s_idx: u32) -> Result<Vec<u8>, Vec<u8>> {
+    super::defline::generate_defline(title, protein, false)
+        .map(|defline| defline.text)
+        .map_err(|super::defline::UnknownEncoding| {
+            format!("Subject_{}", u64::from(s_idx) + 1).into_bytes()
+        })
+}
+
 /// The alignments of one subject in outfmt 0: NCBI's `x_DisplayAlnvecInfo` for each HSP,
 /// the first one with the subject's heading (`GenerateDefline` of its title with flags 0,
 /// `defline.rs`). `write_hsp` writes the rest of one call (the score lines, the alignment
@@ -715,14 +728,14 @@ fn write_subject_alignments_part<W: Write>(
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
-    let heading = super::defline::generate_defline(title, protein, false);
+    let heading = record_heading(title, protein, s_idx);
     if part.start == 0 {
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.subject_begin(first_index);
         }
         if let Ok(heading) = &heading {
-            write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
+            write_subject_header(writer, heading, None, hits[0].subject_length)?;
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -734,12 +747,9 @@ fn write_subject_alignments_part<W: Write>(
             writer.flush()?;
             probe.begin(hsp_index);
         }
-        match heading {
+        match &heading {
             Ok(_) => write_hsp(writer, hit)?,
-            Err(super::defline::UnknownEncoding) => write_skipped_alignment(
-                writer,
-                format!("Subject_{}", u64::from(s_idx) + 1).as_bytes(),
-            )?,
+            Err(id) => write_skipped_alignment(writer, id)?,
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -1836,7 +1846,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_order: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_ids: &[Arc<str>],
+    subject_labels: &[Arc<[u8]>],
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
@@ -1848,22 +1858,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         subject_hits,
         show_sum_n,
         columns,
-        |s_idx| {
-            let subject_id = subject_ids
-                .get(s_idx as usize)
-                .map(|id| id.as_ref())
-                .unwrap_or("unknown");
-            let mut label = subject_id.as_bytes().to_vec();
-            let title = subject_hits
-                .get(&s_idx)
-                .and_then(|hits| hits.first())
-                .and_then(|hit| hit.subject_title.as_deref());
-            if let Some(title) = title {
-                label.push(b' ');
-                label.extend_from_slice(title.as_bytes());
-            }
-            label
-        },
+        |s_idx| subject_labels[s_idx as usize].to_vec(),
         read,
     )
 }
@@ -6920,6 +6915,9 @@ pub struct BlastxPairwiseOptions {
 /// Writes the BLASTX pairwise report (outfmt 0) of `queries`, whose hits are `hits` in the
 /// order of the reports (`q_idx` is the index in `queries`). `probe` marks each subject's
 /// heading and each HSP, `hits[i]` being HSP `first_hsp + i`, without changing the written bytes.
+/// `subject_labels` are the description-table labels by subject (`database_description_label`),
+/// `record_titles` the titles of the `-subject` records (empty with `-db`), whose headings are
+/// `record_heading`'s.
 #[allow(clippy::too_many_arguments)]
 pub fn write_blastx_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
@@ -6931,7 +6929,8 @@ pub fn write_blastx_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     query_validity: &[bool],
     skipped: &[bool],
-    subject_ids: &[Arc<str>],
+    subject_labels: &[Arc<[u8]>],
+    record_titles: &[&[u8]],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<(
@@ -6973,7 +6972,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         // ```
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(&mut writer, query.query_name.as_bytes(), query.query_length)?;
+        write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
         let query_hits = &by_query[qidx];
         if query_hits.is_empty() {
             write_no_hits_found(&mut writer)?;
@@ -7043,7 +7042,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 descriptions,
                 order.len() <= options.num_descriptions,
                 grouped,
-                subject_ids,
+                subject_labels,
                 !options.gapped && options.sum_stats,
                 config.sort_columns(query.query_length),
                 &mut |s_idx, writer: &mut io::BufWriter<&mut W>| match reads.as_mut() {
@@ -7108,15 +7107,18 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
-                    None => {
-                        write_subject_header(
-                            &mut writer,
-                            subject_ids[*oid as usize].as_bytes(),
-                            first.subject_title.as_deref().map(str::as_bytes),
-                            first.subject_length,
-                        )?;
-                        None
-                    }
+                    None => match record_heading(record_titles[*oid as usize], true, *oid) {
+                        Ok(heading) => {
+                            write_subject_header(
+                                &mut writer,
+                                &heading,
+                                None,
+                                first.subject_length,
+                            )?;
+                            None
+                        }
+                        Err(id) => Some(id),
+                    },
                 };
                 if let Some(probe) = probe.as_deref_mut() {
                     writer.flush()?;
@@ -8176,12 +8178,9 @@ mod tblastx_tests {
         best.hit.e_value = 5e-35;
         let mut tie = best.clone();
         tie.hit.e_value = 0.5;
-        for hit in [&mut first, &mut best, &mut tie] {
-            hit.subject_title = Some("pep YOL075C".to_string());
-        }
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&first, &best, &tie])].into_iter().collect();
-        let ids = [Arc::<str>::from("YOL075C")];
+        let ids = [Arc::<[u8]>::from(&b"YOL075C pep YOL075C"[..])];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
             write_subject_summary_table_with_sum_n(
@@ -8379,7 +8378,7 @@ mod tblastx_tests {
             ..KarlinParams::default()
         };
         let query = |length: usize| BlastpPairwiseQuery {
-            query_name: String::new(),
+            query_name: Vec::new(),
             query_length: length,
             ungapped_karlin: karlin,
             effective_search_space: 1_000_000,

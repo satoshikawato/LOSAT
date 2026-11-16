@@ -184,6 +184,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
+        || error.is::<super::tabular::SubjectIdRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
@@ -1624,19 +1625,17 @@ pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
 //         		ERR_POST(Warning << warning);
 //         		continue;
 // ```
-/// The warning of each `-subject` record without letters.
+/// The warning of each `-subject` record without letters, as every program writes it
+/// (`input_files::write_empty_subject_warnings_of`: the id, the title's bytes as they are).
 pub(super) fn write_empty_subject_warnings(
     subjects: &[FastaRecord],
     stderr: &mut dyn Write,
 ) -> Result<()> {
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
-            stderr,
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            String::from_utf8_lossy(s.warning_id()),
-            s.title
-        )?;
-    }
+    crate::blastinput::input_files::write_empty_subject_warnings_of(
+        subjects.iter().map(|s| (s.names(), s.sequence.len())),
+        "blastx",
+        stderr,
+    )?;
     Ok(())
 }
 
@@ -2339,7 +2338,9 @@ fn write_run_error_archive(
 pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> Result<()> {
     // A warning of `ParseGapLine` (`fasta_reader::reader::gap_line_size`) is the bytes that the
     // reader of the other programs writes: a modifier's value as it is in the input.
-    if warning.kind == "gap_line" {
+    // The lines the reader wrote whole (`gap_line`, and `-parse_deflines`' messages of a defline's
+    // ids, `defline_id`), as bytes: a message names the defline's bytes as they are.
+    if matches!(warning.kind, "gap_line" | "defline_id") {
         let mut line = Vec::with_capacity(warning.text.len() + 1);
         line.extend_from_slice(&warning.text);
         line.push(b'\n');
@@ -2356,7 +2357,6 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
                 let text=ranges.iter().map(|&(a,b)|if a==b{a.to_string()}else{format!("{a}-{b}")}).collect::<Vec<_>>().join(", ");
                 format!("FASTA-Reader: Ignoring invalid {}residues at position(s): On line {}: {text}",String::from_utf8_lossy(&warning.text),warning.line)
             },
-            "defline_id"=>String::from_utf8_lossy(&warning.text).into_owned(),
             _=>unreachable!("source-registered FASTA warning"),
         };
     writeln!(stderr, "{message}")?;
@@ -3074,7 +3074,7 @@ mod archive_error_tests {
             num_positives: 50_000,
         });
         let query = BlastpPairwiseQuery {
-            query_name: "q".into(),
+            query_name: b"q".to_vec(),
             query_length: 150_000,
             ungapped_karlin: Default::default(),
             effective_search_space: 1,
@@ -3113,7 +3113,8 @@ mod archive_error_tests {
                 std::slice::from_ref(&query),
                 &[true],
                 &[false],
-                &[std::sync::Arc::from("s0")],
+                &[std::sync::Arc::from(&b"s0"[..])],
+                &[b"s0"],
                 &report,
                 &BlastxPairwiseOptions {
                     word_threshold: 12.0,
@@ -3157,7 +3158,7 @@ mod reader_batch_tests {
     fn record(letters: usize) -> FastaRecord {
         FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; letters],
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

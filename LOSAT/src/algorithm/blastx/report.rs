@@ -4,13 +4,7 @@ use super::{
     runtime::BatchResults,
 };
 use crate::algorithm::tblastx::report::display_codon;
-use crate::{
-    common::GapEditOp,
-    report::outfmt6::{
-        format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
-    },
-    report::query_warnings::EMPTY_DATABASE_MESSAGE,
-};
+use crate::{common::GapEditOp, report::query_warnings::EMPTY_DATABASE_MESSAGE};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 // ```c++
 //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
@@ -33,7 +27,7 @@ use crate::{
 //     retval('U', 'C') = retval('C', 'C');
 //     retval('C', 'U') = retval('C', 'C');
 // ```
-use super::empty_rows::{rows_empty, AlignQueryIds, SubjectLoc};
+use super::empty_rows::SubjectLoc;
 use crate::cli::NativeError;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
@@ -76,47 +70,6 @@ pub(crate) struct DisplayAlignment {
 }
 
 impl DisplayAlignment {
-    /// The alignment of a tabular row that leaves before NCBI's alignment block (the empty rows of
-    /// an HSP of length 0, `empty_rows`): every count and coordinate at `x_ResetFields`' 0.
-    pub(crate) fn empty() -> Self {
-        DisplayAlignment {
-            qseq: String::new(),
-            sseq: String::new(),
-            masked_qseq: String::new(),
-            identity: 0,
-            positive: 0,
-            gaps: 0,
-            gap_opens: 0,
-            qstart: 0,
-            qend: 0,
-            sstart: 0,
-            send: 0,
-            frame: 0,
-            subject_stored_gaps: Vec::new(),
-        }
-    }
-
-    /// The alignment of a tabular row of `-subject`'s mapped alignment without scores of a
-    /// subject's only HSP of length 0 (`empty_rows::MappedAlignment`): its rows of letters, no gap.
-    pub(crate) fn mapped(mapped: &super::empty_rows::MappedAlignment) -> Self {
-        let (qrow, srow) = mapped.rows();
-        DisplayAlignment {
-            qseq: String::from_utf8_lossy(qrow).into_owned(),
-            sseq: String::from_utf8_lossy(srow).into_owned(),
-            masked_qseq: String::new(),
-            identity: qrow.iter().zip(srow).filter(|(q, s)| q == s).count(),
-            positive: 0,
-            gaps: 0,
-            gap_opens: 0,
-            qstart: mapped.q_start as i32,
-            qend: mapped.q_end as i32,
-            sstart: mapped.s_start as i32,
-            send: mapped.s_end as i32,
-            frame: mapped.q_frame as i8,
-            subject_stored_gaps: Vec::new(),
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
     // ```c++
     // inline void CBlastTabularInfo::x_PrintMismatches(void)
@@ -788,262 +741,6 @@ pub(crate) fn hsp_scores(
         ),
     ))
 }
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
-// ```c++
-// CRef<CSeq_id> s_ReplaceLocalId(const CBioseq_Handle& bh, CConstRef<CSeq_id> sid_in, bool parse_local)
-// {
-//
-//         CRef<CSeq_id> retval(new CSeq_id());
-//
-//         // Local ids are usually fake. If a title exists, use the first token
-//         // of the title instead of the local id. If no title or if the local id
-//         // should be parsed, use the local id, but without the "lcl|" prefix.
-//         if (sid_in->IsLocal()) {
-//             string id_token;
-//             vector<string> title_tokens;
-//             title_tokens =
-//                 NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
-//             if(title_tokens.empty()){
-//                 id_token = NcbiEmptyString;
-//             } else {
-//                 id_token = title_tokens[0];
-//             }
-//
-//             if (id_token == NcbiEmptyString || parse_local) {
-//                 const CObject_id& obj_id = sid_in->GetLocal();
-//                 if (obj_id.IsStr())
-//                     id_token = obj_id.GetStr();
-//                 else
-//                     id_token = NStr::IntToString(obj_id.GetId());
-//             }
-//             CObject_id* obj_id = new CObject_id();
-//             obj_id->SetStr(id_token);
-//             retval->SetLocal(*obj_id);
-//         } else {
-//             retval->Assign(*sid_in);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:175-187
-// ```c++
-//          if (found_gi)
-//              id_string += "|";
-//
-//          if (best_id->IsLocal()) {
-//              string id_token;
-//              best_id->GetLabel(&id_token, CSeq_id::eContent, 0);
-//              id_string += id_token;
-//          }
-//          else
-//              id_string += best_id->AsFastaString();
-//     }
-//
-//     return id_string;
-// ```
-pub(super) fn local_id(record: &FastaRecord) -> &str {
-    if let Some(ids) = record.believed() {
-        return std::str::from_utf8(&ids.tabular[2]).unwrap_or_default();
-    }
-    record
-        .title
-        .split(' ')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&record.internal_id)
-}
-// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3884-3889 (`x_SetTitleFromProtein`
-// without a protein feature; `GenerateDefline` of a protein Bioseq without a title)
-// ```c++
-//     if (m_MainTitle.empty() && m_IsAA) {
-//         m_MainTitle = "unnamed protein product";
-// ```
-/// The id and the rest of the title that BLASTX's reports show for a `-subject` record read as one
-/// without `-parse_deflines` (outfmt 0, and the tabular `sseqid`, `report::defline::
-/// tabular_subject_id`): the first word of its title and what follows it, or for a record without
-/// a title those of the title that `GenerateDefline` makes of none.
-pub(super) fn subject_label(record: &FastaRecord) -> (&str, Option<&str>) {
-    if record.title.is_empty() {
-        return ("unnamed", Some("protein product"));
-    }
-    match record.title.split_once(' ') {
-        Some((id, rest)) => (id, Some(rest)),
-        None => (&record.title, None),
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-191
-// ```c++
-//     string id_str = NcbiEmptyString;
-//
-//     switch (id_type) {
-//     case CBlastTabularInfo::eFullId:
-//         id_str = CShowBlastDefline::GetSeqIdListString(id, true);
-//         break;
-//     case CBlastTabularInfo::eAccession:
-//     {
-//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
-//         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
-//         break;
-//     }
-//     case CBlastTabularInfo::eAccVersion:
-//     {
-//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
-//         accid->GetLabel(&id_str, CSeq_id::eContent, CSeq_id::fLabel_Version);
-//         break;
-//     }
-//     case CBlastTabularInfo::eGi:
-//         id_str = NStr::NumericToString(FindGi(id));
-//         break;
-//     default: break;
-//     }
-// ```
-fn id_field(record: &FastaRecord, field: &str) -> String {
-    // Local FASTA uses generated local Seq-ids, replaced by title tokens. The default report's
-    // query field is `qaccver` (its other identifier fields are the shared writer's, `tabular`).
-    match field {
-        "qaccver" => local_id(record).to_owned(),
-        _ => unreachable!("a std identifier field"),
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1128-1196
-// ```c++
-//         case eQuerySeqId:
-//             m_Ostream << "query id"; break;
-//         case eQueryGi:
-//             m_Ostream << "query gi"; break;
-//         case eQueryAccession:
-//             m_Ostream << "query acc."; break;
-//         case eQueryAccessionVersion:
-//             m_Ostream << "query acc.ver"; break;
-//         case eQueryLength:
-//             m_Ostream << "query length"; break;
-//         case eSubjectSeqId:
-//             m_Ostream << "subject id"; break;
-//         case eSubjectAllSeqIds:
-//             m_Ostream << "subject ids"; break;
-//         case eSubjectGi:
-//             m_Ostream << "subject gi"; break;
-//         case eSubjectAllGis:
-//             m_Ostream << "subject gis"; break;
-//         case eSubjectAccession:
-//             m_Ostream << "subject acc."; break;
-//         case eSubjAccessionVersion:
-//             m_Ostream << "subject acc.ver"; break;
-//         case eSubjectAllAccessions:
-//             m_Ostream << "subject accs."; break;
-//         case eSubjectLength:
-//             m_Ostream << "subject length"; break;
-//         case eQueryStart:
-//             m_Ostream << "q. start"; break;
-//         case eQueryEnd:
-//             m_Ostream << "q. end"; break;
-//         case eSubjectStart:
-//             m_Ostream << "s. start"; break;
-//         case eSubjectEnd:
-//             m_Ostream << "s. end"; break;
-//         case eQuerySeq:
-//             m_Ostream << "query seq"; break;
-//         case eSubjectSeq:
-//             m_Ostream << "subject seq"; break;
-//         case eEvalue:
-//             m_Ostream << "evalue"; break;
-//         case eBitScore:
-//             m_Ostream << "bit score"; break;
-//         case eScore:
-//             m_Ostream << "score"; break;
-//         case eAlignmentLength:
-//             m_Ostream << "alignment length"; break;
-//         case ePercentIdentical:
-//             m_Ostream << "% identity"; break;
-//         case eNumIdentical:
-//             m_Ostream << "identical"; break;
-//         case eMismatches:
-//             m_Ostream << "mismatches"; break;
-//         case ePositives:
-//             m_Ostream << "positives"; break;
-//         case eGapOpenings:
-//             m_Ostream << "gap opens"; break;
-//         case eGaps:
-//             m_Ostream << "gaps"; break;
-//         case ePercentPositives:
-//             m_Ostream << "% positives"; break;
-//         case eFrames:
-//             m_Ostream << "query/sbjct frames"; break;
-//         case eQueryFrame:
-//             m_Ostream << "query frame"; break;
-//         case eSubjFrame:
-//             m_Ostream << "sbjct frame"; break;
-//         case eBTOP:
-//             m_Ostream << "BTOP"; break;
-//         case eSubjectTaxIds:
-// ```
-fn field_name(field: &str) -> &str {
-    // The `std` fields of the default report (`ResolvedOptions::fields`); the other fields are
-    // the shared writer's (`report::tabular::TabularField::header_name`).
-    match field {
-        "qaccver" => "query acc.ver",
-        "saccver" => "subject acc.ver",
-        "qstart" => "q. start",
-        "qend" => "q. end",
-        "sstart" => "s. start",
-        "send" => "s. end",
-        "evalue" => "evalue",
-        "bitscore" => "bit score",
-        "length" => "alignment length",
-        "pident" => "% identity",
-        "mismatch" => "mismatches",
-        "gapopen" => "gap opens",
-        _ => unreachable!("a std field"),
-    }
-}
-// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
-// ```c++
-// inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
-// {
-//     double perc_ident =
-//         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-//     m_Ostream << NStr::DoubleToString(perc_ident, 3);
-// }
-// ```
-// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:543-547
-// ```c++
-// inline void CBlastTabularInfo::x_PrintMismatches(void)
-// {
-//     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
-//     m_Ostream << num_mismatches;
-// ```
-/// A subject as the default tabular report shows it: its `saccver`
-/// (`ShownSubjects::subject_ids`).
-struct ShownSubject<'a> {
-    /// `sseqid`, `sacc` and `saccver` (`ShownSubjects::subject_ids`).
-    ids: [&'a str; 3],
-}
-
-/// The value of a `std` field of the default report (outfmt 6 and 7 without a field list or
-/// a delimiter) of a row of the scores `(evalue, bit_score)`; the other fields are the shared
-/// writer's (`tabular`).
-fn field_value(
-    field: &str,
-    query: &FastaRecord,
-    subject: &ShownSubject<'_>,
-    (evalue, bit_score): (f64, f64),
-    a: &DisplayAlignment,
-) -> String {
-    match field {
-        "qaccver" => id_field(query, field),
-        "saccver" => subject.ids[2].to_owned(),
-        "qstart" => a.qstart.to_string(),
-        "qend" => a.qend.to_string(),
-        "sstart" => a.sstart.to_string(),
-        "send" => a.send.to_string(),
-        "evalue" => format_evalue_ncbi_tabular(evalue),
-        "bitscore" => format_bitscore_ncbi(bit_score),
-        "length" => a.qseq.len().to_string(),
-        "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3),
-        "mismatch" => a.mismatches().to_string(),
-        "gapopen" => a.gap_opens.to_string(),
-        _ => unreachable!("a std field"),
-    }
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
 // ```c++
 //     for (int index = 0; index < hit_list->hsplist_count; index++) {
@@ -1129,7 +826,7 @@ pub(crate) struct RecordsParsed {
 
 /// `sseqid`, `sacc` and `saccver`, and the `sall*` of a subject in `RecordsParsed`.
 pub(crate) struct RecordTabularIds {
-    pub(crate) ids: [String; 3],
+    pub(crate) ids: [Vec<u8>; 3],
     pub(crate) all_ids: Vec<crate::report::tabular::DeflineIds>,
 }
 
@@ -1148,7 +845,7 @@ impl RecordsParsed {
         let subjects = crate::report::db_subject::parsed_records(
             records
                 .iter()
-                .map(|record| (record.believed(), record.title.as_bytes())),
+                .map(|record| (record.believed(), record.title.as_slice())),
             show_gis,
             true,
             pairwise,
@@ -1166,12 +863,11 @@ impl RecordsParsed {
                 let Some(subject) = subject else {
                     return Ok(None);
                 };
-                let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
-                let [id, accession, version] = subject
+                let ids = subject
                     .tabular_ids(true)
                     .map_err(|problem| refused(subject, problem))?;
                 Ok(Some(RecordTabularIds {
-                    ids: [text(id), text(accession), text(version)],
+                    ids,
                     all_ids: subject
                         .all_tabular_ids(true)
                         .map_err(|problem| refused(subject, problem))?,
@@ -1183,22 +879,6 @@ impl RecordsParsed {
 }
 
 impl ShownSubjects<'_> {
-    /// The tabular subject ids of subject `oid` (`sseqid`, `sacc`, `saccver`): the first
-    /// word of a record's title, or a database sequence's id made from its stored title, the
-    /// same for the three; a database sequence with parsed Seq-ids has its own three
-    /// (`ParsedSubject::tabular_ids`).
-    fn subject_ids<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> [&'s str; 3] {
-        match self {
-            ShownSubjects::Fasta { parsed, .. } => {
-                match parsed.tabular.get(oid).and_then(Option::as_ref) {
-                    Some(ids) => [&ids.ids[0], &ids.ids[1], &ids.ids[2]],
-                    None => [subject_label(subject).0; 3],
-                }
-            }
-            ShownSubjects::Database { reported, .. } => reported.tabular_ids(oid),
-        }
-    }
-
     /// The `-db` database's `Database:` lines.
     fn pairwise_database(&self) -> Option<&crate::report::pairwise::PairwiseDatabase> {
         match self {
@@ -1298,7 +978,7 @@ pub(super) fn render_queries_with(
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
-    let (mut probe, first_hsp, made_hits) = match local {
+    let (probe, first_hsp, made_hits) = match local {
         Some(local) => (local.probe, local.first_hsp, local.hits),
         None => (None, 0, None),
     };
@@ -1411,310 +1091,38 @@ pub(super) fn render_queries_with(
             batches,
         );
     }
-    // The tabular reports with a field list or a delimiter, and outfmt 10 and 20: the shared
-    // writer (`tabular`, NCBI's `CBlastTabularInfo`); the default outfmt 6 and 7 below.
-    if let Some(spec) = options.tabular {
-        return super::tabular::write_blastx_tabular(
-            writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
-        );
-    }
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:77-81
     // ```c++
-    //         alnVec->SetGapChar('-');
-    //         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-    //         alnVec->SetGenCode(m_DbGeneticCode, 1);
-    //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-    //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+    //     vector<string> format_tokens;
+    //     NStr::Split(format, " ", format_tokens);
+    //
+    //     if (format_tokens.empty())
+    //         x_AddDefaultFieldsToShow();
     // ```
-    let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
-    let comments = options.outfmt == 7;
-    let mut next_hsp = first_hsp;
-    for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
-            let query = &queries[batch.query_ordinal + qidx];
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-            // ```c++
-            //     if (results.HasWarnings()) {
-            //         ERR_POST(Warning << results.GetWarningStrings());
-            //     }
-            // ```
-            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
-            stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
-            // The texts of the subjects that the query's rows read one by one, written where they
-            // read each (`ReadCursor`, the query's only).
-            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
-                shown.query_reads(batch.query_ordinal + qidx),
-            ));
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
-            // ```c++
-            //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
-            //              ? CBlastTabularInfo::eComma : CBlastTabularInfo::eTab);
-            //
-            //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-            //         if(!m_CustomDelim.empty()) {
-            // ```
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-            // ```c++
-            // CBlastTabularInfo::~CBlastTabularInfo()
-            // {
-            //     m_Ostream.flush();
-            // }
-            // ```
-            // Tabular stream failures unwind through this local formatter.
-            // Its destructor flushes the already-failed stream and terminates,
-            // including failures before the final explicit flush is reached.
-            (|| -> Result<()> {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:762-765
-                // ```c++
-                //     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
-                //     if (m_IsUngappedSearch && results.HasAlignments()) {
-                //         aln_set.Reset(CDisplaySeqalign::PrepareBlastUngappedSeqalign(*aln_set));
-                //     }
-                // ```
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3162-3185
-                // ```c++
-                // CRef<CSeq_align_set>
-                // CDisplaySeqalign::PrepareBlastUngappedSeqalign(const CSeq_align_set& alnset)
-                // {
-                //     CRef<CSeq_align_set> alnSetRef(new CSeq_align_set);
-                //
-                //     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()){
-                //         const CSeq_align::TSegs& seg = (*iter)->GetSegs();
-                //         if(seg.Which() == CSeq_align::C_Segs::e_Std){
-                //             if(seg.GetStd().size() > 1){
-                //                 //has more than one stdseg. Need to seperate as each
-                //                 //is a distinct HSP
-                //                 ITERATE (CSeq_align::C_Segs::TStd, iterStdseg, seg.GetStd()){
-                //                     CRef<CSeq_align> aln(new CSeq_align);
-                //                     if((*iterStdseg)->IsSetScores()){
-                //                         aln->SetScore() = (*iterStdseg)->GetScores();
-                //                     }
-                //                     aln->SetSegs().SetStd().push_back(*iterStdseg);
-                //                     alnSetRef->Set().push_back(aln);
-                //                 }
-                //
-                //             } else {
-                //                 alnSetRef->Set().push_back(*iter);
-                //             }
-                //         } else if(seg.Which() == CSeq_align::C_Segs::e_Dendiag){
-                // ```
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
-                // ```c++
-                //     if (align_set) {
-                //        int num_hits = align_set->Get().size();
-                // ```
-                let count: usize = lists
-                    .iter()
-                    .map(|l| {
-                        l.hsps
-                            .iter()
-                            .filter(|h| has_seqalign(h, options.gapped))
-                            .count()
-                    })
-                    .sum();
-                if comments {
-                    writeln!(
-                        writer,
-                        "# {} {}",
-                        options.program().upper,
-                        crate::NCBI_BLAST_VERSION
-                    )?;
-                    writeln!(
-                        writer,
-                        "# Query: {}",
-                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
-                        // ```c++
-                        // CAlignFormatUtil::GetSeqIdString(const list<CRef<CSeq_id> > & ids, bool believe_local_id)
-                        // {
-                        //     string all_id_str = NcbiEmptyString;
-                        //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
-                        //
-                        //     if (wid && (wid->Which()!= CSeq_id::e_Local || believe_local_id)){
-                        //         TGi gi = FindGi(ids);
-                        //
-                        // ```
-                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-739
-                        // ```c++
-                        //     string all_id_str = GetSeqIdString(cbs, believe_query);
-                        //     all_id_str += " ";
-                        //     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
-                        //
-                        //     // For tabular output, there is no limit on the line length.
-                        //     // There is also no extra line with the sequence length.
-                        //     if (tabular) {
-                        //         out << all_id_str;
-                        // ```
-                        query.query_line()
-                    )?;
-                    match shown {
-                        ShownSubjects::Fasta { path, .. } => writeln!(
-                            writer,
-                            "# Database: User specified sequence set (Input: {})",
-                            path.display()
-                        )?,
-                        ShownSubjects::Database { name, .. } => {
-                            writeln!(writer, "# Database: {name}")?
-                        }
-                    }
-                    if count > 0 {
-                        writeln!(
-                            writer,
-                            "# Fields: {}",
-                            options
-                                .fields
-                                .iter()
-                                .map(|f| field_name(f))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )?;
-                    }
-                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
-                    if !batch.search_skipped || options.merged_volumes() {
-                        writeln!(writer, "# {count} hits found")?;
-                    }
-                }
-                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
-                let listed = &lists[..lists.len().min(options.shown_lists())];
-                for list in listed {
-                    let subject = &subjects[list.oid];
-                    let shown_subject = ShownSubject {
-                        ids: shown.subject_ids(subject, list.oid),
-                    };
-                    let mut read = false;
-                    for hsp in &list.hsps {
-                        if !has_seqalign(hsp, options.gapped) {
-                            continue;
-                        }
-                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-                        // ```c++
-                        //        		const CBioseq_Handle& subject_bh =
-                        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-                        // ```
-                        // The subject's first row loads it where the query's batch did not
-                        // prefetch it: the texts of its taxonomy lookups follow the rows before it.
-                        if let (Some(reads), false) = (reads.as_mut(), read) {
-                            read = true;
-                            reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
-                        }
-                        // The default fields enter NCBI's alignment block and read the query
-                        // (`qaccver`, `qstart`, ...).
-                        let (form, scores, mapped) = if rows_empty(&hsp.hsp) {
-                            let loc = SubjectLoc::of(shown).of_list(list, options.gapped);
-                            let shown_hsps = list
-                                .hsps
-                                .iter()
-                                .filter(|h| has_seqalign(h, options.gapped))
-                                .count();
-                            // A `-subject` subject whose only shown HSP has length 0: the mapper's
-                            // rows without scores (`empty_rows::MappedRows`, which
-                            // `render_queries_with` let through).
-                            let mapped = super::empty_rows::subject_mapped_rows(
-                                loc,
-                                list,
-                                options.gapped,
-                                query,
-                                subject,
-                            );
-                            let (evalue, bit_score, _) =
-                                super::empty_rows::empty_row_scores(loc, shown_hsps, hsp);
-                            (
-                                super::empty_rows::tabular_empty_row(
-                                    loc,
-                                    true,
-                                    shown_hsps,
-                                    true,
-                                    matches!(
-                                        mapped,
-                                        Some(super::empty_rows::MappedRows::QueryRowWraps)
-                                    ),
-                                ),
-                                (evalue, bit_score),
-                                mapped,
-                            )
-                        } else {
-                            (
-                                super::empty_rows::TabularEmptyRow::Row,
-                                (hsp.evalue, hsp.bit_score),
-                                None,
-                            )
-                        };
-                        if form == super::empty_rows::TabularEmptyRow::Throws {
-                            writer.flush()?;
-                            return Err(NativeError::exception(
-                                &super::empty_rows::std_seg_lengths_not_accurate(),
-                            )
-                            .into());
-                        }
-                        if form == super::empty_rows::TabularEmptyRow::Leaves {
-                            let ids = AlignQueryIds::of(query);
-                            let a = DisplayAlignment::empty();
-                            let values: Vec<_> = options
-                                .fields
-                                .iter()
-                                .map(|f| match f.as_str() {
-                                    "qaccver" => String::from_utf8_lossy(&ids.ids[2]).into_owned(),
-                                    _ => field_value(f, query, &shown_subject, scores, &a),
-                                })
-                                .collect();
-                            if let Some(probe) = probe.as_deref_mut() {
-                                writer.flush()?;
-                                probe.begin(next_hsp);
-                            }
-                            writeln!(writer, "{}", values.join("	"))?;
-                            if let Some(probe) = probe.as_deref_mut() {
-                                writer.flush()?;
-                                probe.end(next_hsp);
-                            }
-                            next_hsp += 1;
-                            continue;
-                        }
-                        let a = if form == super::empty_rows::TabularEmptyRow::Mapped {
-                            let Some(super::empty_rows::MappedRows::Letters(mapped)) = &mapped
-                            else {
-                                return Err(super::empty_rows::EmptyRowsRefusal(
-                                    super::empty_rows::UNPORTED_SUBJECT_ALL_EMPTY.to_string(),
-                                )
-                                .into());
-                            };
-                            DisplayAlignment::mapped(mapped)
-                        } else {
-                            alignment(batch, hsp, subject, query, &code, options.scoring)?
-                        };
-                        let values: Vec<_> = options
-                            .fields
-                            .iter()
-                            .map(|f| field_value(f, query, &shown_subject, scores, &a))
-                            .collect();
-                        if let Some(probe) = probe.as_deref_mut() {
-                            writer.flush()?;
-                            probe.begin(next_hsp);
-                        }
-                        writeln!(writer, "{}", values.join("	"))?;
-                        if let Some(probe) = probe.as_deref_mut() {
-                            writer.flush()?;
-                            probe.end(next_hsp);
-                        }
-                        next_hsp += 1;
-                    }
-                }
-                // A text whose read the rows did not place comes after them.
-                if let Some(reads) = reads.as_mut() {
-                    reads.before_query(1, &mut *writer, &mut *stderr)?;
-                }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-                // ```c++
-                // CBlastTabularInfo::~CBlastTabularInfo()
-                // {
-                //     m_Ostream.flush();
-                // }
-                // ```
-                writer.flush().map_err(TabularFlushError)?;
-                Ok(())
-            })()
-            .map_err(tabular_io_error)?;
+    // The tabular reports: the default outfmt 6 and 7 are the `std` fields and a tab of the same
+    // formatter (`CBlastTabularInfo`) as any field list, so one writer writes them all (the shared
+    // rows of `report::tabular`, `tabular::write_blastx_tabular`); outfmt 10 and 20 and the
+    // organism report (18) have their spec.
+    let default_spec;
+    let spec = match options.tabular {
+        Some(spec) => spec,
+        None => {
+            debug_assert!(matches!(options.outfmt, 6 | 7), "outfmt {}", options.outfmt);
+            default_spec = crate::report::tabular::TabularSpec {
+                kind: if options.outfmt == 7 {
+                    crate::report::tabular::TabularKind::Commented
+                } else {
+                    crate::report::tabular::TabularKind::Tabular
+                },
+                fields: crate::report::tabular::STD_FIELDS.to_vec(),
+                delimiter: "\t".to_string(),
+            };
+            &default_spec
         }
-    }
-    Ok(())
+    };
+    super::tabular::write_blastx_tabular(
+        writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
+    )
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1420
 // ```c++
@@ -1823,29 +1231,58 @@ fn write_pairwise(
     let hits = match made_hits {
         Some(hits) => hits,
         None => {
-            made = pairwise_hits(options, queries, subjects, shown, batches)?;
+            made = pairwise_hits(options, queries, subjects, batches)?;
             &made
         }
     };
     let report = pairwise_metadata(options, subjects, shown);
-    let ids: Vec<std::sync::Arc<str>> = match shown {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
+    // ```c++
+    //     //get defline
+    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1582-1591
+    // ```c++
+    //     sdl->defline = "Unknown";
+    //     ...
+    //     try{
+    //         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
+    //         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
+    //     } catch (const CException&){
+    //         sdl->defline = "Unknown";
+    // ```
+    // The description-table labels, as every program's (`database_description_label`): a
+    // `-subject` record's is the title `GenerateDefline` makes of its title's bytes (`Unknown`
+    // where it throws), with `-parse_deflines` its ids and title.
+    let ids: Vec<std::sync::Arc<[u8]>> = match shown {
         ShownSubjects::Fasta { parsed, .. } => subjects
             .iter()
             .enumerate()
-            .map(|(index, s)| match parsed.shown(index) {
-                Some(subject) => {
-                    let label = crate::report::pairwise::database_description_label(
+            .map(|(index, s)| {
+                let label = match parsed.shown(index) {
+                    Some(subject) => crate::report::pairwise::database_description_label(
                         b"",
                         &crate::report::defline::UNNAMED_SOURCE,
                         Some(subject),
                         true,
-                    );
-                    std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
-                }
-                None => std::sync::Arc::from(subject_label(s).0),
+                    ),
+                    None => crate::report::pairwise::database_description_label(
+                        &s.title,
+                        &crate::report::defline::UNNAMED_SOURCE,
+                        None,
+                        true,
+                    ),
+                };
+                std::sync::Arc::from(label)
             })
             .collect(),
         ShownSubjects::Database { reported, .. } => reported.descriptions(),
+    };
+    // The `-subject` records' titles, whose headings `write_blastx_pairwise_report` makes
+    // (`pairwise::record_heading`).
+    let record_titles: Vec<&[u8]> = match shown {
+        ShownSubjects::Fasta { .. } => subjects.iter().map(|s| s.title.as_slice()).collect(),
+        ShownSubjects::Database { .. } => Vec::new(),
     };
     let database = match shown {
         ShownSubjects::Fasta { .. } => None,
@@ -1886,6 +1323,7 @@ fn write_pairwise(
         &valid,
         &skipped,
         &ids,
+        &record_titles,
         &report,
         &BlastxPairwiseOptions {
             word_threshold: options.threshold,
@@ -1930,7 +1368,6 @@ pub(super) fn pairwise_hits(
     options: &ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
-    shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
 ) -> Result<Vec<crate::report::pairwise::PairwiseHit>> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
@@ -1992,19 +1429,10 @@ pub(super) fn pairwise_hits(
                         positives: Some(a.positive),
                         gaps: Some(a.gaps),
                         subject_length: Some(subject.placement().length),
-                        // A database sequence's description line is made from its stored
-                        // title alone (`ReportedSubjects::descriptions`).
-                        subject_title: match shown {
-                            ShownSubjects::Fasta { parsed, .. }
-                                if parsed.shown(list.oid).is_some() =>
-                            {
-                                None
-                            }
-                            ShownSubjects::Fasta { .. } => {
-                                subject_label(subject).1.map(str::to_owned)
-                            }
-                            ShownSubjects::Database { .. } => None,
-                        },
+                        // The descriptions and headings are made from the records' titles
+                        // (`write_pairwise`) and a database sequence's stored title
+                        // (`ReportedSubjects::descriptions`), not from the hit.
+                        subject_title: None,
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
                         subject_stored_gaps: a.subject_stored_gaps,
@@ -2394,15 +1822,8 @@ pub(super) fn query_warning(
     if !query.sequence.is_empty() && !search_skipped && !empty_database {
         return Vec::new();
     }
-    let mut id = query.warning_id().to_vec();
-    if !query.title.is_empty() {
-        id.push(b' ');
-        id.extend_from_slice(query.title.as_bytes());
-    }
-    if id.len() > 35 {
-        id.truncate(25);
-        id.extend_from_slice(b".. ");
-    }
+    // The id and the title cut as every program's query warning (`warning_query_id`).
+    let id = crate::report::query_warnings::warning_query_id(query.warning_id(), &query.title);
     let mut bytes = format!("Warning: [{}] ", options.program().lower).into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");

@@ -14057,7 +14057,7 @@ fn run_call(
                     .iter()
                     .enumerate()
                     .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
-                        query_name: String::new(),
+                        query_name: Vec::new(),
                         // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
                         // ```c++
                         //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){

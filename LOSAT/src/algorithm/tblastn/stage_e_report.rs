@@ -1438,7 +1438,7 @@ fn write_pairwise(
             valid: true,
             batch_skipped: false,
             // TBLASTN's report reads the query's title bytes by query index (`query_titles`).
-            query_name: String::new(),
+            query_name: Vec::new(),
             // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){

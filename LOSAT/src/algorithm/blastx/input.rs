@@ -1,5 +1,5 @@
 //! Local FASTA state before translation. Internal IDs and defline titles differ.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
 // ```c++
 // bool CStreamLineReader::AtEOF(void) const
@@ -44,7 +44,9 @@ use crate::ncbi_str::{is_space, truncate_spaces, truncate_spaces_begin, truncate
 // ```
 pub struct FastaRecord {
     pub internal_id: String,
-    pub title: String,
+    /// The title bytes as the reader keeps them (`fasta_reader::FastaRecord::title`): any bytes,
+    /// also bytes that are not UTF-8, which NCBI's reader keeps as they are.
+    pub title: Vec<u8>,
     pub sequence: Vec<u8>,
     pub lowercase_masks: Vec<(i32, i32)>,
     pub warnings: Vec<InputWarning>,
@@ -73,31 +75,43 @@ impl FastaRecord {
         self.source.as_ref()?.believed.as_deref()
     }
 
-    /// What `Query=` and `# Query:` show (`fasta_reader::FastaRecord::query_line`).
-    pub fn query_line(&self) -> std::borrow::Cow<'_, str> {
-        if self.believed().is_none() || self.title.is_empty() {
-            return match self.believed() {
-                Some(_) => std::borrow::Cow::Borrowed(&self.internal_id),
-                None => std::borrow::Cow::Borrowed(&self.title),
-            };
+    /// The record's names, whose rules the shared reader's records follow too
+    /// (`fasta_reader::RecordNames`).
+    pub fn names(&self) -> crate::blastinput::fasta_reader::RecordNames<'_> {
+        crate::blastinput::fasta_reader::RecordNames {
+            local_id: &self.internal_id,
+            title: &self.title,
+            believed: self.believed(),
         }
-        std::borrow::Cow::Owned(format!("{} {}", self.internal_id, self.title))
     }
 
-    /// The id of the record in NCBI's warnings (`fasta_reader::FastaRecord::warning_id`).
+    /// What `Query=` and `# Query:` show (`RecordNames::query_line`).
+    pub fn query_line(&self) -> std::borrow::Cow<'_, [u8]> {
+        self.names().query_line()
+    }
+
+    /// The id of the record in NCBI's warnings (`RecordNames::warning_id`).
     pub fn warning_id(&self) -> &[u8] {
-        match self.believed() {
-            Some(ids) => &ids.warning_id,
-            None => self.internal_id.as_bytes(),
-        }
+        self.names().warning_id()
     }
 
-    /// The Seq-id of the record in the Seq-aligns and the archive.
+    /// The Seq-id of the record in the Seq-aligns and the archive (`RecordNames::seq_id`).
     pub fn seq_id(&self) -> crate::report::seqid::SeqId<'_> {
-        match self.believed() {
-            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
-            None => crate::report::seqid::SeqId::Local(&self.internal_id),
-        }
+        self.names().seq_id()
+    }
+
+    /// The ID that the tabular formats and the reports show (`RecordNames::shown_id`).
+    pub fn shown_id(&self) -> &[u8] {
+        self.names().shown_id()
+    }
+
+    /// The subject ID of the tabular formats of a `-subject` record
+    /// (`RecordNames::subject_tabular_id`).
+    pub fn subject_tabular_id(
+        &self,
+        protein: bool,
+    ) -> Result<Vec<u8>, crate::report::defline::UnknownEncoding> {
+        self.names().subject_tabular_id(protein)
     }
 
     /// Where the letters lie in the record: the start of the `-query_loc` / `-subject_loc`
@@ -336,8 +350,9 @@ pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<Fas
     // }
     //
     // ```
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("cannot read BLASTX input {}", path.display()))?;
+    let file = anyhow::Context::with_context(std::fs::File::open(path), || {
+        format!("cannot read BLASTX input {}", path.display())
+    })?;
     parse_fasta_stream_with_warnings(
         &mut FastaStream::from_file(file),
         protein,
@@ -776,7 +791,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 },
             )? as usize;
             let record = current
-                .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
+                .get_or_insert_with(|| new_record(batch.number(&records), protein, Vec::new()));
             for text in messages {
                 let warning = InputWarning {
                     line: line_index + 1,
@@ -904,8 +919,22 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 .skip(1)
                 .position(|&b| b < b' ')
                 .map_or(title_bytes.len(), |i| i + 1);
-            let title = String::from_utf8(truncate_spaces_end(&title_bytes[..end]).to_vec())
-                .context("invalid UTF-8 FASTA title")?;
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:214-223
+            // ```c++
+            //         for (pos = title_start + 1;  pos < len;  ++pos) {
+            //             if ((unsigned char)defline[pos] < ' ') {
+            //             break;
+            //             }
+            //         }
+            //         // Parse the title elsewhere - after the molecule has been deduced
+            //         data.titles.push_back(
+            //             SLineTextAndLoc(
+            //                 defline.substr(title_start, pos - title_start), lineNumber));
+            // ```
+            // The title's bytes as they are, as the shared reader keeps them
+            // (`fasta_reader::FastaRecord::title`): NCBI reads any byte at or above 0x20 into
+            // the title, also bytes that are not UTF-8, and its writers take them as they are.
+            let title = truncate_spaces_end(&title_bytes[..end]).to_vec();
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1677
             // ```c++
             //     // check for nuc or aa sequences at the end of the title
@@ -1011,8 +1040,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             raw_residues = 0;
             continue;
         }
-        let record = current
-            .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
+        let record =
+            current.get_or_insert_with(|| new_record(batch.number(&records), protein, Vec::new()));
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
@@ -1208,7 +1237,7 @@ fn read_believed_defline(
     })
 }
 
-fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
+fn new_record(index: usize, protein: bool, title: Vec<u8>) -> FastaRecord {
     FastaRecord {
         internal_id: format!(
             "{}_{n}",
@@ -1433,6 +1462,59 @@ impl std::error::Error for NoDeflineError {}
 // ```
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:214-223 (quoted at
+    // the reader): the title is the defline's bytes up to the first byte below 0x20 after its first,
+    // as they are; NCBI BLAST+ 2.17.0 blastx runs every such title (K/SURVEY_K4j.md §1).
+    #[test]
+    fn titles_keep_their_bytes_and_their_names_are_the_shared_records() {
+        let titles: [&[u8]; 12] = [
+            b"q1 a\xc3\xa9b z",
+            b"q1 a\xe9b z",
+            b"q1 a\xa9b z",
+            b"q1 a\x81b z",
+            b"q1 a\xc0\x80b z",
+            b"q1 a\xe0\x81\x81b z",
+            b"q1 a\xed\xa0\x80b z",
+            b"q1 a\xf5\x80\x80\x80b z",
+            b"q1 one\xe9",
+            b"\x01q1 ab z",
+            b"q1\xe9 rest",
+            b"Subject_1\x81 rest",
+        ];
+        for title in titles {
+            let mut data = b">".to_vec();
+            data.extend_from_slice(title);
+            data.extend_from_slice(b"\nACGT\n");
+            for protein in [false, true] {
+                let records = parse_fasta(&data, protein, false).unwrap();
+                let record = &records[0];
+                assert_eq!(record.title, title, "{title:?}");
+                let shared = crate::blastinput::fasta_reader::FastaRecord::new(
+                    record.internal_id.clone(),
+                    title,
+                    b"ACGT",
+                );
+                assert_eq!(record.query_line(), shared.query_line(), "{title:?}");
+                assert_eq!(record.shown_id(), shared.shown_id(), "{title:?}");
+                assert_eq!(record.warning_id(), shared.warning_id(), "{title:?}");
+                assert_eq!(
+                    record.subject_tabular_id(true),
+                    shared.subject_tabular_id(true),
+                    "{title:?}"
+                );
+            }
+        }
+        // A byte below 0x20 after the first ends the title.
+        for (data, title) in [
+            (&b">q1 a\x01b z\nACGT\n"[..], &b"q1 a"[..]),
+            (b">q1 a\tb z\nACGT\n", b"q1 a"),
+            (b">q1\x01 rest\nACGT\n", b"q1"),
+        ] {
+            assert_eq!(parse_fasta(data, false, false).unwrap()[0].title, title);
+        }
+    }
+
     #[test]
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:736-751
     // ```c++
@@ -1475,7 +1557,7 @@ mod tests {
     // ```
     fn ncbi_reader_preserves_normalized_positions_and_warnings() {
         let r = parse_fasta(b">  q description   \r\natg1-2-3ACT;rest\r\n", false, true).unwrap();
-        assert_eq!(r[0].title, "q description");
+        assert_eq!(r[0].title, b"q description");
         assert_eq!(r[0].internal_id, "Query_1");
         assert_eq!(r[0].sequence, b"ATGACT");
         assert_eq!(r[0].lowercase_masks, vec![(0, 2)]);
@@ -3530,7 +3612,7 @@ mod defline_tests {
     }
 
     /// `read` with NCBI's data loaders on (`FastaStream::seq_id_role`): the titles and letters.
-    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(String, Vec<u8>)>> {
+    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
         stream.parse_deflines = parse_deflines;
         stream.seq_id_role = Some("query");

@@ -248,41 +248,29 @@ impl FastaRecord {
         self
     }
 
-    /// What `Query=` and `# Query:` show: the title, and with `-parse_deflines` the id before it
-    /// (`local_id`, `BelievedIds::bare_id`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
-    /// ```c++
-    ///     string all_id_str = GetSeqIdString(cbs, believe_query);
-    ///     all_id_str += " ";
-    ///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
-    /// ```
+    /// The record's names (`RecordNames`): its local ID, title and the Seq-ids `-parse_deflines`
+    /// read.
+    pub fn names(&self) -> RecordNames<'_> {
+        RecordNames {
+            local_id: &self.local_id,
+            title: &self.title,
+            believed: self.believed(),
+        }
+    }
+
+    /// What `Query=` and `# Query:` show (`RecordNames::query_line`).
     pub fn query_line(&self) -> Cow<'_, [u8]> {
-        if self.believed().is_none() {
-            return Cow::Borrowed(&self.title);
-        }
-        let mut line = self.local_id.clone().into_bytes();
-        if !self.title.is_empty() {
-            line.push(b' ');
-            line.extend_from_slice(&self.title);
-        }
-        Cow::Owned(line)
+        self.names().query_line()
     }
 
-    /// The id of the record in NCBI's warnings (`report::query_warnings::warning_query_id`).
+    /// The id of the record in NCBI's warnings (`RecordNames::warning_id`).
     pub fn warning_id(&self) -> &[u8] {
-        match self.believed() {
-            Some(ids) => &ids.warning_id,
-            None => self.local_id.as_bytes(),
-        }
+        self.names().warning_id()
     }
 
-    /// The Seq-id of the record in the Seq-aligns and the archive.
+    /// The Seq-id of the record in the Seq-aligns and the archive (`RecordNames::seq_id`).
     pub fn seq_id(&self) -> crate::report::seqid::SeqId<'_> {
-        match self.believed() {
-            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
-            None => crate::report::seqid::SeqId::Local(&self.local_id),
-        }
+        self.names().seq_id()
     }
 
     /// The record as the Seq-loc of the archive's `seq-loc-list` (`-parse_deflines`, an id that is
@@ -296,44 +284,18 @@ impl FastaRecord {
             .seq_loc(from, from + self.sequence.len() as i32 - 1)
     }
 
-    /// The ID that the tabular formats and the reports show for a record with a local
-    /// ID: the title up to its first space, or the local ID when there is no title. With
-    /// `-parse_deflines` the `qaccver` of its ids.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
-    /// (`s_ReplaceLocalId`; see `report::` for its callers)
+    /// The ID that the tabular formats and the reports show (`RecordNames::shown_id`).
     pub fn shown_id(&self) -> &[u8] {
-        if let Some(ids) = self.believed() {
-            return &ids.tabular[2];
-        }
-        if self.title.is_empty() {
-            self.local_id.as_bytes()
-        } else {
-            let end = self
-                .title
-                .iter()
-                .position(|&byte| byte == b' ')
-                .unwrap_or(self.title.len());
-            &self.title[..end]
-        }
+        self.names().shown_id()
     }
 
-    /// The subject ID of the tabular formats of a `-subject` record (`sseqid`, `sacc`, `saccver`
-    /// of the default report): `report::defline::tabular_subject_id`, or with `-parse_deflines`
-    /// the `saccver` of its ids (a record shown as one without the option keeps the first:
-    /// `BelievedIds::subject_local`).
+    /// The subject ID of the tabular formats of a `-subject` record
+    /// (`RecordNames::subject_tabular_id`).
     pub fn subject_tabular_id(
         &self,
         protein: bool,
     ) -> Result<Vec<u8>, crate::report::defline::UnknownEncoding> {
-        match self.believed() {
-            Some(ids) if !ids.subject_local() => Ok(ids.tabular[2].clone()),
-            _ => crate::report::defline::tabular_subject_id(
-                self.local_id.as_bytes(),
-                &self.title,
-                protein,
-            ),
-        }
+        self.names().subject_tabular_id(protein)
     }
 
     /// The record cut to the residues `from..to_exclusive` of a range (`-query_loc`,
@@ -406,6 +368,100 @@ impl FastaRecord {
         self.sequence.truncate(to_exclusive);
         self.sequence.drain(..from);
         self.warnings = Vec::new();
+    }
+}
+
+/// The names of a record that the reports show, read from its local ID, its title bytes and
+/// the Seq-ids `-parse_deflines` read: the one owner of these rules for the shared reader's
+/// records (`FastaRecord::names`) and BLASTX's (`algorithm::blastx::input::FastaRecord::names`).
+#[derive(Clone, Copy)]
+pub struct RecordNames<'a> {
+    /// The generated local ID (`Query_N`, `Subject_N`), or with `-parse_deflines` the bare id
+    /// (`BelievedIds::bare_id`).
+    pub local_id: &'a str,
+    /// The title bytes as read (any bytes, also bytes that are not UTF-8).
+    pub title: &'a [u8],
+    /// The Seq-ids `-parse_deflines` read, `None` without the option.
+    pub believed: Option<&'a believed::BelievedIds>,
+}
+
+impl<'a> RecordNames<'a> {
+    /// What `Query=` and `# Query:` show: the title, and with `-parse_deflines` the id before it
+    /// (`local_id`, `BelievedIds::bare_id`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
+    /// ```c++
+    ///     string all_id_str = GetSeqIdString(cbs, believe_query);
+    ///     all_id_str += " ";
+    ///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
+    /// ```
+    pub fn query_line(self) -> Cow<'a, [u8]> {
+        if self.believed.is_none() {
+            return Cow::Borrowed(self.title);
+        }
+        let mut line = self.local_id.as_bytes().to_vec();
+        if !self.title.is_empty() {
+            line.push(b' ');
+            line.extend_from_slice(self.title);
+        }
+        Cow::Owned(line)
+    }
+
+    /// The id of the record in NCBI's warnings (`report::query_warnings::warning_query_id`).
+    pub fn warning_id(self) -> &'a [u8] {
+        match self.believed {
+            Some(ids) => &ids.warning_id,
+            None => self.local_id.as_bytes(),
+        }
+    }
+
+    /// The Seq-id of the record in the Seq-aligns and the archive: the best of the ids
+    /// `-parse_deflines` read, else the local ID.
+    pub fn seq_id(self) -> crate::report::seqid::SeqId<'a> {
+        match self.believed {
+            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
+            None => crate::report::seqid::SeqId::Local(self.local_id),
+        }
+    }
+
+    /// The ID that the tabular formats and the reports show for a record with a local
+    /// ID: the title up to its first space, or the local ID when there is no title. With
+    /// `-parse_deflines` the `qaccver` of its ids.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
+    /// (`s_ReplaceLocalId`; see `report::` for its callers)
+    pub fn shown_id(self) -> &'a [u8] {
+        if let Some(ids) = self.believed {
+            return &ids.tabular[2];
+        }
+        if self.title.is_empty() {
+            self.local_id.as_bytes()
+        } else {
+            let end = self
+                .title
+                .iter()
+                .position(|&byte| byte == b' ')
+                .unwrap_or(self.title.len());
+            &self.title[..end]
+        }
+    }
+
+    /// The subject ID of the tabular formats of a `-subject` record (`sseqid`, `sacc`, `saccver`
+    /// of the default report): `report::defline::tabular_subject_id`, or with `-parse_deflines`
+    /// the `saccver` of its ids (a record shown as one without the option keeps the first:
+    /// `BelievedIds::subject_local`).
+    pub fn subject_tabular_id(
+        self,
+        protein: bool,
+    ) -> Result<Vec<u8>, crate::report::defline::UnknownEncoding> {
+        match self.believed {
+            Some(ids) if !ids.subject_local() => Ok(ids.tabular[2].clone()),
+            _ => crate::report::defline::tabular_subject_id(
+                self.local_id.as_bytes(),
+                self.title,
+                protein,
+            ),
+        }
     }
 }
 

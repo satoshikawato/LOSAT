@@ -371,7 +371,7 @@ fn kept_blocks_equal_score_block_of_the_unsplit_chunk() {
     };
     let record = |sequence: Vec<u8>| FastaRecord {
         internal_id: String::new(),
-        title: String::new(),
+        title: Vec::new(),
         sequence,
         lowercase_masks: Vec::new(),
         warnings: Vec::new(),
@@ -531,7 +531,7 @@ fn a_batch_that_is_not_searched_does_not_refuse_a_long_subject() {
     let (_, _, o) = fixture("S06_seed.fna");
     let record = |id: &str, sequence: Vec<u8>| FastaRecord {
         internal_id: id.into(),
-        title: String::new(),
+        title: Vec::new(),
         sequence,
         lowercase_masks: Vec::new(),
         warnings: Vec::new(),

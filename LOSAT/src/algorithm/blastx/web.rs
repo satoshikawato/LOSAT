@@ -188,14 +188,7 @@ pub(crate) fn run_pair(
     //         		warning += "Subject sequence contains no data";
     //         		ERR_POST(Warning << warning);
     // ```
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
-            diagnostics.borrow_mut(),
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            s.internal_id,
-            s.title
-        )?;
-    }
+    super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();

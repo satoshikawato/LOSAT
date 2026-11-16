@@ -543,6 +543,77 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
     psi_search_and_object(pssm, PssmReader::PSIBLAST).map(|(search, _)| search)
 }
 
+/// The query's letters (`Seq-inst.seq-data`) as NCBIstdaa letters; none when the data is missing
+/// or holds a code or letter outside NCBIstdaa.
+fn query_letters(query: &crate::report::serial::pssm::PssmQuery) -> Vec<u8> {
+    match query.inst.seq_data.as_ref() {
+        Some(SeqData::Ncbistdaa(codes)) => codes
+            .iter()
+            .map(|&code| NCBISTDAA_TO_AMINOACID.get(code as usize).copied())
+            .collect::<Option<Vec<u8>>>()
+            .unwrap_or_default(),
+        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
+            .iter()
+            .map(|&c| NCBISTDAA_TO_AMINOACID.contains(&c).then_some(c))
+            .collect::<Option<Vec<u8>>>()
+            .unwrap_or_default(),
+        None => Vec::new(),
+    }
+}
+
+/// The query record of the PSSM's Bioseq (`PsiSearch::query`, the reasons in
+/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), other ids are
+/// believed; a Bioseq without one (only where the object manager stops the run first,
+/// `stopped_as_query_joins_scope`) has no id.
+fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRecord {
+    match ids {
+        [] => FastaRecord::new(String::new(), title, letters),
+        [ParsedSeqId::Local(ObjectId::Str(id))] => {
+            FastaRecord::new(String::from_utf8_lossy(id).into_owned(), title, letters)
+        }
+        [ParsedSeqId::Local(ObjectId::Id(id))] => FastaRecord::new(id.to_string(), title, letters),
+        _ => FastaRecord::new(String::new(), title, letters).believing(ids.to_vec()),
+    }
+}
+
+/// The PSSM search of a PSSM whose query NCBI's object manager stops at as it joins the scope
+/// (`AnnotOutcome::abort`, `psi_search_and_object`): the query record, the object manager's
+/// messages and exception; no rows, values, request or PSSM files (NCBI reads none of them).
+fn stopped_as_query_joins_scope(
+    pssm: PssmWithParameters,
+    annot: super::annot_index::AnnotOutcome,
+    defline_reads_annot: bool,
+) -> (PsiSearch, InPssmFile) {
+    let query = pssm
+        .pssm
+        .query
+        .as_ref()
+        .expect("the query that joins the scope");
+    let title = query.titles().first().copied().unwrap_or(&[]).to_vec();
+    let search = PsiSearch {
+        pssm: QueryPssm { rows: Vec::new() },
+        freq_ratios: Vec::new(),
+        stats: PssmStats::default(),
+        query: query_record_of(&query.ids, &title, &query_letters(query)),
+        query_ids: query.ids.clone(),
+        validation_error: None,
+        scores_error: None,
+        setup_messages: Vec::new(),
+        warning_title: Some(Vec::new()),
+        request: None,
+        annot,
+        defline_reads_annot,
+        round_query: None,
+        split_setup: None,
+    };
+    let file = InPssmFile {
+        object: pssm,
+        computed: false,
+        valid: false,
+    };
+    (search, file)
+}
+
 /// The PSSM search of `pssm` and the PSSM as NCBI's `CPsiBlastImpl` leaves it before the first
 /// round: a PSSM of frequency ratios only gets the scores and gapped values that the PSSM engine
 /// computes for it (`with_computed_scores`).
@@ -585,6 +656,35 @@ pub(crate) fn psi_search_and_object(
         _ => super::annot_index::AnnotOutcome::default(),
     };
     let defline_reads_annot = defline_reads_annot(query);
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537, 548 and
+    // c++/src/app/blast/tblastn_app.cpp:226, 307, 324
+    // ```c++
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    // ...
+    //         retval = DoIterations(opts_hndl, query, pssm, db_adapter, scope, formatter);
+    // ```
+    // ```c++
+    //             scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    // ...
+    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+    // ...
+    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
+    // ```
+    // The object manager's exception ends the run as the query joins the scope, before NCBI reads
+    // any other value of the PSSM (its check, scores, sizes, statistics, letters and ids; its
+    // search strategy's request and the PSSM files): NCBI BLAST+ 2.17.0 writes plain t04's stop
+    // for every such PSSM (line RG D3-1 review 4 S2 and `r3/s2/`: a local id among other ids, the
+    // sizes, a score outside one letter's range, the scores' sum, a negative lambda, no Seq-id, a
+    // `BL_ORD_ID` or `giim` id, an id without an accession or a name, an empty local id, a
+    // nucleotide Seq-inst, letters of another length, frequency ratios only, by row). LOSAT's
+    // refusals of those values are for the runs that read them.
+    if annot.abort.is_some() {
+        return Ok(stopped_as_query_joins_scope(
+            pssm,
+            annot,
+            defline_reads_annot,
+        ));
+    }
     let validation_error = validation_error(&pssm);
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
     // (`x_CreatePssmScoresFromFrequencyRatios`, below).
@@ -666,11 +766,6 @@ pub(crate) fn psi_search_and_object(
     {
         return Err(reader.refuse("a PSSM query whose Seq-id holds an empty local id"));
     }
-    let local_id = match ids {
-        [ParsedSeqId::Local(ObjectId::Str(id))] => Some(String::from_utf8_lossy(id).into_owned()),
-        [ParsedSeqId::Local(ObjectId::Id(id))] => Some(id.to_string()),
-        _ => None,
-    };
     let titles = query.titles();
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:669-683
     // ```c++
@@ -750,19 +845,7 @@ pub(crate) fn psi_search_and_object(
             query.inst.repr.0, query.inst.mol.0
         )));
     }
-    let letters: Vec<u8> = match query.inst.seq_data.as_ref() {
-        Some(SeqData::Ncbistdaa(codes)) => codes
-            .iter()
-            .map(|&code| NCBISTDAA_TO_AMINOACID.get(code as usize).copied())
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
-            .iter()
-            .map(|&c| NCBISTDAA_TO_AMINOACID.contains(&c).then_some(c))
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
+    let letters = query_letters(query);
     let length = query.inst.length.map_or(-1, i64::from);
     if letters.is_empty() || letters.len() as i64 != length || letters.contains(&b'-') {
         return Err(reader.refuse(
@@ -987,10 +1070,7 @@ pub(crate) fn psi_search_and_object(
         pssm: QueryPssm { rows },
         freq_ratios,
         stats,
-        query: match local_id {
-            Some(local_id) => FastaRecord::new(local_id, title, &letters),
-            None => FastaRecord::new(String::new(), title, &letters).believing(ids.to_vec()),
-        },
+        query: query_record_of(ids, title, &letters),
         query_ids: ids.to_vec(),
         validation_error,
         scores_error,
@@ -1624,6 +1704,56 @@ mod tests {
         assert!(stats.lambda_ungapped.is_some() && stats.kappa.is_some() && stats.h.is_some());
         // The gapped Lambda of psiblast's PSSMs is the table's 0.267 as NCBI reads `{ 267, 10, -3 }`.
         assert_eq!(stats.lambda, Some(267.0 * 1e-3));
+    }
+
+    // Line RG D3-1 review 4 S1, S2: a PSSM whose query's annotations end the run as the query joins
+    // NCBI's scope (`d3om_t04_dup_partial_id`, two `partial` columns: CAnnotException) gets that stop
+    // whatever the values NCBI reads later; NCBI BLAST+ 2.17.0 writes plain t04's bytes for each
+    // variant below (`F/d3a/r3/s2`, review 4 `p3`), and neither a search strategy's request nor a
+    // PSSM file (`-out_pssm`, review 4 `p2`).
+    #[test]
+    fn the_object_managers_stop_comes_before_the_pssms_values() {
+        let text = String::from_utf8(gunzip("pssm/d3om_t04_dup_partial_id.asn.gz")).unwrap();
+        let variant = |from: &str, to: &str| {
+            assert_eq!(text.matches(from).count(), 1, "{from}");
+            text.replace(from, to)
+        };
+        let local = "local str \"Query_1\"";
+        for (name, pssm) in [
+            ("t04", text.clone()),
+            ("dims", variant("numColumns 30,", "numColumns 31,")),
+            (
+                "range",
+                variant(
+                    "scores {\n        -32768,\n        -1,",
+                    "scores {\n        -32768,\n        40000,",
+                ),
+            ),
+            ("neglambda", variant("{ 267, 10, -3 }", "{ -267, 10, -3 }")),
+            (
+                "ids",
+                variant(local, "local str \"Query_1\",\n        gi 5"),
+            ),
+            ("noid", variant(&format!("{local}\n"), "")),
+            ("emptylocal", variant(local, "local str \"\"")),
+            ("textnoacc", variant(local, "genbank { version 1 }")),
+            ("molna", variant("mol aa,", "mol na,")),
+            ("letters", variant("length 30,", "length 31,")),
+        ] {
+            let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(pssm.as_bytes())
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            let reader = PssmReader {
+                strategy: true,
+                database: true,
+                ..PssmReader::PSIBLAST
+            };
+            let (search, file) = psi_search_and_object(pssm, reader)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert!(search.annot.abort.is_some(), "{name}");
+            assert!(search.request.is_none(), "{name}");
+            assert!(search.refuse_request_members("PSIBLAST").is_ok(), "{name}");
+            assert!(!file.valid, "{name}");
+        }
     }
 
     // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot

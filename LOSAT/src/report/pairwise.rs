@@ -734,7 +734,7 @@ fn write_subject_alignments_part<W: Write>(
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
-    let heading = super::defline::generate_defline(title, protein, false);
+    let heading = record_heading(title, protein, parsed, s_idx);
     if part.start == 0 {
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -753,11 +753,9 @@ fn write_subject_alignments_part<W: Write>(
             writer.flush()?;
             probe.begin(hsp_index);
         }
-        match heading {
+        match &heading {
             Ok(_) => write_hsp(writer, hit)?,
-            Err(super::defline::UnknownEncoding) => {
-                write_skipped_alignment(writer, &record_skipped_id(parsed, s_idx))?
-            }
+            Err(id) => write_skipped_alignment(writer, id)?,
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -4116,6 +4114,28 @@ fn parsed_subject(
         .filter(|subject| !subject.shown_as_record())
 }
 
+/// The heading of the alignments of `-subject` record `s_idx` (title `title`, of a protein or a
+/// nucleotide record): the title that `GenerateDefline` makes of it (flags 0), or where it throws
+/// (`UnknownEncoding`) the id of NCBI's line in place of each alignment (`record_skipped_id`). The
+/// one rule of every program's `-subject` headings (`write_subject_alignments_part`, BLASTX's
+/// `write_blastx_pairwise_report`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
+/// ```c++
+/// 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+/// ```
+/// (the catch of the line in place of the alignment: showalign.cpp:1950-1981, quoted at
+/// `write_subject_alignments_part`)
+fn record_heading(
+    title: &[u8],
+    protein: bool,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> Result<super::defline::Defline, Vec<u8>> {
+    super::defline::generate_defline(title, protein, false)
+        .map_err(|super::defline::UnknownEncoding| record_skipped_id(parsed, s_idx))
+}
+
 /// The id of NCBI's line in place of each alignment of `-subject` record `s_idx` whose heading
 /// it cannot make (`write_subject_alignments_part`): `GetSeqIdString` of the Seq-align id, the local id
 /// `Subject_N` (N = `s_idx` + 1) of a record without parsed ids, else its parsed id (`parsed`:
@@ -7332,19 +7352,14 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
-                    // A `-subject` record's heading: the title that `GenerateDefline` makes (flags
-                    // 0), as the other programs' (`write_record_alignments`); NCBI's line in place
-                    // of each alignment where it throws.
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
-                    // ```c++
-                    // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
-                    // ```
+                    // A `-subject` record's heading, as the other programs' (`record_heading`):
+                    // NCBI's line in place of each alignment where it cannot be made.
                     None => {
                         let title = record_titles
                             .get(*oid as usize)
                             .copied()
                             .unwrap_or_default();
-                        match super::defline::generate_defline(title, true, false) {
+                        match record_heading(title, true, records_parsed, *oid) {
                             Ok(heading) => {
                                 write_subject_header(
                                     &mut writer,
@@ -7354,9 +7369,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                                 )?;
                                 None
                             }
-                            Err(super::defline::UnknownEncoding) => {
-                                Some(record_skipped_id(records_parsed, *oid))
-                            }
+                            Err(id) => Some(id),
                         }
                     }
                 };

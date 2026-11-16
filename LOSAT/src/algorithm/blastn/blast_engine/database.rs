@@ -164,7 +164,11 @@ const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 /// block buffer `kept` (`SeqDb::x_read_block_into`: below 1 MiB the worker's own buffer, kept from
 /// one block to the next; a block of 1 MiB or more, a long sequence or at one thread a block of
 /// exactly 1 MiB, in a buffer of `utils::x_mapped::X_BYTES`); `x_done_kept_block` gives the
-/// buffer back.
+/// buffer back. Out of line, as the read of a block was before: inlined into the one-thread loop
+/// (`search_blocks_of`), its call of `Volume::read_block_in` with arguments on the stack made the
+/// loop pass the stack argument of every subject's `search_subject` call with pushes (+3
+/// instructions per subject on syn megablast).
+#[inline(never)]
 fn x_read_block(
     db: &SeqDb,
     range: BlockRange,

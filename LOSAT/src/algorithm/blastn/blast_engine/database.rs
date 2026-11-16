@@ -643,20 +643,23 @@ impl BlastnDatabase {
     /// (`shared::batch_prefetch`): the taxonomy texts of [`BlastnDatabase::prefetch_messages`],
     /// then the warning where the prefetch fails, at a subject whose lookup fails or one without
     /// a Bioseq that a Seq-align on the query's minus strand flips (`gapped`: each HSP is a
-    /// Seq-align, else a subject's first HSP decides).
+    /// Seq-align, else a subject's first HSP decides); `xml_before`: the outfmt 5 reports before
+    /// the batch (`shared::XmlReportsBefore`).
     pub(super) fn batch_prefetch(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         query: usize,
-    ) -> Result<Vec<u8>> {
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
             Self::prefetch_subjects(titles, hit_lists, gapped),
             PROGRAM,
             query,
+            xml_before,
         )
     }
 

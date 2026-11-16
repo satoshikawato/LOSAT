@@ -647,14 +647,14 @@ fn the_error_comes_before_its_error_archive_in_one_stream() {
 }
 
 /// BLASTX reads its query file once before the search with outfmt 5 and 13 to 16, to refuse a
-/// title its writers cannot write before any byte (`blast_xml::prescan_queries`; outfmt 11 writes
-/// NCBI's `#` and posts instead and reads the query once, as the search does, so a reader error
-/// comes first there too). Under `-parse_deflines` that read stops where the search's
-/// does, so a reader error that NCBI meets before it writes a title comes first: a first line
-/// that is not a defline (any format, NCBI 2.17.0, probe `SM/prescan/probe.py`), or a Seq-id NCBI
-/// cannot make in the batch of the record with the title. With `BATCH_SIZE=1` that record is its
-/// own batch, which NCBI writes before it reads the bad Seq-id: LOSAT refuses its title before any
-/// byte (NCBI stops with an exception).
+/// title of punctuation alone, on which NCBI crashes, before any byte (`blast_xml::prescan_queries`;
+/// outfmt 11 reads the query once, as the search does, so a reader error comes first there too).
+/// Under `-parse_deflines` that read stops where the search's does, so a reader error that NCBI
+/// meets before it writes a title comes first: a first line that is not a defline (any format,
+/// NCBI 2.17.0, probe `SM/prescan/probe.py`), or a Seq-id NCBI cannot make in the batch of the
+/// record with the title. With `BATCH_SIZE=1` that record is its own batch, which NCBI writes
+/// before it reads the bad Seq-id: its title (not US-ASCII) fails the first header, so NCBI writes
+/// nothing and stops with its exception (rc 255), and LOSAT writes the same.
 #[test]
 fn blastx_reads_its_query_before_the_search_as_the_search_does() {
     let dir = temp_dir("prescan");
@@ -750,13 +750,30 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
             stderr.contains("a query and a subject record have the Seq-id lcl|s1"),
             "s1 n{threads}: {stderr}"
         );
+        // The first record is its own batch, which NCBI writes before it reads `>gi|abc`: its title
+        // fails the header (`BlastOutput_query-def`), nothing is written, and NCBI stops with its
+        // exception (`tests/fixtures/outfmt16/prescan_badgi_blastx_5.*`, NCBI BLAST+ 2.17.0 on the
+        // same two files).
         let (status, stdout, stderr) = search(&bad_gi, "5", threads, Some("1"));
-        assert_eq!(status, 1, "gi|abc BATCH_SIZE=1 n{threads}: {stderr}");
-        assert!(stdout.is_empty(), "gi|abc BATCH_SIZE=1 n{threads}");
-        assert!(
-            stderr.contains("a query title with a character outside the US-ASCII range")
-                && stderr.contains("not supported by LOSAT"),
+        let frozen = |extension: &str| {
+            std::fs::read(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/outfmt16")
+                    .join(format!("prescan_badgi_blastx_5.{extension}")),
+            )
+            .unwrap()
+        };
+        let code = String::from_utf8(frozen("rc")).unwrap();
+        assert_eq!(
+            status,
+            code.trim().parse::<i32>().unwrap(),
             "gi|abc BATCH_SIZE=1 n{threads}: {stderr}"
+        );
+        assert_eq!(stdout, frozen("out"), "gi|abc BATCH_SIZE=1 n{threads}");
+        assert_eq!(
+            stderr.as_bytes(),
+            frozen("err"),
+            "gi|abc BATCH_SIZE=1 n{threads}"
         );
     }
 }

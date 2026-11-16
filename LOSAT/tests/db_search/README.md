@@ -36,7 +36,7 @@ FASTA files:
 - `bx_prescan_data_q.fna`, `bx_prescan_gap_q.fna`: a data line, or the gap line `>?5`, before any defline,
   then the record `r1` whose title is not US-ASCII (`café x`), the BLASTX queries of `db.bxprescan.*`: with
   `-parse_deflines` NCBI stops at line 1 (`Input doesn't start with a defline or comment`) in every format,
-  before any title is written. `bx_prescan_badgi_q.fna`: the record `r0` with that title, then `>gi|abc`, which
+  before any title is written (and before it fails on that one). `bx_prescan_badgi_q.fna`: the record `r0` with that title, then `>gi|abc`, which
   NCBI cannot read as a Seq-id under `-parse_deflines` (`Could not construct seq-id from 'gi|abc'`): in one batch
   the error comes before `r0` is written, with `BATCH_SIZE=1` after; with `BATCH_SIZE=0` (`db.bxprescan.bs0.*`, without
   `-parse_deflines`) NCBI reads no query and stops with `Empty CBlastQueryVector`. `bx_prescan_badgi_big_q.fna`: the same with
@@ -393,7 +393,20 @@ both subjects) so that a subject is a `Hit` of two queries. The rows `db.sa.x16_
 `BLASTDB=tests/seqdb/taxdb/<variant>` in `extra_args` (a `BLASTDB=DIR` token is the environment variable of both programs,
 not an argument): `good`, `bad_magic`, `count_larger`, `no_btd`, `empty_fields`, `offset_last_past_end` and
 `tests/seqdb/taxdb_xml2/no_9606` (`make_taxdb.py write` of `taxdb.tsv` without the row of 9606). The rows `.nonascii.*`
-(`high_bytes_utf8`) are LOSAT refusals: NCBI aborts its XML2 writer there.
+(`high_bytes_utf8`, the scientific name of 9606 has bytes >= 0x80) are frozen from NCBI like the others (K4h): its XML2
+writer stops at the byte (outfmt 16 is cut there with a `Frame type= eFrameNamed` post and exit status 0, outfmt 14
+leaves the side file cut and exits 255), its JSON writer copies the bytes (outfmt 15 and 13).
+
+K4h (titles with bytes >= 0x80 or control bytes in the XML family): `xb/` holds the inputs of the rows `db.xb.*`, made by
+`make_xb_inputs.py` (its docstring names the byte classes: `u2`, `u2end`, `l1x`, `c01first`, `ent1`, `x81`, `ovl3`; a query
+title against a clean `-subject` or `-db`, a `-subject` title with a hit, a `-subject` title that no hit reaches). `xb_p` and
+`xb_n` (only `.phr .pin .psq` and `.nhr .nin .nsq` kept) are the databases of the `-db` rows, made with
+`makeblastdb -in xb/xb_sp_clean.faa -dbtype prot -out xb_p -title "xb proteins" -blastdb_version 4` and
+`makeblastdb -in xb/xb_sn_clean.fna -dbtype nucl -out xb_n -title "xb nucleotides" -blastdb_version 4`. Every row is frozen from
+NCBI BLAST+ 2.17.0 (`freeze --only db.xb.`), the trace lines of its exceptions naming NCBI's own build path, which LOSAT prints.
+`xb/e2/` (K4h review 3, case E2: rows `db.xb.e2.*`) holds the BLASTP and BLASTN queries of `e2probe.py prep` (remaining-gaps
+K/k4h/review3/e2): q0 without hits, q1 titled `q1 a\xc3\xa9b z` that hits only `multidb/put` (`nut`), q2 that hits `multidb/pa` (`na`)
+and `put` (`nut`); `qmp` has the ASCII title `q1 ab z`, `qm1`'s q2 hits only `pa` (`na`), `qm2`'s only `put` (`nut`).
 
 OF5a part 2 (XML2 and JSON of BLASTN): `x16_ntitles.fna` (three records: an empty definition line, a title with an
 ampersand, angle brackets and quotes, and `.`) and `x16_ntaxid.fna` with its query `x16_ntaxid_q.fna` (`qn1` hits both

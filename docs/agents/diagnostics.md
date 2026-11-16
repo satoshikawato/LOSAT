@@ -472,6 +472,7 @@ export LOSAT_X_TBNSTAGEDROP=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNUNGAP=1
 export LOSAT_X_TBNUNITXLATE=1
+export LOSAT_X_TBNXLATE128=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXBOARD=1
@@ -5972,6 +5973,28 @@ Scheduling (each value computed by one thread with the original function; order 
   off): human genome x one protein 0.88 at one thread (27.9 -> 24.5 s; NCBI BLAST+ 2.17.0 `-db` 47.1
   s) and 0.94 at 8 threads; zebrafish genome x one protein 0.99; fly genome x one batch and MG1655 x
   16 batches at 8 threads 0.99-1.00.
+- `LOSAT_X_TBNXLATE128=1` tblastn (speed; in the strict set since 2026-11-16, class platform, on by
+  default; `=0` turns it off, `=2` runs it on any x86-64 CPU with SSSE3 and SSE4.1, AVX2 or not, as
+  a diagnostic; `tblastn/x_subject_translate.rs`): the vector loop of `TBNXLATESIMD` in 128 bits,
+  16 codons of a phase a step, for the CPUs without AVX2: the WebAssembly build (simd128) and
+  x86-64 with SSSE3 and SSE4.1 but no AVX2. It is the AVX2 loop's form in halves: the 12 bytes
+  after bit 2 x phase, every three bytes split into four six-bit codons (`i8x16.swizzle` / `pshufb`
+  with indexes masked to 0..15, and 32-bit shifts in place of the multiplications that wasm32 does
+  not have), the codon table read as four 16-byte tables chosen by bits 4 and 5, the minus residues
+  stored in reverse order. Its operations come from the 128-bit layer of the X-drop kernel
+  (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128). The AVX2 loop is
+  unchanged: in the native build the machine code of `x_phase_residues_avx2`, `x_phase_one_avx2`
+  and the X-drop kernels is the same as before the switch (60 functions); only the two callers that
+  choose the loop (`x_bytes_plan`, `x_unit_residues`) grew by 62 and 130 bytes. It gives the
+  residues of the word loop (unit test
+  `x_w128_loops_write_the_residues_of_the_word_loop`, every length from 0 to 400 bases and long ones,
+  three genetic codes) and the same report end to end (`tests/tblastn_xlate_simd.rs`
+  `the_128_bit_loop_gives_the_same_report`, `=2` against `=0` with `[X_STATS] TBNXLATESIMD`
+  counting its codons). Timed on the workstation (node 0, Node 26.8.2, the serial WebAssembly
+  command, dev against the switch in rotating rounds, the same output): a 411-residue human protein
+  x the human genome `-db` at one thread 25.05 -> 21.98 s (0.88, 5 of 5 rounds faster); a bacterial
+  proteome x its genome with `-subject` (no packed store, so no change) 7.65 -> 7.69 s (1.00).
+  Native x86-64 with AVX2: instructions x1.00000, cycles 1.01 [0.99-1.01] (noise).
 - `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; in the strict set since 2026-10-17, on by default; `=0` turns
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
   (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/word_finder.rs`) walk the subject

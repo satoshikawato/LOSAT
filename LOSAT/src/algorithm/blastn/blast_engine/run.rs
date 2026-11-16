@@ -7080,12 +7080,7 @@ fn post_process_hits_and_write(
         // (`x_CheckTaxDB`, `algorithm::blastn::tabular`), and the Seq-annots' posts of the bytes
         // that NCBI's stream replaces (`seqalign::write_query_to`).
         let mut format_warnings = (warning_lines.is_some()
-            || matches!(
-                output_format,
-                BlastnOutputFormat::Xml2(_)
-                    | BlastnOutputFormat::Archive
-                    | BlastnOutputFormat::Seqalign(_)
-            )
+            || crate::report::query_warnings::report_posts(format.report_format())
             || output_format
                 .tabular_spec()
                 .is_some_and(|spec| spec.looks_up_every_taxid()))
@@ -7376,11 +7371,7 @@ fn post_process_hits_and_write(
                         } else {
                             crate::report::blast_xml::REFERENCE_GAPPED_BLAST
                         },
-                        db_name: if is_database {
-                            subject_title.as_bytes()
-                        } else {
-                            b""
-                        },
+                        db_name: if is_database { subject_title } else { "" },
                         matrix: None,
                         expect: report.expect,
                         gap_open: report.gap_open,
@@ -11044,7 +11035,7 @@ fn run_in_pool(
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     if !taxdb_found {
                         // No prefetch, and the reports' fetches look nothing up.
-                        Ok(Vec::new())
+                        Ok(Posts::new())
                     } else {
                         let fetches = match output_formats.first() {
                             Some(BlastnOutputFormat::CustomTabular(spec)) => {
@@ -11069,7 +11060,7 @@ fn run_in_pool(
                             .collect::<Result<Vec<_>>>()
                             .map(|messages| {
                                 query_fetches = messages;
-                                Vec::new()
+                                Posts::new()
                             })
                     }
                 } else if seq_aligns == 0 {
@@ -11082,10 +11073,39 @@ fn run_in_pool(
                     //        LoadSequencesToScope(ids, ranges, scope);
                     // ```
                     // A batch without Seq-aligns prefetches no sequence.
-                    rows_open(&batch_hit_lists).map(|()| Vec::new())
+                    rows_open(&batch_hit_lists).map(|()| Posts::new())
                 } else {
+                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
+                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    let xml_cut = |query: usize| {
+                        queries
+                            .before(&kept, start)
+                            .get(query)
+                            .is_some_and(|record| {
+                                crate::report::blast_xml::names::iteration_cut_before_hits(
+                                    record.local_id.as_bytes(),
+                                    record.warning_id(),
+                                    record.believed(),
+                                    &record.title,
+                                    false,
+                                )
+                            })
+                    };
+                    let xml_before =
+                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)).then(
+                            || crate::algorithm::common::database::XmlReportsBefore {
+                                reads: &query_reads,
+                                cut: &xml_cut,
+                            },
+                        );
                     database
-                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped, start)
+                        .batch_prefetch(
+                            &titles,
+                            &batch_hit_lists,
+                            !args.ungapped,
+                            start,
+                            xml_before.as_ref(),
+                        )
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
                             Ok(messages)
@@ -11111,14 +11131,14 @@ fn run_in_pool(
                                 !args.ungapped,
                                 start,
                             )
-                            .map(|()| Vec::new())
+                            .map(|()| Posts::new())
                     })
             } else {
                 None
             };
             match prefetch {
                 None => {}
-                Some(Ok(messages)) => warnings[start].lines(&messages),
+                Some(Ok(posts)) => warnings[start].append(&posts),
                 Some(Err(error)) if error.is::<database::HeaderReadError>() => {
                     let failure = error
                         .downcast::<database::HeaderReadError>()
@@ -11418,9 +11438,9 @@ fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
 /// report, from `write_pairwise_prologs`) and not before the search: the outfmt 0 prolog of a
 /// file sink (`prolog_before_search`), and the start of the XML2 and JSON documents of outfmt
 /// 16 and 15 for every sink. NCBI writes that start before the search too (`PrintProlog`), but
-/// LOSAT's refusals of what NCBI could write (a title outside US-ASCII, DECISIONS 20) come
-/// after the search and before the first byte, so the start is written with the first report, or
-/// by the path of an NCBI error that stops the run before one.
+/// LOSAT's refusals of the reports (a title that NCBI crashes on, `names::Refusal`, DECISIONS
+/// 20 as K4h left it) come after the search and before the first byte, so the start is written
+/// with the first report, or by the path of an NCBI error that stops the run before one.
 ///
 /// Outfmt 20's line of the field names comes with the first report too (or from
 /// `write_pairwise_prologs` for a run that stops before one), after LOSAT's refusals of the

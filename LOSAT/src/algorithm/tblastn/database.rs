@@ -360,7 +360,8 @@ impl TblastnDatabase {
     /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
     /// before, whose final hit lists by rank are `before` (`reported`'s ranks, as `read_taxids`
-    /// reads them); TBLASTN writes those reports after the stop.
+    /// reads them); TBLASTN writes those reports after the stop. `xml_before`: the outfmt 5
+    /// reports before the batch (`shared::XmlReportsBefore`).
     pub(super) fn prefetch_stop_error(
         &self,
         reported: Option<&ReportedSubjects>,
@@ -368,6 +369,7 @@ impl TblastnDatabase {
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
         query: usize,
         at_hits: bool,
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
     ) -> anyhow::Error {
         let subjects = subjects.iter().map(|(ordinal, parsed)| {
             shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
@@ -383,7 +385,8 @@ impl TblastnDatabase {
             });
             shared::held_batch_prefetch_stop(&self.db, before, subjects, PROGRAM, query).err()
         } else {
-            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query, xml_before)
+                .err()
         };
         stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
     }
@@ -391,13 +394,15 @@ impl TblastnDatabase {
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
-    /// subject whose lookup fails (the protein query has no strand); the stop of the batch whose first query is `query`.
+    /// subject whose lookup fails (the protein query has no strand); the stop of the batch whose first query is `query`
+    /// (`xml_before`: the outfmt 5 reports before it, `shared::XmlReportsBefore`).
     pub(super) fn batch_prefetch(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         query: usize,
-    ) -> Result<Vec<u8>> {
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+    ) -> Result<crate::report::diag_log::Posts> {
         let subjects = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
@@ -409,7 +414,7 @@ impl TblastnDatabase {
                     reported.parsed_subject(rank),
                 )
             });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query)
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query, xml_before)
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of

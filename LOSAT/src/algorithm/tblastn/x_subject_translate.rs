@@ -798,11 +798,26 @@ fn x_phase_residues(
     assert!(phase < 3 && plus.len() == codons + 2 && minus.len() == codons + 2);
     let mut done = 0;
     #[cfg(target_arch = "x86_64")]
-    if simd && x_avx2_available() {
-        // SAFETY: the CPU has AVX2; the bounds are checked inside.
-        done = unsafe { x_phase_residues_avx2(packed, phase, codons, tables, plus, minus) };
+    match x_vector_loop(simd) {
+        XVectorLoop::Avx2 => {
+            // SAFETY: the CPU has AVX2; the bounds are checked inside.
+            done = unsafe { x_phase_residues_avx2(packed, phase, codons, tables, plus, minus) };
+        }
+        XVectorLoop::W128 => {
+            // SAFETY: the CPU has SSSE3 and SSE4.1; the bounds are checked inside.
+            done = unsafe { x_phase_residues_w128(packed, phase, codons, tables, plus, minus) };
+        }
+        XVectorLoop::Words => {}
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    if x_vector_loop(simd) == XVectorLoop::W128 {
+        // SAFETY: simd128 is part of the build; the bounds are checked inside.
+        done = unsafe { x_phase_residues_w128(packed, phase, codons, tables, plus, minus) };
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
     let _ = simd;
     let vector = done;
     done = match phase {
@@ -861,6 +876,71 @@ fn x_xlate_simd() -> bool {
 #[cfg(target_arch = "x86_64")]
 fn x_avx2_available() -> bool {
     std::arch::is_x86_feature_detected!("avx2")
+}
+
+// No NCBI counterpart: reads LOSAT_X_TBNXLATE128 once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): 0 = off, 1 = the 128-bit loop where the AVX2 loop does not
+/// run (wasm32 simd128; x86-64 with SSSE3 and SSE4.1 but without AVX2), 2 = the 128-bit loop on
+/// any x86-64 CPU with SSSE3 and SSE4.1, AVX2 or not (diagnostic: the tests run it end to end). A
+/// switch of the strict set, on unless it is `0`.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+fn x_xlate128() -> usize {
+    static ON: OnceLock<usize> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_TBNXLATE128", 1..=2, 1).unwrap_or(0))
+}
+
+/// EXPERIMENT (LOSAT_X_TBNXLATESIMD, LOSAT_X_TBNXLATE128): the loop that reads a phase's codons
+/// before the word loop (`x_phase_words` and the tail).
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum XVectorLoop {
+    /// 32 codons a step (`x_phase_residues_avx2`, `x_phase_one_avx2`).
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+    /// 16 codons a step (`x_phase_residues_w128`, `x_phase_one_w128`).
+    W128,
+    /// None: the word loop from the first codon.
+    Words,
+}
+
+// No NCBI counterpart: chooses LOSAT's loop; every loop gives the same residues.
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): the vector loop for `simd` (LOSAT_X_TBNXLATESIMD) on this
+/// CPU: AVX2 where the CPU has it (unless LOSAT_X_TBNXLATE128 is `2`), else the 128-bit loop where
+/// LOSAT_X_TBNXLATE128 is on and the CPU has SSSE3 and SSE4.1 (always on wasm32 simd128).
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+fn x_vector_loop(simd: bool) -> XVectorLoop {
+    if !simd {
+        return XVectorLoop::Words;
+    }
+    let w128 = x_xlate128();
+    #[cfg(target_arch = "x86_64")]
+    {
+        if w128 != 2 && x_avx2_available() {
+            return XVectorLoop::Avx2;
+        }
+        if w128 != 0
+            && std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+        {
+            return XVectorLoop::W128;
+        }
+        XVectorLoop::Words
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    if w128 != 0 {
+        XVectorLoop::W128
+    } else {
+        XVectorLoop::Words
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
@@ -1286,11 +1366,26 @@ fn x_phase_one<const MINUS: bool>(
     assert!(phase < 3 && out.len() == codons + 2);
     let mut j = 0;
     #[cfg(target_arch = "x86_64")]
-    if simd && x_avx2_available() {
-        // SAFETY: the CPU has AVX2; the bounds are checked inside.
-        j = unsafe { x_phase_one_avx2::<MINUS>(packed, phase, codons, tables, out) };
+    match x_vector_loop(simd) {
+        XVectorLoop::Avx2 => {
+            // SAFETY: the CPU has AVX2; the bounds are checked inside.
+            j = unsafe { x_phase_one_avx2::<MINUS>(packed, phase, codons, tables, out) };
+        }
+        XVectorLoop::W128 => {
+            // SAFETY: the CPU has SSSE3 and SSE4.1; the bounds are checked inside.
+            j = unsafe { x_phase_one_w128::<MINUS>(packed, phase, codons, tables, out) };
+        }
+        XVectorLoop::Words => {}
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    if x_vector_loop(simd) == XVectorLoop::W128 {
+        // SAFETY: simd128 is part of the build; the bounds are checked inside.
+        j = unsafe { x_phase_one_w128::<MINUS>(packed, phase, codons, tables, out) };
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
     let _ = simd;
     let vector = j;
     let table = if MINUS {
@@ -1416,6 +1511,193 @@ unsafe fn x_phase_one_avx2<const MINUS: bool>(
         j += 32;
     }
     j
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+// `x_phase_words`)
+// The loop of `x_phase_residues_avx2` with one 128-bit register: 16 codons a step, from the 12
+// bytes after bit `2 * phase` (made from two loads one byte apart), written once over the 128-bit
+// layer of `utils/xdrop_simd.rs` for x86-64 (SSSE3 and SSE4.1) and wasm32 (simd128). Two steps
+// differ from the AVX2 loop and give the same bytes: the upper six-bit fields of each 16-bit half
+// (AVX2: `vpmulhuw`, which wasm32 lacks) are moved down by 32-bit shifts, and each 16-entry table
+// is read with the index's low four bits, chosen by bits 4 and 5 as all-ones byte masks, so that
+// x86-64's `pshufb` and wasm32's `i8x16.swizzle` (which differ for indexes of 16 and more) read
+// the same entries. Same reads, same tables as the scalar loop.
+
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): the residue index of every byte of `spread` (four codons per
+/// 32-bit lane: the group's bytes `b1 b0 b2 b1`, as `x_phase_residues_avx2` spreads them): codon
+/// 0 is bits 10-15 of the low 16-bit half (`b0 b1`), codon 1 bits 4-9, codon 2 bits 6-11 of the
+/// high half (`b1 b2`), codon 3 bits 0-5.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+unsafe fn x_codon_index_w128(
+    spread: crate::utils::xdrop_simd::arch::V,
+) -> crate::utils::xdrop_simd::arch::V {
+    use crate::utils::xdrop_simd::arch::*;
+    // SAFETY (the block): register operations of the build's 128-bit instructions.
+    unsafe {
+        let first = shr32::<10>(and(spread, splat_i32(0x0000_FC00)));
+        let third = shr32::<6>(and(spread, splat_i32(0x0FC0_0000)));
+        let second_fourth = mullo16(and(spread, splat_i32(0x003F_03F0)), splat_i32(0x0100_0010));
+        or(or(first, third), second_fourth)
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): entry `index` (0..64) of the 64-byte table `table`, held as
+/// four registers of 16 entries, for every byte of `index`.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+unsafe fn x_look64_w128(
+    table: &[crate::utils::xdrop_simd::arch::V; 4],
+    index: crate::utils::xdrop_simd::arch::V,
+) -> crate::utils::xdrop_simd::arch::V {
+    use crate::utils::xdrop_simd::arch::*;
+    // SAFETY (the block): register operations of the build's 128-bit instructions.
+    unsafe {
+        let low = and(index, splat8(15));
+        let bit4 = eq8(and(index, splat8(16)), splat8(16));
+        let bit5 = eq8(and(index, splat8(32)), splat8(32));
+        let first = blend8(pick(table[0], low), pick(table[1], low), bit4);
+        let second = blend8(pick(table[2], low), pick(table[3], low), bit4);
+        blend8(first, second, bit5)
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): one step's residue indexes: the 16 codons of phase `phase`
+/// in the 12 bytes from `at` (`at + 17` bytes readable).
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+unsafe fn x_step_index_w128(at: *const u8, phase: usize) -> crate::utils::xdrop_simd::arch::V {
+    use crate::utils::xdrop_simd::arch::*;
+    const SPREAD: [u8; 16] = [1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10];
+    // SAFETY (the block): the caller makes bytes `at ..+ 17` readable.
+    unsafe {
+        let (bytes, next) = (load(at), load(at.add(1)));
+        let keep_left = splat8((0xFFu8 << (2 * phase)) as i8);
+        let keep_right = splat8(((1u16 << (2 * phase)) - 1) as u8 as i8);
+        let shifted = or(
+            and(shl16n(bytes, 2 * phase as u32), keep_left),
+            and(shr16n(next, 8 - 2 * phase as u32), keep_right),
+        );
+        x_codon_index_w128(pick(shifted, load(SPREAD.as_ptr())))
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): the 16-entry quarters of a 64-residue codon table.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+unsafe fn x_table_w128(values: &[u8; 64]) -> [crate::utils::xdrop_simd::arch::V; 4] {
+    // SAFETY: bytes `16 * k ..+ 16` of the 64.
+    [0, 1, 2, 3]
+        .map(|k| unsafe { crate::utils::xdrop_simd::arch::load(values.as_ptr().add(16 * k)) })
+}
+
+/// The byte order that reverses a register's 16 bytes.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+const X_BACKWARD: [u8; 16] = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): [`x_phase_residues`] for the groups of 16 codons whose bytes
+/// can be read with 17 bytes from the group's first; returns the codons done (a multiple of 16).
+/// The 128-bit form of [`x_phase_residues_avx2`].
+///
+/// # Safety
+/// On x86-64 the CPU has SSSE3 and SSE4.1.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1"))]
+unsafe fn x_phase_residues_w128(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    plus: &mut [u8],
+    minus: &mut [u8],
+) -> usize {
+    use crate::utils::xdrop_simd::arch::*;
+    assert!(phase < 3 && plus.len() == codons + 2 && minus.len() == codons + 2);
+    // SAFETY (the block): the loads read `packed[3 * j / 4 ..+ 17]` (checked by the loop) and
+    // the 64-byte tables; the stores write `plus[1 + j ..+ 16]` and `minus[codons - j - 15 ..=
+    // codons - j]` (`j + 16 <= codons`, length `codons + 2`).
+    unsafe {
+        let forward = x_table_w128(&tables.forward);
+        let reverse = x_table_w128(&tables.reverse);
+        let backward = load(X_BACKWARD.as_ptr());
+        let mut j = 0;
+        while j + 16 <= codons && 3 * j / 4 + 17 <= packed.len() {
+            let index = x_step_index_w128(packed.as_ptr().add(3 * j / 4), phase);
+            store(plus.as_mut_ptr().add(1 + j), x_look64_w128(&forward, index));
+            store(
+                minus.as_mut_ptr().add(codons - j - 15),
+                pick(x_look64_w128(&reverse, index), backward),
+            );
+            j += 16;
+        }
+        j
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): [`x_phase_one`]'s vector loop with 16 codons a step; returns
+/// the codons done (a multiple of 16). The 128-bit form of [`x_phase_one_avx2`].
+///
+/// # Safety
+/// On x86-64 the CPU has SSSE3 and SSE4.1.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1"))]
+unsafe fn x_phase_one_w128<const MINUS: bool>(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    out: &mut [u8],
+) -> usize {
+    use crate::utils::xdrop_simd::arch::*;
+    assert!(phase < 3 && out.len() == codons + 2);
+    // SAFETY (the block): the loads read `packed[3 * j / 4 ..+ 17]` (checked by the loop) and
+    // the 64-byte table; the store writes `out[1 + j ..+ 16]` or `out[codons - j - 15 ..=
+    // codons - j]` (`j + 16 <= codons`, length `codons + 2`).
+    unsafe {
+        let table = x_table_w128(if MINUS {
+            &tables.reverse
+        } else {
+            &tables.forward
+        });
+        let backward = load(X_BACKWARD.as_ptr());
+        let mut j = 0;
+        while j + 16 <= codons && 3 * j / 4 + 17 <= packed.len() {
+            let index = x_step_index_w128(packed.as_ptr().add(3 * j / 4), phase);
+            let residues = x_look64_w128(&table, index);
+            if MINUS {
+                store(
+                    out.as_mut_ptr().add(codons - j - 15),
+                    pick(residues, backward),
+                );
+            } else {
+                store(out.as_mut_ptr().add(1 + j), residues);
+            }
+            j += 16;
+        }
+        j
+    }
 }
 
 #[cfg(test)]
@@ -2064,6 +2346,100 @@ mod tests {
         if x_avx2_available() {
             assert!(vector_codons > 30_000, "{vector_codons}");
         }
+    }
+
+    // No NCBI counterpart: test of LOSAT_X_TBNXLATE128's loops (the x86-64 SSSE3 / SSE4.1 build of
+    // the code the wasm32 build runs): for every phase of every length from 0 to 400 bases and five
+    // long ones, and three genetic codes, the residues the 128-bit loops write are those of the word
+    // loop (`simd` false), and they write no other byte.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn x_w128_loops_write_the_residues_of_the_word_loop() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        if !(std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1"))
+        {
+            return;
+        }
+        const UNTOUCHED: u8 = 0xA5;
+        let mut vector_codons = 0usize;
+        let lengths = (0..=400).chain([1_000, 4_999, 49_151, 49_153, 100_003]);
+        for length in lengths {
+            let subject = letters(b"ACGTACGTN", length, length as u64 + 11);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            let packed = store.packed();
+            for db_gencode in [1, 4, 11] {
+                let tables = x_codon_tables(db_gencode).unwrap();
+                for phase in (0..3).filter(|&p| p + 3 <= length) {
+                    let codons = (length - phase) / 3;
+                    let mut plus = vec![0u8; codons + 2];
+                    let mut minus = vec![0u8; codons + 2];
+                    x_phase_residues(packed, phase, codons, tables, &mut plus, &mut minus, false);
+                    let mut w_plus = vec![UNTOUCHED; codons + 2];
+                    let mut w_minus = vec![UNTOUCHED; codons + 2];
+                    // SAFETY: the CPU has SSSE3 and SSE4.1 (checked above).
+                    let done = unsafe {
+                        x_phase_residues_w128(
+                            packed,
+                            phase,
+                            codons,
+                            tables,
+                            &mut w_plus,
+                            &mut w_minus,
+                        )
+                    };
+                    assert_eq!(done % 16, 0);
+                    vector_codons += done;
+                    let what = format!("{length} bases, phase {phase}, genetic code {db_gencode}");
+                    for j in 0..codons {
+                        let (p, m) = (1 + j, codons - j);
+                        if j < done {
+                            assert_eq!(w_plus[p], plus[p], "plus codon {j}, {what}");
+                            assert_eq!(w_minus[m], minus[m], "minus codon {j}, {what}");
+                        } else {
+                            assert_eq!(w_plus[p], UNTOUCHED, "plus codon {j} written, {what}");
+                            assert_eq!(w_minus[m], UNTOUCHED, "minus codon {j} written, {what}");
+                        }
+                    }
+                    for edge in [0, codons + 1] {
+                        assert_eq!(
+                            (w_plus[edge], w_minus[edge]),
+                            (UNTOUCHED, UNTOUCHED),
+                            "{what}"
+                        );
+                    }
+                    for minus_strand in [false, true] {
+                        let mut out = vec![0u8; codons + 2];
+                        let mut w_out = vec![UNTOUCHED; codons + 2];
+                        // SAFETY: the CPU has SSSE3 and SSE4.1 (checked above).
+                        let one = if minus_strand {
+                            x_phase_one::<true>(packed, phase, codons, tables, &mut out, false);
+                            unsafe {
+                                x_phase_one_w128::<true>(packed, phase, codons, tables, &mut w_out)
+                            }
+                        } else {
+                            x_phase_one::<false>(packed, phase, codons, tables, &mut out, false);
+                            unsafe {
+                                x_phase_one_w128::<false>(packed, phase, codons, tables, &mut w_out)
+                            }
+                        };
+                        assert_eq!(one, done, "{what}");
+                        for j in 0..codons {
+                            let at = if minus_strand { codons - j } else { 1 + j };
+                            let expected = if j < done { out[at] } else { UNTOUCHED };
+                            assert_eq!(
+                                w_out[at], expected,
+                                "codon {j}, minus {minus_strand}, {what}"
+                            );
+                        }
+                        for edge in [0, codons + 1] {
+                            assert_eq!(w_out[edge], UNTOUCHED, "{what}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(vector_codons > 90_000, "{vector_codons}");
     }
 
     // No NCBI counterpart: test of the frame reuse; it does not change any value NCBI computes.

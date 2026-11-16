@@ -1,5 +1,5 @@
 //! Local FASTA state before translation. Internal IDs and defline titles differ.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
 // ```c++
 // bool CStreamLineReader::AtEOF(void) const
@@ -44,7 +44,9 @@ use crate::ncbi_str::{is_space, truncate_spaces, truncate_spaces_begin, truncate
 // ```
 pub struct FastaRecord {
     pub internal_id: String,
-    pub title: String,
+    /// The title as read, bytes: NCBI's reader keeps a title in any encoding, and its formatters
+    /// make what they show of it (`report::defline`).
+    pub title: Vec<u8>,
     pub sequence: Vec<u8>,
     pub lowercase_masks: Vec<(i32, i32)>,
     pub warnings: Vec<InputWarning>,
@@ -140,14 +142,17 @@ impl FastaRecord {
     }
 
     /// What `Query=` and `# Query:` show (`fasta_reader::FastaRecord::query_line`).
-    pub fn query_line(&self) -> std::borrow::Cow<'_, str> {
+    pub fn query_line(&self) -> std::borrow::Cow<'_, [u8]> {
         if self.believed().is_none() || self.title.is_empty() {
             return match self.believed() {
-                Some(_) => std::borrow::Cow::Borrowed(&self.internal_id),
+                Some(_) => std::borrow::Cow::Borrowed(self.internal_id.as_bytes()),
                 None => std::borrow::Cow::Borrowed(&self.title),
             };
         }
-        std::borrow::Cow::Owned(format!("{} {}", self.internal_id, self.title))
+        let mut line = self.internal_id.as_bytes().to_vec();
+        line.push(b' ');
+        line.extend_from_slice(&self.title);
+        std::borrow::Cow::Owned(line)
     }
 
     /// The id of the record in NCBI's warnings (`fasta_reader::FastaRecord::warning_id`).
@@ -402,8 +407,9 @@ pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<Fas
     // }
     //
     // ```
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("cannot read BLASTX input {}", path.display()))?;
+    let file = anyhow::Context::with_context(std::fs::File::open(path), || {
+        format!("cannot read BLASTX input {}", path.display())
+    })?;
     parse_fasta_stream_with_warnings(
         &mut FastaStream::from_file(file),
         protein,
@@ -842,7 +848,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 },
             )? as usize;
             let record = current
-                .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
+                .get_or_insert_with(|| new_record(batch.number(&records), protein, Vec::new()));
             for text in messages {
                 let warning = InputWarning {
                     line: line_index + 1,
@@ -970,8 +976,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 .skip(1)
                 .position(|&b| b < b' ')
                 .map_or(title_bytes.len(), |i| i + 1);
-            let title = String::from_utf8(truncate_spaces_end(&title_bytes[..end]).to_vec())
-                .context("invalid UTF-8 FASTA title")?;
+            let title = truncate_spaces_end(&title_bytes[..end]).to_vec();
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1677
             // ```c++
             //     // check for nuc or aa sequences at the end of the title
@@ -1077,8 +1082,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             raw_residues = 0;
             continue;
         }
-        let record = current
-            .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
+        let record =
+            current.get_or_insert_with(|| new_record(batch.number(&records), protein, Vec::new()));
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
@@ -1275,7 +1280,7 @@ fn read_believed_defline(
     })
 }
 
-fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
+fn new_record(index: usize, protein: bool, title: Vec<u8>) -> FastaRecord {
     FastaRecord {
         internal_id: format!(
             "{}_{n}",
@@ -1543,7 +1548,7 @@ mod tests {
     // ```
     fn ncbi_reader_preserves_normalized_positions_and_warnings() {
         let r = parse_fasta(b">  q description   \r\natg1-2-3ACT;rest\r\n", false, true).unwrap();
-        assert_eq!(r[0].title, "q description");
+        assert_eq!(r[0].title, b"q description");
         assert_eq!(r[0].internal_id, "Query_1");
         assert_eq!(r[0].sequence, b"ATGACT");
         assert_eq!(r[0].lowercase_masks, vec![(0, 2)]);
@@ -3633,7 +3638,7 @@ mod defline_tests {
     }
 
     /// `read` with NCBI's data loaders on (`FastaStream::seq_id_role`): the titles and letters.
-    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(String, Vec<u8>)>> {
+    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
         stream.parse_deflines = parse_deflines;
         stream.seq_id_role = Some("query");

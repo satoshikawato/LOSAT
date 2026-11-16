@@ -841,7 +841,7 @@ impl ReportedSubjects {
         &self,
         oids: crate::seqdb::OidMap<'_>,
         reads: bool,
-    ) -> Result<Vec<Arc<[u8]>>> {
+    ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,

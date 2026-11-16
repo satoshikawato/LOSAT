@@ -185,6 +185,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                     taxid: 0,
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
+                    unknown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {

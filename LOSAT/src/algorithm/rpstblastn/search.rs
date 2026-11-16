@@ -912,7 +912,7 @@ mod tests {
     fn record(id: &str, letters: &[u8]) -> FastaRecord {
         FastaRecord {
             internal_id: id.to_string(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: letters.to_vec(),
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

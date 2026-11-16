@@ -2,12 +2,13 @@
 // source and record table until the tab closed, so adding and removing a large input again
 // and again made the tab grow without end. The test opens a FASTA of 100,000 records (32 MB)
 // and removes it ten times, and compares the JavaScript heap of the page and of the Data worker
-// (Chrome DevTools Protocol, after a garbage collection) after the first round and after the
-// last: over the nine rounds, the page and the Data worker each grow by less than a tenth of
-// what one source takes (before the fix: one source a round, the Data worker's table and the
-// draft's cached checks). The same file opens again each round, as a removed source is brought
-// back. The V8 heap does not count the bytes of a Blob (a pasted text, an inflated .gz), so a
-// File kept by mistake is not seen here; the unit tests see it. Chromium only (the protocol).
+// (Chrome DevTools Protocol, once the page has drawn a frame, after a garbage collection) after
+// the first round and after the last: over the nine rounds, the page and the Data worker each
+// grow by less than a tenth of what one source takes (before the fix: one source a round, the
+// Data worker's table and the draft's cached checks). The same file opens again each round, as
+// a removed source is brought back. The V8 heap does not count the bytes of a Blob (a pasted
+// text, an inflated .gz), so a File kept by mistake is not seen here; the unit tests see it.
+// Chromium only (the protocol).
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -86,6 +87,16 @@ async function memoryProbe(page: Page): Promise<() => Promise<Memory>> {
     });
   const pageCall: Call = (method, params) => pageSession.send(method as 'Runtime.getHeapUsage', params as never);
   return async () => {
+    // The page draws two frames first. The click on Remove starts a CSS transition of the button
+    // (styles.css gives buttons transitions of their colours and of the `:active` scale), and
+    // Chromium keeps the transition of a removed element in the document's animation timeline until
+    // it next updates the animations, in the next frame. Until then the transition holds the removed
+    // button, whose Vue click handler holds its card, the card its source and the source its record
+    // table: 24.3 to 24.8 MB of the page's 29 MB here. On CI that frame sometimes came after the
+    // heap was read (2 of 41 CI jobs on 2026-11-15/16 failed with the last round 24.8 MB up; in their
+    // traces it came 46 to 58 ms after the click in every round that read high, and within the
+    // reading in every round that read low).
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const dataWorker = await heapUsed(workerCall);
     return { total: (await heapUsed(pageCall)) + dataWorker, dataWorker };
   };

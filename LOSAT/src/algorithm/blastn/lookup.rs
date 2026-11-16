@@ -1090,7 +1090,33 @@ impl MbLookupTable {
     }
 }
 
+/// No NCBI counterpart (layout only): the presence vector of a two-stage table and its shift as
+/// values (`TwoStageLookup::x_pv_view`), for a scan whose per-word closure holds them itself
+/// instead of reading them through the table for every word.
+#[derive(Clone, Copy)]
+pub(crate) struct XPvView<'a> {
+    pv: &'a [PvArrayType],
+    bts: usize,
+}
+
+impl XPvView<'_> {
+    /// `TwoStageLookup::has_hits`.
+    #[inline(always)]
+    pub(crate) fn has_hits(self, lut_kmer: u64) -> bool {
+        pv_test_shift(self.pv, lut_kmer as usize, self.bts)
+    }
+}
+
 impl TwoStageLookup {
+    /// No NCBI counterpart (layout only): the presence vector and its shift (`XPvView`).
+    #[inline(always)]
+    pub(crate) fn x_pv_view(&self) -> XPvView<'_> {
+        XPvView {
+            pv: &self.mb_lookup.pv_array,
+            bts: self.mb_lookup.pv_array_bts,
+        }
+    }
+
     /// Check if a lut_word_length k-mer has any hits (O(1))
     #[inline(always)]
     pub fn has_hits(&self, lut_kmer: u64) -> bool {

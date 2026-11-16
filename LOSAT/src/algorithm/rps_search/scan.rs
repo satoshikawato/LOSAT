@@ -7,8 +7,10 @@
 //! that a worker holds the hits of 64 buckets, not of the whole volume: the scan itself makes the
 //! hits of the first group and notes whether the scan has more (`scan_subject`); each later group
 //! is made by a pass over the same words of the subject (`RpsBuckets::fill_group`), which keeps 8
-//! bytes for a word of a long cell with hits past the first group and nothing for the others. A
-//! volume of at most 64 buckets is one group and has no further pass.
+//! bytes for a word whose cell has an overflow run (more than `RPS_HITS_PER_CELL` = 3 entries, the
+//! table format's own limit of the entries in the cell) and hits past the first group, and nothing
+//! for the other words; a pass is made only for the groups that can have hits. A volume of at most
+//! 64 buckets is one group and has no further pass.
 
 use crate::seqdb::rps::{
     entry_q_off, q_off_bucket, RPS_BUCKET_BITS, RPS_BUCKET_SIZE, RPS_GROUP_BUCKETS,
@@ -95,11 +97,12 @@ struct BucketHead {
     segment: u32,
 }
 
-/// A word of the scan whose cell is a long one (more than `RPS_HITS_PER_CELL` entries, which are
-/// in the overflow array) and has hits beyond the first group of buckets, with where
-/// `RpsBuckets::fill_group` stands in its entries: 8 bytes, and a long cell is at least four of the
-/// scan's 4,000,000 hits, so the words that a scan records take at most 8 MB. (The words of short
-/// cells are found again by each pass: their entries are in the cell.)
+/// A word of the scan whose cell has an overflow run (more than `RPS_HITS_PER_CELL` entries: the
+/// first is in the cell and the others in the overflow array; that number is NCBI's table format,
+/// not a size chosen here) and has hits beyond the first group of buckets, with where
+/// `RpsBuckets::fill_group` stands in its entries: 8 bytes, and such a cell is at least four of the
+/// scan's 4,000,000 hits, so the words that a scan records take at most 8 MB. (The other words'
+/// entries are all in the cell, which each pass reads again.)
 #[derive(Clone, Copy)]
 struct ScanWord {
     /// The query offset of the word's first letter (NCBI's `s_off`).
@@ -145,11 +148,15 @@ pub(crate) struct RpsBuckets {
     /// The words of the current scan: the subject's offsets `first..end` (what `scan_subject`
     /// scanned; every word of them with hits is in the scan's total).
     scanned: (i32, i32),
-    /// The words of the current scan with a long cell that have hits past the first group, in the
+    /// The words of the current scan with an overflow run that have hits past the first group, in the
     /// order of the scan.
     words: Vec<ScanWord>,
     /// Whether the current scan has hits past the first group (`scan_subject`).
     beyond: bool,
+    /// The groups that the entries of the current scan's inline cells (`RPS_HITS_PER_CELL` entries
+    /// or fewer, in the cell itself) with hits past the first group lie in, one bit per group: a
+    /// pass is needed for these, and for every group when `words` is not empty.
+    reached: Vec<u64>,
     /// The first concatenated position past the current group (`u32::MAX` for the last group).
     g1_q: u32,
     heads: Vec<BucketHead>,
@@ -181,6 +188,7 @@ impl RpsBuckets {
             scanned: (0, 0),
             words: Vec::new(),
             beyond: false,
+            reached: Vec::new(),
             g1_q: u32::MAX,
             heads: Vec::new(),
             chains: Vec::new(),
@@ -223,6 +231,41 @@ impl RpsBuckets {
         }
     }
 
+    /// Whether the scan has hits in `group` to make: the first group always (its hits are the
+    /// scan's), a later one when a cell with an overflow run has hits past the first group (its
+    /// entries are not known to lie in this group or not: `words`) or an inline cell has an entry
+    /// in it (`reached`).
+    pub(crate) fn needs_pass(&self, group: usize) -> bool {
+        group == 0
+            || !self.words.is_empty()
+            || self
+                .reached
+                .get(group / 64)
+                .is_some_and(|bits| bits & (1u64 << (group % 64)) != 0)
+    }
+
+    /// The groups of the entries of an inline cell that lie past the first group, noted in
+    /// `reached`.
+    fn reach_groups(&mut self, entries: &[i32]) {
+        let g1_q = self.g1_q;
+        for &entry in entries {
+            let q_off = entry_q_off(entry);
+            if q_off >= g1_q {
+                let bucket = q_off_bucket(q_off);
+                // A shift in production (64 buckets), a division for the odd sizes of the tests.
+                let group = if self.group_buckets.is_power_of_two() {
+                    bucket >> self.group_buckets.trailing_zeros()
+                } else {
+                    bucket / self.group_buckets
+                };
+                if self.reached.len() <= group / 64 {
+                    self.reached.resize(group / 64 + 1, 0);
+                }
+                self.reached[group / 64] |= 1u64 << (group % 64);
+            }
+        }
+    }
+
     /// Every bucket emptied, its closed blocks back in the pool.
     fn clear(&mut self) {
         for (head, chain) in self.heads.iter_mut().zip(&mut self.chains) {
@@ -260,20 +303,20 @@ impl RpsBuckets {
     /// adds from each cell the entries that lie in the group. The entries of a cell are in groups
     /// in non-decreasing order (a table made by makeprofiledb lists them ascending, and
     /// `seqdb::rps` regroups the cells of a table that does not when it opens the volume), so a
-    /// word's entries in the group follow the entries of the groups before it: for a long cell
-    /// the number of those is `taken` of its `ScanWord` (made by the scan for group 0 and kept
-    /// by each pass), for a short one (up to `RPS_HITS_PER_CELL` entries, in the cell itself)
+    /// word's entries in the group follow the entries of the groups before it: for a cell with an
+    /// overflow run the number of those is `taken` of its `ScanWord` (made by the scan for group 0 and kept
+    /// by each pass), for a cell without one (up to `RPS_HITS_PER_CELL` entries, in the cell itself)
     /// they are the entries before the group's first position, found in the cell at once. So
     /// every bucket receives exactly the hits NCBI's `BlastRPSScanSubject` appends to it, in its
     /// order (the words in the order of the scan, a word's entries in the order of its cell), and
     /// the word finder reads the same hits in the same order.
     ///
-    /// The state per word is the 8 bytes of a long cell with hits past group 0 (a long cell is at
-    /// least four of the scan's hits: at most 8 MB, where the dev scan's hits are 16 MB), and
-    /// none for a short cell, so that a scan of millions of words with one hit each past the
+    /// The state per word is the 8 bytes of a cell with an overflow run and hits past group 0 (such a
+    /// cell is at least four of the scan's hits: at most 8 MB, where the dev scan's hits are 16 MB),
+    /// and none for a cell without a run, so that a scan of millions of words with one hit each past the
     /// first group (a repeat of one rare word) costs no more memory than the dev scan. A pass
     /// costs a rescan of the subject's words (the presence bits and the cells, which are 512 KB)
-    /// and no search in a long cell's entries.
+    /// and no search in a cell's entries.
     pub(crate) fn fill_group(
         &mut self,
         table: &RpsTable<'_>,
@@ -294,7 +337,7 @@ impl RpsBuckets {
             }
             let cell = &table.cells[word];
             let (taken, entry) = if cell[0] > RPS_HITS_PER_CELL {
-                // The words of long cells with hits past group 0, in the order of the scan.
+                // The words of cells with an overflow run and hits past group 0, in the order of the scan.
                 if words.get(next).is_none_or(|w| w.s_off != s as u32) {
                     continue;
                 }
@@ -534,6 +577,9 @@ impl RpsBuckets {
     pub(crate) fn drain(&mut self, table: &RpsTable<'_>, subject: &[u8]) -> Vec<(u32, u32)> {
         let mut hits = Vec::new();
         for group in 0..self.groups() {
+            if !self.needs_pass(group) {
+                continue;
+            }
             let cursor = self.start_group(table, subject, group);
             hits.extend(self.read_group(cursor));
         }
@@ -742,6 +788,7 @@ pub(crate) fn scan_subject(
     buckets.open_group(0);
     buckets.beyond = false;
     buckets.words.clear();
+    buckets.reached.iter_mut().for_each(|bits| *bits = 0);
     let s_first = *offset;
     let s_last = subject.len() as i32 - RPS_WORDSIZE as i32;
     let mut totalhits = 0i32;
@@ -764,6 +811,8 @@ pub(crate) fn scan_subject(
                             s_off: s as u32,
                             taken,
                         });
+                    } else {
+                        buckets.reach_groups(&cell[1 + taken as usize..=numhits as usize]);
                     }
                 }
                 totalhits += numhits;
@@ -1150,7 +1199,7 @@ mod tests {
     }
 
     // PS12m (second review, S2): a scan whose every word has one hit past the first group keeps
-    // nothing per word (a short cell): the later group is made by a pass over the subject, and
+    // nothing per word (a cell without an overflow run): the later group is made by a pass over the subject, and
     // the hits are the scan's, in its order (the dev scan's state is the same hits).
     #[test]
     fn a_repeated_word_with_one_hit_past_the_first_group_needs_no_state_per_word() {
@@ -1169,6 +1218,8 @@ mod tests {
         );
         assert_eq!(hits, 20_000 - 2);
         assert_eq!(buckets.groups(), 3);
+        // The word's one entry lies in group 1: group 2 has no pass.
+        assert!(buckets.needs_pass(0) && buckets.needs_pass(1) && !buckets.needs_pass(2));
         let read = buckets.drain(&table.view(), &subject);
         let expected: Vec<(u32, u32)> = (0..20_000 - 2).map(|s| (q_off as u32, s)).collect();
         assert_eq!(read, expected);

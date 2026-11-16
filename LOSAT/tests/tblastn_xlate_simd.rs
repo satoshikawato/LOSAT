@@ -16,8 +16,11 @@
 //! `x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes`), so the report does not
 //! depend on the switch. It is on by default and off with `LOSAT_X_TBNXLATESIMD=0`;
 //! it acts on packed subjects (`LOSAT_X_TBNSTORE`, here `-subject`) and only where the CPU has
-//! AVX2. These tests compare the reports and read the `[X_STATS] TBNXLATESIMD codons_vector=
-//! codons_scalar=` line (`LOSAT_X_STATS=1`).
+//! AVX2. Where the AVX2 loop does not run, `LOSAT_X_TBNXLATE128` reads 16 codons at a time with
+//! a 128-bit loop (wasm32 simd128, x86-64 SSSE3 and SSE4.1; `=2` takes it in place of AVX2, as
+//! the last test does). These tests compare the reports and read the `[X_STATS] TBNXLATESIMD
+//! codons_vector= codons_scalar=` line (`LOSAT_X_STATS=1`), which counts the codons of either
+//! vector loop.
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` and all 115 of them; the
 //! subject is `tests/fasta/MelaMJNV.fasta`.
@@ -94,13 +97,25 @@ fn stats(stderr: &str) -> Option<[u64; 2]> {
 const OFF: (&str, &str) = ("LOSAT_X_TBNXLATESIMD", "0");
 const NO_STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 
-/// Whether the vector loop can run here.
+/// Whether a vector loop can run here: AVX2, or the 128-bit loop (`LOSAT_X_TBNXLATE128`, SSSE3
+/// and SSE4.1).
 fn vector_cpu() -> bool {
     #[cfg(target_arch = "x86_64")]
-    return std::arch::is_x86_feature_detected!("avx2");
+    return std::arch::is_x86_feature_detected!("avx2") || w128_cpu();
     #[cfg(not(target_arch = "x86_64"))]
     return false;
 }
+
+/// Whether the 128-bit loop can run here (`LOSAT_X_TBNXLATE128=2` takes it on any such CPU).
+fn w128_cpu() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    return std::arch::is_x86_feature_detected!("ssse3")
+        && std::arch::is_x86_feature_detected!("sse4.1");
+    #[cfg(not(target_arch = "x86_64"))]
+    return false;
+}
+
+const W128: (&str, &str) = ("LOSAT_X_TBNXLATE128", "2");
 
 // NCBI reference: c++/src/algo/blast/core/blast_util.c:584-596 (above). The default and `=0`
 // give the same report at one and four threads; by default the vector loop read codons where
@@ -138,4 +153,24 @@ fn the_switch_acts_on_packed_subjects_only() {
     let (report, stderr) = tblastn(one, 1, &[NO_STORE]);
     assert!(report == expected);
     assert_eq!(stats(&stderr), None);
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_util.c:584-596 (above). `LOSAT_X_TBNXLATE128`'s
+// 128-bit loop (the loop of the wasm32 build, here its x86-64 SSSE3 / SSE4.1 build, taken with `=2`
+// in place of AVX2) gives the report of the word loop (`LOSAT_X_TBNXLATESIMD=0`) at one and four
+// threads, and reads codons where the CPU has SSSE3 and SSE4.1.
+#[test]
+fn the_128_bit_loop_gives_the_same_report() {
+    for query in queries() {
+        let (expected, _) = tblastn(query, 1, &[OFF]);
+        let (report, stderr) = tblastn(query, 1, &[W128]);
+        assert!(
+            report == expected,
+            "{query:?}: the 128-bit loop changes the report"
+        );
+        let [vector, _] = stats(&stderr).expect("a line with =2");
+        assert_eq!(vector > 0, w128_cpu(), "{query:?}");
+        let (report, _) = tblastn(query, 4, &[W128]);
+        assert!(report == expected, "{query:?}: four threads");
+    }
 }

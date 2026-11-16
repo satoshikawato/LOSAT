@@ -1007,10 +1007,11 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
     ) -> bool {
         const MASK: usize = RING - 1;
         let n = self.n;
-        if (n + 1) % GROUP == 0 {
+        if (n + 1).is_multiple_of(GROUP) {
             let (offsets, qs) = (self.offsets, self.qs);
             // (constant trip counts and bounds written from `n` alone: the loops unroll, and
             // with one word per group they are the hints of that word alone, as before groups)
+            #[allow(clippy::reversed_empty_ranges)] // (none in a group of one word)
             for k in 0..GROUP - 1 {
                 let m = n - (GROUP - 1) + k;
                 // SAFETY: `m < n` and `m > n - GROUP >= n - RING`: word `m` was pushed, and no
@@ -1096,8 +1097,9 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
             return false;
         };
         let n = self.n;
-        if (n + 1) % GROUP == 0 {
+        if (n + 1).is_multiple_of(GROUP) {
             let (offsets, qs) = (self.head.offsets, self.head.qs);
+            #[allow(clippy::reversed_empty_ranges)] // (none in a group of one word)
             for k in 0..GROUP - 1 {
                 let m = n - (GROUP - 1) + k;
                 // SAFETY: `m < n` and `m > n - GROUP >= n - RING`: word `m` was pushed with its
@@ -1157,8 +1159,9 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     }
 }
 
-const _: () =
-    assert!(RING.is_power_of_two() && RING >= 2 * GROUP && RING % GROUP == 0 && GROUP >= 1);
+const _: () = assert!(
+    RING.is_power_of_two() && RING >= 2 * GROUP && RING.is_multiple_of(GROUP) && GROUP >= 1
+);
 const _: () = assert!(PV_ARRAY_MASK == 31);
 
 /// No NCBI counterpart: the check of the unit tests of a table built with both layouts: the CSR

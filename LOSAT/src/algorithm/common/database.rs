@@ -1502,12 +1502,41 @@ pub(crate) enum BatchLoads {
 }
 
 impl BatchLoads {
-    /// Whether these loads of a batch hold those of the report of its query `query`: always
-    /// where the prefetch ran (it loads the subjects of the batch's Seq-aligns before the
-    /// reports); where it is off, unless NCBI's XML stream cut the report before its hits
-    /// (`cuts`), which then loads nothing.
-    pub(crate) fn of_report(self, cuts: XmlCuts<'_>, query: usize) -> bool {
-        self == BatchLoads::Prefetched || !cuts.cut(query)
+    /// The rows that these loads read of the hit lists that a batch's reports show, in a program
+    /// whose prefetched set is its reported set (BLASTN, TBLASTN, BLASTX, TBLASTX): every subject
+    /// where the prefetch ran, else the first format's rows (`Read`). Not psiblast's, whose
+    /// prefetch reads its traceback beyond the reports' cut and whose PSSM reads more
+    /// (`blastp::blast_engine::report_prep`). The one owner of that rule (review 7 of line DBID
+    /// loadord, L2).
+    pub(crate) fn reported_rows(self) -> crate::report::tabular::SubjectFetch {
+        match self {
+            BatchLoads::Prefetched => crate::report::tabular::SubjectFetch::Every,
+            BatchLoads::Read(rows) => rows,
+        }
+    }
+
+    /// The queries of the batch of the queries `span` (by query of the call, as `cuts` counts
+    /// them) that these loads are made for: the batch at once where the prefetch ran (it loads the
+    /// subjects of the batch's Seq-aligns before the reports); where it is off, each query whose
+    /// report NCBI writes, alone: not one whose outfmt 5 report NCBI's XML stream cut before its
+    /// hits (`cuts`), which loads nothing. The one walk of a batch's reports for the run's record
+    /// ([`LoadedBefore::subjects`], BLASTX's `ReportedSubjects::note_loaded`; review 7 of line DBID
+    /// loadord, L2).
+    pub(crate) fn report_spans<'c>(
+        self,
+        cuts: XmlCuts<'c>,
+        span: std::ops::Range<usize>,
+    ) -> impl Iterator<Item = std::ops::Range<usize>> + 'c {
+        let (batch, each) = match self {
+            BatchLoads::Prefetched => (Some(span), None),
+            BatchLoads::Read(_) => (None, Some(span)),
+        };
+        batch.into_iter().chain(
+            each.into_iter()
+                .flatten()
+                .filter(move |&query| !cuts.cut(query))
+                .map(|query| query..query + 1),
+        )
     }
 }
 
@@ -1581,9 +1610,10 @@ impl<'a, T> LoadedBefore<'a, T> {
     /// reports' reads ([`BatchLoads::Read`]), of each query of the batch whose report NCBI writes
     /// (`span` its query alone; not one whose outfmt 5 report the stream cut before its hits,
     /// `cuts`, which loads nothing: review 6 of line DBID loadord, H2). The walk over the
-    /// batches, the one question whether a batch's prefetch is off, and which of its reports
-    /// load are here; how each program counts its Seq-aligns and which of its subjects a batch's
-    /// loads read stay with its hit lists (review 4 of line DBID loadord, L4).
+    /// batches and the one question whether a batch's prefetch is off are here, which of its
+    /// reports load is [`BatchLoads::report_spans`]; how each program counts its Seq-aligns and
+    /// which of its subjects a batch's loads read stay with its hit lists (review 4 of line DBID
+    /// loadord, L4; [`BatchLoads::reported_rows`] where its prefetched set is its reported set).
     pub(crate) fn subjects<I>(
         self,
         batch: impl Fn(&'a [T], std::ops::Range<usize>) -> Option<&'a [T]> + 'a,
@@ -1621,17 +1651,11 @@ impl<'a, T> LoadedBefore<'a, T> {
                 let Some(held) = batch(hits, span.clone()) else {
                     return Vec::new();
                 };
-                match batch_loads_at(limit, seq_aligns(span.clone(), held), rows) {
-                    BatchLoads::Prefetched => vec![(span.clone(), held, BatchLoads::Prefetched)],
-                    loads => span
-                        .clone()
-                        .filter(|&query| loads.of_report(cuts, query))
-                        .filter_map(|query| {
-                            let queries = query..query + 1;
-                            Some((queries.clone(), batch(hits, queries)?, loads))
-                        })
-                        .collect(),
-                }
+                let loads = batch_loads_at(limit, seq_aligns(span.clone(), held), rows);
+                loads
+                    .report_spans(cuts, span.clone())
+                    .filter_map(|queries| Some((queries.clone(), batch(hits, queries)?, loads)))
+                    .collect()
             })
             .flat_map(move |(span, hits, loads)| loaded(span, hits, loads))
     }
@@ -4073,6 +4097,10 @@ mod tests {
             assert_eq!(batch_loads_at(Some(2), 4, rows), Read(rows));
             assert_eq!(batch_loads_at(Some(0), 0, rows), Read(rows));
             assert_ne!(batch_loads_at(Some(2), 4, rows), Prefetched);
+            // Review 7, L2: where the prefetched set is the reported set, the loads read every
+            // reported subject where the prefetch ran, else what the rows read.
+            assert_eq!(Prefetched.reported_rows(), Every);
+            assert_eq!(Read(rows).reported_rows(), rows);
         }
         // Review 4, L4: the one walk of the held batches (`LoadedBefore::subjects`), in their
         // order, each batch's loads from its own Seq-aligns; a batch past the held hits is not
@@ -4134,6 +4162,16 @@ mod tests {
         );
         // Without outfmt 5 first nothing is cut.
         assert_eq!(walk(Some(2), XmlCuts::of(false, &cut)).len(), 4);
+        // Review 7, L2: the one walk of a batch's reports (`BatchLoads::report_spans`, which
+        // BLASTX's record walks too), also of a batch that does not start at query 0 (BLASTX's
+        // search batches, by query of the reader batch).
+        let spans = |loads: BatchLoads, cuts: XmlCuts<'_>, span| -> Vec<std::ops::Range<usize>> {
+            loads.report_spans(cuts, span).collect()
+        };
+        assert_eq!(spans(Prefetched, XmlCuts::of(true, &cut), 1..3), [1..3]);
+        assert_eq!(spans(Read(Every), XmlCuts::of(true, &cut), 1..4), [3..4]);
+        assert_eq!(spans(Read(Every), XmlCuts::NONE, 1..3), [1..2, 2..3]);
+        assert_eq!(spans(Read(Never), XmlCuts::NONE, 2..2), []);
     }
 
     /// The subjects of the database `name` of `tests/db_search/ids` by ordinal id.

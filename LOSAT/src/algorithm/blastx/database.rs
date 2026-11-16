@@ -769,10 +769,15 @@ impl ReportedSubjects {
     /// batch that does not stop is recorded for the stop of a later batch's prefetch (nothing for
     /// a database that cannot stop). `loads`: what the batch's loads read of the lists that the
     /// reports show (`shared::BatchLoads::Prefetched` where its prefetch read them, BLASTX's
-    /// prefetched set being its reported set; where it is off, or failed before it loaded
-    /// anything, the rows of its reports; review 3 of line DBID loadord, H2), of each query whose
-    /// report NCBI writes (`BatchLoads::of_report`: not one whose outfmt 5 report NCBI's XML stream
-    /// cut before its hits, `cuts`, by query of the reader batch; review 6, H2).
+    /// prefetched set being its reported set, `BatchLoads::reported_rows`; where it is off, or
+    /// failed before it loaded anything, the rows of its reports; review 3 of line DBID loadord,
+    /// H2), of each query whose report NCBI writes (`BatchLoads::report_spans`, the walk of
+    /// `shared::LoadedBefore::subjects`: not one whose outfmt 5 report NCBI's XML stream cut
+    /// before its hits, `cuts`, by query of the reader batch; review 6, H2). Not
+    /// `LoadedBefore::subjects` itself: these loads are `BatchPrefetch::loads` (the rows where
+    /// the prefetch fails at an empty subject row with the prefetch on, which the Seq-aligns'
+    /// count that `subjects` asks cannot tell), and the lists nest in `BatchResults` by query
+    /// of each search batch, not one slice by query of the call (review 7, L2).
     pub(crate) fn note_loaded(
         &self,
         database: &BlastxDatabase,
@@ -782,22 +787,16 @@ impl ReportedSubjects {
         cuts: shared::XmlCuts<'_>,
     ) {
         if database.parsed_seqids() {
-            let rows = match loads {
-                shared::BatchLoads::Prefetched => SubjectFetch::Every,
-                shared::BatchLoads::Read(rows) => rows,
-            };
+            let rows = loads.reported_rows();
             database.taxdb.note_loaded(&database.db, || {
                 batches
                     .iter()
                     .flat_map(move |batch| {
-                        batch
-                            .queries
-                            .iter()
-                            .enumerate()
-                            .filter_map(move |(qidx, lists)| {
-                                loads
-                                    .of_report(cuts, batch.query_ordinal + qidx)
-                                    .then_some(lists)
+                        let first = batch.query_ordinal;
+                        loads
+                            .report_spans(cuts, first..first + batch.queries.len())
+                            .flat_map(move |queries| {
+                                &batch.queries[queries.start - first..queries.end - first]
                             })
                     })
                     .flatten()

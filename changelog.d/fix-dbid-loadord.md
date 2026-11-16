@@ -11,8 +11,9 @@
   looks the earlier one up), and so are two such Seq-ids whose lookups fail with different messages. Newly refused, where NCBI BLAST+ may never look such a Seq-id up and LOSAT cannot tell whether it goes
   on: a stopping Seq-id that another sequence of the database holds under another Seq-align id where that sequence
   may be loaded first (in the batch, or in a batch, query or psiblast round before: by its prefetch, or with
-  `PRE_FETCH_SEQS_LIMIT` by the reports that NCBI BLAST+ writes, after their cut to `-max_target_seqs`, and by
-  psiblast's PSSM), and the id of a query that NCBI BLAST+ holds at that
+  `PRE_FETCH_SEQS_LIMIT` by the reports that NCBI BLAST+ writes, after their cuts to `-max_target_seqs` (in the
+  pairwise report, `-outfmt 0`: the sequences of both its description lines, cut to `-num_descriptions`, and its
+  alignments, cut to `-num_alignments`), and by psiblast's PSSM), and the id of a query that NCBI BLAST+ holds at that
   point (the batch's queries as read, one that `-query_loc` skips included, numbered over the whole run; with
   `-parse_deflines` the ids of the deflines; the PSSM's query of `-in_pssm`; with `-outfmt 5` also the queries
   before).

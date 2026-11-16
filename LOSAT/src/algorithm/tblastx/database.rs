@@ -587,19 +587,19 @@ pub(crate) type LoadedBefore<'a> = shared::LoadedBefore<'a, TblastxHsp>;
 
 /// The sequences that NCBI's BLAST database data loader loaded for reported hits `ordered` whose
 /// loads are `loads` (`shared::batch_loads`, review 3 of line DBID loadord, H2): every subject
-/// where its batch's prefetch ran (TBLASTX's prefetched set is its reported set); where it is
-/// off, those that the rows of a report NCBI writes read (`ordered` is then one query's hits,
-/// `shared::LoadedBefore::subjects`), which LOSAT takes as all of them unless no row reads one
-/// (`SubjectFetch::Never`): rows that read a subject for its identities only (`nident`) read
-/// those of HSPs with identities, which the stores of the batch count (`run_impl`'s fetches of a
-/// batch whose prefetch is off), so every subject is a superset (TBLASTX's own: its hits carry no
-/// identities before those fetches).
+/// where its batch's prefetch ran (TBLASTX's prefetched set is its reported set,
+/// `shared::BatchLoads::reported_rows`); where it is off, those that the rows of a report NCBI
+/// writes read (`ordered` is then one query's hits, `shared::LoadedBefore::subjects`), which
+/// LOSAT takes as all of them unless no row reads one (`SubjectFetch::Never`): rows that read a
+/// subject for its identities only (`nident`) read those of HSPs with identities, which the
+/// stores of the batch count (`run_impl`'s fetches of a batch whose prefetch is off), so every
+/// subject is a superset (TBLASTX's own: its hits carry no identities before those fetches).
 fn batch_loaded<'s>(
     ordered: &'s [TblastxHsp],
     loads: shared::BatchLoads,
     titles: &'s DatabaseTitles,
 ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
-    let loaded = if loads == shared::BatchLoads::Read(SubjectFetch::Never) {
+    let loaded = if loads.reported_rows() == SubjectFetch::Never {
         &[]
     } else {
         ordered

@@ -18,7 +18,7 @@ mod two_hit;
 // The table walks of the two-hit extension.
 mod x_two_hit_fast;
 
-pub(crate) use one_hit::extend_hit_one_hit;
+pub(crate) use one_hit::{extend_hit_one_hit, extend_hit_one_hit_alone, OneHit};
 pub(crate) use query_batch::{InBatch, QueryBatch};
 pub(crate) use two_hit::extend_hit_two_hit_fitting;
 pub(crate) use two_hit::extend_hit_two_hit_with;

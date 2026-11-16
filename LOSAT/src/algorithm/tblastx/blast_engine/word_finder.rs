@@ -1199,6 +1199,35 @@ fn scan_chunk_bucketed<S: TbxScore>(
     )
 }
 
+/// The one-hit extension of the word at batch offset `query_offset` (in context `ctx_idx`, `ctx`)
+/// and `subject_offset` of the chunk's letters `subject`, on the query batch: where a walk on the
+/// context alone read the context's last letter on its side without a break where the subject has
+/// letters more (`extend_hit_one_hit_alone`), NCBI's walk goes on past the NULLB
+/// (extension/query_batch.rs). Out of the scan's loop, from values the loop keeps.
+#[cold]
+#[inline(never)]
+fn one_hit_in_batch<S: TbxScore>(
+    sc: S,
+    frame: &FrameCx<'_>,
+    ctx: &QueryContext,
+    ctx_idx: usize,
+    query_offset: u32,
+    subject: &[u8],
+    subject_offset: u32,
+    x_dropoff_per_context: &[i32],
+) -> Option<crate::algorithm::tblastx::extension::OneHit> {
+    let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
+    crate::algorithm::tblastx::extension::extend_hit_one_hit(
+        sc,
+        &ctx.aa_seq[1..ctx.aa_seq.len() - 1],
+        frame.query_batch.at(ctx_idx),
+        subject,
+        q_raw,
+        subject_offset as usize,
+        x_dropoff_per_context[ctx_idx],
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-807
 // ```c
 //     scan_range[0] = 0;
@@ -1389,17 +1418,19 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 // blast_query_info.c:311-315), as the two-hit extensions read them.
                 let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
                 // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
-                // The walks go on into the query batch past the context's ends, as NCBI's do
-                // (extension/query_batch.rs; aa_ungapped.c:841, 897).
-                let Some(hit) = crate::algorithm::tblastx::extension::extend_hit_one_hit(
-                    sc,
-                    query,
-                    frame.query_batch.at(ctx_idx),
-                    subject,
-                    q_raw,
-                    subject_offset as usize,
-                    x_dropoff_per_context[ctx_idx],
-                ) else {
+                // On the context alone; where a walk would go on into the query batch past the
+                // context's ends, as NCBI's do, again on the batch (`one_hit_in_batch`;
+                // extension/query_batch.rs; aa_ungapped.c:841, 897).
+                let Some((hit, past)) =
+                    crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
+                        sc,
+                        query,
+                        subject,
+                        q_raw,
+                        subject_offset as usize,
+                        x_dropoff_per_context[ctx_idx],
+                    )
+                else {
                     // A word past the letters, which the scan does not give.
                     x_read_failure.fail(
                         s_idx,
@@ -1410,6 +1441,21 @@ fn scan_chunk_one_hit<S: TbxScore>(
                         ),
                     );
                     continue;
+                };
+                let hit = if past {
+                    one_hit_in_batch(
+                        sc,
+                        frame,
+                        ctx,
+                        ctx_idx,
+                        query_offset,
+                        subject,
+                        subject_offset,
+                        x_dropoff_per_context,
+                    )
+                    .unwrap_or(hit)
+                } else {
+                    hit
                 };
                 // [C] if (score >= cutoffs->cutoff_score)
                 // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,

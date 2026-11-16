@@ -63,10 +63,7 @@ pub(crate) struct OneHit {
 /// or negative when the sum is reset after its best part. The left and right walks are the two-hit
 /// extension's (`s_BlastAaExtendLeft` and `s_BlastAaExtendRight`): they stop at the subject
 /// slice's ends, and at the context's ends they go on into the query batch `qb` as NCBI's walks do
-/// (query_batch.rs). They first run on the context alone, and only where one of them reads the
-/// context's last letter on its side without a break, where the subject has letters more, does the
-/// extension run again on the batch (`extend_hit_one_hit_in_batch`): elsewhere the two give the
-/// same result, and the walks' loops keep no values of the batch.
+/// (query_batch.rs).
 pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -76,25 +73,23 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     s_off: usize,
     x_drop: i32,
 ) -> Option<OneHit> {
-    match one_hit_walks(sc, q_seq, InBatch::ALONE, s_seq, q_off, s_off, x_drop) {
-        Some((_, true)) => extend_hit_one_hit_in_batch(sc, q_seq, qb, s_seq, q_off, s_off, x_drop),
-        hit => hit.map(|(hit, _)| hit),
-    }
+    one_hit_walks(sc, q_seq, qb, s_seq, q_off, s_off, x_drop).map(|(hit, _)| hit)
 }
 
-/// `extend_hit_one_hit` on the batch: its walks past the context's ends.
-#[cold]
-#[inline(never)]
-fn extend_hit_one_hit_in_batch<S: TbxScore>(
+/// `extend_hit_one_hit` on the context alone (`InBatch::ALONE`: the walks stop at its ends), and
+/// whether a walk read the context's last letter on its side without a break where the subject
+/// has letters more: only there do NCBI's walks go on into the query batch, and the search runs
+/// the extension again on the batch (`extend_hit_one_hit`); elsewhere the two give the same
+/// result. The search's loop so keeps no values of the batch through the walks.
+pub(crate) fn extend_hit_one_hit_alone<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
-    qb: InBatch<'_>,
     s_seq: &[u8],
     q_off: usize,
     s_off: usize,
     x_drop: i32,
-) -> Option<OneHit> {
-    one_hit_walks(sc, q_seq, qb, s_seq, q_off, s_off, x_drop).map(|(hit, _)| hit)
+) -> Option<(OneHit, bool)> {
+    one_hit_walks(sc, q_seq, InBatch::ALONE, s_seq, q_off, s_off, x_drop)
 }
 
 /// The steps of `extend_hit_one_hit` with the walks of `qb`, and whether a walk read the

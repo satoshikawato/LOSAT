@@ -56,7 +56,8 @@ stderr and exit status with the frozen files (and checks that each frozen file's
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
-failure's exit status counts as any other failure's, a row whose query the reader refuses is
+failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
+too (the library holds its output where the command line holds it), a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
 row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
@@ -175,23 +176,26 @@ def is_env_token(token: str) -> bool:
     return token.partition("=")[0] in ENV_NAMES
 
 
-def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str]] | None:
-    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...]`:
-    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`) and the files put in their
-    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux); None for another cell."""
+def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
+    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
+    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux) and the alias file the run
+    searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files, `-db ALIAS`; its
+    DBLIST names them); None for another cell."""
     if not cell.startswith("rps-gz:"):
         return None
-    names, *changes = cell.removeprefix("rps-gz:").split("!")
+    body, at, alias = cell.removeprefix("rps-gz:").partition("@")
+    names, *changes = body.split("!")
     dropped = {"." + change for change in changes if "=" not in change}
     replaced = dict(("." + change.split("=")[0], change.split("=")[1]) for change in changes if "=" in change)
-    return names.split("+"), dropped, replaced
+    return names.split("+"), dropped, replaced, (alias if at else None)
 
 
 def inflate_rps(cell: str) -> Path:
     """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
     files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
-    leaves out or replaces."""
-    names, dropped, replaced = rps_cell(cell)
+    leaves out or replaces, and the cell's alias file."""
+    names, dropped, replaced, alias = rps_cell(cell)
     rps_dir = TESTS / "db_search" / "rps"
     target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
@@ -205,6 +209,8 @@ def inflate_rps(cell: str) -> Path:
             (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
         for extension, file in replaced.items():
             (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+    if alias is not None:
+        (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target
 
 
@@ -215,11 +221,12 @@ def rps_dir_token(row: dict[str, str]) -> bool:
 
 def subjects_argv(cell: str) -> list[str]:
     """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
-    for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the inflated directory)."""
+    (`-db ALIAS` with `@ALIAS`) for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the
+    inflated directory)."""
     if cell.startswith("subject:"):
         return ["-subject", cell.removeprefix("subject:")]
     if (rps := rps_cell(cell)) is not None:
-        return ["-db", " ".join(rps[0])]
+        return ["-db", rps[3] if rps[3] is not None else " ".join(rps[0])]
     return ["-db", cell]
 
 
@@ -467,8 +474,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        # The library writes as the search goes (`api::run`): nothing holds the bytes before a
-        # refusal, as the command line holds them.
+        # A refusal follows no byte in either path (the library holds its output where the command
+        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
+        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
+        # library skips.
         if row["stdout_bytes"]:
             out_path = FROZEN / f"{row['row_id']}.out"
             out = out_path.read_bytes() if out_path.exists() else b""
@@ -476,7 +485,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                 problems.append("frozen .out does not match the manifest")
             if run.stdout != out:
                 problems.append("stdout " + first_difference(out, run.stdout))
-        elif run.stdout and not library:
+        elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")

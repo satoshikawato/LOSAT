@@ -1040,7 +1040,10 @@ pub(crate) fn link_even(
 /// The linking cutoffs of BLASTX's ungapped search with one subject
 /// (`CalculateLinkHSPCutoffs`, `core::link_hsps::calculate_link_hsp_cutoffs`): the smallest Lambda, the average
 /// query length and `cutoff_score_min` are those of the query batch, the reader batch's when the
-/// unit is a part of one (`reader_batch.rs`). The subject is a protein, so its lengths are not
+/// unit is a part of one (`reader_batch.rs`). Where NCBI computes the statistics of each subject (a
+/// database length of 0), `subject_cutoff_min` is the reader batch's minimum of the subject's word
+/// cutoffs (`parameters::subject_word_cutoff_min`; line RG D1a-3); a batch searched as one unit
+/// passes its subject's parameters as `params`. The subject is a protein, so its lengths are not
 /// divided by 3.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-112
@@ -1063,6 +1066,7 @@ pub(crate) fn link_cutoffs(
     params: &[ContextParameters],
     subject_length: i32,
     db_length: i64,
+    subject_cutoff_min: Option<i32>,
 ) -> LinkCutoffs {
     let shape = batch.reader_shape.as_deref();
     let kbp = match shape.and_then(|shape| shape.smallest_lambda) {
@@ -1078,7 +1082,7 @@ pub(crate) fn link_cutoffs(
     };
     let avg_query_length =
         (batch.batch_concatenated_length() as i32 - 1) / batch.batch_context_count() as i32;
-    let cutoff_score_min = || match shape.and_then(|shape| shape.word_cutoff_min) {
+    let cutoff_score_min = || match subject_cutoff_min.or(shape.and_then(|s| s.word_cutoff_min)) {
         Some(batch_min) => batch_min,
         None => params
             .iter()
@@ -1139,13 +1143,15 @@ mod link_cutoffs_tests {
                 super::super::parameters::SubjectNumbers {
                     total: db,
                     count: 1,
+                    gumbel_total: db,
                     shortest: (length as usize).max(10),
                     average: db as i32,
+                    request_count: 1,
                 },
                 None,
             )
             .unwrap();
-            let link = super::link_cutoffs(&batch, &parameters, length, db);
+            let link = super::link_cutoffs(&batch, &parameters, length, db, None);
             assert_eq!(
                 [link.cutoff_small_gap, link.cutoff_big_gap],
                 [f[4].parse().unwrap(), f[5].parse().unwrap()],

@@ -98,10 +98,11 @@ impl TblastnDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
             shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
-        let total = db.total_length();
+        // The statistics' setup total (`DbStatistics::setup_total`: not negative, below 2^63; a
+        // `LENGTH` of 2^63 or more is NCBI's negative `Int8`, read as such) as the engine holds it.
+        let total = db.statistics().setup_total;
         usize::try_from(total)
             .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
             .with_context(|| {
                 format!(
                     "a database of {total} letters is not supported by LOSAT's TBLASTN on this platform"
@@ -135,14 +136,20 @@ impl TblastnDatabase {
     //     return seqdb.GetTotalLength();
     // }
     // ```
-    /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
-    /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    /// The numbers of the statistics (`SeqDb::statistics`): the setup's total length and number
+    /// of sequences, the Gumbel block's length and `CSeqDB::GetMinLength`; the real numbers, also
+    /// with `-dbsize`.
     pub(super) fn numbers(&self) -> DatabaseNumbers {
-        let (total_length, num_seqs) = self.db.statistics_numbers();
+        let statistics = self.db.statistics();
         DatabaseNumbers {
-            total_length,
-            num_seqs: u64::from(num_seqs),
-            min_length: self.db.min_length(),
+            // The setup's total is not negative (a length of OID 0 where the total is not
+            // positive).
+            total_length: statistics.setup_total as u64,
+            num_seqs: statistics.setup_count,
+            gumbel_db_length: statistics.gumbel_db_length,
+            engine_db_length: statistics.engine_db_length,
+            min_length: statistics.min_length,
+            request_count: statistics.request_count,
         }
     }
 
@@ -151,10 +158,10 @@ impl TblastnDatabase {
         self.db.filtered_empty()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -353,7 +360,8 @@ impl TblastnDatabase {
     /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
     /// before, whose final hit lists by rank are `before` (`reported`'s ranks, as `read_taxids`
-    /// reads them); TBLASTN writes those reports after the stop.
+    /// reads them); TBLASTN writes those reports after the stop. `xml_before`: the outfmt 5
+    /// reports before the batch (`shared::XmlReportsBefore`).
     pub(super) fn prefetch_stop_error(
         &self,
         reported: Option<&ReportedSubjects>,
@@ -361,6 +369,7 @@ impl TblastnDatabase {
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
         query: usize,
         at_hits: bool,
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
     ) -> anyhow::Error {
         let subjects = subjects.iter().map(|(ordinal, parsed)| {
             shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
@@ -376,7 +385,8 @@ impl TblastnDatabase {
             });
             shared::held_batch_prefetch_stop(&self.db, before, subjects, PROGRAM, query).err()
         } else {
-            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query, xml_before)
+                .err()
         };
         stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
     }
@@ -384,13 +394,15 @@ impl TblastnDatabase {
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
-    /// subject whose lookup fails (the protein query has no strand); the stop of the batch whose first query is `query`.
+    /// subject whose lookup fails (the protein query has no strand); the stop of the batch whose first query is `query`
+    /// (`xml_before`: the outfmt 5 reports before it, `shared::XmlReportsBefore`).
     pub(super) fn batch_prefetch(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         query: usize,
-    ) -> Result<Vec<u8>> {
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+    ) -> Result<crate::report::diag_log::Posts> {
         let subjects = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
@@ -402,7 +414,7 @@ impl TblastnDatabase {
                     reported.parsed_subject(rank),
                 )
             });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query)
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query, xml_before)
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of

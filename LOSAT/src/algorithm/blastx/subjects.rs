@@ -78,21 +78,23 @@ impl<'a> Subjects<'a> {
     }
 
     /// The numbers that the parameters of the search read (`SubjectNumbers`): a database's
-    /// statistics (`SeqDb::statistics_numbers`: `STATS_TOTLEN` or the total, `STATS_NSEQ` or
-    /// `GetNumSeqs`, the length of OID 0 and one sequence for a list that kept none),
+    /// statistics (`SeqDb::statistics`: `STATS_TOTLEN` or the total, `STATS_NSEQ` or
+    /// `GetNumSeqs`, the length of OID 0 and one sequence for a list that kept none, and the
+    /// Gumbel block's length before that fallback),
     /// `GetMinLength` and `BlastSeqSrcGetAvgSeqLen`; a FASTA set's total, records, shortest
     /// record (raised to `BLAST_SEQSRC_MINLENGTH`) and average.
     pub(crate) fn numbers(&self) -> Result<super::parameters::SubjectNumbers> {
         let shortest = self.shortest_length();
         Ok(match self {
             Subjects::Stream(stream) => {
-                let (total, count) = stream.db.statistics_numbers();
+                let statistics = stream.db.statistics();
                 super::parameters::SubjectNumbers {
-                    total: i64::try_from(total)
-                        .map_err(|_| anyhow!("BLASTX database length exceeds Int8"))?,
-                    count: i64::from(count),
+                    total: statistics.setup_total,
+                    count: statistics.setup_count,
+                    gumbel_total: statistics.gumbel_db_length,
                     shortest,
-                    average: stream.db.average_length(),
+                    average: statistics.average,
+                    request_count: statistics.request_count,
                 }
             }
             Subjects::Fasta(_) | Subjects::Unreadable => {
@@ -100,15 +102,26 @@ impl<'a> Subjects<'a> {
                 let count = self.len() as i64;
                 super::parameters::SubjectNumbers {
                     total,
-                    count,
+                    count: i32::try_from(count).unwrap_or(i32::MAX),
+                    gumbel_total: total,
                     shortest,
                     average: (total / count.max(1)) as i32,
+                    request_count: i32::try_from(count).unwrap_or(i32::MAX),
                 }
             }
         })
     }
 
     /// Whether the subjects are `Unreadable`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407, 1434 (quoted at
+    // `seqdb::DbStatistics`)
+    /// Whether NCBI's preliminary search computes the statistics of each subject on its own: a
+    /// database whose `BlastSeqSrcGetTotLen` is 0 (`DbStatistics::per_subject`). A FASTA set's
+    /// total is the sum of its records (NCBI's "dbscan" mode).
+    pub(crate) fn per_subject(&self) -> bool {
+        matches!(self, Subjects::Stream(stream) if stream.db.statistics().per_subject())
+    }
+
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)
     }
@@ -253,8 +266,10 @@ impl<'a> Subjects<'a> {
                     sum.checked_add(i64::try_from(s.sequence.len()).ok()?)
                 })
                 .ok_or_else(|| anyhow!("BLASTX subject-set length exceeds Int8")),
-            Subjects::Stream(stream) => i64::try_from(stream.db.total_length())
-                .map_err(|_| anyhow!("BLASTX database length exceeds Int8")),
+            // NCBI's `Int8` of the `Uint8` (seqsrc_seqdb.cpp:183-189): negative for an alias
+            // file's `LENGTH` of 2^63 or more, which takes the subject's own branch of the link
+            // cutoffs (`linking::link_cutoffs`; line RG D1a-3).
+            Subjects::Stream(stream) => Ok(stream.db.total_length() as i64),
             Subjects::Unreadable => Ok(0),
         }
     }

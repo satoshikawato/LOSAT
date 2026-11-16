@@ -19,7 +19,7 @@ fn put<F: SideFiles>(
 ) -> anyhow::Result<()> {
     doc.report(&mut Vec::new(), out, |_, made| {
         made.extend_from_slice(report);
-        Ok(())
+        Ok(crate::report::blast_xml2::framing::MadeReport::default())
     })
 }
 
@@ -126,7 +126,7 @@ const INVALID_ONLY_15: &str = r####"{
 }
 "####;
 
-fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlRun<'a> {
+fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRun<'a> {
     XmlRun {
         program: "blastp",
         version: "BLASTP 2.17.0+",
@@ -140,6 +140,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlR
         filter: b"F",
         db_num: 4,
         db_len: 5000,
+        db_len_overflow: false,
         positives: matrix,
         mask_char: b'X',
     }
@@ -174,7 +175,7 @@ fn invalid_message() -> Vec<u8> {
 
 fn document(kind: Xml2Kind, target: Xml2Target, finish: bool) -> String {
     let message = invalid_message();
-    let run = run(None, b"");
+    let run = run(None, "");
     let mut writer = Xml2Writer::new(kind, params(target));
     let mut out = Vec::new();
     writer
@@ -217,7 +218,7 @@ fn an_unsearched_query_lists_no_masks() {
         (Xml2Kind::Single16, INVALID_ONLY_16),
         (Xml2Kind::Single15, INVALID_ONLY_15),
     ] {
-        let run = run(None, b"");
+        let run = run(None, "");
         let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
         let mut out = Vec::new();
         let query = XmlQuery {
@@ -346,6 +347,64 @@ fn a_document_started_early_writes_its_start_once() {
 }
 
 #[test]
+fn the_start_refuses_the_report_sums_before_its_first_byte() {
+    // Line RG D1a-3: NCBI writes the XML2 and JSON documents' start before the search and sums the
+    // database counts when it formats the first report, after its own errors of the search (probe
+    // `fix3_d1a3/p2`): LOSAT refuses the counts it would print where NCBI's sums overflow in the
+    // document's start, before any byte, and only for a call that writes reports.
+    let mut overflow = run(None, "d");
+    overflow.db_len_overflow = true;
+    let mut int64_min = run(None, "d");
+    int64_min.db_len = i64::MIN;
+    for kind in [
+        Xml2Kind::Single16,
+        Xml2Kind::Single15,
+        Xml2Kind::Files14,
+        Xml2Kind::Files13,
+    ] {
+        let refused = |run: &XmlRun<'_>| {
+            let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+            let mut out = Vec::new();
+            let refused = writer.start(Some(run), &mut out).is_err_and(|error| {
+                error.is::<crate::algorithm::common::database::ReportSumRefusal>()
+            });
+            // A refusal writes nothing; otherwise the start is written.
+            if refused {
+                assert!(out.is_empty(), "{kind:?}");
+            } else {
+                assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+            }
+            refused
+        };
+        assert!(refused(&overflow), "{kind:?}");
+        // `-0` in the serial XML only (outfmt 14 and 16); JSON writes INT64_MIN.
+        assert_eq!(
+            refused(&int64_min),
+            matches!(kind, Xml2Kind::Single16 | Xml2Kind::Files14),
+            "{kind:?}"
+        );
+        // A call that writes no report (a run without a query) prints no count.
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        writer.start(None, &mut out).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        writer.start(Some(&run(None, "d")), &mut out).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+    }
+    let mut blast_xml = crate::report::blast_xml::BlastXmlWriter::new(0);
+    let mut out = Vec::new();
+    assert!(blast_xml.start(Some(&overflow), &mut out).is_err());
+    assert!(blast_xml.start(Some(&int64_min), &mut out).is_err());
+    let mut count = run(None, "d");
+    count.db_num = i64::from(i32::MAX) + 1;
+    assert!(blast_xml.start(Some(&count), &mut out).is_err());
+    assert!(blast_xml.start(None, &mut out).is_ok());
+    assert!(out.is_empty());
+}
+
+#[test]
 fn a_report_is_made_after_the_bytes_written_before_it() {
     // NCBI writes outfmt 15's separator before it makes a report's data, which loads the
     // report's subjects (`Xml2Document::report`): `make` gets the place after the separator, and
@@ -361,7 +420,7 @@ fn a_report_is_made_after_the_bytes_written_before_it() {
             doc.report(&mut Vec::new(), &mut out, |at, made| {
                 start = at;
                 made.extend_from_slice(format!("{{{n}}}\n").as_bytes());
-                Ok(())
+                Ok(crate::report::blast_xml2::framing::MadeReport::default())
             })
             .unwrap();
             befores.push(String::from_utf8(out[..start].to_vec()).unwrap());
@@ -522,9 +581,9 @@ fn one_hsp_named(
     let run = run(
         Some(&matrix),
         if target == Xml2Target::Database {
-            b"db/sprot"
+            "db/sprot"
         } else {
-            b""
+            ""
         },
     );
     let mut writer = Xml2Writer::new(kind, params(target));
@@ -561,7 +620,7 @@ fn one_hsp_named(
                     taxid,
                     taxonomy,
                     descriptions: &[],
-                    unknown: false,
+                    defline_thrown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -648,7 +707,7 @@ fn query_masking_lists_the_plus_regions_and_a_nucleotide_row_is_masked_in_lower_
 /// regions of the query (frame 0) are applied to the nucleotide row in lower case, and the
 /// scores come from `reward_penalty`.
 fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
-    let mut run = run(None, b"");
+    let mut run = run(None, "");
     run.program = "blastn";
     run.version = "BLASTN 2.17.0+";
     run.matrix = None;
@@ -684,7 +743,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     taxid: 0,
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
-                    unknown: false,
+                    defline_thrown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -1167,6 +1226,145 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_some());
     assert_eq!(std::fs::read(dir.join("p.out_1.xml")).unwrap(), b"one\n");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A 16 document of one `-db` query with `hits` hits titled `hits_title` (the last one `last_title`)
+/// and the message `message`, with the posts of its writer (`StructuredXml::take_posts`).
+fn many_hits_16(
+    hits: usize,
+    hits_title: &[u8],
+    last_title: &[u8],
+    message: Option<&[u8]>,
+) -> (Vec<u8>, Vec<crate::report::blast_xml::writer::DocumentPost>) {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let run = run(Some(&matrix), "db/sprot");
+    let mut writer = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"q1",
+        len: 12,
+        stats: XmlStats::NONE,
+        message,
+        searched: true,
+        masks: &[],
+    };
+    let mut out = Vec::new();
+    writer.start(None, &mut out).unwrap();
+    let mut posts = writer.take_posts().posts;
+    let base = out.len();
+    writer
+        .query(&run, &query, &mut out, |sink| {
+            for n in 0..hits {
+                let title = if n + 1 == hits {
+                    last_title
+                } else {
+                    hits_title
+                };
+                sink.hit(
+                    &XmlHit {
+                        id: b"gnl|BL_ORD_ID|3",
+                        title,
+                        accession: b"3",
+                        len: 20,
+                        taxid: 0,
+                        taxonomy: crate::report::blast_xml::records::UNNAMED,
+                        descriptions: &[],
+                        defline_thrown: false,
+                    },
+                    |hsps| {
+                        hsps.hsp(&XmlHsp {
+                            score: 21,
+                            bit_score: 12.697412345,
+                            evalue: 1.515236,
+                            query_from: 3,
+                            query_to: 8,
+                            hit_from: 5,
+                            hit_to: 10,
+                            query_frame: 0,
+                            hit_frame: 0,
+                            qrow: b"WCNYFW",
+                            srow: b"WENYCW",
+                            ops: None,
+                            query_first: 2,
+                            query_step: 1,
+                        })
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    posts.extend(writer.take_posts().posts);
+    assert!(posts.iter().all(|post| post.at >= base));
+    writer.finish(&mut out).unwrap();
+    posts.extend(writer.take_posts().posts);
+    (out, posts)
+}
+
+#[test]
+fn every_text_of_a_report_that_is_no_string_element_is_a_number() {
+    // `is_string_element` decides how NCBI's buffer writes an element's text
+    // (`out_buffer::xml_written_at`): the elements it leaves out hold numbers only.
+    let (out, _) = many_hits_16(2, b"s1 title", b"s1 title", Some(b"Query_1 m"));
+    let text = String::from_utf8(out).unwrap();
+    let mut checked = 0;
+    for line in text.lines().chain(INVALID_ONLY_16.lines()) {
+        let line = line.trim_start();
+        let Some(rest) = line.strip_prefix('<') else {
+            continue;
+        };
+        let Some((tag, rest)) = rest.split_once('>') else {
+            continue;
+        };
+        let Some((value, _)) = rest.split_once("</") else {
+            continue;
+        };
+        if !super::writer::is_string_element(tag.as_bytes()) {
+            assert!(value.parse::<f64>().is_ok(), "{tag}: {value}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+}
+
+#[test]
+fn a_16_report_posts_its_control_characters_and_its_exception_as_ncbi_writes_them() {
+    // A control character: `#`, the post after the bytes NCBI's buffer had written (the report's
+    // start until 4 KiB of it fill the buffer; K4h probe t.c01: `...description.sciname` line 39).
+    let (out, posts) = many_hits_16(1, b"\x01s1 a", b"\x01s1 a", None);
+    assert_eq!(posts.len(), 1);
+    // The report starts after the document's start (`PrintProlog`).
+    let report_start = super::framing::header16().len();
+    assert_eq!(posts[0].at, report_start);
+    let post = String::from_utf8(posts[0].text.clone()).unwrap();
+    assert!(
+        post.starts_with("Error: (803.7) [blastp] BlastOutput2.report.results.search.hits.description.title\nBad char [0x1] in string at line "),
+        "{post}"
+    );
+    assert!(String::from_utf8_lossy(&out).contains("<title>#s1 a</title>"));
+    // The same character in a message after many hits: NCBI's buffer has written some of the
+    // report by then (whole buffers less the byte it keeps back).
+    let (out, posts) = many_hits_16(40, b"s1 title", b"s1 title", Some(b"\x01Query_1"));
+    assert_eq!(posts.len(), 1);
+    let written = posts[0].at - report_start;
+    let message = out.windows(9).position(|w| w == b"<message>").unwrap();
+    assert!(
+        written > 4000 && report_start + written < message,
+        "{written}"
+    );
+    // An exception: the report is cut at the failing byte, the post follows it, the document
+    // goes on with its end.
+    let (out, posts) = many_hits_16(3, b"s1 title", b"s1 a\xc3\xa9b", None);
+    assert_eq!(posts.len(), 1);
+    let cut = out.len() - b"</BlastXML2>\n".len();
+    assert!(out[..cut].ends_with(b"<title>s1 a"));
+    assert_eq!(posts[0].at, cut);
+    let post = String::from_utf8(posts[0].text.clone()).unwrap();
+    assert!(post.starts_with("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n"), "{post}");
+    assert!(
+        post.ends_with("Object type= BlastOutput2 (m_Pos = 0)\n\n"),
+        "{post}"
+    );
 }
 
 /// A report that raises an exception NCBI's report function catches (`CaughtException`, BLASTX's

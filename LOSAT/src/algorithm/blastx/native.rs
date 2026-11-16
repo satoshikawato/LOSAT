@@ -180,13 +180,15 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     //     m_Outfile.exceptions(NcbiBadbit);
     // ```
     if error.is::<super::blast_xml::XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<crate::report::tabular::FailedLookupRefusal>()
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
+        // LOSAT's refusal of a title NCBI's XML crashes on, of the database counts a report
+        // would print where NCBI's sums overflow (`ReportSumRefusal`), of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), of a tabular
         // row at which NCBI stops (`report::tabular::check_failed_lookups`), or of a report of
@@ -205,7 +207,8 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
-        // the formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
+        // an exception of NCBI's XML stream, `blast_xml::writer::run_ending_exception`, or the
+        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
         // an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
@@ -592,9 +595,15 @@ fn run_inner(
                 strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                false,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
+                program.upper,
+            )?;
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                [args.outfmt.as_str()],
                 program.upper,
             )?;
             Some(database)
@@ -644,11 +653,6 @@ fn run_inner(
     ) {
         crate::report::serial::seqalign::check_database(serial, database.name(), Program::Blastx)?;
     }
-    // LOSAT's refusal of a database name that BLAST XML (outfmt 5, 15 and 16) cannot write,
-    // before the search (`blast_xml::check_database_name`).
-    if let (Some(database), true) = (database.as_ref(), structured_xml) {
-        super::blast_xml::check_database_name(database.name())?;
-    }
     // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
     // reads of the file before the search share (`QueryStreamSettings`).
     let query_settings = QueryStreamSettings {
@@ -666,7 +670,7 @@ fn run_inner(
     };
     let batch_size = crate::blastinput::app::query_batch_size(default_batch_size as u32)
         .map(|size| size as usize);
-    // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
+    // LOSAT's other refusals of BLAST XML (a title NCBI crashes on, `names::Refusal`)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
     // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids
@@ -742,17 +746,20 @@ fn run_inner(
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
         // A `-db` search in which a later batch can still refuse the taxonomy database or a
-        // subject with parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; outfmt 5 looks
-        // the batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
-        // T, and asks no scientific name) holds its document too.
-        let prefetch = prefetches_subjects(Some(choice.number));
-        let database_may_refuse = database
-            .as_ref()
-            .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
+        // subject with parsed Seq-ids (outfmt 5 looks the batch's subjects up in its prefetch,
+        // `ReportedSubjects::batch_prefetch`, DBID item T, and asks no scientific name), or whose
+        // database counts the reports would refuse at the first report (`write_blastx_xml`,
+        // after NCBI's own errors of the search, which stop the run after the document's start,
+        // written with the prolog below), holds its document too, as does a `-subject` title
+        // (`blast_xml::documents_may_refuse`, the library's decision too).
+        // A run whose XML format fails for its matrix name holds nothing (`xml_matrix`: no title is
+        // checked, the failure comes before any report and any start).
         if xml_matrix.is_none()
-            && (scan.messages_may_be_refused
-                || database_may_refuse
-                || super::blast_xml::subjects_may_be_refused(&subjects))
+            && super::blast_xml::documents_may_refuse(
+                &[choice.number],
+                database.as_ref(),
+                &subjects,
+            )
         {
             held.hold();
         }
@@ -947,7 +954,9 @@ fn run_inner(
     // A refusal of a title (BLAST XML) found while a batch is reported drops what the run holds.
     let refused = |error: anyhow::Error| -> anyhow::Error {
         let error = report_error(error);
-        if error.is::<super::blast_xml::XmlRefusal>() {
+        if error.is::<super::blast_xml::XmlRefusal>()
+            || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
+        {
             if let Some(held) = &held {
                 held.discard();
             }
@@ -1518,7 +1527,7 @@ pub(super) fn reported_batch(
             let messages = reported
                 .batch_prefetch(database, results, options.gapped)
                 .map_err(reported_error)?;
-            diagnostics.write_all(&messages)?;
+            messages.write(diagnostics, None)?;
         }
     } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's

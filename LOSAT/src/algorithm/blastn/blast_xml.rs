@@ -82,13 +82,11 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     const PROGRAM: &str = "BLASTN";
-    // Everything NCBI cannot write is refused before the first byte of the document, for the
-    // reports that the document writes: a run that stops (this call without the epilog: BLAST
+    // A title NCBI crashes on (`names::Refusal`) is refused before the first byte of the
+    // document, for the reports that the document writes: a run that stops (this call without the epilog: BLAST
     // XML is never streamed, `x_rpt_stream::Off::Xml`, so the call is the run's last) never
     // writes the `-subject` report of its last query, which NCBI holds back, unless another
     // format of the call (outfmt 5) writes it (`written_queries`).
-    names::check_text(xml.run.db_name)
-        .map_err(|refusal| refusal.error(PROGRAM, "a database name"))?;
     let reports = written_queries(
         xml.queries.len(),
         !xml.epilog,
@@ -108,7 +106,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         has_hits,
     )?;
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
-    // cannot write is refused here, before the first byte.
+    // crashes on is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);
     for hit_list in hit_lists.iter().take(reports).flatten() {
         for hsp_list in &hit_list.hsplist_array {
@@ -120,8 +118,9 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     let mut taxdb_printer = xml.taxdb_notes.printer();
     let (mut query_row, mut subject_row): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut buf: Vec<u8> = Vec::new();
-    // The document's start (`StructuredXml::start`), before the first query's warnings.
-    document.start(&mut buf);
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
     for (q_idx, record) in xml.queries.iter().enumerate() {
@@ -132,13 +131,18 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
             document.unwritten(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
             break;
         }
         let text = &texts[q_idx];
         let query = XmlQuery {
-            id: text.id.as_deref().unwrap_or(record.local_id.as_bytes()),
+            id: text.query_id(record.local_id.as_bytes()),
             title: &text.title,
             len: xml.searched_lengths[q_idx] as i32,
             stats: xml.stats[q_idx],
@@ -218,6 +222,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             buf.truncate(start);
             return Err(error);
         }
+        posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(
             &buf,
             &posts,
@@ -229,7 +234,12 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     }
     if xml.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }

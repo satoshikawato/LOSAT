@@ -241,7 +241,7 @@ pub(super) fn sort_ungapped_hits_for_gapped(
 }
 
 /// What the gapped preliminary loop of one subject chunk (`gapped_score_list`) and one hit's
-/// extension (`x_prelim_extend`) read: the batch's values (`PrelimBatch`, built once per batch: the
+/// extension (`x_prelim_extend`) read: the batch's (`PrelimBatch`, or its copy per subject: the
 /// trace and verbose switches, the queries' contexts, the scoring, the look-ahead's schedule), and
 /// the chunk's own: the subject (its index, its trace id, its letters for the greedy aligner), the
 /// chunk (its offset, packed letters and length), whether the chunk is the owner's serial call (not

@@ -282,7 +282,7 @@ const BLOSUM62_NCBISTDAA_DIRECT_SCORES: [i32; BLOSUM62_NCBISTDAA_DIRECT_SIZE] =
     build_blosum62_ncbistdaa_direct_scores();
 
 #[inline(always)]
-fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
+const fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
     if ncbi < BLASTAA_SIZE as u8 {
         NCBISTDAA_TO_BLOSUM62_DIRECT[ncbi as usize]
     } else {
@@ -291,7 +291,7 @@ fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
 }
 
 #[inline(always)]
-pub fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
+pub const fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     if aa1_ncbi < BLASTAA_SIZE as u8 && aa2_ncbi < BLASTAA_SIZE as u8 {
         return BLOSUM62_NCBISTDAA_DIRECT_SCORES
             [aa1_ncbi as usize * BLASTAA_SIZE + aa2_ncbi as usize];
@@ -322,6 +322,83 @@ pub fn blosum62_ncbistdaa_score_row(row_ncbi: usize) -> &'static [i32] {
     debug_assert!(row_ncbi < BLASTAA_SIZE);
     let start = row_ncbi * BLASTAA_SIZE;
     &BLOSUM62_NCBISTDAA_DIRECT_SCORES[start..start + BLASTAA_SIZE]
+}
+
+/// The rows of a [`ScoreRows`]: one for each NCBISTDAA letter and one that every other byte reads.
+const SCORE_ROW_COUNT: usize = BLASTAA_SIZE + 1;
+
+/// A matrix's scores for every two bytes in NCBI's form `matrix[q][s]`: a row for each byte of the
+/// first letter, holding the score against every byte of the second. A score is two loads and
+/// tests no code, as in NCBI's walks (`score += matrix[q[i]][s[i]]`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-849 (and :906-907)
+/// ```c
+///     for (i = 0; i < n; i++) {
+///         score += matrix[q[i]][s[i]];
+/// ```
+///
+/// The bytes past the alphabet (`BLASTAA_SIZE` and above) read one row, the last: the functions
+/// of this module take every such first byte as X (`ncbistdaa_to_blosum62`,
+/// `ncbistdaa_to_blosum62_direct_index`); the tests compare every two bytes with the function the
+/// table is built from. A row holds the function's score for each of the 256 second bytes.
+pub struct ScoreRows {
+    rows: [&'static [i32; 256]; 256],
+}
+
+impl ScoreRows {
+    /// The score of `a` against `b`.
+    #[inline(always)]
+    pub fn score(&self, a: u8, b: u8) -> i32 {
+        self.rows[a as usize][b as usize]
+    }
+
+    /// The rows of `data`: a byte below `BLASTAA_SIZE` reads its own row, every other byte the
+    /// last.
+    const fn of(data: &'static [[i32; 256]; SCORE_ROW_COUNT]) -> Self {
+        let mut rows = [&data[BLASTAA_SIZE]; 256];
+        let mut a = 0;
+        while a < BLASTAA_SIZE {
+            rows[a] = &data[a];
+            a += 1;
+        }
+        Self { rows }
+    }
+}
+
+/// The rows of the scores `score(a, b)` for the first bytes `0..SCORE_ROW_COUNT`.
+const fn blosum62_ncbistdaa_row_data() -> [[i32; 256]; SCORE_ROW_COUNT] {
+    let mut data = [[0; 256]; SCORE_ROW_COUNT];
+    let mut a = 0;
+    while a < SCORE_ROW_COUNT {
+        let mut b = 0;
+        while b < 256 {
+            data[a][b] = blosum62_score_ncbistdaa_direct(a as u8, b as u8);
+            b += 1;
+        }
+        a += 1;
+    }
+    data
+}
+
+static BLOSUM62_NCBISTDAA_ROW_DATA: [[i32; 256]; SCORE_ROW_COUNT] = blosum62_ncbistdaa_row_data();
+
+/// `blosum62_score_ncbistdaa_direct` for every two bytes, as [`ScoreRows`] at a static address.
+pub static BLOSUM62_NCBISTDAA_ROWS: ScoreRows = ScoreRows::of(&BLOSUM62_NCBISTDAA_ROW_DATA);
+
+/// `protein_score(matrix, ..)` for every two bytes, as [`ScoreRows`]: built at the first call for
+/// the matrix and kept for the process (one table of 30 KiB for each matrix used).
+pub fn protein_score_rows(matrix: ScoringMatrix) -> &'static ScoreRows {
+    static ROWS: [OnceLock<&'static ScoreRows>; ScoringMatrix::ALL.len()] =
+        [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+    ROWS[matrix as usize].get_or_init(|| {
+        let mut data = Box::new([[0i32; 256]; SCORE_ROW_COUNT]);
+        for (a, row) in data.iter_mut().enumerate() {
+            for (b, score) in row.iter_mut().enumerate() {
+                *score = protein_score(matrix, a as u8, b as u8);
+            }
+        }
+        Box::leak(Box::new(ScoreRows::of(Box::leak(data))))
+    })
 }
 
 const BLOSUM45_TEXT: &str = r#"
@@ -950,6 +1027,32 @@ mod tests {
                 );
             }
         }
+    }
+
+    // No NCBI counterpart: the rows give the scores of the functions they are built from for
+    // every two bytes (the bytes past the alphabet read one row).
+    #[test]
+    fn the_score_rows_hold_the_scores_of_every_two_bytes() {
+        for a in 0..=u8::MAX {
+            for b in 0..=u8::MAX {
+                assert_eq!(
+                    BLOSUM62_NCBISTDAA_ROWS.score(a, b),
+                    blosum62_score_ncbistdaa_direct(a, b),
+                    "BLOSUM62 {a} {b}"
+                );
+                for matrix in ScoringMatrix::ALL {
+                    assert_eq!(
+                        protein_score_rows(matrix).score(a, b),
+                        protein_score(matrix, a, b),
+                        "{matrix:?} {a} {b}"
+                    );
+                }
+            }
+        }
+        assert!(std::ptr::eq(
+            protein_score_rows(ScoringMatrix::Pam30),
+            protein_score_rows(ScoringMatrix::Pam30)
+        ));
     }
 
     #[test]

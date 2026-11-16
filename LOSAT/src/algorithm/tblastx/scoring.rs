@@ -11,10 +11,10 @@
 //!
 //! The search reads its matrix through [`TbxScore`], chosen once before the search
 //! (`blast_engine::run_impl::run_in_pool`). BLOSUM62's instance ([`Blosum62Score`], no data)
-//! calls what the search called before `-matrix`: `blosum62_score` and the paths built on
-//! BLOSUM62's scores (the batch table of TBXLUT, the table walks of TBXUNGAP with the sentinel
+//! reads `blosum62_score`'s scores from their rows at a static address (`BLOSUM62_NCBISTDAA_ROWS`)
+//! and takes the paths built on BLOSUM62's scores (the batch table of TBXLUT, the table walks of TBXUNGAP with the sentinel
 //! walks of TBXUNGAPSENT, the AVX2 reevaluation). The other matrices' instance ([`MatrixScore`])
-//! reads a table of the matrix: PAIRLUT builds its group tables with the matrix's scores and the
+//! reads the rows of the matrix (`protein_score_rows`): PAIRLUT builds its group tables with the matrix's scores and the
 //! units of PAIRPAR run wherever `decide` takes the batch, the reference frame loop builds NCBI's
 //! table with them (`build_ncbi_lookup_for_profile`), and both two-hit extensions take the table
 //! walks of TBXUNGAP with a byte table of the matrix ([`TbxScore::table_two_hit`]).
@@ -35,7 +35,7 @@ use super::extension::{
     two_hit_in4, two_hit_sent_in, InBatch, MatrixWalkTable, TwoHit,
 };
 use crate::config::ScoringMatrix;
-use crate::utils::matrix::{blosum62_score, protein_score, BLASTAA_SIZE};
+use crate::utils::matrix::{protein_score, protein_score_rows, ScoreRows, BLOSUM62_NCBISTDAA_ROWS};
 
 /// The scores of a search's matrix, `matrix[a][b]` of NCBI's score block.
 ///
@@ -155,7 +155,8 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     }
 }
 
-/// BLOSUM62, read from `blosum62_score`'s table at its static address.
+/// BLOSUM62, `blosum62_score` read from its rows at their static address (NCBI's
+/// `matrix[a][b]`, two loads; `BLOSUM62_NCBISTDAA_ROWS`).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Blosum62Score;
 
@@ -164,7 +165,7 @@ impl TbxScore for Blosum62Score {
 
     #[inline(always)]
     fn score(self, a: u8, b: u8) -> i32 {
-        blosum62_score(a, b)
+        BLOSUM62_NCBISTDAA_ROWS.score(a, b)
     }
 
     #[inline(always)]
@@ -224,7 +225,8 @@ pub(crate) struct MatrixScores {
     matrix: ScoringMatrix,
     /// `-word_size` (`TbxScore::word`).
     word: usize,
-    scores: Box<[i32; BLASTAA_SIZE * BLASTAA_SIZE]>,
+    /// The matrix's rows (`protein_score_rows`, a table of the process).
+    rows: &'static ScoreRows,
     /// The byte table of the two-hit walks (`TbxScore::table_two_hit`), a static of the matrix;
     /// `None` if a score does not fit it.
     walk: Option<&'static MatrixWalkTable>,
@@ -239,35 +241,22 @@ impl MatrixScores {
 
     /// The scores of `matrix` for a search of `word`-letter words (`-word_size`).
     pub(crate) fn with_word(matrix: ScoringMatrix, word: usize) -> Self {
-        let mut scores = Box::new([0i32; BLASTAA_SIZE * BLASTAA_SIZE]);
-        for a in 0..BLASTAA_SIZE {
-            for b in 0..BLASTAA_SIZE {
-                scores[a * BLASTAA_SIZE + b] = protein_score(matrix, a as u8, b as u8);
-            }
-        }
-        let walk = matrix_walk_table(matrix, |a, b| {
-            MatrixScore {
-                matrix,
-                word,
-                scores: &scores,
-                walk: None,
-            }
-            .score(a, b)
-        });
+        let rows = protein_score_rows(matrix);
+        let walk = matrix_walk_table(matrix, |a, b| rows.score(a, b));
         Self {
             matrix,
             word,
-            scores,
+            rows,
             walk,
         }
     }
 
     /// The scores as the search reads them.
-    pub(crate) fn scorer(&self) -> MatrixScore<'_> {
+    pub(crate) fn scorer(&self) -> MatrixScore {
         MatrixScore {
             matrix: self.matrix,
             word: self.word,
-            scores: &self.scores,
+            rows: self.rows,
             walk: self.walk,
         }
     }
@@ -276,24 +265,20 @@ impl MatrixScores {
 /// A matrix other than BLOSUM62, or any matrix with a word length other than 3, read from its
 /// [`MatrixScores`].
 #[derive(Clone, Copy)]
-pub(crate) struct MatrixScore<'a> {
+pub(crate) struct MatrixScore {
     matrix: ScoringMatrix,
     word: usize,
-    scores: &'a [i32; BLASTAA_SIZE * BLASTAA_SIZE],
+    rows: &'static ScoreRows,
     walk: Option<&'static MatrixWalkTable>,
 }
 
-impl TbxScore for MatrixScore<'_> {
+impl TbxScore for MatrixScore {
     const BLOSUM62: bool = false;
 
-    // The letters of a search are below BLASTAA_SIZE; other bytes are read as
-    // `blosum62_score` reads them (`blosum62_score_ncbistdaa_direct`).
+    // `protein_score` of every two bytes (`protein_score_rows`).
     #[inline(always)]
     fn score(self, a: u8, b: u8) -> i32 {
-        if (a as usize) < BLASTAA_SIZE && (b as usize) < BLASTAA_SIZE {
-            return self.scores[a as usize * BLASTAA_SIZE + b as usize];
-        }
-        protein_score(self.matrix, a, b)
+        self.rows.score(a, b)
     }
 
     fn matrix(self) -> ScoringMatrix {
@@ -500,7 +485,7 @@ impl TbxScore for MatrixScore<'_> {
 #[cold]
 #[inline(never)]
 fn x_matrix_sent_refused(
-    sc: MatrixScore<'_>,
+    sc: MatrixScore,
     q_full: &[u8],
     qb: InBatch<'_>,
     s_full: &[u8],
@@ -540,6 +525,7 @@ impl TbxScore for ScoringMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::matrix::BLASTAA_SIZE;
 
     // No NCBI counterpart: the table of BLOSUM62 holds the scores the search read before
     // `-matrix`, for every two bytes.

@@ -528,9 +528,9 @@ pub(crate) enum Pass {
 /// Whether the NULLB's step leaves NCBI's left walk going, the walk being at `score` below its
 /// best `max_score` without a break (`max_score - score < x_drop` after a step; 0 with no step):
 /// the NULLB takes `-NULLB_SCORE` (32,768) off, so the sum stays below the best and the walk breaks
-/// unless the X-drop is larger than what it is then below the best. In `i32`: `x_drop - (max_score
-/// - score)` lies in `1..=x_drop` after a step and is `x_drop` with none (an X-drop of 0 or less
-/// then gives false, as NCBI's step breaks there), so it does not overflow.
+/// unless the X-drop is larger than what it is then below the best. In `i32`:
+/// `x_drop - (max_score - score)` lies in `1..=x_drop` after a step and is `x_drop` with none (an
+/// X-drop of 0 or less then gives false, as NCBI's step breaks there), so it does not overflow.
 #[inline(always)]
 fn nullb_goes_on_left(score: i32, max_score: i32, x_drop: i32) -> bool {
     x_drop - (max_score - score) > -NULLB_SCORE

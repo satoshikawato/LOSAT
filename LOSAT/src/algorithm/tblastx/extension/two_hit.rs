@@ -234,18 +234,22 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
     x_drop: i32,
 ) -> (i32, usize, usize, bool) {
     let q_limit = q_seq.len();
-    let s_limit = s_seq.len();
+
+    // NCBI's `n = MIN(subject->length - s_off, query->length - q_off)` (aa_ungapped.c:841), on the
+    // context's letters: one test a step. None where the walk starts past them
+    // (`extend_hit_one_hit`).
+    let q_rest = q_seq.get(q_start..).unwrap_or_default();
+    let s_rest = s_seq.get(s_start..).unwrap_or_default();
+    let n = q_rest.len().min(s_rest.len());
 
     let mut score = initial_score;
     let mut max_score = initial_score;
     let mut right_disp = 0usize;
     let mut j = 0usize;
 
-    while q_start + j < q_limit && s_start + j < s_limit {
-        // SAFETY: `q_start + j` and `s_start + j` are in bounds; the loop condition
-        // tests both against `q_limit` and `s_limit`, the lengths of the two slices.
-        let q_char = unsafe { *q_seq.get_unchecked(q_start + j) };
-        let s_char = unsafe { *s_seq.get_unchecked(s_start + j) };
+    while j < n {
+        let q_char = q_rest[j];
+        let s_char = s_rest[j];
 
         score += sc.score(q_char, s_char);
 

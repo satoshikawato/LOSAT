@@ -40,6 +40,7 @@ pub use run_impl::x_pair_par_print_summary;
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use run_impl::x_seed_release_print_summary;
 // What every report of a run needs (`blast_xml`).
+pub(crate) use run_impl::ReportDatabase;
 pub(crate) use run_impl::TblastxReportRun;
 // The error of a query batch's search that comes after the reports of the batches before (the
 // refusals of `extension::query_batch`).

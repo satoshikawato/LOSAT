@@ -1,0 +1,42 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txself.fa).
+           1 sequences; 421 total letters
+
+
+
+Query= txself self record with repeats on both strands
+
+Length=421
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+txself self record with repeats on both strands                       338     5e-98  1
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 15625
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/txself.fa).
+    Posted date:  Unknown
+  Number of letters in database: 421
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

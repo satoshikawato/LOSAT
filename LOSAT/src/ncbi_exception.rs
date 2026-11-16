@@ -282,6 +282,21 @@ impl NcbiException {
         os
     }
 
+    /// The exception as the error of a report's writer, where NCBI's formatter throws it while the
+    /// report is written (the merge of a query-anchored section,
+    /// `report::query_anchored::write_section`): the writers before the program's report pass
+    /// `io::Error`s on, and the report finds the exception again ([`NcbiException::of_io_error`],
+    /// `cli::NativeError::of_writer`), as NCBI's leaves the formatter for the application's
+    /// `CATCH_ALL`.
+    pub(crate) fn into_io_error(self) -> std::io::Error {
+        std::io::Error::other(self)
+    }
+
+    /// The exception that an error of a report's writer carries ([`NcbiException::into_io_error`]).
+    pub(crate) fn of_io_error(error: &std::io::Error) -> Option<&NcbiException> {
+        error.get_ref()?.downcast_ref()
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7844-7856
     // ```c++
     // static string
@@ -433,6 +448,16 @@ impl NcbiException {
         out
     }
 }
+
+/// `what()` ([`NcbiException::what`]).
+impl std::fmt::Display for NcbiException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.what())
+    }
+}
+
+/// The error of a report's writer ([`NcbiException::into_io_error`]).
+impl std::error::Error for NcbiException {}
 
 /// A message of severity `Error` with the error id `id` (`m_ErrText`, or `<err_code>.<err_subcode>`)
 /// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,

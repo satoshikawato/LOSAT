@@ -1285,8 +1285,6 @@ enum Outfmt {
     /// A format LOSAT writes whose custom specification NCBI's formatting handler then rejects
     /// (`s_ValidateCustomDelim`): the message of "BLAST query/options error: ...".
     WritesThenNcbi(crate::blastinput::app::ReportFormat, &'static str),
-    /// LOSAT's rejection before the inputs are read; `{P}` is the program's name.
-    Losat(&'static str),
 }
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
@@ -1295,7 +1293,6 @@ const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
 /// writer: all of them (line CLI C2: BLASTN in PR 1, TBLASTN and TBLASTX in PR 2, BLASTP and
 /// BLASTX in PR 3).
 const SHARED: &[&str] = ALL;
-const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
@@ -1363,17 +1360,13 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line RG T3 (the query-anchored formats): BLASTP (T3a), BLASTN and TBLASTN (T3b) write
-        // them, BLASTX and TBLASTX not yet.
-        (&["blastp", "blastn", "tblastn"], "1", None, Writes(QueryAnchoredIdentities)),
-        (&["blastp", "blastn", "tblastn"], "2", None, Writes(QueryAnchoredNoIdentities)),
-        (&["blastp", "blastn", "tblastn"], "3", None, Writes(FlatQueryAnchoredIdentities)),
-        (&["blastp", "blastn", "tblastn"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
-        (&["blastp", "blastn", "tblastn"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
-        (&["blastx", "tblastx"], "1", None, UNSUPPORTED),
-        (&["blastx", "tblastx"], "2", None, UNSUPPORTED),
-        (&["blastx", "tblastx"], "3", None, UNSUPPORTED),
-        (&["blastx", "tblastx"], "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP (T3a), BLASTN and TBLASTN (T3b), BLASTX
+        // and TBLASTX (T3c) write them.
+        (ALL, "1", None, Writes(QueryAnchoredIdentities)),
+        (ALL, "2", None, Writes(QueryAnchoredNoIdentities)),
+        (ALL, "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (ALL, "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (ALL, "1 qseqid", None, Writes(QueryAnchoredIdentities)),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),
@@ -1460,13 +1453,6 @@ fn output_formats_follow_the_format_table() {
             let report = report_format(&choice, program, out.map(std::path::Path::new));
             match expected {
                 Outfmt::Writes(format) => assert_eq!(report.unwrap(), Some(format), "{case}"),
-                Outfmt::Losat(message) => assert_eq!(
-                    report.unwrap_err().to_string(),
-                    message
-                        .replace("{P}", program.name())
-                        .replace("{N}", &choice.number.to_string()),
-                    "{case}"
-                ),
                 Outfmt::NcbiLater(message) => {
                     assert_eq!(report.unwrap(), None, "{case}");
                     let error = formatting_handler_check(&choice, program)

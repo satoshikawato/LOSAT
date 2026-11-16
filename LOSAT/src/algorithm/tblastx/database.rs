@@ -253,8 +253,8 @@ impl TblastxDatabase {
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
-    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, the taxonomy
-    /// database's refusals and the non-ASCII refusal come before any byte).
+    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, and the taxonomy
+    /// database's refusals before any byte).
     pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len()).collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
@@ -506,14 +506,15 @@ pub(crate) fn subject_read_texts<'h>(
 ///
 /// `before`: the batches of the run before it that the loop still holds (none where it wrote and
 /// dropped them, `report_stream`, which records each batch instead: `note_loaded`), as NCBI's
-/// data loader loaded them ([`LoadedBefore`]), read only where the batch stops.
+/// data loader loaded them ([`LoadedBefore`]), read only where the batch stops; the outfmt 5
+/// reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
 pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
     before: LoadedBefore<'_>,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
-) -> Result<Vec<u8>> {
+) -> Result<crate::report::diag_log::Posts> {
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,

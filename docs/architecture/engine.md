@@ -265,7 +265,7 @@ flowchart LR
 | input | `CBlastInput::GetNextSeqBatch`; subjects as a `BlastSeqSrc` (`MultiSeqBlastSeqSrcInit`, `SeqDbBlastSeqSrcInit`) | `read_cli_subjects` or `open_search_database`, then `search_cli` reads the queries | the same names in `blast_engine.rs` |
 | query batches | `CBatchSizeMixer` (blastn), `GetQueryBatchSize` | `run_in_pool` with the adaptive `BatchSizeMixer` (`blastinput/query_batch.rs`) | a fixed size: 10,000 letters unless `BATCH_SIZE` is set; psiblast one query |
 | masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`); the encoding in `batch_setup.rs` (`encode_query_block`) | SEG in `blastp/encoding.rs` |
-| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | `call_scoring` (`blast_engine/call_setup.rs`; the contexts' Karlin blocks with the lookup table in `call_lookup`), the search spaces in `run_call` |
+| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | `call_scoring` (`blast_engine/call_setup.rs`; the contexts' Karlin blocks with the lookup table in `call_lookup`; the database's length and number of subjects in `db_extent`, the search spaces in `call_search_spaces`, the preliminary cutoffs in `prelim_cutoffs`, the statistics of each subject in `subject_parameters` and the scan's X-drops and sizes in `scan_shape`) |
 | lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks; the call's choice among them in `call_lookup` (`blast_engine/call_setup.rs`) |
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`, or `s_BlastNaExtendDirect` for a table whose width is the word size (in LOSAT: a small or na table in `na_scan.rs`; megablast-kind and discontiguous tables of that width in `pair_extend.rs`); `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges`; for a two-stage table the scan that collects the offset pairs in `two_stage_scan.rs` (`scan_two_stage_lookup`) and their extension in `pair_extend.rs` (`extend_offset_pairs`, with the word extension `word_extend_pair` and the off-diagonal search `off_diagonal_found`), for the other tables the scan with the steps of each seed in `na_scan.rs` (`scan_na_lookup`); and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `prelim_hsp_list.rs` (`gapped_hsp_list`, its loop `gapped_score_list`, per subject chunk) with `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
@@ -303,8 +303,11 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
   block, or once per query and round of psiblast. It calls `run_call`, whose
-  `process_subject` does the preliminary search; the traceback, the composition redo (its parameters, its
-  plan and all its paths are in `blast_engine/redo_run.rs`) and the report
+  `process_subject` does the preliminary search of a subject (the stage's drivers, the choice of the
+  pool and the call's branch: the calls of RPS-BLAST's and the PSSM search's hooks, the query blocks,
+  a database's blocks and the subject loops, are in `blast_engine/prelim_run.rs`); the traceback, the
+  composition redo (its parameters, its plan and all its paths are in `blast_engine/redo_run.rs`)
+  and the report
   follow in `run_call` (the warning lines of the queries, the checks and the prefetch of the
   reported subjects and the refusals before any format is written, and before them the residues that
   the reports read, the check of the prefetch environment, the subjects that the reports show, what
@@ -322,7 +325,7 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
 
 NCBI reads both through one `BlastSeqSrc` iterator. LOSAT splits them where subjects reach the
 kernel: a `-subject` set is encoded first and searched by `search_subjects` (blastn) or the subject
-loop of `run_resolved_in_pool` (blastp); a database is read in blocks by
+loops of `run_preliminary` (blastp, `blast_engine/prelim_run.rs`); a database is read in blocks by
 `database::search_blocks` (`blastn/blast_engine/database.rs`, `blastp/blast_engine/database.rs`),
 and the sequences with hits are read again for the traceback (`traceback_listed`) or the
 composition redo (`ListedSubjects`). Both paths share the per-subject kernel (blastn `search_subject`,

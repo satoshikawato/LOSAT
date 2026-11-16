@@ -1,6 +1,6 @@
 //! The preliminary stage of blastp's search of all queries in blocks of whole query batches with
-//! `LOSAT_X_BPQBLOCK` (`src/algorithm/blastp/blast_engine.rs`: `x_prelim_block_plan` and the block
-//! loop of `run_call`, item SC8b-2).
+//! `LOSAT_X_BPQBLOCK` (`src/algorithm/blastp/blast_engine.rs`: `x_prelim_block_plan`;
+//! `blast_engine/prelim_run.rs`: the block loop of `run_preliminary`, item SC8b-2).
 //!
 //! The reports that the block search (`blastp_query_blocks.rs`) does not write come from the search
 //! of all queries: outfmt 10, 18 and 20, a custom outfmt 7 that reads more of `-db`'s definition

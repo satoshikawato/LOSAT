@@ -186,13 +186,16 @@ ids (line DBID item loadord); refused is a run whose reports read such a Seq-id 
 off, a stopping batch where a load whose order to the stop NCBI takes from the addresses of
 its Seq-id handles writes such a text, or where a lookup that throws on its id may come before the
 stop, one where a load that NCBI makes only where it skips an earlier stopping lookup writes such a
-text, and one whose stopping ids NCBI may all never look up (another sequence holds an id of its
+text, one whose stopping ids NCBI may all never look up (another sequence holds an id of its
 handle that the batch may load first or the run loaded before, in a batch, query or psiblast
 round before, or in a call of the library's batches before; or a query that NCBI's scope holds at
 the prefetch has it: the batch's records as read, those that `-query_loc` drops included, by
 their `lcl|Query_N` or the ids of `-parse_deflines`, or the query of `-in_pssm`, and with outfmt 5
 those of the batches before; of several stopping ids, the first that NCBI surely looks up ends
-the loads) (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+the loads), and one where, after a BLAST XML report that NCBI's XML stream cuts before its hits
+(outfmt 5, a query title or id outside US-ASCII: that report makes none of its loads, line RG
+item K4h), another load of the batch looks a tax id up (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
+line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an

@@ -2,6 +2,10 @@
 //! words made at once and their presence read from one byte per index, and the hits of a block
 //! copied with one capacity test.
 //!
+//! The module lives in tblastx, the lowest program that scans with it (tblastx's dense unit-group
+//! tables, LOSAT_X_TBXSCANBYTE; tblastn's units; blastx's direct loop), so that every caller reaches
+//! it down the layering of `tests/check_program_edges.py`; it reads only tblastx's lookup table.
+//!
 //! NCBI's scan (c++/src/algo/blast/core/blast_aascan.c:75-127, `s_BlastAaScanSubject`, kept as
 //! `tblastx/blast_aascan.rs` `s_blast_aa_scan_subject_one_range`) rolls the index of the next word
 //! from the one before (`ComputeTableIndexIncremental`), tests its presence-vector bit and copies
@@ -155,7 +159,7 @@ impl XScanByte {
 /// plain loops lose where most words are candidates, see the module text; on aarch64 nothing);
 /// `2` takes the plain loops on any CPU and table, `3` the plain loops for sparse tables on any
 /// CPU.
-pub(super) fn x_scan_byte() -> XScanByte {
+pub(crate) fn x_scan_byte() -> XScanByte {
     static MODE: std::sync::OnceLock<XScanByte> = std::sync::OnceLock::new();
     *MODE.get_or_init(|| x_mode("LOSAT_X_TBNSCANBYTE"))
 }
@@ -247,7 +251,7 @@ fn sparse(presence: &[u8], lookup: &BlastAaLookupTable) -> bool {
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes for `x_scan_one_range_byte` when `mode`
 /// scans `lookup` this way (it is on, the table `fits`, and it is sparse if `mode` asks), else
 /// `None` (the scan before).
-pub(super) fn x_presence(mode: XScanByte, lookup: &Arc<BlastAaLookupTable>) -> Option<Arc<[u8]>> {
+pub(crate) fn x_presence(mode: XScanByte, lookup: &Arc<BlastAaLookupTable>) -> Option<Arc<[u8]>> {
     if !mode.on() || !fits(lookup) {
         return None;
     }
@@ -285,7 +289,7 @@ static COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): counts one unit and its `calls` for the
 /// `[X_STATS] TBNSCANBYTE` line (`LOSAT_X_STATS` set).
-pub(super) fn x_count_unit(calls: u64) {
+pub(crate) fn x_count_unit(calls: u64) {
     if crate::algorithm::tblastx::x_aascan_bf::x_stats() {
         COUNTS[0].fetch_add(1, Ordering::Relaxed);
         COUNTS[1].fetch_add(calls, Ordering::Relaxed);
@@ -408,7 +412,7 @@ impl XScanHeld {
 /// EXPERIMENT (LOSAT_X_TBNSCANRESUME): whether the unit path's scan on presence bytes resumes a
 /// stopped call in its block (`x_scan_one_range_held`) and takes NCBI's offset-array size
 /// (`x_scan_unit`). In the strict set: on unless `LOSAT_X_TBNSCANRESUME=0`; read once.
-pub(super) fn x_scan_resume() -> bool {
+pub(crate) fn x_scan_resume() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSCANRESUME"))
 }
@@ -1015,9 +1019,9 @@ unsafe fn write_avx2<const RUN: bool>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::tblastn::search_seed::encode_tblastn_lookup_query;
     use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
+    use crate::algorithm::tblastx::translation::QueryFrame;
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;
 
@@ -1037,10 +1041,32 @@ mod tests {
 
     const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
 
+    // The frame tblastn's `encode_tblastn_lookup_query(query, None, false)` gives a query of the
+    // 20 common letters (blastp's `encode_protein_query_frame_with_seg` without SEG), built here
+    // so that the tests stay below tblastn (the layering of `tests/check_program_edges.py`).
+    fn protein_frame(query: &[u8]) -> QueryFrame {
+        let mut aa_seq = Vec::with_capacity(query.len() + 2);
+        aa_seq.push(0);
+        aa_seq.extend(
+            query
+                .iter()
+                .map(|&a| crate::utils::matrix::aa_char_to_ncbistdaa(a)),
+        );
+        aa_seq.push(0);
+        QueryFrame {
+            frame: 0,
+            aa_seq,
+            aa_seq_nomask: None,
+            aa_len: query.len(),
+            orig_len: query.len(),
+            seg_masks: Vec::new(),
+        }
+    }
+
     fn lookup_for(queries: &[Vec<u8>], threshold: i32) -> BlastAaLookupTable {
         let frames: Vec<_> = queries
             .iter()
-            .map(|query| vec![encode_tblastn_lookup_query(query, None, false)])
+            .map(|query| vec![protein_frame(query)])
             .collect();
         let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         build_ncbi_lookup_for_profile(

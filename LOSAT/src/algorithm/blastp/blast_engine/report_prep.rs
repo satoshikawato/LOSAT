@@ -191,6 +191,7 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
 pub(super) fn prefetch_reported_subjects(
     prep: &ReportPrep<'_, '_>,
     query_warning_lines: &mut [Vec<u8>],
+    prefetch_posts: &mut Vec<(usize, crate::report::diag_log::Posts)>,
     psiblast_pssms: &mut Option<PssmFiles>,
 ) -> Result<SubjectReads> {
     let ReportPrep {
@@ -213,6 +214,7 @@ pub(super) fn prefetch_reported_subjects(
         batch_prefetch,
         pssm_made,
         pssm_reads,
+        query_records,
         ..
     } = *prep;
     // A database title that LOSAT does not report as NCBI does is an error before any
@@ -419,6 +421,20 @@ pub(super) fn prefetch_reported_subjects(
             },
         )
     };
+    // Outfmt 5 first: a later batch's prefetch stop asks whether a report before it was cut
+    // (`shared::XmlReportsBefore`), from the reads of the queries' reports modelled here.
+    let xml_first = first_report == Some(crate::blastinput::app::ReportFormat::Xml);
+    let xml_cut = |query: usize| {
+        query_records.get(query).is_some_and(|record| {
+            crate::report::blast_xml::names::iteration_cut_before_hits(
+                record.local_id.as_bytes(),
+                record.warning_id(),
+                record.believed(),
+                &record.title,
+                true,
+            )
+        })
+    };
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
@@ -442,6 +458,7 @@ pub(super) fn prefetch_reported_subjects(
             .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))
         {
             let scope = || batch_scope(span);
+            // No report's reads are modelled before it (`prefetch_taxids` is off).
             titles.batch_prefetch(
                 database,
                 loaded(span.start),
@@ -565,12 +582,18 @@ pub(super) fn prefetch_reported_subjects(
                 }
                 // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
                 // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
+                let xml_before =
+                    xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
+                        reads: subject_reads.queries(),
+                        cut: &xml_cut,
+                    });
                 let scope = || batch_scope(&batch.searched);
                 let queries = crate::algorithm::common::database::PrefetchQueries::new(
                     batch.searched.start,
                     &scope,
                 )
-                .after_unrecorded_calls(unrecorded_calls);
+                .after_unrecorded_calls(unrecorded_calls)
+                .after_xml_reports(xml_before.as_ref());
                 let messages = match psiblast_prefetched.as_ref() {
                     Some(ranks) => {
                         let prefetched = titles.prefetched_ranks(
@@ -602,12 +625,11 @@ pub(super) fn prefetch_reported_subjects(
                     }
                 };
                 open_for_rows(lists)?;
-                if messages.is_empty() {
-                    continue;
+                // After the reader's messages of the batch, in its first query
+                // (`query_warnings::query_posts`).
+                if !messages.is_empty() {
+                    prefetch_posts.push((batch.searched.start, messages));
                 }
-                let first = batch.searched.start;
-                let reader = reports.reader_warnings.get(first).map_or(0, Vec::len);
-                query_warning_lines[first].splice(reader..reader, messages);
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-264

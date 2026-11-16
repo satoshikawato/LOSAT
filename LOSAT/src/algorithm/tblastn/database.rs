@@ -361,7 +361,8 @@ impl TblastnDatabase {
     /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
     /// before (as `read_taxids` reads them, every reported subject); TBLASTN writes those reports
-    /// after the stop.
+    /// after the stop. The outfmt 5 reports before the batch are the queries'
+    /// (`shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn prefetch_stop_error(
         &self,
         reported: Option<&ReportedSubjects>,
@@ -440,14 +441,15 @@ impl TblastnDatabase {
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
     /// subject whose lookup fails (the protein query has no strand); the stop of the batch of
-    /// `queries`, after the batches before, `before` (read only where the batch stops).
+    /// `queries`, after the batches before, `before` (read only where the batch stops; the outfmt
+    /// 5 reports before it, `shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn batch_prefetch(
         &self,
         reported: &ReportedSubjects,
         before: LoadedBefore<'_>,
         hitlists: &[KappaResultHitList],
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,

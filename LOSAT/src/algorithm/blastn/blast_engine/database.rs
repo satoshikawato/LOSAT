@@ -646,7 +646,8 @@ impl BlastnDatabase {
     /// Seq-align, else a subject's first HSP decides).
     /// `before`: the batches of the call before it that the loop still holds (none where it wrote
     /// and dropped them, LOSAT_X_RPTSTREAM, which records each batch instead: `note_loaded`), as
-    /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops.
+    /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops; the outfmt
+    /// 5 reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn batch_prefetch(
         &self,
         titles: &DatabaseTitles,
@@ -654,7 +655,7 @@ impl BlastnDatabase {
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,

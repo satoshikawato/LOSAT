@@ -111,8 +111,10 @@ impl<'a> QueryBatch<'a> {
     pub(crate) fn at(&'a self, ctx: usize, s_idx: usize) -> InBatch<'a> {
         InBatch {
             batch: Some(self),
-            ctx,
-            s_idx,
+            // A batch's contexts and a search's subjects are counted in `u32`, as `InitHSP`
+            // counts the subject.
+            ctx: ctx as u32,
+            s_idx: s_idx as u32,
         }
     }
 
@@ -358,9 +360,10 @@ pub(crate) fn refusal() -> anyhow::Error {
 #[derive(Clone, Copy)]
 pub(crate) struct InBatch<'a> {
     batch: Option<&'a QueryBatch<'a>>,
-    ctx: usize,
-    /// The subject, whose search a refusal fails.
-    s_idx: usize,
+    ctx: u32,
+    /// The subject, whose search a refusal fails. (Two words in all, which a call passes in
+    /// registers.)
+    s_idx: u32,
 }
 
 impl InBatch<'static> {
@@ -398,8 +401,8 @@ impl InBatch<'_> {
             Some(batch) => {
                 if q_off < s_off && self.ctx > 0 {
                     batch.walk_left(
-                        self.ctx,
-                        self.s_idx,
+                        self.ctx as usize,
+                        self.s_idx as usize,
                         sc,
                         s_seq,
                         s_off - q_off,
@@ -441,7 +444,16 @@ impl InBatch<'_> {
         match self.batch {
             Some(batch) if s_at < s_seq.len() => (
                 batch.walk_right(
-                    self.ctx, self.s_idx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop,
+                    self.ctx as usize,
+                    self.s_idx as usize,
+                    sc,
+                    s_seq,
+                    s_at,
+                    q_at,
+                    j,
+                    score,
+                    max_score,
+                    x_drop,
                 ),
                 false,
             ),

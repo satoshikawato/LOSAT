@@ -1,0 +1,6 @@
+ndq	kappa,	kappa,	kappa,	kappa, partial [Homo sapiens]	2.06e-174
+ndq	kappa,	kappa,	kappa,	kappa, partial [Homo sapiens]	0.12
+ndq	Unknown	kappa,;gnl|BL_ORD_ID|1	kappa,;BL_ORD_ID:1	kappa, partial [Homo sapiens]	2.06e-174
+ndq	Unknown	kappa,;gnl|BL_ORD_ID|1;gnl|BL_ORD_ID|1	kappa,;BL_ORD_ID:1;BL_ORD_ID:1	kappa, partial [Homo sapiens]	0.12
+ndq	Unknown	kappa,;gnl|BL_ORD_ID|1;gnl|BL_ORD_ID|1;gnl|BL_ORD_ID|0	kappa,;BL_ORD_ID:1;BL_ORD_ID:1;BL_ORD_ID:0	kappa, partial [Homo sapiens]	2.06e-174
+ndq	Unknown	kappa,;gnl|BL_ORD_ID|1;gnl|BL_ORD_ID|1;gnl|BL_ORD_ID|0;gnl|BL_ORD_ID|0	kappa,;BL_ORD_ID:1;BL_ORD_ID:1;BL_ORD_ID:0;BL_ORD_ID:0	kappa, partial [Homo sapiens]	0.12

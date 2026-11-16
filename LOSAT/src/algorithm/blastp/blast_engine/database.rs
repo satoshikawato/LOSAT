@@ -2309,11 +2309,15 @@ fn x_all_header_ranges(
 /// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
 /// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
 /// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
-/// queries then reports it where NCBI does).
+/// queries then reports it where NCBI does). The tabular id is the reports' own question
+/// (`shared::tabular_subject_id` of the title and the record's source,
+/// `shared::HeaderReader::stored_source` of the taxid read with it, as `shared::read_header`
+/// gives them to `ListedTitles::tabular_subject_ids`), so a title is ruled out here wherever the
+/// search of all queries can refuse it (a failed lookup, `TabularSubjectId::Unknown`, also where
+/// the field list does not stop at it).
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the definition lines are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, the same results as
-/// `SeqDb::deflines`; with `taxids`, `SeqDb::visit_deflines_taxids`, the titles and the taxids in
-/// one pass) instead of one sequence at a time.
+/// `SeqDb::deflines`, the titles and the taxids in one pass) instead of one sequence at a time.
 pub(super) fn x_titles_allow_blocks(
     database: &BlastpDatabase,
     pairwise: bool,
@@ -2321,7 +2325,8 @@ pub(super) fn x_titles_allow_blocks(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
-    let allowed_deflines = |ordinal: u32,
+    let allowed_deflines = |headers: &shared::HeaderReader<'_>,
+                            ordinal: u32,
                             deflines: std::result::Result<
         Vec<crate::seqdb::OrdinalDefline>,
         crate::seqdb::SeqDbError,
@@ -2346,17 +2351,22 @@ pub(super) fn x_titles_allow_blocks(
                         )
                         .is_ok()
                     } else {
-                        // A protein's word is `unnamed`, with or without the name of its source.
-                        // A failed lookup (`SubjectWord::Unknown`) is refused by some field
-                        // lists (`report::tabular::failed_lookup_stop`): not allowed.
+                        // The tabular id of the title with its source (an empty title made from
+                        // it, the end of a title ending in `]` rewritten from it). A lookup that
+                        // LOSAT refuses is ruled out with `taxids` too. A failed lookup
+                        // (`TabularSubjectId::Unknown`) is refused by some field lists
+                        // (`report::tabular::failed_lookup_stop`): not allowed.
+                        let defline = &deflines[0];
                         matches!(
-                            crate::report::defline::database_subject_id(
-                                &deflines[0].title,
-                                &Default::default(),
+                            shared::tabular_subject_id(
+                                &defline.title,
+                                &headers.stored_source(&defline.title, defline.taxid, ordinal),
+                                db.oid(ordinal),
                                 true,
+                                database.program,
                             ),
-                            Ok(crate::report::defline::SubjectWord::Word(_)
-                                | crate::report::defline::SubjectWord::General)
+                            Ok(shared::TabularSubjectId::Word(_)
+                                | shared::TabularSubjectId::General(_))
                         )
                     }
             }
@@ -2364,17 +2374,14 @@ pub(super) fn x_titles_allow_blocks(
         }
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        // A record whose taxid does not decode is an `Err` (`visit_deflines_taxids`).
+        // A record whose taxid does not decode is an `Err` (`visit_deflines`). Each range has its
+        // reader of the sources' names (`HeaderReader`, which opens the taxonomy database at its
+        // first lookup).
         let allowed_range = |range: &BlockRange| -> bool {
-            if taxids {
-                db.visit_deflines_taxids(*range, |ordinal, deflines| {
-                    allowed_deflines(ordinal, deflines)
-                })
-            } else {
-                db.visit_deflines(*range, |ordinal, deflines| {
-                    allowed_deflines(ordinal, deflines)
-                })
-            }
+            let headers = shared::HeaderReader::new(db);
+            db.visit_deflines(*range, |ordinal, deflines| {
+                allowed_deflines(&headers, ordinal, deflines)
+            })
         };
         if crate::seqdb::x_bp_db_keep() {
             return x_all_header_ranges(db, pool, allowed_range)
@@ -2400,7 +2407,9 @@ pub(super) fn x_titles_allow_blocks(
         };
         return titles && !(taxids && shared::taxdb_may_refuse(db));
     }
-    let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
+    let allowed = |headers: &mut shared::HeaderReader<'_>, ordinal: u32| -> bool {
+        allowed_deflines(headers, ordinal, db.deflines(ordinal))
+    };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2410,16 +2419,21 @@ pub(super) fn x_titles_allow_blocks(
             (0..db.num_seqs())
                 .into_par_iter()
                 .with_min_len(4096)
-                .all(allowed)
+                .map_init(|| shared::HeaderReader::new(db), allowed)
+                .all(|allowed| allowed)
         })
     } else {
-        (0..db.num_seqs()).all(allowed)
+        let mut headers = shared::HeaderReader::new(db);
+        (0..db.num_seqs()).all(|ordinal| allowed(&mut headers, ordinal))
     };
     #[cfg(not(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )))]
-    let titles = (0..db.num_seqs()).all(allowed);
+    let titles = {
+        let mut headers = shared::HeaderReader::new(db);
+        (0..db.num_seqs()).all(|ordinal| allowed(&mut headers, ordinal))
+    };
     // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxids after the titles.
     titles && (!taxids || x_taxids_allow_blocks(database, pool))
 }
@@ -2503,7 +2517,7 @@ pub(super) fn x_titles_read_allow_blocks(
 // database's taxids), else the database's taxids, sorted and deduplicated, looked up. It has its
 // own taxonomy handle, so the run's open messages stay for the report. This is conservative,
 // since the report reads the taxids of the subjects with hits only.
-// The titles and the taxid decodes are read in one pass over the headers (`SeqDb::visit_deflines_taxids`,
+// The titles and the taxid decodes are read in one pass over the headers (`SeqDb::visit_deflines`,
 // one read per `HEADER_RANGE_SEQS` sequences, as `x_titles_read_allow_blocks` reads them); no set of
 // taxids is built here.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
@@ -2523,7 +2537,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
         return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
     }
     let readable_range = |range: &BlockRange| -> bool {
-        db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
+        db.visit_deflines(*range, |_ordinal, deflines| match deflines {
             // The taxid `read_reported_taxonomy` takes of a sequence: its first definition
             // line's.
             Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
@@ -4290,7 +4304,7 @@ mod tests {
         assert_eq!(renamed, [(0, 0), (2, 2)]);
     }
 
-    // EXPERIMENT (LOSAT_X_BPQBLOCK): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the one pass over the headers (`SeqDb::visit_deflines`)
     // gives the answer of the two checks it replaces (`x_titles_read_allow_blocks`, then
     // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
     // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.

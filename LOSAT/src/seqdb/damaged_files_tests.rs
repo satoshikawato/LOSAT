@@ -329,10 +329,6 @@ fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut T
                 tally.check(result);
                 true
             });
-            db.visit_deflines_taxids(range, |_, result| {
-                tally.check(result);
-                true
-            });
             db.visit_defline_taxids(range, |_, result| {
                 tally.check(result);
                 true

@@ -660,7 +660,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 2);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 3);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs

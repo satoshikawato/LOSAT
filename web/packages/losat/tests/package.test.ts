@@ -117,7 +117,7 @@ describe.skipIf(!built)('the built package', () => {
 
   it("names the engine's version and the reactors' ABI version, as the README's table does", () => {
     const abi = JSON.parse(readFileSync(join(DIST, 'abi.json'), 'utf8')) as { package: string; engine: string; abi_version: number };
-    expect(abi).toEqual({ package: engineVersion(), engine: engineVersion(), abi_version: 2 });
+    expect(abi).toEqual({ package: engineVersion(), engine: engineVersion(), abi_version: 3 });
     expect(README).toContain(`| ${abi.package} | ${abi.engine} | ${abi.abi_version} |`);
   });
 

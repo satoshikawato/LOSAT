@@ -618,6 +618,23 @@ impl RangeRecorder {
     fn position(&self, format: usize) -> u64 {
         self.positions[format].load(Ordering::SeqCst)
     }
+
+    /// Forgets the events of the format `format`, which failed alone (`search`): its stream is
+    /// dropped, so no HSP record points into it (stream 6: `out6`; stream 0: `out0` and
+    /// `out0_subject`), and an HSP that its report had begun when it stopped is not a fault.
+    fn forget(&mut self, format: usize) {
+        self.open[format] = None;
+        match self.streams[format] {
+            6 => self.out6.clear(),
+            0 => {
+                self.out0.clear();
+                self.out0_subject.clear();
+                self.subject_start = None;
+                self.subject = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Stores the range of `hsp`; a second range for the same HSP is a fault.
@@ -899,13 +916,14 @@ impl Searched {
 
 /// One `run_local` call that writes the output formats `formats` (a group of
 /// `search_groups`), with the warnings of the CLI to `diagnostics`. A format other than the
-/// argv's own (`Output::requested`) whose report the engine refuses fails alone
-/// (`FormatRefusal::FailsAlone`, `Searched::refused`): the call writes the others, as the CLI's
-/// run of each format alone writes it; a refusal of the argv's own format fails the call, as it
-/// fails the CLI. The bytes that a format that failed alone had written before its refusal stay
-/// with its writer, which is dropped; where a chunk of them reached the host already (BLASTX,
-/// whose run writes its formats query batch by query batch, refused at a later batch), the host
-/// cannot drop that stream alone, and the refusal fails the run.
+/// argv's own (`Output::requested`) whose report fails, at a check before its rows or in its
+/// middle (`FormatRefusal`), fails alone (`FormatRefusal::FailsAlone`, `Searched::refused`): the
+/// call writes the others, as the CLI's run of each format alone writes it; an error of the argv's
+/// own format fails the call, as it fails the CLI. The bytes that a format that failed alone had
+/// written stay with its writer, which is dropped, and its observer events with the recorder,
+/// which forgets them (`RangeRecorder::forget`); where a chunk of them reached the host already
+/// (a report that failed after 1 MiB, BLASTX's later query batch), the host is told to discard
+/// that stream (`emit::discard`).
 fn search(
     command: Commands,
     formats: &[Output],
@@ -1048,6 +1066,24 @@ fn search(
             .any(|writer| writer.position().load(Ordering::SeqCst) > 0);
         return Err(Failed::new(&error, wrote));
     }
+    // The formats that failed alone: their writers are dropped with what they hold, the host
+    // discards what it received of them, and the recorder forgets their events.
+    let mut written = Vec::with_capacity(writers.len());
+    let mut refused = Vec::new();
+    for (index, ((format, writer), refusal)) in
+        formats.iter().zip(writers).zip(refusals).enumerate()
+    {
+        match refusal {
+            None => written.push(writer),
+            Some(error) => {
+                if writer.sent() {
+                    crate::emit::discard(format.stream);
+                }
+                recorder.forget(index);
+                refused.push((format.stream, Failed::new(&error, false)));
+            }
+        }
+    }
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder
             .fault
@@ -1061,16 +1097,6 @@ fn search(
             native: None,
             wrote: true,
         });
-    }
-    // The formats that failed alone: their writers are dropped with what they hold.
-    let mut written = Vec::with_capacity(writers.len());
-    let mut refused = Vec::new();
-    for ((format, writer), refusal) in formats.iter().zip(writers).zip(refusals) {
-        match refusal {
-            None => written.push(writer),
-            Some(error) if writer.sent() => return Err(Failed::new(&error, true)),
-            Some(error) => refused.push((format.stream, Failed::new(&error, false))),
-        }
     }
     Ok(Searched {
         writers: written,
@@ -2006,6 +2032,9 @@ mod tests {
     }
 
     /// The bytes of each stream that `run` emitted, joined.
+    /// The streams of a run as a host keeps them (docs/web/abi_v2.md §5): each stream's chunks in
+    /// order, and for each signal of stream 9, what came of the stream it names dropped (stream 9
+    /// itself holds the signals).
     fn streams(
         words: &[&str],
         query: &[FastaRecord],
@@ -2016,6 +2045,10 @@ mod tests {
         let mut streams = std::collections::BTreeMap::new();
         crate::emit::EMITTED.with(|emitted| {
             for (stream, bytes) in emitted.borrow().iter() {
+                if *stream == crate::emit::STREAM_DISCARD {
+                    let discarded = u32::from_le_bytes(bytes[..].try_into().unwrap());
+                    streams.insert(discarded, Vec::new());
+                }
                 streams
                     .entry(*stream)
                     .or_insert_with(Vec::new)
@@ -2023,6 +2056,16 @@ mod tests {
             }
         });
         Ok(streams)
+    }
+
+    /// The streams that the signals of stream 9 of `streams` discard, in order.
+    fn discarded(streams: &std::collections::BTreeMap<u32, Vec<u8>>) -> Vec<u32> {
+        streams
+            .get(&crate::emit::STREAM_DISCARD)
+            .map_or(&[][..], Vec::as_slice)
+            .chunks(4)
+            .map(|signal| u32::from_le_bytes(signal.try_into().unwrap()))
+            .collect()
     }
 
     // The searches of a run: one per distinct hit list size of the formats 0, 6 and 7 (NCBI
@@ -3891,5 +3934,278 @@ mod tests {
             (valid.out6.len(), valid.out0.len(), valid.out0_subject.len()),
             (1, 1, 1)
         );
+    }
+
+    // A format that failed alone leaves no trace in the HSP records (review 3 N5 of line RG T7):
+    // the recorder forgets the ranges of its stream and an HSP that its report had begun.
+    #[test]
+    fn a_format_that_failed_alone_is_forgotten_by_the_recorder() {
+        let mut recorder = recorder();
+        recorder.hsp_begin(1, 0);
+        recorder.hsp_end(1, 0);
+        recorder.subject_begin(0, 0);
+        recorder.subject_end(0, 0);
+        recorder.hsp_begin(0, 0);
+        recorder.hsp_end(0, 0);
+        recorder.hsp_begin(0, 1);
+        recorder.forget(0);
+        assert!(recorder.open.iter().all(Option::is_none));
+        assert!(recorder.out0.is_empty() && recorder.out0_subject.is_empty());
+        assert_eq!(recorder.out6.len(), 1);
+        recorder.forget(1);
+        assert!(recorder.out6.is_empty());
+        assert!(recorder.fault.is_none());
+    }
+
+    /// `letters` pseudo-random nucleotides (a fixed linear congruential generator, `seed`).
+    fn random_nucleotides(letters: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed;
+        (0..letters)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                b"ACGT"[(state >> 62) as usize]
+            })
+            .collect()
+    }
+
+    // Line RG item T7-W (review 3 W3 of line RG T7, dev too): with `-sorthits`, NCBI BLAST+ 2.17.0
+    // pads a description table whose last total is above 99999 bits without end
+    // (showdefline.cpp:940-944), which the CLI refuses in outfmt 0 (`TotalScoreRefusal`, in the
+    // middle of the report), while its `-outfmt 6`, field list and 5 are NCBI's (the 60 kb self hit
+    // here: `1.108e+05` bits, NCBI's row). The queries before it write more than 1 MiB of outfmt
+    // 0, so a chunk of stream 0 has reached the host when it fails: a run whose argv asks for
+    // another format writes it, and stream 0 fails alone, discarded by the signal of stream 9,
+    // its refusal once on stream 3 after the warnings, the HSP records without `out0`. The
+    // default outfmt 0 fails the run with the refusal, as the CLI fails.
+    #[test]
+    fn a_sorthits_total_ncbi_pads_without_end_fails_stream_0_alone_after_its_chunks() {
+        let mut query = Vec::new();
+        let mut subject = Vec::new();
+        for n in 0..7u64 {
+            let letters = random_nucleotides(50_000, n + 1);
+            query.push(FastaRecord::new(
+                &format!("Query_{}", n + 1),
+                format!("q{n}").as_bytes(),
+                &letters,
+            ));
+            subject.push(FastaRecord::new(
+                &format!("Subject_{}", n + 1),
+                format!("s{n}").as_bytes(),
+                &letters,
+            ));
+        }
+        let big = random_nucleotides(60_000, 99);
+        query.push(FastaRecord::new("Query_8", b"bq", &big));
+        subject.push(FastaRecord::new("Subject_8", b"bs", &big));
+        let words = ["blastn", "-query", "q", "-subject", "s", "-sorthits", "0"];
+        let refusal = "-sorthits: the total score of the description table's last subject is wider than its column";
+        let row = "bq\tbs\t100.000\t60000\t0\t0\t1\t60000\t1\t60000\t0.0\t1.108e+05\n";
+        let six = streams(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap();
+        assert!(text(&six[&6]).ends_with(row), "{}", text(&six[&6]));
+        assert_eq!(text(&six[&6]).lines().count(), 8);
+        assert_eq!(discarded(&six), [0]);
+        assert!(six[&0].is_empty());
+        let error = text(&six[&3]);
+        assert!(
+            error.starts_with(
+                "Warning: [blastn] The parameter -sorthits is ignored for output formats > 4.\n"
+            ),
+            "{error}"
+        );
+        assert_eq!(error.matches(refusal).count(), 1, "{error}");
+        let records = text(&six[&STREAM_HITS]);
+        assert_eq!(records.lines().count(), 8);
+        assert!(
+            records.contains("\"out6\":[0,")
+                && !records.contains("\"out0\":[")
+                && !records.contains("\"out0_subject\":["),
+            "{records}"
+        );
+        for argv in ["6 qseqid sseqid evalue", "5"] {
+            let custom =
+                streams(&[&words[..], &["-outfmt", argv]].concat(), &query, &subject).unwrap();
+            assert!(!custom[&STREAM_CUSTOM].is_empty(), "{argv}");
+            assert_eq!(text(&custom[&6]), text(&six[&6]), "{argv}");
+            assert!(custom[&0].is_empty(), "{argv}");
+            assert_eq!(discarded(&custom), [0], "{argv}");
+            assert_eq!(text(&custom[&3]).matches(refusal).count(), 1, "{argv}");
+        }
+        assert_eq!(
+            text(&streams(&[&words[..], &["-outfmt", "6 qseqid sseqid evalue"]].concat(), &query, &subject).unwrap()[&STREAM_CUSTOM]),
+            "q0\ts0\t0.0\nq1\ts1\t0.0\nq2\ts2\t0.0\nq3\ts3\t0.0\nq4\ts4\t0.0\nq5\ts5\t0.0\nq6\ts6\t0.0\nbq\tbs\t0.0\n"
+        );
+        let error = run(&words, &query, &subject).unwrap_err();
+        assert!(error.contains(refusal), "{error}");
+    }
+
+    // Line RG item T7-W (review 3 W4 of line RG T7, dev too): an NCBI error of outfmt 0 alone.
+    // NCBI BLAST+ 2.17.0's BLASTX writes outfmt 0 of this ungapped one-hit run up to
+    // `CSeq_align::GetSeqRange(): Row is empty` (Seq_align.cpp:226-229, exit 255), while its
+    // `-outfmt 6` and field list complete (exit 0), and so does the CLI. A run whose argv asks
+    // for them writes NCBI's rows, stream 0 fails alone (no chunk of it reached the host) with
+    // NCBI's exception on stream 3 after the prefetch warning, each once; the default outfmt 0
+    // fails the run with NCBI's exception, as the CLI fails.
+    #[test]
+    fn an_ncbi_error_of_outfmt_0_alone_fails_stream_0_alone_where_the_argv_asks_for_another_format()
+    {
+        let query = [FastaRecord::new(
+            "Query_1",
+            b"c00556_q",
+            b"GACTCCCTCGAGCTTC",
+        )];
+        let subject = [FastaRecord::new("Subject_1", b"c00556_s", b"WRTIVII")];
+        let words = [
+            "blastx",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-ungapped",
+            "-window_size",
+            "0",
+            "-comp_based_stats",
+            "0",
+            "-seg",
+            "no",
+            "-evalue",
+            "1e5",
+            "-word_size",
+            "3",
+            "-threshold",
+            "2",
+        ];
+        let exception = "CSeq_align::GetSeqRange(): Row is empty";
+        let warning = "Warning: [blastx] Error pre-fetching sequence data\n";
+        for (argv, stream, ncbi) in [
+            (
+                "6",
+                6,
+                "Query_1\tc00556_s\t0.000\t0\t0\t0\t0\t0\t0\t0\t3.7\t 4.2\n",
+            ),
+            (
+                "6 qseqid sseqid evalue",
+                STREAM_CUSTOM,
+                "Query_1\tc00556_s\t3.7\n",
+            ),
+        ] {
+            let written =
+                streams(&[&words[..], &["-outfmt", argv]].concat(), &query, &subject).unwrap();
+            assert_eq!(text(&written[&stream]), ncbi, "{argv}");
+            assert!(written.get(&0).is_none_or(Vec::is_empty), "{argv}");
+            assert!(discarded(&written).is_empty(), "{argv}");
+            let error = text(&written[&3]);
+            assert!(error.starts_with(warning), "{argv}: {error}");
+            assert_eq!(error.matches(warning).count(), 1, "{argv}: {error}");
+            assert_eq!(error.matches(exception).count(), 1, "{argv}: {error}");
+        }
+        let error = run(&words, &query, &subject).unwrap_err();
+        assert!(error.contains(exception), "{error}");
+    }
+
+    // Line RG item T7-W (decision T7-4, review 3 N5 of line RG T7): BLASTX writes its formats
+    // query batch by query batch (10,002 query letters, NCBI's). The first batch (103 queries of
+    // 99 letters against 320 subjects) writes more than 1 MiB of streams 6 and 7; the last query,
+    // in the second batch, alone hits a subject whose title NCBI cannot decode, where NCBI's
+    // tabular `saccver` stops (PD-LOSAT-NCBI-DEFECTS 1.37). With the default outfmt 0, or a field
+    // list without `saccver`, the CLI completes; streams 6 and 7, which the argv does not ask
+    // for, fail alone at that batch with a chunk sent: the signals of stream 9 discard them, the
+    // run writes the others, the HSP records (which point into stream 6) are not written, and
+    // stream 3 has the refusal once. The argv's own `-outfmt 6` fails the run, as the CLI fails.
+    #[test]
+    fn a_blastx_stream_that_fails_alone_at_a_later_batch_is_discarded() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let other = b"CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRS";
+        let codons = |letters: &[u8]| -> Vec<u8> {
+            letters
+                .iter()
+                .flat_map(|&residue| {
+                    let codon: &[u8] = match residue {
+                        b'A' => b"GCG",
+                        b'C' => b"TGC",
+                        b'D' => b"GAT",
+                        b'E' => b"GAA",
+                        b'F' => b"TTT",
+                        b'G' => b"GGC",
+                        b'H' => b"CAT",
+                        b'I' => b"ATT",
+                        b'K' => b"AAA",
+                        b'L' => b"CTG",
+                        b'M' => b"ATG",
+                        b'N' => b"AAC",
+                        b'P' => b"CCG",
+                        b'Q' => b"CAG",
+                        b'R' => b"CGT",
+                        b'S' => b"AGC",
+                        b'T' => b"ACC",
+                        b'V' => b"GTG",
+                        b'W' => b"TGG",
+                        b'Y' => b"TAT",
+                        _ => unreachable!("not in the proteins above"),
+                    };
+                    codon.iter().copied()
+                })
+                .collect()
+        };
+        let mut query: Vec<FastaRecord> = (0..103)
+            .map(|n| {
+                FastaRecord::new(
+                    &format!("Query_{}", n + 1),
+                    format!("q{n}").as_bytes(),
+                    &CODING[..99],
+                )
+            })
+            .collect();
+        query.push(FastaRecord::new("Query_104", b"qlast", &codons(other)));
+        let mut subject: Vec<FastaRecord> = (0..320)
+            .map(|n| {
+                FastaRecord::new(
+                    &format!("Subject_{}", n + 1),
+                    format!("s{n}").as_bytes(),
+                    protein,
+                )
+            })
+            .collect();
+        subject.push(FastaRecord::new(
+            "Subject_321",
+            b"Subject_9 bad x\x81y title",
+            other,
+        ));
+        let words = ["blastx", "-query", "q", "-subject", "s", "-evalue", "1e-10"];
+        let refusal = "subject record 321 (Subject_9)";
+        let plain = streams(&words, &query, &subject).unwrap();
+        assert_eq!(discarded(&plain), [6, 7]);
+        for stream in [6, 7, STREAM_HITS] {
+            assert!(
+                plain.get(&stream).is_none_or(Vec::is_empty),
+                "stream {stream}"
+            );
+        }
+        let report = text(&plain[&0]);
+        assert!(report.len() > 1 << 20, "{}", report.len());
+        assert!(
+            report.contains("Query= qlast")
+                && report.contains("Sequence with id Subject_321 no longer exists"),
+            "{}",
+            &report[report.len() - 2000..]
+        );
+        let last = &report[report.find("Query= qlast").unwrap()..];
+        assert!(last.contains("Effective search space used:"), "{last}");
+        let error = text(&plain[&3]);
+        assert_eq!(error.matches(refusal).count(), 1, "{error}");
+        let fields = [&words[..], &["-outfmt", "6 qseqid evalue"]].concat();
+        let custom = streams(&fields, &query, &subject).unwrap();
+        assert_eq!(discarded(&custom), [6, 7]);
+        let rows = text(&custom[&STREAM_CUSTOM]);
+        assert!(
+            rows.starts_with("q0\t") && rows.contains("\nqlast\t"),
+            "{}",
+            &rows[rows.len().saturating_sub(300)..]
+        );
+        assert_eq!(rows.lines().count(), 103 * 320 + 1);
+        assert_eq!(text(&custom[&0]), report);
+        let error = run(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap_err();
+        assert!(error.contains(refusal), "{error}");
     }
 }

@@ -640,9 +640,15 @@ fn open_search_database(
                 args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                true,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
+                "TBLASTN",
+            )?;
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                outputs.formats.iter().map(|format| format.outfmt),
                 "TBLASTN",
             )?;
             Some(database)
@@ -1751,7 +1757,14 @@ fn search(
                         Some(failure) => failure.error("TBLASTN"),
                         None => PreliminaryReadError("Database memory map file error").into(),
                     })
-                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
+                } else if !subject_set.old_fsc
+                    && crate::stats::setup::setup_subject_length(
+                        0,
+                        1,
+                        Some((database.numbers().min_length, true)),
+                    )
+                    .is_none()
+                {
                     Err(PreliminaryReadError("The average subject length is too short").into())
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
@@ -1987,6 +2000,8 @@ fn search(
                                 super::archive::batch_searched_space(
                                     validity.iter().any(|&valid| valid),
                                     &lengths.lengths[0],
+                                    &queries[range.start],
+                                    validity[0],
                                 ),
                             )?;
                         }
@@ -2056,13 +2071,14 @@ fn search(
             //     }
             // ```
             // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
-            // context is its searched letters), which the search has sorted by e-value; the
-            // sort is a total order (best e-value, first score, OID), so sorting again after
-            // the filter gives NCBI's order. A search with hits has subject letters.
+            // context is its searched letters), which the search has sorted by e-value where NCBI
+            // sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is a total order
+            // (best e-value, first score, OID), so sorting again after the filter gives NCBI's
+            // order, and where NCBI does not sort the lists keep their order.
             // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
             // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
             // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
-            // sort by e-value below is the one NCBI runs unconditionally after the pipes.
+            // sort by e-value below is NCBI's after the pipes, where it sorts.
             if resolved.max_hsps > 0
                 || resolved.query_cov_hsp_perc > 0.0
                 || resolved.culling_limit > 0
@@ -2078,7 +2094,9 @@ fn search(
                             query.len(),
                         );
                     }
-                    hitlist.sort_by_evalue_for_positive_totlen();
+                    if subject_set.sorts_results() {
+                        hitlist.sort_by_evalue_for_positive_totlen();
+                    }
                 }
             }
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI

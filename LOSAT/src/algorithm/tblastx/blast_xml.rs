@@ -134,7 +134,7 @@ pub(crate) fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };
-    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin);
+    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin).ok();
     debug_assert_eq!(
         lengths.map(|lengths| lengths.eff_searchsp),
         Some(stats.eff_searchsp),
@@ -190,13 +190,14 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
 ) -> Result<()> {
     let args = run.args;
     let taxa = run.xml_taxa;
-    let (db_name, db_num, db_len) = match &run.database {
+    let (db_name, db_num, db_len, db_len_overflow) = match &run.database {
         Some(database) => (
             database.name,
-            i32::try_from(database.pairwise.num_sequences)?,
-            i64::try_from(database.pairwise.total_letters)?,
+            database.pairwise.num_sequences,
+            database.pairwise.total_letters,
+            database.pairwise.total_letters_overflow,
         ),
-        None => ("", 0, 0),
+        None => ("", 0, 0, false),
     };
     names::check_database_name(PROGRAM, db_name)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
@@ -246,6 +247,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: positives.as_ref(),
         mask_char: b'X',
     };
@@ -327,8 +329,9 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let mut masks: Vec<QueryMask> = Vec::new();
     let (mut window, mut query_row, mut subject_row): (Vec<u8>, Vec<u8>, Vec<u8>) =
         (Vec::new(), Vec::new(), Vec::new());
-    // The document's start (`StructuredXml::start`), before the first query's warnings.
-    document.start(&mut buf);
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml_run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
     for (q_idx, query) in queries.iter().enumerate() {
@@ -495,8 +498,10 @@ mod tests {
             total: 3_000,
             count: 3,
             link_total: 3_000,
+            average: None,
             dbsize: None,
             searchsp: None,
+            statistics: None,
         };
         assert_eq!(
             query_stats(&TblastxQueryStats::default(), &numbers),
@@ -515,8 +520,10 @@ mod tests {
                 total: 3_000,
                 count,
                 link_total: 3_000,
+                average: None,
                 dbsize,
                 searchsp: None,
+                statistics: None,
             };
             let lengths = try_compute_eff_lengths_tblastx(
                 130,
@@ -530,6 +537,7 @@ mod tests {
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
                 context0_search_space: 0,
+                context0_aa_len: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

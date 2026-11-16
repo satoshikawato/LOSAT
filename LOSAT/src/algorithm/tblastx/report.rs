@@ -1486,7 +1486,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_titles: &[&[u8]],
     database: &str,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1565,7 +1565,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     writer: &mut W,
     hsp: &TblastxHsp,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &OutputConfig,
 ) -> io::Result<()> {
     let hit = &hsp.hit;
@@ -1574,9 +1574,8 @@ pub(crate) fn write_tabular_row<W: Write>(
     let query_id = query_ids
         .get(hit.q_idx as usize)
         .map_or(&b""[..], |id| id.as_ref());
-    let subject_id = subject_ids
-        .get(hit.s_idx as usize)
-        .map_or(&b""[..], |id| id.as_ref());
+    // A failed lookup's rows are refused before (`check_failed_lookups`).
+    let subject_id = crate::algorithm::common::tabular::printed_id(subject_ids, hit.s_idx as usize);
     write_hit_fields_bytes(
         writer,
         query_id,

@@ -440,9 +440,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .iter()
         .map(|format| format.sink.side_files().cloned())
         .collect();
+    // What a refusal of each format's checks does (`FormatRefusal`), beside its writer.
+    let mut refusals: Vec<&mut crate::api::local_blast::FormatRefusal> = Vec::new();
     let writers = formats
         .iter_mut()
-        .map(|format| crate::cli::NcbiOstream::sink(&mut format.sink))
+        .map(|format| {
+            refusals.push(&mut format.refusal);
+            crate::cli::NcbiOstream::sink(&mut format.sink)
+        })
         .collect::<io::Result<Vec<_>>>()?;
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by the BLAST XML,
@@ -497,6 +502,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     let written = write_run(
         run,
         &mut writers,
+        &mut refusals,
         &mut documents,
         wants_hits,
         only_archive,
@@ -527,12 +533,16 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 
 /// `report_batches` from the prologs to the epilogs, into `writers` (each format's, behind the
 /// hold of a run that holds its formats) and `documents` (the writer of each XML2 or JSON
-/// document): whatever ends it, `report_batches` then ends the hold. `only_archive`: every format
-/// is the archive (`ReportOutputs::only_archive`). Returns the run's hit list (`wants_hits`) and
-/// the database sequences it names.
+/// document): whatever ends it, `report_batches` then ends the hold. `refusals` say what a
+/// refusal of each format's checks does (`FormatRefusal`): a format that fails alone writes
+/// nothing after it, and the first format that is still written writes the warnings that the
+/// formats share. `only_archive`: every format is the archive (`ReportOutputs::only_archive`).
+/// Returns the run's hit list (`wants_hits`) and the database sequences it names.
+#[allow(clippy::too_many_arguments)]
 fn write_run(
     run: &RunReports<'_>,
     writers: &mut [crate::cli::NcbiOstream<'_>],
+    refusals: &mut [&mut crate::api::local_blast::FormatRefusal],
     documents: &mut [Option<super::blast_xml::RunXml2>],
     wants_hits: bool,
     only_archive: bool,
@@ -743,16 +753,28 @@ fn write_run(
         //             	ITERATE(CSearchResultSet, result, *results) {
         //                	    formatter.PrintOneResultSet(**result, query_batch);
         // ```
-        for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
-            // The warnings of the batch's queries are written once, with the first format; NCBI's
-            // posts of the bytes that a Seq-annot's stream replaces (outfmt 8, 9; the only text
-            // that their writer writes to it, `seqalign::write_blastx_seqalign`) at every format,
-            // as the other programs write them.
+        // Whether a format of the batch wrote the warnings that the formats share.
+        let mut warned = false;
+        for (index, ((writer, options), refusal)) in writers
+            .iter_mut()
+            .zip(resolved)
+            .zip(refusals.iter_mut())
+            .enumerate()
+        {
+            // A format that failed alone writes nothing more.
+            if refusal.refused() {
+                continue;
+            }
+            // The warnings of the batch's queries are written once, with the first format that
+            // is written; NCBI's posts of the bytes that a Seq-annot's stream replaces (outfmt 8,
+            // 9; the only text that their writer writes to it, `seqalign::write_blastx_seqalign`)
+            // at every format, as the other programs write them.
             let mut quiet = io::sink();
             let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
                 .and_then(crate::report::serial::SerialFormat::of)
                 .is_some();
-            let warnings: &mut dyn Write = if index == 0 || seq_annot {
+            let warns = !warned;
+            let warnings: &mut dyn Write = if warns || seq_annot {
                 &mut *diagnostics
             } else {
                 &mut quiet
@@ -800,6 +822,8 @@ fn write_run(
                 )
                 .map_err(archive_error)?;
                 writer.flush().map_err(output_error)?;
+                // The archive, as the first format, takes the place of the warnings' writer.
+                warned |= warns;
                 continue;
             }
             let mut probe = observer
@@ -823,10 +847,14 @@ fn write_run(
                     probe: probe.as_mut(),
                     first_hsp,
                     hits: hits.as_deref(),
+                    refusal,
                 }),
             )
             .map_err(report_error)?;
             writer.flush().map_err(output_error)?;
+            // A format refused by its checks wrote no warning (they come before its warnings and
+            // rows, `report::render_queries_with`).
+            warned |= warns && !refusal.refused();
         }
         first_hsp += match &hits {
             Some(hits) => hits.len(),
@@ -876,9 +904,19 @@ fn write_run(
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
-    for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
+    // The first format that is still written writes the warnings of the epilogs.
+    let first = refusals.iter().position(|refusal| !refusal.refused());
+    for (index, ((writer, options), refusal)) in writers
+        .iter_mut()
+        .zip(resolved)
+        .zip(refusals.iter())
+        .enumerate()
+    {
+        if refusal.refused() {
+            continue;
+        }
         let mut quiet = io::sink();
-        let warnings: &mut dyn Write = if index == 0 {
+        let warnings: &mut dyn Write = if Some(index) == first {
             &mut **diagnostics
         } else {
             &mut quiet

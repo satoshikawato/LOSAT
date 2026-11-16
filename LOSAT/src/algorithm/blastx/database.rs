@@ -296,7 +296,8 @@ pub(super) fn too_long(oid: crate::seqdb::Oid, length: usize) -> anyhow::Error {
 pub(crate) struct ReportedSubjects {
     records: Vec<FastaRecord>,
     titles: Vec<Arc<[u8]>>,
-    tabular_ids: Vec<String>,
+    /// `None` where the lookup fails (`common::tabular::SubjectId`).
+    tabular_ids: Vec<Option<String>>,
     /// The ordinal id of each rank, ascending.
     ordinals: Vec<u32>,
     /// The OID of each rank, which names a sequence without parsed Seq-ids (the Seq-ids of the
@@ -590,10 +591,10 @@ impl ReportedSubjects {
                         .tabular_ids(true)
                         .and_then(|ids| subject.check_printed_word(true, words).map(|()| ids));
                     // A table of fields that read nothing of the subject prints none of its ids.
-                    // An empty id where the lookup throws (`ParsedSubject::tabular_ids`).
-                    let [id, accession, version] = match ids {
-                        Ok(ids) => ids.unwrap_or_default(),
-                        Err(_) if !tabular_reads || !reports => Default::default(),
+                    // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
+                    let found = match ids {
+                        Ok(ids) => ids,
+                        Err(_) if !tabular_reads || !reports => Some(Default::default()),
                         Err(problem) => {
                             return Err(shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -603,13 +604,16 @@ impl ReportedSubjects {
                         }
                     };
                     // The ids of a stored definition line are VisibleStrings: ASCII.
-                    let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
-                    reported.tabular_ids.push(text(id));
+                    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+                    reported
+                        .tabular_ids
+                        .push(found.as_ref().map(|[id, _, _]| text(id)));
                     if reported.tabular_accessions.is_empty() {
                         reported.tabular_accessions = vec![None; listed.len()];
                     }
-                    reported.tabular_accessions[reported.ordinals.len()] =
-                        Some([text(accession), text(version)]);
+                    reported.tabular_accessions[reported.ordinals.len()] = found
+                        .as_ref()
+                        .map(|[_, accession, version]| [text(accession), text(version)]);
                 }
                 if reported.parsed.is_empty() {
                     reported.parsed = vec![None; listed.len()];
@@ -632,9 +636,11 @@ impl ReportedSubjects {
                 };
                 // A stored title is a VisibleString (checked above), so its id is ASCII.
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
-                reported
-                    .tabular_ids
-                    .push(id.as_ref().map_or_else(String::new, |id| text(&id.id())));
+                reported.tabular_ids.push(match &id {
+                    Some(shared::TabularSubjectId::Unknown(_)) => None,
+                    Some(id) => Some(text(&id.id())),
+                    None => Some(String::new()),
+                });
                 if let Some(id @ shared::TabularSubjectId::General(_)) = &id {
                     if reported.tabular_accessions.is_empty() {
                         reported.tabular_accessions = vec![None; listed.len()];
@@ -1052,19 +1058,17 @@ impl ReportedSubjects {
         &self.taxdb_notes
     }
 
-    /// The tabular subject id of rank `rank` (only with `tabular` in `for_batch`).
-    pub(crate) fn tabular_id(&self, rank: usize) -> &str {
-        &self.tabular_ids[rank]
-    }
-
     /// The tabular `sseqid`, `sacc` and `saccver` of rank `rank` (only with `tabular` in
-    /// `for_batch`): the same id for a sequence without parsed Seq-ids whose title gives a word.
-    pub(crate) fn tabular_ids(&self, rank: usize) -> [&str; 3] {
-        let id = self.tabular_id(rank);
-        match self.tabular_accessions.get(rank).and_then(Option::as_ref) {
-            Some([accession, version]) => [id, accession, version],
-            None => [id, id, id],
-        }
+    /// `for_batch`): the same id for a sequence without parsed Seq-ids whose title gives a word;
+    /// `None` where the lookup fails (`common::tabular::SubjectId`).
+    pub(crate) fn tabular_ids(&self, rank: usize) -> Option<[&str; 3]> {
+        let id = self.tabular_ids[rank].as_deref()?;
+        Some(
+            match self.tabular_accessions.get(rank).and_then(Option::as_ref) {
+                Some([accession, version]) => [id, accession, version],
+                None => [id, id, id],
+            },
+        )
     }
 
     /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each reported sequence

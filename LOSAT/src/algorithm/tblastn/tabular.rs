@@ -40,7 +40,6 @@
 //! (`report_num_ident`, counted from the same rows). `qcovus` is BLASTN's alone (`N/A`).
 
 use std::io::Write;
-use std::sync::Arc;
 
 use anyhow::{ensure, Context, Result};
 
@@ -121,7 +120,7 @@ pub(super) struct TblastnTabular<'a> {
     pub letters: SubjectLetters<'a>,
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`stage_e_report::tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
-    pub subject_ids: &'a [Arc<[u8]>],
+    pub subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
     /// The records of a subject set (`-subject`; the organism report shows their local ids and
     /// titles).
     pub subject_records: &'a [FastaRecord],

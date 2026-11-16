@@ -6083,7 +6083,7 @@ struct BlastnReportInputs<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The tabular subject ids of a database search's reported sequences, by rank
     /// (`database::ReportedSubjects::tabular_subject_ids`); `None` for a subject set.
-    database_subject_ids: Option<&'a [Arc<[u8]>]>,
+    database_subject_ids: Option<&'a [crate::algorithm::common::tabular::SubjectId]>,
     /// The ordinal ID of each reported sequence of a database search, by rank
     /// (`database::ReportedSubjects::ordinals`); `None` for a subject set.
     database_ordinals: Option<&'a [u32]>,
@@ -6429,8 +6429,8 @@ fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRang
 
 /// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) of every subject, by
 /// subject index (`report::defline::tabular_subject_id`: the title's first word, or the
-/// local ID, and for `lcl|Subject_...` the first word of `GenerateDefline`); empty where
-/// `GenerateDefline` throws (a `Subject_` first word and a title in no encoding that
+/// local ID, and for `lcl|Subject_...` the first word of `GenerateDefline`); `None` where
+/// `GenerateDefline` throws (`common::tabular::SubjectId`) (a `Subject_` first word and a title in no encoding that
 /// `CUtf8::GuessEncoding` recognises), whose rows NCBI writes with its catch's values
 /// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
@@ -6451,7 +6451,9 @@ fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRang
 ///             	SetSubjectId(subject_bh);
 ///             }
 /// ```
-fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
+fn tabular_subject_ids(
+    subjects: &[FastaRecord],
+) -> Vec<crate::algorithm::common::tabular::SubjectId> {
     subjects
         .iter()
         .map(|subject| {
@@ -6460,26 +6462,32 @@ fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
                 .subject_tabular_id(false)
                 .ok()
                 .flatten()
-                .map_or_else(|| Arc::from(&b""[..]), Arc::from)
+                .map(Arc::from)
         })
         .collect()
 }
 
 /// The check of the rows of `hit_lists` whose subjects' lookups fail where NCBI has no result
-/// (`report::tabular::check_failed_lookups`), for each tabular format of `output_formats`, before
-/// any format is written; `subject_ids` are the formats' subject ids (`tabular_subject_ids`, or a
-/// database's). Out of line and called only for a tabular format whose subjects' lookups may fail
+/// (`report::tabular::check_failed_lookups`), for each tabular format of `output_formats` (the
+/// formats of `outputs`, whose refusal each is: `FormatRefusal::check`), before any format is
+/// written; `subject_ids` are the formats' subject ids (`tabular_subject_ids`, or a database's).
+/// Out of line and called only for a tabular format whose subjects' lookups may fail
 /// (`common::tabular::lookups_may_fail`), so that the other reports do not change for it (no NCBI
 /// counterpart: code placement only).
 #[inline(never)]
 fn check_tabular_lookups(
+    outputs: &mut [crate::api::local_blast::FormatOutput<'_>],
     output_formats: &[BlastnOutputFormat],
     hit_lists: &[Option<BlastnHitList>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     report: &BlastnReportInputs<'_>,
 ) -> Result<()> {
     let database = report.database_ordinals.zip(report.database_reader);
-    for format in output_formats.iter().filter(|format| format.is_tabular()) {
+    for (output, format) in outputs
+        .iter_mut()
+        .zip(output_formats)
+        .filter(|(_, format)| format.is_tabular())
+    {
         let spec = format.tabular_spec();
         if !crate::algorithm::common::tabular::checks_failed_lookups(
             spec,
@@ -6488,7 +6496,7 @@ fn check_tabular_lookups(
         ) {
             continue;
         }
-        crate::report::tabular::check_failed_lookups(
+        let checked = crate::report::tabular::check_failed_lookups(
             spec,
             hit_lists.iter().flatten().map(|hit_list| {
                 hit_list
@@ -6517,7 +6525,8 @@ fn check_tabular_lookups(
                 ),
             },
             "BLASTN",
-        )?;
+        );
+        output.refusal.check(checked)?;
     }
     Ok(())
 }
@@ -6967,24 +6976,33 @@ fn post_process_hits_and_write(
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch where LOSAT
     // refuses none of them (`x_rpt_stream::SubjectCache`), so they are the ids made here.
     let tabular = output_formats.iter().any(|format| format.is_tabular());
-    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if tabular {
-        match (
-            report.database_subject_ids,
-            report.subject_cache.and_then(|cache| cache.ids.as_deref()),
-        ) {
-            (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
-            (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
-            (None, None) => std::borrow::Cow::Owned(tabular_subject_ids(report.subjects.records())),
-        }
-    } else {
-        std::borrow::Cow::Owned(Vec::new())
-    };
+    let subject_ids: std::borrow::Cow<'_, [crate::algorithm::common::tabular::SubjectId]> =
+        if tabular {
+            match (
+                report.database_subject_ids,
+                report.subject_cache.and_then(|cache| cache.ids.as_deref()),
+            ) {
+                (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
+                (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
+                (None, None) => {
+                    std::borrow::Cow::Owned(tabular_subject_ids(report.subjects.records()))
+                }
+            }
+        } else {
+            std::borrow::Cow::Owned(Vec::new())
+        };
     // The rows of subjects whose lookups fail where NCBI has no result, before any format is
     // written.
     if tabular
         && crate::algorithm::common::tabular::lookups_may_fail(&subject_ids, report.database_parsed)
     {
-        check_tabular_lookups(output_formats, &hit_lists, &subject_ids, report)?;
+        check_tabular_lookups(
+            &mut outputs.formats,
+            output_formats,
+            &hit_lists,
+            &subject_ids,
+            report,
+        )?;
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++
@@ -7051,6 +7069,10 @@ fn post_process_hits_and_write(
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
+        // A format that failed alone writes nothing more; the next takes the warnings.
+        if format.refusal.refused() {
+            continue;
+        }
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a search with several formats, `run_local`).
         if let Some(handle) = report.archive {
@@ -7549,7 +7571,7 @@ fn write_custom_tabular(
     query_titles: &[Arc<[u8]>],
     query_lengths: &[usize],
     subject_title: &str,
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],
     writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,

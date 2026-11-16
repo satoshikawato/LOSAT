@@ -47,7 +47,6 @@
 //! is BLASTN's alone (`N/A`).
 
 use std::io::Write;
-use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -146,7 +145,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
     pub database: &'a str,
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
-    pub subject_ids: &'a [Arc<[u8]>],
+    pub subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
 }

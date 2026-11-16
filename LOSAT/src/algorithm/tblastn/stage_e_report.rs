@@ -384,21 +384,26 @@ pub(super) fn render(
     } else {
         Vec::new()
     };
-    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // The rows of subjects whose lookup fails (no id) where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before any format is written.
     let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
         ShownSubjects::Fasta { parsed, .. } => parsed,
         ShownSubjects::Database { reported, .. } => &reported.parsed,
     };
     let database = matches!(shown, ShownSubjects::Database { .. });
-    for format in outputs.formats.iter().filter(|format| shows_ids(format)) {
+    // Each tabular format's refusal is that format's (`FormatRefusal::check`).
+    for format in outputs
+        .formats
+        .iter_mut()
+        .filter(|format| shows_ids(format))
+    {
         let spec = super::tabular::tabular_spec(format.outfmt);
         if crate::algorithm::common::tabular::checks_failed_lookups(
             spec.as_ref(),
             &subject_ids,
             parsed,
         ) {
-            crate::report::tabular::check_failed_lookups(
+            let checked = crate::report::tabular::check_failed_lookups(
                 spec.as_ref(),
                 hitlists.iter().map(|hitlist| {
                     hitlist
@@ -429,7 +434,8 @@ pub(super) fn render(
                     ),
                 },
                 "TBLASTN",
-            )?;
+            );
+            format.refusal.check(checked)?;
         }
     }
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
@@ -597,6 +603,10 @@ pub(super) fn render(
         ranges,
     };
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        // A format that failed alone writes nothing more; the next takes the warnings.
+        if format.refusal.refused() {
+            continue;
+        }
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).
         if let Some(handle) = archive.map(|render| render.handle) {
@@ -822,7 +832,7 @@ fn write_tabular(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
@@ -961,7 +971,11 @@ fn write_tabular(
                 // written as bytes.
                 writer.write_all(query.shown_id())?;
                 writer.write_all(b"\t")?;
-                writer.write_all(&subject_ids[oid])?;
+                // A failed lookup's rows are refused before (`check_failed_lookups`).
+                writer.write_all(crate::algorithm::common::tabular::printed_id(
+                    subject_ids,
+                    oid,
+                ))?;
                 writeln!(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -1048,8 +1062,8 @@ pub(super) fn record_coordinates(
 
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
-/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's; empty
-/// where `GenerateDefline` throws, whose rows NCBI writes with its catch's values
+/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's; `None`
+/// where `GenerateDefline` throws (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
 /// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
@@ -1063,7 +1077,9 @@ pub(super) fn record_coordinates(
 ///             bioseqs_found = false;
 ///         }
 /// ```
-fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
+fn tabular_subject_ids(
+    subjects: &[FastaRecord],
+) -> Vec<crate::algorithm::common::tabular::SubjectId> {
     subjects
         .iter()
         .map(|subject| {
@@ -1072,7 +1088,7 @@ fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
                 .subject_tabular_id(false)
                 .ok()
                 .flatten()
-                .map_or_else(|| Arc::from(&b""[..]), Arc::from)
+                .map(Arc::from)
         })
         .collect()
 }
@@ -1913,6 +1929,7 @@ mod tests {
                     .zip(outputs_bytes.iter_mut())
                     .map(|(outfmt, bytes)| FormatOutput {
                         outfmt,
+                        refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                         sink: OutputSink::Writer(bytes),
                     })
                     .collect(),

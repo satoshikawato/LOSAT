@@ -2728,10 +2728,10 @@ pub(crate) fn check_reported_parsed(
 /// an empty one made from the name of its source, `sources[rank]`, or `BL_ORD_ID:n`), or of a
 /// sequence with parsed Seq-ids (`parsed[rank]`, `ParsedSubject::tabular_ids`). The custom fields
 /// ask `sseqid` of it (`tabular_seqid`). `records[rank]` holds the stored title, `ordinals[rank]`
-/// the ordinal id, `oids` the database's OIDs; `protein` for a protein database. An id that LOSAT
-/// cannot write as NCBI is its refusal where a tabular report `reads` the subject
-/// (`report::tabular::reads_subject`), else empty: a table of fields that read nothing of the
-/// subject prints none of its ids.
+/// the ordinal id, `oids` the database's OIDs; `protein` for a protein database. `None` where the
+/// lookup fails (`common::tabular::SubjectId`). An id that LOSAT cannot write as NCBI is its
+/// refusal where a tabular report `reads` the subject (`report::tabular::reads_subject`), else
+/// empty: a table of fields that read nothing of the subject prints none of its ids.
 pub(crate) fn tabular_subject_ids(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     ordinals: &[u32],
@@ -2741,7 +2741,7 @@ pub(crate) fn tabular_subject_ids(
     protein: bool,
     reads: bool,
     program: &str,
-) -> Result<Vec<std::sync::Arc<[u8]>>> {
+) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
     records
         .iter()
         .zip(ordinals)
@@ -2760,10 +2760,13 @@ pub(crate) fn tabular_subject_ids(
                     protein,
                     program,
                 )
-                .map(|id| std::sync::Arc::from(id.accession())),
+                .map(|id| match id {
+                    TabularSubjectId::Unknown(_) => None,
+                    id => Some(std::sync::Arc::from(id.accession())),
+                }),
             };
             match id {
-                Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
+                Err(_) if !reads => Ok(Some(std::sync::Arc::from(&b""[..]))),
                 id => id,
             }
         })
@@ -2802,11 +2805,11 @@ pub(crate) fn library_subject(
     program: &str,
 ) -> crate::api::local_blast::ReportedSubject {
     let id = match parsed {
-        // An empty `saccver`: the lookup throws; the library names it as one without parsed ids.
+        // No `saccver`: the lookup throws; the library names it as one without parsed ids.
         Some(subject) => subject
             .tabular_saccver(protein)
             .ok()
-            .filter(|id| !id.is_empty())
+            .flatten()
             .map(|id| id.to_vec()),
         None => tabular_subject_id(title, source, db.oid(ordinal), protein, program)
             .ok()
@@ -3197,8 +3200,8 @@ impl TabularSubjectId {
     }
 
     /// `sacc` and `saccver`, and `sallacc`: the word, or the general id's content label
-    /// `BL_ORD_ID:n`; empty where the lookup fails (`Unknown`), which the programs' id lists keep
-    /// as the mark of a failed lookup (`failed_lookup`).
+    /// `BL_ORD_ID:n`; empty where the lookup fails (`Unknown`, which the programs' id lists hold
+    /// as `None`, `common::tabular::SubjectId`).
     pub(crate) fn accession(&self) -> std::borrow::Cow<'_, [u8]> {
         match self {
             TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),

@@ -652,9 +652,11 @@ here, and names the widening that PS16a made for protein queries.
   (`blastxml2_format.cpp:410-415`), a query's id without a title (`:584-596`). Outfmt 0, 11 and 18
   were NCBI's before (`Unknown`, the line in place of each alignment), but for a `-parse_deflines`
   record with an `lcl|Subject_N` id, whose line names the Seq-align id (`Subject_9`, LOSAT wrote
-  `Subject_1`). BLASTX reads such a title as its bytes, as the other programs do. LOSAT Web writes
-  each format as the CLI writes it alone: where the default tabular formats stop (rule 3 below),
-  streams 6 and 7 fail alone and outfmt 0 is written (`docs/web/abi_v2.md` §7).
+  `Subject_1`). BLASTX reads such a title as its bytes, as the other programs do. Each stream of
+  LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
+  and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
+  the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
+  (`docs/web/abi_v2.md` §7).
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`

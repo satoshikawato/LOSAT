@@ -215,7 +215,7 @@ struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: &'a TabularTaxonomy,
-    /// How the lookups of a subject fail (an empty id: `SetSubjectId`), `None` where they do not.
+    /// How the lookups of a subject fail (no id: `SetSubjectId`), `None` where they do not.
     failed: Option<FailedValues<'a>>,
 }
 
@@ -294,15 +294,19 @@ fn subject_values<'a>(
             if parsed.tabular.get(oid).is_some_and(Option::is_some) =>
         {
             let ids = parsed.tabular[oid].as_ref().expect("the guard");
-            // An empty id: `SetSubjectId`'s `GetSeqIdList` throws (`RecordTabularIds::ids`); a
+            // No ids: `SetSubjectId`'s `GetSeqIdList` throws (`RecordTabularIds::ids`); a
             // record's definition line is not looked up.
             let failed = parsed.subjects[oid]
                 .as_deref()
-                .and_then(|record| FailedValues::of_parsed(record, ids.ids[2].is_empty(), false));
+                .and_then(|record| FailedValues::of_parsed(record, ids.ids.is_none(), false));
+            let [id, accession, accession_version] = match &ids.ids {
+                Some([id, accession, version]) => [id.as_str(), accession, version],
+                None => [""; 3],
+            };
             SubjectValues {
-                id: std::borrow::Cow::Borrowed(ids.ids[0].as_bytes()),
-                accession: ids.ids[1].as_bytes(),
-                accession_version: ids.ids[2].as_bytes(),
+                id: std::borrow::Cow::Borrowed(id.as_bytes()),
+                accession: accession.as_bytes(),
+                accession_version: accession_version.as_bytes(),
                 gi: parsed.subjects[oid]
                     .as_deref()
                     .map_or(0, |subject| subject.tabular_gi()),
@@ -315,10 +319,11 @@ fn subject_values<'a>(
         }
         // A record without parsed ids: its `sseqid` is the first word of its title, or of the
         // title that `GenerateDefline` makes of it for a `Subject_` word
-        // (`report::subject_tabular_id`), empty where that throws; its `sall*` the first word of
+        // (`report::subject_tabular_id`), none where that throws; its `sall*` the first word of
         // its title (`s_ReplaceLocalId`, `DeflineIds::of_record`).
         ShownSubjects::Fasta { .. } => {
             let tabular = subject_tabular_id(subject);
+            let failed_id = tabular.is_none();
             let id = tabular.unwrap_or_default();
             SubjectValues {
                 accession: &[],
@@ -333,7 +338,7 @@ fn subject_values<'a>(
                 titles: None,
                 length: subject.placement().length,
                 taxonomy: no_taxonomy,
-                failed: id.is_empty().then(|| {
+                failed: failed_id.then(|| {
                     let local = std::borrow::Cow::Borrowed(subject.internal_id.as_bytes());
                     FailedValues {
                         align_id: [local.clone(), local],
@@ -347,7 +352,9 @@ fn subject_values<'a>(
         // A database sequence: the default report's ids (`ReportedSubjects::tabular_ids`), with
         // parsed Seq-ids the ids and titles of each definition line, else its one stored title.
         ShownSubjects::Database { reported, .. } => {
-            let [id, accession, accession_version] = reported.tabular_ids(oid);
+            // No ids where the lookup fails (`ReportedSubjects::tabular_ids`).
+            let found = reported.tabular_ids(oid);
+            let [id, accession, accession_version] = found.unwrap_or([""; 3]);
             let parsed = reported.parsed_subject(oid);
             let (all_ids, all_failed) = reported.tabular_all_ids(oid);
             SubjectValues {
@@ -369,12 +376,12 @@ fn subject_values<'a>(
                 }),
                 length: subject.placement().length,
                 taxonomy: reported.tabular_taxonomy(oid).unwrap_or(no_taxonomy),
-                // An empty id: `GetSeqIdList` throws, for the general id of a sequence without
+                // No ids: `GetSeqIdList` throws, for the general id of a sequence without
                 // parsed Seq-ids (`TabularSubjectId::Unknown`) in `SetSubjectId` and
                 // `x_SetSubjectIds`; for one with parsed Seq-ids where `ParsedSubject` says.
                 failed: match parsed {
-                    Some(parsed) => FailedValues::of_parsed(parsed, id.is_empty(), all_failed),
-                    None => id.is_empty().then(|| {
+                    Some(parsed) => FailedValues::of_parsed(parsed, found.is_none(), all_failed),
+                    None => found.is_none().then(|| {
                         let [full, accession] =
                             crate::algorithm::common::database::failed_general_lookup(
                                 reported.oid(oid),

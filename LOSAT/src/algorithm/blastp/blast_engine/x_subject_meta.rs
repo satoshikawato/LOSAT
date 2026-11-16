@@ -12,7 +12,7 @@
 //!
 //! The block search's subjects (`x_query_blocks::XBlockSubjects::new`, made
 //! once per search with the subjects' encoding) also hold an `XSubjectMeta`: the shown IDs
-//! (`tabular_subject_ids`: each subject's `tabular_subject_id`, empty where NCBI's `GenerateDefline`
+//! (`tabular_subject_ids`: each subject's `tabular_subject_id`, `None` where NCBI's `GenerateDefline`
 //! would throw) and the title `Arc`s. A block borrows the titles (`subject_titles` in `run_resolved_in_pool`) and
 //! the shown IDs, which the check of failed lookups (`report::tabular::check_failed_lookups`)
 //! reads over the block's hit lists as it reads `tabular_subject_ids`'.
@@ -60,8 +60,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 /// made once for all blocks of a block search.
 pub(crate) struct XSubjectMeta {
     /// The IDs as `tabular_subject_ids` shows them: `tabular_subject_id(local_id, title, true)` of
-    /// each subject, the empty ID where `GenerateDefline` throws.
-    shown: Vec<Arc<[u8]>>,
+    /// each subject, `None` where `GenerateDefline` throws.
+    shown: Vec<crate::algorithm::common::tabular::SubjectId>,
     /// `Arc::from(record.title())` of each subject, as `run_resolved_in_pool` makes them.
     titles: Vec<Arc<[u8]>>,
 }
@@ -88,7 +88,7 @@ impl XSubjectMeta {
     }
 
     /// The shown IDs, as `tabular_subject_ids` returns them.
-    pub(crate) fn shown(&self) -> &[Arc<[u8]>] {
+    pub(crate) fn shown(&self) -> &[crate::algorithm::common::tabular::SubjectId] {
         &self.shown
     }
 
@@ -100,7 +100,7 @@ impl XSubjectMeta {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{tabular_subject_id_results, tabular_subject_ids};
+    use super::super::tabular_subject_ids;
     use super::*;
 
     /// Subject records whose IDs take every branch of `tabular_subject_id`: a first word, the local
@@ -127,13 +127,12 @@ mod tests {
             .collect()
     }
 
-    // The stored values are those that every block makes: each subject's shown ID (the empty one
-    // where it fails) and the titles.
+    // The stored values are those that every block makes: each subject's shown ID (none where it
+    // fails) and the titles.
     #[test]
     fn stored_values_are_the_per_block_values() {
         let records = records();
         let meta = XSubjectMeta::new(&records);
-        let reference_ids = tabular_subject_id_results(&records);
         assert_eq!(meta.shown().len(), records.len());
         for (index, record) in records.iter().enumerate() {
             let direct = crate::report::defline::tabular_subject_id(
@@ -141,27 +140,17 @@ mod tests {
                 &record.title,
                 true,
             )
-            .unwrap_or_default();
-            assert_eq!(&meta.shown()[index][..], &direct[..], "{index}");
-            assert_eq!(
-                reference_ids[index].as_deref().unwrap_or_default(),
-                &direct[..],
-                "{index}"
-            );
+            .ok();
+            assert_eq!(meta.shown()[index].as_deref(), direct.as_deref(), "{index}");
             assert_eq!(&*meta.titles()[index], record.title(), "{index}");
         }
         // Two of the records cannot be written (`Subject_\x81`), the others can.
         let failing: Vec<usize> = (0..records.len())
-            .filter(|&index| reference_ids[index].is_none())
+            .filter(|&index| meta.shown()[index].is_none())
             .collect();
         assert_eq!(failing, vec![3, 7]);
-        // No reported subject: `tabular_subject_ids` shows every ID, the empty one where it fails.
-        let reference = tabular_subject_ids(&records);
-        let shown: Vec<&[u8]> = meta.shown().iter().map(|id| &id[..]).collect();
-        let reference: Vec<&[u8]> = reference.iter().map(|id| &id[..]).collect();
-        assert_eq!(shown, reference);
-        assert_eq!(shown[3], b"");
-        assert_eq!(shown[7], b"");
-        assert_eq!(shown[0], b"sp|P1|A");
+        // No reported subject: `tabular_subject_ids` shows every ID, none where it fails.
+        assert_eq!(meta.shown(), tabular_subject_ids(&records));
+        assert_eq!(meta.shown()[0].as_deref(), Some(&b"sp|P1|A"[..]));
     }
 }

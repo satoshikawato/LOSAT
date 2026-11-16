@@ -69,7 +69,7 @@ pub struct ParsedSubject {
     /// positive list.
     use_this_seqid: Vec<Vec<u8>>,
     /// `tabular_saccver`, kept for the reports of later query batches.
-    saccver: std::sync::OnceLock<std::sync::Arc<[u8]>>,
+    saccver: std::sync::OnceLock<Option<std::sync::Arc<[u8]>>>,
     /// `query_scope_keys`, made at the first report that asks.
     query_scope_keys: std::sync::OnceLock<QueryScopeKeys>,
 }
@@ -1288,18 +1288,19 @@ impl ParsedSubject {
     }
 
     /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's);
-    /// empty where the lookup throws (the programs' id lists mark a failed lookup so).
-    pub fn tabular_saccver(&self, protein: bool) -> Result<std::sync::Arc<[u8]>, &'static str> {
+    /// `None` where the lookup throws, as `tabular_ids` (the programs' id lists,
+    /// `common::tabular::SubjectId`).
+    pub fn tabular_saccver(
+        &self,
+        protein: bool,
+    ) -> Result<Option<std::sync::Arc<[u8]>>, &'static str> {
         if let Some(saccver) = self.saccver.get() {
-            return Ok(std::sync::Arc::clone(saccver));
+            return Ok(saccver.clone());
         }
         let saccver = self
             .tabular_ids(protein)?
-            .map(|[_, _, saccver]| saccver)
-            .unwrap_or_default();
-        Ok(std::sync::Arc::clone(
-            self.saccver.get_or_init(|| std::sync::Arc::from(saccver)),
-        ))
+            .map(|[_, _, saccver]| std::sync::Arc::from(saccver));
+        Ok(self.saccver.get_or_init(|| saccver).clone())
     }
 
     /// `Err` as `tabular_ids`', which it does not make.
@@ -2295,11 +2296,11 @@ mod tests {
         assert!(subject("lcl|Subject_29").check_tabular_ids(true).is_ok());
         // The `saccver`, made once.
         let once = subject("lcl|Subject_28");
-        let first = once.tabular_saccver(true).unwrap();
+        let first = once.tabular_saccver(true).unwrap().unwrap();
         assert_eq!(&*first, b"DAA10008.1");
         assert!(std::sync::Arc::ptr_eq(
             &first,
-            &once.tabular_saccver(true).unwrap()
+            &once.tabular_saccver(true).unwrap().unwrap()
         ));
     }
 
@@ -3174,7 +3175,7 @@ mod tests {
         );
         let bad = record_subject_of(b">lcl|Subject_9 bad x\x81y title", false);
         assert_eq!(bad.tabular_ids(false).unwrap(), None);
-        assert_eq!(&*bad.tabular_saccver(false).unwrap(), b"");
+        assert_eq!(bad.tabular_saccver(false).unwrap(), None);
         assert!(bad.check_tabular_ids(false).is_ok());
         assert_eq!(
             bad.lookup_failure(false).unwrap(),

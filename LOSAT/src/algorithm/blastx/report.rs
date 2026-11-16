@@ -1127,10 +1127,11 @@ pub(crate) struct RecordsParsed {
     pub(crate) tabular: Vec<Option<RecordTabularIds>>,
 }
 
-/// `sseqid`, `sacc` and `saccver` (empty where the lookup throws, `ParsedSubject::tabular_ids`),
+/// `sseqid`, `sacc` and `saccver` (`None` where the lookup throws, `ParsedSubject::tabular_ids`),
 /// and the `sall*` of a subject in `RecordsParsed`.
 pub(crate) struct RecordTabularIds {
-    pub(crate) ids: [String; 3],
+    /// `None` where the lookup throws (`ParsedSubject::tabular_ids`).
+    pub(crate) ids: Option<[String; 3]>,
     pub(crate) all_ids: Vec<crate::report::tabular::DeflineIds>,
 }
 
@@ -1168,13 +1169,12 @@ impl RecordsParsed {
                     return Ok(None);
                 };
                 let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
-                let [id, accession, version] = subject
+                let ids = subject
                     .tabular_ids(true)
-                    .map_err(|problem| refused(subject, problem))?
-                    .unwrap_or_default();
+                    .map_err(|problem| refused(subject, problem))?;
                 // A record's definition line is not looked up (`AllTabularIds::failed` is false).
                 Ok(Some(RecordTabularIds {
-                    ids: [text(id), text(accession), text(version)],
+                    ids: ids.map(|ids| ids.map(text)),
                     all_ids: subject
                         .all_tabular_ids(true)
                         .map_err(|problem| refused(subject, problem))?
@@ -1189,7 +1189,8 @@ impl RecordsParsed {
 impl ShownSubjects<'_> {
     /// The `saccver` of subject `oid` (the same as `sseqid` and `sacc` but for a sequence with
     /// parsed Seq-ids, `ParsedSubject::tabular_ids`): a record's `subject_tabular_id`, or a
-    /// database sequence's id made from its stored title; empty where the lookup fails.
+    /// database sequence's id made from its stored title; empty where the lookup fails, whose
+    /// default rows are refused before (`check_failed_lookups`).
     fn subject_saccver<'s>(
         &'s self,
         subject: &'s FastaRecord,
@@ -1198,20 +1199,27 @@ impl ShownSubjects<'_> {
         match self {
             ShownSubjects::Fasta { parsed, .. } => {
                 match parsed.tabular.get(oid).and_then(Option::as_ref) {
-                    Some(ids) => std::borrow::Cow::Borrowed(ids.ids[2].as_bytes()),
+                    Some(ids) => std::borrow::Cow::Borrowed(
+                        ids.ids
+                            .as_ref()
+                            .map_or(&[][..], |[_, _, saccver]| saccver.as_bytes()),
+                    ),
                     None => subject_tabular_id(subject).unwrap_or_default(),
                 }
             }
-            ShownSubjects::Database { reported, .. } => {
-                std::borrow::Cow::Borrowed(reported.tabular_ids(oid)[2].as_bytes())
-            }
+            ShownSubjects::Database { reported, .. } => std::borrow::Cow::Borrowed(
+                reported
+                    .tabular_ids(oid)
+                    .map_or(&[][..], |[_, _, saccver]| saccver.as_bytes()),
+            ),
         }
     }
 
     /// Which lookups of subject `oid`'s tabular ids fail (`report::tabular::LookupFailure`) for a
-    /// report of `spec` (`None`: the default fields): a record's (with parsed ids, an empty
-    /// `RecordTabularIds::ids`; else `subject_tabular_id`), or a database sequence's (an empty id;
-    /// with parsed Seq-ids and a report of `sall*`, `ParsedSubject::lookup_failure`).
+    /// report of `spec` (`None`: the default fields): a record's (with parsed ids, no
+    /// `RecordTabularIds::ids`; else `subject_tabular_id`), or a database sequence's (no
+    /// `ReportedSubjects::tabular_ids`; with parsed Seq-ids and a report of `sall*`,
+    /// `ParsedSubject::lookup_failure`).
     pub(super) fn lookup_failure(
         &self,
         spec: Option<&crate::report::tabular::TabularSpec>,
@@ -1222,7 +1230,7 @@ impl ShownSubjects<'_> {
         match self {
             ShownSubjects::Fasta { parsed, .. } => {
                 let failed = match parsed.tabular.get(oid).and_then(Option::as_ref) {
-                    Some(ids) => ids.ids[2].is_empty(),
+                    Some(ids) => ids.ids.is_none(),
                     None => subject_tabular_id(subject).is_none(),
                 };
                 failed.then(|| LookupFailure::of_plain(false))
@@ -1233,14 +1241,16 @@ impl ShownSubjects<'_> {
                 {
                     parsed.lookup_failure(true).ok().flatten()
                 }
-                Some(_) => reported.tabular_ids(oid)[0]
-                    .is_empty()
+                Some(_) => reported
+                    .tabular_ids(oid)
+                    .is_none()
                     .then_some(LookupFailure {
                         subject_id: true,
                         all_ids: false,
                     }),
-                None => reported.tabular_ids(oid)[0]
-                    .is_empty()
+                None => reported
+                    .tabular_ids(oid)
+                    .is_none()
                     .then(|| LookupFailure::of_plain(true)),
             },
         }
@@ -1306,6 +1316,9 @@ pub(super) struct LocalReport<'a, 'p> {
     pub first_hsp: crate::api::local_blast::HspIndex,
     /// The batch's hits (`pairwise_hits`), when they are made already.
     pub hits: Option<&'a [crate::report::pairwise::PairwiseHit]>,
+    /// What a refusal of the format's checks does (`FormatRefusal::check`); without a local
+    /// report it fails the call.
+    pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
 }
 
 /// Sorts the HSPs of each list of `batches` by e-value, the order of every report.
@@ -1385,16 +1398,44 @@ pub(super) fn render_queries_with(
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
-    let (mut probe, first_hsp, made_hits) = match local {
-        Some(local) => (local.probe, local.first_hsp, local.hits),
-        None => (None, 0, None),
+    let (mut probe, first_hsp, made_hits, mut refusal) = match local {
+        Some(local) => (
+            local.probe,
+            local.first_hsp,
+            local.hits,
+            Some(local.refusal),
+        ),
+        None => (None, 0, None, None),
+    };
+    // A check of the format's report before its rows: `false` where the format fails alone
+    // (`FormatRefusal::check`), and writes nothing of the batch.
+    let mut writes = |checked: Result<()>| match refusal.as_deref_mut() {
+        Some(refusal) => refusal.check(checked),
+        None => checked.map(|()| true),
     };
     if !options.gapped && options.outfmt != 18 && SubjectLoc::of(shown) == SubjectLoc::Interval {
         // The tabular reports (`options.tabular`, the default outfmt 6 and 7) write a subject's
         // only HSP of length 0 as NCBI's formatter reads its mapped alignment.
         let tabular = (options.tabular.is_some() || matches!(options.outfmt, 6 | 7))
             .then_some(super::empty_rows::MappedTables { queries, subjects });
-        super::empty_rows::refuse_mapped_without_scores(batches, options.gapped, tabular)?;
+        if !writes(super::empty_rows::refuse_mapped_without_scores(
+            batches,
+            options.gapped,
+            tabular,
+        ))? {
+            return Ok(());
+        }
+    }
+    // The rows of subjects whose lookup fails where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before the batch's tabular report and before
+    // the format writes a warning of the batch (the prefetch's below, the queries'), so that a
+    // format that fails alone leaves them to the next (`local::write_run`).
+    if options
+        .tabular
+        .map_or(matches!(options.outfmt, 6 | 7), |spec| spec.writes_rows())
+        && !writes(check_failed_lookups(options, subjects, shown, batches))?
+    {
+        return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (quoted at
     // `native::reported_batch`)
@@ -1497,14 +1538,6 @@ pub(super) fn render_queries_with(
             &names,
             batches,
         );
-    }
-    // The rows of subjects whose lookup fails where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before the batch's tabular report.
-    if options
-        .tabular
-        .map_or(matches!(options.outfmt, 6 | 7), |spec| spec.writes_rows())
-    {
-        check_failed_lookups(options, subjects, shown, batches)?;
     }
     // The tabular reports with a field list or a delimiter, and outfmt 10 and 20: the shared
     // writer (`tabular`, NCBI's `CBlastTabularInfo`); the default outfmt 6 and 7 below.

@@ -70,6 +70,23 @@ pub(crate) const COUNTS_BLOCK: [TabularField; 16] = [
     TabularField::SubjectStrand,
 ];
 
+/// The tabular id of one subject that the default fields print (`saccver`; for a subject without
+/// parsed Seq-ids also its `sseqid` and `sacc`), as the programs' lists of them hold it by subject
+/// index or rank: `None` where NCBI's `GetSeqIdList` makes none and `SetSubjectId` throws
+/// (`report::tabular::SubjectLookup::Failed`), whose rows NCBI writes with its catch's values or
+/// stops at (`report::tabular::check_failed_lookups`).
+pub(crate) type SubjectId = Option<Arc<[u8]>>;
+
+/// The bytes of `ids[s_idx]` (`SubjectId`) that a row prints: empty where the lookup fails, whose
+/// default fields' rows are refused before they are written (`check_failed_lookups`), or where
+/// `ids` has no such subject.
+#[inline]
+pub(crate) fn printed_id(ids: &[SubjectId], s_idx: usize) -> &[u8] {
+    ids.get(s_idx)
+        .and_then(Option::as_deref)
+        .unwrap_or_default()
+}
+
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
 /// reported sequences of a database).
 pub(crate) enum TabularSubjects<'a> {
@@ -77,11 +94,11 @@ pub(crate) enum TabularSubjects<'a> {
     /// default report's), the length of its record, and the ones whose ids `-parse_deflines`
     /// read (empty without the option).
     Records {
-        ids: &'a [Arc<[u8]>],
+        ids: &'a [SubjectId],
         length: &'a dyn Fn(usize) -> usize,
         parsed: &'a [Option<Arc<ParsedSubject>>],
         /// The records, by subject index: the Seq-align id (`FastaRecord::local_id`) of one whose
-        /// lookup fails (an empty id in `ids`) and the first word of the title that `sall*` print.
+        /// lookup fails (`None` in `ids`) and the first word of the title that `sall*` print.
         records: &'a [FastaRecord],
     },
     /// The reported sequences of a database: their tabular ids (`saccver`,
@@ -90,7 +107,7 @@ pub(crate) enum TabularSubjects<'a> {
     /// has them), the names of the sources from which NCBI makes empty stored titles (empty when
     /// none has one), lengths, and taxonomy (empty when no field shows it).
     Database {
-        ids: &'a [Arc<[u8]>],
+        ids: &'a [SubjectId],
         ordinals: &'a [u32],
         /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
         oids: crate::seqdb::OidMap<'a>,
@@ -195,20 +212,20 @@ impl SubjectValues<'_> {
 }
 
 /// Which lookups of subject `s_idx` fail (`report::tabular::check_failed_lookups`) for a report of
-/// `spec` (`None`: the default fields): an empty id among `ids` (the reports' `saccver`, empty
-/// where `SetSubjectId` throws), and for a subject with parsed Seq-ids (`parsed`) and a report of
+/// `spec` (`None`: the default fields): its id among `ids` (`SubjectId`: `None` where
+/// `SetSubjectId` throws), and for a subject with parsed Seq-ids (`parsed`) and a report of
 /// `sall*`, also `x_SetSubjectIds` (`ParsedSubject::lookup_failure`). `database`: the subjects are
 /// a database's (the one definition line of a sequence without parsed Seq-ids throws in
 /// `x_SetSubjectIds` too, `LookupFailure::of_plain`); `protein` is their kind.
 pub(crate) fn subject_lookup_failure(
     spec: Option<&TabularSpec>,
-    ids: &[Arc<[u8]>],
+    ids: &[SubjectId],
     parsed: &[Option<Arc<ParsedSubject>>],
     database: bool,
     protein: bool,
     s_idx: usize,
 ) -> Option<crate::report::tabular::LookupFailure> {
-    let failed_id = ids.get(s_idx).is_some_and(|id| id.is_empty());
+    let failed_id = matches!(ids.get(s_idx), Some(None));
     match parsed.get(s_idx).and_then(Option::as_deref) {
         Some(subject) if spec.is_some_and(reports_all_ids) => {
             subject.lookup_failure(protein).ok().flatten()
@@ -231,23 +248,23 @@ pub(crate) fn reports_all_ids(spec: &TabularSpec) -> bool {
 }
 
 /// Whether the lookups of some subject can fail, so that a tabular report may need the check of
-/// `checks_failed_lookups`: an empty id among `ids` (`SetSubjectId` throws), or subjects with
+/// `checks_failed_lookups`: a failed id among `ids` (`SetSubjectId` throws), or subjects with
 /// parsed Seq-ids (`parsed` is empty when none has them).
 #[inline]
-pub(crate) fn lookups_may_fail(ids: &[Arc<[u8]>], parsed: &[Option<Arc<ParsedSubject>>]) -> bool {
-    !parsed.is_empty() || ids.iter().any(|id| id.is_empty())
+pub(crate) fn lookups_may_fail(ids: &[SubjectId], parsed: &[Option<Arc<ParsedSubject>>]) -> bool {
+    !parsed.is_empty() || ids.iter().any(Option::is_none)
 }
 
 /// Whether a tabular report of `spec` is checked for rows whose lookups fail
-/// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (empty for a failed
-/// `SetSubjectId`) and `parsed` are as given: some id is empty, or a subject with parsed Seq-ids
+/// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (`None` for a failed
+/// `SetSubjectId`) and `parsed` are as given: some id failed, or a subject with parsed Seq-ids
 /// may fail in `x_SetSubjectIds` (`subject_lookup_failure`).
 pub(crate) fn checks_failed_lookups(
     spec: Option<&TabularSpec>,
-    ids: &[Arc<[u8]>],
+    ids: &[SubjectId],
     parsed: &[Option<Arc<ParsedSubject>>],
 ) -> bool {
-    (ids.iter().any(|id| id.is_empty())
+    (ids.iter().any(Option::is_none)
         || (!parsed.is_empty()
             && spec.is_some_and(reports_all_ids)
             && parsed.iter().any(Option::is_some)))
@@ -358,7 +375,8 @@ impl<'a> TabularSubjects<'a> {
                         index: s_idx,
                     });
                 }
-                let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
+                let found = ids.get(s_idx).map(Option::as_deref);
+                let id: &[u8] = found.map_or(&b"unknown"[..], Option::unwrap_or_default);
                 let record = records.get(s_idx);
                 let all_ids = match record {
                     // Only where the word is not the id, which the writer prints for none.
@@ -367,10 +385,10 @@ impl<'a> TabularSubjects<'a> {
                     }
                     _ => Vec::new(),
                 };
-                // An empty id: `GetSeqIdList` throws in `SetSubjectId` (`FastaRecord::
+                // No id: `GetSeqIdList` throws in `SetSubjectId` (`FastaRecord::
                 // subject_tabular_id`); the Seq-align id is the record's local id.
                 let failed = match record {
-                    Some(record) if id.is_empty() => {
+                    Some(record) if found == Some(None) => {
                         let local = Cow::Borrowed(record.local_id.as_bytes());
                         Some(FailedValues {
                             align_id: [local.clone(), local],
@@ -451,15 +469,16 @@ impl<'a> TabularSubjects<'a> {
                     // `CShowBlastDefline::GetSeqIdList`) for every id, or where it gives none the
                     // general id (`TabularSubjectId`), and its one definition line's title.
                     None => {
+                        let found = ids.get(s_idx).map(Option::as_deref);
                         let accession: &[u8] =
-                            ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
+                            found.map_or(&b"unknown"[..], Option::unwrap_or_default);
                         let title = records
                             .get(s_idx)
                             .map_or(&[][..], |record| record.title.as_slice());
                         let oid = oids.oid(ordinals.get(s_idx).copied().unwrap_or_default());
-                        // An empty id: `GetSeqIdList` throws for the general id
+                        // No id: `GetSeqIdList` throws for the general id
                         // (`TabularSubjectId::Unknown`), in `SetSubjectId` and `x_SetSubjectIds`.
-                        let failed = accession.is_empty().then(|| {
+                        let failed = (found == Some(None)).then(|| {
                             let [full, accession] =
                                 crate::algorithm::common::database::failed_general_lookup(oid);
                             FailedValues {

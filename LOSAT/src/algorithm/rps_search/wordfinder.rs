@@ -364,10 +364,10 @@ fn two_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        // The hits in passes of buckets (`RpsBuckets::fill_group`), each read as NCBI reads its
+        // The hits in passes of groups of buckets (`RpsBuckets::start_group`), each read as NCBI reads its
         // buckets: the order of the hits is NCBI's whatever the grouping.
         for group in 0..buckets.groups() {
-            let mut cursor = buckets.fill_group(&params.table, group);
+            let mut cursor = buckets.start_group(&params.table, group);
             while let Some(RpsHits {
                 entries,
                 q_base,
@@ -500,10 +500,10 @@ fn one_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        // The hits in passes of buckets (`RpsBuckets::fill_group`), each read as NCBI reads its
+        // The hits in passes of groups of buckets (`RpsBuckets::start_group`), each read as NCBI reads its
         // buckets: the order of the hits is NCBI's whatever the grouping.
         for group in 0..buckets.groups() {
-            let mut cursor = buckets.fill_group(&params.table, group);
+            let mut cursor = buckets.start_group(&params.table, group);
             while let Some(RpsHits {
                 entries,
                 q_base,

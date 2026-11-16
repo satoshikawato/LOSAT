@@ -234,7 +234,7 @@ impl RpstblastnArgs {
             comp_based_stats: self.comp_based_stats.clone(),
             several_volumes: false,
             costs: None,
-            regrouped: Default::default(),
+            setup: None,
         })
     }
 

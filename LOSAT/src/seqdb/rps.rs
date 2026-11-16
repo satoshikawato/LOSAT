@@ -70,7 +70,8 @@ pub(crate) const RPS_WORDSIZE: usize = 3;
 pub(crate) const RPS_CHARSIZE: usize = 5;
 pub(crate) const RPS_BACKBONE_SIZE: usize = 1 << (RPS_WORDSIZE * RPS_CHARSIZE);
 
-/// `RPS_BUCKET_SIZE`: the concatenated rows per bucket of a scan's hits (`rps_search::scan`).
+/// `RPS_BUCKET_SIZE`: the concatenated rows per bucket of a scan's hits (`rps_search::scan`),
+/// `2^RPS_BUCKET_BITS`: a position is its bucket's index times 2,048 plus a value below 2,048.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:349-351
 /// ```c
@@ -78,7 +79,38 @@ pub(crate) const RPS_BACKBONE_SIZE: usize = 1 << (RPS_WORDSIZE * RPS_CHARSIZE);
 ///     database is split via bucket sorting */
 /// #define RPS_BUCKET_SIZE 2048
 /// ```
-pub(crate) const RPS_BUCKET_SIZE: usize = 2048;
+pub(crate) const RPS_BUCKET_SIZE: usize = 1 << RPS_BUCKET_BITS;
+pub(crate) const RPS_BUCKET_BITS: u32 = 11;
+
+/// The buckets whose hits a pass of the scan makes and reads together (`RpsBuckets::fill_group`,
+/// series PR, item PS12m): 64 buckets = 131,072 rows. No NCBI counterpart: a memory bound (NCBI
+/// keeps every bucket of a scan, a volume of CDD 162 to 355 of them, 4,000,000 hits at most); the
+/// order of the hits that the word finder reads is NCBI's whatever the number. A volume of at most
+/// 64 buckets is one group. The scan needs the hits of every cell in groups in ascending order
+/// (`list_is_grouped`; makeprofiledb writes every list ascending), so this module owns the number:
+/// it regroups the cells of a table that does not (`regroup_cells`) at this granularity (mg5k_100
+/// x CDD, 32 threads: groups of 128 buckets hold 472 MB, of 64 361 MB; groups of 32 cost 1 %
+/// more instructions than 64).
+pub(crate) const RPS_GROUP_BUCKETS: usize = 64;
+
+/// The concatenated position of a table entry's word (`entry - (BLAST_WORDSIZE_PROT - 1)`, NCBI's
+/// `q_off = cell->entries[i] - table_correction`): the one producer of it.
+#[inline(always)]
+pub(crate) fn entry_q_off(entry: i32) -> u32 {
+    entry.wrapping_sub(RPS_WORDSIZE as i32 - 1) as u32
+}
+
+/// The bucket of a concatenated position (`q_off / RPS_BUCKET_SIZE`).
+#[inline(always)]
+pub(crate) fn q_off_bucket(q_off: u32) -> usize {
+    (q_off >> RPS_BUCKET_BITS) as usize
+}
+
+/// The group of `group_buckets` buckets that a table entry's position lies in.
+#[inline(always)]
+fn entry_group(entry: i32, group_buckets: usize) -> u32 {
+    (entry_q_off(entry) >> RPS_BUCKET_BITS) / group_buckets as u32
+}
 
 /// The most hits that one scan of a query collects (`max_hits` of `BlastRPSScanSubject`). A cell
 /// with more hits than this would never fit, and NCBI's scan would not advance past its word.
@@ -263,12 +295,6 @@ impl FreqSource {
     }
 }
 
-/// The bucket of an entry of the table (`entry - (BLAST_WORDSIZE_PROT - 1)` is the position of
-/// the word's first letter, `q_off`; its bucket `q_off / RPS_BUCKET_SIZE`, as NCBI's scan files it).
-fn entry_bucket(entry: i32) -> i32 {
-    (entry - (RPS_WORDSIZE as i32 - 1)).div_euclid(RPS_BUCKET_SIZE as i32)
-}
-
 /// The hits of a cell with `cell[0] > 0`: the first slice and the overflow run after it (the
 /// cell's entries in the cell, or its first and its run), `None` when the run is not inside the
 /// overflow array (`BlastRPSScanSubject` reads them in this order).
@@ -281,38 +307,50 @@ fn cell_hits<'a>(cell: &'a [i32; 4], overflow: &'a [i32]) -> Option<(&'a [i32], 
     Some((&cell[1..2], run))
 }
 
-/// Whether the hits of a cell (`cell_hits`) have non-decreasing buckets, as the cells of every
-/// table that makeprofiledb writes: its lookup appends the hits of the profiles' rows in
-/// ascending order (`s_AddPSSMNeighboringWords`, `BlastLookupAddWordHit`) and `x_RPS_DbClose`
-/// copies each chain in order.
-fn list_is_grouped(head: &[i32], run: &[i32]) -> bool {
-    let mut previous = i32::MIN;
+/// Whether the hits of a cell (`cell_hits`) are in groups of `group_buckets` buckets in
+/// non-decreasing order: what `RpsBuckets::fill_group` needs of a table (it makes the hits of one
+/// group of buckets at a time from the entries of a cell in turn, so the entries of a group must
+/// be a prefix of what is left). A table made by makeprofiledb lists every cell ascending: its
+/// lookup appends the hits of the profiles' rows in ascending order
+/// (`s_AddPSSMNeighboringWords`, `BlastLookupAddWordHit`) and `x_RPS_DbClose` copies each chain in
+/// order. (The groups, not the buckets: inside a group each bucket receives the entries in the
+/// cell's order whatever their buckets.)
+fn list_is_grouped(head: &[i32], run: &[i32], group_buckets: usize) -> bool {
+    let mut previous = 0;
     head.iter().chain(run).all(|&entry| {
-        let bucket = entry_bucket(entry);
-        let ordered = bucket >= previous;
-        previous = bucket;
+        let group = entry_group(entry, group_buckets);
+        let ordered = group >= previous;
+        previous = group;
         ordered
     })
 }
 
-/// The hits of a cell sorted by bucket, each bucket's hits in the order they had (a stable sort):
-/// the hits of one bucket in the order of the cell, which is all that NCBI's scan makes of a
-/// cell's order (it appends the cell's hits to their buckets), and idempotent on a grouped list.
-fn regroup_cell(hits: &mut [i32]) {
-    hits.sort_by_key(|&entry| entry_bucket(entry));
+/// The hits of a cell sorted by group of `group_buckets` buckets, each group's hits in the order
+/// they had (a stable sort): the hits of one bucket stay in the order of the cell, which is all
+/// that NCBI's scan makes of a cell's order (it appends the cell's hits to their buckets), and
+/// the sort is idempotent on a grouped list.
+fn regroup_cell(hits: &mut [i32], group_buckets: usize) {
+    hits.sort_by_key(|&entry| entry_group(entry, group_buckets));
 }
 
-/// The cells and overflow array of a table whose cells are not all grouped by bucket
-/// (`list_is_grouped`) as copies that are, `None` when they are: `RpsBuckets::fill_group` makes the
-/// hits of a group of buckets from the entries of a cell in turn, which needs the buckets of a cell's
-/// hits not to decrease. The regrouped cells keep their entries' relative order inside each
-/// bucket (`regroup_cell`), so the hits of every bucket stay those NCBI's scan gives it, in its
-/// order. A cell of at most `RPS_HITS_PER_CELL` hits is rewritten in place, a longer one gets its
-/// first hit in the cell and its run appended to the copy of the overflow array (the cell's
-/// offset rewritten; the old run stays where it was, for another cell may share it).
+/// The cells and overflow array of a table whose cells are not all in groups of `group_buckets`
+/// buckets in order, as copies that are, `None` when they are (`list_is_grouped`; the scan's
+/// groups are `RPS_GROUP_BUCKETS`, tests read others). The regrouped cells keep their entries'
+/// relative order inside each group (`regroup_cell`), so the hits of every bucket stay those
+/// NCBI's scan gives it, in its order. A cell of at most `RPS_HITS_PER_CELL` hits is rewritten in
+/// place, a longer one gets its first hit in the cell and its run appended to the copy of the
+/// overflow array (the cell's offset rewritten; the old run stays where it was, for another cell
+/// may share it).
+///
+/// The copy is the whole overflow array (600 MB for a table of CDD's size, per volume, and again
+/// for every window of an rpstblastn run): the file is mapped read-only on every target
+/// (`MappedFile`: a read-only mapping on unix and windows, a heap copy elsewhere), so copy-on-write
+/// pages would need a private writable mapping on each of them; only a table that makeprofiledb
+/// did not write is copied.
 pub(crate) fn regroup_cells(
     cells: &[[i32; 4]],
     overflow: &[i32],
+    group_buckets: usize,
 ) -> Result<Option<(Vec<[i32; 4]>, Vec<i32>)>, String> {
     let mut copy: Option<(Vec<[i32; 4]>, Vec<i32>)> = None;
     for (index, cell) in cells.iter().enumerate().take(RPS_BACKBONE_SIZE) {
@@ -322,11 +360,11 @@ pub(crate) fn regroup_cells(
         let Some((head, run)) = cell_hits(cell, overflow) else {
             continue;
         };
-        if list_is_grouped(head, run) {
+        if list_is_grouped(head, run, group_buckets) {
             continue;
         }
         let mut hits: Vec<i32> = head.iter().chain(run).copied().collect();
-        regroup_cell(&mut hits);
+        regroup_cell(&mut hits, group_buckets);
         let (cells_copy, overflow_copy) =
             copy.get_or_insert_with(|| (cells.to_vec(), overflow.to_vec()));
         let rewritten = &mut cells_copy[index];
@@ -335,7 +373,9 @@ pub(crate) fn regroup_cells(
         } else {
             rewritten[1] = hits[0];
             rewritten[2] = i32::try_from(overflow_copy.len() * std::mem::size_of::<i32>())
-                .map_err(|_| ".loo overflow array too large to regroup by bucket".to_string())?;
+                .map_err(|_| {
+                    ".loo overflow array too large to regroup by group of buckets".to_string()
+                })?;
             overflow_copy.extend_from_slice(&hits[1..]);
         }
     }
@@ -421,7 +461,7 @@ impl RpsVolumeFiles {
     /// NCBI's own errors of the files (a missing file, a magic number) and LOSAT's refusals of
     /// their layout come as there, but the table's hits are not read again (`check_cells`):
     /// only their presence bits are made. `regroup`: `open_for` found the cells not grouped by
-    /// bucket (`is_regrouped`), so they are regrouped again.
+    /// groups of buckets (`is_regrouped`), so they are regrouped again.
     pub(crate) fn open_checked(
         base: &Path,
         lengths: &[u32],
@@ -620,7 +660,8 @@ impl RpsVolumeFiles {
                 files.cells().expect("checked above"),
                 files.overflow().expect("checked above"),
             );
-            files.regrouped = regroup_cells(cells, overflow).map_err(|what| refused(&what))?;
+            files.regrouped =
+                regroup_cells(cells, overflow, RPS_GROUP_BUCKETS).map_err(|what| refused(&what))?;
         }
         if alphabet == 26 {
             files.narrow = Some(files.widen_rows(num_rows));
@@ -784,7 +825,7 @@ impl RpsVolumeFiles {
     /// Every hit of the table names a position whose word lies in the concatenated rows
     /// (`entry - 2` from 0, `entry` before the last row), every overflow run lies in the
     /// overflow array, no cell holds more hits than a scan can take; the presence bits. Returns
-    /// whether some cell lists its hits not grouped by bucket (`list_is_grouped`; false when
+    /// whether some cell lists its hits not in groups of buckets in order (`list_is_grouped`; false when
     /// `check_hits` is not set).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:162-173
@@ -823,32 +864,34 @@ impl RpsVolumeFiles {
                     ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
                 ));
             }
-            let hits_ok = if num_used <= RPS_HITS_PER_CELL {
-                cell[1..=num_used as usize]
-                    .iter()
-                    .all(|&entry| in_rows(entry))
-            } else {
-                let start = usize::try_from(cell[2]).ok().map(|bytes| bytes / 4);
-                let run = start.and_then(|start| {
-                    overflow.get(start..start.checked_add(num_used as usize - 1)?)
-                });
-                in_rows(cell[1]) && run.is_some_and(|run| run.iter().all(|&entry| in_rows(entry)))
-            };
-            if !hits_ok {
+            // The cell's hits (`cell_hits`), each inside the rows, and whether their groups of
+            // buckets never decrease (`list_is_grouped`; one compare per hit in this walk).
+            let Some((head, run)) = cell_hits(cell, overflow) else {
                 return Err(format!(
                     ".loo word {index} names a position outside the profiles' rows"
                 ));
+            };
+            let (mut all_in_rows, mut previous) = (true, 0);
+            for list in [head, run] {
+                for &entry in list {
+                    all_in_rows &= in_rows(entry);
+                    let group = entry_group(entry, RPS_GROUP_BUCKETS);
+                    ungrouped |= group < previous;
+                    previous = group;
+                }
             }
-            if let Some((head, run)) = cell_hits(cell, overflow) {
-                ungrouped |= !list_is_grouped(head, run);
+            if !all_in_rows {
+                return Err(format!(
+                    ".loo word {index} names a position outside the profiles' rows"
+                ));
             }
         }
         self.pv = pv;
         Ok(ungrouped)
     }
 
-    /// Whether the cells are regrouped by bucket (`regroup_cells`): the table lists some cell's
-    /// hits not grouped by bucket.
+    /// Whether the cells are regrouped (`regroup_cells`): the table lists some cell's hits not in
+    /// groups of buckets in order.
     pub(crate) fn is_regrouped(&self) -> bool {
         self.regrouped.is_some()
     }
@@ -1202,12 +1245,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A volume of two profiles of 2,200 and 2,100 letters (4,302 rows: three buckets) whose
-    /// table holds the given cells' hits (word, hits in the cell's order), the long lists in the
-    /// overflow array.
+    /// A volume of two profiles of 140,000 and 100 letters (140,102 rows: 69 buckets, so two groups
+    /// of `RPS_GROUP_BUCKETS`) whose table holds the given cells' hits (word, hits in the cell's
+    /// order), the long lists in the overflow array.
     fn write_wide_volume(dir: &Path, cell_hits: &[(usize, &[i32])]) -> PathBuf {
         let base = dir.join("wide");
-        let (a, b) = (2_200usize, 2_100usize);
+        let (a, b) = (140_000usize, 100usize);
         let mut rps = vec![RPS_MAGIC_NUM_28, 2, 0, (a + 1) as i32, (a + b + 2) as i32];
         rps.extend(std::iter::repeat_n(3i32, (a + b + 2) * 28));
         std::fs::write(base.with_extension("rps"), words(&rps)).unwrap();
@@ -1232,67 +1275,91 @@ mod tests {
         base
     }
 
-    // PS12m: the buckets of a cell's hits (entry - 2, per 2,048 rows) are non-decreasing in every
-    // table that makeprofiledb writes; a table that lists a cell otherwise is regrouped by a
-    // stable sort of the cell (the hits of one bucket keep their order), the copy read in place of
-    // the file's cells and overflow array; the other cells and the grouped files are not copied.
+    // PS12m: the groups of a cell's hits (entry - 2, per 2,048 rows, per 64 buckets) are
+    // non-decreasing in every table that makeprofiledb writes; a table that lists a cell otherwise
+    // is regrouped by a stable sort of the cell (the hits of one group keep their order), the copy
+    // read in place of the file's cells and overflow array; the other cells, and the cells whose
+    // buckets are unordered inside a group, are not touched, and grouped files are not copied.
     #[test]
-    fn cells_not_grouped_by_bucket_are_regrouped_stably() {
+    fn cells_not_in_groups_of_buckets_are_regrouped_stably() {
         let dir = scratch("regroup");
-        // Buckets: 3000 is bucket 1, 2500 bucket 1, 4300 bucket 2.
-        let drop_in_cell = [3000, 10];
-        let drop_in_run = [10, 3000, 20, 2500, 30];
-        let grouped = [10, 20, 3000];
-        let equal = [3000, 2500];
-        let cells: [(usize, &[i32]); 4] = [
+        const G1: i32 = 2 + 65 * 2048; // the first entry of bucket 65: group 1
+                                       // Group 1 is entries from 2 + 64 * 2048 = 131,074.
+        let drop_in_cell = [G1 + 5, 10];
+        let drop_after_first = [G1 + 5, 10, 20, G1 + 7]; // the drop is between the cell and the run
+        let drop_in_run = [10, G1, 20, G1 + 9, 30];
+        let grouped = [10, 20, G1];
+        let unordered_in_group = [3000, 10, 2500, 40_000, G1, G1 + 1]; // buckets drop, groups do not
+        let cells: [(usize, &[i32]); 5] = [
             (5, &drop_in_cell),
             (9, &drop_in_run),
             (11, &grouped),
-            (13, &equal),
+            (13, &unordered_in_group),
+            (15, &drop_after_first),
         ];
         let base = write_wide_volume(&dir, &cells);
-        let files = RpsVolumeFiles::open(&base, &[2_200, 2_100]).unwrap();
+        let lengths = [140_000, 100];
+        let files = RpsVolumeFiles::open(&base, &lengths).unwrap();
         assert!(files.is_regrouped());
         let (cells, overflow) = (files.cells().unwrap(), files.overflow().unwrap());
-        assert_eq!(cells[5], [2, 10, 3000, 0]);
-        // The long list: 10 20 30 (bucket 0), then 3000 2500 (bucket 1) in their order.
+        assert_eq!(cells[5], [2, 10, G1 + 5, 0]);
+        // The long list: 10 20 30 (group 0), then G1 and G1 + 9 in their order.
         assert_eq!(&cells[9][..2], &[5, 10]);
-        let run = cell_hits(&cells[9], overflow).unwrap();
-        assert_eq!((run.0, run.1), (&[10][..], &[20, 30, 3000, 2500][..]));
-        assert_eq!(cells[11], [3, 10, 20, 3000]);
-        assert_eq!(cells[13], [2, 3000, 2500, 0]);
+        let (head, run) = cell_hits(&cells[9], overflow).unwrap();
+        assert_eq!((head, run), (&[10][..], &[20, 30, G1, G1 + 9][..]));
+        assert_eq!(cells[11], [3, 10, 20, G1]);
+        // Unordered buckets inside group 0 stay as they are.
+        let (head, run) = cell_hits(&cells[13], overflow).unwrap();
+        assert_eq!(
+            (head, run),
+            (&[3000][..], &[10, 2500, 40_000, G1, G1 + 1][..])
+        );
+        // The drop between the cell's first hit and the run's first.
+        let (head, run) = cell_hits(&cells[15], overflow).unwrap();
+        assert_eq!((head, run), (&[10][..], &[20, G1 + 5, G1 + 7][..]));
         // The reopening of a file checked in the run: regrouped when told so, as it was.
-        let reopened =
-            RpsVolumeFiles::open_checked(&base, &[2_200, 2_100], "RPSBLAST", true).unwrap();
+        let reopened = RpsVolumeFiles::open_checked(&base, &lengths, "RPSBLAST", true).unwrap();
         assert_eq!(reopened.cells(), files.cells());
         assert_eq!(reopened.overflow(), files.overflow());
-        let raw = RpsVolumeFiles::open_checked(&base, &[2_200, 2_100], "RPSBLAST", false).unwrap();
+        let raw = RpsVolumeFiles::open_checked(&base, &lengths, "RPSBLAST", false).unwrap();
         assert!(!raw.is_regrouped());
-        assert_eq!(raw.cells().unwrap()[5], [2, 3000, 10, 0]);
+        assert_eq!(raw.cells().unwrap()[5], [2, G1 + 5, 10, 0]);
         drop((files, reopened, raw));
-        // A table whose cells are grouped is read in place.
-        let cells: [(usize, &[i32]); 2] = [(9, &[10, 20, 3000, 2500, 4300]), (13, &equal)];
+        // A table whose cells are grouped (a bucket drop inside a group is not a drop) is read in place.
+        let cells: [(usize, &[i32]); 2] = [
+            (9, &[10, 20, 3000, 2500, 40_000]),
+            (13, &unordered_in_group),
+        ];
         let base = write_wide_volume(&dir, &cells);
-        let files = RpsVolumeFiles::open(&base, &[2_200, 2_100]).unwrap();
+        let files = RpsVolumeFiles::open(&base, &lengths).unwrap();
         assert!(!files.is_regrouped());
         assert_eq!(files.cells().unwrap()[9][1], 10);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // The sort of one cell: stable, so a bucket's hits keep the order they had, and idempotent on
-    // a grouped list.
+    // The sort of one cell: stable, so a group's hits keep the order they had, and idempotent on
+    // a grouped list; the regrouping works at any group size.
     #[test]
-    fn a_cells_hits_are_sorted_by_bucket_and_keep_their_order_inside_one() {
-        let mut hits = [5000, 12, 2100, 30, 5001, 2050, 20];
-        assert!(!list_is_grouped(&hits[..1], &hits[1..]));
-        regroup_cell(&mut hits);
-        assert_eq!(hits, [12, 30, 20, 2100, 2050, 5000, 5001]);
-        assert!(list_is_grouped(&hits[..1], &hits[1..]));
-        let again = hits;
-        regroup_cell(&mut hits);
-        assert_eq!(hits, again);
-        assert_eq!(entry_bucket(2), 0);
-        assert_eq!(entry_bucket(2049), 0);
-        assert_eq!(entry_bucket(2050), 1);
+    fn a_cells_hits_are_sorted_by_group_and_keep_their_order_inside_one() {
+        // Buckets (entry - 2) / 2048: 2, 0, 1, 0, 2, 1, 0.
+        let original = [5000, 12, 2100, 30, 5001, 2050, 20];
+        for (group_buckets, sorted) in [
+            (1, [12, 30, 20, 2100, 2050, 5000, 5001]),
+            (2, [12, 2100, 30, 2050, 20, 5000, 5001]),
+        ] {
+            let mut hits = original;
+            assert!(!list_is_grouped(&hits[..1], &hits[1..], group_buckets));
+            regroup_cell(&mut hits, group_buckets);
+            assert_eq!(hits, sorted, "{group_buckets} buckets a group");
+            assert!(list_is_grouped(&hits[..1], &hits[1..], group_buckets));
+            let again = hits;
+            regroup_cell(&mut hits, group_buckets);
+            assert_eq!(hits, again);
+        }
+        assert_eq!(q_off_bucket(entry_q_off(2)), 0);
+        assert_eq!(q_off_bucket(entry_q_off(2049)), 0);
+        assert_eq!(q_off_bucket(entry_q_off(2050)), 1);
+        assert_eq!(entry_group(2 + 64 * 2048, 64), 1);
+        assert_eq!(entry_group(1 + 64 * 2048, 64), 0);
     }
 }

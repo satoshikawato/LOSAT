@@ -194,13 +194,15 @@ impl<'a> Consensus<'a> {
 
 /// The set-up of the volumes of one run: the program of LOSAT's refusals, the word window (the
 /// diagonal table's bound) and the matrix and gap costs of the first volume set up.
+#[derive(Debug, PartialEq)]
 pub(crate) struct RpsVolumeSetup {
     program: &'static str,
     window: i32,
     first_costs: Option<(String, i32, i32)>,
-    /// The volumes (`canonical_volume_path`) whose cells `check` or `open` found not grouped by
-    /// bucket and regrouped (`RpsVolumeFiles::is_regrouped`; series PR, item PS12m): `reopen`
-    /// regroups them again without reading every hit.
+    /// The volumes (`canonical_volume_path`) whose cells `check` or `open` found not in groups of
+    /// buckets in order and regrouped (`RpsVolumeFiles::is_regrouped`; series PR, item PS12m):
+    /// `reopen` regroups them again without reading every hit. This set-up is the one owner of the
+    /// fact: a run that reopens volumes keeps the set-up that checked them.
     regrouped: std::collections::BTreeSet<String>,
 }
 
@@ -212,18 +214,6 @@ impl RpsVolumeSetup {
             first_costs: None,
             regrouped: std::collections::BTreeSet::new(),
         }
-    }
-
-    /// The set-up that knows the volumes found not grouped by bucket (`regrouped`) by an earlier
-    /// set-up of the run.
-    pub(crate) fn with_regrouped(mut self, regrouped: std::collections::BTreeSet<String>) -> Self {
-        self.regrouped = regrouped;
-        self
-    }
-
-    /// The volumes whose cells `check` or `open` found not grouped by bucket and regrouped.
-    pub(crate) fn regrouped(&self) -> &std::collections::BTreeSet<String> {
-        &self.regrouped
     }
 
     /// The files of `volume` (with its frequency ratios when `cbs`, composition-based

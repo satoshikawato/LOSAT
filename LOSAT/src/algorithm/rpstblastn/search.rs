@@ -90,11 +90,10 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         };
         // A total length of 0 or of 2^63 or more: refused as rpsblast refuses it
         // (`blastp::blast_engine::rps_hooks::check_alias_keys`) until item D1a-4.
-        if let Some(reason) = crate::algorithm::rps_search::volumes::untraced_total_length(
+        crate::algorithm::rps_search::volumes::untraced_total_length(
             &database.x_seqdb().statistics(),
-        ) {
-            return Err(crate::algorithm::common::database::refusal(reason, PROGRAM));
-        }
+            PROGRAM,
+        )?;
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.

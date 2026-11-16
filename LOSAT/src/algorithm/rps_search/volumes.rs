@@ -27,11 +27,16 @@ use crate::seqdb::{DbStatistics, SeqDb, Volume};
 /// opens each volume alone, whose statistics then read the volume's own length and count (probe of
 /// D1a-3 fix 6: a footer's "Effective search space used" and the next request's
 /// `EffectiveSearchSpace` differ from a plain reading of the negative total); LOSAT has not traced
-/// these totals (item D1a-4). One owner for `rpsblast` and `rpstblastn`.
-pub(crate) fn untraced_total_length(statistics: &DbStatistics) -> Option<&'static str> {
-    (statistics.engine_db_length <= 0).then_some(
-        "an alias file's LENGTH of 0 or of 2^63 or more (a total length of 0 or less as NCBI's Int8) over an RPS-BLAST database",
-    )
+/// these totals (item D1a-4). One owner of the refusal and its text for `rpsblast` and `rpstblastn`
+/// (`program`), so neither program reaches `common::database` for it.
+pub(crate) fn untraced_total_length(statistics: &DbStatistics, program: &str) -> Result<()> {
+    if statistics.engine_db_length <= 0 {
+        return Err(crate::algorithm::common::database::refusal(
+            "an alias file's LENGTH of 0 or of 2^63 or more (a total length of 0 or less as NCBI's Int8) over an RPS-BLAST database",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 /// The volumes of a profile database in the order of their search.
@@ -640,11 +645,16 @@ mod tests {
     /// an alias `LENGTH` of 2^63 or more (`Int8` of `GetTotalLength`), and searches a positive one.
     #[test]
     fn an_rps_search_refuses_totals_of_zero_or_less() {
-        assert!(untraced_total_length(&with_total(0)).is_some());
-        assert!(untraced_total_length(&with_total(i64::MIN)).is_some());
-        assert!(untraced_total_length(&with_total(i64::MIN + 1)).is_some());
-        assert!(untraced_total_length(&with_total(-1)).is_some());
-        assert!(untraced_total_length(&with_total(1)).is_none());
-        assert!(untraced_total_length(&with_total(i64::MAX)).is_none());
+        for total in [0, i64::MIN, i64::MIN + 1, -1] {
+            let refusal = untraced_total_length(&with_total(total), "rpsblast").unwrap_err();
+            assert_eq!(
+                refusal.to_string(),
+                "an alias file's LENGTH of 0 or of 2^63 or more (a total length of 0 or less as \
+                 NCBI's Int8) over an RPS-BLAST database; this database is not supported by \
+                 LOSAT's rpsblast"
+            );
+        }
+        assert!(untraced_total_length(&with_total(1), "rpsblast").is_ok());
+        assert!(untraced_total_length(&with_total(i64::MAX), "rpstblastn").is_ok());
     }
 }

@@ -336,12 +336,7 @@ pub(super) fn check_alias_keys(database: &database::BlastpDatabase, program: &st
     // A total length of 0 (which a database search of the other programs reads as NCBI's
     // statistics of each subject, `DbStatistics::per_subject`) or of 2^63 or more: kept refused
     // with the other alias keys until item D1a-4 traces them.
-    if let Some(reason) =
-        crate::algorithm::rps_search::volumes::untraced_total_length(&database.statistics())
-    {
-        return Err(crate::algorithm::common::database::refusal(reason, program));
-    }
-    Ok(())
+    crate::algorithm::rps_search::volumes::untraced_total_length(&database.statistics(), program)
 }
 
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread

@@ -1605,7 +1605,13 @@ Rebuilding less:
   (`the_by_byte_decode_gives_the_reports_of_the_decode_by_base`: EDL933 as a database, 2,466 ambiguity runs of 11 codes,
   queries across 24 of them; the reports of the default and of `=0`, with and without `LOSAT_X_BNTBRANGE`, the same,
   and `sseq` shows the codes).
-  EVIDENCE_PLACEHOLDER
+  Evidence (ws, base dev 24652e373, every report the same as dev's): cycles (perf stat, node 0, one timed core, both
+  arms alternating, 3 runs, medians) BlobToolKit x0.869 (instructions x0.715), MOB-suite x0.928 (x0.831), Kaptive's
+  exact match x0.976 (x0.979), ECTyper x0.997 (x0.990), and QIIME 2, rBLAST, ABRicate's ncbi, pyani, BRIG, Easyfig and
+  SISTR within 0.5 % (instructions x0.995 to x1.000); time (node 0, one timed core, alternating, warm-up + 5 rounds,
+  medians) MOB-suite x0.927 (each of the five pairs faster), BlobToolKit x0.922, mlst x0.980 to x1.000; max RSS within
+  0.6 % (MOB-suite 86.5 / 87.0 MiB, BlobToolKit 220.8 / 221.8 MiB; x0.994 and x0.999 in a second run). The decode's
+  share of MOB-suite's cycles 8.6 % -> 1.5 % (perf record).
 - `LOSAT_X_BNEXTFIRST=1` (BLASTN, a megablast-type table whose lookup width is below the word size: `-task megablast`
   and `-word_size` 12 or more, `-task blastn` with a lookup width of 9 or 10; speed; in the strict set from the pull
   request that added it (perf/bn-ext-first, 2026-11-16); `=0` keeps the order before) extends each

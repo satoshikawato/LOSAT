@@ -1,1 +1,1 @@
-- BLASTN `-db`: a database sequence's letters are decoded four bases at a time, so a megablast search that reads a large database spends less time on it: at one thread BlobToolKit's search takes about 13 % fewer CPU cycles and MOB-suite's about 7 % fewer. Reports do not change.
+- BLASTN `-db`: a database sequence's letters are decoded four bases at a time, so a megablast search that reads a large database spends less time on it: at one thread BlobToolKit's search is about 8 % faster and MOB-suite's about 7 % faster, with the same memory. Reports do not change.

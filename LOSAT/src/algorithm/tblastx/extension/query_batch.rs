@@ -340,17 +340,19 @@ pub(crate) fn refusal() -> anyhow::Error {
 }
 
 /// Where the letters an ungapped extension walks lie: context `ctx` of a query batch
-/// (`QueryBatch::at`), or, in the tests, a context alone (`ALONE`: the walks stop at its ends, as
-/// NCBI's do when the NULLB breaks them).
+/// (`QueryBatch::at`), or a context alone (`ALONE`: the walks stop at its ends, as NCBI's do when
+/// the NULLB breaks them).
 #[derive(Clone, Copy)]
 pub(crate) struct InBatch<'a> {
     batch: Option<&'a QueryBatch<'a>>,
     ctx: usize,
 }
 
-#[cfg(test)]
 impl InBatch<'static> {
-    /// A context alone (the tests; `x_two_hit_cells` counts the cells of the same walks).
+    /// A context alone: the walks stop at its ends. The extensions walk so first and on the batch
+    /// only where a walk would go on past an end (`extend_hit_one_hit`,
+    /// `extend_hit_two_hit_reference`); the tests, and `x_two_hit_cells`, which counts the cells
+    /// of the same walks.
     pub(crate) const ALONE: Self = Self {
         batch: None,
         ctx: 0,

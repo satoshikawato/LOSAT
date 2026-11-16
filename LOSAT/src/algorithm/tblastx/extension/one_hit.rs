@@ -63,7 +63,10 @@ pub(crate) struct OneHit {
 /// or negative when the sum is reset after its best part. The left and right walks are the two-hit
 /// extension's (`s_BlastAaExtendLeft` and `s_BlastAaExtendRight`): they stop at the subject
 /// slice's ends, and at the context's ends they go on into the query batch `qb` as NCBI's walks do
-/// (query_batch.rs).
+/// (query_batch.rs). They first run on the context alone, and only where one of them reads the
+/// context's last letter on its side without a break, where the subject has letters more, does the
+/// extension run again on the batch (`extend_hit_one_hit_in_batch`): elsewhere the two give the
+/// same result, and the walks' loops keep no values of the batch.
 pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -73,6 +76,39 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     s_off: usize,
     x_drop: i32,
 ) -> Option<OneHit> {
+    match one_hit_walks(sc, q_seq, InBatch::ALONE, s_seq, q_off, s_off, x_drop) {
+        Some((_, true)) => extend_hit_one_hit_in_batch(sc, q_seq, qb, s_seq, q_off, s_off, x_drop),
+        hit => hit.map(|(hit, _)| hit),
+    }
+}
+
+/// `extend_hit_one_hit` on the batch: its walks past the context's ends.
+#[cold]
+#[inline(never)]
+fn extend_hit_one_hit_in_batch<S: TbxScore>(
+    sc: S,
+    q_seq: &[u8],
+    qb: InBatch<'_>,
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    x_drop: i32,
+) -> Option<OneHit> {
+    one_hit_walks(sc, q_seq, qb, s_seq, q_off, s_off, x_drop).map(|(hit, _)| hit)
+}
+
+/// The steps of `extend_hit_one_hit` with the walks of `qb`, and whether a walk read the
+/// context's last letter on its side without a break where the subject has letters more.
+#[inline(always)]
+fn one_hit_walks<S: TbxScore>(
+    sc: S,
+    q_seq: &[u8],
+    qb: InBatch<'_>,
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    x_drop: i32,
+) -> Option<(OneHit, bool)> {
     let word = sc.word();
     if q_off + word > q_seq.len() || s_off + word > s_seq.len() {
         return None;
@@ -95,10 +131,10 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     let s_left_off = q_left_off + s_off - q_off;
     let s_right_off = q_right_off + s_off - q_off;
     // `extend_left_ungapped` walks from the letter before the offsets it is given.
-    let (left_score, left_disp) =
+    let (left_score, left_disp, left_past) =
         extend_left_ungapped(sc, q_seq, qb, s_seq, q_left_off, s_left_off, score, x_drop);
     // `last` is the walk's `i` at its end: `*s_last_off = s_off + i`.
-    let (total_score, right_disp, last) = extend_right_ungapped(
+    let (total_score, right_disp, last, right_past) = extend_right_ungapped(
         sc,
         q_seq,
         qb,
@@ -108,11 +144,14 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
         left_score,
         x_drop,
     );
-    Some(OneHit {
-        q_start: (q_left_off - left_disp) as i32,
-        s_start: (s_left_off - left_disp) as i32,
-        length: left_disp as i32 + right_disp as i32 + init_hit_width,
-        score: total_score,
-        s_last_off: (s_right_off + 1 + last) as i32,
-    })
+    Some((
+        OneHit {
+            q_start: (q_left_off - left_disp) as i32,
+            s_start: (s_left_off - left_disp) as i32,
+            length: left_disp as i32 + right_disp as i32 + init_hit_width,
+            score: total_score,
+            s_last_off: (s_right_off + 1 + last) as i32,
+        },
+        left_past || right_past,
+    ))
 }

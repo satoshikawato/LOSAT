@@ -1551,10 +1551,10 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
 /// solved, without it they stay until the store holds `STORE_CAPACITY` results. A dropped result
 /// asked for after all would be solved by the caller with the same bits (`take` returns `None`).
 /// With `drop` and `batch` the results stay in the boxes they were solved in (one batch a
-/// thread) instead of being copied into the store: no copy, so the caller's inputs, the outputs and
-/// the store's boxes are never held at once; each box is freed when its result is taken. The batch keeps every result of a prefetch; the store keeps
-/// the last `STORE_CAPACITY` of one that solves more (then more of them are taken from the batch,
-/// with the same bits).
+/// thread) instead of being copied into the store: no copy, so the caller's inputs, the outputs
+/// and the store's boxes are never held at once; each box is freed when its result is taken. The
+/// batch keeps every result of a prefetch; the store keeps the last `STORE_CAPACITY` of one that
+/// solves more (then more of them are taken from the batch, with the same bits).
 #[inline]
 fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
     if drop {

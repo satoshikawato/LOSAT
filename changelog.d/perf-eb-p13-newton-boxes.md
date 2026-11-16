@@ -1,0 +1,1 @@
+- TBLASTN: less memory with many threads and about 1 % faster: with 16 or more threads the peak is 3 to 9 % lower (`-db` at 64 threads 104 -> 95 MiB, `-subject` 79 -> 76 MiB). The composition-based score adjustment solves its Newton problems 64 at a time instead of 32 and keeps each result in its own small block, freed when the result is used; the reports do not change.

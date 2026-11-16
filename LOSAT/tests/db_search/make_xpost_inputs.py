@@ -17,6 +17,16 @@ Run from LOSAT/: python3 tests/db_search/make_xpost_inputs.py. The files are com
   `tests/seqdb/taxdb/offset_last_past_end` writes the offset error, and `bad_magic` writes its open's text): the
   second query's `Iteration` is left out, and the third reads the other sequence first (`m2_qa`) or the same one
   (`m2_qd`).
+
+Not written by this script (committed as made by the probes of K4h review 2 and agent4, 2026-11-16):
+- `r2_mid.faa`, `r2_first.faa`, `r2_mv.faa`, `r2_qa.faa`, `r2_s3mid.faa`, `r2_mq3.fna` (review 2's `in/q`, `in/x2g`)
+  and the version 5 databases `db/nST` (nucleotide), `db/pA`, `db/pB` (two volumes), `db/pR3` (`makeblastdb -in
+  <name>.fa -dbtype nucl|prot -taxid 99990 -out <name>`, NCBI BLAST+ 2.17.0) and `db/x2gtax` (BLASTX's X2g fixture
+  with taxid 99990): the taxonomy texts before a run-ending 14 exception, two volumes' offset errors, a caught
+  exception's cut (`r2ce`), and `-export_search_strategy` to a FIFO (`r2_s3mid`, query 2's title of two-byte UTF-8).
+- `m2b_{bp,bn,tn,tx}_qm.{faa,fna}` (agent4 `m2/probe_m2b.py`): with `BATCH_SIZE=1` query 1's batch has its prefetch
+  off (more Seq-aligns than `PRE_FETCH_SEQS_LIMIT`) and its title of two-byte UTF-8, query 2's batch prefetches:
+  NCBI writes the offset error at query 2's prefetch.
 """
 from pathlib import Path
 

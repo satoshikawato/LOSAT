@@ -185,7 +185,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
+        // LOSAT's refusal of a title NCBI's XML crashes on, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), or of a
         // report of an ungapped HSP of length 0 in a form LOSAT does not write
@@ -660,7 +660,7 @@ fn run_inner(
     };
     let batch_size = crate::blastinput::app::query_batch_size(default_batch_size as u32)
         .map(|size| size as usize);
-    // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
+    // LOSAT's other refusals of BLAST XML (a title NCBI crashes on, `names::Refusal`)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
     // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids

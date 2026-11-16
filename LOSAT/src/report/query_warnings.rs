@@ -478,8 +478,10 @@ pub fn write_marked(
 /// program's model (`ReadCursor::subject_read`) and the texts that the report's writer makes there
 /// (the taxonomy database's messages of the XML2 and JSON documents' `Hit`s, `TaxdbPrinter`).
 /// NCBI posts them on `cerr`, which flushes the report written before them (`QueryWarnings`);
-/// `write` writes them so.
+/// `write` writes them so. Dropping it loses them and the exception that ends the run, so it is
+/// `must_use`.
 #[derive(Debug, Default)]
+#[must_use = "a report's posts and the exception that ends the run go through write_hit_posts"]
 pub struct HitPosts {
     /// Whether every `Hit` is marked (the model's reads of the query write texts); else only one
     /// whose writer makes a text.

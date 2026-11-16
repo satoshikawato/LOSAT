@@ -63,8 +63,9 @@ use crate::report::serial::xml::{XmlThrow, XML2_ROOT_ATTRIBUTES};
 /// what NCBI posts while it writes the report (`DocumentPost`, at offsets of the report), and the
 /// exception of a 14 side file, which ends the run when the report is written (blastxml2_format.cpp:
 /// 768-778 has no `catch`; outfmt 16's report catches its exception and posts it,
-/// `report::blast_xml2::writer`).
+/// `report::blast_xml2::writer`). Dropping it loses them, so it is `must_use`.
 #[derive(Clone, Debug, Default)]
+#[must_use = "a report's posts and the side file's exception go to the framing (Xml2Document::report)"]
 pub struct MadeReport {
     pub posts: Vec<DocumentPost>,
     pub ends_run: Option<Box<XmlThrow>>,

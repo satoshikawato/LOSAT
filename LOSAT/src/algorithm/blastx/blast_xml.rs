@@ -34,8 +34,9 @@
 //! one `Xml2Writer` across the query batches (`xml2_writer`), as it passes `queries_before` to
 //! outfmt 5's. Its document start is written with the prolog, before the first batch.
 //!
-//! Every refusal (`XmlRefusal`: a byte NCBI's XML stream cannot write in a title) comes before
-//! the first byte of the document, though the query file is read batch by batch:
+//! Every refusal (`XmlRefusal`: a title NCBI's definition line generator reads past the end of,
+//! `names::Refusal`, where NCBI crashes) comes before the first byte of the document, though the
+//! query file is read batch by batch:
 //!
 //! - `prescan_queries` reads the query file once more before the search (only with outfmt 5,
 //!   13 to 16) and refuses the first query whose title the writer would refuse;
@@ -43,7 +44,7 @@
 //!   (`subjects_may_be_refused`), or some query's message would be (a title that is refused only
 //!   in the message of a query NCBI did not search), or (with `-db`) the taxonomy database is
 //!   on the search path and the lookup of the taxid of some sequence of the database would be
-//!   refused (a scientific name NCBI's XML2 cannot write, a damaged record, which outfmt 5 reads
+//!   refused (a damaged record, which outfmt 5 reads
 //!   in each batch's prefetch, `ReportedSubjects::batch_prefetch`: checked once before the
 //!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
 //!   fetches are refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`: outfmt
@@ -91,9 +92,9 @@ use crate::report::serial::seqalign::seqalign_evalue;
 
 const PROGRAM: &str = "BLASTX";
 
-/// LOSAT's refusal of a title or name that NCBI's XML stream cannot write (not an error of
-/// NCBI's engine: the run ends with exit status 1 and the message, `native::report_error`
-/// passes it on).
+/// LOSAT's refusal of a title that NCBI crashes on (`names::Refusal`; not an error of NCBI's
+/// engine: the run ends with exit status 1 and the message, `native::report_error` passes it
+/// on).
 #[derive(Debug)]
 pub(super) struct XmlRefusal(String);
 
@@ -121,8 +122,8 @@ impl XmlRefusal {
 }
 
 /// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
-/// JSON document drops what it holds, so that the refusal follows no byte: a title or name NCBI's
-/// XML stream cannot write (`XmlRefusal`), a reported database sequence with parsed Seq-ids
+/// JSON document drops what it holds, so that the refusal follows no byte: a title NCBI crashes
+/// on (`XmlRefusal`), a reported database sequence with parsed Seq-ids
 /// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
 /// error the run writes what it holds, the bytes of the batches before it, as the run without a
 /// hold does (the command line's `HeldOutput`; a library call's `HeldFormats`).
@@ -982,8 +983,8 @@ pub(super) fn prescan_queries(
     Ok(scan)
 }
 
-/// Refuses the first query the writer would refuse (a title with a byte NCBI's XML stream cannot
-/// write) in a report that the document writes, among the reader batches that `read` gives its
+/// Refuses the first query the writer would refuse (a title NCBI crashes on, `names::Refusal`)
+/// in a report that the document writes, among the reader batches that `read` gives its
 /// argument in order, so that no refusal can follow a written byte (`QueryScan`; the command
 /// line's `prescan_queries`, the records of `local::run_local`).
 ///

@@ -40,8 +40,9 @@ const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// A case: name, program, options (a `.faa` name is an input under `tests/db_search/xpost`; with
 /// a taxonomy database the paths are relative to `tests/db_search`), the taxonomy database under
-/// `tests/seqdb/taxdb` and `PRE_FETCH_SEQS_LIMIT` (`None`: a `-subject` run, in an empty
-/// directory), whether the run writes `-out out`, and NCBI's exit status.
+/// `tests/seqdb/taxdb` and the run's other variables (`VAR=VALUE`, separated by spaces:
+/// `PRE_FETCH_SEQS_LIMIT`, `BATCH_SIZE`) (`None`: a `-subject` run, in an empty directory),
+/// whether the run writes `-out out` (in the run's own directory), and NCBI's exit status.
 type Case = (
     &'static str,
     &'static str,
@@ -198,7 +199,7 @@ const CASES: &[Case] = &[
             "-outfmt",
             "5",
         ],
-        Some(("offset_last_past_end", "1")),
+        Some(("offset_last_past_end", "PRE_FETCH_SEQS_LIMIT=1")),
         false,
         0,
     ),
@@ -213,7 +214,7 @@ const CASES: &[Case] = &[
             "-outfmt",
             "5",
         ],
-        Some(("bad_magic", "0")),
+        Some(("bad_magic", "PRE_FETCH_SEQS_LIMIT=0")),
         false,
         0,
     ),
@@ -228,11 +229,191 @@ const CASES: &[Case] = &[
             "-outfmt",
             "5",
         ],
-        Some(("offset_last_past_end", "0")),
+        Some(("offset_last_past_end", "PRE_FETCH_SEQS_LIMIT=0")),
+        false,
+        0,
+    ),
+    (
+        "r2m1.bp.mid.off.pre.f14",
+        "blastp",
+        &[
+            "-query",
+            "xpost/r2_mid.faa",
+            "-db",
+            "x16_taxid_99990",
+            "-outfmt",
+            "14",
+        ],
+        Some(("offset_last_past_end", "")),
+        true,
+        255,
+    ),
+    (
+        "r2m1.tn.first.off.lim0.f14",
+        "tblastn",
+        &[
+            "-query",
+            "xpost/r2_first.faa",
+            "-db",
+            "xpost/db/nST/nST",
+            "-outfmt",
+            "14",
+        ],
+        Some(("offset_last_past_end", "PRE_FETCH_SEQS_LIMIT=0")),
+        true,
+        255,
+    ),
+    (
+        "r2m2e.bp.mv.off.lim0.f5",
+        "blastp",
+        &[
+            "-query",
+            "xpost/r2_mv.faa",
+            "-db",
+            "xpost/db/pA/pA xpost/db/pB/pB",
+            "-outfmt",
+            "5",
+            "-evalue",
+            "1e-20",
+        ],
+        Some(("offset_last_past_end", "PRE_FETCH_SEQS_LIMIT=0")),
+        false,
+        0,
+    ),
+    (
+        "r2m2.tn.qa.off.lim0.f5",
+        "tblastn",
+        &[
+            "-query",
+            "xpost/r2_qa.faa",
+            "-db",
+            "xpost/db/nST/nST",
+            "-outfmt",
+            "5",
+        ],
+        Some(("offset_last_past_end", "PRE_FETCH_SEQS_LIMIT=0")),
+        false,
+        0,
+    ),
+    (
+        "r2ce.mq3.lim0.f16",
+        "blastx",
+        &[
+            "-query",
+            "xpost/r2_mq3.fna",
+            "-db",
+            "xpost/db/x2gtax/x2gtax",
+            "-ungapped",
+            "-window_size",
+            "0",
+            "-comp_based_stats",
+            "0",
+            "-seg",
+            "no",
+            "-word_size",
+            "5",
+            "-threshold",
+            "2",
+            "-evalue",
+            "1e5",
+            "-outfmt",
+            "16",
+        ],
+        Some(("offset_last_past_end", "PRE_FETCH_SEQS_LIMIT=0")),
+        false,
+        0,
+    ),
+    (
+        "m2b.bp.qm.off.mix.f5",
+        "blastp",
+        &[
+            "-query",
+            "xpost/m2b_bp_qm.faa",
+            "-db",
+            "x16_taxid_99990",
+            "-outfmt",
+            "5",
+        ],
+        Some((
+            "offset_last_past_end",
+            "PRE_FETCH_SEQS_LIMIT=3 BATCH_SIZE=1",
+        )),
+        false,
+        0,
+    ),
+    (
+        "m2b.bn.qm.off.mix.f5",
+        "blastn",
+        &[
+            "-query",
+            "xpost/m2b_bn_qm.fna",
+            "-db",
+            "x16_ntaxid_99990",
+            "-outfmt",
+            "5",
+        ],
+        Some((
+            "offset_last_past_end",
+            "PRE_FETCH_SEQS_LIMIT=3 BATCH_SIZE=1",
+        )),
+        false,
+        0,
+    ),
+    (
+        "m2b.tn.qm.off.mix.f5",
+        "tblastn",
+        &[
+            "-query",
+            "xpost/m2b_tn_qm.faa",
+            "-db",
+            "x16_ntaxid_99990",
+            "-outfmt",
+            "5",
+        ],
+        Some((
+            "offset_last_past_end",
+            "PRE_FETCH_SEQS_LIMIT=3 BATCH_SIZE=1",
+        )),
+        false,
+        0,
+    ),
+    (
+        "m2b.tx.qm.off.mix.f5",
+        "tblastx",
+        &[
+            "-query",
+            "xpost/m2b_tx_qm.fna",
+            "-db",
+            "x16_ntaxid_99990",
+            "-outfmt",
+            "5",
+            "-evalue",
+            "1e-20",
+        ],
+        Some((
+            "offset_last_past_end",
+            "PRE_FETCH_SEQS_LIMIT=1 BATCH_SIZE=1",
+        )),
         false,
         0,
     ),
 ];
+
+/// Removes the variables that change a run from `command`'s environment.
+fn clear_env(command: &mut Command) {
+    for (variable, _) in std::env::vars() {
+        // `LOSAT_BLASTX_WORKER_LOG` stays: an `--all-features` binary writes its probe there.
+        if variable.starts_with("LOSAT_X_")
+            || variable.starts_with("NCBI")
+            || matches!(
+                variable.as_str(),
+                "BATCH_SIZE" | "BLASTDB" | "CHUNK_SIZE" | "PRE_FETCH_SEQS_LIMIT"
+            )
+        {
+            command.env_remove(variable);
+        }
+    }
+}
 
 fn tests_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
@@ -271,27 +452,22 @@ fn run(case: &Case) -> (i32, Vec<u8>, Vec<u8>) {
         }
     }
     if to_file {
-        command.args(["-out", "out"]);
+        // In the run's directory (a run with a taxonomy database runs in `tests/db_search`).
+        command.arg("-out").arg(match taxdb {
+            None => PathBuf::from("out"),
+            Some(_) => dir.join("out"),
+        });
     }
     command
         .stdout(Stdio::from(file.try_clone().unwrap()))
         .stderr(Stdio::from(file));
-    for (variable, _) in std::env::vars() {
-        // `LOSAT_BLASTX_WORKER_LOG` stays: an `--all-features` binary writes its probe there.
-        if variable.starts_with("LOSAT_X_")
-            || variable.starts_with("NCBI")
-            || matches!(
-                variable.as_str(),
-                "BATCH_SIZE" | "BLASTDB" | "CHUNK_SIZE" | "PRE_FETCH_SEQS_LIMIT"
-            )
-        {
-            command.env_remove(variable);
+    clear_env(&mut command);
+    if let Some((taxdb, variables)) = taxdb {
+        command.env("BLASTDB", format!("../seqdb/taxdb/{taxdb}"));
+        for variable in variables.split_whitespace() {
+            let (name, value) = variable.split_once('=').expect("VAR=VALUE");
+            command.env(name, value);
         }
-    }
-    if let Some((taxdb, limit)) = taxdb {
-        command
-            .env("BLASTDB", format!("../seqdb/taxdb/{taxdb}"))
-            .env("PRE_FETCH_SEQS_LIMIT", limit);
     }
     command.env("HOME", &dir).env("USERPROFILE", &dir);
     let status = command.status().expect("run LOSAT CLI");
@@ -337,4 +513,74 @@ fn the_xml_streams_post_where_ncbi_posts_in_a_merged_stream() {
             );
         }
     }
+}
+
+/// Review 2 of K4h, M1: `-export_search_strategy` to a FIFO, which cannot be cut back, in a run
+/// that query 2's 14 side file ends (`BATCH_SIZE=1`): NCBI BLAST+ 2.17.0 writes the requests of
+/// the batches through query 2's (2 of 3), and so does LOSAT, which holds each request until the
+/// run reaches its batch.
+#[cfg(unix)]
+#[test]
+fn a_strategy_fifo_gets_the_requests_that_ncbi_writes() {
+    let fixtures = tests_dir().join("fixtures").join("xml_post_order");
+    let dir =
+        std::env::temp_dir().join(format!("losat-xml-post-order-{}-fifo", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("ss.fifo");
+    assert!(Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("mkfifo")
+        .success());
+    let reader = {
+        let fifo = fifo.clone();
+        std::thread::spawn(move || std::fs::read(fifo).unwrap())
+    };
+    let path = dir.join("merged");
+    let file = std::fs::File::create(&path).unwrap();
+    let mut command = Command::new(BIN);
+    command
+        .arg("blastp")
+        .current_dir(tests_dir().join("db_search"))
+        .args([
+            "-query",
+            "xpost/r2_s3mid.faa",
+            "-db",
+            "xpost/db/pR3/pR3",
+            "-outfmt",
+            "14",
+        ])
+        .arg("-out")
+        .arg(dir.join("out"))
+        .arg("-export_search_strategy")
+        .arg(&fifo)
+        .stdout(Stdio::from(file.try_clone().unwrap()))
+        .stderr(Stdio::from(file));
+    clear_env(&mut command);
+    command
+        .env("BATCH_SIZE", "1")
+        .env("HOME", &dir)
+        .env("USERPROFILE", &dir);
+    let status = command.status().expect("run LOSAT CLI");
+    let strategy = reader.join().unwrap();
+    let merged = std::fs::read(&path).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let name = "fifo.bp.s3mid.f14";
+    assert_eq!(
+        status.code(),
+        Some(255),
+        "{}",
+        String::from_utf8_lossy(&merged)
+    );
+    assert!(
+        merged == std::fs::read(fixtures.join(format!("{name}.merged"))).unwrap(),
+        "{name}:\n{}",
+        String::from_utf8_lossy(&merged)
+    );
+    assert!(
+        strategy == std::fs::read(fixtures.join(format!("{name}.ss"))).unwrap(),
+        "{name}: the strategy:\n{}",
+        String::from_utf8_lossy(&strategy)
+    );
 }

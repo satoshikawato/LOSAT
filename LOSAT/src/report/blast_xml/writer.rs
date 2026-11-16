@@ -122,8 +122,10 @@ pub(crate) fn run_ending_exception(
 /// calls that wrote them), whether a query's report left out the loads of its later subjects, and
 /// an exception that ends the run once the posts are written. The caller writes them through
 /// `report::query_warnings::write_hit_posts` (or `write_document_posts`), the one place that
-/// writes a document's posts and hands the run's end back.
+/// writes a document's posts and hands the run's end back. Dropping it unwritten loses the
+/// posts and NCBI's end of the run, so it is `must_use`.
 #[derive(Debug, Default)]
+#[must_use = "a document's posts and the exception that ends the run go through query_warnings::write_hit_posts"]
 pub struct DocumentPosts {
     pub posts: Vec<DocumentPost>,
     /// The query written last made no `Hit` after the last one marked (`HitPosts::hit`), so NCBI

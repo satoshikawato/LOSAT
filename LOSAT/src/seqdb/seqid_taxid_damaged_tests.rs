@@ -733,7 +733,6 @@ fn read_taxdb(dir: &Path, trace: &mut Trace) {
             trace.note(&db.entry_count());
             trace.read(db.offset_error_taxid());
             trace.read(db.any_lookup_may_fail());
-            trace.read(db.any_lookup_may_refuse());
             for tax_id in TAXDB_TAXIDS {
                 let mut messages = Vec::new();
                 trace.read(db.names(tax_id, &mut messages));

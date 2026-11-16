@@ -4465,9 +4465,9 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
 /// checked): `taxonomy[rank]` is then `Named`, or `NotFound` when the taxonomy database does
 /// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
-/// taxid, `taxonomy` is empty. A scientific name that NCBI's XML stream cannot write, and a
-/// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
-/// byte is written; so is a run whose fetches NCBI's taxonomy cache would make repeat the
+/// taxid, `taxonomy` is empty. A taxonomy database that LOSAT cannot read as NCBI does is a
+/// refusal made here, before any byte is written (a scientific name of any bytes is written as
+/// NCBI's streams write it); so is a run whose fetches NCBI's taxonomy cache would make repeat the
 /// offset error ([`TaxdbRun::cache_collision`]), when a reported subject has a positive taxid.
 ///
 /// NCBI's messages about the taxonomy database go to standard error, and not here: those of
@@ -5955,11 +5955,12 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb) -> bool {
 }
 
 /// The taxonomy side of [`taxdb_may_refuse`]: `Some(false)` when no lookup of any taxid can be
-/// refused ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`]; no scientific name is
-/// refused: NCBI's streams write them); `Some(true)` when one can; `None` when the taxonomy
-/// database cannot be opened or read, which only the lookups of the database's taxids can answer.
+/// refused, which is where none can fail ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_fail`],
+/// whose pass holds for any order of the index; no scientific name is refused: NCBI's streams
+/// write them); `Some(true)` when one can; `None` when the taxonomy database cannot be opened or
+/// read, which only the lookups of the database's taxids can answer.
 fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb) -> Option<bool> {
-    taxdb.any_lookup_may_refuse().ok()
+    taxdb.any_lookup_may_fail().ok()
 }
 
 /// The database side of [`taxdb_may_refuse`]: whether the lookup of the first definition line's

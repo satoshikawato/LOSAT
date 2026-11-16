@@ -493,71 +493,6 @@ impl TaxDb {
         }
         Ok(false)
     }
-
-    /// Whether [`Self::names`] could refuse some taxid, decided by one sequential pass over the
-    /// index instead of a lookup per taxid (OF5b BLASTX, `taxdb_may_refuse`): `Ok(false)` means
-    /// that no lookup of any taxid can be refused. `Ok(true)` means that one can, or that the index
-    /// is not in the layout the pass relies on (not strictly increasing in taxid, the offsets not
-    /// non-decreasing), where the answer is left to the per-taxid lookups. A database that NCBI
-    /// treats as missing finds nothing: `Ok(false)`.
-    ///
-    /// With a strictly increasing index every lookup ends on its own entry, and the record it
-    /// reads is `offset[i]..offset[i+1]`, the last entry's `offset..file length` (`names`): a
-    /// lookup is refused exactly where that record has a positive size and reaches past the mapped
-    /// end of `taxdb.btd` (a scientific name of any bytes is written as NCBI's streams write it).
-    /// The index is read in blocks of 64 Ki entries; `taxdb.btd` is not read.
-    pub fn any_lookup_may_refuse(&self) -> Result<bool, SeqDbError> {
-        const INDEX_BLOCK: u64 = 1 << 16;
-        let Some(files) = &self.files else {
-            return Ok(false);
-        };
-        let data_len = files.data.len();
-        let mapped = data_len.div_ceil(MAP_PAGE) * MAP_PAGE;
-        let count = files.count as u64;
-        // The previous entry, whose record ends where the current one begins.
-        let mut pending: Option<u32> = None;
-        // Whether the lookup of the record `begin_data..end_data` is refused (`names`).
-        let refused = |begin_data: u32, end_data: u32| {
-            let size = end_data.wrapping_sub(begin_data) as i32;
-            size > 0 && u64::from(begin_data) + size as u64 > mapped
-        };
-        let mut previous_taxid: Option<i32> = None;
-        let mut previous_offset = 0u32;
-        let mut block: Vec<u8> = Vec::new();
-        let mut i = 0u64;
-        while i < count {
-            let n = INDEX_BLOCK.min(count - i);
-            block.resize((n * ENTRY_LEN) as usize, 0);
-            files
-                .index
-                .read_exact_at(&mut block, HEADER_LEN + ENTRY_LEN * i)?;
-            for entry in block.chunks_exact(ENTRY_LEN as usize) {
-                let taxid = be32(&entry[0..4]) as i32;
-                let offset = be32(&entry[4..8]);
-                if previous_taxid.is_some_and(|previous| taxid <= previous)
-                    || (pending.is_some() && offset < previous_offset)
-                {
-                    return Ok(true);
-                }
-                if pending.is_some_and(|begin| refused(begin, offset)) {
-                    return Ok(true);
-                }
-                previous_taxid = Some(taxid);
-                previous_offset = offset;
-                pending = Some(offset);
-            }
-            i += n;
-        }
-        // The last entry's record ends at the end of the file (an end before its beginning is
-        // NCBI's "offset error": no names, no read).
-        if let Some(begin) = pending {
-            let end = data_len as u32;
-            if end >= begin && refused(begin, end) {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:113-127
@@ -693,12 +628,6 @@ impl LazyTaxDb {
     /// was refused or a file that cannot be read is an `Err`.
     pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
         self.open_into(&mut Vec::new())?.any_lookup_may_fail()
-    }
-
-    /// [`TaxDb::any_lookup_may_refuse`] of the lazily opened database (this opens it). An open
-    /// that was refused or a file that cannot be read is an `Err`.
-    pub fn any_lookup_may_refuse(&self) -> Result<bool, SeqDbError> {
-        self.open_into(&mut Vec::new())?.any_lookup_may_refuse()
     }
 
     /// Whether the database has been opened (a name has been asked for).
@@ -1309,7 +1238,7 @@ mod tests {
         assert!(checked > 300, "{checked}");
     }
 
-    /// What [`TaxDb::any_lookup_may_refuse`] must agree with: the lookup of every taxid of the
+    /// What [`TaxDb::any_lookup_may_fail`] must agree with: the lookup of every taxid of the
     /// index with `names`, refused (`Err`).
     fn brute_force_may_refuse(db: &TaxDb) -> bool {
         let Some(files) = &db.files else {
@@ -1403,7 +1332,7 @@ mod tests {
                 continue;
             };
             let brute = brute_force_may_refuse(&db);
-            let walk = db.any_lookup_may_refuse().unwrap();
+            let walk = db.any_lookup_may_fail().unwrap();
             assert!(
                 walk || !brute,
                 "{variant}: the pass says no, a lookup refuses"
@@ -1456,7 +1385,7 @@ mod tests {
             std::fs::write(dir.join("taxdb.btd"), &data).unwrap();
             let db = TaxDb::open(&path_of(&dir)).unwrap();
             assert_eq!(db.entry_count(), u64::from(n));
-            assert_eq!(db.any_lookup_may_refuse().unwrap(), refuses, "{tag}");
+            assert_eq!(db.any_lookup_may_fail().unwrap(), refuses, "{tag}");
             assert_eq!(brute_force_may_refuse(&db), refuses, "{tag}");
         }
     }

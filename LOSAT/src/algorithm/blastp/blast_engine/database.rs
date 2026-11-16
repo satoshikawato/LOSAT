@@ -1404,9 +1404,9 @@ impl ListedTitles<'_> {
     /// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
     /// checked): `taxonomy[rank]` is then `Named`, or `NotFound` when the taxonomy database does
     /// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
-    /// taxid, `taxonomy` is empty. A scientific name that NCBI's XML stream cannot write, and a
-    /// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
-    /// byte is written.
+    /// taxid, `taxonomy` is empty. A taxonomy database that LOSAT cannot read as NCBI does is a
+    /// refusal made here, before any byte is written (a scientific name of any bytes is written
+    /// as NCBI's streams write it).
     ///
     /// NCBI's messages about the taxonomy database go to standard error: those of opening and of
     /// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
@@ -4445,7 +4445,7 @@ mod tests {
     // the one pass over the headers gives the answer of the titles' check followed by
     // `x_taxids_allow_blocks`. `sprot_tax` of `tests/fixtures/outfmt16/db` (two sequences, taxid
     // 9606) with no taxonomy database, ones whose lookups cannot be refused (a wrong magic number
-    // is a message; a scientific name of 9606 that XML2 cannot write is not asked for by the
+    // is a message; a scientific name of 9606 with bytes >= 0x80 is not asked for by the
     // prefetch) and one whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`),
     // at one thread and in a pool.
     #[test]

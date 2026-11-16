@@ -174,9 +174,9 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
 /// Writes the document of every query of `run` (`hits` is the final list after
 /// `shift_to_records`: record coordinates, in query order) through `document` (BLAST XML, or
 /// the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
-/// header before the first query and its end after the last when `run.epilog`. Everything NCBI
-/// cannot write is refused before the first byte: the `-db` name, the query titles and
-/// messages, the titles of the subjects with hits. `all_masks`: the masks of every searched
+/// header before the first query and its end after the last when `run.epilog`. A query or
+/// subject title that NCBI crashes on (`names::Refusal`) is refused before the first byte; every
+/// other text is written as NCBI's streams write it. `all_masks`: the masks of every searched
 /// query are listed (XML2 and JSON), not those of the queries with hits alone (outfmt 5).
 /// `run.xml_taxa` holds the taxids of the database sequences that XML2 and JSON show.
 pub(crate) fn write_tblastx_xml<W: StructuredXml>(

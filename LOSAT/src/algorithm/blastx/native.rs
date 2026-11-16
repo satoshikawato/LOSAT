@@ -1509,7 +1509,7 @@ pub(super) fn reported_batch(
             let messages = reported
                 .batch_prefetch(database, results, options.gapped)
                 .map_err(reported_error)?;
-            diagnostics.write_all(&messages)?;
+            messages.write(diagnostics, None)?;
         }
     } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's

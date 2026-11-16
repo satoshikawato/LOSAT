@@ -88,7 +88,7 @@ pub type QueryReads = Vec<SubjectRead>;
 /// hit lists), the text that its load writes in the program's model, and, in a run whose lookups
 /// can write a text, what the load looks up (`ReadLoad`; then every read has an entry, with or
 /// without a text of its own).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubjectRead {
     pub subject: u32,
     pub text: Vec<u8>,
@@ -108,8 +108,9 @@ impl SubjectRead {
     }
 
     /// The text of this read where it happens: the texts of the loads left out before that this
-    /// load makes ([`ReadLoad::placed`]) around the model's own.
-    fn placed(&self) -> Vec<u8> {
+    /// load makes ([`ReadLoad::placed`]) around the model's own (also a load of a batch's prefetch,
+    /// `diag_log::Posts::loads`).
+    pub fn placed(&self) -> Vec<u8> {
         match &self.load {
             Some(load) => load.placed(&self.text),
             None => self.text.clone(),
@@ -128,7 +129,7 @@ impl SubjectRead {
 /// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
 /// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
 /// to NCBI's next load that makes the same ask (`LoadTexts`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadLoad {
     /// The run's texts of the loads left out (shared by every read of the run).
     pub texts: std::sync::Arc<LoadTexts>,
@@ -216,6 +217,15 @@ impl ReadLoad {
 pub struct LoadTexts {
     pending: std::sync::Mutex<PendingTexts>,
 }
+
+/// The run's one ledger: two are the same where they are one (the loads of one run share it).
+impl PartialEq for LoadTexts {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Eq for LoadTexts {}
 
 impl LoadTexts {
     /// No text left out (`TaxdbRun::restart`: the batches are searched again).
@@ -828,7 +838,9 @@ impl<'a> QueryWarnings<'a> {
         if let Some(cursor) = self.reads.as_mut() {
             cursor.before_query(index, report, &mut *self.sink)?;
         }
-        match self.before.get(index) {
+        // The texts of a prefetch's loads are made here (`Posts::placed`), where NCBI's prefetch
+        // loads the subjects: after the reports of the batches before.
+        match self.before.get(index).map(Posts::placed) {
             Some(posts) if posts.has_text() => {
                 report.flush()?;
                 posts.write(&mut *self.sink, self.archive)?;
@@ -848,18 +860,33 @@ impl<'a> QueryWarnings<'a> {
 //
 //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+// ```c++
+//                 BlastFormatter_PreFetchSequenceData(*results, scope,
+//                 		                            fmt_args->GetFormattedOutputChoice());
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+// ```
 /// The posts written before each query's report (`QueryWarnings::of_posts`) from the lines of
-/// each query (`lines`, each line a warning) and NCBI's posts of the bytes replaced in the search
+/// each query (`lines`, each line a warning), NCBI's posts of the bytes replaced in the search
 /// strategy requests of the batches (`requests`: each with the batch's first query, numbered as
-/// `lines`, in order; `StrategyExport::take_posts`). NCBI posts them when it writes the request,
-/// after it read the batch and before the batch's search: in the batch's first query, after the
-/// reader's messages of the batch (the first `reader(query)` bytes of its lines) and before the
-/// rest (the messages of the batch's prefetch, the query's own warnings).
+/// `lines`, in order; `StrategyExport::take_posts`) and the texts of the batches' prefetches
+/// (`prefetches`, the same way; `common::database::batch_prefetch`, whose loads' texts are made
+/// where they are written, `Posts::loads`). NCBI posts a request's when it writes the request,
+/// after it read the batch and before the batch's search, and the prefetch's after the search:
+/// in the batch's first query, after the reader's messages of the batch (the first
+/// `reader(query)` bytes of its lines), the request's, the prefetch's, then the rest (the query's
+/// own warnings).
 pub fn query_posts(
     lines: Vec<Vec<u8>>,
     requests: Vec<(usize, Posts)>,
+    prefetches: Vec<(usize, Posts)>,
     reader: impl Fn(usize) -> usize,
 ) -> Vec<Posts> {
+    // A batch's prefetch after its request (a stable sort keeps the order of each list).
+    let mut requests: Vec<(usize, Posts)> = requests.into_iter().chain(prefetches).collect();
+    requests.sort_by_key(|&(first, _)| first);
     let mut requests = requests.into_iter().peekable();
     let mut posts: Vec<Posts> = lines
         .into_iter()
@@ -1511,6 +1538,60 @@ mod tests {
     /// messages of the batch in its first query and come before the rest of its lines (NCBI
     /// 2.17.0, probe RG K/k4b/probe2 `blastp_b3_f6`: the O warning of query 3 after the posts of
     /// its batch); a batch without posts keeps its lines, and the posts are whole posts.
+    /// A batch whose prefetch is on, modelled before the report of a batch before it that the
+    /// stream cut (a program that models every batch before it writes): its loads' texts are made
+    /// where the posts are written (`Posts::loads`), after that report, so the texts that the cut
+    /// left go to the prefetch's loads that make their asks, in the order of the loads, after the
+    /// batch's reader messages and request posts (NCBI 2.17.0, agent4 m2 probe `*.qm.*.mix.f5`:
+    /// the offset error of query 2's prefetch after query 1's `Failed s_BlastXMLAddIteration`).
+    #[test]
+    fn a_prefetch_takes_the_texts_that_a_cut_report_before_it_left() {
+        let texts = std::sync::Arc::new(LoadTexts::default());
+        // Query 0's batch reads 5 (the texts of opening, then volume 0's offset error) one by one;
+        // query 1's batch prefetches 6 (volume 1, its offset error) and 7 (volume 0, the offset
+        // taxid), whose model gave 7 no text: 5 asked before it.
+        let reads: Vec<QueryReads> = vec![vec![loaded(&texts, 5, b"O\nE0\n", (0, true, 2))]];
+        let mut prefetch = Posts::new();
+        prefetch.loads(vec![
+            loaded(&texts, 6, b"E1\n", (1, true, 0)),
+            loaded(&texts, 7, b"", (0, true, 0)),
+        ]);
+        let mut request = Posts::new();
+        request.post(crate::report::diag_log::ERROR, b"P1\n".to_vec());
+        let posts = query_posts(
+            vec![Vec::new(), b"R1\nW1\n".to_vec()],
+            vec![(1, request)],
+            vec![(1, prefetch)],
+            |query| [0, 3][query],
+        );
+        let log = Log::default();
+        let mut report = log.clone();
+        let mut sink = log.clone();
+        let mut warnings =
+            QueryWarnings::of_posts(&posts, None, &mut sink).with_subject_reads(&reads);
+        warnings.before_query(0, &mut report).unwrap();
+        // Query 0's report is cut before its read of 5.
+        let (cursor, sink) = warnings.reads_and_sink();
+        cursor.unwrap().cut(0, &mut report, sink).unwrap();
+        warnings.before_query(1, &mut report).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        // The opening at 6, the first load that looks a taxid up; volume 0's offset error at 7.
+        assert_eq!(text, "R1\nP1\nO\nE1\nE0\nW1\n");
+        // Without a cut, the model's texts.
+        let texts = std::sync::Arc::new(LoadTexts::default());
+        let mut prefetch = Posts::new();
+        prefetch.loads(vec![
+            loaded(&texts, 6, b"E1\n", (1, true, 0)),
+            loaded(&texts, 7, b"", (0, true, 0)),
+        ]);
+        assert_eq!(prefetch.text(), b"E1\n");
+        // A run whose lookups write no text keeps the prefetch's lines as they are.
+        let mut plain = Posts::new();
+        plain.loads(vec![SubjectRead::of_text(6, b"T\n")]);
+        assert_eq!(plain, Posts::of_lines(b"T\n".to_vec()));
+    }
+
     #[test]
     fn request_posts_follow_the_reader_messages_of_their_batch() {
         use crate::report::diag_log::ERROR;
@@ -1528,6 +1609,7 @@ mod tests {
         let posts = query_posts(
             lines,
             vec![(0, post(b"P0\n")), (2, post(b"P2a\n")), (2, post(b"P2b\n"))],
+            Vec::new(),
             |query| reader[query],
         );
         let texts: Vec<Vec<u8>> = posts.iter().map(Posts::text).collect();
@@ -1545,7 +1627,12 @@ mod tests {
         whole.lines(b"T2\nW2\n");
         assert_eq!(posts[2], whole);
         // A request after the last query's lines keeps its posts after them.
-        let posts = query_posts(vec![b"W0\n".to_vec()], vec![(1, post(b"P1\n"))], |_| 0);
+        let posts = query_posts(
+            vec![b"W0\n".to_vec()],
+            vec![(1, post(b"P1\n"))],
+            Vec::new(),
+            |_| 0,
+        );
         assert_eq!(posts[0].text(), b"W0\nP1\n");
     }
 

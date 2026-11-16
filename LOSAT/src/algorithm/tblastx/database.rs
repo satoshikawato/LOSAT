@@ -501,7 +501,7 @@ pub(crate) fn batch_prefetch(
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     query: usize,
-) -> Result<Vec<u8>> {
+) -> Result<crate::report::diag_log::Posts> {
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,

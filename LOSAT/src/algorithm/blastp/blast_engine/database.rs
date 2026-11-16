@@ -1513,7 +1513,7 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
         query: usize,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,

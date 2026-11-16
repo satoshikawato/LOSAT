@@ -13304,9 +13304,11 @@ fn run_call(
         pssm_reads: &pssm_reads,
     };
     let mut query_warning_lines = report_prep::query_warning_lines(&prep);
+    let mut prefetch_posts = Vec::new();
     let subject_reads = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
+        &mut prefetch_posts,
         &mut psiblast_pssms,
     )?;
     report_prep::refuse_unreportable(&prep, &rows_of)?;
@@ -13537,6 +13539,7 @@ fn run_call(
         reports
             .call_requests
             .map_or_else(Vec::new, CallRequests::take_posts),
+        prefetch_posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {

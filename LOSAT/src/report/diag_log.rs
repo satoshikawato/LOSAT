@@ -54,6 +54,9 @@ enum Post {
     Whole { severity: i32, text: Vec<u8> },
     /// The place of a search strategy request (`Posts::request`): writing it marks it reached.
     Request(RequestMark),
+    /// The loads of a batch's prefetch (`Posts::loads`): lines whose text is made where they are
+    /// written.
+    Loads(Vec<crate::report::query_warnings::SubjectRead>),
 }
 
 /// Where NCBI writes the search strategy request of the batch whose first query (the run's) is
@@ -115,6 +118,30 @@ impl Posts {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
+    /// Adds the texts of the loads of a batch's prefetch (`reads`, in the order of the loads;
+    /// `common::database::batch_prefetch`), each line a warning. NCBI's prefetch loads the batch's
+    /// subjects after the reports of the batches before, whose loads a BLAST XML stream that cut
+    /// a report did not make (`query_warnings::ReadCursor::cut`): their texts go to the prefetch's
+    /// loads that make the same asks, so each load's text is made where the posts are written
+    /// (`SubjectRead::placed`), not where the program models the batch.
+    pub fn loads(&mut self, reads: Vec<crate::report::query_warnings::SubjectRead>) {
+        if reads.iter().any(|read| read.load.is_some()) {
+            self.0.push(Post::Loads(reads));
+        } else {
+            // No text is left to a load of a run whose lookups write none (`ReadLoad`).
+            let text: Vec<u8> = reads.into_iter().flat_map(|read| read.text).collect();
+            self.lines(&text);
+        }
+    }
+
     /// Adds one post of `severity` whose text is `text` (with its line feed).
     pub fn post(&mut self, severity: i32, text: impl Into<Vec<u8>>) {
         let text = text.into();
@@ -128,9 +155,27 @@ impl Posts {
         for post in &other.0 {
             match post {
                 Post::Lines(lines) => self.lines(lines),
-                Post::Whole { .. } | Post::Request(_) => self.0.push(post.clone()),
+                Post::Whole { .. } | Post::Request(_) | Post::Loads(_) => self.0.push(post.clone()),
             }
         }
+    }
+
+    /// These posts with the texts of their loads (`loads`) made here, once: the place where they
+    /// are written. The texts that the loads take from the run's loads left out are theirs from
+    /// now on.
+    pub fn placed(&self) -> Posts {
+        let mut posts = Posts::new();
+        for post in &self.0 {
+            match post {
+                Post::Loads(reads) => {
+                    let text: Vec<u8> = reads.iter().flat_map(|read| read.placed()).collect();
+                    posts.lines(&text);
+                }
+                Post::Lines(lines) => posts.lines(lines),
+                Post::Whole { .. } | Post::Request(_) => posts.0.push(post.clone()),
+            }
+        }
+        posts
     }
 
     /// Whether there is no post (and no request mark, `request`).
@@ -138,9 +183,17 @@ impl Posts {
         self.0.is_empty()
     }
 
-    /// Whether a post shows text on the diagnostics (a request mark alone shows none).
+    /// Whether a post shows text on the diagnostics (a request mark alone shows none; loads, whose
+    /// texts are made where they are written, count as text unless none of them can make one:
+    /// `placed` first where it decides).
     pub fn has_text(&self) -> bool {
-        self.0.iter().any(|post| !matches!(post, Post::Request(_)))
+        self.0.iter().any(|post| match post {
+            Post::Request(_) => false,
+            Post::Loads(reads) => reads
+                .iter()
+                .any(|read| !read.text.is_empty() || read.load.is_some()),
+            Post::Lines(_) | Post::Whole { .. } => true,
+        })
     }
 
     /// What standard error shows of the posts.
@@ -152,6 +205,7 @@ impl Posts {
                 Post::Lines(bytes) | Post::Whole { text: bytes, .. } => {
                     text.extend_from_slice(bytes)
                 }
+                Post::Loads(reads) => text.extend(reads.iter().flat_map(|read| read.placed())),
                 Post::Request(_) => {}
             }
         }
@@ -161,7 +215,7 @@ impl Posts {
     /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
     /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
     /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark marks its
-    /// search strategy requests reached (`request`).
+    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`).
     pub fn write(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -170,6 +224,11 @@ impl Posts {
         for post in &self.0 {
             match (post, archive) {
                 (Post::Request(mark), _) => mark.export.release_through(mark.first)?,
+                (Post::Loads(reads), _) => {
+                    for read in reads {
+                        diagnostics.write_all(&read.placed())?;
+                    }
+                }
                 (Post::Whole { severity, text }, Some(handle)) => {
                     handle.write_post(diagnostics, *severity, text)?
                 }

@@ -5085,9 +5085,13 @@ impl<'s> PrefetchSubject<'s> {
 }
 
 /// NCBI's prefetch of one query batch's reported subjects on standard error, for a first format
-/// that prefetches ([`prefetches_subjects`]) and a batch whose prefetch is on: the taxonomy
-/// database's texts of the loads ([`prefetch_messages`], empty without `taxdb.bti` on the search
-/// path), then `Warning: [<program>] Error pre-fetching sequence data` where the prefetch fails.
+/// that prefetches ([`prefetches_subjects`]) and a batch whose prefetch is on: the posts of the
+/// taxonomy database's texts of the loads (those of [`prefetch_messages`], none without
+/// `taxdb.bti` on the search path), then `Warning: [<program>] Error pre-fetching sequence data`
+/// where the prefetch fails. The loads' texts are made where the posts are written
+/// (`diag_log::Posts::loads`): a BLAST XML report of a batch before that the stream cut left the
+/// texts of loads NCBI did not make to them (`report::query_warnings::ReadCursor::cut`), which
+/// a program that models every batch before it writes a report cannot know here.
 /// `subjects` are the batch's reported sequences ([`PrefetchSubject`]), in any order. The
 /// prefetch fails at a subject whose lookup throws on its id (`ParsedSubject::prefetch_fails`),
 /// which loads nothing, and at a flipped Seq-align of a subject without a Bioseq
@@ -5111,7 +5115,7 @@ pub(crate) fn batch_prefetch<'s>(
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
     query: usize,
-) -> Result<Vec<u8>> {
+) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if let Some(stopping) = stopping_subject(&subjects) {
         return Err(prefetch_stop(db, run, &subjects, program, query, stopping));
@@ -5157,9 +5161,17 @@ pub(crate) fn batch_prefetch<'s>(
             program,
         ));
     }
-    let mut text = prefetch_messages(db, run, loaded, program)?;
+    let reads = subject_read_texts(
+        db,
+        run,
+        loaded
+            .into_iter()
+            .map(|(ordinal, parsed)| (0, ordinal, parsed)),
+        false,
+        program,
+    )?;
     if let Some((ordinal, id)) = &failed_lookup {
-        if !text.is_empty() {
+        if reads.iter().any(|read| !read.text.is_empty()) {
             return Err(parsed_refusal(
                 db.oid(*ordinal),
                 &format!(
@@ -5169,10 +5181,12 @@ pub(crate) fn batch_prefetch<'s>(
             ));
         }
     }
+    let mut posts = crate::report::diag_log::Posts::new();
+    posts.loads(reads);
     if failed_lookup.is_some() || fails {
-        text.extend_from_slice(&prefetch_warning(program));
+        posts.lines(&prefetch_warning(program));
     }
-    Ok(text)
+    Ok(posts)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:778-786
@@ -6524,7 +6538,9 @@ mod taxdb_prepass_tests {
                 parsed: Some(&*subject),
                 flipped,
             };
-            batch_prefetch(&db, &run, [subject], "TBLASTX", 0).unwrap()
+            batch_prefetch(&db, &run, [subject], "TBLASTX", 0)
+                .unwrap()
+                .text()
         };
         assert_eq!(prefetch(false), b"");
         assert_eq!(prefetch(true), warning);
@@ -6552,7 +6568,7 @@ mod taxdb_prepass_tests {
         };
         let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
         let warning = "Warning: [blastn] Error pre-fetching sequence data\n";
-        let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+        let text = |posts: crate::report::diag_log::Posts| String::from_utf8(posts.text()).unwrap();
         for taxdb in [None, Some(taxdb.as_path())] {
             let db = open("ntag_t5", taxdb);
             let headers = HeaderReader::new(&db);

@@ -730,7 +730,7 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
@@ -1312,7 +1312,7 @@ mod tests {
             )
             .unwrap();
             let messages = reported.batch_prefetch(database, &batches, true);
-            String::from_utf8(messages.unwrap()).unwrap()
+            String::from_utf8(messages.unwrap().text()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);
         assert!(database.taxdb_found());

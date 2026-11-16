@@ -4209,7 +4209,7 @@ fn run_batch_loop(
                     if plural_names && !ordered.is_empty() {
                         database.open_for_tabular_rows()?;
                     }
-                    warnings[start].lines(&messages);
+                    warnings[start].append(&messages);
                 }
             }
         }

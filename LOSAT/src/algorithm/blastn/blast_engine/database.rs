@@ -649,7 +649,7 @@ impl BlastnDatabase {
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         query: usize,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,

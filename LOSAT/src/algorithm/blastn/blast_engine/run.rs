@@ -10978,7 +10978,7 @@ fn run_in_pool(
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     if !taxdb_found {
                         // No prefetch, and the reports' fetches look nothing up.
-                        Ok(Vec::new())
+                        Ok(Posts::new())
                     } else {
                         let fetches = match output_formats.first() {
                             Some(BlastnOutputFormat::CustomTabular(spec)) => {
@@ -11003,7 +11003,7 @@ fn run_in_pool(
                             .collect::<Result<Vec<_>>>()
                             .map(|messages| {
                                 query_fetches = messages;
-                                Vec::new()
+                                Posts::new()
                             })
                     }
                 } else if seq_aligns == 0 {
@@ -11016,7 +11016,7 @@ fn run_in_pool(
                     //        LoadSequencesToScope(ids, ranges, scope);
                     // ```
                     // A batch without Seq-aligns prefetches no sequence.
-                    rows_open(&batch_hit_lists).map(|()| Vec::new())
+                    rows_open(&batch_hit_lists).map(|()| Posts::new())
                 } else {
                     database
                         .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped, start)
@@ -11045,14 +11045,14 @@ fn run_in_pool(
                                 !args.ungapped,
                                 start,
                             )
-                            .map(|()| Vec::new())
+                            .map(|()| Posts::new())
                     })
             } else {
                 None
             };
             match prefetch {
                 None => {}
-                Some(Ok(messages)) => warnings[start].lines(&messages),
+                Some(Ok(posts)) => warnings[start].append(&posts),
                 Some(Err(error)) if error.is::<database::HeaderReadError>() => {
                     let failure = error
                         .downcast::<database::HeaderReadError>()

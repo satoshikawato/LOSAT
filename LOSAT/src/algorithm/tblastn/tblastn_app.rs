@@ -2261,6 +2261,8 @@ fn search(
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
         let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
+        // The posts of each batch's prefetch, with its first query (`query_warnings::query_posts`).
+        let mut prefetch_posts = Vec::new();
         let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
@@ -2481,11 +2483,11 @@ fn search(
                     }
                     let messages = database.batch_prefetch(reported, hitlists, span.start)?;
                     rows_open(hitlists)?;
-                    if messages.is_empty() {
-                        continue;
+                    // After the reader's messages of the batch, in its first query
+                    // (`query_warnings::query_posts`).
+                    if !messages.is_empty() {
+                        prefetch_posts.push((span.start, messages));
                     }
-                    let reader = batches.warnings[span.start].len();
-                    query_warning_lines[span.start].splice(reader..reader, messages);
                 }
             }
         }
@@ -2609,6 +2611,7 @@ fn search(
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
+            prefetch_posts,
             |query| batches.warnings[query].len(),
         );
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is

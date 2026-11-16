@@ -693,7 +693,6 @@ impl XdropScratch {
             sc.x_nib = x_dp_nibble_here();
             return sc;
         }
-        X_SCRATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             ha: Rows::new(0),
             hb: Rows::new(0),
@@ -728,7 +727,6 @@ impl XdropScratch {
     // ```
     // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
-        X_SCRATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             ha: Rows::new(1024),
             hb: Rows::new(1024),
@@ -933,7 +931,7 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // The 32-bit lanes' rows (`kernel::align_body32`): `best` and `best_gap` of `score_array` (`H` and
 // `E`) on 32-bit lanes. They are not a field of `XdropScratch` (a field would move the others and
 // change the code of every 8-bit and 16-bit kernel); a call takes a set from a pool that every
-// scratch shares (`X32_ROWS`, as `X_CHUNKS` holds trace chunks) and gives it back when it ends
+// scratch shares (`X32_ROWS`, as `X_POOL` holds trace chunks) and gives it back when it ends
 // (`X32Lease`), with its written lanes cleared (`dirty`) as `XdropScratch::reset` clears the other
 // rows; the pool is freed with the trace chunks when the last scratch goes.
 #[cfg(any(
@@ -1220,12 +1218,20 @@ impl XdropScratch {
 // NCBI keeps every chunk in its `gap_align` until the search ends; here a scratch keeps its first
 // chunk (it grows as `Vec::reserve` does, up to one chunk, so a scratch that only ran short
 // tracebacks holds what they needed), and the chunks after it come from one pool that every
-// scratch of the process shares (`X_CHUNKS`) and go back to it when the traceback call ends
+// scratch of the process shares (`X_POOL`) and go back to it when the traceback call ends
 // (`XdropScratch::x_trace_release`) or the next call starts (`reset`). Any thread takes any chunk
 // given back, so long tracebacks never grow a buffer by copying it to one twice its size, and the
-// pool holds the most chunks in use at one time. The pool is freed when the last scratch goes
-// (`X_SCRATCHES`). Rows go forward only (NCBI looks for room from the head of its list again for
-// each row), and the kernels write and the walk reads the same cells either way.
+// pool holds the most chunks in use at one time. The pool cuts its chunks from slabs of 32 MiB
+// (`X_SLAB`) and frees them when the last scratch goes (`X_SCRATCHES`, the end of a search's
+// traceback stage). A chunk taken from the allocator by itself came from the arena of the thread
+// that took it and raised that arena's top, where the allocations of the stages after the
+// traceback then stacked on the chunks freed below them (Sakai x EDL933 `-subject` blastn at 48
+// threads: +46 to +70 MiB of chunks in the traceback stage, then 4 to 16 MiB more at the peak,
+// with 62 to 67 MiB live); a slab is mapped by itself (glibc maps every block of 32 MiB or more,
+// whatever its moving threshold, and the other allocators map large blocks too), so its pages
+// count only once a chunk in them is written and go back to the system with it. Rows go forward
+// only (NCBI looks for room from the head of its list again for each row), and the kernels write
+// and the walk reads the same cells either way.
 //
 // The chunk size: 64 KiB, a sixteenth of NCBI's `CHUNKSIZE` (2,097,152) cells in the four-bit rows
 // (`LOSAT_X_DPNIBBLE`), the layout of every scratch of a search on two threads or more, where
@@ -1241,10 +1247,29 @@ const X_ROW_BYTES: usize = 9;
 // No NCBI counterpart: the least bytes a scratch's own chunk takes when it first grows.
 const X_CHUNK_MIN: usize = 256;
 
-// No NCBI counterpart: the chunks given back (`X_CHUNK`; `x_chunk_take` enlarges a shorter one).
-static X_CHUNKS: std::sync::Mutex<Vec<Vec<u8>>> = std::sync::Mutex::new(Vec::new());
-// No NCBI counterpart: the scratches alive (`X_CHUNK`). The last one to go (the end of a search's
-// traceback stage) frees the pool's chunks, as the scratches' own chunks were freed with them.
+// No NCBI counterpart: the bytes of a slab of the pool (`X_POOL`), a whole number of chunks.
+const X_SLAB: usize = 32 << 20;
+const _: () = assert!(X_SLAB.is_multiple_of(X_CHUNK));
+
+// No NCBI counterpart: the pool of trace chunks (`X_CHUNK`): its slabs (`X_SLAB` bytes of capacity
+// each, written only through the chunks cut from them), the chunks cut from the last slab, and the
+// chunks given back (their numbers, `i / (X_SLAB / X_CHUNK)` the slab), which go out again first,
+// the last one given back first (its pages were written last).
+#[derive(Default)]
+struct XPool {
+    slabs: Vec<Vec<u8>>,
+    cut: usize,
+    free: Vec<usize>,
+}
+
+static X_POOL: std::sync::Mutex<XPool> = std::sync::Mutex::new(XPool {
+    slabs: Vec::new(),
+    cut: 0,
+    free: Vec::new(),
+});
+// No NCBI counterpart: the traces alive (`XTrace`, one in each scratch). The last one to go (the
+// end of a search's traceback stage) frees the pool's slabs, as the scratches' own chunks were
+// freed with them.
 static X_SCRATCHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(test)]
@@ -1265,20 +1290,124 @@ fn x_chunk_shift() -> u32 {
 }
 
 // No NCBI counterpart: the pool's lock; a chunk is plain memory, so poisoning carries no meaning.
-fn x_chunk_lock() -> std::sync::MutexGuard<'static, Vec<Vec<u8>>> {
-    X_CHUNKS
+fn x_pool_lock() -> std::sync::MutexGuard<'static, XPool> {
+    X_POOL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-// No NCBI counterpart: an empty chunk of at least `size` bytes, from the pool when it has one.
-fn x_chunk_take(size: usize) -> Vec<u8> {
-    let taken = x_chunk_lock().pop();
-    let mut c = taken.unwrap_or_default();
-    if c.capacity() < size {
-        c.reserve_exact(size);
+// No NCBI counterpart: an empty chunk of the pool for `size` bytes (at most `X_CHUNK`): one given
+// back when there is one, else the next of the last slab, or the first of a new slab.
+fn x_chunk_take(size: usize) -> XChunk {
+    debug_assert!(size <= X_CHUNK);
+    let per = X_SLAB / X_CHUNK;
+    let mut pool = x_pool_lock();
+    let i = match pool.free.pop() {
+        Some(i) => i,
+        None => {
+            if pool.slabs.is_empty() || pool.cut == per {
+                pool.slabs.push(Vec::with_capacity(X_SLAB));
+                pool.cut = 0;
+            }
+            pool.cut += 1;
+            (pool.slabs.len() - 1) * per + pool.cut - 1
+        }
+    };
+    // SAFETY: chunk `i % per` of a slab of `X_SLAB` bytes of capacity lies in its buffer, which
+    // stays put while the slab lives (`Vec::as_mut_ptr` takes no reference to the buffer).
+    let p = unsafe { pool.slabs[i / per].as_mut_ptr().add(i % per * X_CHUNK) };
+    XChunk::Pool {
+        p,
+        i,
+        len: 0,
+        cap: size,
     }
-    c
+}
+
+// No NCBI counterpart: the end of the last trace (`X_SCRATCHES`): the pool's slabs are freed,
+// unless a trace made since then holds one of their chunks (it took it under the lock).
+fn x_pool_free() {
+    let idle = {
+        let mut pool = x_pool_lock();
+        if X_SCRATCHES.load(std::sync::atomic::Ordering::Acquire) == 0 {
+            std::mem::take(&mut *pool)
+        } else {
+            XPool::default()
+        }
+    };
+    drop(idle);
+}
+
+/// No NCBI counterpart: a trace chunk of a scratch (`XTrace::t`): its own (`t[0]`) or one for a
+/// row longer than a chunk, from the allocator, or one of the pool's (`X_POOL`), cut from a slab,
+/// of `cap` bytes, chunk `i` of the pool. The used part (`len`) is set when the next chunk is
+/// taken (`x_row_room`).
+enum XChunk {
+    Own(Vec<u8>),
+    Pool {
+        p: *mut u8,
+        i: usize,
+        len: usize,
+        cap: usize,
+    },
+}
+
+impl XChunk {
+    #[inline]
+    fn as_ptr(&self) -> *const u8 {
+        match self {
+            Self::Own(v) => v.as_ptr(),
+            Self::Pool { p, .. } => *p,
+        }
+    }
+
+    #[inline]
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        match self {
+            Self::Own(v) => v.as_mut_ptr(),
+            Self::Pool { p, .. } => *p,
+        }
+    }
+
+    #[inline]
+    fn capacity(&self) -> usize {
+        match self {
+            Self::Own(v) => v.capacity(),
+            Self::Pool { cap, .. } => *cap,
+        }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            Self::Own(v) => v.len(),
+            Self::Pool { len, .. } => *len,
+        }
+    }
+
+    /// # Safety
+    /// The first `n` bytes were written and `n` is at most the capacity.
+    #[inline]
+    unsafe fn set_len(&mut self, n: usize) {
+        match self {
+            // SAFETY: the caller's.
+            Self::Own(v) => unsafe { v.set_len(n) },
+            Self::Pool { len, .. } => *len = n,
+        }
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        // SAFETY: no byte is used.
+        unsafe { self.set_len(0) }
+    }
+
+    /// Test only: the used part.
+    #[cfg(test)]
+    fn x_test_bytes(&self) -> &[u8] {
+        // SAFETY: the first `len` bytes were written (`set_len`).
+        unsafe { std::slice::from_raw_parts(self.as_ptr(), self.len()) }
+    }
 }
 
 /// No NCBI counterpart (memory placement only): the traceback rows of a scratch, each followed by
@@ -1287,7 +1416,7 @@ fn x_chunk_take(size: usize) -> Vec<u8> {
 /// the next chunk is taken, so the used part of `t[tc]` ends at `wp`.
 pub(crate) struct XTrace {
     /// The trace chunks of this call: `t[0]` the scratch's own, the rest from the pool.
-    t: Vec<Vec<u8>>,
+    t: Vec<XChunk>,
     /// The chunk being filled (the last of `t`).
     tc: usize,
     /// Where the next row starts in `t[tc]` (NCBI `state_array + used`).
@@ -1311,14 +1440,17 @@ pub(crate) struct XTrace {
 
 // SAFETY: the pointers of an `XTrace` point into the buffers of its own chunks (`t`), which do not
 // move when the `XTrace` moves; they are written only through `&mut self` and read through `&self`,
-// like the chunks themselves. The one place the chunks change hands is the pool: `x_purge_written`
-// gives every chunk after the scratch's own back to the pool and resets every cursor (`wp`,
-// `wend`, the best-row mark `best`, and `w0` with chunk 0's base) before any chunk reaches the
-// pool, so no cursor of one scratch points into a chunk another thread holds.
+// like the chunks themselves. A chunk of the pool is in one trace at a time (`x_chunk_take` gives
+// it out under the pool's lock until it is given back), and its slab lives while any trace does
+// (`X_SCRATCHES`, `x_pool_free`). The one place the chunks change hands is the pool:
+// `x_purge_written` gives every chunk after the scratch's own back to the pool and resets every
+// cursor (`wp`, `wend`, the best-row mark `best`, and `w0` with chunk 0's base) before any chunk
+// reaches the pool, so no cursor of one scratch points into a chunk another thread holds.
 unsafe impl Send for XTrace {}
 
 impl XTrace {
     fn new() -> Self {
+        X_SCRATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             t: Vec::new(),
             tc: 0,
@@ -1383,7 +1515,7 @@ impl XTrace {
         let size = 1usize << self.shift;
         let need = n + X_ROW_BYTES;
         if self.t.is_empty() {
-            self.t.push(Vec::new());
+            self.t.push(XChunk::Own(Vec::new()));
             self.x_at(0, 0, 0);
             self.w0 = self.wp;
         }
@@ -1392,7 +1524,9 @@ impl XTrace {
             // the best row's record moves with the rows
             let best =
                 (!self.best.is_null()).then(|| self.best as usize - self.t[0].as_ptr() as usize);
-            let c = &mut self.t[0];
+            let XChunk::Own(c) = &mut self.t[0] else {
+                unreachable!("a scratch's own chunk is its first")
+            };
             // SAFETY: the first `used` bytes were written (rows and their records); `reserve_exact`
             // copies them.
             unsafe { c.set_len(used) };
@@ -1415,7 +1549,7 @@ impl XTrace {
         let (c, lim) = if need > size {
             let c = Vec::with_capacity((n + n / 3).max(need));
             let lim = c.capacity();
-            (c, lim)
+            (XChunk::Own(c), lim)
         } else {
             (x_chunk_take(size), size)
         };
@@ -1549,7 +1683,7 @@ impl XTrace {
     }
 
     /// NCBI `s_GapPurgeState` (every chunk's used part set to 0), and the chunks after the
-    /// scratch's own go back to the pool (`X_CHUNKS`). One test when nothing was written since the
+    /// scratch's own go back to the pool (`X_POOL`). One test when nothing was written since the
     /// last purge.
     #[inline(always)]
     fn x_purge(&mut self) {
@@ -1558,21 +1692,19 @@ impl XTrace {
         }
     }
 
-    // No NCBI counterpart: the slow part of `x_purge`. A chunk longer than one chunk (a row longer
-    // than a chunk) is freed.
+    // No NCBI counterpart: the slow part of `x_purge`. A chunk of a row longer than a chunk is
+    // freed.
     #[cold]
     #[inline(never)]
     fn x_purge_written(&mut self) {
         if self.t.len() > 1 {
             let mut big = Vec::new();
             {
-                let mut pool = x_chunk_lock();
-                for mut c in self.t.drain(1..) {
-                    if c.capacity() > X_CHUNK {
-                        big.push(c);
-                    } else {
-                        c.clear();
-                        pool.push(c);
+                let mut pool = x_pool_lock();
+                for c in self.t.drain(1..) {
+                    match c {
+                        XChunk::Pool { i, .. } => pool.free.push(i),
+                        XChunk::Own(c) => big.push(c),
                     }
                 }
             }
@@ -1650,14 +1782,13 @@ impl XTrace {
     }
 }
 
-impl Drop for XdropScratch {
-    // No NCBI counterpart: the scratch's chunks from the pool go back, and the last scratch alive
-    // frees the pool's chunks (`X_SCRATCHES`) and the 32-bit lanes' rows (`X32_ROWS`).
+impl Drop for XTrace {
+    // No NCBI counterpart: the trace's chunks from the pool go back, and the last trace alive (the
+    // last scratch) frees the pool's slabs (`X_SCRATCHES`) and the 32-bit lanes' rows (`X32_ROWS`).
     fn drop(&mut self) {
-        self.trace.x_purge();
+        self.x_purge();
         if X_SCRATCHES.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
-            let idle = std::mem::take(&mut *x_chunk_lock());
-            drop(idle);
+            x_pool_free();
             #[cfg(any(
                 target_arch = "x86_64",
                 all(target_arch = "wasm32", target_feature = "simd128"),
@@ -6130,7 +6261,8 @@ mod tests {
         assert_eq!(t.x_test_used(), vec![454, 102, 621]);
         assert!(t.t[0].capacity() <= 512 && t.t[1].capacity() >= 512);
         assert!(t.t[2].capacity() >= 600 + 600 / 3);
-        assert!(t.t[0][..200].iter().all(|&b| b == 1) && t.t[0][202..452].iter().all(|&b| b == 2));
+        let own = t.t[0].x_test_bytes();
+        assert!(own[..200].iter().all(|&b| b == 1) && own[202..452].iter().all(|&b| b == 2));
         // the best row's record moved with chunk 0 when it grew for row 2
         let (c, base, p) = t.x_walk_start().expect("best row");
         assert_eq!(
@@ -6174,7 +6306,7 @@ mod tests {
         }
         t.x_purge();
         assert_eq!((t.t.len(), t.tc), (1, 0));
-        assert!(t.x_test_empty() && t.t[0].is_empty() && t.x_walk_start().is_none());
+        assert!(t.x_test_empty() && t.t[0].len() == 0 && t.x_walk_start().is_none());
         row(&mut t, 300, 300, 6);
         assert_eq!(t.x_test_layout(false), vec![(0, 0, 6, 300)]);
         // a step of 255 or more forward takes the long form too

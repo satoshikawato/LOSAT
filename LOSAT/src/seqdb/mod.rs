@@ -2266,9 +2266,9 @@ impl SeqDb {
     //                     }
     //                 }
     // ```
-    /// The definition lines of `ordinal`: the title and `n` of
-    /// `gnl|BL_ORD_ID|n`, where `n` is the stored number plus the first
-    /// OID of the volume, as NCBI reports it.
+    /// The definition lines of `ordinal`: the title, `n` of `gnl|BL_ORD_ID|n`, where `n` is the
+    /// stored number plus the first OID of the volume, as NCBI reports it, and the taxid (a
+    /// record whose taxid does not decode is an `Err`, as in `defline_taxids`).
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.ordinal_deflines(
@@ -2301,8 +2301,8 @@ impl SeqDb {
     //                     }
     // ```
     /// The header of `ordinal` as a report reads it: the ordinal-id definition lines
-    /// (`deflines`), or every member and Seq-id (`defline_set`) of a record with parsed
-    /// Seq-ids. A record without parsed Seq-ids is read as before, with the same errors.
+    /// (`deflines`, with their taxids), or every member and Seq-id (`defline_set`) of a record
+    /// with parsed Seq-ids.
     pub fn read_header(&self, ordinal: u32) -> Result<SequenceHeader, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.sequence_header(
@@ -2489,30 +2489,11 @@ impl SeqDb {
     /// call returned true. The headers of the range are read with one read of the index file
     /// and one read of the header file per MiB (`Volume::visit_deflines`) instead of two reads
     /// per sequence.
+    /// The titles and the taxids of a range come in one pass over its headers (a record whose
+    /// taxid does not decode is an `Err`, as in `defline_taxids`).
     pub fn visit_deflines(
         &self,
         range: BlockRange,
-        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
-    ) -> bool {
-        self.visit_deflines_as(range, false, visit)
-    }
-
-    /// `visit_deflines`, with the `taxid` of each definition line decoded (the decode of
-    /// `defline_taxids`, which also gives the titles): the titles and the taxids of a range in one
-    /// pass over its headers. A record whose taxid does not decode is an `Err`, as in
-    /// `defline_taxids`.
-    pub fn visit_deflines_taxids(
-        &self,
-        range: BlockRange,
-        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
-    ) -> bool {
-        self.visit_deflines_as(range, true, visit)
-    }
-
-    fn visit_deflines_as(
-        &self,
-        range: BlockRange,
-        want_taxid: bool,
         mut visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
@@ -2529,7 +2510,7 @@ impl SeqDb {
             range.first,
             range.end,
             header_piece_bytes(),
-            want_taxid,
+            true,
             &mut |oid, deflines| {
                 let Some(ordinal) = self.range_ordinal(range, oid) else {
                     return true;
@@ -2774,7 +2755,7 @@ pub struct OrdinalDefline {
     /// Number of stored title bytes outside ' ' ..= '~' that were read as '#'
     /// (`Defline::replaced_title_bytes`).
     pub replaced_title_bytes: usize,
-    /// `Defline::taxid`: 0 unless the definition lines were read with their taxids
-    /// ([`SeqDb::visit_deflines_taxids`]).
+    /// `Defline::taxid` (0 for none), read with the title by [`SeqDb::deflines`],
+    /// [`SeqDb::visit_deflines`] and [`SeqDb::read_header`].
     pub taxid: i32,
 }

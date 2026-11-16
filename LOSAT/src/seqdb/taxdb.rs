@@ -49,7 +49,8 @@
 //!
 //! The reader opens nothing until a name is asked for ([`LazyTaxDb`]); it
 //! reads the index by position (about 22 reads of 8 bytes per lookup), so it
-//! holds no table in memory.
+//! holds no table in memory. The readers of the stored titles keep what they
+//! looked up as NCBI's volume does, in 256 slots ([`TaxCache`]).
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -634,6 +635,134 @@ impl LazyTaxDb {
     #[cfg(test)]
     pub fn is_open(&self) -> bool {
         self.db.get().is_some()
+    }
+}
+
+/// What the lookup of one taxid gives the source of a Bioseq (`CSeqDBVol::x_GetTaxonomy`'s
+/// Org-ref, seqdbvol.cpp:1161-1169): the names of the taxonomy database, and the scientific name
+/// that `CDeflineGenerator` takes as `m_Taxname`.
+#[derive(Debug)]
+pub struct SourceNames {
+    names: Option<TaxNames>,
+    taxname: Option<std::sync::Arc<[u8]>>,
+}
+
+impl SourceNames {
+    fn new(names: Option<TaxNames>) -> Self {
+        // An empty scientific name sets an empty `m_Taxname`, which makes the titles of a Bioseq
+        // without a name (`report::defline::SourceTaxname::Unnamed`).
+        let taxname = names
+            .as_ref()
+            .filter(|names| !names.scientific_name.is_empty())
+            .map(|names| std::sync::Arc::from(names.scientific_name.as_slice()));
+        Self { names, taxname }
+    }
+
+    /// The names (`TaxDb::names`); `None` where `GetTaxNames` returned false.
+    pub fn names(&self) -> Option<&TaxNames> {
+        self.names.as_ref()
+    }
+
+    /// The scientific name of the source (`m_Taxname`); `None` where the lookup found no names or
+    /// the name is empty.
+    pub fn taxname(&self) -> Option<&std::sync::Arc<[u8]>> {
+        self.taxname.as_ref()
+    }
+}
+
+/// `CSeqDBVol::m_TaxCache(256)` (seqdbvol.cpp:84).
+const TAX_CACHE_SLOTS: usize = 256;
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1105-1107, 1140-1182
+// ```c++
+//     const bool provide_new_taxonomy_info = true;
+//     const bool use_taxinfo_cache         = (CThread::GetSelf() == 0 ? true : false);
+//     ...
+//         if (use_taxinfo_cache && m_TaxCache.Lookup(TAX_ID_TO(int, taxid)).NotEmpty()) {
+//             have_org_desc = true;
+//         }
+//
+//         SSeqDBTaxInfo tnames(taxid);
+//         bool found_taxid_in_taxonomy_blastdb = true;
+//
+//         if ((! have_org_desc) && provide_new_taxonomy_info) {
+//             try {
+//                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
+//             } catch (CSeqDBException &) {
+//                 found_taxid_in_taxonomy_blastdb = false;
+//             }
+//         }
+//         ...
+//                 if (use_taxinfo_cache) {
+//                     m_TaxCache.Lookup(TAX_ID_TO(int, taxid)) = desc;
+//                 }
+// ```
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1196
+// ```c++
+//     TValue & Lookup(int key)
+//     {
+//         _ASSERT(IS_POWER_OF_TWO(m_Slots.size()));
+//
+//         TSlot & slot = m_Slots[key & (m_Slots.size()-1)];
+//
+//         if (slot.first != key) {
+//             slot.first = key;
+//             slot.second = TValue();
+//         }
+//
+//         return slot.second;
+//     }
+// ```
+// NCBI's cache keeps the source of every lookup on the main thread, found or not (a
+// `CSeqDBException` of `GetTaxNames` counts as not found), so a volume asks the taxonomy database
+// again only where the slot of the taxid holds another one; on other threads it asks at every
+// load. The texts that a lookup writes come from `GetTaxNames` and so only where it is asked:
+// `algorithm::common::database::TaxdbRun` keeps that per volume for the search's texts. A lookup
+// that reads past the mapped end of `taxdb.btd` crashes NCBI at the first: there is nothing to
+// keep.
+/// The sources' names that a reader of a database's Bioseqs looked up, by taxid: NCBI's taxonomy
+/// cache of a volume (`CSeqDBVol::m_TaxCache`, 256 slots, a taxid in the slot `taxid & 255`, which
+/// holds the last taxid looked up there). The one memo of the lookups of the readers of the stored
+/// titles (`algorithm::common::database::HeaderReader`, blastdbcmd's `retrieve::Source`, the
+/// maskers' `seqmasks_io::bdb_reader::MaskBdbReader`), each with its own.
+///
+/// It keeps only a lookup that found its answer without writing a text and without an error,
+/// which every later lookup of that taxid gives again (`TaxDb::names` reads nothing else). A
+/// lookup that writes a text (those of opening the database, which come with the first lookup;
+/// the offset error of the last entry) or fails is asked again each time, as NCBI writes the
+/// offset error at each lookup where it asks: the readers that refuse it do so at the first, and
+/// the search's texts are `TaxdbRun`'s. So its answers do not depend on what it holds, and it
+/// holds at most 256 of them (nothing until the first lookup).
+#[derive(Debug, Default)]
+pub struct TaxCache {
+    slots: std::cell::RefCell<Vec<Option<(i32, std::sync::Arc<SourceNames>)>>>,
+}
+
+impl TaxCache {
+    /// The names of `taxid`: the slot's where it holds `taxid`, else `lookup` (`TaxDb::names` or
+    /// `LazyTaxDb::names` of the reader's database), which appends its texts to `messages`.
+    pub fn names(
+        &self,
+        taxid: i32,
+        messages: &mut Vec<String>,
+        lookup: impl FnOnce(&mut Vec<String>) -> Result<Option<TaxNames>, SeqDbError>,
+    ) -> Result<std::sync::Arc<SourceNames>, SeqDbError> {
+        let slot = taxid as usize & (TAX_CACHE_SLOTS - 1);
+        if let Some(Some((held, names))) = self.slots.borrow().get(slot) {
+            if *held == taxid {
+                return Ok(std::sync::Arc::clone(names));
+            }
+        }
+        let written = messages.len();
+        let names = std::sync::Arc::new(SourceNames::new(lookup(messages)?));
+        if messages.len() == written {
+            let mut slots = self.slots.borrow_mut();
+            if slots.is_empty() {
+                slots.resize(TAX_CACHE_SLOTS, None);
+            }
+            slots[slot] = Some((taxid, std::sync::Arc::clone(&names)));
+        }
+        Ok(names)
     }
 }
 
@@ -1387,6 +1516,85 @@ mod tests {
             assert_eq!(db.entry_count(), u64::from(n));
             assert_eq!(db.any_lookup_may_fail().unwrap(), refuses, "{tag}");
             assert_eq!(brute_force_may_refuse(&db), refuses, "{tag}");
+        }
+    }
+
+    /// `TaxCache::names` of `taxid` through `db`, with the number of lookups it made.
+    fn cached(
+        cache: &TaxCache,
+        db: &TaxDb,
+        taxid: i32,
+    ) -> (
+        Result<std::sync::Arc<SourceNames>, SeqDbError>,
+        Vec<String>,
+        u32,
+    ) {
+        let mut messages = Vec::new();
+        let mut asked = 0;
+        let names = cache.names(taxid, &mut messages, |messages| {
+            asked += 1;
+            db.names(taxid, messages)
+        });
+        (names, messages, asked)
+    }
+
+    // NCBI's `CSeqDBIntCache` (seqdbgeneral.hpp:1184-1196): a slot per `taxid & 255` that holds the
+    // last taxid looked up there. LOSAT keeps only the answers that a lookup gives again without
+    // a text: those that wrote one, and the refusals, are asked again.
+    #[test]
+    fn the_cache_keeps_answers_without_texts_in_a_slot_per_taxid() {
+        // 257 shares the slot of 1; 300 is in no entry (found nothing); 600 is the last entry,
+        // whose offset is past the end (the offset error at each lookup).
+        let (mut index, data) = build(&[
+            (1, b"Bacillus\tb\tc\td"),
+            (257, b"\tb\tc\td"),
+            (600, b"e\tf\tg\th"),
+        ]);
+        let last = 24 + 16 + 4;
+        index[last..last + 4].copy_from_slice(&be(data.len() as u32 + 10));
+        let (_dir, db) = open_built(&index, &data);
+        let cache = TaxCache::default();
+        let (first, messages, asked) = cached(&cache, &db, 1);
+        let first = first.unwrap();
+        assert_eq!((messages.len(), asked), (0, 1));
+        assert_eq!(
+            first.taxname().map(|name| &name[..]),
+            Some(&b"Bacillus"[..])
+        );
+        let (again, _, asked) = cached(&cache, &db, 1);
+        assert!(std::sync::Arc::ptr_eq(&first, &again.unwrap()));
+        assert_eq!(asked, 0);
+        // An empty scientific name is no `m_Taxname`; the names are still there.
+        let (other, _, asked) = cached(&cache, &db, 257);
+        let other = other.unwrap();
+        assert_eq!(
+            (other.taxname(), other.names().is_some(), asked),
+            (None, true, 1)
+        );
+        // 257 took the slot: 1 is asked again.
+        assert_eq!(cached(&cache, &db, 1).2, 1);
+        // Nothing found is kept.
+        let (none, _, asked) = cached(&cache, &db, 300);
+        assert!(none.unwrap().names().is_none());
+        assert_eq!(asked, 1);
+        assert_eq!(cached(&cache, &db, 300).2, 0);
+        // The offset error comes at each lookup: never kept.
+        for _ in 0..2 {
+            let (names, messages, asked) = cached(&cache, &db, 600);
+            assert!(names.unwrap().names().is_none());
+            assert_eq!((messages, asked), (vec![MSG_OFFSET_ERROR.to_string()], 1));
+        }
+        // A refused lookup (past the mapped end) is asked again.
+        let (mut index, data) =
+            build(&[(1, b"a\tb\tc\td"), (2, b"e\tf\tg\th"), (3, b"i\tj\tk\tl")]);
+        let off3 = 24 + 16 + 4;
+        index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 1));
+        let (_dir, db) = open_built(&index, &data);
+        let cache = TaxCache::default();
+        for _ in 0..2 {
+            let (names, _, asked) = cached(&cache, &db, 2);
+            assert!(matches!(names, Err(SeqDbError::Unsupported { .. })));
+            assert_eq!(asked, 1);
         }
     }
 }

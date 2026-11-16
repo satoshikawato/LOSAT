@@ -995,6 +995,9 @@ pub(crate) struct StoredTitle {
     /// The name of the organism of the source of the sequence's Bioseq, from which NCBI makes an
     /// empty title (`HeaderReader::stored_source`; `report::defline::BioseqFacts::of_source`).
     pub(crate) source: crate::report::defline::SourceTaxname,
+    /// The `taxid` of the definition line (0 for none), read with the title: the Bioseq's source
+    /// where it is positive (`HeaderReader::stored_source`).
+    pub(crate) taxid: i32,
 }
 
 impl StoredTitle {
@@ -1070,6 +1073,7 @@ pub(crate) fn stored_title(
         title: defline.title,
         replaced_bytes: defline.replaced_title_bytes > 0,
         source: Default::default(),
+        taxid: defline.taxid,
     })
 }
 
@@ -1302,9 +1306,8 @@ pub(crate) struct HeaderReader<'a> {
     /// The taxonomy database of the search path where `taxdb.bti` is found and it opens, opened
     /// at the first record whose title NCBI can make from its taxids (`source_taxname`).
     taxdb: std::cell::OnceCell<Option<crate::seqdb::taxdb::TaxDb>>,
-    /// `source_taxname` of the first sources' taxids of the titles made from a source, by taxid.
-    source_names:
-        std::cell::RefCell<std::collections::HashMap<i32, crate::report::defline::SourceTaxname>>,
+    /// What `source_taxname` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
+    source_names: crate::seqdb::taxdb::TaxCache,
     /// `LookupTexts::of`, asked at the first record found with other taxids or in another
     /// volume (`copy_of`).
     lookup_texts: std::cell::OnceCell<LookupTexts>,
@@ -1719,7 +1722,8 @@ impl<'a> HeaderReader<'a> {
     /// The name that the taxonomy database gives the taxid `taxid` of a Bioseq's first source
     /// (`DeflineSet::first_source_taxid`: of a stored title its definition line's, of a sequence
     /// with parsed Seq-ids `ParsedSubject::first_source_taxid`; none: `Unnamed`), its titles made
-    /// from (`report::defline::BioseqFacts::taxname`). Each taxid is looked up once.
+    /// from (`report::defline::BioseqFacts::taxname`). The lookups are kept as NCBI's volume keeps
+    /// them (`source_names`); their texts are `TaxdbRun`'s and `LookupTexts`'.
     fn source_taxname(&self, taxid: Option<i32>) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
         let Some(taxid) = taxid else {
@@ -1728,19 +1732,15 @@ impl<'a> HeaderReader<'a> {
         let Some(taxdb) = self.taxdb() else {
             return SourceTaxname::Unnamed;
         };
-        self.source_names
-            .borrow_mut()
-            .entry(taxid)
-            .or_insert_with(|| {
-                let mut messages = Vec::new();
-                match taxdb.names(taxid, &mut messages) {
-                    Ok(names) => SourceTaxname::of_names(names.as_ref()),
-                    Err(_) => SourceTaxname::Refused(
-                        "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
-                    ),
-                }
-            })
-            .clone()
+        match self
+            .source_names
+            .names(taxid, &mut Vec::new(), |messages| taxdb.names(taxid, messages))
+        {
+            Ok(names) => SourceTaxname::of_names(&names),
+            Err(_) => SourceTaxname::Refused(
+                "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
+            ),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
@@ -1755,24 +1755,50 @@ impl<'a> HeaderReader<'a> {
     // outfmt 18, the first word of the tabular subject ids), where the taxonomy database names
     // the taxid (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`;
     // probe of line RG T5, `remaining-gaps-20261112/T/t5`).
-    /// The name of the source from which NCBI makes the title of the sequence `ordinal` without
-    /// parsed Seq-ids, whose stored title is `title` (`report::defline::bioseq_title_from_source`,
-    /// `source_taxname` of its first source's taxid, `DeflineSet::first_source_taxid` of its
-    /// definition lines, which NCBI reads by its ordinal id: no target). The definition lines are
-    /// read only for a title that the source replaces, where a taxonomy database opens; ones that
-    /// do not read are LOSAT's refusal.
-    fn stored_source(&self, title: &[u8], ordinal: u32) -> crate::report::defline::SourceTaxname {
+    // A protein title ending in `]` loses its end to `x_AdjustProteinTitleSuffix` where the
+    // Bioseq has a source, named or not (`report::defline::adjust_protein_title_suffix`): the
+    // first word that replaces `gnl|BL_ORD_ID|n` in the tabular ids is the adjusted title's
+    // (`alpha` of `alpha, partial [Bacillus sp.]` with taxid 100002; `chi` of `chi, partial [ ]`
+    // also without a name: probe of line RG T5c, `T/t5c/out/ncbi/psall.blastp.f6.*`). The other
+    // reports show the stored title, or the description's without the adjustment. So the source
+    // of such a title is asked only where the first word can depend on it: most titles ending in
+    // `]` (`hypothetical protein [Bacillus sp.]`) keep their first word whatever the source
+    // (`report::defline::protein_title_word_needs_source`) and ask nothing, as for any other title.
+    // NCBI looks the taxid up where it loads the Bioseq, whatever the title: that lookup, and its
+    // refusal of a record past the mapped end of `taxdb.btd`, are the prefetch's and the XML2
+    // reports' (`TaxdbRun::load`).
+    /// The source of the sequence `ordinal` without parsed Seq-ids, whose stored title is `title`
+    /// and whose definition line's taxid is `taxid` (`StoredTitle::taxid`, read with the title;
+    /// one definition line, so its positive taxid is the first source's,
+    /// `DeflineSet::first_source_taxid` without a target: NCBI reads the sequence by its ordinal
+    /// id), where a title that NCBI makes depends on it: the name from which it makes an empty
+    /// title (`report::defline::bioseq_title_from_source`, where a taxonomy database opens), and
+    /// for a protein title ending in `]` whose first word its rewritten end can change
+    /// (`report::defline::protein_title_word_needs_source`) whether there is a source
+    /// (`SourceTaxname::Nameless` without a name) and its name (`source_taxname`). Other titles
+    /// ask nothing (`Unnamed`).
+    pub(crate) fn stored_source(
+        &self,
+        title: &[u8],
+        taxid: i32,
+        ordinal: u32,
+    ) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
+        let taxid = (taxid > 0).then_some(taxid);
+        if let Some(taxid) = taxid.filter(|_| {
+            self.db.seqtype() == SeqType::Protein
+                && crate::report::defline::protein_title_word_needs_source(title)
+        }) {
+            return match self.source_taxname(Some(taxid)) {
+                SourceTaxname::Unnamed => SourceTaxname::Nameless,
+                source => source,
+            };
+        }
         if !crate::report::defline::bioseq_title_from_source(title, Default::default)
             || self.taxdb().is_none()
         {
             return SourceTaxname::Unnamed;
         }
-        let Ok(set) = self.db.defline_set(ordinal) else {
-            return SourceTaxname::Refused(
-                "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, and a definition line whose taxid does not read",
-            );
-        };
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
         // ```c++
         //                 } catch (const CException&){
@@ -1785,7 +1811,7 @@ impl<'a> HeaderReader<'a> {
         // `CSeq_id::GetSeqIdString()` (Seq_id.cpp:2145-2154, `seqid::label::content`) of the
         // Seq-align's `gnl|BL_ORD_ID|n`, the OID (with a taxid list, of the ordinal id):
         // `seqdb::Oid::content_label`.
-        self.source_taxname(set.first_source_taxid(None))
+        self.source_taxname(taxid)
             .of_stored(|| self.db.oid(ordinal).content_label().into_bytes())
     }
 
@@ -2295,7 +2321,9 @@ fn reported_header(
                     let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
                     ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
-                            .with_source(|taxid| headers.source_taxname(Some(taxid)))
+                            .with_source(db.seqtype() == SeqType::Protein, |taxid| {
+                                headers.source_taxname(Some(taxid))
+                            })
                             .showing_gis(db.reports_show_gis())
                             .under_positive_list(db.has_positive_list())
                             .found_instead(found)
@@ -2306,7 +2334,7 @@ fn reported_header(
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
             let mut stored = stored_title(Ok(deflines), || db.oid(ordinal), query, program)?;
-            stored.source = headers.stored_source(&stored.title, ordinal);
+            stored.source = headers.stored_source(&stored.title, stored.taxid, ordinal);
             Ok(ReportedHeader::Stored(stored))
         }
         Err(error) => Err(header_read_error(error, query, program)),
@@ -2667,13 +2695,13 @@ fn joined_apart(
 /// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end; approved exception 2 of
 /// PD-LOSAT-NCBI-DEFECTS has BLASTN, TBLASTN and TBLASTX stop such a nucleotide title at the end
 /// of the string, as for a database without parsed Seq-ids), a description id longer
-/// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a
-/// generated heading title whose end NCBI rewrites from the taxids
-/// (`ParsedSubject::title_suffix_adjusted`), a title that NCBI makes from a source that LOSAT
-/// refuses (`ParsedSubject::source`, `SourceTaxname::Refused`), and one that it makes from the
+/// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a title
+/// that NCBI makes from a source that LOSAT refuses (`ParsedSubject::source`,
+/// `SourceTaxname::Refused`), and one that it makes from the
 /// taxids of the same record that it can show for the sequence where `taxdb.bti` is found
 /// (`taxdb_found`, `ParsedSubject::generated_title_fetched`). A title made from the sequence's
-/// own source names its organism (`ParsedSubject::with_source`).
+/// own source names its organism, and a generated heading title ending in `]` gets its end from
+/// it (`ParsedSubject::with_source`, `report::defline::adjust_protein_title_suffix`).
 pub(crate) fn check_shown_parsed_subject(
     subject: &crate::report::db_subject::ParsedSubject,
     protein: bool,
@@ -2717,13 +2745,6 @@ pub(crate) fn check_shown_parsed_subject(
         subject
             .generated_title_fetched()
             .map_err(|reason| parsed_refusal(oid(), &reason, program))?;
-    }
-    if generated && subject.title_suffix_adjusted(protein) {
-        return Err(parsed_refusal(
-            oid(),
-            "has a definition line without a title and a title ending in ']' that NCBI BLAST+'s outfmt 0 heading rewrites from the taxids (x_AdjustProteinTitleSuffix)",
-            program,
-        ));
     }
     if let Err(reason) = subject.source().name() {
         return Err(parsed_refusal(oid(), &format!("has {reason}"), program));
@@ -3391,9 +3412,11 @@ pub(crate) fn failed_general_lookup(oid: crate::seqdb::Oid) -> [Vec<u8>; 2] {
 
 /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of the database
 /// sequence `oid` with the stored title `title` and the source `source` of its Bioseq, from
-/// which NCBI makes an empty title (`report::defline::database_subject_id`; `protein` for a
-/// protein database). A title whose id LOSAT cannot write as NCBI, and a source that it refuses
-/// (`SourceTaxname::Refused`), are LOSAT's refusals (`program` names the program).
+/// which NCBI makes an empty title and rewrites the end of a protein title ending in `]`
+/// (`report::defline::database_subject_id` with `stored_facts`; `protein` for a protein
+/// database; `HeaderReader::stored_source`). A title whose id LOSAT cannot write as NCBI, and a
+/// source that it refuses (`SourceTaxname::Refused`), are LOSAT's refusals (`program` names the
+/// program).
 pub(crate) fn tabular_subject_id(
     title: &[u8],
     source: &crate::report::defline::SourceTaxname,
@@ -3401,8 +3424,7 @@ pub(crate) fn tabular_subject_id(
     protein: bool,
     program: &str,
 ) -> Result<TabularSubjectId> {
-    let facts =
-        crate::report::defline::BioseqFacts::of_source(source_name(source, || oid, program)?);
+    let facts = stored_facts(source, source_name(source, || oid, program)?);
     match crate::report::defline::database_subject_id(title, &facts, protein) {
         Ok(SubjectWord::Word(word)) => Ok(TabularSubjectId::Word(word)),
         Ok(SubjectWord::General) => Ok(TabularSubjectId::General(oid)),
@@ -3410,6 +3432,21 @@ pub(crate) fn tabular_subject_id(
         Err(problem) => bail!(
             "database sequence {oid} has a title {problem}, which is not supported by LOSAT's {program}"
         ),
+    }
+}
+
+/// The facts of the Bioseq of a database sequence without parsed Seq-ids whose source is
+/// `source`, named `name` (`SourceTaxname::name`): `BioseqFacts::of_source`, with a source
+/// without a name too (`SourceTaxname::Nameless`), for which `x_AdjustProteinTitleSuffix` runs as
+/// well (`report::defline::adjust_protein_title_suffix`). One form for the tabular ids
+/// (`tabular_subject_id`, `tabular_seqid`).
+fn stored_facts(
+    source: &crate::report::defline::SourceTaxname,
+    name: Option<std::sync::Arc<[u8]>>,
+) -> crate::report::defline::BioseqFacts {
+    crate::report::defline::BioseqFacts {
+        has_source: source.has_source(),
+        ..crate::report::defline::BioseqFacts::of_source(name)
     }
 }
 
@@ -3428,11 +3465,8 @@ pub(crate) fn tabular_seqid<'a>(
     if accession.starts_with(b"BL_ORD_ID:")
         && accession == oid.content_label().as_bytes()
         && source.name().is_ok_and(|name| {
-            crate::report::defline::database_subject_id(
-                title,
-                &crate::report::defline::BioseqFacts::of_source(name),
-                protein,
-            ) == Ok(SubjectWord::General)
+            crate::report::defline::database_subject_id(title, &stored_facts(source, name), protein)
+                == Ok(SubjectWord::General)
         })
     {
         return std::borrow::Cow::Owned(oid.fasta_id().into_bytes());
@@ -3633,6 +3667,28 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .starts_with("database sequence 3 has x")
+        );
+    }
+
+    // NCBI BLAST+ 2.17.0 (probe of the review of line RG item T5c,
+    // `remaining-gaps-20261112/T/t5c/review/out/ncbi/sall.blastp.f6.*`): the protein title
+    // `MAG: (plastid) [ ]` of a sequence whose taxid no taxonomy database names (a source without
+    // a name) is cut to `MAG:` by `x_AdjustProteinTitleSuffix` and keeps the general id in both
+    // forms (`gnl|BL_ORD_ID|7`, `BL_ORD_ID:7`); without a source it gives `(plastid)`.
+    #[test]
+    fn a_rewritten_protein_title_without_a_word_keeps_the_general_id() {
+        use crate::report::defline::SourceTaxname;
+        let oid = crate::seqdb::Oid::of_unrestricted(7);
+        let title = b"MAG: (plastid) [ ]";
+        let id = tabular_subject_id(title, &SourceTaxname::Nameless, oid, true, "BLASTP").unwrap();
+        assert_eq!(id, TabularSubjectId::General(oid));
+        assert_eq!(
+            &*tabular_seqid(&id.accession(), oid, title, &SourceTaxname::Nameless, true),
+            b"gnl|BL_ORD_ID|7"
+        );
+        assert_eq!(
+            tabular_subject_id(title, &SourceTaxname::Unnamed, oid, true, "BLASTP").unwrap(),
+            TabularSubjectId::Word(b"(plastid)".to_vec())
         );
     }
 

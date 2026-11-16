@@ -506,11 +506,14 @@ impl ParsedSubject {
     // (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`).
     // A RefSeq chromosome, mRNA or ncRNA record gets its title from the source too: NCBI's own
     // functions for them make nothing of a database Bioseq (`report::defline::source_title`).
+    // The end of a protein title ending in `]` is rewritten from the same name
+    // (`x_AdjustProteinTitleSuffix`, `adjusted_title_shown`; probe of line RG T5c).
     /// The subject with the name of its Bioseq's first source (`names` of its taxid,
-    /// `first_source_taxid`, asked only where `title_from_taxonomy`), from which its generated
-    /// title is made (`source`, `bioseq_title`).
-    pub fn with_source(mut self, names: impl FnOnce(i32) -> SourceTaxname) -> Self {
-        if self.title_from_taxonomy() {
+    /// `first_source_taxid`, asked only where `title_from_taxonomy` or, of a `protein` database,
+    /// `adjusted_title_shown`), from which its generated title is made (`source`,
+    /// `bioseq_title`). Other subjects ask nothing.
+    pub fn with_source(mut self, protein: bool, names: impl FnOnce(i32) -> SourceTaxname) -> Self {
+        if self.title_from_taxonomy() || self.adjusted_title_shown(protein) {
             if let Some(taxid) = self.first_source_taxid() {
                 self.source = names(taxid);
             }
@@ -970,10 +973,11 @@ impl ParsedSubject {
         &self.set.deflines[self.target]
     }
 
-    /// What `GenerateDefline` reads of the subject Bioseq: its Seq-ids and the name of its first
-    /// source (none where LOSAT refuses it, `source`).
+    /// What `GenerateDefline` reads of the subject Bioseq: its Seq-ids, whether it has a source
+    /// and the name of its first source (none where LOSAT refuses it, `source`).
     fn bioseq_facts(&self) -> BioseqFacts {
         let mut facts = bioseq_facts(&self.target().ids);
+        facts.has_source = self.has_source();
         facts.taxname = self.source.name().ok().flatten();
         facts
     }
@@ -1033,41 +1037,47 @@ impl ParsedSubject {
     //         }
     //     }
     // ```
-    // `x_AdjustProteinTitleSuffix` (:3263-3330) returns at once for a Bioseq without a source.
-    // Otherwise a title that ends in ` [<taxname>]` (the source's name from the taxonomy
-    // database, empty without it) loses that suffix, a `(organelle)` and a `, partial` before
-    // it, and gets the name back as the taxonomy database writes it: `alpha, partial [Homo
-    // sapiens]` is written `alpha [Homo sapiens]` (probe of the ID2a review).
-    /// Whether NCBI's `GenerateDefline` without `fLeavePrefixSuffix` may rewrite the end of the
-    /// subject Bioseq's title (`x_AdjustProteinTitleSuffix`, which LOSAT does not port): a
-    /// protein whose Bioseq has a source and whose title ends in `]`.
-    pub fn title_suffix_adjusted(&self, protein: bool) -> bool {
-        protein && self.has_source() && self.title_ends_in_bracket()
-    }
-
-    /// Whether the subject Bioseq's title ends in `]` before NCBI's trimmed end
-    /// (`title_suffix_adjusted`).
+    // `x_AdjustProteinTitleSuffix` (`report::defline::adjust_protein_title_suffix`) rewrites the
+    // end of a protein title ending in `]` from the Bioseq's first source, also without a name
+    // (a ` [ ]` end goes): `alpha, partial [Bacillus sp.]` is written `alpha [Bacillus sp.]`
+    // (probe of line RG T5c, `T/t5c/out/ncbi/ppar.blastp.f0.tx`).
+    /// Whether the subject Bioseq's title can lose its end to `x_AdjustProteinTitleSuffix`
+    /// (`report::defline::protein_title_suffix_adjustable` of the target's title).
     fn title_ends_in_bracket(&self) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
-        let end = title
+        crate::report::defline::protein_title_suffix_adjustable(title)
+    }
+
+    /// Whether some definition line has an id that `seq_id_list` replaces by the first word of
+    /// the generated title (`replaces_an_id`; `all_tabular_ids`, `lookup_failure`).
+    fn has_replaced_id(&self) -> bool {
+        self.set
+            .deflines
             .iter()
-            .rposition(|byte| !b".,;~ ".contains(byte) && !byte.is_ascii_whitespace());
-        end.is_some_and(|end| title[end] == b']')
+            .any(|defline| replaces_an_id(&defline.ids))
+    }
+
+    /// Whether a report shows the subject Bioseq's generated title (flags 0) where
+    /// `x_AdjustProteinTitleSuffix` can rewrite its end from the source: a protein with a source
+    /// whose title ends in `]`, with a line without a title (the outfmt 0 heading, outfmt 18) or
+    /// an id that the title's first word replaces (the tabular ids). `with_source` names the
+    /// source then.
+    fn adjusted_title_shown(&self, protein: bool) -> bool {
+        protein
+            && self.title_ends_in_bracket()
+            && self.has_source()
+            && (self.heading_generates_title() || self.has_replaced_id())
     }
 
     /// Whether a title that the reports write of the subject can depend on its Bioseq's
     /// source, the taxids of its definition lines, whatever they are (`title_from_taxonomy`,
-    /// `title_suffix_adjusted`): in outfmt 0 (`pairwise_title_reads_source`), and the tabular word
+    /// `adjusted_title_shown`): in outfmt 0 (`pairwise_title_reads_source`), and the tabular word
     /// of an id that `seq_id_list` replaces, of a protein title ending in `]` (a title made from
     /// the source with the taxonomy database is also shown in outfmt 0; of a protein the word is
     /// `unnamed` either way).
     pub fn title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
-        let replaced =
-            self.set.deflines.iter().any(|defline| {
-                matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
-            });
         self.pairwise_title_reads_source(protein, taxdb_found)
-            || (protein && self.title_ends_in_bracket() && replaced)
+            || (protein && self.title_ends_in_bracket() && self.has_replaced_id())
     }
 
     /// Whether a title that outfmt 0 shows of the subject can depend on its Bioseq's source
@@ -1096,8 +1106,7 @@ impl ParsedSubject {
     /// The first word of the subject Bioseq's generated title, which `seq_id_list` puts in the
     /// place of a `gnl|BL_ORD_ID` or `lcl|Subject_` id of the Bioseq; empty when no such id is
     /// there (the title is then not made). `Err` where NCBI's `x_CleanAndCompress` reads past the
-    /// end of the title (NCBI crashes) and where NCBI may rewrite its end
-    /// (`title_suffix_adjusted`).
+    /// end of the title (NCBI crashes) and the other refusals of `generated_title_word`.
     /// `Ok(None)` where `GenerateDefline` throws for that title (a title in no encoding that
     /// `CUtf8::GuessEncoding` recognises): `GetSeqIdList` makes no ids (`lookup_failure`).
     fn title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
@@ -1179,9 +1188,6 @@ impl ParsedSubject {
     /// (`SourceTaxname::Refused`); `Ok(None)` where `GenerateDefline` throws.
     fn generated_title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
         self.source.name()?;
-        if self.title_suffix_adjusted(protein) {
-            return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
-        }
         let Ok(defline) = self.bioseq_title(protein, false) else {
             return Ok(None);
         };
@@ -1239,12 +1245,7 @@ impl ParsedSubject {
         protein: bool,
     ) -> Result<Option<super::tabular::LookupFailure>, &'static str> {
         let subject_id = replaces_an_id(&self.target().ids);
-        let all_ids = !self.record
-            && self
-                .set
-                .deflines
-                .iter()
-                .any(|defline| replaces_an_id(&defline.ids));
+        let all_ids = !self.record && self.has_replaced_id();
         if !subject_id && !all_ids {
             return Ok(None);
         }
@@ -1338,12 +1339,7 @@ impl ParsedSubject {
     pub fn all_tabular_ids(&self, protein: bool) -> Result<AllTabularIds, &'static str> {
         // `GetSeqIdList` replaces the ids of each definition line, so the word is made when any
         // line has an id to replace, not only the target's.
-        let replaced = !self.record
-            && self
-                .set
-                .deflines
-                .iter()
-                .any(|defline| replaces_an_id(&defline.ids));
+        let replaced = !self.record && self.has_replaced_id();
         let word = if replaced {
             self.generated_title_word(protein)?
         } else {
@@ -1745,9 +1741,6 @@ impl ParsedSubject {
         let generated = || -> TaxTitle {
             if let Err(reason) = self.source.name() {
                 return refused(&format!("has {reason}"), true);
-            }
-            if self.title_suffix_adjusted(protein) {
-                return refused("has a definition line without a title and a title ending in ']' that NCBI BLAST+ rewrites from the taxids (x_AdjustProteinTitleSuffix)", false);
             }
             if let Err(reason) = self.generated_title_fetched() {
                 return refused(&reason, false);
@@ -2952,7 +2945,7 @@ mod tests {
                 }],
             })
             .unwrap()
-            .with_source(|taxid| {
+            .with_source(true, |taxid| {
                 assert_eq!(taxid, 9606);
                 source
             })
@@ -2991,7 +2984,7 @@ mod tests {
             }],
         })
         .unwrap()
-        .with_source(|_| panic!("no source to name"));
+        .with_source(true, |_| panic!("no source to name"));
         assert_eq!(none.source(), &SourceTaxname::Unnamed);
         // A named RefSeq chromosome gets the name (`x_SetTitleFromNC` makes nothing of a database
         // Bioseq), a protein's not upper-cased and not `unnamed protein product`; an unnamed one
@@ -3025,7 +3018,7 @@ mod tests {
                 }],
             })
             .unwrap()
-            .with_source(|_| SourceTaxname::Named(std::sync::Arc::from(name)))
+            .with_source(false, |_| SourceTaxname::Named(std::sync::Arc::from(name)))
         };
         let bad = subject(None, b"Bad \x81 name");
         assert_eq!(
@@ -3279,5 +3272,137 @@ mod tests {
                 assert!(subject.first_title().is_empty() || defline.contains(' '));
             }
         }
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastp -num_threads 1` on the version 5 database `psfx` of line RG
+    // T5c (`tests/db_search/t5/make_t5.py --suffix-only`; rows `db.t5.sfx.blastp.*`): the heading
+    // of an untitled line, outfmt 18 and the tabular word of `lcl|Subject_9nn` show the target's
+    // title with its end rewritten from the first source (`x_AdjustProteinTitleSuffix`); the
+    // description (`fLeavePrefixSuffix`) keeps the stored end. Only those subjects ask for the
+    // source's name.
+    #[test]
+    fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
+        use crate::algorithm::common::database::check_shown_parsed_subject;
+        let set = |lines: &[(ParsedSeqId, &str, Option<i32>)]| DeflineSet {
+            deflines: lines
+                .iter()
+                .map(|(id, title, taxid)| BlastDefline {
+                    ids: vec![id.clone()],
+                    title: (!title.is_empty()).then(|| title.as_bytes().to_vec()),
+                    taxid: *taxid,
+                    ..BlastDefline::default()
+                })
+                .collect(),
+        };
+        let bacillus = || SourceTaxname::Named(std::sync::Arc::from(&b"Bacillus sp."[..]));
+        let named = |lines: &[(ParsedSeqId, &str, Option<i32>)], protein| {
+            ParsedSubject::new(set(lines))
+                .unwrap()
+                .with_source(protein, |taxid| {
+                    assert_eq!(taxid, 100002);
+                    bacillus()
+                })
+        };
+        // The first source comes from the second line.
+        let heading = named(
+            &[
+                (gb("AC400001", 1), "alpha, partial [Bacillus sp.]", None),
+                (gb("AD400001", 1), "", Some(100002)),
+            ],
+            true,
+        );
+        assert_eq!(heading.source(), &bacillus());
+        assert_eq!(
+            text(&heading.heading(true, false).unwrap()),
+            ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha [Bacillus sp.]\n"
+        );
+        assert_eq!(
+            text(&heading.description(true).1.text),
+            "alpha, partial [Bacillus sp.]"
+        );
+        assert!(check_shown_parsed_subject(
+            &heading,
+            true,
+            true,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTP"
+        )
+        .is_ok());
+        let deflines = heading.tax_deflines(true);
+        assert!(matches!(
+            &deflines[1].title,
+            crate::report::tax_report::TaxTitle::Text(title) if title == b"alpha [Bacillus sp.]"
+        ));
+        // A nucleotide is not adjusted, and asks nothing.
+        let nucleotide = ParsedSubject::new(set(&[
+            (gb("AC400001", 1), "alpha, partial [Bacillus sp.]", None),
+            (gb("AD400001", 1), "", Some(100002)),
+        ]))
+        .unwrap()
+        .with_source(false, |_| panic!("a nucleotide title is not adjusted"));
+        assert_eq!(
+            text(&nucleotide.heading(false, false).unwrap()),
+            ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha, partial [Bacillus sp.]\n"
+        );
+        // The tabular word of `lcl|Subject_9nn`.
+        let local = |tag: &str| ParsedSeqId::Local(ObjectId::Str(tag.as_bytes().to_vec()));
+        let word = named(
+            &[(
+                local("Subject_901"),
+                "alpha, partial [Bacillus sp.]",
+                Some(100002),
+            )],
+            true,
+        );
+        let [id, accession, version] = word.tabular_ids(true).unwrap().unwrap();
+        assert_eq!([text(&id), text(&accession), text(&version)], ["alpha"; 3]);
+        // Without a name (no taxonomy database) a ` [ ]` end goes.
+        let nameless = ParsedSubject::new(set(&[(local("Subject_903"), "a, [ ]", Some(77777))]))
+            .unwrap()
+            .with_source(true, |_| SourceTaxname::Unnamed);
+        assert_eq!(text(&nameless.tabular_ids(true).unwrap().unwrap()[0]), "a");
+        // A title whose generated form no report shows (no untitled line, no replaced id), a
+        // title not ending in `]` and a Bioseq without a source ask nothing.
+        for lines in [
+            vec![(
+                gb("AC400002", 1),
+                "alpha, partial [Bacillus sp.]",
+                Some(100002),
+            )],
+            vec![
+                (gb("AC400003", 1), "alpha protein", Some(100002)),
+                (gb("AD400003", 1), "", Some(100002)),
+            ],
+            vec![
+                (gb("AC400031", 1), "gg, partial [Bacillus sp.]", None),
+                (gb("AD400031", 1), "", None),
+            ],
+        ] {
+            let subject = ParsedSubject::new(set(&lines))
+                .unwrap()
+                .with_source(true, |_| panic!("no name is asked for {lines:?}"));
+            assert_eq!(subject.source(), &SourceTaxname::Unnamed);
+        }
+        // An adjusted title of punctuation is read past its end (NCBI BLAST+ 2.17.0 crashes:
+        // probe of line RG T5c, `pedge_e3`): refused.
+        let edge = ParsedSubject::new(set(&[
+            (gb("AG400003", 1), ", , [ ]", Some(77777)),
+            (gb("AH400003", 1), "", None),
+        ]))
+        .unwrap()
+        .with_source(true, |_| SourceTaxname::Unnamed);
+        let error = check_shown_parsed_subject(
+            &edge,
+            true,
+            true,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTP",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("x_CleanAndCompress reads past the end"),
+            "{error}"
+        );
     }
 }

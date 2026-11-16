@@ -27,9 +27,10 @@ find it by its LMDB key unless an earlier sequence holds the key, line DBID N2b)
 `refuse_v5.*` (version 5): the records of `refuse.faa` with the taxids of `taxmap_refuse.txt`, each
 the subject of its own query `refuse_<case>.faa` (its sequence; `refuse_nf.fna` a back-translation):
 `nf` a taxid that the test taxonomy database (`tests/seqdb/taxdb/good`) does not know between two
-that it does (NCBI's XML2 and JSON descriptions stop there), and the refusals of LOSAT: `adj` and
-`tw` titles ending in `[Homo sapiens]` whose end NCBI rewrites (`x_AdjustProteinTitleSuffix`;
-`adj` with a definition line without a title, `tw` a `lcl|Subject_` id), `long` an outfmt 0
+that it does (NCBI's XML2 and JSON descriptions stop there), `adj` and `tw` titles ending in
+`[Homo sapiens]` whose end NCBI rewrites from the taxid (`x_AdjustProteinTitleSuffix`; `adj` with a
+definition line without a title, `tw` a `lcl|Subject_` id; LOSAT's refusals until line RG item T5c,
+NCBI's rows since), and the refusals of LOSAT: `long` an outfmt 0
 description id longer than 65 bytes, `punct` a title that NCBI's `x_CleanAndCompress` reads past
 the end of, `disp` a `lcl|777` before `gi|777` (NCBI's formatters find no sequence by the
 Seq-align id `gi|777`). The queries hit their own record alone with `-evalue 1e-20` (NCBI's

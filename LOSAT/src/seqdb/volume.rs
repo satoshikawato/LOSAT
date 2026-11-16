@@ -811,14 +811,15 @@ impl Volume {
         Ok(decoded)
     }
 
-    /// The header of the sequence `oid` (volume-relative) in the bytes `record` (`header`).
+    /// The header of the sequence `oid` (volume-relative) in the bytes `record` (`header`): the
+    /// definition lines of a record without parsed Seq-ids with their `taxid` (`deflines`).
     fn decode_header(
         &self,
         oid: u32,
         record: &[u8],
         path: &Path,
     ) -> Result<VolumeHeader, SeqDbError> {
-        match decode_deflines_as(record, path, oid, false) {
+        match decode_deflines_as(record, path, oid, true) {
             Err(error) if error.is_parsed_seqids() => self
                 .decode_kept_set(oid, record, path)
                 .map(VolumeHeader::Parsed),
@@ -853,10 +854,21 @@ impl Volume {
         Ok(set)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
+    // ```c++
+    //     CTempString raw_data = x_GetHdrAsn1Binary(oid);
+    //     ...
+    //     CObjectIStreamAsnBinary inpstr(raw_data.data(), raw_data.size());
+    //
+    //     bdls.Reset(new objects::CBlast_def_line_set);
+    // ```
+    // NCBI decodes every member of the header for each report (`x_GetFilteredHeader`); the
+    // reports read the title and the taxid of a record without parsed Seq-ids (its source,
+    // `algorithm::common::database::HeaderReader::stored_source`) from this one decode.
     /// The definition lines of the sequence `oid` (volume-relative), with
-    /// their ordinal ids still relative to the volume.
+    /// their ordinal ids still relative to the volume and their `taxid`.
     pub fn deflines(&self, oid: u32) -> Result<Vec<Defline>, SeqDbError> {
-        self.deflines_as(oid, false)
+        self.deflines_as(oid, true)
     }
 
     /// `deflines` with every definition line of the stored header: the volume's `DeflineRule` is
@@ -868,8 +880,10 @@ impl Volume {
         decode_deflines_as(&record, &path, oid, false)
     }
 
-    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid` (the
-    /// decode of `defline_taxids`, which also gives the titles).
+    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid`, as NCBI's
+    /// `x_GetHdrAsn1` reads the record (`header::decode_deflines_as`; `defline_taxids` keeps the
+    /// taxids of the same decode). The reads of the stored titles (`deflines`, `visit_deflines_as`)
+    /// decode the taxid; only `stored_deflines` skips it.
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");
@@ -1074,7 +1088,7 @@ impl Volume {
         piece_bytes: u64,
         visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool,
     ) -> bool {
-        self.visit_deflines_as(first, end, piece_bytes, false, visit)
+        self.visit_deflines_as(first, end, piece_bytes, true, visit)
     }
 
     /// `visit_deflines`, with the `taxid` of each definition line decoded when `want_taxid`

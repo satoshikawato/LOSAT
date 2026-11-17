@@ -2526,7 +2526,7 @@ mod tests {
     #[test]
     fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
         use crate::ncbi_exception::{NcbiException, ThrowSite};
-        let site = crate::seqdb::throw_site("DB contains no accession info.").unwrap();
+        let site = crate::seqdb::lookup_throw_site("DB contains no accession info.").unwrap();
         let error =
             NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
         assert_eq!(error.exit, 2);

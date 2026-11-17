@@ -3353,7 +3353,7 @@ mod archive_error_tests {
     #[test]
     fn a_database_error_of_catch_all_is_no_engine_error() {
         let thrown = crate::ncbi_exception::NcbiException::new(
-            crate::seqdb::throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO).unwrap(),
+            crate::seqdb::lookup_throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO).unwrap(),
             crate::seqdb::tax_files::NO_ACCESSION_INFO,
         );
         let error = report_error(NativeError::exception(&thrown).into());

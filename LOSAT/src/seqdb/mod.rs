@@ -569,8 +569,28 @@ impl SeqDbError {
 // function: blastp 2.17.0's `Error: [blastp] DB contains no accession info.NCBI C++ Exception:`
 // of outfmt 15 at a lookup of a list of version 5 databases with and without the accession table,
 // `blastdb-ids-20261021/R/mixdb2/review1/out/ncbi/bp.lim1.U2.15.err`, DECISIONS 62 of line DBID.)
-/// The places of NCBI's throws of a database error, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 6] = [
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:56-66
+// ```c++
+// void CBlastLMDBManager::CBlastEnv::InitDbi(lmdb::env & env, ELMDBFileType file_type)
+// {
+//     auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+// 	if(file_type == eLMDB) {
+// 		try {
+// 	    m_dbis[eDbiAcc2oid] = lmdb::dbi::open(txn, blastdb::acc2oid_str.c_str(), MDB_DUPSORT | MDB_DUPFIXED).handle();
+// 		}
+// 		catch (...){ /* It's ok not to have acc in a db */}
+// 		m_dbis[eDbiVolname] = lmdb::dbi::open(txn, blastdb::volname_str.c_str(), MDB_INTEGERKEY).handle();
+// 		m_dbis[eDbiVolinof] = lmdb::dbi::open(txn, blastdb::volinfo_str.c_str(), MDB_INTEGERKEY).handle();
+// ```
+// (A reader opens each LMDB file read-only through `InitDbi`, which leaves only the accession
+// table unset: a file without `volname` or `volinfo` throws lmdb's `mdb_dbi_open: MDB_NOTFOUND:
+// No matching key/data pair found` there, before `GetDbi` can throw `DB contains no vol info.`
+// (segmasker and dustmasker 2.17.0: `Error: (106.7) Application's execution failed: mdb_dbi_open:
+// ...`, exit 3; blastp and blastn: `Error: mdb_dbi_open: ...`, exit 255; review 1 of line DBID
+// pfoff-1, L4). So no text of the reader's table below is GetDbi's: its one throw that NCBI's
+// programs reach is the lookup's (`lookup_throw_site`).)
+/// The places of NCBI's throws of a database error of the reader, by the start of its text.
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 5] = [
     (
         "No alias or index file found for ",
         seqdb_site(
@@ -611,7 +631,6 @@ const DATABASE_ERROR_SITES: [(&str, ThrowSite); 6] = [
             "BLASTDB::ncbi::CSeqDBExtFile::CSeqDBExtFile",
         ),
     ),
-    ("DB contains no ", GET_DBI_SITE),
 ];
 
 /// The place of `CBlastLMDBManager::CBlastEnv::GetDbi`'s throw of a version 5 database's missing
@@ -638,11 +657,12 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// The place in NCBI's database reader that throws the `CSeqDBException` whose message is
 /// `message` (a text of [`SeqDbError::ncbi_message`]), where LOSAT knows it: the one owner of
 /// those places (dustmasker's and segmasker's reports of the reader's errors,
-/// `seqmasks_io::bdb_reader`; the lookups of the formatters, `report::db_subject::LookupFailure`).
-/// Each place reports the code `eInvalid` (`CSeqDBException` names none). `None` for every other
-/// text, of which LOSAT does not know the place: also the texts that `ncbi_message` gives of the
-/// codes `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
-/// `CATCH_ALL` and not the exception's own message.
+/// `seqmasks_io::bdb_reader`; a lookup's own throw is [`lookup_throw_site`]'s). Each place
+/// reports the code `eInvalid` (`CSeqDBException` names none). `None` for every other text, of
+/// which LOSAT does not know the place: also the texts that `ncbi_message` gives of the codes
+/// `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
+/// `CATCH_ALL` and not the exception's own message, and `DB contains no ...`, which NCBI's reader
+/// never throws (it throws lmdb's error first, `InitDbi` quoted above).
 pub(crate) fn throw_site(message: &str) -> Option<ThrowSite> {
     DATABASE_ERROR_SITES
         .iter()

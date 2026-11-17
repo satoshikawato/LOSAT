@@ -2610,8 +2610,11 @@ fn a_directory_in_place_of_an_isam_file_is_no_isam() {
 
 // Line DBID pfoff-1 (DECISIONS 62): the places of NCBI's throws of the reader's texts, of which
 // segmasker 2.17.0 names those of the alias reader, `CSeqDB` and `CSeqDBExtFile` (review of line
-// RG item K2, L2) and blastp 2.17.0 the lookup's `GetDbi` (outfmt 15 of `pP pU`,
-// `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15.err`); every place reports `eInvalid`.
+// RG item K2, L2), and of a lookup's, of which blastp 2.17.0 names `GetDbi` for the accession
+// table (outfmt 15 of `pP pU`, `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15.err`); every place
+// reports `eInvalid`. The reader never throws `GetDbi`'s texts (review 1 of item pfoff-1, L4: its
+// read-only open throws lmdb's `mdb_dbi_open` error for a missing `volname` or `volinfo` first,
+// `seqdb::DATABASE_ERROR_SITES`), and no lookup was seen to throw another text.
 #[test]
 fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
     let place = |text: &str| {
@@ -2619,19 +2622,30 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
         assert_eq!(site.kind, "CSeqDBException::eInvalid", "{text}");
         (site.file, site.line, site.function.unwrap())
     };
+    let get_dbi = super::lookup_throw_site("DB contains no accession info.").unwrap();
+    assert_eq!(get_dbi.kind, "CSeqDBException::eInvalid");
+    assert_eq!(
+        (get_dbi.file, get_dbi.line, get_dbi.function.unwrap()),
+        (
+            "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp",
+            142,
+            "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi"
+        )
+    );
     for text in [
         "DB contains no accession info.",
         "DB contains no vol info.",
         "DB contains no tax id info",
     ] {
-        assert_eq!(
-            place(text),
-            (
-                "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp",
-                142,
-                "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi"
-            )
-        );
+        assert_eq!(throw_site(text), None, "{text}");
+    }
+    for text in [
+        "DB contains no vol info.",
+        "DB contains no tax id info",
+        "Database name is required.",
+        "Error: File (x.pos) not found.",
+    ] {
+        assert_eq!(super::lookup_throw_site(text), None, "{text}");
     }
     assert_eq!(
         place("No alias or index file found for protein database [x] in search path [y]."),

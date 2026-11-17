@@ -130,8 +130,8 @@
   LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07);
   1.43 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-1: exception 14, a PSSM whose
-  values nest deeper than NCBI's stack holds, read to any depth, rule 1, its approval pending the
-  Owner's answer to Q-DEPTH (asked 2026-11-17); the explicit rejections where NCBI's object
+  values nest deeper than NCBI's stack holds, read to any depth, rule 1, decided by the Owner on
+  2026-11-17 (Q-DEPTH = B); the explicit rejections where NCBI's object
   manager or format guess prints addresses, reads outside its data, overflows a signed integer or
   depends on the machine's memory, rule 3, and of well-formed BitMagic data and of a `-subject`
   duplicate-id message that may spell a subject's Seq-id, rule 2, Owner-delegated, standing
@@ -709,15 +709,14 @@ masked). Line NP item M4a-2c.
     and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
-## Exception pending the Owner's approval (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.43)
+## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.43)
 
-Version 1.43, line RG item D3-1. Approval: pending the Owner's answer to Q-DEPTH (asked 2026-11-17).
-Built under the maintainer's standing delegation (standing instruction 2026-09-29, restated
-2026-10-07) as that question's recommended option B, in a pull request that stays a draft until
-the Owner answers. Not taken: option A, refusing the depths at which NCBI may crash, from NCBI's
-stack bytes per nested value computed for the run (D3-1 fix round 6): those bytes differ with the
-path of each recursion and with the types open together, so such a rule refuses depths that NCBI
-reads at every start and reads depths at which NCBI crashes at every start.
+Version 1.43, line RG item D3-1. The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117,
+words 「B 深さに関係なく読む (推奨)」) question Q-DEPTH of D3-1 (PR #1262): option B, reading every depth and
+writing NCBI's output with a stack large enough. Not taken: option A, refusing the depths at which
+NCBI may crash, from NCBI's stack bytes per nested value computed for the run (D3-1 fix round 6):
+those bytes differ with the path of each recursion and with the types open together, so such a rule
+refuses depths that NCBI reads at every start and reads depths at which NCBI crashes at every start.
 
 14. **A PSSM whose values nest deeper than NCBI's stack holds.** NCBI's reader of the `-in_pssm`
     ASN.1 text (`CObjectIStreamAsn`) reads a value whose type holds values of its own type by

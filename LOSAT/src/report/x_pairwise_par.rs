@@ -506,9 +506,22 @@ pub(crate) trait QuerySections: Sync {
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()>;
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-304 (each app's `Run`)
+// ```c++
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+//     ...
+//         formatter.PrintEpilog(opt);
+//     ...
+//     } CATCH_ALL(status)
+// ```
 /// Writes the per-query reports of `hits_by_query` (each query's hits with their indices in
 /// the report's hit list; the first is query `first_query`) between a writer's prolog and
-/// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer.
+/// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer. An error of the
+/// writer (NCBI's exception out of `PrintOneResultSet`, a failed write of its stream) ends the
+/// run: NCBI leaves its formatting loop for `CATCH_ALL` and loads no subject after it, so no text
+/// of a read is written after it (`QueryWarnings::end_run`), also not when the warnings end.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write<S: QuerySections, W: Write>(
     writer: &mut W,
@@ -517,37 +530,44 @@ pub(crate) fn write<S: QuerySections, W: Write>(
     hits_by_query: &[Vec<(HspIndex, &PairwiseHit)>],
     subject_titles: &[Arc<[u8]>],
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
     pool: Option<&SearchPool<'_>>,
 ) -> io::Result<()> {
-    let pool = match pool {
-        Some(pool) if probe.is_none() => pool,
+    let written = match pool {
+        Some(pool) if probe.is_none() => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
+            write_parallel(
+                writer,
+                sections,
+                first_query,
+                hits_by_query,
+                subject_titles,
+                warnings.as_deref_mut(),
+                pool,
+            )
+            .map(|_| ())
+        }
         _ => {
             if on() {
                 crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", false);
             }
-            return write_serial(
+            write_serial(
                 writer,
                 sections,
                 first_query,
                 hits_by_query,
                 subject_titles,
                 probe,
-                warnings,
-            );
+                warnings.as_deref_mut(),
+            )
         }
     };
-    crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
-    write_parallel(
-        writer,
-        sections,
-        first_query,
-        hits_by_query,
-        subject_titles,
-        warnings,
-        pool,
-    )?;
-    Ok(())
+    if written.is_err() {
+        if let Some(warnings) = warnings {
+            warnings.end_run();
+        }
+    }
+    written
 }
 
 /// The serial writer: each query's warnings and parts on `writer`, in order.

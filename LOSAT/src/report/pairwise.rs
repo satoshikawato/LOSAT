@@ -7164,8 +7164,10 @@ pub fn write_blastx_pairwise_report<W: Write>(
         }
     }
     // The queries' reports, by the shared writer of the pairwise reports (`x_pairwise_par`). The
-    // titles are the sections' own (`BlastxSections`), so the groups copy none.
-    let written = super::x_pairwise_par::write(
+    // titles are the sections' own (`BlastxSections`), so the groups copy none. A report that
+    // stops (NCBI's exception at an HSP of length 0, `EmptyRowsStop`; a failed write) ends the
+    // run there: the reads after it make no text (`x_pairwise_par::write`).
+    super::x_pairwise_par::write(
         writer,
         &sections,
         0,
@@ -7174,15 +7176,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         probe,
         warnings.as_deref_mut(),
         pool,
-    );
-    // A report that stops (NCBI's exception at an HSP of length 0, `EmptyRowsStop`; a failed
-    // write) ends the run: the reads after it make no text (`QueryWarnings::end_run`).
-    if let Err(error) = written {
-        if let Some(warnings) = warnings {
-            warnings.end_run();
-        }
-        return Err(error);
-    }
+    )?;
     // The texts of the reads that the reports did not place come after them
     // (`QueryWarnings::after_last_query`).
     if let Some(warnings) = warnings {

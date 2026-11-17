@@ -391,6 +391,7 @@ impl RpsTraceback<'_> {
             let statistics = RpsQueryStats {
                 batch_kbp: &query.batch_kbp,
                 stats: first.stats(gumbel),
+                context_0_valid: first.valid,
             };
             return if translated {
                 let frames = frame_letters(query);

@@ -374,6 +374,36 @@ impl<'a> RedoRun<'a> {
         self
     }
 
+    /// The run of a redo whose query information has no valid context: the cutoff of the
+    /// near-identical test is 0, NCBI's old test (`old_test_near_identical`). RPS-BLAST's redo
+    /// keeps context 0 of the user query's information only, with its validity: rpstblastn's
+    /// query whose frame +1 is invalid (`-strand minus`, a frame +1 without letters) gets it.
+    /// A protein query has one context, valid where it has hits.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1244
+    /// ```c
+    ///           one_query_info->first_context = one_query_info->last_context = 0;
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2436-2446
+    /// ```c
+    ///     /* score block is already scaled by context->localScalingFactor */
+    ///     double near_identical_cutoff=0;
+    ///     Int4 index;
+    ///     for (index = queryInfo->first_context;
+    ///                      index <= queryInfo->last_context; ++index) {
+    ///
+    ///         if ((queryInfo->contexts[index].is_valid)) {
+    ///     		near_identical_cutoff =
+    ///        		 (near_identical_cutoff_bits * NCBIMATH_LN2)
+    ///         		/ context->sbp->kbp_gap[index]->Lambda;
+    /// ```
+    /// (`Blast_GetOneQueryStructs` copies the query's contexts with `is_valid`, and
+    /// `OffsetArrayToContextOffsets` sets only the offsets, lengths, frames and query indices.)
+    pub(crate) fn without_valid_context(mut self) -> Self {
+        self.near_identical_cutoff = 0.0;
+        self
+    }
+
     /// The first sum of best row scores above `INT4_MAX` that an adjusted matrix had.
     pub(crate) fn bound_exceeded(&self) -> Option<i64> {
         self.bound_exceeded
@@ -988,11 +1018,18 @@ impl RedoMatch<'_> {
         let mut num_adjustments = 0;
         for (hsp_index, in_align) in incoming.iter().enumerate() {
             if hsp_index == 0 || subject_maybe_biased {
-                near_identical = preliminary_test_near_identical(
-                    query_length,
-                    in_align,
-                    run.near_identical_cutoff,
-                );
+                // Only rpstblastn's redo (the translated instance) can have the cutoff 0
+                // (`RedoRun::without_valid_context`); psiblast's and rpsblast's keep the one test.
+                near_identical =
+                    if S::Instance::SUBJECT_IS_TRANSLATED && run.near_identical_cutoff <= 0.0 {
+                        old_test_near_identical(query_length, incoming.len(), in_align)
+                    } else {
+                        preliminary_test_near_identical(
+                            query_length,
+                            in_align,
+                            run.near_identical_cutoff,
+                        )
+                    };
             }
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
                 subject_data = if S::Instance::SUBJECT_IS_TRANSLATED {
@@ -1607,6 +1644,36 @@ fn preliminary_test_near_identical(query_length: i32, align: &Align, cutoff: f64
         return false;
     }
     true
+}
+
+/// `s_preliminaryTestNearIdentical` with the cutoff 0 (`RedoRun::without_valid_context`): the
+/// window `hspcnt` holds one alignment, without gaps, at least as long as the profile or 50.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1078-1094
+/// ```c
+///   else {
+///       /* Otherwise fallback to the old near identical test. This is left for
+///          compatibility with the code in c toolkit's tools/kappa.c */
+///
+///       if ((window->hspcnt > 1) || (window->hspcnt < 1))
+///           return(FALSE);
+///
+///       queryIndex = align->queryIndex;
+///       queryLength = query_info[queryIndex].seq.length;
+///       if ((align->queryEnd - align->queryStart) !=
+///           (align->matchEnd - align->matchStart))
+///           return(FALSE);
+///
+///       if ((align->matchEnd - align->matchStart +1) <
+///           (MIN(queryLength, MINIMUM_LENGTH_NEAR_IDENTICAL)))
+///           return(FALSE);
+///   }
+/// ```
+fn old_test_near_identical(query_length: i32, hspcnt: usize, align: &Align) -> bool {
+    hspcnt == 1
+        && align.query_end - align.query_start == align.match_end - align.match_start
+        && align.match_end - align.match_start + 1
+            >= query_length.min(MINIMUM_LENGTH_NEAR_IDENTICAL)
 }
 
 /// `KAPPA_CONTAINED_IN_HSP` (redo_alignment.c:72-73) and `CONTAINED_IN_HSP` (blast_kappa.c).

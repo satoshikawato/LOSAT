@@ -192,3 +192,21 @@ fn the_window_composition_is_ncbis() {
     let composition = window_composition(&data, window(50, 40, 1), &align_in(1, (250, 260)));
     assert_eq!(composition.num_true_amino_acids, 89);
 }
+
+// redo_alignment.c:1063-1094 (quoted at `preliminary_test_near_identical` and
+// `old_test_near_identical`): with the cutoff 0 (rpstblastn's query whose frame +1 is invalid,
+// `RedoRun::without_valid_context`) the window must hold one ungapped alignment as long as the
+// profile or 50, whatever its score; with a cutoff above 0 the score per position decides.
+#[test]
+fn the_old_near_identical_test_is_ncbis() {
+    let long = align_in(-1, (10, 70));
+    assert!(old_test_near_identical(200, 1, &long));
+    assert!(!old_test_near_identical(200, 2, &long));
+    assert!(!old_test_near_identical(200, 1, &align_in(-1, (10, 40))));
+    assert!(old_test_near_identical(25, 1, &align_in(-1, (10, 40))));
+    let mut gapped = hsp(-1, (10, 70), 30);
+    gapped.query_end += 1;
+    assert!(!old_test_near_identical(200, 1, &Align::incoming(&gapped)));
+    // The same alignment with the cutoff of a valid frame +1 (1.74 bits per position): 960 / 60.
+    assert!(!preliminary_test_near_identical(200, &long, 144.548446));
+}

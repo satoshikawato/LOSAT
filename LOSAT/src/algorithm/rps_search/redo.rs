@@ -111,6 +111,9 @@ pub(crate) struct RpsRedoParams<'a> {
 pub(super) struct RpsQueryStats<'a> {
     pub(super) batch_kbp: &'a KarlinParams,
     pub(super) stats: EvalueStats<'a>,
+    /// Whether the user query's context 0 (frame +1; a protein query's only one) is valid: the
+    /// only context the redo's query information keeps (`RedoRun::without_valid_context`).
+    pub(super) context_0_valid: bool,
 }
 
 impl RpsTraceback<'_> {
@@ -147,7 +150,11 @@ impl RpsTraceback<'_> {
         statistics: RpsQueryStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
-        let RpsQueryStats { batch_kbp, stats } = statistics;
+        let RpsQueryStats {
+            batch_kbp,
+            stats,
+            context_0_valid,
+        } = statistics;
         let program = redo.program;
         let mut hit_list: Option<BlastpHitList> = None;
         let mut k_mark: Option<u32> = None;
@@ -249,6 +256,9 @@ impl RpsTraceback<'_> {
                 std::mem::take(&mut scratch.gap),
             )
             .with_bound_check();
+            if !context_0_valid {
+                run = run.without_valid_context();
+            }
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redo_match = RedoMatch {
                 info: &info,

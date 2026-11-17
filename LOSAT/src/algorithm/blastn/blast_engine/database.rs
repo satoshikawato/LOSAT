@@ -46,7 +46,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::report::tabular::PrintedIds;
+use crate::report::tabular::{PrintedIds, SubjectFetch};
 use crate::seqdb::{
     BlockMasks, BlockRange, MaskBlock, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType,
     SequenceBlock,
@@ -710,54 +710,112 @@ impl BlastnDatabase {
     /// (`shared::batch_prefetch`): the taxonomy texts of [`BlastnDatabase::prefetch_messages`],
     /// then the warning where the prefetch fails, at a subject whose lookup fails or one without
     /// a Bioseq that a Seq-align on the query's minus strand flips (`gapped`: each HSP is a
-    /// Seq-align, else a subject's first HSP decides); `xml_before`: the outfmt 5 reports before
-    /// the batch (`shared::XmlReportsBefore`).
+    /// Seq-align, else a subject's first HSP decides).
+    /// `before`: the batches of the call before it that the loop still holds (none where it wrote
+    /// and dropped them, LOSAT_X_RPTSTREAM, which records each batch instead: `note_loaded`), as
+    /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops; the outfmt
+    /// 5 reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn batch_prefetch(
         &self,
         titles: &DatabaseTitles,
+        before: LoadedBefore<'_>,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-        query: usize,
-        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
-            Self::prefetch_subjects(titles, hit_lists, gapped),
+            Self::loaded_subjects(titles, before, gapped),
+            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
             PROGRAM,
-            query,
-            xml_before,
+            queries,
         )
     }
 
-    /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
-    /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
+    /// The stop of NCBI's prefetch of the query batch of `queries` whose final hit lists are
+    /// `hit_lists`, for the XML2 and JSON formats, which write the taxonomy
     /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
-    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`),
-    /// which BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
+    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`;
+    /// the reports read every reported subject), which BLASTN writes after the stop (the XML
+    /// formats are not streamed, `x_rpt_stream`).
     pub(super) fn batch_prefetch_stop(
         &self,
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-        query: usize,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         shared::held_batch_prefetch_stop(
             &self.db,
-            Self::prefetch_subjects(titles, before, gapped),
-            Self::prefetch_subjects(titles, hit_lists, gapped),
+            &self.taxdb,
+            Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every),
+            std::iter::empty(),
+            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
             PROGRAM,
-            query,
+            queries,
+        )
+    }
+
+    /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
+    /// batch whose final hit lists are `hit_lists` (`shared::TaxdbRun::note_loaded`;
+    /// `loaded_subjects` of the batch alone, `rows`: the first format's), for a later batch's
+    /// stop: where the loop writes each batch's reports and drops its lists (LOSAT_X_RPTSTREAM),
+    /// so that `batch_prefetch`'s `before` no longer holds them. The stream never writes outfmt 5
+    /// (`x_rpt_stream`), so no report of the batch is cut (`shared::XmlCuts::NONE`).
+    pub(super) fn note_loaded(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+        rows: SubjectFetch,
+    ) {
+        if self.parsed_seqids() {
+            let batch = [0..hit_lists.len()];
+            self.taxdb.note_loaded(&self.db, || {
+                Self::loaded_subjects(
+                    titles,
+                    LoadedBefore {
+                        hits: hit_lists,
+                        spans: &batch,
+                        rows,
+                        cuts: shared::XmlCuts::NONE,
+                    },
+                    gapped,
+                )
+            });
+        }
+    }
+
+    /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
+    /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
+    /// prefetch is on, else those that the rows of the reports NCBI writes read,
+    /// `shared::BatchLoads::reported_rows`; review 3 of line DBID loadord, H2; review 6, H2).
+    fn loaded_subjects<'s>(
+        titles: &'s DatabaseTitles,
+        before: LoadedBefore<'s>,
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        before.subjects(
+            |hit_lists, span| hit_lists.get(span),
+            move |_, hit_lists| seq_aligns_of(hit_lists, gapped),
+            // BLASTN's prefetched set is its reported set.
+            move |_, hit_lists, loads| {
+                Self::prefetch_subjects(titles, hit_lists, gapped, loads.reported_rows())
+            },
         )
     }
 
     /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`
-    /// reads (`batch_prefetch`).
+    /// reads (`batch_prefetch`), or, as its reports read them where the prefetch is off, those
+    /// whose rows read them (`rows`, by each HSP's `num_ident`; BLASTN's formatter does not fetch
+    /// for the identities, so its rows read every subject or none).
     fn prefetch_subjects<'s>(
         titles: &'s DatabaseTitles,
         hit_lists: &'s [Option<BlastnHitList>],
         gapped: bool,
+        rows: SubjectFetch,
     ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
         hit_lists
             .iter()
@@ -766,7 +824,7 @@ impl BlastnDatabase {
                 let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
                 &hit_list.hsplist_array[..count]
             })
-            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .filter(move |hsp_list| hsp_list.hsps.iter().any(|hsp| rows.reads(hsp.num_ident)))
             .map(move |hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -1847,6 +1905,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
 /// The Seq-aligns of the results `hit_lists` that NCBI's prefetch counts against
 /// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP of a `gapped` search, one
 /// for each subject of an ungapped one (`shared::subject_seq_aligns`).
+/// The query batches of a call before a batch's prefetch that the loop holds
+/// (`shared::LoadedBefore`, read by `BlastnDatabase::loaded_subjects`): their final hit lists by
+/// query (`hits`), the queries of each batch (`spans`; those past `hits` are not held), and which
+/// rows of the first format read a subject where a batch's prefetch is off (`rows`).
+pub(super) type LoadedBefore<'a> = shared::LoadedBefore<'a, Option<BlastnHitList>>;
+
 pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -> usize {
     hit_lists
         .iter()

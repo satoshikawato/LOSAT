@@ -2348,14 +2348,18 @@ mod tests {
         }
     }
 
-    // No NCBI counterpart: test of LOSAT_X_TBNXLATE128's loops (the x86-64 SSSE3 / SSE4.1 build of
-    // the code the wasm32 build runs): for every phase of every length from 0 to 400 bases and five
-    // long ones, and three genetic codes, the residues the 128-bit loops write are those of the word
-    // loop (`simd` false), and they write no other byte.
+    // No NCBI counterpart: test of LOSAT_X_TBNXLATE128's loops (wasm32 simd128, and the x86-64
+    // SSSE3 / SSE4.1 build of the same code): for every phase of every length from 0 to 400 bases
+    // and five long ones, and three genetic codes, the residues the 128-bit loops write are those
+    // of the word loop (`simd` false), and they write no other byte.
     #[test]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
     fn x_w128_loops_write_the_residues_of_the_word_loop() {
         use crate::sequence::packed_subject::PackedNucleotide;
+        #[cfg(target_arch = "x86_64")]
         if !(std::arch::is_x86_feature_detected!("ssse3")
             && std::arch::is_x86_feature_detected!("sse4.1"))
         {
@@ -2377,7 +2381,7 @@ mod tests {
                     x_phase_residues(packed, phase, codons, tables, &mut plus, &mut minus, false);
                     let mut w_plus = vec![UNTOUCHED; codons + 2];
                     let mut w_minus = vec![UNTOUCHED; codons + 2];
-                    // SAFETY: the CPU has SSSE3 and SSE4.1 (checked above).
+                    // SAFETY: on x86-64 the CPU has SSSE3 and SSE4.1 (checked above).
                     let done = unsafe {
                         x_phase_residues_w128(
                             packed,
@@ -2411,7 +2415,7 @@ mod tests {
                     for minus_strand in [false, true] {
                         let mut out = vec![0u8; codons + 2];
                         let mut w_out = vec![UNTOUCHED; codons + 2];
-                        // SAFETY: the CPU has SSSE3 and SSE4.1 (checked above).
+                        // SAFETY: on x86-64 the CPU has SSSE3 and SSE4.1 (checked above).
                         let one = if minus_strand {
                             x_phase_one::<true>(packed, phase, codons, tables, &mut out, false);
                             unsafe {

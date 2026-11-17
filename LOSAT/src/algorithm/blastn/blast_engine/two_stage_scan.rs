@@ -777,12 +777,12 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         if debug_enabled {
                             *total_s_positions += 1;
                         }
-                        // A word that passes `test` joins the batch (`XWordBatch::keep`), which
-                        // goes to the ring out of line when it is full, so this closure makes no
-                        // call for a word and the scan inlines it.
+                        // A word that passes `test` goes to its batch out of line (`x_keep_word`),
+                        // so this closure is the test and that call and the scan inlines it: a
+                        // word the test drops makes no call.
                         let $k = current_lut_kmer;
                         if $has {
-                            words_ref.keep((kmer_start, s_range, current_lut_kmer));
+                            x_keep_word(&mut *words_ref, kmer_start, s_range, current_lut_kmer);
                         }
                     },
                 );
@@ -907,20 +907,19 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 /// closure gathers before they go to the head's ring together (`XWordBatch`). A power of two.
 const X_WORD_BATCH: usize = 32;
 
-/// No NCBI counterpart (call layout only): the words of the scan of a CSR table (`x_scan_csr!`)
-/// that pass its test, gathered in order and taken to the head's ring `X_WORD_BATCH` at a time, out of
-/// line (`XWordBatch::push`). The ring's push with the hand-over of the word that leaves the ring
-/// (`x_on_word_csr`) inlined made the scan's closure too large for the scan to inline, so every
-/// subject word cost a call. A call for each word that passes the test (one word out of line) cost
-/// a table whose cells are nearly all filled almost one call per subject word, and the test a
-/// branch that follows the data (pyani: about 89 % of the 4^11 cells of a packed head that fits
-/// the cache, LOSAT_X_BNPVONCE; x1.012 in time on node 1 against the form without the test). Here
-/// the closure writes every word to the next free place and keeps it only when the test holds
-/// (`word`: a store and an add, no branch on the test where the test reads no memory the presence
-/// vector would skip), and makes a call for `X_WORD_BATCH` words that passed, on a sparse table
-/// (ABRicate's resfinder: 84 % of 21.4 M words without a run) as on a full one. The words, their
-/// order and every value are the same: the ring gets the words that pass in the scan's order, the
-/// last ones (`finish`) before the ring is flushed.
+/// No NCBI counterpart (scheduling only): the words of the scan of a CSR table (`x_scan_csr!`)
+/// that pass its test, on their way to the head's ring. While the ring fills (no push has handed a
+/// word over yet) each word goes to it at once (`push_one`), so its prefetches start when it is
+/// found, as when every word went straight to the ring; from then on the words gather here, in
+/// order, and go to the ring `X_WORD_BATCH` at a time (`push`), so the ring's pushes and the
+/// hand-overs of the words that leave it (`x_on_word_csr`, the seeding) run as one loop instead of
+/// one word between two of the scan's. BlobToolKit's and MOB-suite's megablast searches run 3-4 %
+/// fewer cycles (ws node 1, one core, 10 rounds against dev 9943c4db7, each round faster). A
+/// subject whose words never fill the ring (mlst's alleles: about 7 words each) keeps the old
+/// schedule: the batch only waits for a full ring, as a batch from the first word made mlst's
+/// searches 1.6-2.3 % slower (their prefetches came just before the flush that used them). The
+/// words, their order and every value are the same: the ring gets the words that pass in the
+/// scan's order, the last ones (`finish`) before it is flushed.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1523-1536
 /// (`s_MBScanSubject_Any`: the presence test of each word in the scan's loop, the retrieve only for
@@ -947,6 +946,9 @@ struct XWordBatch<'a, R, E> {
     /// for each subject: mlst's 225,777 alleles spent 29 M instructions, 1.2 %, zeroing them.)
     words: [MaybeUninit<(usize, usize, u64)>; X_WORD_BATCH],
     n: usize,
+    /// Whether a push has handed a word over (the ring is full); until then the words go to the
+    /// ring one at a time.
+    ring_full: bool,
     ring: &'a mut R,
     emit: &'a mut E,
 }
@@ -960,25 +962,40 @@ where
         Self {
             words: [MaybeUninit::uninit(); X_WORD_BATCH],
             n: 0,
+            ring_full: false,
             ring,
             emit,
         }
     }
 
-    /// The word `w` of the scan, which passed its test, joins the batch; a full batch goes to the
-    /// ring.
+    /// A word of the scan that passed its test: to the ring while it fills, else to the batch; a
+    /// full batch goes to the ring.
     #[inline(always)]
-    fn keep(&mut self, w: (usize, usize, u64)) {
+    fn keep(&mut self, kmer_start: usize, s_range: usize, kmer: u64) {
+        if !self.ring_full {
+            self.push_one(kmer_start, s_range, kmer);
+            return;
+        }
         // (`n < X_WORD_BATCH` here: a full batch goes at once, so the mask never wraps a word)
-        self.words[self.n & (X_WORD_BATCH - 1)] = MaybeUninit::new(w);
+        self.words[self.n & (X_WORD_BATCH - 1)] = MaybeUninit::new((kmer_start, s_range, kmer));
         self.n += 1;
         if self.n == X_WORD_BATCH {
             self.push();
         }
     }
 
-    /// The words that passed go to the ring, in order (out of line, so the scan's closure stays
-    /// the store, the test and this call).
+    /// A word while the ring fills goes to it at once; whether the ring is full now (out of line,
+    /// so `keep` stays a test and a store, and `x_keep_word` jumps here).
+    #[inline(never)]
+    fn push_one(&mut self, kmer_start: usize, s_range: usize, kmer: u64) {
+        self.ring_full = self.ring.push(
+            (kmer_start, s_range, kmer),
+            |w| w.2 as usize,
+            &mut *self.emit,
+        );
+    }
+
+    /// The words gathered go to the ring, in order (out of line: once per `X_WORD_BATCH` words).
     #[inline(never)]
     fn push(&mut self) {
         for m in 0..self.n {
@@ -989,7 +1006,7 @@ where
         self.n = 0;
     }
 
-    /// The words that passed after the last full batch go to the ring.
+    /// The words gathered after the last full batch go to the ring.
     fn finish(&mut self) {
         if self.n > 0 {
             self.push();
@@ -997,34 +1014,66 @@ where
     }
 }
 
+/// No NCBI counterpart (call layout only): a word of a CSR scan that passes its test, to its
+/// batch (`XWordBatch::keep`), out of line with the word's three values as its arguments, so the
+/// scan's closure is the test and this call and the scan inlines it: a word the test drops makes no
+/// call (the ring's push inlined in the closure made it too large for the scan to inline, and the
+/// batch's store inlined there cost mlst's scan two more reads per word, 1.3 % more instructions).
+#[inline(never)]
+fn x_keep_word<R, E>(words: &mut XWordBatch<'_, R, E>, kmer_start: usize, s_range: usize, kmer: u64)
+where
+    R: x_dc_csr::XRing<(usize, usize, u64)>,
+    E: FnMut((usize, usize, u64), usize),
+{
+    words.keep(kmer_start, s_range, kmer);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     type W = (usize, usize, u64);
 
-    /// A ring that keeps the words pushed to it, in order, and hands none over.
-    struct Kept(Vec<W>);
+    /// A FIFO of `depth` words like the head's ring: a push enters the word and, once `depth`
+    /// words are in, hands the oldest over to `emit` (and says so); a flush hands over the rest.
+    struct Fifo {
+        q: VecDeque<W>,
+        depth: usize,
+        pushes: usize,
+    }
 
-    impl x_dc_csr::XRing<W> for Kept {
+    impl x_dc_csr::XRing<W> for Fifo {
         fn push(
             &mut self,
             w: W,
             _cell: impl Fn(&W) -> usize,
-            _emit: &mut impl FnMut(W, usize),
+            emit: &mut impl FnMut(W, usize),
         ) -> bool {
-            self.0.push(w);
-            false
+            self.pushes += 1;
+            self.q.push_back(w);
+            if self.q.len() > self.depth {
+                emit(self.q.pop_front().unwrap(), 0);
+                true
+            } else {
+                false
+            }
         }
 
-        fn flush(&mut self, _cell: impl Fn(&W) -> usize, _emit: &mut impl FnMut(W, usize)) {}
+        fn flush(&mut self, _cell: impl Fn(&W) -> usize, emit: &mut impl FnMut(W, usize)) {
+            while let Some(w) = self.q.pop_front() {
+                emit(w, 0);
+            }
+        }
     }
 
-    /// `XWordBatch` hands the ring the words that pass, in the scan's order, the same as pushing
-    /// each passing word as it comes: across full batches and the last part (`finish`), with
-    /// none, every and every k-th word passing, and with pseudo-random words and passes.
+    /// `XWordBatch` hands the ring the words that pass, in the scan's order, so the ring hands
+    /// over the same words in the same order as when each passing word is pushed as it comes:
+    /// with a ring that fills at once, after a few words, at the scans' depth or never; across full
+    /// batches and the last part (`finish`); with none, every and every k-th word passing, and with
+    /// pseudo-random words and passes.
     #[test]
-    fn the_word_batch_pushes_the_passing_words_in_order() {
+    fn the_word_batch_hands_the_ring_the_passing_words_in_order() {
         let mut x = 0x9e37_79b9_7f4a_7c15u64;
         let mut next = move || {
             x ^= x << 13;
@@ -1033,33 +1082,46 @@ mod tests {
             x
         };
         let lens = [0, 1, 2, 31, 32, 33, 63, 64, 65, 96, 1000];
-        for len in lens {
-            for rule in 0..6u64 {
-                let words: Vec<(W, bool)> = (0..len)
-                    .map(|i| {
-                        let r = next();
-                        let pass = match rule {
-                            0 => false,
-                            1 => true,
-                            2 => i % 2 == 0,
-                            3 => i % X_WORD_BATCH == X_WORD_BATCH - 1,
-                            4 => r % 10 != 0,
-                            _ => r % 7 == 0,
-                        };
-                        ((i, (r >> 40) as usize, r), pass)
-                    })
-                    .collect();
-                let mut ring = Kept(Vec::new());
-                let mut emit = |_: W, _: usize| {};
-                let mut batch = XWordBatch::new(&mut ring, &mut emit);
-                for &(w, pass) in &words {
-                    if pass {
-                        batch.keep(w);
+        for depth in [0, 1, 5, x_dc_csr::RING, 10_000] {
+            for len in lens {
+                for rule in 0..6u64 {
+                    let words: Vec<(W, bool)> = (0..len)
+                        .map(|i| {
+                            let r = next();
+                            let pass = match rule {
+                                0 => false,
+                                1 => true,
+                                2 => i % 2 == 0,
+                                3 => i % X_WORD_BATCH == X_WORD_BATCH - 1,
+                                4 => r % 10 != 0,
+                                _ => r % 7 == 0,
+                            };
+                            ((i, (r >> 40) as usize, r), pass)
+                        })
+                        .collect();
+                    let mut ring = Fifo {
+                        q: VecDeque::new(),
+                        depth,
+                        pushes: 0,
+                    };
+                    let mut out = Vec::new();
+                    let mut emit = |w: W, _: usize| out.push(w);
+                    let mut batch = XWordBatch::new(&mut ring, &mut emit);
+                    for &(w, pass) in &words {
+                        if pass {
+                            batch.keep(w.0, w.1, w.2);
+                        }
                     }
+                    batch.finish();
+                    x_dc_csr::XRing::flush(&mut ring, |w: &W| w.2 as usize, &mut emit);
+                    let want: Vec<W> = words.iter().filter(|w| w.1).map(|w| w.0).collect();
+                    assert_eq!(
+                        ring.pushes,
+                        want.len(),
+                        "depth {depth} len {len} rule {rule}"
+                    );
+                    assert_eq!(out, want, "depth {depth} len {len} rule {rule}");
                 }
-                batch.finish();
-                let want: Vec<W> = words.iter().filter(|w| w.1).map(|w| w.0).collect();
-                assert_eq!(ring.0, want, "len {len} rule {rule}");
             }
         }
     }

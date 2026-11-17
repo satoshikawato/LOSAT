@@ -23,7 +23,8 @@
 //! ```
 //!
 //! The serial builder makes the reference's appends (a query offset's cells, in the order of
-//! `add_word_hits`) for the query offsets of its count ranges (`x_count_ranges`) in order. Here:
+//! `add_word_hits`, or of `LOSAT_X_CLUTPAIRS`' pair rows within an offset: `x_clut_direct.rs` header)
+//! for the query offsets of its count ranges (`x_count_ranges`) in order. Here:
 //! - chunks (`x_chunks`): each count range's query offsets, in order, cut into contiguous runs, a run
 //!   given as ranges of lookup segments (`XChunk::pieces`: a range `(a, b + word_length - 1)` holds
 //!   the offsets a..=b of its lookup segment, which `x_for_each_offset` visits as it visits them in
@@ -1468,7 +1469,7 @@ fn x_chunk_appends(
         true
     };
     match starts {
-        // One wave: every cell, in `add_word_hits`' order.
+        // One wave: every cell, as `XWords::for_each_word` gives them.
         XStarts::Make => {
             x_for_each_offset(words.word_length, query, &chunk.pieces, |offset, word| {
                 let before = targets.len();
@@ -1519,7 +1520,7 @@ fn x_chunk_appends(
 #[derive(Clone, Copy)]
 enum XStarts<'a> {
     /// None: a build of one wave, whose appends are `XWords::for_each_word`'s (every cell of an
-    /// offset in `add_word_hits`' order: a wave of fewer letters chooses its last letter first, and
+    /// offset, as it gives them: a wave of fewer letters chooses its last letter first, and
     /// testing each of the alphabet's letters against the bound one by one missed the branch
     /// predictor's guess often: blastp-fast +4.7 % of the wall time at 8 threads with +0.4 % of the
     /// instructions).

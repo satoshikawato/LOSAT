@@ -29,8 +29,16 @@ LOSAT/tests/db_search (README.md there says how they were built).
   bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same search with
   the mask one letter shorter), where NCBI's own run of the row reaches an approved NCBI defect
   (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
-  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject). The row has no frozen files of its own; `freeze` does not run NCBI
-  for it and copies ROW_ID's columns (`near_row_id`).
+  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject; exception 3: a one-hit gapped
+  start whose window reads past the end of a database volume's last memory page, where NCBI faults). The row has no
+  frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row_id`).
+- a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
+  memcheck, where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3: the window of a one-hit
+  gapped start of negative length; natively NCBI may crash there or read bytes that differ from run to run, valgrind
+  reports the reads and goes on). `freeze` runs such a row only with `--valgrind CMD` (the command line put before
+  NCBI's, for example `valgrind -q --log-file=/dev/null`, so that NCBI's stderr stays its own; a stderr with
+  valgrind's `==PID==` lines stops the freeze) and otherwise leaves its columns and files as they are
+  (`under_valgrind`).
 - a `ncbi` row whose `covers` cell has `ncbi-stack: unlimited`: `freeze` runs NCBI with no stack limit
   (`RLIMIT_STACK` infinity). NCBI's reader of a PSSM recurses once per nested value on its main thread's stack,
   and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
@@ -45,7 +53,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
   against `stdout_sha256`. Its `rc` and stderr are LOSAT's.
 
-`freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
+`freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
 the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
@@ -79,6 +87,7 @@ import argparse
 import gzip
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -340,6 +349,23 @@ def strip_sam_cl(data: bytes) -> bytes:
     return data if end < 0 else data[:start] + data[end:]
 
 
+def frozen_stdout(row: dict[str, str], stdout: bytes) -> bytes:
+    """The stdout that `freeze` writes for `row`: NCBI's, except that a SAM document (outfmt 17) whose bytes
+    differ from the frozen file's only in the CL tag of its @PG line keeps the frozen bytes.
+
+    NCBI writes its argv[0] in that tag, the path of the NCBI build that ran (the oracle, Bioconda's, ws's).
+    Without this rule a freeze with another build of the same NCBI release would rewrite the file and its
+    sha256 and byte cells although the search output is the same by the rule that `check` (and set D's
+    `run_oracle.py`) compares with, and a freeze of the candidate would leave `git status` dirty."""
+    if not is_sam_outfmt(row["outfmt"]):
+        return stdout
+    path = FROZEN / f"{row['row_id']}.out"
+    if not path.is_file():
+        return stdout
+    frozen = path.read_bytes()
+    return frozen if strip_sam_cl(frozen) == strip_sam_cl(stdout) else stdout
+
+
 def first_difference(expected: bytes, actual: bytes) -> str:
     for number, (left, right) in enumerate(zip(expected.split(b"\n"), actual.split(b"\n")), 1):
         if left != right:
@@ -360,6 +386,24 @@ def near_row_id(row: dict[str, str]) -> str | None:
     covers cell), or None: the row's own frozen files."""
     _, marker, rest = row["covers"].partition("ncbi-near: ")
     return rest.split(" | ")[0].split()[0] if marker else None
+
+
+def under_valgrind(row: dict[str, str]) -> bool:
+    """Whether the frozen bytes of `row` are NCBI's run under valgrind (a ` | ncbi-valgrind` part of its covers
+    cell): rows where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3)."""
+    return any(part.strip() == "ncbi-valgrind" for part in row["covers"].split(" | ")[1:])
+
+
+def valgrind_messages(stderr: bytes) -> bool:
+    """Whether `stderr` holds valgrind's own lines (`==PID== ...`): `freeze` refuses to freeze them as NCBI's
+    stderr (the `--valgrind` command needs a `--log-file`)."""
+    return re.search(rb"^==\d+==", stderr, re.MULTILINE) is not None
+
+
+def refuse_valgrind_messages(row: dict[str, str], stderr: bytes) -> None:
+    """Stops `freeze` before it writes any file of an `ncbi-valgrind` row whose NCBI stderr holds valgrind's lines."""
+    if under_valgrind(row) and valgrind_messages(stderr):
+        raise SystemExit(f"{row['row_id']}: valgrind's messages in NCBI's stderr; give --valgrind a --log-file")
 
 
 def frozen_id(row: dict[str, str]) -> str:
@@ -404,12 +448,18 @@ def freeze(args: argparse.Namespace) -> int:
             else:
                 run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                      env=row_env(row, env), preexec_fn=ncbi_stack(row))
-            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
-            row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
-            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
+            out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+            row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
+            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
             continue
         if row["kind"] != "ncbi" or near_row_id(row):
             continue
+        if under_valgrind(row):
+            if not args.valgrind:
+                print(f"{row['row_id']}\tkept: frozen from NCBI under valgrind (freeze it with --valgrind)")
+                continue
+            command = [*shlex.split(args.valgrind), *command]
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
         if rps_cell(row["db"]) is not None:
@@ -419,29 +469,35 @@ def freeze(args: argparse.Namespace) -> int:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = written.run
+            refuse_valgrind_messages(row, run.stderr)
+            out = run.stdout
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
             pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                            timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = pssms.run
+            refuse_valgrind_messages(row, run.stderr)
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
-            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+            out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env), preexec_fn=ncbi_stack(row))
-            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+            refuse_valgrind_messages(row, run.stderr)
+            out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)
         else:
             err.unlink(missing_ok=True)
-        row.update(rc=str(run.returncode), stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)),
+        row.update(rc=str(run.returncode), stdout_sha256=sha256(out), stdout_bytes=str(len(out)),
                    stderr_sha256=sha256(run.stderr) if run.stderr else "")
         if files:
             row.update(xinclude.observed(written))
         if pssm:
             row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
-        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
+        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(out)}\tstderr={len(run.stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     # The rows whose expectation is a near input's NCBI run (`near_row_id`) take that row's columns, after it
@@ -605,6 +661,8 @@ def main() -> int:
     fz.add_argument("--ncbi-bin", required=True)
     fz.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     fz.add_argument("--only", default="")
+    fz.add_argument("--valgrind", default="",
+                    help="the command before NCBI's for the rows frozen under valgrind (`ncbi-valgrind` in covers)")
     ck = sub.add_parser("check", help="compare LOSAT with the frozen bytes")
     ck.add_argument("--losat", type=Path, required=True)
     ck.add_argument("--threads", type=int, default=1)

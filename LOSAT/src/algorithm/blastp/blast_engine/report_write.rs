@@ -119,6 +119,9 @@ pub(super) struct ReportView<'a> {
     pub(super) subject_accessions: &'a [Option<[Arc<[u8]>; 2]>],
     pub(super) subject_stitles: &'a [Arc<[u8]>],
     pub(super) hit_lists: &'a [Option<BlastpHitList>],
+    /// What the XML2 and JSON reports do at each subject's `Hit`, by rank
+    /// (`ListedTitles::hit_loads`, from `report_prep::prefetch_reported_subjects`).
+    pub(super) hit_loads: &'a crate::report::db_subject::HitLoads,
     pub(super) engine_counts: &'a EngineCounts,
     pub(super) pairwise_hits: &'a Option<Arc<Vec<PairwiseHit>>>,
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
@@ -354,6 +357,7 @@ pub(super) fn write_xml(
         subject_records,
         subject_titles,
         hit_lists,
+        hit_loads,
         pairwise_hits,
         filtered_empty,
         xml_matrix_failure,
@@ -493,7 +497,9 @@ pub(super) fn write_xml(
         Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
         crate::algorithm::common::database::TaxdbNotes,
     ) = match (xml2_kind, listed_titles.as_ref(), database) {
-        (Some(_), Some(titles), Some(database)) => titles.read_taxids(database, hit_lists)?,
+        (Some(_), Some(titles), Some(database)) => {
+            titles.read_taxids(database, hit_lists, hit_loads)?
+        }
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
     let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref(), database) {
@@ -510,6 +516,7 @@ pub(super) fn write_xml(
                 length: &database_length,
                 parsed: listed_parsed,
                 parsed_taxonomy: &xml_parsed_taxonomy,
+                loads: hit_loads,
             }
         }
         _ => crate::report::blast_xml::XmlSubjects::Records {
@@ -852,7 +859,12 @@ pub(super) fn write_pairwise(
     let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let mut windows = match pairwise_hits {
         Some(_) => vec![0..pairwise_queries.len()],
-        None => query_rows::row_windows(hit_lists, pairwise_queries.len(), x_pool),
+        None => query_rows::row_windows(
+            hit_lists,
+            pairwise_queries.len(),
+            x_pool,
+            pairwise_config.line_length,
+        ),
     };
     if windows.is_empty() {
         windows.push(0..0);
@@ -1132,11 +1144,26 @@ pub(super) fn write_custom_tabular(
         writer.flush()?;
         return Ok(());
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2955-2958
+    // ```c++
+    //     	if (args[kArgLineLength]) {
+    //    		 ERR_POST(Warning << "The parameter -line_length is not applicable for "
+    //    				    		 "output formats > 4 .");
+    //     	}
+    // ```
     // The rows of the queries' HSPs when a field shows them (and rpsblast's
-    // identities, `tabular::needs_rows`), a window at a time (`query_rows`).
+    // identities, `tabular::needs_rows`), a window at a time (`query_rows`). A tabular
+    // report has no lines: NCBI reads `-line_length` only for outfmt 0 to 4
+    // (blast_args.cpp:2939-2941) and keeps its default otherwise (`kDfltLineLength`,
+    // blast_args.hpp:1094), the line length that the windows' estimate takes here.
     let mut rows = tabular::needs_rows(needs.rows, spec, args.app).then(|| {
         query_rows::QueryRows::new(
-            query_rows::row_windows(hit_lists, hit_lists.len(), x_rows_pool),
+            query_rows::row_windows(
+                hit_lists,
+                hit_lists.len(),
+                x_rows_pool,
+                crate::report::pairwise::DEFAULT_LINE_LENGTH,
+            ),
             pairwise_hits.as_deref().map(Vec::as_slice),
             rows_of,
         )

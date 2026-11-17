@@ -1,22 +1,29 @@
 //! The subject loop of a TBLASTX query batch: the worker state of each thread, the writer thread
-//! that collects the subjects' hits (native builds with `parallel`), and the loop that runs
+//! that collects the subjects' hits (native builds with `parallel`), the loop that runs
 //! `process_subject` for every subject of the batch, on the search pool's threads or on the calling
-//! thread.
+//! thread, and the end of each subject (`SubjectEmit::emit`: its final HSPs, after the negative
+//! seqid list's check, to the writer thread or to the collector the loop keeps).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1607
 //! (`BLAST_PreliminarySearchEngine`, whose subject loop is at :1411-1584), which every thread of
 //! c++/src/algo/blast/api/prelim_stage.cpp:141-203
-//! (`CBlastPrelimSearch::x_LaunchMultiThreadedSearch`) runs, at :145-188.
+//! (`CBlastPrelimSearch::x_LaunchMultiThreadedSearch`) runs, at :145-188;
+//! c++/src/algo/blast/core/blast_hits.c:2651-2665 (the fetch that a negative seqid list excludes)
+//! and c++/src/algo/blast/core/blast_engine.c:1553-1554 (`BlastHSPStreamWrite`).
 //!
 //! This module is a child of `run_impl` for the modules it keeps private (`x_subject_next`,
 //! `x_batch_pipe`). Its functions are statements of `search_query_batch` moved here in their
 //! order; `process_subject` stays a closure of `search_query_batch`, which hands it to
-//! `run_subject_loop`. What the loop reads is a struct of references or `Copy` values.
+//! `run_subject_loop`. What the loop reads is a struct of references or `Copy` values, as is
+//! `SubjectEmit`, whose `emit` is the closure `process_subject` called at the end of a subject.
 
 use super::{
     x_batch_pipe, x_subject_next, DiagStruct, OffsetPair, Subjects, TblastxHsp, TbxScore,
     WorkerState,
 };
+use crate::algorithm::common::database::FetchExcluded;
+use crate::algorithm::tblastx::hit_collector::HitCollector;
+use crate::algorithm::tblastx::subjects::XReadFailure;
 use crate::algorithm::tblastx::x_work_board::XBoard;
 #[cfg(all(
     feature = "parallel",
@@ -29,10 +36,7 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-use {
-    super::TblastxArgs, crate::algorithm::tblastx::hit_collector::HitCollector,
-    crate::blastinput::fasta_reader::FastaRecord, std::sync::Arc,
-};
+use {super::TblastxArgs, crate::blastinput::fasta_reader::FastaRecord, std::sync::Arc};
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
 // ```c
@@ -130,6 +134,77 @@ pub(super) fn spawn_writer(
         }
         collector.finish()
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
+// ```c
+//       	seq_arg.oid = subject_blk->oid;
+// ...
+//         seq_arg.check_oid_exclusion = TRUE;
+// ...
+//       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+//       		for (index = 0; index < hspcnt; ++index) {
+//       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+//       		}
+//       		Blast_HSPListPurgeNullHSPs(hsp_list);
+//       		return 0;
+//       	}
+// ```
+// The re-evaluation's fetch of a subject with HSPs excludes one that the negative seqid
+// list keeps without a line (`FetchExcluded`): its HSPs are freed before the hit lists and
+// the culling writer (`SubjectEmit::emit`), one check for the batch.
+/// What the end of each subject reads of the batch (`emit`): the negative seqid list's check of the
+/// re-evaluation's fetch (`fetch_excluded`, `None` where the fetches exclude nothing), the batch's
+/// read failure, and the collector of the hit lists that a subject loop without a writer thread
+/// keeps (`local_collector`).
+pub(super) struct SubjectEmit<'a> {
+    pub(super) fetch_excluded: Option<&'a FetchExcluded<'a>>,
+    pub(super) x_read_failure: &'a XReadFailure,
+    pub(super) local_collector: &'a std::sync::Mutex<Option<HitCollector>>,
+}
+
+impl SubjectEmit<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
+    // ```c
+    //          /* Save the results. */
+    //          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // ```
+    // NCBI writes a subject's list when it holds HSPs (:1480); the collector takes one message per
+    // subject, with none too, to keep the subjects' order.
+    /// One message per subject of the loop, with its final HSPs or none, so that the collector
+    /// reaches every OID (`HitCollector::push`): `st.hits` holds the subject's HSPs until here.
+    pub(super) fn emit<S>(&self, st: &mut WorkerState<S>, s_idx: usize) {
+        let &SubjectEmit {
+            fetch_excluded,
+            x_read_failure,
+            local_collector,
+        } = self;
+        let mut hits = std::mem::take(&mut st.hits);
+        if let (false, Some(excluded), Ok(ordinal)) =
+            (hits.is_empty(), fetch_excluded, u32::try_from(s_idx))
+        {
+            match excluded.excludes(ordinal) {
+                Ok(false) => {}
+                Ok(true) => hits.clear(),
+                Err(error) => {
+                    // A header that the fetch cannot read ends NCBI's search: the batch fails
+                    // with LOSAT's refusal, as a subject whose read failed fails it.
+                    hits.clear();
+                    x_read_failure.fail(s_idx, FetchExcluded::refusal((ordinal, error), "TBLASTX"));
+                }
+            }
+        }
+        if let Some(tx) = &st.tx {
+            tx.send((s_idx, hits)).unwrap();
+        } else {
+            local_collector
+                .lock()
+                .unwrap()
+                .as_mut()
+                .expect("a subject loop without a writer thread keeps the collector")
+                .push(s_idx, hits);
+        }
+    }
 }
 
 /// What `run_subject_loop` reads.
@@ -231,7 +306,7 @@ where
         //        continue;
         //    }
         // ```
-        // The threads' subjects go to the collector the subject loop keeps (`emit_subject_hits`;
+        // The threads' subjects go to the collector the subject loop keeps (`SubjectEmit::emit`;
         // no writer thread on this target), which takes them in OID order.
         if x_subject_next::on() {
             // EXPERIMENT (LOSAT_X_TBXNEXT): as in native builds below, each thread of the pool

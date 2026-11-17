@@ -8,8 +8,8 @@
 //! c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274).
 //!
 //! This module is a child of `run_impl`, as subject_link.rs is. Its functions are statements of
-//! `process_subject` moved here in their order (`print_hsp_saving_stats` is called from it, the
-//! others from subject_report.rs); what they read is a struct of references and `Copy` values.
+//! `process_subject` moved here in their order (they are called from subject_report.rs); what
+//! they read is a struct of references and `Copy` values.
 
 use super::{
     trace_hsp_target, trace_match_target, AtomicOrdering, DiagnosticCounters, QueryContext,

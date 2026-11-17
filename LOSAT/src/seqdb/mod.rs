@@ -1216,6 +1216,11 @@ impl SeqDb {
         self.find_volume(ordinal).map(|at| at.volume)
     }
 
+    /// The number of the volume that holds NCBI's OID `oid` ([`SeqDb::locate_oid`]).
+    pub fn oid_volume(&self, oid: u32) -> Result<usize, SeqDbError> {
+        self.locate_oid(oid).map(|at| at.volume)
+    }
+
     /// Opens the one database at the path `name` (without extension), taken
     /// as it is: a space or a double quote in it is a character of the path
     /// (`alias::resolve_one_name`). Everything else is as in [`SeqDb::open`],
@@ -2382,8 +2387,8 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_length(at.vol_oid, self.location_oid(&at))
     }
 
-    /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
-    /// ambiguity runs that overlap it, read without the rest of the sequence.
+    /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal`.
+    #[cfg(test)]
     pub fn nucleotide_iupac_range(
         &self,
         ordinal: u32,
@@ -2393,7 +2398,8 @@ impl SeqDb {
         self.nucleotide_iupac_range_at(self.find_volume(ordinal)?, from, to)
     }
 
-    /// [`SeqDb::nucleotide_iupac_range`] of the nucleotide at `at`.
+    /// The IUPAC letters `[from, to)` of the nucleotide at `at`: the bases of the range and the
+    /// ambiguity runs that overlap it, read without the rest of the sequence.
     pub fn nucleotide_iupac_range_at(
         &self,
         at: SeqLocation,
@@ -2403,6 +2409,18 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_iupac_range(at.vol_oid, self.location_oid(&at), from, to)
     }
 
+    /// [`SeqDb::nucleotide_iupac_at`] of nucleotide `ordinal`.
+    pub fn nucleotide_iupac(&self, ordinal: u32) -> Result<Vec<u8>, SeqDbError> {
+        self.nucleotide_iupac_at(self.find_volume(ordinal)?)
+    }
+
+    /// The IUPAC letters of the whole nucleotide at `at`: [`SeqDb::nucleotide_iupac_range_at`]
+    /// of `[0, length)`, the length read once, with the sequence's ambiguity data
+    /// (`Volume::nucleotide_iupac`).
+    pub fn nucleotide_iupac_at(&self, at: SeqLocation) -> Result<Vec<u8>, SeqDbError> {
+        self.volumes[at.volume].nucleotide_iupac(at.vol_oid, self.location_oid(&at))
+    }
+
     /// The length and the ambiguity runs of nucleotide `ordinal`, read once for any number of
     /// [`SeqDb::nucleotide_iupac_range_with`] calls on it.
     pub fn nucleotide_ambiguity(&self, ordinal: u32) -> Result<NucleotideAmbiguity, SeqDbError> {
@@ -2410,8 +2428,8 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_ambiguity(at.vol_oid, self.location_oid(&at))
     }
 
-    /// [`SeqDb::nucleotide_iupac_range`] with the length and the runs of
-    /// [`SeqDb::nucleotide_ambiguity`] for the same `ordinal`: one read of the range's bytes.
+    /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal` with the length and the runs
+    /// of [`SeqDb::nucleotide_ambiguity`] for the same `ordinal`: one read of the range's bytes.
     pub fn nucleotide_iupac_range_with(
         &self,
         ordinal: u32,

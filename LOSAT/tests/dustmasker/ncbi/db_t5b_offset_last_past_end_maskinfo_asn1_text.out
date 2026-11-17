@@ -1,0 +1,208 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410000",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410000",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410001",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410002",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410002",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410003",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410003",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410004",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410004",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410005",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410005",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410006",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410006",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410007",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410007",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410009",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410009",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410010",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410010",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id genbank {
+            accession "AB410011",
+            version 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id genbank {
+            accession "AB410011",
+            version 1
+          }
+        }
+      }
+    },
+    more FALSE
+  }
+}

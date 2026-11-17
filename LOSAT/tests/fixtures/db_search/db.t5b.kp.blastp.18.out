@@ -1,0 +1,20 @@
+
+                                          Tax BLAST report                                          
+
+Query= pdq query of the duplicated record
+
+Length=220
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ AB420011  titled human b                                                              466   7e-174  
+ AB420003  unnamed protein product [Homo sapiens]                                      466   7e-174  
+ AB420002  titled human                                                                466   7e-174  
+
+                              Last entry sp. (last common) [lastblast]                              
+ AB420010  unnamed protein product [Last entry sp.]                                    466   7e-174  
+ AB420007  first                                                                       466   7e-174  
+ AB420006  t99990 again                                                                466   7e-174  
+ AB420004  unnamed protein product [Last entry sp.]                                    466   7e-174  

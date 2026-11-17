@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.44
+- Version: 1.45
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -129,11 +129,19 @@
   an ISAM file of a later volume that does not open stops none of its lookups; refused, where
   LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07);
-  1.44 2026-11-17 (outfmt 13 to 16 of a reported sequence whose lookup in a version 5 list fails
+  1.43 2026-11-17 (the explicit rejections of a taxonomy record read past NCBI's mapping of
+  `taxdb.btd`, rule 3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, and
+  exception 14, LOSAT's output where NCBI may fault there, which the Owner decided on 2026-11-15;
+  line RG item T5b; written 2026-11-15 as 1.26 with exception 13);
+  1.44 2026-11-17 (TBLASTN `-in_pssm -window_size 0`, a one-hit gapped start on its frame's NULLB
+  or after it, which a PSSM whose '-' column scores above BLAST_SCORE_MIN allows: its preliminary
+  gapped score reproduced, rule 2, and the explicit rejection of its traceback after the NULLB,
+  rule 3; line RG item X2d, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.45 2026-11-17 (outfmt 13 to 16 of a reported sequence whose lookup in a version 5 list fails
   where the batch's prefetch is off are written as NCBI writes them: 15 and 16 post the exception
   and leave the query's report out, 13 and 14 stop with `BLAST Database error`; the refusal of
   1.31 narrowed to the other formats; line DBID item pfoff, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; 1.43 is line RG item T5b's on dev)
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -983,7 +991,7 @@ masked). Line NP item M4a-2c.
   run where the reports read such a Seq-id with the prefetch off (`... whose lookup in the
   database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
   BLAST Database error, and where the prefetch is off its formatters fail to read it)`) but
-  writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.44,
+  writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.45,
   line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
@@ -1168,6 +1176,24 @@ masked). Line NP item M4a-2c.
   where that first inverted node would be made; ranges in order inside the tree's bounds never
   make one, and only this word finder's HSPs are out of order or leave them.
 
+  With `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (a hand-made one: the
+  matrices score it BLAST_SCORE_MIN, `blast_stat.c:1559-1562`, and so does NCBI's PSSM engine, the
+  gap's background probability being 0, `blast_psi_priv.c:2435-2436`), the window can sum above 0
+  over the NULLB after a subject frame's last letter, and the gapped start then lies on that NULLB
+  or one or two letters after it (version 1.44, 2026-11-17, line RG item X2d, Owner-delegated).
+  NCBI's preliminary gapped alignment reads back from the start over the six frames' buffer (the
+  next frame's letters, the NULLB scored with the '-' column, the frame's letters; no right
+  extension, `blast_gapalign.c:4250-4347`), and LOSAT reads the same bytes; an HSP that NCBI drops
+  before its traceback leaves the search as NCBI's. LOSAT refuses where such an HSP reaches the
+  traceback with its start after the NULLB: `BLAST_GappedAlignmentWithTraceback` reads the subject
+  at the start first (`blast_gapalign.c:4609`, `:569-575`), a byte past the fence of the partial
+  translation (`blast_hits.c:1208,1225-1227`) and, on the retry after that fence, past the NULLB of
+  the whole frame's translation (`subject.offset` -1: `blast_traceback.c:424-428`,
+  `blast_hits.c:1175-1177,1189,1208`, no fence; the NULLB of `blast_util.c:453`) or past its
+  allocation. A start on the NULLB is defined there (the fence, then the whole frame's NULLB); LOSAT
+  does not reproduce the reports of that alignment's column of the NULLB yet and refuses it where
+  they would show it, as a gap of its own, not under this rule.
+
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.
 
@@ -1339,6 +1365,49 @@ masked). Line NP item M4a-2c.
   every `-num_threads` (`tests/tblastx_query_batch.rs`: 1, 4, 8 and 16 threads, the one-hit word
   finder, and a run of two query batches). It takes a raw X-drop above 32,768 (with BLOSUM62 about
   15,000 bits of `-xdrop_ungap` or more).
+
+## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
+
+`CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
+entry's (the last entry's: to the end of the file) without checking it against the file's size
+(`seqdbtax.cpp:258-298`). Past the end of the file NCBI reads the zero bytes of its mapping's last
+4,096-byte page, which LOSAT reproduces, and after that page memory that does not belong to the
+file. LOSAT refuses (exit 1, one line naming its program) only:
+
+- every lookup that reads a record of an empty `taxdb.btd`, which NCBI maps as a null pointer: it
+  faults for certain (SIGSEGV in every program; the loads of dustmasker, segmasker, blastdbcmd's
+  FASTA and the searches' prefetch included);
+- a name that the output writes and NCBI reads past the mapping: the super kingdom of a record
+  that reaches past it (`blastdbcmd -outfmt %K`, `-tax_info` with `%K`, `sskingdom` and
+  `sskingdoms`), and any name of a record whose third tab is past it (whether NCBI finds names at
+  all depends on that memory): a title made from the scientific name, `%S %L %B %C %N`, the
+  tabular name fields, the `sciname` of outfmt 13 to 16, outfmt 18. Line RG item T5b's review
+  measured NCBI 2.17.0 writing 4,835 bytes and more of other mappings as the kingdom of such a
+  record (`-tax_info -outfmt "%T|%K|%B"`), the same in two runs.
+
+## Approved exception (a taxonomy record past NCBI's mapping of `taxdb.btd`, version 1.43)
+
+Version 1.43. The Owner decided on 2026-11-15 (line RG `DECISIONS.md` T5b-6, Q1 = A, words
+「RG-T Q1=A」) the question of line RG item T5b's fix 2: LOSAT keeps writing NCBI's completed output
+here, as rule 1's approved exception, against rule 3's rejection of every lookup of such a record,
+which would also refuse runs that NCBI completes with the same bytes (44 runs of the item's probes).
+Numbered after exception 13 (version 1.35).
+
+14. **A record that NCBI reads past its mapping where the output writes nothing of the bytes
+    there.** Where NCBI reads such a record past its mapping and the output writes nothing of the
+    bytes there (the lookups of `GetBioseq`, whose names the maskers' and blastdbcmd's output do
+    not write, a stored title, the names before a third tab inside the mapping, the searches'
+    prefetch), LOSAT writes what NCBI writes when it completes, which is the result of the same run
+    with a `taxdb.btd` that holds those bytes (rule 1's valid result). Whether NCBI completes
+    depends on its memory map, not on the input: in the review of line RG item T5b, a record of a
+    266-byte `taxdb.btd` that ends at 5,000 bytes completed in `dustmasker`, `segmasker` and
+    `blastdbcmd`, one that ends at 9,000 or 20,000 bytes in `blastdbcmd -tax_info`, and one that
+    ends at 1 MiB faulted (SIGSEGV) in `dustmasker` and `blastdbcmd`. LOSAT writes the output in
+    all of them, as in the 20 of the item's 115 search runs and 2 of its 32 tool runs where NCBI
+    faulted.
+    This was LOSAT's behaviour for the maskers' and blastdbcmd's loads before line RG item T5b
+    (dev), and is now its behaviour in the searches as well. What the output writes from past the
+    mapping stays refused (the rejections above).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

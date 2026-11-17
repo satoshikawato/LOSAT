@@ -2298,22 +2298,25 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 //     /* +1 as the first byte is a sentinel. */
 //     return target_t->translations[context] - target_t->range[2*context] + 1;
 // ```
-// NCBI skips the translation of a subject of fewer than 12 bases (`0 < n / 3 - 3` is false) and
-// returns the frame's translation that was never made: NULL + 1. Every caller reads it next: the
-// traceback's gapped start and ALIGN_EX (blast_traceback.c:429-436,509-512), the identities after
-// the composition-based redo (blast_kappa.c:527-528), the ungapped re-evaluation
+// NCBI skips the translation of a subject (its searched range, `-subject_loc`) of fewer than 12
+// bases (`stop < n / 3 - 3` is false) and returns the frame's translation that was never made:
+// NULL + 1. Every caller reads from there next: the traceback's gapped start and ALIGN_EX
+// (blast_traceback.c:429-440,509-512), the identities after the composition-based redo
+// (blast_kappa.c:527-528, after its E-value purge, :3677-3700), the ungapped re-evaluation
 // (blast_hits.c:2700-2705; LOSAT's TBLASTN refuses `-ungapped`). NCBI BLAST+ 2.17.0 dies there with
-// SIGSEGV (probes on ws, 2026-11-17: `-subject` and `-db`, frames + and -, a matrix query at
-// `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS 1.44, rule
-// 3). A subject that leaves no HSP to that point (9 or 10 bases at the probes' settings, 11 below
-// the cutoff of `-evalue 1e-30`, in NCBI and LOSAT alike) lets the search go on.
+// SIGSEGV (probes on ws, 2026-11-17: `-subject`, `-subject_loc` and `-db`, frames + and -, a matrix
+// query at `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS
+// 1.44, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or
+// the hit list; at the default word size 3, any of 9 or 10 bases in the probes; with `-word_size 2`
+// they reach it too) lets the search go on, in NCBI and LOSAT alike.
 /// The refusal of a read of the translation of a frame of a subject of fewer than 12 bases
-/// (`TargetTranslation::get`): NCBI BLAST+ never makes that translation and reads address 1 there.
+/// (`TargetTranslation::get`): NCBI BLAST+ never makes that translation and reads from address 1
+/// on (NULL + 1).
 #[cold]
 #[inline(never)]
 fn x_traceback_of_an_untranslated_frame() -> anyhow::Error {
     anyhow::anyhow!(
-        "TBLASTN: the traceback of an alignment on a subject of fewer than 12 bases (NCBI BLAST+ reads there the translation of its frame, which it never makes for such a subject, and crashes), which LOSAT does not support"
+        "TBLASTN: the traceback of an alignment on a subject (or its -subject_loc range) of fewer than 12 bases, where NCBI BLAST+ reads the translation of the subject's frame, which it never makes for a subject this short, and crashes; LOSAT does not support it"
     )
 }
 
@@ -2467,6 +2470,10 @@ impl<'a> TargetTranslation<'a> {
                 };
             }
         } else if target.sequence.is_empty() {
+            // NCBI blast_hits.c:1161-1163,1233-1234: the frame never translated, NULL + 1
+            // (`x_traceback_of_an_untranslated_frame`). Only a subject of fewer than 12 bases skips
+            // the first translation; every translation leaves at least its closing byte.
+            debug_assert!(n / 3 <= 3, "an empty translation of a subject of {n} bases");
             return Err(x_traceback_of_an_untranslated_frame());
         }
         Ok((&target.sequence, target.stop, target.base))
@@ -2516,7 +2523,7 @@ impl<'a> TargetTranslation<'a> {
         debug_assert!(margin >= HSP_MAX_WINDOW, "margin {margin}");
         let n = self.subject.len();
         // `get` translates nothing for a subject of fewer than 12 letters (`stop < n / 3 - 3` is
-        // `0 < 0`) and refuses the read, as after a fence.
+        // false) and refuses the read, as after a fence.
         if n / 3 <= 3 {
             return self.get(frame, -1, end);
         }

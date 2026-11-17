@@ -134,7 +134,7 @@
   gapped score reproduced, rule 2, and the explicit rejection of its traceback after the NULLB,
   rule 3; line RG item X2d, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.44 2026-11-17 (TBLASTN, the explicit rejection of the traceback of an alignment on a subject of
-  fewer than 12 bases, whose frame NCBI never translates and reads at address 1, rule 3; line RG
+  fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3; line RG
   item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -1354,24 +1354,32 @@ masked). Line NP item M4a-2c.
   finder, and a run of two query batches). It takes a raw X-drop above 32,768 (with BLOSUM62 about
   15,000 bits of `-xdrop_ungap` or more).
 
-- TBLASTN, an alignment on a subject of fewer than 12 bases that reaches the traceback (version
-  1.44, 2026-11-17, line RG item X-short, Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07). `Blast_HSPGetTargetTranslation` translates a frame only when `start ||
-  stop < length/3 - 3` (`blast_hits.c:1161-1163`), false from the start for 11 bases or fewer, so
-  it returns the translation it never made (`calloc`'d to NULL, `blast_util.c:1284`) plus 1
-  (`:1233-1234`), and every caller reads that address next: the traceback's gapped start and
-  `ALIGN_EX` (`blast_traceback.c:429-436,509-512`), the identities after the composition-based
-  redo (`blast_kappa.c:527-528`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's
-  TBLASTN refuses `-ungapped`). NCBI BLAST+ 2.17.0 dies with SIGSEGV in every such run of ours
-  (ws and the local official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject` and `-db`,
+- TBLASTN, an alignment on a subject (or its `-subject_loc` range: NCBI's `subject_blk->length` is
+  the searched range's) of fewer than 12 bases that reaches the traceback (version 1.44,
+  2026-11-17, line RG item X-short, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07). `Blast_HSPGetTargetTranslation` translates a frame only when `start || stop <
+  length/3 - 3` (`blast_hits.c:1161-1163`), false from the start for 11 bases or fewer, so it
+  returns the translation it never made (`calloc`'d to NULL, `blast_util.c:1284`) plus 1
+  (`:1233-1234`), and every caller reads from that address on next: the traceback's gapped start
+  and `ALIGN_EX` (`blast_traceback.c:429-440,509-512`), the identities after the composition-based
+  redo (`blast_kappa.c:527-528`, which run only for an alignment left by the redo's E-value purge,
+  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's TBLASTN refuses
+  `-ungapped`). NCBI BLAST+ 2.17.0 dies with SIGSEGV in every such run of ours (ws and the local
+  official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject`, `-subject_loc` and `-db`,
   a matrix query at `-comp_based_stats` 0 to 3, `-in_pssm`, `-outfmt` 0, 5 and 6, a second query, a
   12-base subject before or after it; gdb: `s_Blast_HSPGetNumIdentitiesAndPositives` under
-  `Blast_RedoAlignmentCore_MT`, `ALIGN_EX` under `Blast_TracebackFromHSPList`). LOSAT refuses at
+  `Blast_RedoAlignmentCore_MT`, `ALIGN_EX` under `Blast_TracebackFromHSPList`; an independent
+  review's 850 random runs and about 150 targeted ones found no other outcome). LOSAT refuses at
   that read (`TargetTranslation::get`, which `x_whole_window` defers to for such a subject), where
-  dev panicked. A subject that leaves no alignment to that point (9 or 10 bases at the probes'
-  settings, 11 at `-evalue 1e-30`, and in our probes every one at the default two-hit window: a frame
-  of three letters holds one word) searches as NCBI's; 12 bases are translated (rows
-  `db.xs.tblastn.*`).
+  dev panicked. A subject that leaves no alignment to that point (cut by a cutoff, the redo's purge
+  or the hit list; at the default word size, 9 or 10 bases in the probes; with `-word_size 2` they
+  reach it too) searches as NCBI's, and so does every run at a two-hit window in our probes (no
+  frame of such a subject, three letters at most, holds two words that do not overlap); 12 bases
+  are translated (rows `db.xs.tblastn.*`). With `-subject` and a `-db_gencode` other than 1, LOSAT
+  translates in the selected code (the approved deviation PD-TLOSAN-LOCAL-GENCODE-32, whose
+  reference is NCBI's `-db` search) and refuses where NCBI's `-db` search crashes, although NCBI's
+  `-subject` search, translating in code 1, may find nothing there. LOSAT's TBLASTN refusals write
+  no report, also where NCBI writes the reports of query batches before its crash (`BATCH_SIZE`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

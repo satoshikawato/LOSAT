@@ -38,8 +38,9 @@
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
   E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-17 (exception 3
-  narrowed to a closed pipe: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; line RG item
-  T6a, RG DECISIONS T6-1 and T6-2, Owner-delegated, the same standing instruction)
+  narrowed to a closed pipe: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; exception 7
+  withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; line RG item T6a,
+  RG DECISIONS T6-1 and T6-2, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -148,6 +149,15 @@ BLAST+.
    `-outfmt 13` or `14` cannot be written, LOSAT stops with `BLAST failed to write output`
    (exit status 6), where NCBI BLAST+ 2.17.0 reports it on standard error and continues with
    exit status 0.
+   Version 1.22: withdrawn. A side file is written as NCBI's object stream and `CNcbiOfstream`
+   write it (`report::ostream::write_side_file`, line RG item T6a; NCBI 2.17.0 probed on Linux,
+   RG survey T6 D8): a write that fails inside the document is the buffer's write fault, posted
+   as `Error: (802.5) [<program>] CObjectOStream: error at byte <N>: stack is empty: write
+   fault` (`N`: the bytes the object stream had put into its buffer), and the run stops there
+   with exit code 0 (`CATCH_ALL` swallows that `CIOException`; no later report and no master
+   file); a failure of the file's last flush alone posts NCBI's chain of `cannot close output
+   stream` and the run goes on. The earlier text above recorded an observation that the probe
+   does not repeat (NCBI does not write the remaining side files).
 
 8. **A `-query` or `-subject` whose name ends in `.gz`, `.bz2` or `.zst`** (version 1.6,
    2026-11-03, `.gz`; version 1.7, 2026-11-04, `.bz2` and `.zst`; version 1.8, 2026-11-04, the

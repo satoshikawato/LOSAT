@@ -3,7 +3,7 @@
 //! No NCBI counterpart: test plumbing; the product code that needs a temporary directory handles
 //! WASI itself (`blastinput::input_files::temporary_directory`).
 
-/// `crate::utils::test_dir::temp_dir()` off WASI. On WASI Rust's `temp_dir()` panics ("no filesystem on wasm",
+/// `std::env::temp_dir()` off WASI. On WASI Rust's `temp_dir()` panics ("no filesystem on wasm",
 /// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), and the panic aborts the whole test binary
 /// (`panic=abort` on `wasm32`). There a host gives a module directories only by its preopens, so
 /// the `TMPDIR` variable names the directory when it is set and not empty, and `/tmp` is the

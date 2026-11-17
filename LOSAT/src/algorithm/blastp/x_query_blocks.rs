@@ -699,7 +699,7 @@ impl<'a> XBlockSink<'a> {
                 Self::Writer(&mut **writer)
             }
             OutputSink::Out(out) => Self::Writer(&mut **out),
-            OutputSink::Report(stream) => Self::Report(&mut **stream),
+            OutputSink::Report(stream) => Self::Report(stream),
         }
     }
 
@@ -710,7 +710,7 @@ impl<'a> XBlockSink<'a> {
         side: Option<&crate::report::blast_xml2::SideFileSink>,
     ) -> OutputSink<'_> {
         match (self, side) {
-            (Self::Report(stream), _) => OutputSink::Report(&mut **stream),
+            (Self::Report(stream), _) => OutputSink::Report(stream),
             (output, Some(side)) => OutputSink::Files(output, side.clone()),
             (output, None) => OutputSink::Writer(output),
         }

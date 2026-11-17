@@ -1659,6 +1659,7 @@ mod scan_tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         }
     }
 

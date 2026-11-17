@@ -254,13 +254,15 @@ class XincludeFixtureTests(unittest.TestCase):
         for cells in rows:
             row = dict(zip(header, cells))
             self.assertEqual(run_oracle.row_cells(header, row), cells, cells[0])
-        # the -db manifest likewise (each program's file), and its header is the old one only while no row has the columns
+        # the -db manifest likewise (each program's files: its file, then its row family files), and its
+        # header is the old one only while no row has the columns
         parsed = db_fixtures.read_manifest()[1]
         listed = []
         for program in db_fixtures.PROGRAMS:
-            header, rows = self.manifest_lines(db_fixtures.manifest_file(program))
-            self.assertEqual(header, db_fixtures.header_cells(parsed), program)
-            listed += rows
+            for path in db_fixtures.program_files(program):
+                header, rows = self.manifest_lines(path)
+                self.assertEqual(header, db_fixtures.header_cells(parsed), path.name)
+                listed += rows
         self.assertEqual(len(listed), len(parsed))
         for cells, row in zip(listed, parsed):
             self.assertEqual(db_fixtures.row_cells(row), cells, cells[0])

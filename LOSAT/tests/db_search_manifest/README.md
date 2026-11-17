@@ -1,11 +1,14 @@
-# LOSAT -db fixture rows, one file per program
+# LOSAT -db fixture rows, one file per program and row family files
 
 `<program>.tsv` holds the rows of one program (`blastp blastn tblastn blastx tblastx psiblast rpsblast rpstblastn`; the `program`
-column decides the file). `LOSAT/tests/db_search_fixtures.py` is the one loader: `read_manifest` reads the files in that
-program order (each in its own row order), `freeze` writes a row back to its own program's file. Every file starts with
-the same header line, after its `# Rows ...` comment lines (a comment that describes rows of several programs is
-repeated in each of their files). `LOSAT/tests/check_manifest_sizes.py` fails CI when a file passes 512 KiB: split
-that program's rows by family into more files and teach `read_manifest` and `write_manifest` the new names.
+column decides the file), but those of a row family with its own file: `<program>.<family>.tsv` holds the program's rows
+`db.<family>.*` (the second word of the row id; for example `blastp.ldo.tsv`, the BLASTP rows `db.ldo.*`). Each row has
+one file, decided by its `program` cell and its id. `LOSAT/tests/db_search_fixtures.py` is the one loader: `read_manifest`
+reads the files in that program order, each program's file before its family files (by name), each in its own row order,
+and refuses a row in another file than its own; `freeze` writes a row back to its file. Every file starts with the same
+header line, after its `# Rows ...` comment lines (a comment that describes rows of several programs is repeated in each
+of their files). `LOSAT/tests/check_manifest_sizes.py` fails CI when a file passes 512 KiB: move a row family of it, its
+rows and their `# Rows` comment lines, to its own file (the loader needs no change).
 
 Columns: row_id, program, kind, db, query, extra_args, outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers,
 and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files and side_sha256 (a row without them has

@@ -54,9 +54,9 @@ use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
+    TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -350,8 +350,7 @@ fn subject_values<'a>(
         // A subject whose load throws where the query's batch has its prefetch off
         // (`report::db_subject::HitLoads::thrown`): NCBI reads none of its own values.
         ShownSubjects::Database { reported, .. }
-            if reported.loads().thrown(oid).is_some()
-                && reported.parsed_subject(oid).is_some() =>
+            if reported.loads().thrown(oid).is_some() && reported.parsed_subject(oid).is_some() =>
         {
             let exception = reported.loads().thrown(oid).expect("the guard");
             let subject = reported.parsed_subject(oid).expect("the guard");
@@ -730,9 +729,11 @@ pub(super) fn write_blastx_tabular(
                         // follow the rows before it, before those of the row's own lookups.
                         // A row that reads a subject whose load throws outside the subject block
                         // ends the run (`TabularWriter::ends_run`).
-                        if let Some(end) =
-                            table.ends_run(&tabular_subject, crate::blastinput::app::Program::Blastx, hsp.identity)
-                        {
+                        if let Some(end) = table.ends_run(
+                            &tabular_subject,
+                            crate::blastinput::app::Program::Blastx,
+                            hsp.identity,
+                        ) {
                             return Err(crate::report::tabular::run_end(writer, &buf, end, || {
                                 if let Some(reads) = reads.as_mut() {
                                     reads.end_run();

@@ -4338,15 +4338,28 @@ fn run_batch_loop(
                             // The first HSP of each subject whose row reads it, in report order (a
                             // subject's HSPs follow each other): the engine's identities are counted
                             // only for `nident` alone, until one of the subject's rows reads it.
+                            // Not a subject whose load throws, nor one that no report reaches
+                            // after it (`database::report_loads`).
+                            let loads = super::super::database::report_loads(
+                                super::super::database::after_throw(
+                                    outputs.formats.iter().map(|format| format.outfmt),
+                                ),
+                                &ordered[from..to],
+                                &reports.titles.borrow(),
+                            );
                             let shown: Vec<&TblastxHsp> = match rows {
-                                SubjectFetch::Every => ordered[from..to].iter().collect(),
+                                SubjectFetch::Every => ordered[from..to]
+                                    .iter()
+                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize))
+                                    .collect(),
                                 SubjectFetch::Never => Vec::new(),
                                 SubjectFetch::WithIdentities => {
                                     let mut read = std::collections::HashSet::new();
                                     ordered[from..to]
                                         .iter()
                                         .filter(|hsp| {
-                                            !read.contains(&hsp.hit.s_idx)
+                                            loads.loaded(hsp.hit.s_idx as usize)
+                                                && !read.contains(&hsp.hit.s_idx)
                                                 && stores.get(&hsp.hit.s_idx).is_none_or(|store| {
                                                     report::stored_engine_identities(
                                                         hsp,

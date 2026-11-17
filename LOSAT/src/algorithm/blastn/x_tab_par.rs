@@ -800,6 +800,7 @@ mod tests {
                 &mut report,
                 &case.query_ids,
                 &case.subject_ids,
+                &crate::report::db_subject::HitLoads::default(),
                 BlastnOutputFormat::Tabular,
                 &case.query_titles,
                 "subject",

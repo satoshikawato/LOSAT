@@ -718,11 +718,36 @@ fn hit_loads(
 /// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads`): the stop of a batch's
 /// prefetch (`batch_prefetch_stop`) and the reports (`reported_subjects`) ask it of the run's
 /// formats alike (review 2 of line DBID pfoff-1, N-M2).
-pub(crate) fn after_throw<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> Option<crate::report::db_subject::AfterThrow> {
+pub(crate) fn after_throw<'a>(
+    outfmts: impl IntoIterator<Item = &'a str>,
+) -> Option<crate::report::db_subject::AfterThrow> {
     crate::report::db_subject::FormatThrow::of_outfmts(
         outfmts,
         crate::blastinput::app::Program::Tblastx,
     )
+}
+
+/// What one query's report of the hits `ordered` (in report order) loads where its batch's
+/// prefetch is off (`HitLoads::of` of that report alone, by ordinal id; `after`:
+/// [`after_throw`]): the subjects of its reads one by one (`run_impl`'s texts of a batch whose
+/// prefetch is off), not one whose load throws, nor one that no report reaches after it.
+pub(crate) fn report_loads(
+    after: Option<crate::report::db_subject::AfterThrow>,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+) -> HitLoads {
+    let mut subjects: Vec<Option<usize>> = ordered
+        .iter()
+        .map(|hsp| Some(hsp.hit.s_idx as usize))
+        .collect();
+    // A subject's HSPs follow each other: one `Hit`.
+    subjects.dedup();
+    HitLoads::of(after, [(true, subjects)], |ordinal| {
+        match titles.get(&u32::try_from(ordinal).ok()?) {
+            Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+            _ => None,
+        }
+    })
 }
 
 /// The Seq-aligns of the hits `ordered` (in report order) that NCBI's prefetch counts against

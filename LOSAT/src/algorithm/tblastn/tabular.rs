@@ -448,7 +448,11 @@ pub(super) fn write_tblastn_tabular(
                 // own lookups. A row that reads a subject whose load throws outside the subject
                 // block ends the run (`TabularWriter::ends_run`).
                 let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
-                if let Some(end) = table.ends_run(&subject, crate::blastinput::app::Program::Tblastn, engine_ident) {
+                if let Some(end) = table.ends_run(
+                    &subject,
+                    crate::blastinput::app::Program::Tblastn,
+                    engine_ident,
+                ) {
                     return Err(crate::report::tabular::run_end(writer, &buf, end, || {
                         if let Some(warnings) = warnings.as_deref_mut() {
                             warnings.end_run();

@@ -3651,10 +3651,22 @@ mod tests {
             .unwrap()
         };
         let row = |fields: &str, program, ident| spec(fields).row_throw(program, ident);
-        assert_eq!(row("qseqid stitle slen", Program::Blastp, 1), Some(AfterThrow::WritesRow));
-        assert_eq!(row("qseqid slen", Program::Blastn, 1), Some(AfterThrow::EndsRun));
-        assert_eq!(row("qseqid sseq", Program::Tblastx, 1), Some(AfterThrow::EndsRun));
-        assert_eq!(row("qseqid nident", Program::Blastx, 1), Some(AfterThrow::EndsRun));
+        assert_eq!(
+            row("qseqid stitle slen", Program::Blastp, 1),
+            Some(AfterThrow::WritesRow)
+        );
+        assert_eq!(
+            row("qseqid slen", Program::Blastn, 1),
+            Some(AfterThrow::EndsRun)
+        );
+        assert_eq!(
+            row("qseqid sseq", Program::Tblastx, 1),
+            Some(AfterThrow::EndsRun)
+        );
+        assert_eq!(
+            row("qseqid nident", Program::Blastx, 1),
+            Some(AfterThrow::EndsRun)
+        );
         assert_eq!(row("qseqid nident", Program::Blastx, 0), None);
         assert_eq!(row("qseqid nident", Program::Blastn, 1), None);
         assert_eq!(row("qseqid evalue qcovs", Program::Tblastn, 1), None);

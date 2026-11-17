@@ -287,6 +287,9 @@ impl TblastnDatabase {
             .iter()
             .flat_map(KappaResultHitList::lists)
             .filter(|list| reads_subject(list, rows))
+            // A subject whose load throws loads nothing, nor does one that no report reaches
+            // after it (`HitLoads::loaded`).
+            .filter(|list| reported.loads.loaded(list.oid as usize))
             .map(|list| {
                 let rank = list.oid as usize;
                 (reported.ordinals[rank], reported.parsed_subject(rank))
@@ -309,10 +312,13 @@ impl TblastnDatabase {
         rows_open: bool,
         pairwise: Option<crate::report::hit_sort::ReportSort>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
+        // A subject whose load throws loads nothing, nor does one that no report reaches after
+        // it (`HitLoads::loaded`).
         let lists = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
-            .filter(|list| reads_subject(list, rows));
+            .filter(|list| reads_subject(list, rows))
+            .filter(|list| reported.loads.loaded(list.oid as usize));
         let ranks: Vec<u32> = match pairwise {
             Some(sort) => {
                 let mut hits = Vec::new();
@@ -797,7 +803,9 @@ fn parsed_shown(
 
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
 /// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
-fn after_throw(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> Option<crate::report::db_subject::AfterThrow> {
+fn after_throw(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> Option<crate::report::db_subject::AfterThrow> {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,

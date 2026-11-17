@@ -3140,6 +3140,75 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
         .sum()
 }
 
+/// The rows of subjects whose lookups fail where NCBI has no result
+/// (`report::tabular::check_failed_lookups`), before any format is written: each tabular
+/// format's refusal is that format's (`FormatRefusal::check`). `parsed`: the subjects' parsed
+/// Seq-ids (a database's listed titles'); `loads`: the reports' loads (`HitLoads::of`), whose
+/// throwing subjects are refused where the first row of a report stops NCBI
+/// (`TabularSpec::may_stop_at_failed_lookup`).
+#[allow(clippy::too_many_arguments)]
+fn check_tabular_lookups(
+    formats: &mut [crate::api::local_blast::FormatOutput<'_>],
+    format_plans: &[BlastpReport],
+    hit_lists: &[Option<BlastpHitList>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    loads: &crate::report::db_subject::HitLoads,
+    listed_titles: Option<&database::ListedTitles<'_>>,
+    subject_records: &[FastaRecord],
+    application: &str,
+) -> Result<()> {
+    for (format, outfmt) in formats
+        .iter_mut()
+        .zip(format_plans)
+        .filter(|(_, outfmt)| outfmt.is_tabular())
+    {
+        let spec = outfmt.tabular_spec();
+        if !crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            subject_ids,
+            parsed,
+            loads,
+        ) {
+            continue;
+        }
+        let checked = crate::report::tabular::check_failed_lookups(
+            spec,
+            hit_lists.iter().flatten().map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .filter_map(|hsp_list| hsp_list.hsps.first())
+                    .map(|hsp| hsp.s_idx as usize)
+            }),
+            |s_idx| {
+                crate::algorithm::common::tabular::subject_lookup_failure(
+                    spec,
+                    subject_ids,
+                    parsed,
+                    loads,
+                    listed_titles.is_some(),
+                    true,
+                    s_idx,
+                )
+            },
+            |s_idx| match listed_titles {
+                Some(titles) => crate::report::tabular::failed_database_subject(
+                    titles.oid(s_idx),
+                    loads.thrown(s_idx),
+                ),
+                None => crate::report::tabular::failed_record_title(
+                    s_idx,
+                    subject_records[s_idx].shown_id(),
+                ),
+            },
+            application,
+        );
+        format.refusal.check(checked)?;
+    }
+    Ok(())
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
@@ -11820,61 +11889,22 @@ fn run_call(
         } else {
             Vec::new().into()
         };
-    // The rows of subjects whose lookups fail where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before any format is written: each tabular
-    // format's refusal is that format's (`FormatRefusal::check`).
+    // The rows of subjects whose lookups fail where NCBI has no result, before any format is
+    // written (`check_tabular_lookups`).
     let parsed_for_checks: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
         .as_ref()
         .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
-    for (format, outfmt) in outputs
-        .formats
-        .iter_mut()
-        .zip(format_plans)
-        .filter(|(_, outfmt)| outfmt.is_tabular())
-    {
-        let spec = outfmt.tabular_spec();
-        if !crate::algorithm::common::tabular::checks_failed_lookups(
-            spec,
-            &subject_ids,
-            parsed_for_checks,
-            &prefetched.hit_loads,
-        ) {
-            continue;
-        }
-        let checked = crate::report::tabular::check_failed_lookups(
-            spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
-            |s_idx| {
-                crate::algorithm::common::tabular::subject_lookup_failure(
-                    spec,
-                    &subject_ids,
-                    parsed_for_checks,
-                    &prefetched.hit_loads,
-                    listed_titles.is_some(),
-                    true,
-                    s_idx,
-                )
-            },
-            |s_idx| match listed_titles.as_ref() {
-                Some(titles) => crate::report::tabular::failed_database_subject(
-                    titles.oid(s_idx),
-                    prefetched.hit_loads.thrown(s_idx),
-                ),
-                None => crate::report::tabular::failed_record_title(
-                    s_idx,
-                    subject_records[s_idx].shown_id(),
-                ),
-            },
-            args.app.name(),
-        );
-        format.refusal.check(checked)?;
-    }
+    check_tabular_lookups(
+        &mut outputs.formats,
+        format_plans,
+        &hit_lists,
+        &subject_ids,
+        parsed_for_checks,
+        &prefetched.hit_loads,
+        listed_titles.as_ref(),
+        subject_records,
+        args.app.name(),
+    )?;
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).

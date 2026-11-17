@@ -50,9 +50,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
-    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
+    TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec,
+    TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -152,7 +152,10 @@ impl<'a> SubjectValues<'a> {
     /// The values of the database sequence `subject` whose load throws with `exception`
     /// (`common::tabular::SubjectValues::thrown`): its rows print none of its own values, and
     /// NCBI reads none of its ids, titles or taxonomy.
-    fn thrown(subject: &ParsedSubject, exception: &'a crate::ncbi_exception::NcbiException) -> Self {
+    fn thrown(
+        subject: &ParsedSubject,
+        exception: &'a crate::ncbi_exception::NcbiException,
+    ) -> Self {
         SubjectValues {
             id: &[],
             accession: &[],
@@ -865,11 +868,16 @@ fn write_tabular_rows<const RPS: bool>(
                     crate::blastinput::app::Program::Blastp,
                     seqalign_num_ident,
                 ) {
-                    return Err(crate::report::tabular::run_end(writer, &buf, exception, || {
-                        if let Some(warnings) = warnings.as_deref_mut() {
-                            warnings.end_run();
-                        }
-                    }));
+                    return Err(crate::report::tabular::run_end(
+                        writer,
+                        &buf,
+                        exception,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++

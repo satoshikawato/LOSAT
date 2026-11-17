@@ -963,13 +963,18 @@ impl ReportedSubjects {
                         .map(|list| list.oid as u32)
                         .collect(),
                 };
-                let subjects = ranks.into_iter().map(|rank| {
-                    (
-                        rank,
-                        self.ordinals[rank as usize],
-                        self.parsed_subject(rank as usize),
-                    )
-                });
+                // A subject whose load throws loads nothing, nor does one that no report
+                // reaches after it (`HitLoads::loaded`).
+                let subjects = ranks
+                    .into_iter()
+                    .filter(|&rank| self.loads.loaded(rank as usize))
+                    .map(|rank| {
+                        (
+                            rank,
+                            self.ordinals[rank as usize],
+                            self.parsed_subject(rank as usize),
+                        )
+                    });
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,
@@ -1436,7 +1441,7 @@ mod tests {
                 false,
                 false,
                 false,
-                false,
+                None,
             )
             .unwrap();
             let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -1511,7 +1516,7 @@ mod tests {
                 false,
                 false,
                 false,
-                false,
+                None,
             )
             .unwrap();
             for hsp in batches

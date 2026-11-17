@@ -633,7 +633,9 @@ impl BlastnDatabase {
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
+        after: Option<crate::report::db_subject::AfterThrow>,
     ) -> Result<Vec<u8>> {
+        let loads = report_loads(after, titles, hit_lists);
         let subjects = hit_lists
             .iter()
             .flatten()
@@ -642,6 +644,7 @@ impl BlastnDatabase {
                 &hit_list.hsplist_array[..count]
             })
             .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .filter(|hsp_list| loads.loaded(hsp_list.oid as usize))
             .map(|hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -666,7 +669,9 @@ impl BlastnDatabase {
         hit_lists: &[Option<BlastnHitList>],
         rows_open: bool,
         pairwise: Option<crate::report::hit_sort::ReportSort>,
+        after: Option<crate::report::db_subject::AfterThrow>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
+        let loads = report_loads(after, titles, hit_lists);
         let lists = hit_lists
             .iter()
             .flatten()
@@ -674,7 +679,8 @@ impl BlastnDatabase {
                 let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
                 &hit_list.hsplist_array[..count]
             })
-            .filter(|hsp_list| !hsp_list.hsps.is_empty());
+            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .filter(|hsp_list| loads.loaded(hsp_list.oid as usize));
         let parsed = |oid: u32| match titles.get(&oid) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
             _ => None,
@@ -1984,9 +1990,41 @@ pub(super) struct ReportedSubjects {
     pub(super) loads: HitLoads,
 }
 
+/// What one query's report of `hit_lists` loads where its batch's prefetch is off (`HitLoads::of`
+/// of that report alone, by ordinal id; `after`: [`after_throw`]): the subjects of its reads one
+/// by one (`DatabaseTitles`' texts of a batch whose prefetch is off), not one whose load throws,
+/// nor one that no report reaches after it.
+fn report_loads(
+    after: Option<crate::report::db_subject::AfterThrow>,
+    titles: &DatabaseTitles,
+    hit_lists: &[Option<BlastnHitList>],
+) -> HitLoads {
+    HitLoads::of(
+        after,
+        hit_lists.iter().map(|hit_list| {
+            let lists = hit_list.as_ref().map_or(&[][..], |hit_list| {
+                &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
+            });
+            (
+                true,
+                lists
+                    .iter()
+                    .map(|hsp_list| (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize))
+                    .collect(),
+            )
+        }),
+        |ordinal| match titles.get(&u32::try_from(ordinal).ok()?) {
+            Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+            _ => None,
+        },
+    )
+}
+
 /// What the formats `output_formats` do after a subject whose lookup throws where its batch's
 /// prefetch is off (`FormatThrow::of_run`, for `hit_loads`).
-pub(super) fn after_throw(output_formats: &[BlastnOutputFormat]) -> Option<crate::report::db_subject::AfterThrow> {
+pub(super) fn after_throw(
+    output_formats: &[BlastnOutputFormat],
+) -> Option<crate::report::db_subject::AfterThrow> {
     crate::report::db_subject::FormatThrow::of_run(
         output_formats.iter().map(BlastnOutputFormat::format_throw),
     )
@@ -3085,7 +3123,7 @@ mod tests {
             &mut hit_lists,
             true,
             ParsedShown::default(),
-            false,
+            None,
             &[],
             0,
             true,
@@ -3142,7 +3180,7 @@ mod tests {
             &mut hit_lists,
             false,
             ParsedShown::default(),
-            false,
+            None,
             &[],
             0,
             true,
@@ -3181,7 +3219,7 @@ mod tests {
             &mut clean,
             false,
             ParsedShown::default(),
-            false,
+            None,
             &[],
             0,
             true,
@@ -3197,7 +3235,7 @@ mod tests {
             &mut bad,
             false,
             ParsedShown::default(),
-            false,
+            None,
             &[],
             0,
             true,
@@ -3286,7 +3324,12 @@ mod tests {
         let cwd = temp_dir("prefetch");
         let text = |database: &BlastnDatabase, hit_lists: &[Option<BlastnHitList>]| -> String {
             let titles = DatabaseTitles::new();
-            String::from_utf8(database.prefetch_messages(&titles, hit_lists).unwrap()).unwrap()
+            String::from_utf8(
+                database
+                    .prefetch_messages(&titles, hit_lists, None)
+                    .unwrap(),
+            )
+            .unwrap()
         };
         let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
         assert!(database.taxdb_found());

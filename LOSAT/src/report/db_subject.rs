@@ -700,7 +700,8 @@ impl ParsedSubject {
     /// `load`: what the reports do at the subject's `Hit` (`HitLoads::load`, the one answer): a
     /// subject whose `Hit` throws (`HitLoad::Throws`: its lookup fails on a file with NCBI's
     /// exception in a batch whose prefetch is off, and every format of the run writes it as NCBI
-    /// does, the XML2 and JSON documents of outfmt 13 to 16) is not refused for what the lookup
+    /// does, `FormatThrow::of_run`: the XML2 and JSON documents of outfmt 13 to 16, the tables of
+    /// outfmt 6, 7 and 10) is not refused for what the lookup
     /// finds (it finds nothing: it throws before any definition line is read), and one that no
     /// report loads (`HitLoad::Unread`: shown only after such a `Hit`) is not refused at all;
     /// every other subject (`HitLoad::Loaded`) is refused as above, a lookup that fails on a file
@@ -2311,10 +2312,10 @@ impl FormatThrow {
         match format {
             ReportFormat::Tabular
             | ReportFormat::TabularWithComments
-            | ReportFormat::CommaSeparatedValues => spec.map_or(
-                FormatThrow::Writes(AfterThrow::WritesRow),
-                |spec| spec.format_throw(program),
-            ),
+            | ReportFormat::CommaSeparatedValues => spec
+                .map_or(FormatThrow::Writes(AfterThrow::WritesRow), |spec| {
+                    spec.format_throw(program)
+                }),
             ReportFormat::AsnText
             | ReportFormat::AsnBinary
             | ReportFormat::ArchiveFormat
@@ -2353,7 +2354,10 @@ impl FormatThrow {
     /// its formats): `None` where a format refuses it or no format reads it, so that every
     /// subject is loaded ([`HitLoads::of`]). The one answer of every program.
     pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<AfterThrow> {
-        match formats.into_iter().fold(FormatThrow::Unread, FormatThrow::and) {
+        match formats
+            .into_iter()
+            .fold(FormatThrow::Unread, FormatThrow::and)
+        {
             FormatThrow::Writes(after) => Some(after),
             FormatThrow::Refused | FormatThrow::Unread => None,
         }
@@ -3133,11 +3137,7 @@ mod tests {
         // A report whose batch prefetches, and a run that writes another format, load every
         // subject.
         for (after, one_by_one) in [(Some(AfterThrow::EndsReport), false), (None, true)] {
-            let every = HitLoads::of(
-                after,
-                [(one_by_one, vec![Some(0), Some(1)])],
-                subject,
-            );
+            let every = HitLoads::of(after, [(one_by_one, vec![Some(0), Some(1)])], subject);
             assert!(every.loaded(0) && every.loaded(1));
         }
         // The refusals take the answer: a `Hit` that throws is not refused for what the lookup
@@ -3211,10 +3211,22 @@ mod tests {
         // The formats' answers.
         let of = |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp);
         assert_eq!(of("6"), FormatThrow::Writes(AfterThrow::WritesRow));
-        assert_eq!(of("7 qseqid sseqid evalue"), FormatThrow::Writes(AfterThrow::WritesRow));
-        assert_eq!(of("10 qseqid stitle slen"), FormatThrow::Writes(AfterThrow::WritesRow));
-        assert_eq!(of("6 qseqid slen"), FormatThrow::Writes(AfterThrow::EndsRun));
-        assert_eq!(of("6 qseqid pident"), FormatThrow::Writes(AfterThrow::EndsRun));
+        assert_eq!(
+            of("7 qseqid sseqid evalue"),
+            FormatThrow::Writes(AfterThrow::WritesRow)
+        );
+        assert_eq!(
+            of("10 qseqid stitle slen"),
+            FormatThrow::Writes(AfterThrow::WritesRow)
+        );
+        assert_eq!(
+            of("6 qseqid slen"),
+            FormatThrow::Writes(AfterThrow::EndsRun)
+        );
+        assert_eq!(
+            of("6 qseqid pident"),
+            FormatThrow::Writes(AfterThrow::EndsRun)
+        );
         assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
         assert_eq!(of("13"), FormatThrow::Writes(AfterThrow::EndsRun));
         assert_eq!(of("15"), FormatThrow::Writes(AfterThrow::EndsReport));
@@ -3228,11 +3240,15 @@ mod tests {
             FormatThrow::Unread
         );
         // A run's answer: a refusal refuses, a format that reads nothing leaves the other's.
-        let after = |outfmts: &[&str]| FormatThrow::of_outfmts(outfmts.iter().copied(), Program::Blastp);
+        let after =
+            |outfmts: &[&str]| FormatThrow::of_outfmts(outfmts.iter().copied(), Program::Blastp);
         assert_eq!(after(&["6", "8"]), Some(AfterThrow::WritesRow));
         assert_eq!(after(&["6", "0"]), None);
         assert_eq!(after(&["6 qseqid evalue"]), None);
-        assert_eq!(after(&["6 qseqid slen", "15"]), Some(AfterThrow::EndsReport));
+        assert_eq!(
+            after(&["6 qseqid slen", "15"]),
+            Some(AfterThrow::EndsReport)
+        );
     }
 
     // Line DBID pssmread (probe `R/pssmread`, reviews 1 and 2): LOSAT's refusals of what

@@ -11226,11 +11226,19 @@ fn run_in_pool(
                                    shown: &[Option<BlastnHitList>],
                                    reads: &mut [QueryReads]|
                  -> Result<Vec<u8>> {
+                    // Not a subject whose load throws, nor one that no report reaches after it
+                    // (`database::report_loads`).
+                    let after = database::after_throw(&output_formats);
                     if !places {
-                        return database.prefetch_messages(&titles, shown);
+                        return database.prefetch_messages(&titles, shown, after);
                     }
-                    reads[query] =
-                        database.subject_read_texts(&titles, shown, plural_names, pairwise)?;
+                    reads[query] = database.subject_read_texts(
+                        &titles,
+                        shown,
+                        plural_names,
+                        pairwise,
+                        after,
+                    )?;
                     Ok(Vec::new())
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);

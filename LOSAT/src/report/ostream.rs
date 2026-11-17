@@ -844,6 +844,12 @@ impl Core {
     /// (`flushing`): the stream is bad, and NCBI's end is the region's (`Site`).
     fn failed_write(&mut self, error: std::io::Error, flushing: bool) -> std::io::Result<()> {
         match error {
+            // A closed pipe that only the writes after the formatter reach (`finish`) ends the
+            // run as it would have (exception 5: LOSAT's completed writes did not reach it).
+            error if error.kind() == std::io::ErrorKind::BrokenPipe && !self.throws => {
+                self.bad = true;
+                Ok(())
+            }
             error if error.kind() == std::io::ErrorKind::BrokenPipe => {
                 self.bad = true;
                 self.pipe = Some(ClosedPipe {

@@ -342,12 +342,13 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
     // ```
     for idx in 0..hitsfound {
         // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
-        // `X_HIT_AHEAD` places on.
+        // `X_HIT_AHEAD` places on: a prefetch on x86_64, a load of the letter on wasm32, which has
+        // no prefetch instruction (`x_dc_csr::x_ahead`; the ungapped extension of each hit
+        // waited there for its query line, a quarter of its cycles in V8).
         if x_hit_prefetch && idx + X_HIT_AHEAD < hitsfound {
-            x_dc_csr::prefetch(
-                encoded_query_concat_blastna_with_sentinels
-                    .as_ptr()
-                    .wrapping_add(offset_pairs[idx + X_HIT_AHEAD].q_off),
+            x_dc_csr::x_ahead(
+                encoded_query_concat_blastna_with_sentinels,
+                offset_pairs[idx + X_HIT_AHEAD].q_off,
             );
         }
         let pair = offset_pairs[idx];

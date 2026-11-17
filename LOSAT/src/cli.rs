@@ -2520,6 +2520,36 @@ mod tests {
         }
     }
 
+    // Line DBID pfoff-1 (DECISIONS 62): `CATCH_ALL` reports a `CSeqDBException` (blastp 2.17.0,
+    // outfmt 13 of `pP pU` with the prefetch off: `BLAST Database error: DB contains no accession
+    // info.`, exit 2) before any other `CException` (`Error: ` and `what()`, exit 255).
+    #[test]
+    fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
+        use crate::ncbi_exception::{NcbiException, ThrowSite};
+        let site = crate::seqdb::throw_site("DB contains no accession info.").unwrap();
+        let error = NativeError::exception(&NcbiException::new(
+            site,
+            "DB contains no accession info.",
+        ));
+        assert_eq!(error.exit, 2);
+        assert_eq!(
+            error.message,
+            "BLAST Database error: DB contains no accession info.\n"
+        );
+        let other = NcbiException::new(
+            ThrowSite {
+                file: "src/corelib/ncbistr.cpp",
+                line: 852,
+                kind: "CStringException::eConvert",
+                function: Some("ncbi::NStr::StringToInt8"),
+            },
+            "x",
+        );
+        let error = NativeError::exception(&other);
+        assert_eq!(error.exit, 255);
+        assert_eq!(error.message, format!("Error: {}\n", other.what()));
+    }
+
     #[test]
     fn the_organism_reports_file_buffer_writes_at_its_8191st_byte() {
         // probe `T/t2/fix1` `f1.d5.*` and `stdout_probe.sh`: NCBI exits 0 for a report that its

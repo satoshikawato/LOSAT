@@ -1598,6 +1598,37 @@ mod tests {
         assert_eq!(alone, b"<H5><H6>");
     }
 
+    /// A JSON report that raised an exception its report function catches (line DBID pfoff-1: the
+    /// `Hit` of a subject whose lookup throws): the separator before it stays, the texts of the
+    /// loads of the `Hit`s before it come after it, the read of the subject that throws and those
+    /// after it are not written (`cut`: NCBI loads none of them), and the exception's post comes
+    /// last (blastp 2.17.0, outfmt 15 of `pP pU`, `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15`).
+    #[test]
+    fn the_post_of_a_caught_exception_follows_the_loads_before_it() {
+        let reads: Vec<QueryReads> = vec![vec![
+            SubjectRead::of_text(1, b"R1\n"),
+            SubjectRead::of_text(2, b"R2\n"),
+        ]];
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
+        let mut posts = HitPosts::new(warnings.reads_with_texts(0));
+        posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+        posts.document(crate::report::blast_xml::DocumentPosts {
+            cut: true,
+            ..Default::default()
+        });
+        posts.caught(b"Error: [blastp] E\n".to_vec());
+        write_hit_posts(b",\n", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, ",\nR1\nT1\nError: [blastp] E\n");
+        // Without warnings the post would be lost: LOSAT's internal error.
+        let mut alone = HitPosts::new(false);
+        alone.caught(b"Error: [blastp] E\n".to_vec());
+        assert!(write_hit_posts(b"", &alone, 0, &mut Vec::new(), None).is_err());
+    }
+
     /// A read with what its load looks up (`ReadLoad`), the run's texts `texts`.
     fn loaded(
         texts: &std::sync::Arc<LoadTexts>,

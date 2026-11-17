@@ -2711,6 +2711,63 @@ mod tests {
         );
     }
 
+    // Line DBID pfoff-1 (DECISIONS 62): where a batch's prefetch is off, the XML2 and JSON `Hit`
+    // loads the subject by its Seq-align id and the lookup throws NCBI's `CSeqDBException` (blastp
+    // 2.17.0, outfmt 15 of `pP pU`, `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15.err`); outfmt 13 to 16
+    // write it, every other format refuses it, and so does a batch that prefetches (whose
+    // prefetch stops first).
+    #[test]
+    fn a_lookup_that_throws_on_a_file_is_written_where_the_xml2_documents_read_it_one_by_one() {
+        let failed = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
+        let exception = failed.exception().unwrap();
+        assert_eq!(exception.get_msg(), "DB contains no accession info.");
+        assert_eq!(
+            exception.what(),
+            format!(
+                "NCBI C++ Exception:\n    T0 \"{}/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp\", line 142: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi() - DB contains no accession info.\n",
+                crate::ncbi_exception::NCBI_BUILD_ROOT
+            )
+        );
+        // LOSAT's own error, and NCBI's text of a place that LOSAT does not know (the text of
+        // `CATCH_ALL` for `eTooManyOpenFiles`): no exception.
+        assert!(LookupFailure::losat("byte range 0..9 passes the end of the file")
+            .exception()
+            .is_none());
+        assert!(
+            LookupFailure::ncbi("Too many open files, please raise the open file limit")
+                .exception()
+                .is_none()
+        );
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)])).unwrap();
+        let thrown = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Failed(failed)));
+        assert_eq!(thrown.lookup_throws(), Some(exception));
+        assert!(thrown.fetched(true, true, true).is_ok());
+        assert!(thrown.fetched(false, true, true).is_ok());
+        for (one_by_one, writes_thrown) in [(false, true), (true, false), (false, false)] {
+            let error = thrown
+                .fetched(false, one_by_one, writes_thrown)
+                .unwrap_err();
+            assert!(
+                error.contains(
+                    "whose lookup in the database fails (DB contains no accession info.;"
+                ),
+                "{error}"
+            );
+        }
+        // A failure whose exception LOSAT does not know is refused by every format.
+        let unknown = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Failed(LookupFailure::losat("x"))));
+        assert!(unknown.lookup_throws().is_none());
+        assert!(unknown.fetched(false, true, true).is_err());
+        // The other findings are refused as before.
+        let nothing = subject.found_instead(Some(FoundInstead::Nothing));
+        assert!(nothing.lookup_throws().is_none());
+        assert!(nothing.fetched(false, true, true).is_err());
+    }
+
     // Line DBID pssmread (probe `R/pssmread`, reviews 1 and 2): LOSAT's refusals of what
     // psiblast's PSSM reads by the Seq-align id (what the scope gets is
     // `common::database::scope_bioseq`'s).

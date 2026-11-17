@@ -2607,3 +2607,50 @@ fn a_directory_in_place_of_an_isam_file_is_no_isam() {
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 }
+
+// Line DBID pfoff-1 (DECISIONS 62): the places of NCBI's throws of the reader's texts, of which
+// segmasker 2.17.0 names those of the alias reader, `CSeqDB` and `CSeqDBExtFile` (review of line
+// RG item K2, L2) and blastp 2.17.0 the lookup's `GetDbi` (outfmt 15 of `pP pU`,
+// `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15.err`); every place reports `eInvalid`.
+#[test]
+fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
+    let place = |text: &str| {
+        let site = throw_site(text).unwrap_or_else(|| panic!("{text}"));
+        assert_eq!(site.kind, "CSeqDBException::eInvalid", "{text}");
+        (site.file, site.line, site.function.unwrap())
+    };
+    for text in [
+        "DB contains no accession info.",
+        "DB contains no vol info.",
+        "DB contains no tax id info",
+    ] {
+        assert_eq!(
+            place(text),
+            (
+                "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp",
+                142,
+                "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi"
+            )
+        );
+    }
+    assert_eq!(
+        place("No alias or index file found for protein database [x] in search path [y]."),
+        (
+            "src/objtools/blast/seqdb_reader/seqdbalias.cpp",
+            320,
+            "BLASTDB::ncbi::CSeqDBAliasNode::x_ResolveNames"
+        )
+    );
+    assert_eq!(place("Error: File (x.pin) not found.").1, 128);
+    assert_eq!(place("Database name is required.").1, 162);
+    // The texts of `CATCH_ALL` for the codes `eTooManyOpenFiles` and `eMemoryMappingFailure`
+    // (`SeqDbError::ncbi_message`), and every other text, have no known place.
+    for text in [
+        "Too many open files, please raise the open file limit",
+        "Database memory map file error - CMemoryFile: Cannot memory map file 'x':No such file",
+        "Error: Not a valid version 4 or 5 database.",
+        "Accessions to Oids lookup error in x",
+    ] {
+        assert_eq!(throw_site(text), None, "{text}");
+    }
+}

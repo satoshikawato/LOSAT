@@ -504,6 +504,59 @@ impl<'s, 'a> SubjectNameCache<'s, 'a> {
 mod tests {
     use super::*;
 
+    // Line DBID pfoff-1 (DECISIONS 62): the `Hit` of a database sequence whose lookup throws where
+    // a batch's prefetch is off has no names: `names` is the lookup's exception
+    // (`CaughtException`), which the cache keeps for the `Hit` and raises there; the other
+    // subjects are named as before.
+    #[test]
+    fn the_hit_of_a_subject_whose_lookup_throws_raises_the_lookup_exception() {
+        use crate::report::db_subject::{FoundInstead, LookupFailure};
+        let set = |accession: &str| crate::seqid::DeflineSet {
+            deflines: vec![crate::seqid::BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids: vec![crate::seqid::ParsedSeqId::Genbank(
+                    crate::seqid::model::TextseqId {
+                        accession: Some(accession.as_bytes().to_vec()),
+                        version: Some(1),
+                        ..Default::default()
+                    },
+                )],
+                ..Default::default()
+            }],
+        };
+        let failure = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
+        let exception = failure.exception().unwrap();
+        let thrown = ParsedSubject::new(set("AAA00001"))
+            .unwrap()
+            .found_instead(Some(FoundInstead::Failed(failure)));
+        let found = ParsedSubject::new(set("AAA00002")).unwrap();
+        let parsed = vec![Some(Arc::new(thrown)), Some(Arc::new(found))];
+        let titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"t"[..]); 2];
+        let subjects = XmlSubjects::Database {
+            ordinals: &[0, 1],
+            oids: crate::seqdb::OidMap::unrestricted(),
+            titles: XmlTitles::Shared(&titles),
+            taxids: &[],
+            taxonomy: &[],
+            length: &|_| 10,
+            parsed: &parsed,
+            parsed_taxonomy: &[],
+        };
+        let error = subjects.names(0, "BLASTP").err().unwrap();
+        let caught = error.downcast::<crate::report::blast_xml::CaughtException>();
+        assert_eq!(caught.unwrap().0, exception);
+        assert!(subjects.names(1, "BLASTP").is_ok());
+        let mut cache = SubjectNameCache::new(&subjects);
+        // Made before the report (a refusal would be the error), raised at the `Hit`.
+        let held = cache.get(0, "BLASTP").unwrap();
+        assert!(matches!(held, HitNames::Throws(kept) if *kept == exception));
+        let raised = held.names().err().unwrap();
+        assert!(raised.is::<crate::report::blast_xml::CaughtException>());
+        assert!(cache.get(1, "BLASTP").unwrap().names().is_ok());
+        // Any other error of the names passes through.
+        assert!(HitNames::of(Err(anyhow::anyhow!("refused"))).is_err());
+    }
+
     // Line DBID N3: following lists of joined subjects, or of one subject, make one `Hit`; a list
     // without HSPs shows nothing and does not part them.
     #[test]

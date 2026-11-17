@@ -128,9 +128,11 @@ pub(crate) fn failed_stream_text(ty: u16, value: &Value) -> Vec<u8> {
     let held = traced.first_write().unwrap_or(0);
     drop(traced);
     out.clear();
-    let mut enc = AsnTextEncoder::failed_after(&mut out, held);
-    write_document_until(&mut enc, ty, value, |enc| enc.held().len() >= held);
-    drop(enc);
+    // The same encoder as the first pass (`Traced` writes NCBI's `#` for a byte that the stream
+    // replaces), so both passes write the same bytes up to the cut.
+    let mut traced = Traced::new(AsnTextEncoder::failed_after(&mut out, held), 0);
+    write_document_until(&mut traced, ty, value, |enc| enc.held_len() >= held);
+    drop(traced);
     out.truncate(held);
     out
 }

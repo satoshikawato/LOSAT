@@ -79,14 +79,21 @@ impl TblastnArgs {
         subject: &[u8],
     ) -> Result<Vec<u8>> {
         let report = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        self.run_io(
+        let ran = self.run_io(
             settings,
             RunIo::Memory {
                 query,
                 subject,
                 report: report.clone(),
             },
-        )?;
+        );
+        // `CATCH_ALL`'s silent end returns 0 with what the run wrote (the error archive of the
+        // saved messages), as the library's call does (`api::run::run_local`).
+        if let Err(error) = ran {
+            if !crate::cli::is_silent_end(&error) {
+                return Err(error);
+            }
+        }
         let bytes = std::mem::take(&mut *report.lock().expect("report mutex poisoned"));
         Ok(bytes)
     }

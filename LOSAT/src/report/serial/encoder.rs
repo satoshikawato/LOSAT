@@ -597,6 +597,12 @@ impl<E: Encoder, P> Traced<E, P> {
         self.buffer.as_ref().and_then(OutBuffer::first_write)
     }
 
+    /// The bytes of the document that `inner` holds (`Encoder::held`, which `Traced` itself does
+    /// not forward: what it hands on is `flush_to`'s).
+    pub(crate) fn held_len(&self) -> usize {
+        self.inner.held().len()
+    }
+
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
     pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
         self.take_posted()

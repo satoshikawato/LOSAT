@@ -5572,8 +5572,10 @@ pub fn run(
     // ```
     // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
     // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-    if stream.failed && (pairwise || tax_report) {
+    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3). An insertion
+    // of the report that sets the stream's `badbit` throws the same way (`cli::BadbitInsertion`).
+    let badbit = result.as_ref().is_err_and(crate::cli::BadbitInsertion::is);
+    if (stream.failed || badbit) && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -5696,8 +5698,7 @@ fn read_cli_subjects(
     // there (`read_subjects`). Records without residues (and intervals without letters) are
     // read without a message and reported when the formatter sets up the subjects
     // (`search`).
-    let mut subject_source = FastaInputSource::from_argument(
-        subject_path,
+    let mut subject_source = FastaInputSource::from_file(
         subject_file,
         ReaderConfig::subject(args.app.name(), true, settings.data_loaders)
             .with_defline(keep_deflines)
@@ -5999,8 +6000,7 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
+    let mut query_source = FastaInputSource::from_file(
         query_file,
         ReaderConfig::query(args.app.name(), true, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -8926,7 +8926,19 @@ fn write_reports_without_queries(
                     database_name: blastp_database_name(args, subject_label),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
-                    matrix_name: args.matrix_name.clone(),
+                    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229
+                    // ```c++
+                    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+                    // ...
+                    //             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+                    //             	results = local_search.Run();
+                    // ...
+                    //         formatter.PrintEpilog(opt);
+                    // ```
+                    // rpsblast's options name a matrix once a query batch's search has set it up
+                    // (`CreateRpsStructures`): without a batch the epilog's matrix name is null
+                    // (`write_matrix_line`).
+                    matrix_name: args.rps_search.is_none().then(|| args.matrix_name.clone()),
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,

@@ -1512,7 +1512,7 @@ fn write_pairwise(
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
-        matrix_name: matrix_name.to_string(),
+        matrix_name: Some(matrix_name.to_string()),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         word_threshold: scoring.threshold,

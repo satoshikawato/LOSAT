@@ -8233,8 +8233,7 @@ fn read_cli_subjects(
     // NCBI reads the records one at a time, writes each one's messages as it reads it, and
     // checks each one's range after reading it: a range that starts past the end of a
     // record stops the reading there (`read_subjects`).
-    let mut subject_source = FastaInputSource::from_argument(
-        subject_path,
+    let mut subject_source = FastaInputSource::from_file(
         subject_file,
         ReaderConfig::subject("BLASTN", false, settings.data_loaders)
             .with_defline(keep_deflines)
@@ -8506,7 +8505,7 @@ fn search_cli(
         .with_defline(args.archive.is_some() || args.strategy.is_some())
         .with_parse_deflines(args.parse_deflines)
         .with_strand(&args.strand);
-    let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
+    let mut query_source = FastaInputSource::from_file(query_file, query_config);
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs

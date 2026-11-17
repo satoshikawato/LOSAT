@@ -1,0 +1,20 @@
+# Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Jul  1 2025 08:59:18 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
+# Only what `freeze`/`freeze-rejections` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
+# `@S <n> <sha256>` lines are a table of the distinct non-empty stderr hashes. Row lines: row_id, rc, stdout sha256,
+# stderr (`-` = empty stream, else a table index n), combined `2>&1` stream (`=` = same as stdout, `~` = same as stderr, else its sha256).
+# Rows of kind losat-rejection hold the hashes of LOSAT's explicit rejection (`freeze-rejections`), not NCBI's. Rows not frozen yet have no line (`pending`). Written by `freeze`/`freeze-rejections`/`refresh`; do not edit.
+@S	1	142e63e842bb7d99920f8491de2cf0120fdc8e7ff10ea0b62f854eaccea55eaa
+@S	2	bdd645f3b1544a7f74b103cc5e3275b731c47ff9a6815bc2a40497b6a383a4fe
+blastx.stdin_q_lost_g55_pipe.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	~
+blastx.stdin_q_lost_g55_pipe.o0	0	6880ca3dc348d3f7913047af34a604eaf1fd1e0ea89396b9850351c482ba52c0	1	b9a74df8fa2e4347831d36f76370892092f796f363050a5f53c8e88409f19d59
+blastx.stdin_q_lost_g55_file.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	~
+blastx.stdin_q_lost_g55_file.o0	0	6880ca3dc348d3f7913047af34a604eaf1fd1e0ea89396b9850351c482ba52c0	1	b9a74df8fa2e4347831d36f76370892092f796f363050a5f53c8e88409f19d59
+blastx.eol_lost_g55.q.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	2	~
+blastx.eol_lost_g55.q.o0	0	a6b2dd938536f57afaa02d5ff6eeda4b46427702cdbcd7e1b258a2e96dd66325	2	392999ec2643393a2b1465f4cbf27fa8df04a11f91beeeed4d7e2770932b76db
+blastx.stdin_q_pipe.o6	0	3de521c84fbd8ff313d068be1aabbb5e8b0c1bfa491dc293a2e348257f8897b5	-	=
+blastx.stdin_q_pipe.o0	0	b135bbd02f11fd73c2987d515bcfb5e6f0eb2036d5442ec16cf52c36e0591a46	-	=
+blastx.stdin_q_file.o6	0	3de521c84fbd8ff313d068be1aabbb5e8b0c1bfa491dc293a2e348257f8897b5	-	=
+blastx.stdin_q_file.o0	0	b135bbd02f11fd73c2987d515bcfb5e6f0eb2036d5442ec16cf52c36e0591a46	-	=
+blastx.stdin_q_empty_pipe.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	-	=
+blastx.stdin_q_empty_pipe.o0	0	6ddc8faf297bc186d09d8299d8789809400672ebbbbe5435680e76afe8c77e01	-	=
+blastx.stdin_q_empty_pipe.o7	0	0f68ce7cd6a5be6bb2769adf4686db02585673579f70461ca27b5999db0e4133	-	=

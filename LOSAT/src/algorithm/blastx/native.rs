@@ -3299,7 +3299,7 @@ mod archive_error_tests {
             database_name: String::new(),
             database_num_sequences: 1,
             database_total_letters: 50_000,
-            matrix_name: "BLOSUM62".into(),
+            matrix_name: Some("BLOSUM62".into()),
             gap_open: 11,
             gap_extend: 1,
             word_threshold: 12.0,

@@ -507,7 +507,9 @@ pub struct BlastpPairwiseReport {
     pub database_name: String,
     pub database_num_sequences: usize,
     pub database_total_letters: usize,
-    pub matrix_name: String,
+    /// `options.GetMatrixName()`; `None` where NCBI's options name no matrix (a null `const
+    /// char*`: an RPS search that set up no query batch, `write_matrix_line`).
+    pub matrix_name: Option<String>,
     pub gap_open: i32,
     pub gap_extend: i32,
     /// `GetWordThreshold()`, a double.
@@ -2819,6 +2821,52 @@ fn write_blastp_query_footer_spacing<W: Write>(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268
+// ```c++
+//     else {
+//         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
+//     }
+// ```
+// NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:661-670
+// ```c++
+//     inline basic_ostream<char, _Traits>&
+//     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+//     {
+//       if (!__s)
+// 	__out.setstate(ios_base::badbit);
+//       else
+// 	__ostream_insert(__out, __s,
+// 			 static_cast<streamsize>(_Traits::length(__s)));
+//       return __out;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:96-103
+// ```c++
+// void
+// CBlastRPSOptionsHandle::SetScoringOptionsDefaults()
+// {
+//     SetGappedMode();
+//     // set invalid values for options that are not applicable
+//     m_Opts->SetOutOfFrameMode(false);
+//     m_Opts->SetFrameShiftPenalty(INT2_MAX);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83 (quoted at
+// `rps_search::volumes::search_sets`: `CreateRpsStructures` names the database's matrix in the
+// options of each RPS query batch it sets up)
+/// The epilog's matrix line after its blank lines (`options.GetMatrixName()`). `None`: the
+/// options name no matrix, as RPS-BLAST's (`CBlastRPSOptionsHandle` sets none) before a query
+/// batch's set-up names the database's; the null `const char*` sets `badbit` on the formatter's
+/// stream, which throws (`cli::BadbitInsertion`): the report ends after `Matrix: ` (NCBI BLAST+
+/// 2.17.0: rpsblast and rpstblastn with an empty pipe, outfmt 0 to 4, exit status 6).
+fn write_matrix_line(writer: &mut impl Write, matrix_name: Option<&str>) -> io::Result<()> {
+    writer.write_all(b"Matrix: ")?;
+    let Some(name) = matrix_name else {
+        return Err(crate::cli::BadbitInsertion::error());
+    };
+    writeln!(writer, "{name}")
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:503-579
 // ```c
 // out << "  Database: ";
@@ -2856,7 +2904,7 @@ fn write_blastp_final_footer<W: Write>(
             report.database_total_letters,
         )?,
     }
-    writeln!(writer, "Matrix: {}", report.matrix_name)?;
+    write_matrix_line(writer, report.matrix_name.as_deref())?;
     writeln!(
         writer,
         "Gap Penalties: Existence: {}, Extension: {}",
@@ -5222,7 +5270,7 @@ fn write_tblastx_epilog<W: Write>(
             report.database_total_letters,
         )?,
     }
-    writeln!(writer, "Matrix: {}", report.matrix_name)?;
+    write_matrix_line(writer, Some(&report.matrix_name))?;
     if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
@@ -5568,6 +5616,24 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268 (quoted at
+    // `write_matrix_line`)
+    // The matrix line of a named matrix; without one (RPS-BLAST before a query batch's set-up) the
+    // line stops after `Matrix: ` with the stream's failure, which a program reports as NCBI's
+    // "BLAST failed to write output" (NCBI BLAST+ 2.17.0: rpsblast and rpstblastn, an empty pipe,
+    // outfmt 0: stdout ends in `Matrix: `, exit status 6; rows `db.rps.stdin.empty.0`,
+    // `db.rpstbn.stdin.empty.*`).
+    #[test]
+    fn a_null_matrix_name_stops_the_epilog_after_its_label() {
+        let mut named = Vec::new();
+        write_matrix_line(&mut named, Some("BLOSUM62")).unwrap();
+        assert_eq!(named, b"Matrix: BLOSUM62\n");
+        let mut unnamed = Vec::new();
+        let error = write_matrix_line(&mut unnamed, None).unwrap_err();
+        assert_eq!(unnamed, b"Matrix: ");
+        assert!(crate::cli::BadbitInsertion::is(&anyhow::Error::from(error)));
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:642-649 (`s_SetFlags`,
     // quoted at `report::query_anchored`) and c++/src/algo/blast/blastinput/blast_args.cpp:2980-2987
@@ -7683,7 +7749,7 @@ pub fn write_blastx_epilog(
         writeln!(writer)?;
         writeln!(writer)?;
     }
-    writeln!(writer, "Matrix: {}", report.matrix_name)?;
+    write_matrix_line(writer, report.matrix_name.as_deref())?;
     if options.gapped {
         writeln!(
             writer,
@@ -8647,7 +8713,7 @@ mod tblastx_tests {
             database_name: String::new(),
             database_num_sequences: 1,
             database_total_letters: 400,
-            matrix_name: "BLOSUM62".into(),
+            matrix_name: Some("BLOSUM62".into()),
             gap_open: 11,
             gap_extend: 1,
             word_threshold: 12.0,
@@ -8969,7 +9035,7 @@ mod tblastx_tests {
             database_name: "db".to_string(),
             database_num_sequences: 1,
             database_total_letters: 180,
-            matrix_name: "BLOSUM62".to_string(),
+            matrix_name: Some("BLOSUM62".to_string()),
             gap_open: 11,
             gap_extend: 1,
             word_threshold: 0.0,

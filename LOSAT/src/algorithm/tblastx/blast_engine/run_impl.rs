@@ -1330,8 +1330,7 @@ fn read_subject_set(
     // record stops the reading there (`read_subjects`). Records without residues (and
     // intervals without letters) are read without a message and reported when the search
     // is set up (`search`).
-    let mut subject_source = FastaInputSource::from_argument(
-        &subject_path,
+    let mut subject_source = FastaInputSource::from_file(
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -1747,8 +1746,7 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
+    let mut query_source = FastaInputSource::from_file(
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())

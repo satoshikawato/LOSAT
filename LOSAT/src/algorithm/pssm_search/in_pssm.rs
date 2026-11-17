@@ -556,6 +556,10 @@ struct QueryResidues {
     letters: Vec<u8>,
     /// The 0-based positions of the residues whose code is no NCBIstdaa code.
     invalid: Vec<usize>,
+    /// Whether a residue is the gap residue (code 0).
+    gap: bool,
+    /// Whether an iupacaa letter is in lower case.
+    lower: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:105-121
@@ -614,47 +618,52 @@ struct QueryResidues {
 /// letter that code). No residues when the data is missing or of another coding (refused before,
 /// `psi_search_and_object`).
 fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
-    let code_of = |letter: u8| {
-        NCBISTDAA_TO_AMINOACID
-            .iter()
-            .position(|&known| known == letter)
-            .map(|code| code as u8)
+    let mut residues = QueryResidues {
+        letters: Vec::new(),
+        invalid: Vec::new(),
+        gap: false,
+        lower: false,
     };
-    let codes: Vec<Option<u8>> = match seq_data {
-        Some(SeqData::Ncbistdaa(codes)) => codes
-            .iter()
-            .map(|&code| (usize::from(code) < BLASTAA_SIZE).then_some(code))
-            .collect(),
-        Some(SeqData::Iupacaa(text)) => text
-            .iter()
-            .map(|&c| {
-                c.is_ascii_alphabetic()
-                    .then(|| code_of(c.to_ascii_uppercase()))
-                    .flatten()
-            })
-            .collect(),
-        Some(SeqData::Ncbieaa(text)) => text
-            .iter()
-            .map(|&c| {
-                (c.is_ascii_uppercase() || c == b'*' || c == b'-')
-                    .then(|| code_of(c))
-                    .flatten()
-            })
-            .collect(),
-        Some(SeqData::Other(_)) | None => Vec::new(),
+    // Each letter of iupacaa and ncbieaa that converts is its capital's place in
+    // `NCBISTDAA_TO_AMINOACID`, which holds all 26 capitals: its letter is the capital itself.
+    let push = |residues: &mut QueryResidues, position: usize, letter: Option<u8>| {
+        match letter {
+            Some(letter) => {
+                residues.gap |= letter == b'-';
+                residues.letters.push(letter);
+            }
+            None => {
+                residues.letters.push(b'X');
+                residues.invalid.push(position);
+            }
+        }
     };
-    QueryResidues {
-        letters: codes
-            .iter()
-            .map(|code| code.map_or(b'X', |code| NCBISTDAA_TO_AMINOACID[usize::from(code)]))
-            .collect(),
-        invalid: codes
-            .iter()
-            .enumerate()
-            .filter(|(_, code)| code.is_none())
-            .map(|(position, _)| position)
-            .collect(),
+    match seq_data {
+        Some(SeqData::Ncbistdaa(codes)) => {
+            residues.letters.reserve(codes.len());
+            for (position, &code) in codes.iter().enumerate() {
+                let letter = NCBISTDAA_TO_AMINOACID.get(usize::from(code)).copied();
+                push(&mut residues, position, letter);
+            }
+        }
+        Some(SeqData::Iupacaa(text)) => {
+            residues.letters.reserve(text.len());
+            for (position, &c) in text.iter().enumerate() {
+                residues.lower |= c.is_ascii_lowercase();
+                let letter = c.is_ascii_alphabetic().then(|| c.to_ascii_uppercase());
+                push(&mut residues, position, letter);
+            }
+        }
+        Some(SeqData::Ncbieaa(text)) => {
+            residues.letters.reserve(text.len());
+            for (position, &c) in text.iter().enumerate() {
+                let letter = (c.is_ascii_uppercase() || c == b'*' || c == b'-').then_some(c);
+                push(&mut residues, position, letter);
+            }
+        }
+        Some(SeqData::Other(_)) | None => {}
     }
+    residues
 }
 
 /// The query record of the PSSM's Bioseq (`PsiSearch::query`, the reasons in
@@ -870,7 +879,8 @@ pub(crate) fn psi_search_and_object(
     } else {
         (None, invalid_residues)
     };
-    let reads_values = validation_error.is_none() && scores_error.is_none() && setup_error.is_none();
+    let reads_values =
+        validation_error.is_none() && scores_error.is_none() && setup_error.is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:648-660
     // ```c++
     //     asn1_pssm.SetByRow(false);  // this is the default
@@ -1040,10 +1050,7 @@ pub(crate) fn psi_search_and_object(
     // case and count no identity or positive on them (tabular.cpp:996-1022, NCBI BLAST+ 2.17.0,
     // M4a-1c E probes `tk_low_iupac`, `ts_low_iupac`: pident 0.000). LOSAT's records hold lower
     // case as a mask, so it refuses such a query where NCBI would search it.
-    if reads_values
-        && matches!(query.inst.seq_data, Some(SeqData::Iupacaa(ref text))
-            if text.iter().any(u8::is_ascii_lowercase))
-    {
+    if reads_values && residues.lower {
         return Err(reader.refuse(
             "a PSSM query with lower-case iupacaa letters (NCBI's reports compare them as they are)",
         ));
@@ -1053,7 +1060,7 @@ pub(crate) fn psi_search_and_object(
     // the identities count it against a gap of the subject (tabular.cpp:996-1022), and it is no
     // end gap. LOSAT's report rows hold `-` for gaps alone, so it refuses such a query where NCBI
     // would search it.
-    if reads_values && letters.contains(&b'-') {
+    if reads_values && residues.gap {
         return Err(reader.refuse(
             "a PSSM query with the gap residue (- of ncbieaa, 0 of ncbistdaa), which NCBI's reports count as a residue,",
         ));
@@ -1165,15 +1172,13 @@ pub(crate) fn psi_search_and_object(
     // rows), which the position-based composition-based statistics read; none when the PSSM has
     // none (NCBI's then stay zero).
     let freq_ratios = match pssm.pssm.intermediate_data.as_ref() {
-        Some(data) if reads_values && !data.freq_ratios.is_empty() => {
-            convert_2_matrix(
-                &data.freq_ratios,
-                rows_n as usize,
-                columns_n as usize,
-                by_row,
-                0.0,
-            )
-        }
+        Some(data) if reads_values && !data.freq_ratios.is_empty() => convert_2_matrix(
+            &data.freq_ratios,
+            rows_n as usize,
+            columns_n as usize,
+            by_row,
+            0.0,
+        ),
         _ => Vec::new(),
     };
     let final_data = pssm.pssm.final_data.as_ref();
@@ -2582,15 +2587,16 @@ mod tests {
         let iupacaa: [u8; 4] = [b'*', b'#', 0xE9, b'-'];
         let ncbieaa: [u8; 3] = [b'#', 0xE9, b'a'];
         let ncbistdaa: [u8; 3] = [28, 30, 255];
-        let cases = iupacaa
-            .iter()
-            .map(|&byte| rnd_with_query(|letters, _| SeqData::Iupacaa(put(letters, 26, byte))))
-            .chain(ncbieaa.iter().map(|&byte| {
-                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, byte)))
-            }))
-            .chain(ncbistdaa.iter().map(|&code| {
-                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, code)))
-            }));
+        let cases =
+            iupacaa
+                .iter()
+                .map(|&byte| rnd_with_query(|letters, _| SeqData::Iupacaa(put(letters, 26, byte))))
+                .chain(ncbieaa.iter().map(|&byte| {
+                    rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, byte)))
+                }))
+                .chain(ncbistdaa.iter().map(|&code| {
+                    rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, code)))
+                }));
         for search in cases {
             let search = search.unwrap();
             assert_eq!(
@@ -2604,10 +2610,9 @@ mod tests {
                 crate::algorithm::pssm_search::PssmQueryStop::Setup(_)
             ));
             assert!(stop.after_request() && stop.after_round_files());
-            assert!(stop
-                .error()
-                .to_string()
-                .starts_with("BLAST engine error: Warning: Invalid residues found at positions 26 "));
+            assert!(stop.error().to_string().starts_with(
+                "BLAST engine error: Warning: Invalid residues found at positions 26 "
+            ));
         }
         let all = rnd_with_query(|letters, _| SeqData::Iupacaa(vec![b'#'; letters.len()])).unwrap();
         assert_eq!(
@@ -2635,10 +2640,9 @@ mod tests {
             assert!(gap.unwrap_err().to_string().contains("the gap residue"));
         }
         // With an invalid residue too, NCBI's stop comes first.
-        let stopped = rnd_with_query(|letters, _| {
-            SeqData::Ncbieaa(put(put(letters, 26, b'-'), 3, b'#'))
-        })
-        .unwrap();
+        let stopped =
+            rnd_with_query(|letters, _| SeqData::Ncbieaa(put(put(letters, 26, b'-'), 3, b'#')))
+                .unwrap();
         assert_eq!(
             stopped.setup_error.as_deref(),
             Some("Warning: Invalid residues found at positions 3 ")

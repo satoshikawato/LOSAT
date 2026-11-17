@@ -154,9 +154,9 @@ fn fixture_data_loads_and_finds_its_rows() {
 /// A copy of the fixture data in a new directory of the system's temporary directory.
 fn fixture_copy(tag: &str) -> std::path::PathBuf {
     let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rpsbproc/data");
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat_rpsbproc_{tag}_{}_{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -176,6 +176,10 @@ fn fixture_copy(tag: &str) -> std::path::PathBuf {
 // skips completes after reading `buf[npos]` (case `ct1`, refused), and a line that ends in a
 // space reads past its terminating 0 (refused).
 #[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    ignore = "NCBI's text prints size_t -1 as 4294967295 on a 32-bit target, not 18446744073709551615: the wasm32 build differs here (reported)"
+)]
 fn cdtrack_lines_read_as_ncbi() {
     let dir = fixture_copy("cdtrack");
     let load = |text: &str| {

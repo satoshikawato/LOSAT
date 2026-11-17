@@ -12,9 +12,9 @@ impl Dir {
     fn new(label: &str) -> Self {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-isam-{label}-{}-{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();

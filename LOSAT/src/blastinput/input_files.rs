@@ -247,6 +247,7 @@ fn inflation_directories(path: &std::path::Path) -> impl Iterator<Item = std::pa
 /// The directory of temporary files: `temp_dir()`.
 #[cfg(not(target_os = "wasi"))]
 fn temporary_directory() -> Option<std::path::PathBuf> {
+    #[allow(clippy::disallowed_methods)] // not WASI: `temp_dir()` is only called off WASI
     Some(std::env::temp_dir())
 }
 
@@ -561,9 +562,9 @@ mod tests {
 
     fn temporary(stem: &str, bytes: &[u8]) -> std::path::PathBuf {
         // The stem ends the name: the suffix is what `open_file_input` reads.
-        let path = std::env::temp_dir().join(format!(
+        let path = crate::utils::test_dir::temp_dir().join(format!(
             "losat-input-files-{}-{}-{stem}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -583,7 +584,7 @@ mod tests {
     /// none on Unix, where the name goes as soon as the file is open.
     #[cfg(unix)]
     fn inflated_names(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let prefix = format!(".losat-query-{}-", std::process::id());
+        let prefix = format!(".losat-query-{}-", crate::utils::test_dir::process_id());
         std::fs::read_dir(directory)
             .unwrap()
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
@@ -623,7 +624,7 @@ mod tests {
         }
         #[cfg(unix)]
         assert_eq!(
-            inflated_names(&std::env::temp_dir()),
+            inflated_names(&crate::utils::test_dir::temp_dir()),
             Vec::<std::path::PathBuf>::new()
         );
     }
@@ -647,9 +648,9 @@ mod tests {
     #[test]
     fn the_inflated_copy_is_made_beside_the_input_or_else_under_temp_dir() {
         use std::os::unix::fs::PermissionsExt;
-        let directory = std::env::temp_dir().join(format!(
+        let directory = crate::utils::test_dir::temp_dir().join(format!(
             "losat-input-files-{}-{}-beside",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -678,7 +679,7 @@ mod tests {
             #[cfg(target_os = "linux")]
             assert_eq!(
                 directory_of_open_file(&file),
-                std::fs::canonicalize(std::env::temp_dir()).unwrap()
+                std::fs::canonicalize(crate::utils::test_dir::temp_dir()).unwrap()
             );
             assert_eq!(read_all(file), b">q1\nACGT\n");
         }
@@ -688,18 +689,20 @@ mod tests {
 
     #[test]
     fn the_inflated_copy_goes_beside_the_input_first_and_then_under_temp_dir() {
-        let temp = std::env::temp_dir();
+        let temp = crate::utils::test_dir::temp_dir();
         let nested = std::path::Path::new("data").join("q.fa.gz");
         let directories =
             |path: &std::path::Path| super::inflation_directories(path).collect::<Vec<_>>();
-        assert_eq!(
-            directories(&nested),
-            vec![std::path::PathBuf::from("data"), temp.clone()]
-        );
-        assert_eq!(
-            directories(std::path::Path::new("q.fa.gz")),
-            vec![std::path::PathBuf::from("."), temp.clone()]
-        );
+        // WASI has no directory of temporary files (`temporary_directory`): beside the input only.
+        let with_temp = |beside: &str| {
+            let mut all = vec![std::path::PathBuf::from(beside)];
+            if cfg!(not(target_os = "wasi")) {
+                all.push(temp.clone());
+            }
+            all
+        };
+        assert_eq!(directories(&nested), with_temp("data"));
+        assert_eq!(directories(std::path::Path::new("q.fa.gz")), with_temp("."));
         assert_eq!(directories(&temp.join("q.fa.gz")), vec![temp]);
     }
 
@@ -740,7 +743,7 @@ mod tests {
             assert!(error.starts_with("-subject: '"), "{error}");
             std::fs::remove_file(&cut).unwrap();
         }
-        let missing = std::env::temp_dir().join("losat-input-files-missing.fa.gz");
+        let missing = crate::utils::test_dir::temp_dir().join("losat-input-files-missing.fa.gz");
         let error = open_file_input(&missing, "query").unwrap_err().to_string();
         assert!(
             error.starts_with(
@@ -815,9 +818,9 @@ mod tests {
     // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
     #[test]
     fn a_regular_file_has_a_position_and_a_pipe_has_none() {
-        let path = std::env::temp_dir().join(format!(
+        let path = crate::utils::test_dir::temp_dir().join(format!(
             "losat-input-files-has-stream-position-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::write(&path, b">q\nACGT\n").unwrap();
         let file = std::fs::File::open(&path).unwrap();

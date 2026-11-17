@@ -987,9 +987,9 @@ fn window_boundary_input(window: usize, offset: usize, tail: usize, end: &[u8]) 
 // the reader with its bulk paths off (one byte at a time).
 #[test]
 fn bytes_read_as_a_file_with_the_same_bytes() {
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-bytes-vs-file-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let configs = [
         ReaderConfig::query("BLASTN", false, false),
@@ -1257,9 +1257,9 @@ fn read_subjects_reader_errors_end_the_program() {
 // either fails (empty) or the position is restored).
 #[test]
 fn stream_is_empty_reads_files_and_never_pipes() {
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-stream-is-empty-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let config = ReaderConfig::query("BLASTN", false, false);
     for (bytes, empty) in [
@@ -1306,9 +1306,9 @@ fn stream_is_empty_reads_files_and_never_pipes() {
 fn standard_input_refills_one_byte_and_keeps_the_tail() {
     let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
     let kept = b"TCTTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCCTTTTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGCACGTACGTACGTACGTACGTACGTACGTAC";
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-standard-input-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     std::fs::write(&path, text).unwrap();
     let config = ReaderConfig::query("BLASTN", false, false);

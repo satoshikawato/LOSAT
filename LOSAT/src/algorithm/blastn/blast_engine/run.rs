@@ -14683,9 +14683,9 @@ mod tests {
             subject.extend_from_slice(&query[240..512 - i * 13]);
             subject.extend_from_slice(&[b'N'; 64]);
         }
-        let directory = std::env::temp_dir().join(format!(
+        let directory = crate::utils::test_dir::temp_dir().join(format!(
             "losat-traceback-regression-{}-{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

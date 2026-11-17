@@ -552,6 +552,11 @@ impl<E: Encoder, P> Traced<E, P> {
         self.buffer.as_ref().map_or(&[], OutBuffer::pieces)
     }
 
+    /// The stream's position at the first of those writes (`OutBuffer::first_write`).
+    pub fn first_write(&self) -> Option<u64> {
+        self.buffer.as_ref().and_then(OutBuffer::first_write)
+    }
+
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
     pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
         self.take_posted()

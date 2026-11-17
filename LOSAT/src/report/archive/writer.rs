@@ -949,27 +949,26 @@ pub fn write_error_archive(
 }
 
 /// Where NCBI's buffer of the error archive of `messages` first writes to its output (the position
-/// of its write fault): the end of its first write, with the buffer's back limit where that write
-/// is not the document's last (`EndOfWrite`'s).
+/// of its write fault: `OutBuffer::first_write`, the bytes it had put into the buffer; for a small
+/// archive the document without the ASN.1 text's separator, which is a write of its own).
 #[cold]
 #[inline(never)]
 fn error_archive_fault(encoding: ArchiveEncoding, messages: &[Message]) -> usize {
-    use crate::report::serial::out_buffer::Stream;
     let mut buf = Vec::new();
     let mut dropped = std::io::sink();
-    let (pieces, stream) = match encoding {
+    let first = match encoding {
         ArchiveEncoding::Nothing => return 0,
         ArchiveEncoding::Xml => {
             let mut out =
                 ArchiveOut::new(Traced::xml(XmlEncoder::archive(&mut buf), 0), &mut dropped);
             write_error_document(&mut out, messages);
-            (out.enc.pieces().to_vec(), Stream::Xml)
+            out.enc.first_write()
         }
         ArchiveEncoding::Text => {
             let mut out =
                 ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), &mut dropped);
             write_error_document(&mut out, messages);
-            (out.enc.pieces().to_vec(), Stream::AsnText)
+            out.enc.first_write()
         }
         ArchiveEncoding::Binary => {
             let mut out = ArchiveOut::new(
@@ -977,14 +976,10 @@ fn error_archive_fault(encoding: ArchiveEncoding, messages: &[Message]) -> usize
                 &mut dropped,
             );
             write_error_document(&mut out, messages);
-            (out.enc.pieces().to_vec(), Stream::AsnBinary)
+            out.enc.first_write()
         }
     };
-    match pieces.as_slice() {
-        [] => 0,
-        [whole] => *whole,
-        [first, ..] => first + stream.back_limit(),
-    }
+    first.unwrap_or(0) as usize
 }
 
 /// The error archive of `messages` written through the encoder of the handle's encoding.

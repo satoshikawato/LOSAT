@@ -1379,4 +1379,36 @@ mod tests {
         write_error_archive(&spec, &lines, &mut sink).unwrap();
         assert!(sink.is_empty());
     }
+
+    /// The error archive after the report stream's failure in outfmt 11 (`error_lines` of
+    /// `ostream::ReportStream::finish`'s error: the 802.4 post of the archive's `Close` and
+    /// "BLAST failed to write output"). NCBI 2.17.0 writes it into the failed stream and posts its
+    /// write fault at byte 356 (blastn), its length (`T/t6/survey` blastn.f11.q1 full2).
+    #[test]
+    fn the_error_archive_of_a_failed_report_has_ncbis_length() {
+        let handle = ArchiveHandle::new(
+            ArchiveEncoding::Text,
+            ArchiveRequest {
+                program: "blastn",
+                application: "blastn",
+                service: "plain",
+                algorithm: Vec::new(),
+                database: None,
+                step_number: None,
+            },
+            OptionsHandle::default(),
+        );
+        let error: anyhow::Error = crate::cli::NativeError {
+            exit: 6,
+            message: "Error: (802.4) [blastn] [Cannot close serializing output stream] \
+                      Exception: basic_ios::clear: iostream error\nBLAST failed to write output\n"
+                .to_string(),
+        }
+        .into();
+        let lines = error_lines(&error, false).expect("the output error's lines");
+        let mut sink = Vec::new();
+        write_error_archive(&handle, &lines, &mut sink).unwrap();
+        eprintln!("{}", String::from_utf8_lossy(&sink));
+        assert_eq!(sink.len(), 356);
+    }
 }

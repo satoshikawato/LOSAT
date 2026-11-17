@@ -1248,6 +1248,11 @@ impl ReportHandle {
         self.flush()
     }
 
+    /// `ReportWrite::resolve_object`, for a hold.
+    pub(crate) fn resolve(&self, pieces: &[usize]) -> std::io::Result<()> {
+        self.resolve_object(pieces)
+    }
+
     /// `~CBlastFormat`'s reset of the stream's exceptions, before the writes of a format that
     /// NCBI makes after it (SAM's `~CSAM_Formatter`, a member of `CBlastFormat`).
     pub fn stop_throwing(&self) {
@@ -1411,6 +1416,18 @@ impl Cuts {
     }
 }
 
+/// NCBI's insertions of `report`, one query's report of outfmt 16 or 15 (`site`,
+/// `Site::Xml2Report`), into the report's stream: the writes of its object stream's buffer, taken
+/// back from the report's bytes (`out_buffer::xml_pieces`, `json_pieces`).
+pub(crate) fn report_pieces(site: Site, report: &[u8]) -> Vec<usize> {
+    match site {
+        Site::Xml2Report { json: true } => crate::report::serial::out_buffer::json_pieces(report),
+        _ => crate::report::serial::out_buffer::xml_pieces(report, |tag| {
+            crate::report::blast_xml2::is_string_element(tag)
+        }),
+    }
+}
+
 /// The writing of a buffer with its `Cuts`, part by part (`write`).
 pub struct CutCursor<'c> {
     cuts: &'c [(usize, Cut)],
@@ -1486,15 +1503,7 @@ impl CutCursor<'_> {
                     .iter()
                     .find(|(_, cut)| matches!(cut, Cut::Site(_)))
                     .map_or(report.len(), |&(at, _)| at);
-                let object = &report[start.min(end)..end];
-                let pieces = match site {
-                    Site::Xml2Report { json: true } => {
-                        crate::report::serial::out_buffer::json_pieces(object)
-                    }
-                    _ => crate::report::serial::out_buffer::xml_pieces(object, |tag| {
-                        crate::report::blast_xml2::is_string_element(tag)
-                    }),
-                };
+                let pieces = report_pieces(site, &report[start.min(end)..end]);
                 writer.resolve_object(&pieces)?;
                 self.skipping = true;
                 Ok(())

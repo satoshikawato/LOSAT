@@ -207,6 +207,8 @@ pub(super) struct OutBuffer {
     /// The size of each write of the buffer to the output (`m_Output.write(m_Buffer, count)`),
     /// in order: NCBI's insertions of the document into the report's stream (`pieces`).
     pieces: Vec<usize>,
+    /// The stream's position at the first of them (`first_write`).
+    first_write: Option<u64>,
 }
 
 impl OutBuffer {
@@ -217,6 +219,7 @@ impl OutBuffer {
             used: 0,
             written: 0,
             pieces: Vec::new(),
+            first_write: None,
         }
     }
 
@@ -234,10 +237,25 @@ impl OutBuffer {
     /// `EndOfWrite`'s `FlushBuffer()`: the buffer is written whole.
     fn end_of_write(&mut self) {
         if self.used > 0 {
+            self.note_first_write(self.used);
             self.pieces.push(self.used);
         }
         self.written += self.used as u64;
         self.used = 0;
+    }
+
+    /// Notes the stream's position at the buffer's first write to its output (`GetStreamPos` at
+    /// that `FlushBuffer`: the bytes put into the buffer by then, `used`).
+    fn note_first_write(&mut self, used: usize) {
+        if self.first_write.is_none() {
+            self.first_write = Some(self.written + used as u64);
+        }
+    }
+
+    /// The stream's position at the buffer's first write to its output: where NCBI posts the
+    /// write fault of a document written into a failed stream (`archive::writer`'s error archive).
+    pub(super) fn first_write(&self) -> Option<u64> {
+        self.first_write
     }
 
     /// `FlushBuffer(false)`.
@@ -248,6 +266,7 @@ impl OutBuffer {
         }
         let count = self.used - leave;
         if count > 0 {
+            self.note_first_write(self.used);
             self.pieces.push(count);
         }
         self.written += count as u64;
@@ -359,9 +378,26 @@ impl OutBuffer {
             self.used = 0;
             return;
         }
+        if piece == Piece::End && self.stream == Stream::AsnText {
+            // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:941-945
+            // ```c++
+            // void CObjectOStreamAsn::WriteSeparator(void)
+            // {
+            //     m_Output.PutString(GetSeparator());
+            //     FlushBuffer();
+            // }
+            // ```
+            // `EndOfWrite`'s `FlushBuffer()` writes the document, then the auto-separator (`\n`,
+            // objostrasn.cpp:70-71) is a write of its own.
+            self.end_of_write();
+            self.used = bytes.len();
+            self.end_of_write();
+            return;
+        }
         if piece == Piece::End {
             let count = self.used + bytes.len();
             if count > 0 {
+                self.note_first_write(count);
                 self.pieces.push(count);
             }
             self.written += count as u64;

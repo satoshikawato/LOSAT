@@ -388,6 +388,15 @@ impl HeldState {
             .map(|(_, texts)| std::mem::take(texts))
             .unwrap_or_default();
         let events = std::mem::take(&mut self.events);
+        // Where each region starts and ends, for a report inserted whole that fails at the device
+        // (`ostream::is_undecided_report_write_failure`: NCBI's pieces of it decide its end).
+        let region_ends: Vec<usize> = events
+            .iter()
+            .filter(|(_, _, event)| matches!(event, HeldEvent::Site(_)))
+            .map(|&(at, _, _)| at)
+            .chain(std::iter::once(held.len()))
+            .collect();
+        let mut region = (0usize, crate::report::ostream::Site::Report);
         let mut written = 0;
         // Skipping the rest of a region whose insertion was caught.
         let mut skipping = false;
@@ -408,6 +417,33 @@ impl HeldState {
                                 report.declare(crate::report::ostream::Site::Report)?;
                             }
                         }
+                        Err(error)
+                            if crate::report::ostream::is_undecided_report_write_failure(
+                                &error,
+                            ) =>
+                        {
+                            let (start, site) = region;
+                            let stop = region_ends
+                                .iter()
+                                .copied()
+                                .find(|&at| at > start)
+                                .unwrap_or(held.len());
+                            let pieces =
+                                crate::report::ostream::report_pieces(site, &held[start..stop]);
+                            skipping = true;
+                            if let Some(report) = &self.report {
+                                match report.resolve(&pieces) {
+                                    Err(error)
+                                        if crate::report::ostream::is_caught_report_write_failure(
+                                            &error,
+                                        ) =>
+                                    {
+                                        report.declare(crate::report::ostream::Site::Report)?;
+                                    }
+                                    resolved => resolved?,
+                                }
+                            }
+                        }
                         written => written?,
                     }
                 }
@@ -416,6 +452,7 @@ impl HeldState {
                     HeldEvent::End => {}
                     HeldEvent::Site(site) => {
                         skipping = false;
+                        region = (end, site);
                         if let Some(report) = &self.report {
                             report.declare(site)?;
                         }

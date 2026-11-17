@@ -976,6 +976,10 @@ fn the_pieces_of_a_seq_annot_cover_it_and_both_json_models_agree() {
         let pieces = super::seqalign::query_pieces(format, &run, &query, &subjects, &hsps);
         assert!(pieces.len() > 2, "{format:?} {}", bytes.len());
         assert_eq!(pieces.iter().sum::<usize>(), bytes.len(), "{format:?}");
+        if format == SerialFormat::AsnText {
+            // The separator after the document is a write of its own (`WriteSeparator`).
+            assert_eq!(pieces.last(), Some(&1));
+        }
         if format == SerialFormat::Json {
             assert_eq!(
                 crate::report::serial::out_buffer::json_pieces(&bytes),

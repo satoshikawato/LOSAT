@@ -273,7 +273,7 @@ flowchart LR
 | traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `search_subject` (`subject_passes.rs`, its second call per subject) calls `traceback_subject` (`traceback_subject.rs`), which calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
-| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Archive, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
+| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Seqalign, Archive, Xml and Xml2, Pairwise, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
 
 Neither blastn nor blastp links HSPs or uses sum statistics: NCBI's option handles start with
 sum statistics off (`api/blast_options_local_priv.cpp`), only those of tblastn, blastx and
@@ -284,7 +284,8 @@ tblastx turn it on (`SetSumStatisticsMode()` in `tblastn_options.cpp`, `blastx_o
 ### The shape of the code
 
 blastp and tblastx run the stages inside one very large function each, with a closure
-`process_subject` for one subject, which calls helpers for some stages. blastn's `search_query_batch`
+`process_subject` for one subject, which calls helpers for some stages (blastp's calls the kernel
+`BlastpPrelimKernel::search_subject` of `blast_engine/prelim_kernel.rs`). blastn's `search_query_batch`
 sets a batch up, then calls the passes of `subject_passes.rs` and the functions of the two stages. blastx and
 tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`, `runtime.rs`; tblastn
 `search_init.rs`, `search_seed.rs`, `search_gapped.rs`, `stage_d_*.rs`).
@@ -303,8 +304,8 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
   block, or once per query and round of psiblast. It calls `run_call`, whose
-  `process_subject` does the preliminary search of a subject (its gapped half, from the order of its
-  ungapped hits to its HSP lists, is in `blast_engine/prelim_kernel.rs`; the stage's drivers, the choice of the
+  `process_subject` does the preliminary search of a subject (its kernel, from the scan of its words to its
+  HSP lists, is `BlastpPrelimKernel::search_subject` in `blast_engine/prelim_kernel.rs`; the stage's drivers, the choice of the
   pool and the call's branch: the calls of RPS-BLAST's and the PSSM search's hooks, the query blocks,
   a database's blocks and the subject loops, are in `blast_engine/prelim_run.rs`); the traceback, the
   composition redo (its parameters, its plan and all its paths are in `blast_engine/redo_run.rs`)
@@ -314,8 +315,9 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   the reports read, the check of the prefetch environment, the subjects that the reports show, what
   the reports read of the final hit lists' Seq-aligns (psiblast's PSSMs and cut among it) and the
   labels of the reports, are in `blast_engine/report_prep.rs`;
-  the BLAST archive, the tabular reports and the organism report are in
-  `blast_engine/report_write.rs`).
+  the Seq-annots, the BLAST archive, the BLAST XML, XML2 and JSON documents, the pairwise and
+  query-anchored reports, the tabular reports and the organism report are in
+  `blast_engine/report_write.rs`, one function per arm of the loop over the formats).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are
@@ -330,7 +332,7 @@ loops of `run_preliminary` (blastp, `blast_engine/prelim_run.rs`); a database is
 `database::search_blocks` (`blastn/blast_engine/database.rs`, `blastp/blast_engine/database.rs`),
 and the sequences with hits are read again for the traceback (`traceback_listed`) or the
 composition redo (`ListedSubjects`). Both paths share the per-subject kernel (blastn `search_subject`,
-blastp `process_subject`), the hit lists and the report writers. `algorithm::common::database` holds what all `-db` programs share: opening a
+blastp `BlastpPrelimKernel::search_subject`), the hit lists and the report writers. `algorithm::common::database` holds what all `-db` programs share: opening a
 database by name, NCBI's error messages, titles, and the prefetch rule. After blastp lists the
 subjects of a `-db` search, a hit's subject index is its rank among the listed subjects, not its
 OID.

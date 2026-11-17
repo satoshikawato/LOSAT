@@ -192,8 +192,10 @@ fn check_sequence(block: &SequenceBlock, i: usize, letters: &[u8], what: &str) {
 }
 
 /// Reads the whole database in blocks of at most `max_bytes` and checks every
-/// sequence against `entries`.
-fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
+/// sequence against `entries`. Each block is read a second time into `kept`, a worker's buffer
+/// read again from one block to the next (`x_read_block_into`, LOSAT_X_BPDBKEEP and
+/// LOSAT_X_BNMAPPED), whose sequences must be the same.
+fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str, kept: &mut Vec<u8>) {
     assert_eq!(db.num_seqs() as usize, entries.len(), "{name}: sequences");
     let mut next = 0u32;
     let mut blocks = 0;
@@ -216,13 +218,19 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
         let block = db.read_block(range).expect("read block");
         assert_eq!(block.len(), range.len() as usize);
         assert_eq!(block.first_ordinal(), next);
+        let given = db
+            .x_read_block_into(range, kept)
+            .expect("read block into kept");
+        assert_eq!(given.len(), block.len());
         for i in 0..block.len() {
             let entry = &entries[next as usize + i];
             let what = format!("{name} ordinal {}", entry.ordinal);
             assert_eq!(entry.ordinal as usize, next as usize + i);
             assert_eq!(entry.seq.len(), entry.length, "{what}: NCBI length");
             check_sequence(&block, i, &entry.seq, &what);
+            check_sequence(&given, i, &entry.seq, &format!("{what}, kept buffer"));
         }
+        given.x_into_kept(kept);
         next = range.end_ordinal();
         blocks += 1;
     }
@@ -395,8 +403,12 @@ fn check_against_ncbi(name: &str, seqtype: SeqType) -> (SeqDb, Vec<Entry>) {
     assert_eq!(db.seqtype(), seqtype);
     let entries = expected_entries(name);
     check_info(&db, name);
-    for max_bytes in [0, 64, 400, 1 << 20] {
-        check_database(&db, &entries, max_bytes, name);
+    // The kept buffer starts with three other bytes; it grows for the blocks that hold more than
+    // any before them (one sequence, then the whole database) and keeps its length past the next
+    // block after the whole database.
+    let mut kept = vec![0xA5u8; 3];
+    for max_bytes in [0, 64, 400, 1 << 20, 0] {
+        check_database(&db, &entries, max_bytes, name, &mut kept);
     }
     check_deflines_and_single_reads(&db, &entries, name);
     if seqtype == SeqType::Nucleotide {
@@ -2517,5 +2529,81 @@ fn open_probe() {
             Some(text) => println!("probe: BLAST Database error: {text}"),
             None => println!("probe: LOSAT: {error}"),
         },
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1201-1209 (quoted
+// at `isam::index_exists`): `IndexExists` is `CFile::Exists` of both files, `IsFile`.
+/// Review 4 of line DBID loadord, H1: a directory in place of a file of a version 4 volume's
+/// string ISAM (`.psi`, `.psd`) or PIG ISAM (`.ppi`, `.ppd`) is no ISAM, as NCBI's `IndexExists`
+/// says: the lookup finds nothing in the volume, with no error, and the search's gate
+/// (`isams_may_fail_to_open`, which asks the lookup's own open) says that no lookup can stop on
+/// it. An index file that is a regular file and does not open (mode 000) is NCBI's `Could not
+/// open input file` at the lookup, and the gate says so.
+#[test]
+fn a_directory_in_place_of_an_isam_file_is_no_isam() {
+    use super::damaged_files_tests::TempDir;
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastdbcmd/db/m");
+    let accession = super::seqidlist::parse_list_id(b"ref|XP_1001.1|").unwrap();
+    // The lookups of `pmg` (XP_1001.1 and PIG 1001 at OID 0): the string ISAM's, then the PIG
+    // ISAM's.
+    let lookups = |db: &SeqDb| {
+        (
+            db.seqid_lookup()
+                .unwrap()
+                .seqid_to_oids(&accession, true)
+                .map_err(|error| error.to_string()),
+            db.id_lookup()
+                .unwrap()
+                .pig_to_oid(1001)
+                .map_err(|error| error.to_string()),
+        )
+    };
+    let intact = TempDir::new("isamdir");
+    intact.copy_fixtures(&source, &["pmg"]);
+    let db = SeqDb::open(&intact.name("pmg"), SeqType::Protein).unwrap();
+    assert!(!db.isams_may_fail_to_open());
+    assert_eq!(lookups(&db), (Ok(vec![0]), Ok(Some(Some(0)))));
+    for ext in ["psi", "psd", "ppi", "ppd"] {
+        let dir = TempDir::new("isamdir");
+        dir.copy_fixtures(&source, &["pmg"]);
+        let file = dir.0.join(format!("pmg.{ext}"));
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        std::fs::write(file.join("placeholder"), b"").unwrap();
+        let db = SeqDb::open(&dir.name("pmg"), SeqType::Protein).unwrap();
+        assert!(!db.isams_may_fail_to_open(), "{ext}");
+        let (string, pig) = lookups(&db);
+        if ext.starts_with("ps") {
+            assert_eq!((string, pig), (Ok(Vec::new()), Ok(Some(Some(0)))), "{ext}");
+        } else {
+            // No volume has PIG files: NCBI's OID is never set.
+            assert_eq!((string, pig), (Ok(vec![0]), Ok(None)), "{ext}");
+        }
+    }
+    #[cfg(unix)]
+    for ext in ["psi", "ppi"] {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("isamdir");
+        dir.copy_fixtures(&source, &["pmg"]);
+        let file = dir.0.join(format!("pmg.{ext}"));
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(&file).is_ok() {
+            // A user that reads every file (root): nothing fails to open.
+            continue;
+        }
+        let db = SeqDb::open(&dir.name("pmg"), SeqType::Protein).unwrap();
+        assert!(db.isams_may_fail_to_open(), "{ext}");
+        let (string, pig) = lookups(&db);
+        let failed = if ext == "psi" {
+            string.unwrap_err()
+        } else {
+            pig.unwrap_err()
+        };
+        assert!(
+            failed.starts_with("Error: Could not open input file ("),
+            "{ext}: {failed}"
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 }

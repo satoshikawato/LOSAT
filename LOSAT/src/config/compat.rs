@@ -97,6 +97,16 @@ impl ScoringMatrix {
     }
 }
 
+// Every matrix at its discriminant (checked at compile time): the per-matrix statics indexed by
+// `matrix as usize` (`ScoringMatrix::ALL.len()` slots) hold a slot for each variant.
+const _: () = {
+    let mut i = 0;
+    while i < ScoringMatrix::ALL.len() {
+        assert!(ScoringMatrix::ALL[i] as usize == i);
+        i += 1;
+    }
+};
+
 impl std::str::FromStr for ScoringMatrix {
     type Err = String;
 

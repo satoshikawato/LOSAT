@@ -483,6 +483,12 @@ pub struct BlastxArgs {
     /// settings (`native::run`), and LOSAT Web, which has no file system. Not a public option.
     #[arg(skip)]
     pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
+    /// The position in the whole input of the first of these records, where the library searches
+    /// each query batch as a call of its own (`api::run_batches`); 0 on the command line, whose
+    /// records are the whole input. A later call's prefetch has no record of the loads of the
+    /// calls before (`local::DatabaseReports::unrecorded_calls`). Not a public option.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -608,6 +614,14 @@ impl ResolvedOptions {
             Some(_) => Default::default(),
             None => self.formatting.report_sort(),
         }
+    }
+
+    /// The view of the pairwise report (outfmt 0 to 4, `PairwiseView::of`), `None` for the other
+    /// formats: formats 1 to 4 are outfmt 0's report with the query-anchored section in place of
+    /// its alignments.
+    pub(crate) fn pairwise_view(&self) -> Option<crate::report::pairwise::PairwiseView> {
+        crate::blastinput::app::ReportFormat::from_number(i32::from(self.outfmt))
+            .and_then(crate::report::pairwise::PairwiseView::of)
     }
 }
 
@@ -857,6 +871,8 @@ pub struct ResolvedOptions {
     /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
     pub outfmt: u8,
+    /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
+    pub show_gis: bool,
     /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
     /// fields), by name; empty for outfmt 0.
     pub fields: Vec<String>,
@@ -1364,7 +1380,7 @@ impl BlastxArgs {
         // dropped, `-name` removes a field). A list that is not the `std` fields with a tab, and
         // outfmt 10 and 20, are written by the shared writer (`tabular`); the default report
         // writes the `std` fields (`fields`).
-        let fields = if outfmt != 0 {
+        let fields = if outfmt > 4 {
             crate::report::tabular::parse_fields(&choice.spec)
                 .into_iter()
                 .map(|field| field.name().to_string())
@@ -1522,6 +1538,7 @@ impl BlastxArgs {
             num_alignments: counts.num_alignments as i32,
             formatting: self.formatting,
             outfmt,
+            show_gis: self.show_gis,
             fields,
             tabular,
             taxdb_found: false,

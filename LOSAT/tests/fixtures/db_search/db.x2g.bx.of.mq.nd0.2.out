@@ -1,0 +1,175 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2g ms subjects
+           2 sequences; 24 total letters
+
+
+
+Query= f1069_q
+
+Length=59
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1   PLRSGLVDPTWWQERE  48
+1        5         VMPS        8
+1        7   PSR               9
+1        3            SW       4
+1        12         DP         13
+1        9                 RQ  10
+1        9               RQ    10
+1        4              W      4
+1        11          P         11
+0        2    MR               3
+0        11               E    11
+
+For reading frame +2 of query sequence:
+
+Query_1  20  LIQLGGKRGRVP  55
+1        9            RQP  11
+1        6             MP  7
+1        9         RQ      10
+1        13             P  13
+0        5   MME           7
+
+For reading frame +3 of query sequence:
+
+Query_1  36  AREGGYPS  59
+1        8   SRQ       10
+1        7         PS  8
+1        11        P   11
+
+For reading frame -1 of query sequence:
+
+Query_1  56  RVPSLSCHQVGSTNPDR  6
+1        8              SRQPD   12
+1        6    MPS               8
+1        9   RQP                11
+1        7                 PSR  9
+1        12               DP    13
+1        10          Q          10
+0        9         CHE          11
+
+For reading frame -2 of query sequence:
+
+Query_1  52  YPPSLATKLDQLTLTAM  2
+1        6       MPSR           9
+1        7     PS               8
+1        2            D         2
+1        12           D         12
+1        7    P                 7
+1        11    P                11
+0            Y                  
+0        5                   M  5
+0        6                M     6
+
+For reading frame -3 of query sequence:
+
+Query_1  48  LPLLPPSWI  22
+1        6   MPSRQP     11
+1        3         SWV  5
+1        5     VMP      7
+1        7        PS    8
+1        11   P         11
+1        13   P         13
+
+
+Lambda      K        H
+   0.316    0.138    0.499 
+
+
+Effective search space used: 196
+
+
+Query= f0616_q
+
+Length=56
+
+
+
+For reading frame +1 of query sequence:
+
+Query_2  1   LSTEQFTARHRC  36
+1        6   MPSRQ         10
+1        8    SRQ          10
+1        8          SR     9
+0        3       RF        4
+0        7       EY        8
+0        9              C  9
+0        10           H    10
+0        3             R   3
+
+For reading frame +2 of query sequence:
+
+Query_2  5  P  7
+1        7  P  7
+
+For reading frame +3 of query sequence:
+
+Query_2  18  HCKAPVHNSNLAP  56
+1        2          DSWVMP  7
+1        9     RQP          11
+1        13              P  13
+1        7       P          7
+1        11              P  11
+0        8   YC             9
+0        10  H              10
+0        10        H        10
+
+For reading frame -1 of query sequence:
+
+Query_2  41  IMHRCLAVNC  12
+0        5   MMEYC       9
+0        2    M          2
+0        10    H         10
+0        9            C  9
+0        3      R        3
+
+For reading frame -2 of query sequence:
+
+Query_2  49  KLLLCTGALQ*IVLWI  2
+1        4                 WV  5
+1        6           M         6
+0        3   RFMM              6
+0        6           ME        7
+0        9       C             9
+
+For reading frame -3 of query sequence:
+
+Query_2  54  VLNCYYAPVPCSELFC  7
+1        11         PDP        13
+1        5   VM                6
+1        6           MP        7
+1        7          P          7
+0        9             CHE     11
+0        9      CH             10
+0        8                 YC  9
+0        8       Y             8
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 224
+
+
+  Database: x2g ms subjects
+    Posted date:  Nov 15, 2026  2:20 AM
+  Number of letters in database: 24
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 2

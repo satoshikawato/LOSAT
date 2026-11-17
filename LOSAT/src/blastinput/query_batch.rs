@@ -1,5 +1,6 @@
 //! Query batches of a search (NCBI `CBlastInput::GetNextSeqBatch`).
 
+use crate::blastinput::fasta_reader::believed::BelievedIds;
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
 /// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
@@ -230,15 +231,8 @@ impl QueryScope {
         &mut self,
         ids: impl IntoIterator<Item = &'r crate::blastinput::fasta_reader::believed::BelievedIds>,
     ) {
-        let mut keys = Vec::new();
-        for id in ids.into_iter().flat_map(|believed| &believed.ids) {
-            keys.clear();
-            crate::seqid::defline_set::scope_keys(id, &mut keys);
-            self.keys.extend(keys.iter().copied());
-            self.keys
-                .extend(crate::seqid::id_scope::name_keys(id).map(|(own, _)| own));
-            self.keys
-                .extend(crate::seqid::id_scope::version_keys(id).map(|(own, _)| own));
+        for believed in ids {
+            self.add_ids(&believed.ids);
         }
     }
 
@@ -264,6 +258,91 @@ impl QueryScope {
     pub(crate) fn has_key(&self, keys: &[u64]) -> bool {
         keys.iter().any(|key| self.keys.contains(key))
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
+    // ```c++
+    //     CRef<CSeqIdGenerator> idgen
+    //         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
+    //                              m_Config.GetLocalIdPrefix()));
+    //     m_InputReader->SetIDGenerator(*idgen);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:395 (the
+    // record joins the scope before `x_FastaToSeqLoc` checks its range, 449-452, whose exception
+    // `CBlastInput::GetNextSeqBatch` drops the record for, blast_input.cpp:146-155)
+    // ```c++
+    //     scope.AddTopLevelSeqEntry(*seq_entry);
+    // ```
+    /// The scope of the query records `records` as NCBI's reader added them to its scope (each a
+    /// record's local id and the ids that `-parse_deflines` read, `None` without the option): the
+    /// generated local ids (`of_generated_ids`, the reader's `Query_N` of the whole input, which
+    /// the records hold) where the first record has no believed ids, else the ids of the records
+    /// (`add_ids_of`). One owner of the scope of query records: the scopes of the query-anchored
+    /// formats (`AnchoredBatchScopes`) and the scope at a batch's prefetch
+    /// (`common::database::PrefetchQueries`).
+    pub(crate) fn of_shown<'r>(
+        records: impl IntoIterator<
+            Item = (
+                &'r str,
+                Option<&'r crate::blastinput::fasta_reader::believed::BelievedIds>,
+            ),
+        >,
+    ) -> Self {
+        let mut records = records.into_iter().peekable();
+        let generated = records
+            .peek()
+            .is_none_or(|(_, believed)| believed.is_none());
+        if generated {
+            Self::of_generated_ids(records.map(|(local_id, _)| local_id))
+        } else {
+            let mut scope = Self::default();
+            scope.add_ids_of(records.filter_map(|(_, believed)| believed));
+            scope
+        }
+    }
+
+    /// `of_shown` of the query records `records` (`FastaRecord::local_id`, `FastaRecord::believed`).
+    pub(crate) fn of_shown_records(records: &[FastaRecord]) -> Self {
+        Self::of_shown(
+            records
+                .iter()
+                .map(|record| (record.local_id.as_str(), record.believed())),
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (tblastn_app.cpp:
+    // 224-226 likewise)
+    // ```c++
+    // 		_ASSERT(pssm->HasQuery());
+    // 		_ASSERT(pssm->GetQuery().IsSeq());  // single query only!
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    // ```
+    /// The scope of the query of a PSSM (`-in_pssm`), whose Bioseq NCBI adds to its scope with
+    /// its Seq-ids `ids` (the keys that `add_ids_of` keeps of each): its local id too, which the
+    /// record of the PSSM's query shows without `lcl|` (`pssm_search::PsiSearch::query_record`).
+    pub(crate) fn of_bioseq_ids(ids: &[crate::seqid::ParsedSeqId]) -> Self {
+        let mut scope = Self::default();
+        scope.add_ids(ids);
+        scope
+    }
+
+    /// Adds the keys that `add_ids_of` keeps of each of the Seq-ids `ids`.
+    fn add_ids(&mut self, ids: &[crate::seqid::ParsedSeqId]) {
+        let mut keys = Vec::new();
+        for id in ids {
+            keys.clear();
+            crate::seqid::defline_set::scope_keys(id, &mut keys);
+            self.keys.extend(keys.iter().copied());
+            self.keys
+                .extend(crate::seqid::id_scope::name_keys(id).map(|(own, _)| own));
+            self.keys
+                .extend(crate::seqid::id_scope::version_keys(id).map(|(own, _)| own));
+        }
+    }
+
+    /// Adds the keys of the queries of `other`.
+    pub(crate) fn extend(&mut self, other: &QueryScope) {
+        self.keys.extend(other.keys.iter().copied());
+    }
 }
 
 /// The scopes of the query batches of one report, for the refusals of the query-anchored formats
@@ -281,25 +360,31 @@ pub(crate) struct AnchoredBatchScopes {
 }
 
 impl AnchoredBatchScopes {
-    /// The scopes of the batches `spans` of the query records `records` (a span past the records
-    /// is cut to them).
+    /// The scopes of the batches `spans` of the query records `records` (`of_ids` of their ids).
     pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
-        let generated = records
-            .first()
-            .is_none_or(|query| query.believed().is_none());
+        let ids: Vec<(&str, Option<&BelievedIds>)> = records
+            .iter()
+            .map(|record| (record.local_id.as_str(), record.believed()))
+            .collect();
+        Self::of_ids(&ids, spans)
+    }
+
+    /// `new` of the query records whose local ids and `-parse_deflines` Seq-ids are `ids` (BLASTX's
+    /// records, which have their own type): a span past the records is cut to them;
+    /// `QueryScope::of_shown` of each (every record is read with `-parse_deflines` or none is).
+    pub(crate) fn of_ids(
+        ids: &[(&str, Option<&BelievedIds>)],
+        spans: Vec<std::ops::Range<usize>>,
+    ) -> Self {
+        let generated = ids.first().is_none_or(|(_, believed)| believed.is_none());
         let scopes = spans
             .iter()
             .map(|span| {
-                let records = &records[span.start.min(records.len())..span.end.min(records.len())];
-                if generated {
-                    QueryScope::of_generated_ids(
-                        records.iter().map(|record| record.local_id.as_str()),
-                    )
-                } else {
-                    let mut scope = QueryScope::default();
-                    scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
-                    scope
-                }
+                QueryScope::of_shown(
+                    ids[span.start.min(ids.len())..span.end.min(ids.len())]
+                        .iter()
+                        .copied(),
+                )
             })
             .collect();
         Self {
@@ -1053,6 +1138,45 @@ mod tests {
             &mut keys,
         );
         keys
+    }
+
+    // blast_fasta_input.cpp:364-367 and 395, blast_input.cpp:146-155 (review 2 of line DBID
+    // loadord, H2 and M2): the scope at a batch's prefetch holds the batch's input records with
+    // their `Query_N` of the run, the record that `-query_loc` drops included, and with
+    // `-parse_deflines` the ids of the deflines alone.
+    #[test]
+    fn the_scope_of_a_batch_holds_its_input_records() {
+        use super::QueryScope;
+        let config = crate::blastinput::fasta_reader::ReaderConfig::query("BLASTP", true, false);
+        let mut source = crate::blastinput::fasta_reader::FastaInputSource::from_bytes(
+            b">qa\nACDEFGHIKL\n>qb\nACD\n>qc\nACDEFGHIKL\n",
+            config,
+        );
+        let records =
+            crate::blastinput::fasta_reader::read_all(&mut source, &mut |_| Ok(())).unwrap();
+        let cut = crate::blastinput::seq_range::cut_queries(
+            &records,
+            &crate::blastinput::seq_range::SequenceRange { from: 5, to: 8 },
+        );
+        // `qb` (3 letters) is dropped; batches of 10 letters: `qa`, then `qb` and `qc`.
+        let batches = cut.input.batches(10);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(
+            (batches[1].input.clone(), batches[1].searched.clone()),
+            (1..3, 1..2)
+        );
+        assert_eq!(cut.records[1].local_id, "Query_3");
+        let second = QueryScope::of_shown_records(&records[batches[1].input.clone()]);
+        assert!(second.has_key(&local_keys("Query_2")));
+        assert!(second.has_key(&local_keys("Query_3")));
+        assert!(!second.has_key(&local_keys("Query_1")));
+        // outfmt 5: the batches before too.
+        let run = QueryScope::of_shown_records(&records[..batches[1].input.end]);
+        assert!(run.has_key(&local_keys("Query_1")));
+        let believed = parsed_records(b">qa x\nAC\n>qb x\nAC\n");
+        let scope = QueryScope::of_shown_records(&believed);
+        assert!(scope.has_key(&local_keys("qa")) && scope.has_key(&local_keys("qb")));
+        assert!(!scope.has_key(&local_keys("Query_1")));
     }
 
     // blast_format.cpp:2295-2313 (series Q of line RG, Q1c): a batch's scope holds its own queries;

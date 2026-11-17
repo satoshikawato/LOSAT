@@ -200,6 +200,13 @@ pub enum SeqDbError {
     Integrity { path: PathBuf, message: String },
     /// A valid database that needs something LOSAT does not read.
     Unsupported { path: PathBuf, message: String },
+    /// A file that NCBI BLAST+ crashes on where it reads it (an ISAM whose header does not fit its
+    /// files, as an empty `.psi` or `.psd`: NCBI's constructor reads its index bounds whatever
+    /// `x_InitSearch` returned, `isam_num::NumericIsam::open_volume`; probe I of line BDC, review 4
+    /// of line DBID loadord), which LOSAT refuses as an `Unsupported` database: the text of one
+    /// whose message is `message` followed by [`NCBI_CRASHES_ON_IT`]
+    /// ([`SeqDbError::ncbi_crashes`]).
+    NcbiCrashes { path: PathBuf, message: String },
     /// A request outside the database (ordinal id, block range).
     Range(String),
     /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
@@ -222,10 +229,20 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Unsupported { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
+            SeqDbError::NcbiCrashes { path, message } => write!(
+                f,
+                "{}: unsupported database: {} {NCBI_CRASHES_ON_IT}",
+                path.display(),
+                message
+            ),
             SeqDbError::Ncbi(exception) => f.write_str(exception.what().trim_end()),
         }
     }
 }
+
+/// The end of the text of LOSAT's refusal of a database file that NCBI BLAST+ crashes on where it
+/// reads it ([`SeqDbError::NcbiCrashes`]).
+pub const NCBI_CRASHES_ON_IT: &str = "(NCBI crashes on it)";
 
 impl SeqDbError {
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
@@ -233,6 +250,13 @@ impl SeqDbError {
     /// with `-parse_seqids`; `SeqDb::read_header`).
     pub fn is_parsed_seqids(&self) -> bool {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
+    }
+
+    /// Whether this is LOSAT's refusal of a file that NCBI BLAST+ crashes on where it reads it
+    /// ([`SeqDbError::NcbiCrashes`]; review 5 of line DBID loadord, L4: the variant, not the text,
+    /// says it).
+    pub fn ncbi_crashes(&self) -> bool {
+        matches!(self, SeqDbError::NcbiCrashes { .. })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
@@ -371,6 +395,7 @@ impl SeqDbError {
             SeqDbError::Io { .. }
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
+            | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
         }
@@ -1277,7 +1302,7 @@ impl SeqDb {
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
         if db.is_version5() {
             match db.lmdb_entries() {
-                Ok(_) | Err(SeqDbError::Unsupported { .. }) => {}
+                Ok(_) | Err(SeqDbError::Unsupported { .. } | SeqDbError::NcbiCrashes { .. }) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -2125,37 +2150,14 @@ impl SeqDb {
         self.volumes[at.volume].protein_mapped_bytes_after(at.vol_oid)
     }
 
-    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer that glibc maps
-    /// from 1 MiB on (`Volume::x_read_block_mapped`).
-    pub fn x_read_block_mapped(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
-        let Some(volume) = self.volumes.get(range.volume) else {
-            return Err(SeqDbError::Range(format!(
-                "volume {} is outside the database ({} volumes)",
-                range.volume,
-                self.volumes.len()
-            )));
-        };
-        volume.x_read_block_mapped(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            self.volume_starts[range.volume] + range.first,
-        )
-    }
-
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
-    /// (`Volume::x_read_block_into`).
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
+    /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
+    /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);
+    /// `SequenceBlock::x_into_kept` gives the buffer back.
     pub fn x_read_block_into(
         &self,
         range: BlockRange,
-        buf: Vec<u8>,
+        kept: &mut Vec<u8>,
     ) -> Result<SequenceBlock, SeqDbError> {
         let Some(volume) = self.volumes.get(range.volume) else {
             return Err(SeqDbError::Range(format!(
@@ -2169,7 +2171,7 @@ impl SeqDb {
             range.end,
             range.first_ordinal,
             self.volume_starts[range.volume] + range.first,
-            buf,
+            kept,
         )
     }
 
@@ -2266,9 +2268,9 @@ impl SeqDb {
     //                     }
     //                 }
     // ```
-    /// The definition lines of `ordinal`: the title and `n` of
-    /// `gnl|BL_ORD_ID|n`, where `n` is the stored number plus the first
-    /// OID of the volume, as NCBI reports it.
+    /// The definition lines of `ordinal`: the title, `n` of `gnl|BL_ORD_ID|n`, where `n` is the
+    /// stored number plus the first OID of the volume, as NCBI reports it, and the taxid (a
+    /// record whose taxid does not decode is an `Err`, as in `defline_taxids`).
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.ordinal_deflines(
@@ -2301,8 +2303,8 @@ impl SeqDb {
     //                     }
     // ```
     /// The header of `ordinal` as a report reads it: the ordinal-id definition lines
-    /// (`deflines`), or every member and Seq-id (`defline_set`) of a record with parsed
-    /// Seq-ids. A record without parsed Seq-ids is read as before, with the same errors.
+    /// (`deflines`, with their taxids), or every member and Seq-id (`defline_set`) of a record
+    /// with parsed Seq-ids.
     pub fn read_header(&self, ordinal: u32) -> Result<SequenceHeader, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.sequence_header(
@@ -2489,30 +2491,11 @@ impl SeqDb {
     /// call returned true. The headers of the range are read with one read of the index file
     /// and one read of the header file per MiB (`Volume::visit_deflines`) instead of two reads
     /// per sequence.
+    /// The titles and the taxids of a range come in one pass over its headers (a record whose
+    /// taxid does not decode is an `Err`, as in `defline_taxids`).
     pub fn visit_deflines(
         &self,
         range: BlockRange,
-        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
-    ) -> bool {
-        self.visit_deflines_as(range, false, visit)
-    }
-
-    /// `visit_deflines`, with the `taxid` of each definition line decoded (the decode of
-    /// `defline_taxids`, which also gives the titles): the titles and the taxids of a range in one
-    /// pass over its headers. A record whose taxid does not decode is an `Err`, as in
-    /// `defline_taxids`.
-    pub fn visit_deflines_taxids(
-        &self,
-        range: BlockRange,
-        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
-    ) -> bool {
-        self.visit_deflines_as(range, true, visit)
-    }
-
-    fn visit_deflines_as(
-        &self,
-        range: BlockRange,
-        want_taxid: bool,
         mut visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
@@ -2529,7 +2512,7 @@ impl SeqDb {
             range.first,
             range.end,
             header_piece_bytes(),
-            want_taxid,
+            true,
             &mut |oid, deflines| {
                 let Some(ordinal) = self.range_ordinal(range, oid) else {
                     return true;
@@ -2774,7 +2757,7 @@ pub struct OrdinalDefline {
     /// Number of stored title bytes outside ' ' ..= '~' that were read as '#'
     /// (`Defline::replaced_title_bytes`).
     pub replaced_title_bytes: usize,
-    /// `Defline::taxid`: 0 unless the definition lines were read with their taxids
-    /// ([`SeqDb::visit_deflines_taxids`]).
+    /// `Defline::taxid` (0 for none), read with the title by [`SeqDb::deflines`],
+    /// [`SeqDb::visit_deflines`] and [`SeqDb::read_header`].
     pub taxid: i32,
 }

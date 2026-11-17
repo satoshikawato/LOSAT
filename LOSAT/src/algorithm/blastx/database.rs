@@ -135,6 +135,13 @@ impl BlastxDatabase {
         self.parsed_seqids
     }
 
+    /// Whether a batch's prefetch can stop at a lookup that fails on a file with NCBI's exception
+    /// (`shared::TaxdbRun::prefetch_can_stop`, decided once for the run): a database with parsed
+    /// Seq-ids whose lookups can fail so.
+    pub(crate) fn prefetch_can_stop(&self) -> bool {
+        self.parsed_seqids && self.taxdb.prefetch_can_stop(&self.db)
+    }
+
     /// The `-db` value as NCBI keeps it.
     pub(crate) fn name(&self) -> &str {
         &self.name
@@ -663,6 +670,7 @@ impl ReportedSubjects {
                 warnings: Vec::new(),
                 source: None,
                 around: None,
+                skipped: None,
             });
             shared::keep_source(
                 &mut reported.sources,
@@ -731,24 +739,76 @@ impl ReportedSubjects {
     /// error.
     ///
     /// A subject whose lookup fails on a file stops the run there (`shared::batch_prefetch`):
-    /// BLASTX writes each batch's reports before it searches the next, so the error names the
-    /// batch's first query as 0 (`native::reported_error` takes the error alone).
+    /// BLASTX writes each batch's reports before it searches the next, so the error of the batch
+    /// of `queries` names query 0 (`native::reported_batch`; `native::reported_error` takes the
+    /// error alone), and the run's record holds what NCBI's data loader loaded for the batches before
+    /// (`note_loaded`).
     pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
+            std::iter::empty(),
             self.prefetch_subjects(batches, gapped),
             database.program,
-            0,
             // The model of each batch follows the reports of the batches before, so the texts
-            // that their loads left are the model's (`ReadLoad::place`).
-            None,
+            // that their loads left are the model's (`ReadLoad::place`): no outfmt 5 reports
+            // before it (`PrefetchQueries::after_xml_reports`).
+            queries,
         )
+    }
+
+    /// The run's record of the sequences that NCBI's BLAST database data loader loaded for the
+    /// query batch whose hit lists are `batches` (`shared::TaxdbRun::note_loaded`): BLASTX writes
+    /// each batch's reports before it searches the next and keeps none of their lists, so each
+    /// batch that does not stop is recorded for the stop of a later batch's prefetch (nothing for
+    /// a database that cannot stop). `loads`: what the batch's loads read of the lists that the
+    /// reports show (`shared::BatchLoads::Prefetched` where its prefetch read them, BLASTX's
+    /// prefetched set being its reported set, `BatchLoads::reported_rows`; where it is off, or
+    /// failed before it loaded anything, the rows of its reports; review 3 of line DBID loadord,
+    /// H2), of each query whose report NCBI writes (`BatchLoads::report_spans`, the walk of
+    /// `shared::LoadedBefore::subjects`: not one whose outfmt 5 report NCBI's XML stream cut
+    /// before its hits, `cuts`, by query of the reader batch; review 6, H2). Not
+    /// `LoadedBefore::subjects` itself: these loads are `BatchPrefetch::loads` (the rows where
+    /// the prefetch fails at an empty subject row with the prefetch on, which the Seq-aligns'
+    /// count that `subjects` asks cannot tell), and the lists nest in `BatchResults` by query
+    /// of each search batch, not one slice by query of the call (review 7, L2).
+    pub(crate) fn note_loaded(
+        &self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+        loads: shared::BatchLoads,
+        cuts: shared::XmlCuts<'_>,
+    ) {
+        if database.parsed_seqids() {
+            let rows = loads.reported_rows();
+            database.taxdb.note_loaded(&database.db, || {
+                batches
+                    .iter()
+                    .flat_map(move |batch| {
+                        let first = batch.query_ordinal;
+                        loads
+                            .report_spans(cuts, first..first + batch.queries.len())
+                            .flat_map(move |queries| {
+                                &batch.queries[queries.start - first..queries.end - first]
+                            })
+                    })
+                    .flatten()
+                    .filter(move |list| super::report::reads_list(list, gapped, rows))
+                    .map(|list| {
+                        shared::PrefetchSubject::unflipped(
+                            self.ordinals[list.oid],
+                            self.parsed_subject(list.oid),
+                        )
+                    })
+            });
+        }
     }
 
     /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
@@ -762,13 +822,14 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         shared::batch_prefetch_stop(
             &database.db,
             &database.taxdb,
             self.prefetch_subjects(batches, gapped),
             database.program,
-            0,
+            queries,
         )
     }
 
@@ -856,11 +917,7 @@ impl ReportedSubjects {
                     }
                     None => lists
                         .iter()
-                        .filter(|list| {
-                            list.hsps.iter().any(|hsp| {
-                                super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
-                            })
-                        })
+                        .filter(|list| super::report::reads_list(list, gapped, rows))
                         .map(|list| list.oid as u32)
                         .collect(),
                 };
@@ -1039,6 +1096,11 @@ impl ReportedSubjects {
         self.oids[rank]
     }
 
+    /// The OID of each rank (`oid`).
+    pub(crate) fn oids(&self) -> &[crate::seqdb::Oid] {
+        &self.oids
+    }
+
     /// The Blast-def-line taxid of the sequence of rank `rank` (0 for none, and for a run that
     /// does not read taxids).
     pub(crate) fn taxid(&self, rank: usize) -> i32 {
@@ -1209,6 +1271,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
@@ -1245,6 +1308,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         };
         let hsp = |score: i32| Hsp {
             hsp: PreliminaryHsp {
@@ -1327,7 +1391,13 @@ mod tests {
                 false,
             )
             .unwrap();
-            let messages = reported.batch_prefetch(database, &batches, true);
+            let scope = crate::blastinput::query_batch::QueryScope::default;
+            let messages = reported.batch_prefetch(
+                database,
+                &batches,
+                true,
+                &shared::PrefetchQueries::new(0, &scope),
+            );
             String::from_utf8(messages.unwrap().text()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);

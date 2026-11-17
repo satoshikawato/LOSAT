@@ -1554,6 +1554,17 @@ impl NativeError {
             message: format!("Error: {}\n", e.what()),
         }
     }
+
+    /// The error of a report's writer as the run ends with it: an exception of NCBI's that the
+    /// writer raised mid-report (`NcbiException::of_io_error`: TBLASTX's query-anchored section,
+    /// `report::query_anchored::write_section`) is `CATCH_ALL`'s report of it (`exception`), after
+    /// what the report wrote before it; any other error is the writer's.
+    pub(crate) fn of_writer(error: std::io::Error) -> anyhow::Error {
+        match crate::ncbi_exception::NcbiException::of_io_error(&error) {
+            Some(exception) => NativeError::exception(exception).into(),
+            None => error.into(),
+        }
+    }
 }
 
 pub use crate::report::ostream::{

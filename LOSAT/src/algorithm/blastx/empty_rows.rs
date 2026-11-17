@@ -574,6 +574,23 @@ pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0
 /// rewrites one (`mapper_wraps_empty_row`).
 pub(crate) const UNPORTED_SUBJECT_ALL_EMPTY: &str = "BLASTX -ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0, one at the first or second letter of its subject's searched part, of which NCBI BLAST+'s Seq-loc mapper, finding no sequence type in its rows, makes alignments without scores of nucleotides against the rest of the subject's letters (rows with an E-value of 0.0 and a bit score of -1.0, or, for two or more such alignments, more rows, an exception or an out-of-memory stop), which LOSAT does not support where the report reads the alignment";
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606 (quoted at
+// `report::query_anchored::aln_mix::Mix::place`), c++/src/objtools/alnmgr/alnsegments.cpp:
+// 310-327 (quoted at `report::query_anchored::aln_mix::Mix::fill_unaligned_regions`)
+/// The refusal of a query-anchored report (outfmt 1 to 4) whose section NCBI's merge frees a
+/// segment in (`report::pairwise::EmptyRowsStop::MergeFreesSegment`,
+/// `report::query_anchored::aln_mix::MixError::NcbiFreesSegment`): the Dense-seg of an HSP of
+/// length 0 has no widths, so `DisplaySeqalign` merges it with the HSPs of the query's frame +1
+/// (`report::query_anchored::HspStrands::no_widths`), as a segment of length 0 of a query row.
+/// One whose query row starts at a codon of one of those HSPs splits that HSP's segment at a
+/// length of 0, which replaces every reference to the segment while the merge still walks it
+/// (`Mix::place`). One that its query row's next segment does not follow at once is where
+/// `FillUnalignedRegions` starts to fill the row, which replaces the row's reference to its
+/// segment: the last one unless the segment is the last that the merge made (`x_Merge`'s local
+/// `CRef`), so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
+/// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3.
+pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support";
+
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:422-427,499-503
 // ```c++
 //         ITERATE( CStd_seg::TLoc, it_loc, (*it)->GetLoc()) {
@@ -879,6 +896,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         }
     }
 

@@ -70,9 +70,11 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 3 since the signal of stream 9, which makes the
+/// host discard a stream that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    2
+    3
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {

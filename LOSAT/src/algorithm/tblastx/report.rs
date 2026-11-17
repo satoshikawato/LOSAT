@@ -1517,7 +1517,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 /// }
 /// ```
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_tabular<W: Write>(
+pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     hits: &[TblastxHsp],
     writer: &mut W,
     comments: bool,
@@ -1574,6 +1574,8 @@ pub(crate) fn write_tabular<W: Write>(
                 probe.end(hsp_index);
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // ```c++
@@ -1594,6 +1596,8 @@ pub(crate) fn write_tabular<W: Write>(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }

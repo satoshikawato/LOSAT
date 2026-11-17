@@ -854,7 +854,7 @@ fn write_round_epilogs(
     };
     for format in outputs.formats.iter_mut() {
         if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt) {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             super::super::tabular::write_tabular_round_epilog(
                 spec,
                 taxdb_found,

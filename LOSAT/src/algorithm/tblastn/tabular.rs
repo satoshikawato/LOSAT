@@ -604,6 +604,8 @@ pub(super) fn write_tblastn_tabular(
             }
         }
         writer.write_all(&buf)?;
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     // ```c++
@@ -616,6 +618,7 @@ pub(super) fn write_tblastn_tabular(
     if spec.kind == TabularKind::Commented && tab.ranges.epilog {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, tab.queries.len())?;
+        crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
     }
     Ok(())
 }

@@ -1183,7 +1183,7 @@ pub(super) fn write_text(
         context,
         ..
     } = *view;
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1107
     // ```c++
     //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {

@@ -1861,10 +1861,9 @@ pub(super) fn render_queries_with(
                 //     m_Ostream.flush();
                 // }
                 // ```
-                writer.flush().map_err(TabularFlushError)?;
+                crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
                 Ok(())
-            })()
-            .map_err(tabular_io_error)?;
+            })()?;
         }
     }
     Ok(())
@@ -2554,7 +2553,7 @@ pub(crate) fn write_epilog(
         //     m_Ostream.flush();
         // }
         // ```
-        writer.flush().map_err(TabularFlushError)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -2695,59 +2694,6 @@ pub(super) fn query_warning(
     bytes.push(b'\n');
     bytes
 }
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// ```c++
-// CBlastTabularInfo::~CBlastTabularInfo()
-// {
-//     m_Ostream.flush();
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-// ```c++
-// {
-//     m_Outfile.exceptions(NcbiBadbit);
-// ```
-pub(super) fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
-    match error.downcast::<std::io::Error>() {
-        Ok(error) => TabularFlushError(error).into(),
-        Err(error) => error,
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// ```c++
-// CBlastTabularInfo::~CBlastTabularInfo()
-// {
-//     m_Ostream.flush();
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-// ```c++
-// {
-//     m_Outfile.exceptions(NcbiBadbit);
-// ```
-#[derive(Debug)]
-pub(crate) struct TabularFlushError(pub std::io::Error);
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// ```c++
-// CBlastTabularInfo::~CBlastTabularInfo()
-// {
-//     m_Ostream.flush();
-// }
-// ```
-impl std::fmt::Display for TabularFlushError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// ```c++
-// CBlastTabularInfo::~CBlastTabularInfo()
-// {
-//     m_Ostream.flush();
-// }
-// ```
-impl std::error::Error for TabularFlushError {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:123-135
 // ```c++

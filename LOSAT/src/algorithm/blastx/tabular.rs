@@ -47,7 +47,7 @@ use super::empty_rows::{
 use super::input::FastaRecord;
 use super::report::{
     alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_tabular_id,
-    tabular_io_error, ShownSubjects, TabularFlushError,
+    ShownSubjects,
 };
 use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
@@ -407,7 +407,8 @@ fn subject_values<'a>(
 /// the rows. A database's refusals of the fields come before (`ReportedSubjects::read_tabular`,
 /// `native::run`); each row's texts of the taxonomy database's lookups follow the rows before
 /// it (`report::tabular::TabularNames::row_messages`). An error writing a query's report is the
-/// stream failure of NCBI's formatter (`report::TabularFlushError`).
+/// stream failure of NCBI's formatter (`ostream::ReportWriteFailure`), at the flush of each
+/// query's `CBlastTabularInfo` where its writes were held.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_tabular(
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -936,10 +937,9 @@ pub(super) fn write_blastx_tabular(
                 //     m_Ostream.flush();
                 // }
                 // ```
-                writer.flush().map_err(TabularFlushError)?;
+                crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
                 Ok(())
-            })()
-            .map_err(tabular_io_error)?;
+            })()?;
         }
     }
     Ok(())

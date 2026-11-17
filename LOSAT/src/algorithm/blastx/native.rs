@@ -226,8 +226,6 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     {
         // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
         error
-    } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
-        NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if error.downcast_ref::<io::Error>().is_some() {
         // Any other error carried as an `io::Error` is LOSAT's own (an internal error of a
         // formatter, `report::query_anchored::internal`): only the report stream's failure (a

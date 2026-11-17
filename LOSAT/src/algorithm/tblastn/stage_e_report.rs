@@ -893,7 +893,7 @@ pub(super) fn render(
 // CBlastTabularInfo::PrintNumProcessed appends the final query count.
 #[allow(clippy::too_many_arguments)]
 fn write_tabular(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     // The program of outfmt 7's first line (`TBLASTN`, `PSITBLASTN`).
     program: &str,
     comments: bool,
@@ -1068,6 +1068,8 @@ fn write_tabular(
                 hsp_index += 1;
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
     // ```c++
@@ -1077,6 +1079,8 @@ fn write_tabular(
     // writes no epilog.
     if comments && ranges.epilog {
         writeln!(writer, "# BLAST processed {} queries", query_records.len())?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }

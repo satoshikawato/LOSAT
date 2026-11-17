@@ -470,7 +470,7 @@ pub(super) fn write_tabular_without_queries(
     spec: &TabularSpec,
     taxdb_found: bool,
     program: &str,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     write_tabular_prolog(spec, writer)?;
@@ -486,6 +486,8 @@ pub(super) fn write_tabular_without_queries(
             matrix: None,
         }
         .epilog(writer, 0)?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -501,7 +503,7 @@ pub(super) fn write_tabular_round_epilog(
     spec: &TabularSpec,
     taxdb_found: bool,
     program: &str,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     rounds: usize,
 ) -> Result<()> {
@@ -519,6 +521,7 @@ pub(super) fn write_tabular_round_epilog(
         matrix: None,
     }
     .epilog(writer, rounds)?;
+    writer.ncbi_flush()?;
     Ok(())
 }
 
@@ -531,7 +534,7 @@ pub(super) fn write_tabular_round_epilog(
 pub(super) fn write_blastp_tabular(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
     rows: Option<&mut QueryRows<'_>>,
@@ -617,7 +620,7 @@ pub(super) fn write_blastp_tax_report(
 fn write_rpsblast_tabular(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
     rows: Option<&mut QueryRows<'_>>,
@@ -630,7 +633,7 @@ fn write_rpsblast_tabular(
 fn write_tabular_rows<const RPS: bool>(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut rows: Option<&mut QueryRows<'_>>,
@@ -760,6 +763,8 @@ fn write_tabular_rows<const RPS: bool>(
         }
         let Some(hit_list) = hit_list else {
             writer.write_all(&buf)?;
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
@@ -908,6 +913,7 @@ fn write_tabular_rows<const RPS: bool>(
             }
         }
         writer.write_all(&buf)?;
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     // ```c++
@@ -923,6 +929,7 @@ fn write_tabular_rows<const RPS: bool>(
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }

@@ -684,6 +684,9 @@ pub(crate) enum XBlockSink<'a> {
         file: Option<BufWriter<File>>,
     },
     Writer(&'a mut (dyn Write + Send)),
+    /// The command line's report stream, which every block's output writes as NCBI's
+    /// (`OutputSink::Report`: its regions and flushes).
+    Report(&'a mut crate::report::ostream::ReportStream),
 }
 
 impl<'a> XBlockSink<'a> {
@@ -696,7 +699,20 @@ impl<'a> XBlockSink<'a> {
                 Self::Writer(&mut **writer)
             }
             OutputSink::Out(out) => Self::Writer(&mut **out),
-            OutputSink::Report(stream) => Self::Writer(&mut **stream),
+            OutputSink::Report(stream) => Self::Report(&mut **stream),
+        }
+    }
+
+    /// The sink of one block's output of a format (`side`: the caller's receiver of the side
+    /// files of outfmt 13 and 14).
+    pub(crate) fn block_sink(
+        &mut self,
+        side: Option<&crate::report::blast_xml2::SideFileSink>,
+    ) -> OutputSink<'_> {
+        match (self, side) {
+            (Self::Report(stream), _) => OutputSink::Report(&mut **stream),
+            (output, Some(side)) => OutputSink::Files(output, side.clone()),
+            (output, None) => OutputSink::Writer(output),
         }
     }
 
@@ -710,6 +726,7 @@ impl<'a> XBlockSink<'a> {
                 file.as_mut().expect("file created above")
             }
             Self::Writer(writer) => &mut **writer,
+            Self::Report(stream) => &mut **stream,
         })
     }
 }

@@ -3155,7 +3155,7 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
 fn write_blastp_tabular_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
     outfmt: OutputFormat,
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
@@ -3195,6 +3195,8 @@ fn write_blastp_tabular_hit_lists(
             )?;
         }
         let Some(hit_list) = hit_list_opt else {
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
@@ -3262,6 +3264,7 @@ fn write_blastp_tabular_hit_lists(
                 hsp_index += 1;
             }
         }
+        writer.ncbi_flush()?;
     }
 
     // The warnings after the last query's report (`QueryWarnings::after_last_query`).
@@ -3278,6 +3281,8 @@ fn write_blastp_tabular_hit_lists(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -7760,10 +7765,7 @@ fn search(
                                     // The block search runs only where no format's check can
                                     // refuse (`x_query_block_plan`): a refusal fails the call.
                                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
-                                    sink: match side {
-                                        Some(side) => OutputSink::Files(output, side.clone()),
-                                        None => OutputSink::Writer(output),
-                                    },
+                                    sink: output.block_sink(side.as_ref()),
                                 }
                             })
                             .collect(),
@@ -8820,7 +8822,7 @@ fn write_reports_without_queries(
                     Some(database) => database.taxdb_found(),
                     None => args.subject_taxdb_found,
                 };
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             super::tabular::write_tabular_without_queries(
                 spec,
                 taxdb_found,

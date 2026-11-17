@@ -497,52 +497,75 @@ impl<E: Encoder> Traced<E> {
     }
 }
 
-impl<E: Encoder, P> Traced<E, P> {
-    /// `CObjectStack::GetStackTraceASN`: the document's type, then `.name` for each member or
-    /// variant frame and `.E` for each container element.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
-    /// ```c++
-    ///     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
-    ///         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
-    ///     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
-    ///         const TFrame& frame = FetchFrameFromBottom(i);
-    ///         switch ( frame.m_FrameType ) {
-    ///         case TFrame::eFrameClassMember:
-    ///         case TFrame::eFrameChoiceVariant:
-    ///             {
-    ///                 ...
-    ///                     const CMemberId& id = *frame.m_MemberId;
-    ///                     stack += '.';
-    ///                     if ( !id.GetName().empty() ) {
-    ///                         stack += id.GetName();
-    ///                     }
-    ///                     ...
-    ///             }
-    ///             break;
-    ///         case TFrame::eFrameArrayElement:
-    ///             stack += ".E";
-    ///             break;
-    ///         default:
-    ///             break;
-    ///         }
-    ///     }
-    ///     return stack;
-    /// ```
-    /// (A member without a name, `.[tag]`, is not in LOSAT's types.)
-    pub fn stack_trace(&self) -> String {
-        let mut stack = self.root.clone();
-        for frame in &self.frames {
-            match frame {
-                Frame::Named(name) => {
-                    stack.push('.');
-                    stack.push_str(name);
-                }
-                Frame::Element { shown: true } => stack.push_str(".E"),
-                Frame::Element { shown: false } | Frame::List => {}
+/// A frame of NCBI's object stack that shows in its path (`object_stack_trace`).
+pub(crate) enum StackStep<'a> {
+    /// `eFrameClassMember` or `eFrameChoiceVariant` with its member's name.
+    Member(&'a str),
+    /// `eFrameArrayElement`.
+    Element,
+}
+
+/// `CObjectStack::GetStackTraceASN`, the one writer of it for NCBI's output and input streams
+/// (`Traced` and the typed reader): the document's type, then `.name` for each member or
+/// variant frame and `.E` for each container element.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
+/// ```c++
+///     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
+///         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
+///     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
+///         const TFrame& frame = FetchFrameFromBottom(i);
+///         switch ( frame.m_FrameType ) {
+///         case TFrame::eFrameClassMember:
+///         case TFrame::eFrameChoiceVariant:
+///             {
+///                 ...
+///                     const CMemberId& id = *frame.m_MemberId;
+///                     stack += '.';
+///                     if ( !id.GetName().empty() ) {
+///                         stack += id.GetName();
+///                     }
+///                     ...
+///             }
+///             break;
+///         case TFrame::eFrameArrayElement:
+///             stack += ".E";
+///             break;
+///         default:
+///             break;
+///         }
+///     }
+///     return stack;
+/// ```
+/// (A member without a name, `.[tag]`, is not in LOSAT's types.)
+pub(crate) fn object_stack_trace<'a>(
+    root: &str,
+    steps: impl IntoIterator<Item = StackStep<'a>>,
+) -> String {
+    let mut stack = root.to_string();
+    for step in steps {
+        match step {
+            StackStep::Member(name) => {
+                stack.push('.');
+                stack.push_str(name);
             }
+            StackStep::Element => stack.push_str(".E"),
         }
-        stack
+    }
+    stack
+}
+
+impl<E: Encoder, P> Traced<E, P> {
+    /// `CObjectStack::GetStackTraceASN` of the frames (`object_stack_trace`).
+    pub fn stack_trace(&self) -> String {
+        object_stack_trace(
+            &self.root,
+            self.frames.iter().filter_map(|frame| match frame {
+                Frame::Named(name) => Some(StackStep::Member(name)),
+                Frame::Element { shown: true } => Some(StackStep::Element),
+                Frame::Element { shown: false } | Frame::List => None,
+            }),
+        )
     }
 
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.

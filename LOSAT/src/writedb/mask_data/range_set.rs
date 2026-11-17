@@ -58,7 +58,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::seqid::mask_handle::{
-    mask_handle_key, mask_handle_order, mask_handle_packed, TreeHandle,
+    mask_handle_key, mask_handle_order, mask_handle_packed, GiimTree, TreeHandle,
 };
 use crate::seqid::model::GiimportId;
 use crate::seqid::ParsedSeqId;
@@ -767,88 +767,6 @@ const NA_STRAND_BOTH_REV: u8 = 4;
 
 fn is_reverse(strand: Option<u8>) -> bool {
     matches!(strand, Some(NA_STRAND_MINUS | NA_STRAND_BOTH_REV))
-}
-
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964
-// ```c++
-// CSeq_id_Info* CSeq_id_Giim_Tree::x_FindInfo(const CGiimport_id& gid) const
-// {
-//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
-//     if (id_it == m_IdMap.end())
-//         return 0;
-//     ITERATE (TGiimList, dbr_it, id_it->second) {
-//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
-//         const CGiimport_id& gid2 = id->GetGiim();
-//         // Both Db and Release must be equal
-//         if ( !gid.Equals(gid2) ) {
-//             return *dbr_it;
-//         }
-//     }
-//     // Not found
-//     return 0;
-// }
-// ...
-// CSeq_id_Handle CSeq_id_Giim_Tree::FindOrCreate(const CSeq_id& id)
-// {
-//     ...
-//     CSeq_id_Info* info = x_FindInfo(gid);
-//     if ( !info ) {
-//         info = CreateInfo(id);
-//         m_IdMap[gid.GetId()].push_back(info);
-//     }
-//     return CSeq_id_Handle(info);
-// }
-// ```
-/// NCBI's `CSeq_id_Giim_Tree`: the live handles of each `giim` number, in the order they were
-/// made, each with the Giimport-id it was made from (`GetSeqId()` of the info).
-#[derive(Debug, Default)]
-struct GiimTree {
-    lists: HashMap<i32, Vec<(usize, GiimportId)>>,
-    made: usize,
-}
-
-impl GiimTree {
-    /// `x_FindInfo`: the first live handle whose Giimport-id is not `Equals` to `id`.
-    fn find(&self, id: &GiimportId) -> Option<usize> {
-        self.lists
-            .get(&id.id)?
-            .iter()
-            .find(|(_, made_from)| made_from != id)
-            .map(|(handle, _)| *handle)
-    }
-
-    /// `FindOrCreate`: the handle, and whether it is new.
-    fn find_or_create(&mut self, id: &GiimportId) -> (usize, bool) {
-        if let Some(handle) = self.find(id) {
-            return (handle, false);
-        }
-        self.made += 1;
-        self.lists
-            .entry(id.id)
-            .or_default()
-            .push((self.made, id.clone()));
-        (self.made, true)
-    }
-
-    /// The Giimport-id the handle was made from.
-    fn made_from(&self, number: i32, handle: usize) -> &GiimportId {
-        let list = &self.lists[&number];
-        &list
-            .iter()
-            .find(|(h, _)| *h == handle)
-            .expect("a live handle")
-            .1
-    }
-
-    /// `x_Unindex` of a handle that nothing holds any more.
-    fn drop_handle(&mut self, number: i32, handle: usize) {
-        if let Some(list) = self.lists.get_mut(&number) {
-            list.retain(|(h, _)| *h != handle);
-            if list.is_empty() {
-                self.lists.remove(&number);
-            }
-        }
-    }
 }
 
 /// The handle of a group of `x_MergeAndSort`.

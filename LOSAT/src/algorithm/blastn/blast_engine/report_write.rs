@@ -363,9 +363,12 @@ pub(super) fn write_structured_xml(
         Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
         crate::algorithm::common::database::TaxdbNotes,
     ) = match (xml2_kind, report.database_ordinals, report.database_reader) {
-        (Some(_), Some(ordinals), Some(database)) if is_database => {
-            database.read_taxids(ordinals, report.database_parsed, hit_lists)?
-        }
+        (Some(_), Some(ordinals), Some(database)) if is_database => database.read_taxids(
+            ordinals,
+            report.database_parsed,
+            hit_lists,
+            report.database_loads,
+        )?,
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
     // The masked regions of the queries in record coordinates and the queries of the
@@ -406,6 +409,7 @@ pub(super) fn write_structured_xml(
                 length: &database_length,
                 parsed: report.database_parsed,
                 parsed_taxonomy: &xml_parsed_taxonomy,
+                loads: report.database_loads,
             }
         }
         _ => crate::report::blast_xml::XmlSubjects::Records {

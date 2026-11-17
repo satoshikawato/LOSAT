@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.49
+- Version: 1.52
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -167,7 +167,13 @@
   LOSAT did not write removed; the rule-3 rejection of Seq-ids in the order of addresses widened to
   a feature's and a Seq-table's location; the PSSM's most negative Int4 and Int8 values written as
   their digits; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.48)
+  after 1.48);
+  1.52 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
+  of a query batch crashes, does not finish or stops come after the reports of the query
+  batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
+  Owner's decision of 2026-11-16 on line RG's question Q-X2c); Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.50 and 1.51, which line RG items
+  X-short-tbx and X4 hold on their branches: the first of them to merge renumbers)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1593,8 +1599,20 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   are translated (rows `db.xs.tblastn.*`). With `-subject` and a `-db_gencode` other than 1, LOSAT
   translates in the selected code (the approved deviation PD-TLOSAN-LOCAL-GENCODE-32, whose
   reference is NCBI's `-db` search) and refuses where NCBI's `-db` search crashes, although NCBI's
-  `-subject` search, translating in code 1, may find nothing there. LOSAT's TBLASTN refusals write
-  no report, also where NCBI writes the reports of query batches before its crash (`BATCH_SIZE`).
+  `-subject` search, translating in code 1, may find nothing there. A refusal in a later query batch
+  (`BATCH_SIZE`, or a first query long enough to fill a batch) comes after the reports of the
+  batches before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it
+  searches the next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold a report
+  as NCBI's do, so only their start), for the first batch the prologs, and leaves the epilog out
+  (version 1.52, 2026-11-18, line RG item X-short-bat, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`).
+  TBLASTN's other rejections of a step where NCBI's search of a batch crashes, does not finish or
+  stops take the same form, TBLASTX's (version 1.40): a hit that the interval tree keeps, the
+  overflow banks of the seed search, a query chunk split again or holding no query, and with
+  `-in_pssm` (one batch: the prologs) a window past the PSSM (1.18), a gapped start past the
+  subject's translation (1.48) and a traceback that starts past its frame's NULLB (1.44). The
+  refusal of a reported column of that NULLB (1.44), whose alignment NCBI reports, comes before the
+  run's first byte.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

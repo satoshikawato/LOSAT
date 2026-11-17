@@ -17,6 +17,7 @@ use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
@@ -24,12 +25,19 @@ use crate::report::tabular::SubjectFetch;
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
-/// subject length). LOSAT's refusal (and any other
-/// error) is returned as `Err` to stop the run.
+/// subject length); and where LOSAT refuses a step at which NCBI's search of the batch crashes,
+/// does not finish or stops, after it has printed the reports of the batches before
+/// (`ErrorAfterBatchReports`, line RG item X-short-bat): its refusal, as the batch's failure.
+/// Any other refusal of LOSAT's (and any other error) is returned as `Err` to stop the run before
+/// its first byte.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
         return Ok(crate::blastinput::app::engine_error(text));
     }
+    let error = match error.downcast::<ErrorAfterBatchReports>() {
+        Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),
+        Err(error) => error,
+    };
     let error = match error.downcast::<XReadError>() {
         Ok(XReadError(read)) => read,
         Err(error) => return Err(error),
@@ -1932,9 +1940,11 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        // A read of the database that failed while the batches were searched ahead, or a batch
-        // whose setup failed (`SetupEngineError`): they are searched again one at a time below, so
-        // that the batch that fails does after the reports of the batches before.
+        // A read of the database that failed while the batches were searched ahead, a batch whose
+        // setup failed (`SetupEngineError`), or one whose search LOSAT refuses after the reports of
+        // the batches before (`ErrorAfterBatchReports`): they are searched again one at a time
+        // below, so that the earliest batch that fails does after the reports of the batches
+        // before, and nothing of it or of the batches after it is written.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -1960,7 +1970,13 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error) if error.is::<XReadError>() || error.is::<SetupEngineError>() => None,
+            Err(error)
+                if error.is::<XReadError>()
+                    || error.is::<SetupEngineError>()
+                    || error.is::<ErrorAfterBatchReports>() =>
+            {
+                None
+            }
             Err(error) => return Err(error),
         };
         for range in query_input
@@ -2921,6 +2937,21 @@ mod tests {
         assert_eq!(refusal.to_string(), "refused");
         let other = batch_failure(anyhow::anyhow!("other")).unwrap_err();
         assert_eq!(other.to_string(), "other");
+    }
+
+    // A refusal of a step where NCBI's search of the batch crashes fails the batch with the refusal
+    // itself (exit status 1, its message unchanged), after the reports of the batches before
+    // (`tests/tblastn_batch_refusal.rs`).
+    #[test]
+    fn a_refusal_after_the_batches_reports_fails_the_batch() {
+        let message = "TBLASTN: a refused step";
+        let refusal = batch_failure(anyhow::Error::new(ErrorAfterBatchReports(anyhow::anyhow!(
+            "{message}"
+        ))))
+        .expect("the batch's failure");
+        assert!(!refusal.is::<ErrorAfterBatchReports>());
+        assert!(refusal.downcast_ref::<crate::cli::NativeError>().is_none());
+        assert_eq!(refusal.to_string(), message);
     }
 
     // NCBI 2.17.0 tblastn with `-searchsp` or `OLD_FSC` and `-subject` of three empty records

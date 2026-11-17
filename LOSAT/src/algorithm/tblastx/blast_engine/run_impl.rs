@@ -4916,23 +4916,15 @@ impl BatchReports<'_> {
     }
 }
 
-/// An error of a query batch's search that comes after the reports of the batches before: NCBI's
-/// (`run_in_pool`), the average subject length (`context_cutoffs::context_cutoffs`); and LOSAT's
-/// refusals of what the search meets, an ungapped extension that scores higher past the end of its
-/// query frame (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's
-/// Q-X2c: "the results of the query batches before are written") and a one-hit merge of lengths
-/// that add up to 0 (`OneHitChunkMerge::refuse`). The run then writes the same bytes whether its
-/// reports are streamed or held (`report_stream`).
-#[derive(Debug)]
-pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
-
-impl std::fmt::Display for ErrorAfterBatchReports {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ErrorAfterBatchReports {}
+/// TBLASTX's errors of a query batch's search that come after the reports of the batches before
+/// (`blastinput::app::ErrorAfterBatchReports`, which TBLASTN shares): NCBI's (`run_in_pool`), the
+/// average subject length (`context_cutoffs::context_cutoffs`); and LOSAT's refusals of what the
+/// search meets, an ungapped extension that scores higher past the end of its query frame
+/// (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the
+/// results of the query batches before are written") and a one-hit merge of lengths that add up to
+/// 0 (`OneHitChunkMerge::refuse`). The run then writes the same bytes whether its reports are
+/// streamed or held (`report_stream`).
+pub(crate) use crate::blastinput::app::ErrorAfterBatchReports;
 
 // EXPERIMENT (LOSAT_X_TBXBOARD): closes subject `.1`'s units on the board when its search returns
 // (a no-op once it put its units there). No NCBI counterpart.

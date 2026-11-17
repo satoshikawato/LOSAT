@@ -132,6 +132,11 @@ FASTA files:
   the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
   (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
   `w11` followed by 21 A, searched in `-subject_loc` 1-11 and 1-12 (NCBI measures the range).
+  `xsb_*` (rows `db.xs.tblastn.bat.*`, line RG item X-short-bat): two query batches (`BATCH_SIZE=1`) whose second
+  is refused there. `xsb_qa.faa` is `qa` (31 residues); `xsb_s.fna` is `pa`, its back-translation (93 bases), then
+  `w11`: `qa` hits only `pa`. `xsb_q.faa` is `qa` then `q` (`MHYWWW`), `xsb_k.faa` is `qk` (`SRPP`, which hits only
+  `w12` of `xs_w12w11`) then `q`, and `xsb_ql.faa` is `qa` then `ql` (`qa` ten times, 310 residues, which
+  `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split into chunks that NCBI would split again).
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's

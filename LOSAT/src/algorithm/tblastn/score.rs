@@ -524,7 +524,9 @@ impl<'a> TbnScore for PssmScore<'a> {
     // the PSSM's '-' column, then the next frame's letters, and past NCBI's buffer NULLBs, exception
     // 3). A window past the PSSM's last row reads past NCBI's matrix (`data` has one row per query
     // position, no sentinel row; exception 3 reads letters past a sequence, not rows past a matrix):
-    // no result to port, so the search stops (PD-LOSAT-NCBI-DEFECTS, rule 3).
+    // no result to port, so the search stops (PD-LOSAT-NCBI-DEFECTS, rule 3), after NCBI's prolog
+    // (`blastinput::app::ErrorAfterBatchReports`, as every refusal of a step where NCBI's search
+    // crashes).
     fn gapped_start_int4(
         self,
         _query_window: &[u8; GAPPED_START_WINDOW],
@@ -534,10 +536,12 @@ impl<'a> TbnScore for PssmScore<'a> {
         _matrix: ScoringMatrix,
     ) -> Result<usize> {
         if q_start + GAPPED_START_WINDOW > self.0.rows.len() {
-            anyhow::bail!(
-                "TBLASTN -in_pssm with -window_size 0: a one-hit alignment of negative length at query position {} would read past the PSSM (NCBI BLAST+ reads past its matrix there), which LOSAT does not support",
-                q_start + 1
-            );
+            return Err(anyhow::Error::new(
+                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                    "TBLASTN -in_pssm with -window_size 0: a one-hit alignment of negative length at query position {} would read past the PSSM (NCBI BLAST+ reads past its matrix there), which LOSAT does not support",
+                    q_start + 1
+                )),
+            ));
         }
         Ok(pssm_get_start_for_gapped_alignment(
             self.0,

@@ -2507,10 +2507,15 @@ fn split_preliminary_hitlists(
         !sizes.negative_chunk_size(),
         "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
     );
-    ensure!(
-        !protein_chunk_would_be_split(chunks, sizes),
-        "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
-    );
+    // NCBI stops in the search of the batch (its `CCoreException`), after it has printed the
+    // reports of the batches before: so does this refusal (`blastinput::app::ErrorAfterBatchReports`).
+    if protein_chunk_would_be_split(chunks, sizes) {
+        return Err(anyhow::Error::new(
+            crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
+            )),
+        ));
+    }
     // The options' spaces of the chunks (`SplitQuery_SetEffectiveSearchSpace`): the batch's own,
     // or the preliminary stage's where they differ (`run_local_search_with_pool`).
     let batch_eff_searchsp: Vec<i64> = match option_spaces {
@@ -2525,11 +2530,15 @@ fn split_preliminary_hitlists(
     let mut merged: Vec<Option<KappaResultHitList>> = (0..queries.len()).map(|_| None).collect();
     for chunk in chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
-        // CBlastQueryVector"); `split_protein_batch` makes none.
-        ensure!(
-            !chunk.queries.is_empty(),
-            "a query chunk without a query is not supported by LOSAT's TBLASTN"
-        );
+        // CBlastQueryVector"); `split_protein_batch` makes none. NCBI stops in the search of the
+        // batch, after the reports of the batches before (`ErrorAfterBatchReports`).
+        if chunk.queries.is_empty() {
+            return Err(anyhow::Error::new(
+                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                    "a query chunk without a query is not supported by LOSAT's TBLASTN"
+                )),
+            ));
+        }
         let parts: Vec<Vec<u8>> = chunk
             .queries
             .iter()

@@ -547,6 +547,19 @@ struct XBand {
     b_offset: usize,
 }
 
+// No NCBI counterpart: why LOSAT's rows stopped before the last row; it holds no value NCBI
+// computes.
+/// Why the rows of `restricted_fast` stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum XStop {
+    /// LOSAT_X_BPGAPBAND: the rows reached the letters `col` holds (`fill_col`); on doubled
+    /// arrays they run again from row 0.
+    Band,
+    /// The rows do not take the problem: a letter code of 28 or more, or (the sixteen-bit rows)
+    /// `best` passed `limit16`. Larger arrays change neither: the rows run the same up to there.
+    Decline,
+}
+
 // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1028-1038,1053-1067,1076-1098
 // ```c
 //     gap_open = score_params->gap_open;
@@ -689,7 +702,7 @@ unsafe fn restricted_fast(
                 // SAFETY: `rows` is `W128` only on wasm32 simd128 or when the CPU has SSSE3 and
                 // SSE4.1 (`cpu_has_w128`, which the tests also call); the 16-bit arrays hold
                 // `held` cells and `col` the letters for them (`band_col`); `fits16` holds.
-                // None: as for the AVX2 sixteen-bit rows below.
+                // A stop: as for the AVX2 sixteen-bit rows below.
                 let narrow = unsafe {
                     restricted_rows16_w128(
                         query,
@@ -704,8 +717,9 @@ unsafe fn restricted_fast(
                         sc,
                     )
                 };
-                if narrow.is_some() || !banded || held >= full {
-                    break narrow;
+                match narrow {
+                    Err(XStop::Band) if banded && held < full => {}
+                    narrow => break narrow.ok(),
                 }
                 let [row0, row1] = &mut sc.h16;
                 band_grow16(row0, row1, &mut sc.e16, held, full);
@@ -741,9 +755,9 @@ unsafe fn restricted_fast(
                 band_col(&mut sc.col, banded, held, ahead, len2);
                 // SAFETY: as for the 32-bit rows below; the 16-bit arrays hold `held` cells and
                 // `col` the letters for them (`band_col`).
-                // None: a score came near the 16-bit bound, and the 32-bit rows start again from
-                // row 0; or (LOSAT_X_BPGAPBAND, arrays short of `len2`) the rows reached the
-                // letters `col` holds, and they run again on doubled arrays.
+                // `XStop::Decline`: a score came near the 16-bit bound, and the 32-bit rows start
+                // again from row 0; `XStop::Band` (LOSAT_X_BPGAPBAND, arrays short of `len2`): the
+                // rows reached the letters `col` holds, and they run again on doubled arrays.
                 let narrow = unsafe {
                     restricted_rows16_avx2(
                         query,
@@ -758,8 +772,9 @@ unsafe fn restricted_fast(
                         sc,
                     )
                 };
-                if narrow.is_some() || !banded || held >= full {
-                    break narrow;
+                match narrow {
+                    Err(XStop::Band) if banded && held < full => {}
+                    narrow => break narrow.ok(),
                 }
                 let [row0, row1] = &mut sc.h16;
                 band_grow16(row0, row1, &mut sc.e16, held, full);
@@ -777,8 +792,8 @@ unsafe fn restricted_fast(
         all(target_arch = "wasm32", target_feature = "simd128")
     )))]
     let _ = narrow;
-    // LOSAT_X_BPGAPBAND: the 32-bit rows; None with arrays short of `len2` (the rows reached the
-    // letters `col` holds, or a letter of 28 or more) runs them again on doubled arrays.
+    // LOSAT_X_BPGAPBAND: the 32-bit rows; where they reach the letters `col` holds (`XStop::Band`,
+    // arrays short of `len2`) they run again on doubled arrays.
     loop {
         let [row0, row1] = &sc.h;
         let held = band_cells32(row0, row1, &sc.e10);
@@ -832,8 +847,9 @@ unsafe fn restricted_fast(
                 sc,
             )
         };
-        if wide.is_some() || !banded || held >= full {
-            return wide;
+        match wide {
+            Err(XStop::Band) if banded && held < full => {}
+            wide => return wide.ok(),
         }
         let [row0, row1] = &mut sc.h;
         band_grow32(row0, row1, &mut sc.e10, held, full);
@@ -861,7 +877,7 @@ unsafe fn restricted_rows_avx2(
     tables: &XScoreTables,
     p: &XParams,
     sc: &mut XRestrictedScratch,
-) -> Option<(usize, usize, i32)> {
+) -> Result<(usize, usize, i32), XStop> {
     restricted_rows::<true, COL32_AVX2>(
         query,
         query_base,
@@ -902,6 +918,8 @@ unsafe fn restricted_rows_avx2(
 /// guarantees the CPU features and has sized the arrays of `sc` for the cells the band reaches:
 /// `len2`, or with LOSAT_X_BPGAPBAND the letters `col` holds, `fill_col`). `COL`: the instance of
 /// `fill_col` of these rows (`COL32_AVX2` for the vector rows, `COL32` for the scalar ones).
+/// `XStop::Decline`: a letter code of 28 or more; `XStop::Band`: the rows reached the letters
+/// `col` holds. Nothing outside `sc` has been changed.
 #[inline(always)]
 fn restricted_rows<const AVX2: bool, const COL: u8>(
     query: &[u8],
@@ -914,7 +932,7 @@ fn restricted_rows<const AVX2: bool, const COL: u8>(
     tables: &XScoreTables,
     p: &XParams,
     sc: &mut XRestrictedScratch,
-) -> Option<(usize, usize, i32)> {
+) -> Result<(usize, usize, i32), XStop> {
     let x_dropoff = p.x_dropoff;
     let gap_open_extend = p.gap_open_extend;
     let gap_extend = p.gap_extend;
@@ -957,16 +975,14 @@ fn restricted_rows<const AVX2: bool, const COL: u8>(
             blastp_query_residue::<false>(query, query_base, len1, a_index)
         };
         if qc >= 28 {
-            return None;
+            return Err(XStop::Decline);
         }
         // Letters for the cells up to `b_size` and the block that may run past it. A letter is
         // below 28 (checked when it is copied), so `& 31` in the scalar rows changes no index.
         let need = (band.b_size + 9).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
-            if !fill_col::<COL>(col, col_ready, upto, subject, subject_base, len2, reverse) {
-                return None;
-            }
+            fill_col::<COL>(col, col_ready, upto, subject, subject_base, len2, reverse)?;
             col_ready = upto;
         }
         let (prev, cur): (&[i32], &mut [i32]) = if a_index % 2 == 1 {
@@ -1038,7 +1054,7 @@ fn restricted_rows<const AVX2: bool, const COL: u8>(
         }
     }
 
-    Some((band.a_offset, band.b_offset, band.best))
+    Ok((band.a_offset, band.b_offset, band.best))
 }
 
 /// `gap_open_extend`, `gap_extend` and `x_dropoff` of `s_RestrictedGappedAlign`.
@@ -1179,8 +1195,9 @@ const COL16_W128: u8 = 2;
 /// `b_index = c - 1` (`blastp_subject_residue`, sentinels included); 0 for cell 0 and past cell
 /// `len2 + 1`, which no cell of the reference reads. The cells whose letter lies inside `subject`
 /// are one slice copy (forward: `subject[subject_base + c]`; reverse: `subject[subject_base + len2 -
-/// c]`, the indices that function computes); the others go through that function. False: a
-/// letter code of 28 or more (not taken).
+/// c]`, the indices that function computes); the others go through that function.
+/// `XStop::Decline`: a letter code of 28 or more (not taken); `XStop::Band`: `to` is past the
+/// letters `col` holds.
 ///
 /// `ROWS`: one instance per row kernel (`COL32_AVX2`: the AVX2 32-bit rows, `COL32`: the scalar
 /// 32-bit rows, `COL16`: the AVX2 sixteen-bit rows, `COL16_W128`: the 128-bit sixteen-bit rows),
@@ -1197,11 +1214,11 @@ fn fill_col<const ROWS: u8>(
     subject_base: usize,
     len2: usize,
     reverse: bool,
-) -> bool {
+) -> Result<(), XStop> {
     // LOSAT_X_BPGAPBAND: `col`'s length bounds the letters copied (`band_col`): past it the rows
-    // stop (None), before a row's band passes the cells the arrays hold.
+    // stop (`XStop::Band`), before a row's band passes the cells the arrays hold.
     if to + 2 + TAIL > col.len() {
-        return false;
+        return Err(XStop::Band);
     }
     let reference = |c: usize| -> u8 {
         if c == 0 || c > len2 + 1 {
@@ -1245,7 +1262,11 @@ fn fill_col<const ROWS: u8>(
             col[c] = reference(c);
         }
     }
-    col[from..to].iter().all(|&v| v < 28)
+    if col[from..to].iter().all(|&v| v < 28) {
+        Ok(())
+    } else {
+        Err(XStop::Decline)
+    }
 }
 
 // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107,1173
@@ -1822,7 +1843,7 @@ trait XRows16 {
         subject_base: usize,
         len2: usize,
         reverse: bool,
-    ) -> bool;
+    ) -> Result<(), XStop>;
 
     /// One row (`x_avx2_16::row`, `x_w128_16::row`). Returns `score_gap_row` after the row.
     ///
@@ -1867,9 +1888,10 @@ trait XRows16 {
 // ```
 /// LOSAT_X_BPGAP16: `restricted_rows` with the rows, the column gaps and the row gap
 /// in 16 bits, one step of the kernel `K` at a time. `i16::MIN` stands for `MININT`; every other
-/// stored value is the 32-bit rows' value (module comment, "Sixteen-bit rows"). None: `best`
-/// passed `limit16` at the start of a row, or a letter code of 28 or more (the AVX2 caller then
-/// runs the 32-bit rows from row 0; nothing outside `sc` has been changed).
+/// stored value is the 32-bit rows' value (module comment, "Sixteen-bit rows").
+/// `XStop::Decline`: `best` passed `limit16` at the start of a row, or a letter code of 28 or more
+/// (the AVX2 caller then runs the 32-bit rows from row 0); `XStop::Band`: the rows reached the
+/// letters `col` holds (they run again on doubled arrays). Nothing outside `sc` has been changed.
 ///
 /// # Safety
 /// Inlined into code compiled for `K`'s instructions (`restricted_rows16_avx2`,
@@ -1891,7 +1913,7 @@ unsafe fn restricted_rows16<K: XRows16>(
     tables: &XScoreTables,
     p: &XParams,
     sc: &mut XRestrictedScratch,
-) -> Option<(usize, usize, i32)> {
+) -> Result<(usize, usize, i32), XStop> {
     let x_dropoff = p.x_dropoff;
     let gap_open_extend = p.gap_open_extend;
     let gap_extend = p.gap_extend;
@@ -1930,7 +1952,7 @@ unsafe fn restricted_rows16<K: XRows16>(
 
     for a_index in 1..=len1 {
         if band.best > limit {
-            return None;
+            return Err(XStop::Decline);
         }
         let qc = if reverse {
             blastp_query_residue::<true>(query, query_base, len1, a_index)
@@ -1938,14 +1960,12 @@ unsafe fn restricted_rows16<K: XRows16>(
             blastp_query_residue::<false>(query, query_base, len1, a_index)
         };
         if qc >= 28 {
-            return None;
+            return Err(XStop::Decline);
         }
         let need = (band.b_size + 17).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
-            if !K::fill_col(col, col_ready, upto, subject, subject_base, len2, reverse) {
-                return None;
-            }
+            K::fill_col(col, col_ready, upto, subject, subject_base, len2, reverse)?;
             col_ready = upto;
         }
         let (prev, cur): (&[i16], &mut [i16]) = if a_index % 2 == 1 {
@@ -2006,7 +2026,7 @@ unsafe fn restricted_rows16<K: XRows16>(
         }
     }
 
-    Some((band.a_offset, band.b_offset, band.best))
+    Ok((band.a_offset, band.b_offset, band.best))
 }
 
 // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1076
@@ -2032,7 +2052,7 @@ unsafe fn restricted_rows16_avx2(
     tables: &XScoreTables,
     p: &XParams,
     sc: &mut XRestrictedScratch,
-) -> Option<(usize, usize, i32)> {
+) -> Result<(usize, usize, i32), XStop> {
     restricted_rows16::<x_avx2_16::Rows>(
         query,
         query_base,
@@ -2074,7 +2094,7 @@ unsafe fn restricted_rows16_w128(
     tables: &XScoreTables,
     p: &XParams,
     sc: &mut XRestrictedScratch,
-) -> Option<(usize, usize, i32)> {
+) -> Result<(usize, usize, i32), XStop> {
     restricted_rows16::<x_w128_16::Rows>(
         query,
         query_base,
@@ -2114,7 +2134,7 @@ unsafe fn restricted_rows16_w128(
 // gives the argument.
 #[cfg(target_arch = "x86_64")]
 mod x_avx2_16 {
-    use super::{XBand, XParams, MININT, PAD, RESTRICT_SIZE};
+    use super::{XBand, XParams, XStop, MININT, PAD, RESTRICT_SIZE};
     use core::arch::x86_64::*;
 
     // `GAPCOL16` and the step of `r10` in `row` are written for columns of ten.
@@ -2335,7 +2355,7 @@ mod x_avx2_16 {
             subject_base: usize,
             len2: usize,
             reverse: bool,
-        ) -> bool {
+        ) -> Result<(), XStop> {
             super::fill_col::<{ super::COL16 }>(col, from, to, subject, subject_base, len2, reverse)
         }
 
@@ -2408,7 +2428,7 @@ mod x_avx2_16 {
     all(target_arch = "wasm32", target_feature = "simd128")
 ))]
 mod x_w128_16 {
-    use super::{XBand, XParams, MININT, PAD, RESTRICT_SIZE};
+    use super::{XBand, XParams, XStop, MININT, PAD, RESTRICT_SIZE};
     use crate::utils::xdrop_simd::arch::*;
 
     // `GAPCOL8` and the step of `r10` in `step` are written for columns of ten.
@@ -2756,7 +2776,7 @@ mod x_w128_16 {
             subject_base: usize,
             len2: usize,
             reverse: bool,
-        ) -> bool {
+        ) -> Result<(), XStop> {
             super::fill_col::<{ super::COL16_W128 }>(
                 col,
                 from,
@@ -3164,20 +3184,25 @@ mod tests {
         if sc.e16.len() < cells {
             sc.e16.resize(cells, i16::MIN);
         }
-        Some(match rows {
-            // SAFETY: AVX2, BMI1 and LZCNT (`narrow_kernels`); the arrays are sized for `len2`;
-            // `fits16`.
-            #[cfg(target_arch = "x86_64")]
-            XRows::Avx2 => unsafe {
-                restricted_rows16_avx2(q, qb, s, sb, len1, len2, rev, tables, &p, sc)
-            },
-            // SAFETY: SSSE3 and SSE4.1 on x86_64 (`narrow_kernels`); the arrays are sized for
-            // `len2`; `fits16`.
-            XRows::W128 => unsafe {
-                restricted_rows16_w128(q, qb, s, sb, len1, len2, rev, tables, &p, sc)
-            },
-            XRows::Scalar => unreachable!("the scalar rows have no sixteen-bit form"),
-        })
+        Some(
+            match rows {
+                // SAFETY: AVX2, BMI1 and LZCNT (`narrow_kernels`); the arrays are sized for `len2`;
+                // `fits16`.
+                #[cfg(target_arch = "x86_64")]
+                XRows::Avx2 => unsafe {
+                    restricted_rows16_avx2(q, qb, s, sb, len1, len2, rev, tables, &p, sc)
+                },
+                // SAFETY: SSSE3 and SSE4.1 on x86_64 (`narrow_kernels`); the arrays are sized for
+                // `len2`; `fits16`.
+                XRows::W128 => unsafe {
+                    restricted_rows16_w128(q, qb, s, sb, len1, len2, rev, tables, &p, sc)
+                },
+                XRows::Scalar => unreachable!("the scalar rows have no sixteen-bit form"),
+            }
+            // Arrays of `len2` cells: the rows never reach the end of `col`.
+            .inspect_err(|&stop| assert_eq!(stop, XStop::Decline))
+            .ok(),
+        )
     }
 
     /// LOSAT_X_BPGAP16 at its bound: long alignments of W against W (BLOSUM62's largest entry,
@@ -3887,7 +3912,7 @@ mod tests {
                         "c={c} base={subject_base} len2={len2} rev={reverse}"
                     );
                 }
-                assert!(ok);
+                assert_eq!(ok, Ok(()));
             }
         }
     }

@@ -299,7 +299,8 @@ their variables mean
   more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNREDOLPT` only where the
   composition-based redo runs on the pool (2 or more threads, 2 or more matches); `REDOCONTAINIDX` only where
   one query's list of kept alignments in a composition-based redo reaches 32; `TBNXLATESIMD` only
-  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
+  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `TBNXLATE128`
+  only where `TBNXLATESIMD`'s AVX2 loop does not run (`=2`: in its place); `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPDIAG` batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT, or with `BPGAP128` on wasm32 simd128 and with SSSE3 and
@@ -6214,7 +6215,8 @@ Scheduling (each value computed by one thread with the original function; order 
   2026-11-17, class platform, on by default; `=0` turns it off, `=2` runs it on any x86-64 CPU with
   SSSE3 and SSE4.1, AVX2 or not, as a diagnostic; acts only where `LOSAT_X_BPGAP` and
   `LOSAT_X_BPGAP16` are on; `restricted_rows16_w128` and `x_w128_16` in
-  `blastp/x_restricted_gap.rs`) the sixteen-bit rows of the restricted gapped alignment
+  `blastp/x_restricted_gap.rs`; one driver, `restricted_rows16`, runs both kernels of the
+  sixteen-bit rows) the sixteen-bit rows of the restricted gapped alignment
   (`LOSAT_X_BPGAP16`) in 128 bits, eight cells per step, for the targets without the AVX2 rows: the
   WebAssembly build (simd128) and x86-64 with SSSE3 and SSE4.1 but not AVX2, BMI1 and LZCNT, which
   ran the reference function before. A step does for its eight cells what a block of the AVX2
@@ -6234,8 +6236,12 @@ Scheduling (each value computed by one thread with the original function; order 
   do not run there). They are the only rows of that build: where they do not take an alignment
   (costs past `fits16`, which no matrix and gap cost pair blastp supports is, or a best score past
   `limit16`, about 32,700) the reference function runs, as before the switch, and so it does with
-  `LOSAT_X_BPGAP16=0`. The AVX2 rows are not changed: only the choice (`x_rows`, `restricted_fast`)
-  is new, and `fill_col` has one instance per row kernel (the AVX2 and the scalar 32-bit rows too:
+  `LOSAT_X_BPGAP16=0`. The rows return why they stopped (`XStop`): only where they reached the
+  letters `col` holds (`LOSAT_X_BPGAPBAND`) do the arrays double and the rows run again; a best
+  score past `limit16` or a letter code of 28 or more ends the try at once (before, it doubled the
+  arrays up to `full` and ran the rows again each time). The AVX2 rows compute as before: the
+  choice (`x_rows`, `restricted_fast`) and the stop reason are new, and `fill_col` has one
+  instance per row kernel (the AVX2 and the scalar 32-bit rows too:
   with one shared instance fat LTO kept it out of line once `restricted_fast` took the 128-bit
   rows, which changed `restricted_rows_avx2`). Tests: lib tests
   `x_bpgap128_rows_match_the_reference_and_the_avx2_rows` (rows of 1 to 40 cells, every column
@@ -6244,7 +6250,12 @@ Scheduling (each value computed by one thread with the original function; order 
   `x_bpgap16_*` with both sixteen-bit rows, and every restricted-alignment test of `check()` with the
   128-bit rows (their x86-64 SSSE3 / SSE4.1 build); `tests/blastp_restricted_gapped.rs` compares
   NCBI BLAST+ 2.17.0's rows with `=0` and `=2` and counts the 128-bit rows' alignments with `=2`
-  (`[X_STATS] BPGAP fast=`).
+  (`[X_STATS] BPGAP fast=`); web.yml runs the lib tests of `x_restricted_gap` on wasm32-wasip1.
+  Measured (ws node 0, one core, 5 rounds; dev 24652e373 against the rows of 27f07216f; serial
+  WASI command in one Node 26.8.2 process; blastp of the first 1,000 human proteins
+  against the 6,600 yeast proteins as `-subject`, `-evalue 0.001`, the same output): Wasm 19.014 -> 16.726 s (x0.847 [0.831-0.918], 5 of 5
+  rounds below 1); native cycles x1.0023 [0.997-1.0095], instructions x1.00007, the AVX2 functions
+  the same machine code as dev's.
 - `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
   v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
   restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the

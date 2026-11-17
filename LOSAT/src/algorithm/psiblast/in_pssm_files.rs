@@ -5,8 +5,7 @@
 //! again after a round 1 without alignments with `-save_pssm_after_last_round`; the ASCII PSSM of a
 //! file PSSM (`ExtractPssmAncillaryData`: the PSI blocks only, the short form or, with
 //! `informationContent`, the long one); the Seq-id that the PSSMs of the later rounds keep; and
-//! LOSAT's refusals of what NCBI would write back that LOSAT's PSSM writer does not write yet, or
-//! that NCBI cannot write.
+//! LOSAT's refusals of what NCBI cannot write.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-408
 //! ```c++
@@ -51,7 +50,7 @@ use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
-use crate::algorithm::pssm_search::in_pssm::{refuse_unwritten_members, InPssmFile};
+use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
@@ -69,13 +68,9 @@ pub(crate) struct InPssmRounds {
 /// run makes once the database is opened, before any output (`InPssmRounds::refuse_written_back`:
 /// NCBI's error of a database it cannot open comes first, and so do the errors that stop NCBI
 /// before round 1, `PsiSearch::stop_before_search`):
-/// - with `-out_pssm`, a member that the PSSM writer does not write yet (NCBI's object keeps it
-///   and writes it:
-///   the descriptors of the query other than titles, its `annot`, the members of its `Seq-inst`
-///   other than `repr`, `mol`, `length` and `seq-data`, the `constraints` and `annotatedSites` of
-///   the parameters; NCBI 2.17.0 probes of PS5b), and a PSSM of frequency ratios only without
-///   `rpsdbparams` (NCBI writes part of the file, then stops with a C++ exception: "cannot write
-///   unassigned member matrixName", rc 255);
+/// - with `-out_pssm`, a PSSM of frequency ratios only without `rpsdbparams` (NCBI writes part of
+///   the file, then stops with a C++ exception: "cannot write unassigned member matrixName",
+///   rc 255); every member that the file holds is written back (`report::serial::pssm`);
 /// - with `-out_ascii_pssm`, a PSSM with `informationContent` (the long form) whose
 ///   `weightedResFreqsPerPos`, `informationContent`, `numMatchingSeqs` or the
 ///   `gaplessColumnWeights` it reads do not cover every column (`PrintAsciiPssm` dereferences
@@ -103,7 +98,6 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> InPssmRou
 /// The refusals of `rounds_input`.
 fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> {
     if request.asn_path.is_some() {
-        refuse_unwritten_members(&file.object, "-out_pssm", "PSIBLAST")?;
         let rpsdbparams = file
             .object
             .params
@@ -502,9 +496,8 @@ mod tests {
     // one), the object only when a file is written.
     #[test]
     fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
-        // A file whose PSSM holds the members `unwritten` that the PSSM writer does not write yet
-        // (`PssmWithParameters::unwritten_members`).
-        let file = |unwritten: Vec<&'static str>, computed: bool, params: bool| {
+        // A file whose PSSM holds the members `unread` that the search does not read.
+        let file = |unread: Vec<&'static str>, computed: bool, params: bool| {
             let mut object = pssm(ObjectId::Id(7), 2, 28);
             if !params {
                 object.params = None;
@@ -515,7 +508,7 @@ mod tests {
                 .as_mut()
                 .and_then(SeqEntry::seq_mut)
                 .unwrap();
-            for name in unwritten {
+            for name in unread {
                 match name {
                     "Seqdesc" => {
                         let comment = crate::report::serial::asn_types::member_index(
@@ -551,19 +544,20 @@ mod tests {
         ))
         .unwrap();
         assert!(input.object.is_some());
-        let error = refusal(rounds_input(
-            file(vec!["Seqdesc", "topology"], false, true),
+        // The members that the search does not read are written back with the others.
+        let input = refusal(rounds_input(
+            file(vec!["Seqdesc", "topology", "annot"], false, true),
             &request(true, false),
         ))
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("(Seqdesc, topology)"), "{error}");
-        // Without -out_pssm the members the writer does not write are never written.
-        refusal(rounds_input(
-            file(vec!["annot"], false, true),
-            &request(false, true),
-        ))
         .unwrap();
+        let (asn, _) = input.files(&request(true, false)).unwrap();
+        let asn = String::from_utf8(asn.unwrap()).unwrap();
+        assert!(
+            asn.contains("comment \"x\"")
+                && asn.contains("topology circular")
+                && asn.contains("annot {\n      }"),
+            "{asn}"
+        );
         let error = refusal(rounds_input(
             file(vec![], true, false),
             &request(true, false),

@@ -1692,16 +1692,12 @@ fn compute_subject_with<S: super::seed::BxScoring>(
                 containment.push((h.clone(), contained))
             }
         };
-        // What NCBI's buffer of the subject holds after its sentinel, read only for a one-hit
-        // gapped start whose window passes the sentinel (`preliminary::gapped_start_negative`).
-        let subject_after = || subjects.buffer_after(oid);
         if S::BLOSUM62 {
             super::preliminary::gapped_observed(
                 batch,
                 params,
                 options,
                 encoded,
-                &subject_after,
                 &initial,
                 xdrop,
                 &mut observe,
@@ -1713,7 +1709,6 @@ fn compute_subject_with<S: super::seed::BxScoring>(
                 params,
                 options,
                 encoded,
-                &subject_after,
                 &initial,
                 xdrop,
                 &mut observe,

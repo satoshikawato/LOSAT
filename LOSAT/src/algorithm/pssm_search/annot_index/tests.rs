@@ -322,17 +322,98 @@ fn table_rows_read_their_values() {
     );
 }
 
-// What NCBI does not do the same way on every run: f02, f33, t36, a07, t44 and the bounds.
+/// f33, k04, k07, k08, k09, k13, k16, k17 (`om/SPEC.md` §3 rule 3): after (1204.6) the empty
+/// region of a feature, graph, alignment, location set or table location posts its header and
+/// what the failed stream gets of the object's ASN.1 text (without its last end of line; of a
+/// longer text than NCBI's buffer of 4096 bytes, the bytes that the buffer held when it first
+/// flushed), and the run ends with exit status 0 and nothing more: NCBI BLAST+ 2.17.0's bytes.
+#[test]
+fn an_empty_region_after_the_failed_stream_writes_the_object() {
+    let dumped = |annots: &[&str]| {
+        let outcome = index(annots).unwrap();
+        assert_eq!(
+            outcome.abort,
+            Some(Abort {
+                exit: 0,
+                message: String::new()
+            })
+        );
+        assert!(outcome.muted);
+        let text = String::from_utf8(outcome.posts.text()).unwrap();
+        text.strip_prefix(FAILED)
+            .expect("(1204.6) first")
+            .to_string()
+    };
+    let feat = |comment: &str| {
+        format!("{{ data ftable {{ {{ data comment NULL,{comment} location int {{ from 10, to 5, id local id 1 }} }} }} }}")
+    };
+    let feat_text = "Seq-feat ::= {\n  data comment NULL,\n  location int {\n    from 10,\n    to 5,\n    id local id 1\n  }\n}";
+    assert_eq!(
+        dumped(&[&failing_feature(), &feat("")]),
+        format!("Error: (1204.1) [psiblast] {feat_text}\n")
+    );
+    assert_eq!(
+        dumped(&[
+            &failing_feature(),
+            &format!("{{ data graph {{ {{ loc int {{ from 10, to 5, id {Q1} }}, numval 1, graph int {{ max 1, min 0, axis 0, values {{ 1 }} }} }} }} }}")
+        ]),
+        format!("Error: (1204.2) [psiblast] Seq-graph ::= {{\n  loc int {{\n    from 10,\n    to 5,\n    id {Q1}\n  }},\n  numval 1,\n  graph int {{\n    max 1,\n    min 0,\n    axis 0,\n    values {{\n      1\n    }}\n  }}\n}}\n")
+    );
+    assert_eq!(
+        dumped(&[
+            &failing_feature(),
+            &format!("{{ data seq-table {{ feat-type 0, num-rows 1, columns {{ {{ header {{ field-name \"Seq-table location\" }}, data loc {{ int {{ from 9, to 4, id {Q1} }} }} }} }} }} }}")
+        ]),
+        format!("Error: (1204.7) [psiblast] Seq-loc ::= int {{\n  from 9,\n  to 4,\n  id {Q1}\n}}\n")
+    );
+    assert_eq!(
+        dumped(&[
+            &failing_feature(),
+            &format!("{{ data align {{ {{ type global, dim 2, segs denseg {{ dim 2, numseg 1, ids {{ {Q1}, local id 2 }}, starts {{ 5, 5 }}, lens {{ 0 }} }} }} }} }}")
+        ]),
+        format!("Error: (1204.3) [psiblast] Seq-align ::= {{\n  type global,\n  dim 2,\n  segs denseg {{\n    dim 2,\n    numseg 1,\n    ids {{\n      {Q1},\n      local id 2\n    }},\n    starts {{\n      5,\n      5\n    }},\n    lens {{\n      0\n    }}\n  }}\n}}\n")
+    );
+    // k09: the (1204.6) of a table row first.
+    assert_eq!(
+        dumped(&[
+            &table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id location-from }}, data int {{ 5 }} }}, {{ header {{ field-id location-to }}, data int {{ 1 }} }}")),
+            &feat("")
+        ]),
+        format!("Error: (1204.1) [psiblast] {feat_text}\n")
+    );
+    // k13: the location set's one location, not the region.
+    assert_eq!(
+        dumped(&[
+            &failing_feature(),
+            &format!("{{ desc {{ region int {{ from 9, to 1, id {Q1} }} }}, data locs {{ int {{ from 0, to 4, id {Q1} }} }} }}")
+        ]),
+        format!("Error: (1204.4) [psiblast] Seq-loc ::= int {{\n  from 0,\n  to 4,\n  id {Q1}\n}}\n")
+    );
+    // k17: a text of 4063 bytes, whole; k16: the first 4096 bytes of a longer one, the buffer
+    // full when it first flushed (a whole line of the string and 31 bytes of the next).
+    let comment = |letter: &str, count: usize| format!(" comment \"{}\",", letter.repeat(count));
+    let header = "Error: (1204.1) [psiblast] ";
+    let k17 = dumped(&[&failing_feature(), &feat(&comment("y", 3900))]);
+    assert_eq!(k17.len(), header.len() + 4063 + 1);
+    assert!(k17.ends_with("  location int {\n    from 10,\n    to 5,\n    id local id 1\n  }\n}\n"));
+    let k16 = dumped(&[&failing_feature(), &feat(&comment("x", 6000))]);
+    assert_eq!(k16.len(), header.len() + 4096 + 1);
+    assert!(k16.ends_with(&format!("\n{}\n{}\n", "x".repeat(78), "x".repeat(31))));
+    // Review 1 F1 (w1): the cut inside a string whose wrap at a word's end would come after it
+    // (NCBI's write threw first): no end of line inserted before the cut.
+    let words = format!(" comment \"zzzz {}\",", "abcdefghi ".repeat(600));
+    let w1 = dumped(&[&failing_feature(), &feat(&words)]);
+    assert_eq!(w1.len(), header.len() + 4096 + 1);
+    assert!(w1.ends_with(&format!("\n{} abcdefgh\n", " abcdefghi".repeat(7))));
+}
+
+// What NCBI does not do the same way on every run: f02, t36, a07, t44 and the bounds.
 #[test]
 fn refusals_name_their_condition() {
     let refused = |annots: &[&str]| index(annots).unwrap_err();
     assert_eq!(
         refused(&["{ data ftable { { data comment NULL, location int { from 10, to 5, id local id 1 } } } }"]),
         Refusal::EmptyRegion
-    );
-    assert_eq!(
-        refused(&[&failing_feature(), "{ data ftable { { data comment NULL, location int { from 10, to 5, id local id 1 } } } }"]),
-        Refusal::MutedDump
     );
     assert_eq!(
         refused(&[&table(
@@ -377,7 +458,6 @@ fn refusals_name_their_condition() {
     );
     for refusal in [
         Refusal::EmptyRegion,
-        Refusal::MutedDump,
         Refusal::NullPointer,
         Refusal::DivideByZero,
         Refusal::BitVector,

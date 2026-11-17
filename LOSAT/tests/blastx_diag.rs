@@ -3,13 +3,15 @@
 //! searches.
 //!
 //! The switch is in the strict set (on unless `LOSAT_X_BXDIAG=0`; not set, it acts only with
-//! `LOSAT_X_BXCROSS`'s cell test), and the reference runs here set it to `0`; its value `per-hit`
+//! `LOSAT_X_BXCROSS`'s cell test or `LOSAT_X_BXCROSS128`'s), and the reference runs here set it to
+//! `0`; its value `per-hit`
 //! or `scalar` forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
 //! every subject and stops at a difference. `LOSAT_X_BXDIAGMIN` sends the query batches with few
 //! hits per lookup cell to the other loop (`0`: none; built-in 670 for every cell test).
 //! `LOSAT_X_BXCROSS` (strict set) makes the AVX2 cell test, where the CPU also has POPCNT, the
 //! batches cut across the cells' borders on every fused table; the timing line then ends with
-//! `cross_splits=` (the windows of eight staged hits with a repeated entry, tested in parts); `0`
+//! `cross_splits=` (the windows of eight staged hits with a repeated entry, which the AVX2 batches
+//! test in parts and the 128-bit ones hit by hit); `0`
 //! leaves the direct loop on every table when `LOSAT_X_BXDIAG` is not set, and the masked AVX2
 //! batch (`mode=avx2-defer-masked`) when it has a value.
 //! `LOSAT_X_BXCROSSDEFER` (strict set) defers those batches' candidate calls (`mode=avx2-cross-defer`);
@@ -390,8 +392,9 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     assert_eq!(field(&none, "tables_fused"), 0, "{none}");
     assert!(field(&none, "tables_other") > 0, "{none}");
     assert_eq!(field(&none, "subjects"), 0, "{none}");
-    // The default (the switch not set) acts only with LOSAT_X_BXCROSS's cell test, on every fused
-    // table: it needs AVX2 and POPCNT.
+    // The default (the switch not set) acts only with a cell test of batches across the cells'
+    // borders, on every fused table: LOSAT_X_BXCROSS's (AVX2 and POPCNT) or LOSAT_X_BXCROSS128's
+    // (SSSE3, SSE4.1 and POPCNT).
     let cross = crosses(cross_mode(""));
     let run = blastx(&args, &[("LOSAT_X_BXDIAGMIN", "0"), ("LOSAT_TIMING", "1")]);
     assert_eq!(run.code, Some(0), "default: {}", run.stderr);
@@ -478,12 +481,26 @@ fn cross_mode(defer: &str) -> &'static str {
 /// LOSAT_X_BXCROSS128's cell test in the timing line.
 const CROSS128: &str = "w128-cross";
 
+// No NCBI counterpart: a name of LOSAT's timing line.
+/// The cell test this machine runs with LOSAT_X_BXCROSS128=0 (and LOSAT_X_BXCROSSDEFER on): that of
+/// [`cross_mode`] where it is the AVX2 batches; where it is the 128-bit batches, the per-hit loop
+/// that ran before the switch (a CPU without AVX2), which the default does not fuse with (no timing
+/// line).
+fn cross_mode_without_128() -> &'static str {
+    match cross_mode("") {
+        CROSS128 => "per-hit",
+        mode => mode,
+    }
+}
+
+// No NCBI counterpart: a name of LOSAT's timing line.
 /// Whether `mode` (a name of [`cross_mode`]) is a cell test of batches across the cells' borders
 /// (LOSAT_X_BXCROSS's AVX2 batches or LOSAT_X_BXCROSS128's), which the default fuses with.
 fn crosses(mode: &str) -> bool {
     mode.contains("-cross")
 }
 
+// No NCBI counterpart: the CPU check of LOSAT's 128-bit kernel.
 /// Whether this machine runs LOSAT_X_BXCROSS128's 128-bit batches (`LOSAT_X_BXCROSS128=2` runs
 /// them in place of the AVX2 ones): an x86-64 CPU with SSSE3, SSE4.1 and POPCNT.
 fn has_cross128() -> bool {
@@ -583,7 +600,9 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
 // table fused, and the shadow compares them with the reference for every subject. `=2` runs them in
 // place of the AVX2 batches on an x86-64 CPU with SSSE3, SSE4.1 and POPCNT, so that they run here
 // as they do in the WebAssembly build; the timing line names `w128-cross` and counts the windows
-// tested in parts. `=0` leaves the CPU's cell test (the AVX2 batches on a CPU with AVX2).
+// with a repeated entry (which these batches test hit by hit). `=0` leaves the choice before the
+// switch: the AVX2 batches on a CPU with AVX2 and POPCNT, the direct loop (no timing line) on one
+// without AVX2.
 #[test]
 fn the_128_bit_cross_cell_batches_give_the_reports_of_the_reference() {
     if !has_cross128() {
@@ -611,7 +630,7 @@ fn the_128_bit_cross_cell_batches_give_the_reports_of_the_reference() {
             let expected = if value == "2" {
                 CROSS128
             } else {
-                cross_mode("")
+                cross_mode_without_128()
             };
             match diag_line(&run) {
                 Some(line) => {

@@ -276,6 +276,12 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
         in_rest: std::arch::x86_64::__m256i,
     ) -> std::arch::x86_64::__m256i;
 
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // of a cell's hits, read in order)
+    // ```c
+    //                     for (i = 0; i < numhits; i++) {
+    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+    // ```
     /// EXPERIMENT (LOSAT_X_BXCROSS128): the first `n` (at most 24) hits from `p` as the `i32` lanes of
     /// six vectors of the 128-bit layer (`utils/xdrop_simd.rs` `arch`), four hits each in order;
     /// the lanes past `n` are not used by the caller. `i32`: a 16-byte load for each four hits
@@ -350,6 +356,12 @@ impl XHit for i32 {
         unsafe { std::arch::x86_64::_mm256_maskload_epi32(p, in_rest) }
     }
 
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // of a cell's hits, read in order)
+    // ```c
+    //                     for (i = 0; i < numhits; i++) {
+    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+    // ```
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128")
@@ -443,6 +455,12 @@ impl XHit for u16 {
         unsafe { _mm256_cvtepu16_epi32(_mm_loadu_si128(p.cast())) }
     }
 
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // of a cell's hits, read in order)
+    // ```c
+    //                     for (i = 0; i < numhits; i++) {
+    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+    // ```
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128")

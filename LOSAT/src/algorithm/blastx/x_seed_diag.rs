@@ -97,12 +97,13 @@
 //! of every table the fused loop takes where the CPU has AVX2 and POPCNT, and in 128 bits
 //! (LOSAT_X_BXCROSS128, below) where it does not; `LOSAT_X_BXCROSS=0`, or a CPU without either,
 //! leaves the direct loop on every table (with a value of `LOSAT_X_BXDIAG` or
-//! `LOSAT_X_BXDIAGSHADOW`, the masked AVX2 batch above). `LOSAT_X_BXDIAGMIN` still chooses the tables (above), and `LOSAT_X_BXDIAGSHADOW`
-//! compares it with the reference like the other cell tests. The batches run at 1,024 staged
-//! hits. The timing line names `mode=avx2-cross` (`mode=avx2-cross-defer` with
+//! `LOSAT_X_BXDIAGSHADOW`, the masked AVX2 batch above, or the per-hit loop without AVX2).
+//! `LOSAT_X_BXDIAGMIN` still chooses the tables (above), and `LOSAT_X_BXDIAGSHADOW` compares it
+//! with the reference like the other cell tests. The batches run at 1,024 staged hits. The timing
+//! line names `mode=avx2-cross` (`mode=avx2-cross-defer` with
 //! LOSAT_X_BXCROSSDEFER, below) and ends with `cross_splits=N` (the windows of
-//! eight staged hits with a repeated entry, tested in parts; counted per subject scan like the
-//! other counts).
+//! eight staged hits with a repeated entry, which these batches test in parts and
+//! LOSAT_X_BXCROSS128's hit by hit; counted per subject scan like the other counts).
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSSDEFER): `XCellTest::Cross { defer: true }`: LOSAT_X_BXCROSS's drain
 //! defers each batch's calls to the batch that next reads one of their entries, or to the end of
@@ -220,7 +221,8 @@ fn x_with_context_table<R>(
 /// EXPERIMENT (LOSAT_X_BXDIAG): 0 = off, 1 = the fused loop, 2 = shadow
 /// (`LOSAT_X_BXDIAGSHADOW`: the fused loop and the reference on a copy of the table, compared).
 /// A switch of the strict set: on unless it is `0`; on
-/// by default (not set, or empty) only with LOSAT_X_BXCROSS's cell test ([`x_cell_mode`]).
+/// by default (not set, or empty) only with a cell test of batches across the cells' borders,
+/// LOSAT_X_BXCROSS's or LOSAT_X_BXCROSS128's ([`x_cross_batches`]).
 pub(crate) fn x_bxdiag_mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
@@ -236,7 +238,8 @@ pub(crate) fn x_bxdiag_mode() -> u8 {
 }
 
 // No NCBI counterpart: chooses LOSAT's code path; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BXDIAG): whether the cell test is LOSAT_X_BXCROSS's, where the default acts.
+/// EXPERIMENT (LOSAT_X_BXDIAG): whether the cell test is LOSAT_X_BXCROSS's or LOSAT_X_BXCROSS128's
+/// (the batches across the cells' borders), where the default acts.
 fn x_cross_batches() -> bool {
     match x_cell_mode() {
         #[cfg(target_arch = "x86_64")]
@@ -444,8 +447,9 @@ static X_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static X_CELLS: AtomicU64 = AtomicU64::new(0);
 static X_HITS: AtomicU64 = AtomicU64::new(0);
 static X_CANDIDATES: AtomicU64 = AtomicU64::new(0);
-/// EXPERIMENT (LOSAT_X_BXCROSS): the windows of eight staged hits with a repeated entry, tested in
-/// parts, added with the other counts once per subject scan ([`x_add_counts`]).
+/// EXPERIMENT (LOSAT_X_BXCROSS): the windows of eight staged hits with a repeated entry (tested in
+/// parts by LOSAT_X_BXCROSS's AVX2 batches, hit by hit by LOSAT_X_BXCROSS128's), added with the
+/// other counts once per subject scan ([`x_add_counts`]).
 static X_SPLITS: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_SHORT: AtomicU64 = AtomicU64::new(0);
@@ -468,7 +472,7 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
             X_RATIO_MIN.load(Relaxed).min(X_RATIO_MAX.load(Relaxed)),
             X_RATIO_MAX.load(Relaxed),
         )?;
-        // EXPERIMENT (LOSAT_X_BXCROSS, LOSAT_X_BXCROSS128): the windows tested in parts.
+        // EXPERIMENT (LOSAT_X_BXCROSS, LOSAT_X_BXCROSS128): the windows with a repeated entry.
         if x_cross_batches() {
             write!(out, " cross_splits={}", X_SPLITS.load(Relaxed))?;
         }
@@ -661,7 +665,8 @@ pub(crate) fn x_word_finder_narrow<S: BxScoring>(
 
 // No NCBI counterpart: adds one subject's counts to the timing line's totals.
 /// EXPERIMENT (LOSAT_X_BXDIAG): one subject's counts of [`x_word_finder_fused`] (the cells, their
-/// hits, the candidates, and LOSAT_X_BXCROSS's windows tested in parts) added to the totals.
+/// hits, the candidates, and the cross-cell batches' windows with a repeated entry) added to the
+/// totals.
 fn x_add_counts(counts: [u64; 4]) {
     X_SUBJECTS.fetch_add(1, Relaxed);
     if counts[0] != 0 {
@@ -708,7 +713,7 @@ fn x_word_finder_fused_or_sent<K: XCell, S: BxScoring>(
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
 /// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
 /// the branch-free scan, BXSCANBF, graduated); also returns the cells tested in
-/// batches, their hits, the candidates and LOSAT_X_BXCROSS's windows tested in parts.
+/// batches, their hits, the candidates and the cross-cell batches' windows with a repeated entry.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
 // ```c
@@ -982,9 +987,10 @@ mod tests {
     use crate::algorithm::blastp::x_seed_fused::XDiagMode;
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
-    /// The cell tests this machine can run (the masked AVX2 batch, and with LOSAT_X_BXCROSS, its
-    /// calls deferred with LOSAT_X_BXCROSSDEFER and not), each with the branch-free scan (BXSCANBF,
-    /// graduated).
+    /// The cell tests this machine can run (the masked AVX2 batch, with LOSAT_X_BXCROSS its
+    /// batches, their calls deferred with LOSAT_X_BXCROSSDEFER and not, and LOSAT_X_BXCROSS128's
+    /// 128-bit batches, which `2` runs where the AVX2 ones would), each with the branch-free scan
+    /// (BXSCANBF, graduated).
     fn modes() -> Vec<XCellTest> {
         let mut modes = vec![
             XCellTest::Diag(XDiagMode::PerHit),

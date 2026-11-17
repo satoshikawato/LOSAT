@@ -521,6 +521,26 @@ class StartupTraceNoticeTests(unittest.TestCase):
         self.assertTrue(any("stderr without" in failure for failure in failures))
 
 
+class RangeRegressionTaskTests(unittest.TestCase):
+    """The frozen NCBI range errors (range_regression_fixtures.py) run whenever a classic program is selected."""
+
+    def names(self, programs: set[str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            return [task.name for task in fast.fixture_tasks(Path("/x/losat"), programs, Path(tmp), None)]
+
+    def test_each_classic_program_selects_the_range_fixtures_once(self):
+        for program in fast.RANGE_PROGRAMS:
+            self.assertEqual(self.names({program}).count("range regression"), 1, program)
+        self.assertEqual(self.names(set(fast.RANGE_PROGRAMS)).count("range regression"), 1)
+
+    def test_other_programs_do_not(self):
+        self.assertNotIn("range regression", self.names({"psiblast", "rpsblast"}))
+
+    def test_the_fixture_programs_are_the_manifest_programs(self):
+        import range_regression_fixtures as ranges
+        self.assertEqual({row["argv"].split(" ", 1)[0] for row in ranges.read_manifest()}, set(fast.RANGE_PROGRAMS))
+
+
 class RunTasksTests(unittest.TestCase):
     """`run_tasks`: the fixture scripts run `jobs` at a time; their failure lines come in the order of the tasks."""
 

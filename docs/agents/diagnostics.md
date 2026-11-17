@@ -3004,7 +3004,12 @@ Rebuilding less:
   memory: one byte per query and per subject up to the largest index asked. The recount runs on the search's thread
   after the redo, between the query blocks of `LOSAT_X_BPQBLOCK`, where the pool waited for it: line BPF s12
   (`REPORT.md` §17) found it in 86 of the 270 samples of that thread in the dips of the human x yeast
-  `-task blastp-fast` search at 16 threads (about 0.15 s of 4.8 s).
+  `-task blastp-fast` search at 16 threads (about 0.15 s of 4.8 s). ws node 1 (2026-11-17, 16 cores, siblings idle, 8 rounds of
+  dev 7e795fac4 / this build with `=0` / this build, arm order rotating, max RSS in the same runs), `-task blastp-fast
+  -outfmt 6 -evalue 0.001 -num_threads 16`: human x yeast `-subject` 4.501 / 4.500 / 4.370 s (x0.971 of dev, 8/8 rounds
+  faster), its first 3,000 queries 0.433 / 0.430 / 0.425 s (x0.978, 8/8), the same pair `-db` 4.809 / 4.824 / 4.753 s
+  (x0.988, 8/8), Arabidopsis x zebrafish `-db` 15.960 / 16.000 / 15.686 s (x0.983, 8/8); the median per-round max RSS
+  difference to dev +1.0, +0.3, -0.3 and +0.6 MiB (106, 76, 98, 96 MiB); outputs identical in every run.
 - `LOSAT_X_BNTABPAR=1` (BLASTN, all tasks, outfmt 6 / 7, two or more threads, speed; in the strict set since
   2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
   formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a

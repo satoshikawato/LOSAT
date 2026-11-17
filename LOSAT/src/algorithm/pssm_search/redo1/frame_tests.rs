@@ -170,20 +170,25 @@ fn align_in(frame: i32, s: (i32, i32)) -> Align {
     Align::incoming(&hsp(frame, s, 30))
 }
 
-// redo_alignment.c:921-936 and composition.c (`Blast_GetCompositionRange`): the composition of
-// the letters between the stops around the alignment, within the window's letters; where the
-// window ends before it begins, the range ends at the alignment's end.
+// redo_alignment.c:921-936 and composition_adjustment.c:1204-1248 (`Blast_GetCompositionRange`,
+// quoted at `blast_get_composition_range`): the letters between the stops around the alignment,
+// 20 letters inside each stop unless that cuts into the alignment, within the window's letters;
+// where the window ends before it begins, the range ends at the alignment's end.
 #[test]
 fn the_window_composition_is_ncbis() {
     let mut data = vec![ncbistdaa::A; 302];
-    // A window of 150 letters from 0, a stop at its letter 130: the alignment [100, 120) reads
-    // [0, 130).
-    data[1 + 130] = ncbistdaa::STOP;
+    // A window of 150 letters from 0, stops at its letters 50 and 145: the alignment [100, 120)
+    // reads [71, 125).
+    data[1 + 50] = ncbistdaa::STOP;
+    data[1 + 145] = ncbistdaa::STOP;
     let composition = window_composition(&data, window(0, 150, 1), &align_in(1, (100, 120)));
-    assert_eq!(composition.num_true_amino_acids, 130);
+    assert_eq!(composition.num_true_amino_acids, 54);
+    // A stop 10 letters after the alignment: the range ends at the alignment's end.
+    let composition = window_composition(&data, window(0, 150, 1), &align_in(1, (100, 135)));
+    assert_eq!(composition.num_true_amino_acids, 135 - 71);
     // A window [50, 40) (`-strand plus`: the alignment [250, 260) past the frame's 40 letters):
-    // its letters read from byte 1 + 50, a stop at letter 100 of the window: [101, 210).
+    // its letters read from byte 1 + 50, a stop at letter 100 of the window: [121, 210).
     data[1 + 50 + 100] = ncbistdaa::STOP;
     let composition = window_composition(&data, window(50, 40, 1), &align_in(1, (250, 260)));
-    assert_eq!(composition.num_true_amino_acids, 109);
+    assert_eq!(composition.num_true_amino_acids, 89);
 }

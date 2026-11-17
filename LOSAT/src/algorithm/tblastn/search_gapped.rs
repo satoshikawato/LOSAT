@@ -198,8 +198,9 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
             usize::try_from(s_gapped_start).context("negative gapped subject start")?;
         let gapped = if ONE_HIT && s_gapped_start >= chunk.length {
             // Only the window of a negative length reaches past the chunk (`q_gapped_start` is
-            // then `q_start + 5`, inside the frame's letters for a chunk that is not the frame's
-            // last).
+            // then `q_start + 5`: inside the frame's letters for a chunk that is not the frame's
+            // last, on the frame's NULLB or up to two letters after it for its last chunk with a
+            // PSSM).
             x_score_only_past_chunk(
                 score,
                 query_sequence,
@@ -590,11 +591,11 @@ fn x_gapped_start_negative<S: super::score::TbnScore>(
 // ```
 /// `s_BlastProtGappedAlignment` of a gapped start at or past the end of its chunk
 /// (`s_gapped_start >= chunk.length`), which only the window of a one-hit HSP of negative length
-/// gives (a chunk that is not its frame's last): NCBI's `subject->sequence` goes on past the chunk
-/// with the frame's next letters, and the left extension reads back from the start over them;
-/// `subject->length` is the chunk's, so the right extension does not run and the HSP ends at the
-/// gapped start. It then goes through the purge, `Blast_HSPListAdjustOffsets` and the merge of the
-/// chunks as any other HSP.
+/// gives: NCBI's `subject->sequence` goes on past the chunk with the frame's next letters or, past
+/// the frame's last one, with its NULLB and the next frame's letters, and the left extension reads
+/// back from the start over them; `subject->length` is the chunk's, so the right extension does
+/// not run and the HSP ends at the gapped start. It then goes through the purge,
+/// `Blast_HSPListAdjustOffsets` and the merge of the chunks as any other HSP.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -3374,6 +3375,175 @@ mod tests {
             aa_len: letters.len(),
             orig_len: 3 * letters.len(),
             seg_masks: Vec::new(),
+        }
+    }
+
+    /// The PSSM of line RG item X2d's probe (without its motif rows; the fixtures' `x2d_d50.asn`): 30
+    /// rows of -6 ('-' BLAST_SCORE_MIN), row 9 -61 for every letter, W +60 at row 10, V -60 at row
+    /// 11, K +1 at row 12, S +4 at row 14 and '-' `dash` at rows 13 to 15.
+    fn x2d_pssm(dash: i32) -> crate::algorithm::pssm_search::rows::QueryPssm {
+        const W: usize = 20;
+        const V: usize = 19;
+        const K: usize = 10;
+        const S: usize = 17;
+        let rows = (0..30)
+            .map(|r| {
+                let mut row = [-6; crate::core::blast_util::BLASTAA_SIZE];
+                if r == 9 {
+                    row = [-61; crate::core::blast_util::BLASTAA_SIZE];
+                }
+                row[0] = -32768;
+                match r {
+                    10 => row[W] = 60,
+                    11 => row[V] = -60,
+                    12 => row[K] = 1,
+                    14 => row[S] = 4,
+                    _ => {}
+                }
+                if (13..=15).contains(&r) {
+                    row[0] = dash;
+                }
+                row
+            })
+            .collect();
+        crate::algorithm::pssm_search::rows::QueryPssm { rows }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4250-4258,4295,
+    // 4342-4345 (quoted at `x_score_only_past_chunk`) and :3405-3439
+    // The word W V K at letters 14..17 of a frame of 19 letters (its last two N S), with the
+    // probe's PSSM: a one-hit HSP of length -1 at (10, 14) whose window of 11 rows reads the
+    // frame's last five letters, its NULLB (row 15, '-' 50) and five letters of the next frame
+    // (A, -6): 60 - 60 + 1 - 6 + 4 + 50 - 30 = 19 > 0, so the gapped start is (15, 19), on the
+    // NULLB. NCBI's left extension reads back from the NULLB: 50, S/S, three letters of the query
+    // and three of the subject in gaps (-14 each), W/W: 86 at (10, 14), the score of NCBI 2.17.0's
+    // alignment there (37.6 bits, raw 86, in the search of `db.x2d.tblastn.nullb.db.6` at `-evalue
+    // 10`, which LOSAT refuses at the traceback); the right extension does not run, so the HSP
+    // ends at the start.
+    #[test]
+    fn a_one_hit_gapped_start_on_its_frames_nullb_reads_it_with_the_pssms_dash_column() {
+        const A: u8 = 1;
+        let pssm = x2d_pssm(50);
+        let mut letters = vec![A; 14];
+        letters.extend_from_slice(&[20, 19, 10, 13, 17]);
+        let frame = one_hit_frame(1, &letters);
+        let query_frame = one_hit_frame(0, &[A; 30]);
+        let chunk = TranslatedChunk {
+            offset: 0,
+            length: 19,
+        };
+        let hit = InitHsp {
+            frame: 1,
+            chunk_offset: 0,
+            q_seed: 10,
+            s_seed: 14,
+            q_start: 10,
+            s_start: 14,
+            length: -1,
+            score: 60,
+        };
+        let query_frames = [query_frame];
+        let buffers = |after_frame: Vec<u8>| XOneHitBuffers {
+            query_frames: &query_frames,
+            context_offsets: &[0],
+            query_last: 31,
+            frame_offsets: [0, 20, 40, 60, 80, 100, 120],
+            frame_index: 0,
+            after_frame,
+        };
+        let gapped = |buffers: &XOneHitBuffers<'_>| {
+            score_gapped_chunk::<_, true>(
+                &[&[A; 30]],
+                &query_frames,
+                &[0],
+                30,
+                &frame,
+                chunk,
+                &frame.aa_seq[1..20],
+                &frame.aa_seq[1..],
+                &[hit],
+                11,
+                1,
+                38,
+                &[1],
+                ScoringMatrix::Blosum62,
+                &mut (
+                    GapAlignScratch::new(),
+                    crate::algorithm::pssm_search::gapalign::PssmGapScratch::new(),
+                ),
+                super::super::score::PssmScore(&pssm),
+                Some(buffers),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            gapped(&buffers(vec![A; 10])),
+            vec![(
+                0,
+                GappedHsp {
+                    frame: 1,
+                    score: 86,
+                    q_start: 10,
+                    q_end: 15,
+                    q_gapped_start: 15,
+                    s_start: 14,
+                    s_end: 19,
+                    s_gapped_start: 19,
+                }
+            )]
+        );
+        // Without the frame's last letter S the word ends one letter before the NULLB (row 14) and
+        // the start (15, 19) lies on the next frame's first letter: the window is 60 - 60 + 1 - 6
+        // + 50 - 36 = 9, and the left extension reads that letter (-6, or 50 for a 0, the NULLB of
+        // an empty frame), the NULLB (50) and the frame's letters back to W/W over the gaps
+        // (-14 each): 76 (A) or 132 (0) at (10, 14), up to the start.
+        let frame = one_hit_frame(1, &letters[..18]);
+        let past = |after_frame: Vec<u8>| {
+            let chunk = TranslatedChunk {
+                offset: 0,
+                length: 18,
+            };
+            score_gapped_chunk::<_, true>(
+                &[&[A; 30]],
+                &query_frames,
+                &[0],
+                30,
+                &frame,
+                chunk,
+                &frame.aa_seq[1..19],
+                &frame.aa_seq[1..],
+                &[hit],
+                11,
+                1,
+                38,
+                &[1],
+                ScoringMatrix::Blosum62,
+                &mut (
+                    GapAlignScratch::new(),
+                    crate::algorithm::pssm_search::gapalign::PssmGapScratch::new(),
+                ),
+                super::super::score::PssmScore(&pssm),
+                Some(&buffers(after_frame)),
+            )
+            .unwrap()
+        };
+        for (after, score) in [(vec![A; 10], 76), (vec![0, A, A, A, A, A, A, A, A, A], 132)] {
+            assert_eq!(
+                past(after),
+                vec![(
+                    0,
+                    GappedHsp {
+                        frame: 1,
+                        score,
+                        q_start: 10,
+                        q_end: 15,
+                        q_gapped_start: 15,
+                        s_start: 14,
+                        s_end: 19,
+                        s_gapped_start: 19,
+                    }
+                )]
+            );
         }
     }
 

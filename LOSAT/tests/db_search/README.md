@@ -2041,3 +2041,11 @@ reverse complement as `lcl|q<DEL>1` and `lcl|q<DEL>2`, and `qp.faa` the protein 
 The rows `db.dbtitle.blastn.qdel.8` and `db.dbtitle.blastx.qdel.9` write the title and, with `-parse_deflines`, the query ids
 with `#` and NCBI's 803.7 message for each byte; fasta_input's `blastp.seqannot_delid_s.*` searches `qp.faa` against
 `pdel.faa` (`-subject -parse_deflines`, its id `lcl|p<DEL>1`).
+
+A `pdb` Seq-id whose chain is an INTEGER outside 0-255 without a chain-id (line RG item K4j; rows `db.pdbchain.*`):
+`pdbchain/make_pdbchain.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb) writes the version 4 database
+`pdbchain/pdbchain` of five sequences without a title, each with a `gb|AB60000<n>.1|` Seq-id and a `pdb` one with the
+chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n>|<letter>` and a rewrite of the stored
+deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
+`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
+(with the pdb one alone it prints `Unknown` and `no longer exists in database`).

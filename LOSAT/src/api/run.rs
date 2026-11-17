@@ -809,9 +809,11 @@ pub(super) fn run_local(
     //         }                                                                   \
     //     }                                                                       \
     // ```
-    // The `-in_pssm` reader's `CEofException` (a `CIOException`, `pssm_search::in_pssm`): NCBI's
-    // run returns 0 without a word, so the call succeeds with what it wrote (nothing).
-    if native.exit == 0 && native.message.is_empty() {
+    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: the `-in_pssm` reader's
+    // `CEofException`, the object manager's failed write after its diagnostic stream failed): NCBI's
+    // run returns 0 without a word, so the call succeeds with what it wrote (tblastn's error
+    // archive of the saved messages, `report::archive::silent_end_lines`, or nothing).
+    if crate::cli::is_silent_end(&error) {
         return Ok(());
     }
     // After NCBI's object manager failed the stream (`ncbi_exception::main_diag_failbit`, this

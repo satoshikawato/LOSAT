@@ -24,8 +24,9 @@
 //! `-db` holds the PSSM as read (a PSSM of frequency ratios only without the engine's scores; the
 //! PSSM engine's error after the request), with `-subject` NCBI's "Remote PSI-BL2SEQ is not
 //! supported" after the prolog writes none (whatever the subjects' titles, and before NCBI's check
-//! of the PSSM). The rows that LOSAT refuses (DECISIONS 15 and 21 of line RG; the PSSM members that
-//! LOSAT's PSSM writer does not write yet, items F1b-2 and D3-1) check the refusal. A title or a
+//! of the PSSM), every member the PSSM held as NCBI writes it back (line RG item D3-2: query
+//! descriptors, `annot`, the `Seq-inst` members, `constraints`, `annotatedSites`). The rows that
+//! LOSAT refuses (DECISIONS 15 and 21 of line RG) check the refusal. A title or a
 //! name with a byte that NCBI's serial stream replaces is written as NCBI writes it (`#` in the
 //! file, `Bad char` on standard error; the `.title.` and `.order.` rows). blastp's query blocks and
 //! the `0` side of the default-on switches that the strategy's paths cross write the same files.

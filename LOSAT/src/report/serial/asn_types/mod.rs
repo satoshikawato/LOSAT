@@ -38,12 +38,15 @@
 
 mod hooks;
 pub(crate) mod read;
+pub(crate) mod write;
 // Generated (`scripts/asn_spec_gen.py`), checked byte for byte by `scripts/asn_spec_check.py`.
 #[rustfmt::skip]
 pub(crate) mod table;
 
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod write_tests;
 
 pub(crate) use read::{read_document, Post, ReadError};
 
@@ -107,7 +110,8 @@ pub(crate) struct TypeInfo {
     /// The ASN.1 name; empty for an anonymous type (a member's own SEQUENCE, CHOICE, ENUMERATED,
     /// SEQUENCE OF or SET OF), as NCBI's internal type information reports it.
     name: Name,
-    /// The module of a named type (for the writers of line RG item D3-2, which name it in XML).
+    /// The module of a named type, which NCBI's XML stream names (`xmlns`); LOSAT writes the
+    /// table's values in ASN.1 text only (`write`, `SerialError::Unwritten`).
     #[allow(dead_code)]
     module: Name,
     pub(crate) kind: Kind,
@@ -131,8 +135,7 @@ pub(crate) enum Kind {
     /// (`Seq-descr ::= SET OF Seqdesc`) is NCBI's implicit class, read as its list.
     List {
         element: u16,
-        /// Read the same way; the writers (line RG item D3-2) tell them apart.
-        #[allow(dead_code)]
+        /// Read the same way; the writer tells them apart (`Encoder::begin_list`).
         set: bool,
     },
     /// A named type that is another named type under its name (`Ref-ext ::= Seq-loc`).
@@ -161,8 +164,10 @@ pub(crate) struct Member {
     pub(crate) ty: u16,
     /// `OPTIONAL`, `DEFAULT`, `DELAYED`.
     pub(crate) flags: u8,
-    /// The DEFAULT value as the module writes it (for the writers of line RG item D3-2: a DEFAULT
-    /// member that was read is written, whatever its value).
+    /// The DEFAULT value as the module writes it. A DEFAULT member that was read is written,
+    /// whatever its value, and one not read is not (`write`); only NCBI's JSON stream writes the
+    /// default of a member not set (`Encoder::writes_defaults`), which no LOSAT document of these
+    /// values is.
     #[allow(dead_code)]
     default: Option<Name>,
 }

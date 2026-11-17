@@ -55,7 +55,7 @@ use crate::config::ProteinScoringSpec;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
-use crate::report::blast_xml::subjects::SubjectNames;
+use crate::report::blast_xml::subjects::{HitNames, SubjectNames};
 use crate::report::blast_xml::{
     filter, hit_ranges, written_queries, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery,
     XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
@@ -113,7 +113,7 @@ pub(super) struct PreparedXml {
     texts: Vec<QueryText>,
     stats: Vec<XmlStats>,
     /// By subject index: the names of the subjects with hits.
-    subject_names: Vec<Option<SubjectNames>>,
+    subject_names: Vec<Option<HitNames>>,
     /// By subject index: `Hit_len`, the length of the subject's record.
     subject_lengths: Vec<i32>,
     /// By rank: the reported database sequences with parsed Seq-ids (empty for `-subject` and
@@ -247,13 +247,20 @@ pub(super) fn prepare(
         })
         .collect::<Result<Vec<_>>>()?;
     // The names of the subjects with hits, made once each.
-    let mut subject_names: Vec<Option<SubjectNames>> = Vec::new();
+    let mut subject_names: Vec<Option<HitNames>> = Vec::new();
     let count = match shown {
         ShownSubjects::Fasta { .. } => subject_records.len(),
         ShownSubjects::Database { reported, .. } => reported.records.len(),
     };
     subject_names.resize_with(count, || None);
     let mut subject_lengths = vec![0i32; count];
+    // What the reports do at each subject's `Hit` (`database::ReportedSubjects::loads`, the one
+    // answer; a subject set's records are always loaded).
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = match shown {
+        ShownSubjects::Fasta { .. } => &every_loaded,
+        ShownSubjects::Database { reported, .. } => &reported.loads,
+    };
     for list in hitlists[..reports]
         .iter()
         .flat_map(KappaResultHitList::lists)
@@ -268,14 +275,16 @@ pub(super) fn prepare(
         let record = subject_records
             .get(s_idx)
             .context("TBLASTN subject OID out of range")?;
-        subject_names[s_idx] = Some(match shown.oid(s_idx) {
+        // The `Hit` of a subject whose lookup throws keeps the exception, and no names are made
+        // for a subject that no report loads (`HitNames::of`).
+        subject_names[s_idx] = Some(HitNames::of(loads, s_idx, || match shown.oid(s_idx) {
             None => match record.believed() {
                 Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
                 None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
             }
-            .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
+            .map_err(|refusal| refusal.error(PROGRAM, "a subject title")),
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(db_oid) => match shown.parsed_subject(s_idx) {
+            Some(db_oid) => Ok(match shown.parsed_subject(s_idx) {
                 Some(parsed) => SubjectNames::of_parsed(
                     parsed,
                     taxa.parsed_taxonomy.get(s_idx).map_or(&[], Vec::as_slice),
@@ -286,8 +295,8 @@ pub(super) fn prepare(
                     taxa.taxids.get(s_idx).copied().unwrap_or(0),
                     taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
                 ),
-            },
-        });
+            }),
+        })?);
         // The whole record (`-subject_loc` searches part of it).
         subject_lengths[s_idx] =
             i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
@@ -536,7 +545,8 @@ impl PreparedXml {
                         .context("negative TBLASTN subject OID")?;
                     let names = self.subject_names[first]
                         .as_ref()
-                        .context("names of a subject with hits")?;
+                        .context("names of a subject with hits")?
+                        .names()?;
                     let hit = XmlHit::of(names, self.subject_lengths[first]);
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
@@ -630,8 +640,16 @@ impl PreparedXml {
                 }
                 Ok(())
             });
-            // A failed query leaves its partial bytes in `buf`, which the error return drops.
-            written?;
+            // A query whose report raised an exception that NCBI's report function catches
+            // (`CaughtException`: the `Hit` of a subject whose lookup throws, `HitNames`): the XML2 and
+            // JSON documents leave its report out (`Xml2Document::report`), and the post of the
+            // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
+            // query leaves its partial bytes in `buf`, which the error return drops.
+            if let Some(post) =
+                crate::report::blast_xml::writer::caught_post(written, &*document, run.program)?
+            {
+                posts.caught(post);
+            }
             posts.document(document.take_posts());
             crate::report::query_warnings::write_hit_posts(
                 &buf,

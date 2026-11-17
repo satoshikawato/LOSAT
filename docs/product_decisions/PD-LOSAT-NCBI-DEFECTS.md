@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.49
+- Version: 1.50
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -167,7 +167,11 @@
   LOSAT did not write removed; the rule-3 rejection of Seq-ids in the order of addresses widened to
   a feature's and a Seq-table's location; the PSSM's most negative Int4 and Int8 values written as
   their digits; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.48)
+  after 1.48);
+  1.50 2026-11-18 (makeblastdb `-mask_data`, line NP item M4a-1c: the explicit rejection of a mask
+  file's string whose length passes the end of the file and is 1 GiB to 2^47 bytes, which NCBI's
+  reader reserves before it reads and which succeeds or fails by the host's memory, rule 3;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.49)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1470,6 +1474,19 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows.
+- makeblastdb `-mask_data` (version 1.50, 2026-11-18, line NP item M4a-1c, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
+  length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the
+  length before it reads the bytes (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`):
+  from 2^47 bytes, which no x86-64 host can allocate, it throws `std::bad_alloc` ("BLAST ran out
+  of memory", exit status 4, which LOSAT writes), past the largest `std::string` (2^63 - 1 bytes)
+  `std::length_error` ("Error: basic_string::_M_create", exit status 255, which LOSAT writes), and
+  below 1 GiB its reservation succeeds and the read ends at the end of the file (NCBI's
+  end-of-file report, which LOSAT writes); between them the reservation succeeds or fails by the
+  host's memory and overcommit, the bound of line PS's DECISIONS 40 that `losat rpsbproc` uses.
+  LOSAT refuses it (exit 1, "losat makeblastdb: mask data that LOSAT does not read: a string whose
+  length ... passes the end of the file ..."), before the build. Fixtures
+  `LOSAT/tests/seqdb/mask_parse/b_length_*.asnb` (`make_mask_parse_fixtures.py`).
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

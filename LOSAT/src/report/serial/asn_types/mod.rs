@@ -1,0 +1,551 @@
+//! NCBI's ASN.1 types as its serial library knows them (the type information that NCBI's
+//! `datatool` generates from the ASN.1 modules and their `.def` files), for the types that a
+//! PSSM file reaches (`PssmWithParameters`, psiblast and tblastn `-in_pssm`), and the one generic
+//! reader of ASN.1 text that runs on them (`read`). This module owns the table (`table`, generated
+//! by `scripts/asn_spec_gen.py` and checked against NCBI's generated `*_.cpp` by
+//! `scripts/asn_spec_check.py`) and the generic value (`Value`); the PSSM's typed model
+//! (`report::serial::pssm`) is built from the value at its typed boundary
+//! (`blastinput::pssm_text`).
+//!
+//! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397
+//! ```c++
+//! void CObjectIStreamAsn::ReadClassSequential(const CClassTypeInfo* classType,
+//!                                             TObjectPtr classPtr)
+//! {
+//!     BEGIN_OBJECT_FRAME3(eFrameClass, classType, classPtr);
+//!     StartBlock();
+//!
+//!     ReadClassSequentialContentsBegin(classType);
+//!
+//!     TMemberIndex index;
+//!     while ( (index = BeginClassMember(classType,*pos)) != kInvalidMember ) {
+//!         ReadClassSequentialContentsMember(classPtr);
+//!     }
+//!
+//!     ReadClassSequentialContentsEnd(classPtr);
+//!
+//!     EndBlock();
+//!     END_OBJECT_FRAME();
+//! }
+//! ```
+//!
+//! What the table holds of a type is what NCBI's text reader reads of it: the kind, the members
+//! or variants in module order with their tags, OPTIONAL and DEFAULT marks and the delayed member
+//! of `Auth-list` (`biblio.def`: `names._delay = 1`), the value lists, the C++ storage of each
+//! INTEGER (`.def` `_type`: `TSeqPos` is read as Uint4, `TGi` as Int8, ...) and the ASN.1 name
+//! (empty for an anonymous type, as `CTypeInfo::GetName` reports an internal type,
+//! serial/typeinfo.cpp:249-252), which the reader's stack names in NCBI's exception reports.
+
+mod hooks;
+pub(crate) mod read;
+// Generated (`scripts/asn_spec_gen.py`), checked byte for byte by `scripts/asn_spec_check.py`.
+#[rustfmt::skip]
+pub(crate) mod table;
+
+#[cfg(test)]
+mod read_tests;
+
+pub(crate) use read::{read_document, Post, ReadError};
+
+/// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
+pub(crate) const OPTIONAL: u8 = 1;
+/// `Member::flags`: a member with a DEFAULT (`->SetDefault(...)`; NCBI reads it as optional).
+pub(crate) const DEFAULT: u8 = 2;
+/// `Member::flags`: a member that NCBI reads into a delay buffer (`->SetDelayBuffer(...)`):
+/// skipped with the skip functions and kept as the text read (`Value::Delayed`).
+pub(crate) const DELAYED: u8 = 4;
+
+/// A name of the table: its offset and length in `table::NAMES` (the table holds no pointer, so
+/// the dynamic loader has nothing of it to relocate when the program starts).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Name(u32, u16);
+
+impl Name {
+    pub(crate) fn get(self) -> &'static str {
+        let start = self.0 as usize;
+        &table::NAMES[start..start + usize::from(self.1)]
+    }
+}
+
+/// The members of a SEQUENCE or CHOICE (`table::MEMBERS`) or the values of an ENUMERATED
+/// (`table::VALUES`): the first and the count.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Span(u16, u16);
+
+impl Span {
+    fn range(self) -> std::ops::Range<usize> {
+        usize::from(self.0)..usize::from(self.0) + usize::from(self.1)
+    }
+
+    /// The members or variants of a SEQUENCE or CHOICE.
+    pub(crate) fn members(self) -> &'static [Member] {
+        &table::MEMBERS[self.range()]
+    }
+
+    /// The named values of an ENUMERATED or INTEGER.
+    pub(crate) fn values(self) -> &'static [EnumValue] {
+        &table::VALUES[self.range()]
+    }
+}
+
+/// A named value of an ENUMERATED or INTEGER.
+#[derive(Debug)]
+pub(crate) struct EnumValue {
+    name: Name,
+    pub(crate) value: i32,
+}
+
+impl EnumValue {
+    pub(crate) fn name(&self) -> &'static str {
+        self.name.get()
+    }
+}
+
+/// One ASN.1 type of the table.
+#[derive(Debug)]
+pub(crate) struct TypeInfo {
+    /// The ASN.1 name; empty for an anonymous type (a member's own SEQUENCE, CHOICE, ENUMERATED,
+    /// SEQUENCE OF or SET OF), as NCBI's internal type information reports it.
+    name: Name,
+    /// The module of a named type (for the writers of line RG item D3-2, which name it in XML).
+    #[allow(dead_code)]
+    module: Name,
+    pub(crate) kind: Kind,
+}
+
+impl TypeInfo {
+    /// The ASN.1 name (empty for an anonymous type).
+    pub(crate) fn name(&self) -> &'static str {
+        self.name.get()
+    }
+}
+
+/// What a type is.
+#[derive(Debug)]
+pub(crate) enum Kind {
+    /// SEQUENCE: its members in module order.
+    Sequence(Span),
+    /// CHOICE: its variants in module order.
+    Choice(Span),
+    /// SEQUENCE OF (`set` false) or SET OF (`set` true): the element type. A named one
+    /// (`Seq-descr ::= SET OF Seqdesc`) is NCBI's implicit class, read as its list.
+    List {
+        element: u16,
+        /// Read the same way; the writers (line RG item D3-2) tell them apart.
+        #[allow(dead_code)]
+        set: bool,
+    },
+    /// A named type that is another named type under its name (`Ref-ext ::= Seq-loc`).
+    Alias(u16),
+    /// INTEGER read as the C++ storage of its member.
+    Integer(Storage),
+    /// ENUMERATED (`integer` false) or INTEGER with named values (`integer` true).
+    Enumerated {
+        integer: bool,
+        values: Span,
+    },
+    Boolean,
+    Null,
+    Real,
+    String(StringKind),
+    Octets,
+}
+
+/// A member of a SEQUENCE or a variant of a CHOICE.
+#[derive(Debug)]
+pub(crate) struct Member {
+    name: Name,
+    /// The tag (NCBI's automatic tags: the position from 0), which `[n]` names in ASN.1 text.
+    pub(crate) tag: u8,
+    /// The type's index in `table::TYPES`.
+    pub(crate) ty: u16,
+    /// `OPTIONAL`, `DEFAULT`, `DELAYED`.
+    pub(crate) flags: u8,
+    /// The DEFAULT value as the module writes it (for the writers of line RG item D3-2: a DEFAULT
+    /// member that was read is written, whatever its value).
+    #[allow(dead_code)]
+    default: Option<Name>,
+}
+
+impl Member {
+    /// The member's or variant's name.
+    pub(crate) fn name(&self) -> &'static str {
+        self.name.get()
+    }
+
+    /// Whether NCBI's reader takes the member as optional (OPTIONAL or DEFAULT).
+    pub(crate) fn optional(&self) -> bool {
+        self.flags & (OPTIONAL | DEFAULT) != 0
+    }
+}
+
+/// The C++ storage of an INTEGER (`.def` `_type`), which decides how NCBI reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Storage {
+    /// `Int2` (`ReadInt2`: an Int4 that must fit).
+    Int2,
+    /// `int`, `TSignedSeqPos` (`ReadInt4`).
+    Int4,
+    /// `TSeqPos`, `unsigned` (`ReadUint4`: no `-`).
+    Uint4,
+    /// `TGi`, `TEntrezId`, `TIntId`, `Int8` (`ReadInt8`).
+    Int8,
+}
+
+/// The kind of a string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StringKind {
+    /// VisibleString: a byte outside 0x20..0x7E is read as `#` with NCBI's error message.
+    Visible,
+    /// UTF8String: the bytes as they are (`eFNP_Allow`).
+    Utf8,
+    /// StringStore: read as a VisibleString (`ReadStringStore` is `ReadString`).
+    Store,
+}
+
+/// The type `ty` of the table.
+pub(crate) fn type_info(ty: u16) -> &'static TypeInfo {
+    &table::TYPES[usize::from(ty)]
+}
+
+/// The type `ty` with its aliases followed.
+pub(crate) fn resolved(mut ty: u16) -> &'static TypeInfo {
+    loop {
+        match type_info(ty).kind {
+            Kind::Alias(target) => ty = target,
+            _ => return type_info(ty),
+        }
+    }
+}
+
+/// The members or variants of the SEQUENCE or CHOICE `ty`.
+pub(crate) fn members(ty: u16) -> &'static [Member] {
+    match resolved(ty).kind {
+        Kind::Sequence(members) | Kind::Choice(members) => members.members(),
+        _ => &[],
+    }
+}
+
+/// The position of the member or variant `name` of `ty` (a name the table must hold).
+pub(crate) fn member_index(ty: u16, name: &str) -> usize {
+    members(ty)
+        .iter()
+        .position(|member| member.name() == name)
+        .unwrap_or_else(|| panic!("{} has no member {name}", type_info(ty).name()))
+}
+
+/// A value read under the table: the shape of its type, the members of a SEQUENCE by their
+/// position in the module (those set, in order). Values nest to any depth, so a value is dropped,
+/// cloned, compared and shown from a list on the heap, never by a recursion as deep as the nest
+/// (below).
+pub enum Value {
+    /// INTEGER of any storage.
+    Int(i64),
+    /// ENUMERATED or INTEGER with named values: the number (its name is the table's).
+    Enum(i32),
+    Bool(bool),
+    Null,
+    Real(f64),
+    /// A string as NCBI's reader keeps it (`#` in place of the bytes it replaced).
+    Str(Vec<u8>),
+    Octets(Vec<u8>),
+    /// A SEQUENCE: (member position, value) of the members set, in module order.
+    Sequence(Vec<(u16, Value)>),
+    /// A CHOICE: the variant's position and value.
+    Choice(u16, Box<Value>),
+    /// A SEQUENCE OF or SET OF, in the order read (of a type other than those below).
+    List(Vec<Value>),
+    /// A SEQUENCE OF or SET OF INTEGER of Int2 or Int4 storage, kept as the numbers in NCBI's
+    /// storage (a PSSM's scores: `list<int>`).
+    Int4s(Vec<i32>),
+    /// A SEQUENCE OF or SET OF INTEGER of Uint4 or Int8 storage, kept as the numbers.
+    Ints(Vec<i64>),
+    /// A SEQUENCE OF or SET OF REAL, kept as the numbers (a PSSM's frequency ratios).
+    Reals(Vec<f64>),
+    /// A delayed member: the text NCBI's reader keeps, from its first byte that is not white
+    /// space to the end of the value (`StartDelayBuffer`, objistrasn.cpp:1648-1652).
+    Delayed(Vec<u8>),
+    /// A Seq-id, in the Seq-id model that owns every Seq-id of LOSAT (`seqid::model`), boxed so
+    /// that a `Value` stays small (the model's largest alternatives are several strings).
+    SeqId(Box<crate::seqid::ParsedSeqId>),
+}
+
+/// A value is dropped with the values nested in it from a list on the heap: the drop of each one
+/// inside the one that holds it would recurse as deep as the values nest (the reader reads any
+/// depth).
+impl Drop for Value {
+    fn drop(&mut self) {
+        let mut nested = Vec::new();
+        self.take_nested(&mut nested);
+        while let Some(mut value) = nested.pop() {
+            value.take_nested(&mut nested);
+        }
+    }
+}
+
+/// A value is cloned with the values nested in it from a list on the heap (as `Drop`).
+impl Clone for Value {
+    fn clone(&self) -> Value {
+        /// A value being cloned: its values and the clones made of them so far.
+        enum Cloning<'a> {
+            Sequence(&'a [(u16, Value)], Vec<(u16, Value)>),
+            Choice(u16),
+            List(&'a [Value], Vec<Value>),
+        }
+        let mut open: Vec<Cloning<'_>> = Vec::new();
+        let mut next = self;
+        loop {
+            let mut done = match next {
+                Value::Sequence(members) => {
+                    open.push(Cloning::Sequence(
+                        members,
+                        Vec::with_capacity(members.len()),
+                    ));
+                    None
+                }
+                Value::Choice(index, value) => {
+                    open.push(Cloning::Choice(*index));
+                    next = value;
+                    continue;
+                }
+                Value::List(items) => {
+                    open.push(Cloning::List(items, Vec::with_capacity(items.len())));
+                    None
+                }
+                Value::Int(n) => Some(Value::Int(*n)),
+                Value::Enum(n) => Some(Value::Enum(*n)),
+                Value::Bool(b) => Some(Value::Bool(*b)),
+                Value::Null => Some(Value::Null),
+                Value::Real(r) => Some(Value::Real(*r)),
+                Value::Str(text) => Some(Value::Str(text.clone())),
+                Value::Octets(bytes) => Some(Value::Octets(bytes.clone())),
+                Value::Int4s(numbers) => Some(Value::Int4s(numbers.clone())),
+                Value::Ints(numbers) => Some(Value::Ints(numbers.clone())),
+                Value::Reals(numbers) => Some(Value::Reals(numbers.clone())),
+                Value::Delayed(text) => Some(Value::Delayed(text.clone())),
+                Value::SeqId(id) => Some(Value::SeqId(id.clone())),
+            };
+            // The clone made goes to the value that holds it, until one has a value left to clone.
+            loop {
+                let Some(top) = open.last_mut() else {
+                    return done.expect("the clone");
+                };
+                match top {
+                    Cloning::Sequence(members, made) => {
+                        let members: &[(u16, Value)] = members;
+                        if let Some(value) = done.take() {
+                            made.push((members[made.len()].0, value));
+                        }
+                        if let Some((_, value)) = members.get(made.len()) {
+                            next = value;
+                            break;
+                        }
+                    }
+                    Cloning::List(items, made) => {
+                        let items: &[Value] = items;
+                        if let Some(value) = done.take() {
+                            made.push(value);
+                        }
+                        if let Some(value) = items.get(made.len()) {
+                            next = value;
+                            break;
+                        }
+                    }
+                    Cloning::Choice(_) => {}
+                }
+                done = Some(match open.pop().expect("a value being cloned") {
+                    Cloning::Sequence(_, made) => Value::Sequence(made),
+                    Cloning::List(_, made) => Value::List(made),
+                    Cloning::Choice(index) => {
+                        Value::Choice(index, Box::new(done.take().expect("the variant's clone")))
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// Two values are equal when they have the same shape and leaves (the derived equality's), compared
+/// from a list on the heap (as `Drop`).
+impl PartialEq for Value {
+    fn eq(&self, other: &Value) -> bool {
+        let mut pairs = vec![(self, other)];
+        while let Some(pair) = pairs.pop() {
+            let same = match pair {
+                (Value::Sequence(a), Value::Sequence(b)) => {
+                    let same = a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0);
+                    pairs.extend(a.iter().zip(b).map(|(x, y)| (&x.1, &y.1)));
+                    same
+                }
+                (Value::Choice(a, x), Value::Choice(b, y)) => {
+                    pairs.push((x, y));
+                    a == b
+                }
+                (Value::List(a), Value::List(b)) => {
+                    pairs.extend(a.iter().zip(b));
+                    a.len() == b.len()
+                }
+                (Value::Int(a), Value::Int(b)) => a == b,
+                (Value::Enum(a), Value::Enum(b)) => a == b,
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                (Value::Null, Value::Null) => true,
+                (Value::Real(a), Value::Real(b)) => a == b,
+                (Value::Str(a), Value::Str(b)) => a == b,
+                (Value::Octets(a), Value::Octets(b)) => a == b,
+                (Value::Int4s(a), Value::Int4s(b)) => a == b,
+                (Value::Ints(a), Value::Ints(b)) => a == b,
+                (Value::Reals(a), Value::Reals(b)) => a == b,
+                (Value::Delayed(a), Value::Delayed(b)) => a == b,
+                (Value::SeqId(a), Value::SeqId(b)) => a == b,
+                _ => false,
+            };
+            if !same {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// A value shown in the derived form (`Choice(1, List([Int(3)]))`), written from a list on the
+/// heap (as `Drop`).
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// What is left to write: a value, a fixed text, or a member's position and its comma.
+        enum Item<'a> {
+            Value(&'a Value),
+            Text(&'static str),
+            Position(u16),
+        }
+        let mut todo = vec![Item::Value(self)];
+        while let Some(item) = todo.pop() {
+            let value = match item {
+                Item::Text(text) => {
+                    f.write_str(text)?;
+                    continue;
+                }
+                Item::Position(position) => {
+                    write!(f, "{position}, ")?;
+                    continue;
+                }
+                Item::Value(value) => value,
+            };
+            match value {
+                Value::Sequence(members) => {
+                    f.write_str("Sequence([")?;
+                    todo.push(Item::Text("])"));
+                    for (at, (position, value)) in members.iter().enumerate().rev() {
+                        todo.push(Item::Text(")"));
+                        todo.push(Item::Value(value));
+                        todo.push(Item::Position(*position));
+                        todo.push(Item::Text(if at == 0 { "(" } else { ", (" }));
+                    }
+                }
+                Value::Choice(position, value) => {
+                    write!(f, "Choice({position}, ")?;
+                    todo.push(Item::Text(")"));
+                    todo.push(Item::Value(value));
+                }
+                Value::List(items) => {
+                    f.write_str("List([")?;
+                    todo.push(Item::Text("])"));
+                    for (at, value) in items.iter().enumerate().rev() {
+                        todo.push(Item::Value(value));
+                        if at > 0 {
+                            todo.push(Item::Text(", "));
+                        }
+                    }
+                }
+                Value::Int(n) => write!(f, "Int({n:?})")?,
+                Value::Enum(n) => write!(f, "Enum({n:?})")?,
+                Value::Bool(b) => write!(f, "Bool({b:?})")?,
+                Value::Null => f.write_str("Null")?,
+                Value::Real(r) => write!(f, "Real({r:?})")?,
+                Value::Str(text) => write!(f, "Str({text:?})")?,
+                Value::Octets(bytes) => write!(f, "Octets({bytes:?})")?,
+                Value::Int4s(numbers) => write!(f, "Int4s({numbers:?})")?,
+                Value::Ints(numbers) => write!(f, "Ints({numbers:?})")?,
+                Value::Reals(numbers) => write!(f, "Reals({numbers:?})")?,
+                Value::Delayed(text) => write!(f, "Delayed({text:?})")?,
+                Value::SeqId(id) => write!(f, "SeqId({id:?})")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Value {
+    /// The member at position `index` of a SEQUENCE value, when set.
+    pub(crate) fn member(&self, index: usize) -> Option<&Value> {
+        match self {
+            Value::Sequence(members) => members
+                .iter()
+                .find(|(position, _)| usize::from(*position) == index)
+                .map(|(_, value)| value),
+            _ => None,
+        }
+    }
+
+    /// `member` taken out of the SEQUENCE value.
+    pub(crate) fn take_member(&mut self, index: usize) -> Option<Value> {
+        match self {
+            Value::Sequence(members) => members
+                .iter()
+                .position(|(position, _)| usize::from(*position) == index)
+                .map(|at| members.remove(at).1),
+            _ => None,
+        }
+    }
+
+    /// The value, moved out (`Null` in its place).
+    pub(crate) fn take(&mut self) -> Value {
+        std::mem::replace(self, Value::Null)
+    }
+
+    /// The Seq-id of a Seq-id value, moved out of it.
+    pub(crate) fn into_seq_id(mut self) -> Option<crate::seqid::ParsedSeqId> {
+        match &mut self {
+            Value::SeqId(id) => Some(std::mem::replace(
+                &mut **id,
+                crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(Vec::new())),
+            )),
+            _ => None,
+        }
+    }
+
+    /// Whether the value holds values (that may hold more).
+    fn holds_values(&self) -> bool {
+        match self {
+            Value::Sequence(members) => !members.is_empty(),
+            Value::Choice(..) => true,
+            Value::List(items) => !items.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Moves the values in this one that hold values themselves to `out` (`Null` in their place).
+    fn take_nested(&mut self, out: &mut Vec<Value>) {
+        let mut take = |value: &mut Value| {
+            if value.holds_values() {
+                out.push(value.take());
+            }
+        };
+        match self {
+            Value::Sequence(members) => members.iter_mut().for_each(|(_, value)| take(value)),
+            Value::Choice(_, value) => take(value),
+            Value::List(items) => items.iter_mut().for_each(take),
+            _ => {}
+        }
+    }
+
+    /// Sets the member at position `index` of a SEQUENCE value, in module order.
+    pub(crate) fn set_member(&mut self, index: usize, value: Value) {
+        if let Value::Sequence(members) = self {
+            let index = index as u16;
+            match members.binary_search_by_key(&index, |(position, _)| *position) {
+                Ok(at) => members[at].1 = value,
+                Err(at) => members.insert(at, (index, value)),
+            }
+        }
+    }
+}

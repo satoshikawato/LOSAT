@@ -1,0 +1,6 @@
+Error: [psiblast] Variation-ref.clinical-test is deprecated and will be ignored
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.inst.ext.map.E.data.variation.data.set.variations.E.data.note
+Bad char [0x1] in string at line 20
+n
+Error: [psiblast] Variation-ref.pub is deprecated and will be ignored
+Error: [psiblast] Variation-ref.population-data is deprecated and will be ignored

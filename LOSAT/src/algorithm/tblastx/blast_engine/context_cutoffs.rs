@@ -1,19 +1,24 @@
 //! The cutoffs of a TBLASTX query batch's contexts, set up before its subjects are searched: the
 //! check of the average subject length, the cutoff score, length adjustment and effective search
 //! space of every context, the smallest cutoff, the per-query statistics of the reports, and
-//! the Karlin block of the smallest Lambda that the linking cutoffs read.
+//! the Karlin block of the smallest Lambda that the linking cutoffs read; and the statistics each
+//! subject reads (`SubjectStatistics`): the batch's, or the subject's own where NCBI computes the
+//! statistics of each subject (`per_subject_cutoffs`, `SubjectStatistics::of_subject`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:887-999
 //! (`BLAST_GapAlignSetUp`), which calls blast_setup.c:699-850 (`BLAST_CalcEffLengths`);
 //! c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`) and
 //! :830-994 (`BlastHitSavingParametersUpdate`); c++/src/algo/blast/api/blast_results.cpp:72-115
-//! (`CBlastAncillaryData`).
+//! (`CBlastAncillaryData`); c++/src/algo/blast/core/blast_engine.c:1434-1444 (the statistics of
+//! each subject, `BLAST_OneSubjectUpdateParameters`).
 //!
 //! This module is a child of `run_impl` for the error type it keeps private
 //! (`ErrorAfterBatchReports`). Its function holds statements of `search_query_batch` moved here
 //! in their order; what it reads is a struct of references or `Copy` values, and what it makes is
-//! what `search_query_batch` then reads under the same names.
+//! what `search_query_batch` then reads under the same names. `per_subject_cutoffs` and
+//! `SubjectStatistics::of_subject` are statements of `process_subject` moved here.
 
+use super::word_finder;
 use super::{
     cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx, find_smallest_lambda_params,
     gap_trigger_raw_score, ErrorAfterBatchReports, KarlinParams, QueryContext, QueryFrame,
@@ -510,4 +515,92 @@ pub(super) struct SubjectCutoffs {
     pub(super) cutoff_score_min: i32,
     pub(super) length_adj_per_context: Vec<i64>,
     pub(super) eff_searchsp_per_context: Vec<i64>,
+}
+
+/// What the rest of `process_subject` reads of the statistics after a subject's length check: the
+/// hit-saving cutoffs (`cutoff_scores`, their minimum, the word finder's `WordFinderCx`) and the
+/// effective lengths of each context, the batch's (`context_cutoffs::context_cutoffs`, made once
+/// per batch) or, where NCBI computes the statistics of each subject, the subject's own
+/// (`context_cutoffs::subject_cutoffs`). One pointer per subject, so that the default path reads
+/// the batch's as it did before the statistics of each subject.
+pub(super) struct SubjectStatistics<'a> {
+    pub(super) cutoff_scores: &'a [i32],
+    pub(super) cutoff_score_min: i32,
+    pub(super) length_adj_per_context: &'a [i64],
+    pub(super) eff_searchsp_per_context: &'a [i64],
+    pub(super) word_finder_cx: word_finder::WordFinderCx<'a>,
+}
+
+impl<'a> SubjectStatistics<'a> {
+    /// The statistics of a subject with its own cutoffs (`own`, from `per_subject_cutoffs`):
+    /// `own`'s cutoffs, length adjustments and search spaces, and the batch's word finder values
+    /// (`self`'s) with `own`'s `cutoff_scores`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1019-1022
+    /// ```c
+    ///    if (word_params) {
+    ///       /* Update cutoff scores in initial word parameters */
+    ///       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
+    ///            subject_length, word_params);
+    /// ```
+    /// NCBI updates the word finder's cutoffs in place; the batch's stay for the other subjects
+    /// here, and the subject's word finder reads its own.
+    pub(super) fn of_subject<'s>(&self, own: &'s SubjectCutoffs) -> SubjectStatistics<'s>
+    where
+        'a: 's,
+    {
+        SubjectStatistics {
+            cutoff_scores: &own.cutoff_scores,
+            cutoff_score_min: own.cutoff_score_min,
+            length_adj_per_context: &own.length_adj_per_context,
+            eff_searchsp_per_context: &own.eff_searchsp_per_context,
+            word_finder_cx: word_finder::WordFinderCx {
+                cutoff_scores: &own.cutoff_scores,
+                ..self.word_finder_cx
+            },
+        }
+    }
+}
+
+/// The cutoffs, length adjustments and search spaces of the subject of `subject_len_nucl` bases
+/// (`subject_cutoffs`) where NCBI's preliminary search computes the statistics of each subject
+/// (`subject_option_spaces`: the preliminary stage's option spaces when
+/// `SubjectSetNumbers::per_subject`), or `None` where the subject reads the batch's. Called once
+/// per subject that passed the length check, before its frame loop; the frame loop's word finder
+/// saves an extension against the subject's cutoffs (`s_BlastAaWordFinder_TwoHit` reads
+/// `word_params->cutoffs`, which `BLAST_OneSubjectUpdateParameters` updated). An overflow of the
+/// search space is the error.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1444
+/// ```c
+///        if (db_length == 0) {
+///            /* This is not a database search, hence need to recalculate and save
+///             the effective search spaces and length adjustments for all
+///             queries based on the length of the current single subject
+///             sequence. */
+///            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+///                           seq_arg.seq->length, score_options, query_info,
+///                           sbp, hit_params, word_params,
+///                           eff_len_params)) != 0)
+///               return status;
+///       }
+/// ```
+pub(super) fn per_subject_cutoffs(
+    subject_option_spaces: Option<&[i64]>,
+    contexts_ref: &[QueryContext],
+    numbers: &SubjectSetNumbers,
+    subject_len_nucl: i64,
+    evalue_threshold: f64,
+) -> Result<Option<SubjectCutoffs>, crate::stats::setup::SearchSpaceOverflow> {
+    match subject_option_spaces {
+        None => Ok(None),
+        Some(spaces) => subject_cutoffs(
+            contexts_ref,
+            numbers,
+            spaces,
+            subject_len_nucl,
+            evalue_threshold,
+        )
+        .map(Some),
+    }
 }

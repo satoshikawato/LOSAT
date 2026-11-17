@@ -1494,6 +1494,10 @@ fn redo_window_alignment(
 ///             hsp_list->best_evalue = hsp_list->hsp_array[index]->evalue;
 ///     }
 /// ```
+///
+/// Inlined in each instance of `RedoMatch::redo_match` (psiblast's code as before the frames'
+/// instance; DECISIONS 63 S3).
+#[inline(always)]
 fn link_redone(
     redone: &mut Vec<Redone>,
     link: &RedoLink,
@@ -1700,6 +1704,10 @@ fn is_contained(in_align: &Align, alignments: &[Align], lambda: f64) -> bool {
 ///         } /* end while align != NULL */
 ///         *p_oldAlignments = newAlign;
 /// ```
+///
+/// Inlined in each instance of `RedoMatch::redo_window` (psiblast's code as before the frames'
+/// instance; DECISIONS 63 S3).
+#[inline(always)]
 fn with_distinct_ends(new_align: Align, alignments: &mut Vec<Align>, is_same_adjustment: bool) {
     let excluded = alignments.iter().any(|align| {
         align.frame == new_align.frame

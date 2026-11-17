@@ -369,7 +369,7 @@ impl TranslatedRpsSearch {
         let cbs = self.search.requested_cbs;
         let gapped = gapped_karlin(options);
         let sbp = if cbs > 0 {
-            match crate::algorithm::pssm_search::in_pssm::score_block(
+            match crate::algorithm::rps_search::redo::redo_score_block(
                 options.scoring,
                 crate::core::psi::KarlinBlk {
                     lambda: gapped.lambda,

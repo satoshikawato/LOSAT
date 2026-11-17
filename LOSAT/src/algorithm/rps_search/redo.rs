@@ -61,6 +61,16 @@ use crate::stats::KarlinParams;
 /// the redo's heaps (blast_kappa.c:3074-3076).
 const PSI_INCLUSION_ETHRESH: f64 = 0.002;
 
+/// The score block of the redo's matrix information (`RpsRedoParams::sbp`) of RPS-BLAST and
+/// RPS-TBLASTN: the matrix's frequency ratios with the search's gapped block `gapped`
+/// (`in_pssm::score_block`, psiblast's), made once per run before any batch.
+pub(crate) fn redo_score_block(
+    matrix: crate::config::ScoringMatrix,
+    gapped: crate::core::psi::KarlinBlk,
+) -> Result<PsiScoreBlk> {
+    crate::algorithm::pssm_search::in_pssm::score_block(matrix, gapped)
+}
+
 /// What the redo of every profile reads besides the traceback's values: the volume's frequency
 /// ratios, BLOSUM62's score block (the matrix information of the position-based adjustment),
 /// the `.aux` gap costs before the scale and the final X-drop in bits

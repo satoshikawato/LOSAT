@@ -232,7 +232,7 @@ fn x_cross_batches() -> bool {
             target_arch = "x86_64",
             all(target_arch = "wasm32", target_feature = "simd128")
         ))]
-        XCellTest::Cross128 { .. } => true,
+        XCellTest::Cross128 => true,
         _ => false,
     }
 }
@@ -454,9 +454,8 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
             X_RATIO_MIN.load(Relaxed).min(X_RATIO_MAX.load(Relaxed)),
             X_RATIO_MAX.load(Relaxed),
         )?;
-        // EXPERIMENT (LOSAT_X_BXCROSS): the windows tested in parts.
-        #[cfg(target_arch = "x86_64")]
-        if matches!(x_cell_mode(), XCellTest::Cross { .. }) {
+        // EXPERIMENT (LOSAT_X_BXCROSS, LOSAT_X_BXCROSS128): the windows tested in parts.
+        if x_cross_batches() {
             write!(out, " cross_splits={}", X_SPLITS.load(Relaxed))?;
         }
         writeln!(out)?;

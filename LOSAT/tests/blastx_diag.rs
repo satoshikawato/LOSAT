@@ -14,6 +14,9 @@
 //! batch (`mode=avx2-defer-masked`) when it has a value.
 //! `LOSAT_X_BXCROSSDEFER` (strict set) defers those batches' candidate calls (`mode=avx2-cross-defer`);
 //! `0` calls them at once (`mode=avx2-cross`).
+//! `LOSAT_X_BXCROSS128` (strict set) runs those batches in 128-bit vectors where the AVX2 ones do
+//! not run (WebAssembly; x86-64 with SSSE3, SSE4.1 and POPCNT but no AVX2): `mode=w128-cross`;
+//! `2` runs them in place of the AVX2 batches, which is how they run here.
 //! So the
 //! properties under test are that the report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
@@ -389,7 +392,7 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     assert_eq!(field(&none, "subjects"), 0, "{none}");
     // The default (the switch not set) acts only with LOSAT_X_BXCROSS's cell test, on every fused
     // table: it needs AVX2 and POPCNT.
-    let cross = cross_mode("").starts_with("avx2-cross");
+    let cross = crosses(cross_mode(""));
     let run = blastx(&args, &[("LOSAT_X_BXDIAGMIN", "0"), ("LOSAT_TIMING", "1")]);
     assert_eq!(run.code, Some(0), "default: {}", run.stderr);
     assert!(run.stdout == reference.stdout, "default: report differs");
@@ -443,22 +446,57 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     }
 }
 
-/// The AVX2 cell test this machine runs with LOSAT_X_BXCROSS (the default; the per-hit loop
-/// without AVX2; it also needs POPCNT, else the masked AVX2 batch runs where `LOSAT_X_BXDIAG` has a
-/// value) and LOSAT_X_BXCROSSDEFER=`defer` (`0`: the calls at once).
+/// The cell test this machine runs with LOSAT_X_BXCROSS (the default): the AVX2 batches where the
+/// CPU has AVX2 and POPCNT, with LOSAT_X_BXCROSSDEFER=`defer` (`0`: the calls at once); otherwise
+/// LOSAT_X_BXCROSS128's 128-bit batches where it has SSSE3, SSE4.1 and POPCNT; otherwise the masked
+/// AVX2 batch where it has AVX2 and `LOSAT_X_BXDIAG` has a value; the per-hit loop elsewhere.
 fn cross_mode(defer: &str) -> &'static str {
     #[cfg(target_arch = "x86_64")]
-    if std::arch::is_x86_feature_detected!("avx2") {
-        return if !std::arch::is_x86_feature_detected!("popcnt") {
-            "avx2-defer-masked"
-        } else if defer == "0" {
-            "avx2-cross"
-        } else {
-            "avx2-cross-defer"
-        };
+    {
+        let popcnt = std::arch::is_x86_feature_detected!("popcnt");
+        if std::arch::is_x86_feature_detected!("avx2") && popcnt {
+            return if defer == "0" {
+                "avx2-cross"
+            } else {
+                "avx2-cross-defer"
+            };
+        }
+        if popcnt
+            && std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+        {
+            return CROSS128;
+        }
+        if std::arch::is_x86_feature_detected!("avx2") {
+            return "avx2-defer-masked";
+        }
     }
     let _ = defer;
     "per-hit"
+}
+
+/// LOSAT_X_BXCROSS128's cell test in the timing line.
+const CROSS128: &str = "w128-cross";
+
+/// Whether `mode` (a name of [`cross_mode`]) is a cell test of batches across the cells' borders
+/// (LOSAT_X_BXCROSS's AVX2 batches or LOSAT_X_BXCROSS128's), which the default fuses with.
+fn crosses(mode: &str) -> bool {
+    mode.contains("-cross")
+}
+
+/// Whether this machine runs LOSAT_X_BXCROSS128's 128-bit batches (`LOSAT_X_BXCROSS128=2` runs
+/// them in place of the AVX2 ones): an x86-64 CPU with SSSE3, SSE4.1 and POPCNT.
+fn has_cross128() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::arch::is_x86_feature_detected!("popcnt")
+            && std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
 }
 
 /// The cell test this machine runs with LOSAT_X_BXCROSS=0 and a value of `LOSAT_X_BXDIAG`: the
@@ -518,7 +556,7 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
             let expected = cross_mode(cross_defer);
             match diag_line(&run) {
                 Some(line) => {
-                    assert!(expected.starts_with("avx2-cross"), "{what}: {line}");
+                    assert!(crosses(expected), "{what}: {line}");
                     assert!(
                         line.contains(&format!("mode={expected} ")),
                         "{what}: {line}"
@@ -534,13 +572,94 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
                         assert_eq!(field(line, "min_hits_per_cell"), 670, "{what}: {line}");
                     }
                 }
-                None => assert!(
-                    !expected.starts_with("avx2-cross"),
-                    "{what}: no timing line: {}",
-                    run.stderr
-                ),
+                None => assert!(!crosses(expected), "{what}: no timing line: {}", run.stderr),
             }
         }
+    }
+}
+
+// EXPERIMENT (LOSAT_X_BXCROSS128): LOSAT_X_BXCROSS's batches in 128-bit vectors give the reports
+// of the reference with every search, with the built-in LOSAT_X_BXDIAGMIN (670) and with every
+// table fused, and the shadow compares them with the reference for every subject. `=2` runs them in
+// place of the AVX2 batches on an x86-64 CPU with SSSE3, SSE4.1 and POPCNT, so that they run here
+// as they do in the WebAssembly build; the timing line names `w128-cross` and counts the windows
+// tested in parts. `=0` leaves the CPU's cell test (the AVX2 batches on a CPU with AVX2).
+#[test]
+fn the_128_bit_cross_cell_batches_give_the_reports_of_the_reference() {
+    if !has_cross128() {
+        eprintln!("no SSSE3, SSE4.1 and POPCNT on this CPU: the 128-bit batches are not compared");
+        return;
+    }
+    let inputs = Inputs::new();
+    for (k, args) in searches(&inputs).into_iter().enumerate() {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let reference = blastx(&args, &[OFF]);
+        assert_eq!(reference.code, Some(0), "{args:?}: {}", reference.stderr);
+        for (value, min) in [("2", ""), ("2", "0"), ("0", "0")] {
+            let run = blastx(
+                &args,
+                &[
+                    ("LOSAT_X_BXCROSS128", value),
+                    ("LOSAT_X_BXDIAGMIN", min),
+                    ("LOSAT_TIMING", "1"),
+                ],
+            );
+            let what = format!("{args:?} LOSAT_X_BXCROSS128={value} LOSAT_X_BXDIAGMIN={min}");
+            assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
+            assert!(run.stdout == reference.stdout, "{what}: report differs");
+            assert_eq!(run.messages(), reference.messages(), "{what}");
+            let expected = if value == "2" {
+                CROSS128
+            } else {
+                cross_mode("")
+            };
+            match diag_line(&run) {
+                Some(line) => {
+                    assert!(
+                        line.contains(&format!("mode={expected} ")),
+                        "{what}: {line}"
+                    );
+                    if min == "0" {
+                        assert!(field(line, "subjects") >= 150, "{what}: {line}");
+                        assert!(field(line, "candidates") > 0, "{what}: {line}");
+                        assert!(field(line, "cross_splits") > 0, "{what}: {line}");
+                    } else {
+                        assert_eq!(field(line, "min_hits_per_cell"), 670, "{what}: {line}");
+                    }
+                }
+                None => assert!(!crosses(expected), "{what}: no timing line: {}", run.stderr),
+            }
+        }
+        if k > 0 {
+            continue;
+        }
+        // The shadow: the 128-bit batches against the reference on a copy of the table.
+        let what = format!("{args:?} shadow LOSAT_X_BXCROSS128=2");
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXCROSS128", "2"),
+                ("LOSAT_X_BXDIAG", "1"),
+                ("LOSAT_X_BXDIAGSHADOW", "1"),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{what}: report differs");
+        let compared = run
+            .stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("[X_SHADOW] BXDIAG subjects_compared="))
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or_else(|| panic!("{what}: no shadow line: {}", run.stderr));
+        assert!(compared >= 150, "{what}: {compared} subjects compared");
+        let line =
+            diag_line(&run).unwrap_or_else(|| panic!("{what}: no timing line: {}", run.stderr));
+        assert!(
+            line.contains(&format!("mode={CROSS128} ")),
+            "{what}: {line}"
+        );
     }
 }
 

@@ -112,7 +112,8 @@
 //! where LOSAT_X_BXCROSS's cell test runs; the timing line then names `mode=avx2-cross-defer`.
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSS128): `XCellTest::Cross128`: LOSAT_X_BXCROSS's batches in two 128-bit
-//! vectors of four lanes, each unit's calls at once, where the AVX2 batches do not run (the
+//! vectors of four lanes, each batch's calls at once and a window with a repeated entry tested hit
+//! by hit, where the AVX2 batches do not run (the
 //! WebAssembly build; x86-64 with SSSE3, SSE4.1 and POPCNT but no AVX2); `x_seed_fused`'s module
 //! header has the form and why the calls, their order and the table are those of the AVX2 batches.
 //! A switch of the strict set (class platform): on unless it is `0`; `2` runs it in place of the

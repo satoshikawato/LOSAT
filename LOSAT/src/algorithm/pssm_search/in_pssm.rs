@@ -1027,8 +1027,7 @@ pub(crate) fn psi_search_and_object(
         )));
     }
     // A gap letter (`-` of ncbieaa, the code 0 of ncbistdaa) is a residue that NCBI's search
-    // reads (`query_residues`; NCBI BLAST+ 2.17.0 searches with it, M4a-1b probes `dash_eaa`,
-    // `r_std0`), and the record keeps it as `-`, which the search encodes as 0.
+    // reads (`query_residues`); the record keeps it as `-` (refused below where NCBI searches).
     let letters = residues.letters;
     let length = query.inst.length.map_or(-1, i64::from);
     if letters.is_empty() || letters.len() as i64 != length {
@@ -1047,6 +1046,16 @@ pub(crate) fn psi_search_and_object(
     {
         return Err(reader.refuse(
             "a PSSM query with lower-case iupacaa letters (NCBI's reports compare them as they are)",
+        ));
+    }
+    // NCBI searches the gap residue too (M4a-1c E probes `*_dash_eaa`, `*_std0*`), and its reports
+    // read it as a residue that shows as `-` (alnvec.cpp:116-121): the rows' coordinates count it,
+    // the identities count it against a gap of the subject (tabular.cpp:996-1022), and it is no
+    // end gap. LOSAT's report rows hold `-` for gaps alone, so it refuses such a query where NCBI
+    // would search it.
+    if reads_values && letters.contains(&b'-') {
+        return Err(reader.refuse(
+            "a PSSM query with the gap residue (- of ncbieaa, 0 of ncbistdaa), which NCBI's reports count as a residue,",
         ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
@@ -2610,34 +2619,30 @@ mod tests {
         );
     }
 
-    // NCBI sequtil_tables.cpp:1748-1781 (`*` is 25 and `-` the gap 0 in ncbieaa) and
-    // blast_setup_cxx.cpp:867 (the code 0 is a residue): these search (NCBI BLAST+ 2.17.0, M4a-1c E
-    // probes `*_star_eaa`, `*_dash_eaa`, `*_std0*`).
+    // NCBI sequtil_tables.cpp:1748-1781: `*` of ncbieaa is the stop residue (25), which NCBI
+    // searches (M4a-1c E probes `*_star_eaa`); the gap residue (`-`, the code 0 of ncbistdaa) is
+    // a residue too, which LOSAT refuses where NCBI searches (its reports count it as a residue).
     #[test]
-    fn a_stop_or_gap_letter_with_a_code_is_searched() {
-        for (search, letter) in [
-            (
-                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'*'))),
-                b'*',
-            ),
-            (
-                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'-'))),
-                b'-',
-            ),
-            (
-                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, 0))),
-                b'-',
-            ),
-            (
-                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 0, 0))),
-                b'-',
-            ),
+    fn a_stop_letter_is_searched_and_a_gap_residue_refused() {
+        let star = rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'*'))).unwrap();
+        assert!(star.setup_error.is_none() && star.stop_before_search(false, true).is_none());
+        assert_eq!(star.query.seq()[26], b'*');
+        for gap in [
+            rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'-'))),
+            rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, 0))),
+            rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 0, 0))),
         ] {
-            let search = search.unwrap();
-            assert!(search.setup_error.is_none() && search.stop_before_search(false, true).is_none());
-            assert!(search.query.seq().contains(&letter));
-            assert_eq!(search.query.seq().len(), 30);
+            assert!(gap.unwrap_err().to_string().contains("the gap residue"));
         }
+        // With an invalid residue too, NCBI's stop comes first.
+        let stopped = rnd_with_query(|letters, _| {
+            SeqData::Ncbieaa(put(put(letters, 26, b'-'), 3, b'#'))
+        })
+        .unwrap();
+        assert_eq!(
+            stopped.setup_error.as_deref(),
+            Some("Warning: Invalid residues found at positions 3 ")
+        );
     }
 
     // NCBI psiblast_aux_priv.cpp:466-473: a PSSM of frequency ratios only sets its query up as it

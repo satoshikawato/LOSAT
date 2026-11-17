@@ -684,16 +684,17 @@ pub(crate) fn later_requests_refusal(
 /// lookup table holds every profile of a volume and its search ignores the alias files'
 /// `FIRST_OID` and `LAST_OID`, while its formatter does not find a profile that they leave out
 /// (`Unknown`, "no longer exists in database", or a null pointer exception in `sacc` and
-/// `saccver`). The formatter looks up only the profiles it reports: the first `cut` of each
-/// query's list (the hit list size, `PruneSeqalign` with `m_HitlistSize`; outfmt 0's descriptions
-/// and alignments are within it), after outfmt 7 has counted the HSPs of the whole list. A
-/// profile left out among them is LOSAT's refusal of the batch (PD-LOSAT-NCBI-DEFECTS 1.42, the
-/// classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one text for
-/// `rpsblast` and `rpstblastn` (`program`). A profile left out past the cut (several volumes,
-/// whose merged lists are longer than the hit list size) leaves its list: nothing reads it again
-/// but its header, which NCBI's Seq-aligns read by OID (a header file that fails there is the
-/// batch's error, as NCBI's), and its HSPs, which outfmt 7's count and the prefetch's limit
-/// still count: the returned counts (by list; `None` where no list lost a profile). Nothing
+/// `saccver`). The formatter looks up only the profiles it reports: the first `cut` subjects of
+/// each query's list (the hit list size, `PruneSeqalign` with `m_HitlistSize`, which counts
+/// following profiles of one Seq-align id as one subject: `formatter_kept`; outfmt 0's
+/// descriptions and alignments are within it), after outfmt 7 has counted the HSPs of the whole
+/// list. A profile left out among them is LOSAT's refusal of the batch (PD-LOSAT-NCBI-DEFECTS
+/// 1.42, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one
+/// text for `rpsblast` and `rpstblastn` (`program`). A profile left out past the cut (several
+/// volumes, whose merged lists are longer than the hit list size) leaves its list: nothing reads
+/// it again but its header, which NCBI's Seq-aligns read by OID (a header file that fails there
+/// is the batch's error, as NCBI's), and its HSPs, which outfmt 7's count and the prefetch's
+/// limit still count: the returned counts (by list; `None` where no list lost a profile). Nothing
 /// changes where the ordinal ids are the OIDs (`SeqDb::ordinal_ids_are_oids`: no range).
 pub(crate) fn report_ordinal_ids(
     db: &SeqDb,
@@ -711,6 +712,8 @@ pub(crate) fn report_ordinal_ids(
             continue;
         };
         list.hsplist_array.truncate(list.hsplist_count);
+        let cut = formatter_kept(db, list, cut)
+            .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         let mut position = 0usize;
         let mut dropped_hsps = 0usize;
         let mut failed = None;
@@ -720,19 +723,40 @@ pub(crate) fn report_ordinal_ids(
             }
             let reported = position < cut;
             position += 1;
-            match db.included_ordinal(hsp_list.oid) {
+            // A reported profile out of the range is found where an included copy of its record
+            // holds its Seq-align id (`found_as_copy`).
+            let ordinal = match db.included_ordinal(hsp_list.oid) {
+                None if reported => match found_as_copy(db, hsp_list.oid) {
+                    Ok(Found::Copy(ordinal)) => Some(ordinal),
+                    Ok(Found::Nothing) => {
+                        failed = Some(anyhow::anyhow!(
+                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID (NCBI BLAST+ 2.17.0's report does not find it: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            hsp_list.oid
+                        ));
+                        return true;
+                    }
+                    Ok(Found::Other(other)) => {
+                        failed = Some(anyhow::anyhow!(
+                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record (the profile of OID {other}), is not supported by LOSAT's {program}",
+                            hsp_list.oid
+                        ));
+                        return true;
+                    }
+                    Err(error) => {
+                        failed = Some(crate::algorithm::common::database::database_error(
+                            error, program,
+                        ));
+                        return true;
+                    }
+                },
+                included => included,
+            };
+            match ordinal {
                 Some(ordinal) => {
                     hsp_list.oid = ordinal;
                     for hsp in &mut hsp_list.hsps {
                         hsp.s_idx = ordinal;
                     }
-                    true
-                }
-                None if reported => {
-                    failed = Some(anyhow::anyhow!(
-                        "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID (NCBI BLAST+ 2.17.0's report does not find it: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
-                        hsp_list.oid
-                    ));
                     true
                 }
                 None => {
@@ -757,6 +781,92 @@ pub(crate) fn report_ordinal_ids(
         }
     }
     Ok(unlisted)
+}
+
+/// What NCBI's reports find of a reported profile that the alias files' ranges leave out
+/// (`found_as_copy`).
+enum Found {
+    /// An included copy of its record, under this ordinal id.
+    Copy(u32),
+    /// No included profile holds its Seq-align id: NCBI writes `Unknown` or stops with a null
+    /// pointer exception.
+    Nothing,
+    /// An included profile of another record holds its Seq-align id (this OID).
+    Other(u32),
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1381-1459 (quoted
+// at `seqdb::SeqidLookup::seqid_to_oids`): the formatter's lookup of a Seq-id gives the OIDs that
+// the alias files' ranges include.
+/// What NCBI's reports find of the profile of OID `oid`, which the alias files' ranges leave out:
+/// the first included profile that holds its Seq-align id (`SeqidLookup::seqid_to_oids`), shown
+/// in its place; LOSAT writes it where that profile is a copy of its record (the same definition
+/// lines but for their taxids, the rule of `report::db_subject::joins_as_copy`): a volume given
+/// twice under two paths, one of them past the range (probe dup6 of line RG D1a-4 fix round 2:
+/// NCBI's rows of both copies, exit 0).
+fn found_as_copy(db: &SeqDb, oid: u32) -> Result<Found, crate::seqdb::SeqDbError> {
+    use crate::seqdb::SequenceHeader;
+    let SequenceHeader::Parsed(set) = db.read_header_of_oid(oid)? else {
+        return Ok(Found::Nothing);
+    };
+    let Some(id) = set.alignment_id() else {
+        return Ok(Found::Nothing);
+    };
+    let Some(&found) = db.seqid_lookup()?.seqid_to_oids(id, false)?.first() else {
+        return Ok(Found::Nothing);
+    };
+    let record = |set: &crate::seqid::DeflineSet| -> Vec<crate::seqid::BlastDefline> {
+        set.deflines
+            .iter()
+            .map(|defline| crate::seqid::BlastDefline {
+                taxid: None,
+                ..defline.clone()
+            })
+            .collect()
+    };
+    let copy = match db.read_header_of_oid(found)? {
+        SequenceHeader::Parsed(other) => record(&set) == record(&other),
+        SequenceHeader::Ordinal(_) => false,
+    };
+    Ok(match db.included_ordinal(found) {
+        Some(ordinal) if copy => Found::Copy(ordinal),
+        _ => Found::Other(found),
+    })
+}
+
+/// The number of HSP lists at the start of `list` that NCBI's formatter keeps in its cut to `cut`
+/// subjects (`PruneSeqalign`, quoted at `report_ordinal_ids`): following lists whose profiles'
+/// Seq-align ids match count as one subject, as NCBI's Seq-aligns name them (the headers read by
+/// OID, `SeqDb::read_header_of_oid`). Two volumes that hold one profile (a volume given twice
+/// under two paths) give such lists; the reports keep the same number
+/// (`common::database::joined_cut`). A list of `cut` lists or fewer is kept whole, unread.
+fn formatter_kept(
+    db: &SeqDb,
+    list: &BlastpHitList,
+    cut: usize,
+) -> Result<usize, crate::seqdb::SeqDbError> {
+    use crate::seqid::defline_set::{compare, Sic};
+    let lists = &list.hsplist_array[..list.hsplist_count.min(list.hsplist_array.len())];
+    if lists.len() <= cut {
+        return Ok(lists.len());
+    }
+    let mut previous: Option<crate::seqid::ParsedSeqId> = None;
+    let mut counted = 0usize;
+    for (kept, hsp_list) in lists.iter().enumerate() {
+        let id = match db.read_header_of_oid(hsp_list.oid)? {
+            crate::seqdb::SequenceHeader::Parsed(set) => set.alignment_id().cloned(),
+            crate::seqdb::SequenceHeader::Ordinal(_) => None,
+        };
+        let joined = matches!((&previous, &id), (Some(a), Some(b)) if compare(a, b) == Sic::Yes);
+        if !joined {
+            counted += 1;
+            if counted > cut {
+                return Ok(kept);
+            }
+        }
+        previous = id;
+    }
+    Ok(lists.len())
 }
 
 /// The consensus letters of a volume's profiles at their offsets (the traceback's letters and the

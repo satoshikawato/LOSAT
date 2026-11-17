@@ -502,7 +502,10 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`).
+    /// one by one (`shared::ParsedShown::one_by_one`). `cut`: the formatter's cut of each query's
+    /// lists to the hit list size where RPSTBLASTN merges several volumes
+    /// (`ResolvedOptions::shown_lists`; `usize::MAX` for every other search), which counts
+    /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -521,6 +524,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
+        cut: usize,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -550,6 +554,37 @@ impl ReportedSubjects {
                         database.program,
                     )?;
                 }
+            }
+        }
+        // RPSTBLASTN's merged lists of several volumes, longer than the hit list size: NCBI's
+        // formatter keeps the Seq-aligns of its first `cut` subjects, counting following ones
+        // whose Seq-ids match as one (`PruneSeqalign`, quoted at `shared::joined_cut`): a copy of
+        // one record that follows another is kept with it, as RPSBLAST's lists are
+        // (`blastp::blast_engine::database::ListedTitles::joined_cut`); two other profiles that
+        // the count reaches with matching Seq-align ids are LOSAT's refusal.
+        if reports && cut != usize::MAX {
+            for batch in batches.iter_mut() {
+                let shown = batch
+                    .queries
+                    .iter()
+                    .enumerate()
+                    .map(|(qidx, lists)| {
+                        if parsed.is_empty() || lists.len() <= cut {
+                            return Ok(cut);
+                        }
+                        shared::joined_cut(
+                            batch.query_ordinal + qidx,
+                            cut,
+                            lists.iter().map(|list| {
+                                let ordinal = u32::try_from(list.oid).ok()?;
+                                Some((ordinal, parsed.get(&list.oid)?.as_ref()))
+                            }),
+                            database.db.oid_map(),
+                            database.program,
+                        )
+                    })
+                    .collect::<Result<Vec<usize>>>()?;
+                batch.shown = shown;
             }
         }
         let taxdb_found = database.db.taxdb_found();
@@ -1350,6 +1385,7 @@ mod tests {
             search_skipped: false,
             request_space: None,
             unlisted: Vec::new(),
+            shown: Vec::new(),
         }]
     }
 
@@ -1391,6 +1427,7 @@ mod tests {
                 false,
                 false,
                 false,
+                usize::MAX,
             )
             .unwrap();
             let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -1465,6 +1502,7 @@ mod tests {
                 false,
                 false,
                 false,
+                usize::MAX,
             )
             .unwrap();
             for hsp in batches

@@ -279,9 +279,12 @@ every unit fails as NCBI's where its average subject length is below one letter 
 block (an alias file's `NSEQ` above its `LENGTH` over one volume: `BLAST engine error: The average
 subject length is too short`, exit status 3, both programs; fix round 1, review A MF5). The search
 ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table holds every profile of a volume); a hit of a
-profile that they leave out among the profiles the reports show (the first `-max_target_seqs` of a
-query's hit list) is refused where NCBI's report does not find it (`Unknown`, or a null pointer
-exception: PD-LOSAT-NCBI-DEFECTS 1.42), RPSBLAST before any output and RPSTBLASTN after the reports of
+profile that they leave out among the profiles the reports show (those of the first
+`-max_target_seqs` subjects of a query's hit list, following profiles of one Seq-id counting as one
+subject, as NCBI's formatter counts them) is written as the included copy of its record that holds
+its Seq-id where there is one (NCBI's lookup by Seq-id finds it; fix round 2), and is refused where
+NCBI's report does not find it (`Unknown`, or a null pointer exception: PD-LOSAT-NCBI-DEFECTS 1.42)
+or finds another record, RPSBLAST before any output and RPSTBLASTN after the reports of
 the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
 HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
 plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's rows) sizes the

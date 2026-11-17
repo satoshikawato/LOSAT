@@ -1423,8 +1423,9 @@ most 9 in BLOSUM62).
   warning and mode 0).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE][@ALIAS]` with the files
   `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
-  to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
-  run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
+  to that directory and `-db "NAME NAME2"` (a name `DIR/NAME` has its files inflated into the subdirectory `DIR`: a
+  copy of a volume under its own base name, line RG D1a-4 fix 2); with `@ALIAS` the alias file `rps/ALIAS.pal` is
+  copied beside them and the run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
 - Alias files (line RG, D1a-3 review 7 S1 and D1a-4), written by hand, each `TITLE t` and a `DBLIST` of `rps_mini`
   (one volume: `*rps.pal`), `rps_mini3v` (three volumes: `*rps3v.pal`) or `rps_mini3v.01 rps_mini3v.02` (two volumes:

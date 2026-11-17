@@ -859,6 +859,7 @@ impl WindowBatch {
             search_skipped: false,
             request_space: self.request_space,
             unlisted: self.unlisted,
+            shown: Vec::new(),
         }
     }
 }
@@ -925,6 +926,7 @@ fn unsearched_batch(
         search_skipped: true,
         request_space: None,
         unlisted: Vec::new(),
+        shown: Vec::new(),
     }
 }
 
@@ -1605,6 +1607,104 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(whole_dir);
+    }
+
+    // Line RG D1a-4 fix round 2: NCBI's cut of a merged list to the hit list size counts following
+    // profiles of one Seq-align id as one subject (`PruneSeqalign`; `report_ordinal_ids`'s
+    // `formatter_kept`), and its reports find a reported profile that the range leaves out by its
+    // Seq-align id among the included ones (`found_as_copy`). `-db "ex12 dup/rps_mini3v.01"`:
+    // rps_mini3v.00 (gnl|CDD|101), rps_mini3v.01 (gnl|CDD|102) and a copy of rps_mini3v.01; the
+    // alias's `LAST_OID 2` is the range of the whole -db (the copy out), `LAST_OID 1` leaves both
+    // gnl|CDD|102 out. With the cut at 1, a profile of the reported Seq-id past the cut is
+    // reported: as its included copy (NCBI's rows of both, exit 0: probe dup6), or LOSAT's refusal
+    // where no included profile holds the id (NCBI's `Unknown` or null pointer exception: probe
+    // dup4_y1); after another profile it leaves the list past the cut, its HSPs counted.
+    #[test]
+    fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
+        let (dir, _) = rps_database("rps_mini3v", &[], "dupcut");
+        std::fs::create_dir_all(dir.join("dup")).unwrap();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if name.starts_with("rps_mini3v.01.") {
+                std::fs::copy(dir.join(&name), dir.join("dup").join(&name)).unwrap();
+            }
+        }
+        let open = |last_oid: u32| {
+            std::fs::write(
+                dir.join(format!("ex{last_oid}.pal")),
+                format!("TITLE t\nDBLIST rps_mini3v.00 rps_mini3v.01\nLAST_OID {last_oid}\n"),
+            )
+            .unwrap();
+            let name = format!(
+                "{} {}",
+                dir.join(format!("ex{last_oid}")).display(),
+                dir.join("dup/rps_mini3v.01").display()
+            );
+            BlastxDatabase::open(
+                &name,
+                &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+            )
+            .unwrap()
+        };
+        let list = |oid: u32| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![hsp(1, 10, (1, 9), (1, 9))],
+            best_evalue: 0.0,
+        };
+        let hit_list = |oids: &[u32]| BlastpHitList {
+            hsplist_count: oids.len(),
+            hsplist_max: oids.len(),
+            worst_evalue: 0.0,
+            low_score: 0,
+            heapified: false,
+            hsplist_array: oids.iter().map(|&oid| list(oid)).collect(),
+            hsplist_current: 0,
+            num_hits: 0,
+        };
+        let oids = |lists: &[Option<BlastpHitList>]| -> Vec<u32> {
+            lists[0]
+                .as_ref()
+                .unwrap()
+                .hsplist_array
+                .iter()
+                .map(|l| l.oid)
+                .collect()
+        };
+        // The OIDs: the -db names in order, rps_mini3v.00, .01 and the copy.
+        let (other, twin, copy) = (0, 1, 2);
+        let database = open(2);
+        let db = database.x_seqdb();
+        assert_eq!(
+            (0..3)
+                .map(|oid| db.included_ordinal(oid))
+                .collect::<Vec<_>>(),
+            [Some(0), Some(1), None]
+        );
+        let mut joined = vec![Some(hit_list(&[twin, copy, other]))];
+        assert_eq!(
+            report_ordinal_ids(db, &mut joined, 1, PROGRAM).unwrap(),
+            None
+        );
+        assert_eq!(oids(&joined), [1, 1, 0]);
+        let mut apart = vec![Some(hit_list(&[twin, other, copy]))];
+        assert_eq!(
+            report_ordinal_ids(db, &mut apart, 1, PROGRAM).unwrap(),
+            Some(vec![1])
+        );
+        assert_eq!(oids(&apart), [1, 0]);
+        let database = open(1);
+        let db = database.x_seqdb();
+        let mut unfound = vec![Some(hit_list(&[twin, copy, other]))];
+        let error = report_ordinal_ids(db, &mut unfound, 1, PROGRAM).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!(
+                "a hit of the profile of OID {twin} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID (NCBI BLAST+ 2.17.0's report does not find it"
+            )),
+            "{error}"
+        );
+        drop(database);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     // S1 of the review of PS12s: in a batch, a query's refusal of its cutoffs comes before an

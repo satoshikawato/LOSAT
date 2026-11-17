@@ -114,6 +114,12 @@ pub struct BatchResults {
     /// (`rps_search::volumes::report_ordinal_ids`): outfmt 7's count and the prefetch's limit
     /// still count them (`BatchResults::unlisted_hsps`). Empty where none left.
     pub unlisted: Vec<usize>,
+    /// RPSTBLASTN over several volumes: the number of each query's merged lists that the
+    /// formatter's cut to the hit list size keeps, which counts following lists whose Seq-align
+    /// ids match as one subject (`database::ReportedSubjects::for_batch`,
+    /// `common::database::joined_cut`). Empty where the reports take
+    /// `ResolvedOptions::shown_lists` (`BatchResults::shown_lists`).
+    pub shown: Vec<usize>,
 }
 
 impl BatchResults {
@@ -121,6 +127,19 @@ impl BatchResults {
     /// formatter's cut (`unlisted`), 0 for every other search.
     pub fn unlisted_hsps(&self, query: usize) -> usize {
         self.unlisted.get(query).copied().unwrap_or(0)
+    }
+
+    /// The number of the query `query`'s lists that the reports write (`shown`, else
+    /// `ResolvedOptions::shown_lists`).
+    pub(crate) fn shown_lists(
+        &self,
+        query: usize,
+        options: &super::args::ResolvedOptions,
+    ) -> usize {
+        self.shown
+            .get(query)
+            .copied()
+            .unwrap_or_else(|| options.shown_lists())
     }
 }
 
@@ -1304,6 +1323,7 @@ impl PreliminarySink for Runtime<'_> {
             search_skipped: true,
             request_space: None,
             unlisted: Vec::new(),
+            shown: Vec::new(),
         });
         Ok(())
     }
@@ -2240,6 +2260,7 @@ impl PreliminarySink for Runtime<'_> {
             search_skipped: false,
             request_space: None,
             unlisted: Vec::new(),
+            shown: Vec::new(),
         });
         super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())

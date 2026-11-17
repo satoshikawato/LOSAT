@@ -568,8 +568,8 @@ pub(super) fn write_blastx_tabular(
                     .map_or(searched_length, |range| range.length());
                 let tabular_query =
                     TabularQuery::of_ids(query.believed(), local_id(query), query_length);
-                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
-                let listed = &lists[..lists.len().min(options.shown_lists())];
+                // Several volumes: the merged lists cut once per query (`BatchResults::shown_lists`).
+                let listed = &lists[..lists.len().min(batch.shown_lists(qidx, options))];
                 // The query's formatter (`TabularRows`).
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
@@ -981,36 +981,39 @@ fn write_blastx_tax_report(
         })
         .collect();
     // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
-    let tax_queries: Vec<TaxQuery<'_>> =
-        batches
-            .iter()
-            .flat_map(|batch| {
-                batch.queries.iter().enumerate().map(move |(qidx, lists)| {
-                    (batch.query_ordinal + qidx, lists, batch.search_skipped)
-                })
+    let tax_queries: Vec<TaxQuery<'_>> = batches
+        .iter()
+        .flat_map(|batch| {
+            batch.queries.iter().enumerate().map(move |(qidx, lists)| {
+                (
+                    batch.query_ordinal + qidx,
+                    &lists[..lists.len().min(batch.shown_lists(qidx, options))],
+                    batch.search_skipped,
+                )
             })
-            .zip(&titles)
-            .map(|((ordinal, lists, skipped), title)| TaxQuery {
-                title,
-                length: queries[ordinal].placement().length,
-                // A query of a batch that NCBI did not search has no Seq-align-set.
-                hsps: (!skipped).then(|| {
-                    lists[..lists.len().min(options.shown_lists())]
-                        .iter()
-                        .flat_map(|list| {
-                            list.hsps
-                                .iter()
-                                .filter(|hsp| has_seqalign(hsp, options.gapped))
-                                .map(move |hsp| TaxHsp {
-                                    subject: list.oid,
-                                    evalue: hsp.evalue,
-                                    bit_score: hsp.bit_score,
-                                })
-                        })
-                        .collect()
-                }),
-            })
-            .collect();
+        })
+        .zip(&titles)
+        .map(|((ordinal, lists, skipped), title)| TaxQuery {
+            title,
+            length: queries[ordinal].placement().length,
+            // A query of a batch that NCBI did not search has no Seq-align-set.
+            hsps: (!skipped).then(|| {
+                lists
+                    .iter()
+                    .flat_map(|list| {
+                        list.hsps
+                            .iter()
+                            .filter(|hsp| has_seqalign(hsp, options.gapped))
+                            .map(move |hsp| TaxHsp {
+                                subject: list.oid,
+                                evalue: hsp.evalue,
+                                bit_score: hsp.bit_score,
+                            })
+                    })
+                    .collect()
+            }),
+        })
+        .collect();
     let parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
         ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
         ShownSubjects::Database { reported, .. } => reported.parsed(),

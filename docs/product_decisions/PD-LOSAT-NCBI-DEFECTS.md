@@ -1341,9 +1341,15 @@ masked). Line NP item M4a-2c.
   1.37; probes p6_1v_fo22 and p6b_fo22 of line RG D1a-4). LOSAT refuses (exit 1, "a hit of the
   profile of OID N outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID ... is not
   supported by LOSAT's RPSBLAST", one text for both programs) where a query's reported profiles
-  hold such a profile: the first `-max_target_seqs` profiles of its hit list (the hit list size,
-  `PruneSeqalign` with `m_HitlistSize`, `blast_format.cpp:810-813`; outfmt 0's descriptions and
-  alignments lie within it). RPSBLAST refuses before any output (its search of every query batch
+  hold such a profile: the profiles of the first `-max_target_seqs` subjects of its hit list (the
+  hit list size, `PruneSeqalign` with `m_HitlistSize`, `blast_format.cpp:810-813`, which counts
+  following profiles of one Seq-id as one subject, as with a volume given twice under two paths:
+  fix round 2 of D1a-4; outfmt 0's descriptions and alignments lie within it). NCBI's report looks
+  a reported profile up by its Seq-id among the profiles the range includes: where an included copy
+  of its record holds it (a volume given twice under two paths, one past the range), NCBI shows that
+  copy and exits 0, and LOSAT writes the same (probe dup6 of D1a-4 fix round 2); an included profile
+  of another record that holds it is refused too ("... whose Seq-id NCBI BLAST+ 2.17.0's report
+  finds in another record ..."). RPSBLAST refuses before any output (its search of every query batch
   comes before the reports); RPSTBLASTN after the reports of the query batches before. With several
   volumes a profile outside the range past that cut of the merged lists, which no report of NCBI's
   looks up, is NCBI's run: its HSPs count in outfmt 7's `# N hits found` (and in

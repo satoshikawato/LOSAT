@@ -212,7 +212,8 @@ def is_env_token(token: str) -> bool:
 
 def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
     """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
-    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
+    the names (`-db "NAME NAME2"`; `DIR/NAME`: NAME's files inflated into the subdirectory DIR, a copy of a
+    volume under its own base name), the extensions left out (`!aux`, `!freq`), the files put in their
     place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux) and the alias file the run
     searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files, `-db ALIAS`; its
     DBLIST names them); None for another cell."""
@@ -233,6 +234,9 @@ def inflate_rps(cell: str) -> Path:
     rps_dir = TESTS / "db_search" / "rps"
     target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
+        sub, _, name = name.rpartition("/")
+        into = target / sub
+        into.mkdir(parents=True, exist_ok=True)
         sources = sorted(rps_dir.glob(f"{name}.*.gz"))
         if not sources:
             raise SystemExit(f"no files LOSAT/tests/db_search/rps/{name}.*.gz")
@@ -240,9 +244,9 @@ def inflate_rps(cell: str) -> Path:
             inflated = source.name.removesuffix(".gz")
             if inflated[len(name):] in dropped or inflated[len(name):] in replaced:
                 continue
-            (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
+            (into / inflated).write_bytes(gzip.decompress(source.read_bytes()))
         for extension, file in replaced.items():
-            (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+            (into / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
     if alias is not None:
         (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target

@@ -1559,6 +1559,7 @@ pub(super) fn reported_batch(
         asks.prefetched && !unfetched,
         asks.prefetch_runs && !unfetched,
         unfetched,
+        options.shown_lists(),
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -3361,6 +3362,7 @@ mod reader_batch_tests {
             search_skipped: skipped,
             request_space: None,
             unlisted: Vec::new(),
+            shown: Vec::new(),
         }]
     }
 

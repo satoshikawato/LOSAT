@@ -25,3 +25,9 @@
   `-export_search_strategy` and two query batches or more a database length of exactly 2^63 over
   several volumes. Each search's diagonal tables are no longer than its profiles and longest query
   need (NCBI's length or less, the same hits): no table of 4 GiB per thread near 2^30.
+- `rpstblastn` over several volumes that hold one profile (a volume given twice under two paths)
+  writes both volumes' hits of it within `-max_target_seqs`, as NCBI BLAST+ 2.17.0 and `rpsblast`
+  do: NCBI's cut counts following hits of one Seq-id as one subject (LOSAT wrote one volume's).
+  With `FIRST_OID` and `LAST_OID`, such a profile that the range leaves out but whose Seq-id an
+  included copy holds is written as that copy (NCBI's report finds it by its Seq-id), in both
+  programs; LOSAT dropped it past the cut.

@@ -281,22 +281,26 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
 
 // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
 // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-// NCBI's overlapping BLASTNA bit expression of the query letters `start..start + 4`,
-// ambiguities included, computed where it is read as NCBI does (LOSAT's memory: no array
-// of these bytes at every offset of the query).
+// NCBI's overlapping BLASTNA bit expression of four query letters, ambiguities included,
+// computed where it is read as NCBI does (LOSAT's memory: no array of these bytes at every
+// offset of the query). The four letters are read as one little-endian word `w`; each term is
+// the C term truncated to the byte: `w << 6` keeps `q[0] << 6`, `(w >> 4) & 0xF0` is
+// `q[1] << 4` (the `q[0] >> 4` it also carries is at most 15 and masked off), `(w >> 14) &
+// 0xFC` is `q[2] << 2` (`q[1] >> 6` is at most 3) and `w >> 24` is `q[3]`, for every byte
+// value. One load instead of four: the Wasm build has no addressing mode that folds the byte
+// offsets, and V8 spent a register and an add on each.
 #[inline(always)]
-pub fn query_four_base_byte(query: &[u8], start: usize) -> u8 {
-    let q: &[u8; 4] = query[start..start + 4]
-        .try_into()
-        .expect("four query letters");
-    (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3]
+pub fn query_four_base_byte(q: &[u8; 4]) -> u8 {
+    let w = u32::from_le_bytes(*q);
+    ((w << 6) | ((w >> 4) & 0xF0) | ((w >> 14) & 0xFC) | (w >> 24)) as u8
 }
 
 // The byte of `query_four_base_byte` at every starting offset (the tests' reference).
 #[cfg(test)]
 pub fn build_query_four_base_bytes(query: &[u8]) -> Vec<u8> {
-    (0..query.len().saturating_sub(3))
-        .map(|start| query_four_base_byte(query, start))
+    query
+        .windows(4)
+        .map(|q| query_four_base_byte(q.try_into().expect("four query letters")))
         .collect()
 }
 
@@ -324,6 +328,27 @@ mod four_base_tests {
                 build_query_four_base_bytes(&query),
                 vec![255; len.saturating_sub(3)]
             );
+        }
+    }
+
+    // Each term of the word form takes bits from at most two neighbouring letters, so every
+    // value of each neighbouring pair (the other two letters 0, 0xAA or 0xFF) covers every
+    // byte value, not only BLASTNA's 0..=15.
+    #[test]
+    fn every_byte_value_of_each_neighbouring_pair_matches_c_uint1_expression() {
+        for pair in 0..3 {
+            for fill in [0u8, 0xAA, 0xFF] {
+                for value in 0..65_536u32 {
+                    let mut q = [fill; 4];
+                    q[pair] = (value >> 8) as u8;
+                    q[pair + 1] = value as u8;
+                    let expected = ((u32::from(q[0]) << 6)
+                        | (u32::from(q[1]) << 4)
+                        | (u32::from(q[2]) << 2)
+                        | u32::from(q[3])) as u8;
+                    assert_eq!(build_query_four_base_bytes(&q), vec![expected]);
+                }
+            }
         }
     }
 }
@@ -802,76 +827,77 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     let len = (COMPRESSION_RATIO - (s_off % COMPRESSION_RATIO)) % COMPRESSION_RATIO;
     let q_ext = q_off + len;
     let s_ext = s_off + len;
-
-    let mut q_idx = q_ext as isize;
-    let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let left_len = q_ext.min(s_ext) / COMPRESSION_RATIO;
+    let s_byte = s_ext / COMPRESSION_RATIO;
 
     let mut score = 0i32;
     let mut sum = 0i32;
-    let mut new_q = q_idx;
 
-    // Left extension in 4-base blocks.
-    for _ in 0..left_len {
-        if q_idx < 4 || s_idx == 0 {
-            break;
-        }
+    // Left extension in 4-base blocks. NCBI's loop count `MIN(q_ext, s_ext) / 4` keeps every
+    // block inside both sequences (q >= 4 and s > 0 at each step), so the blocks are cut once:
+    // the query letters `q_ext - 4 * left_len..q_ext` and the subject bytes before `s_byte`,
+    // walked together from the right. One counter drives the loop, with no bound check or
+    // guard per block (the Wasm build kept five loop variables and spilled them).
+    let left_len = q_ext.min(s_ext) / COMPRESSION_RATIO;
+    let q_left = &q_seq[q_ext - COMPRESSION_RATIO * left_len..q_ext];
+    let s_left = &s_seq_packed[s_byte - left_len..s_byte];
+    // `new_q` of NCBI is `q_ext - 4 * left_blocks`.
+    let mut left_blocks = 0usize;
+    for (block, (q4, &s_packed)) in q_left
+        .as_chunks::<COMPRESSION_RATIO>()
+        .0
+        .iter()
+        .zip(s_left)
+        .rev()
+        .enumerate()
+    {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:292-304
         // ```c
         // Uint1 s_byte = s[-1];
         // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
         // ```
-        // SAFETY: q_idx >= 4 and s_idx > 0 are enforced by the loop guard.
-        let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
-        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
-        // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-        let q_byte = query_four_base_byte(q_seq, (q_idx - 4) as usize);
-        sum += score_table[(q_byte ^ s_byte) as usize];
+        sum += score_table[(query_four_base_byte(q4) ^ s_packed) as usize];
         if sum > 0 {
-            new_q = q_idx - 4;
+            left_blocks = block + 1;
             score += sum;
             sum = 0;
         }
         if sum < x {
             break;
         }
-        q_idx -= 4;
-        s_idx -= 1;
     }
 
-    let q_start = new_q.max(0) as usize;
+    let q_start = q_ext - COMPRESSION_RATIO * left_blocks;
     let s_start = s_ext - (q_ext - q_start);
 
-    // Right extension in 4-base blocks.
-    let mut q_idx = q_ext as isize;
-    let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
+    // Right extension in 4-base blocks, cut the same way: `MIN(query->length - q_ext,
+    // subject->length - s_ext) / 4` blocks from `q_ext` and `s_byte`.
     let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
+    let q_right = &q_seq[q_ext..q_ext + COMPRESSION_RATIO * right_len];
+    let s_right = &s_seq_packed[s_byte..s_byte + right_len];
     sum = 0;
-    new_q = q_idx;
-
-    for _ in 0..right_len {
+    // `new_q` of NCBI is `q_ext` while no block is kept, else `q_ext + 4 * right_blocks - 1`.
+    let mut right_blocks = 0usize;
+    for (block, (q4, &s_packed)) in q_right
+        .as_chunks::<COMPRESSION_RATIO>()
+        .0
+        .iter()
+        .zip(s_right)
+        .enumerate()
+    {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:322-334
         // ```c
         // Uint1 s_byte = s[0];
         // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
         // ```
-        // SAFETY: q_idx + 3 and s_idx stay within bounds by the loop length
-        // derived from query/subject lengths (NCBI uses the same limits).
-        let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
-        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
-        // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-        let q_byte = query_four_base_byte(q_seq, q_idx as usize);
-        sum += score_table[(q_byte ^ s_byte) as usize];
+        sum += score_table[(query_four_base_byte(q4) ^ s_packed) as usize];
         if sum > 0 {
-            new_q = q_idx + 3;
+            right_blocks = block + 1;
             score += sum;
             sum = 0;
         }
         if sum < x {
             break;
         }
-        q_idx += 4;
-        s_idx += 1;
     }
 
     if score >= reduced_cutoff {
@@ -886,13 +912,14 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
         );
     }
 
-    let s_match_len = s_match_end.saturating_sub(s_start);
-    let right_len = if new_q >= q_start as isize {
-        (new_q - q_start as isize + 1) as usize
+    let new_q = if right_blocks == 0 {
+        q_ext
     } else {
-        0
+        q_ext + COMPRESSION_RATIO * right_blocks - 1
     };
-    let length = s_match_len.max(right_len);
+    let s_match_len = s_match_end.saturating_sub(s_start);
+    // `new_q >= q_ext >= q_start`, so NCBI's `new_q - q_start + 1` is never below 1.
+    let length = s_match_len.max(new_q - q_start + 1);
 
     UngappedData {
         q_start,

@@ -54,6 +54,34 @@ pub(crate) fn read_failure<F: RunFailure>(error: std::io::Error, program: &str) 
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:44-49
+// ```c++
+//     if( oid_ < seqdb_->GetNumOIDs() ) {
+//         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
+// ```
+// `GetBioseq` posts the taxonomy database's texts (`ERR_POST`, severity Error, no prefix in
+// dustmasker and segmasker) while it reads a sequence, before the writer prints it; `cerr` is tied
+// to `cout`, so each text comes after the output written so far, and on a closed pipe SIGPIPE
+// ends NCBI's process before it.
+/// Posts `texts`, the taxonomy database's texts of reading a database sequence
+/// (`bdb_reader::BdbRecord::texts`), before the sequence is written: for each the output `out`
+/// is flushed (a closed pipe ends the run there, without the text), then `Error: <text>` goes to
+/// the diagnostics (`-logfile`).
+pub(crate) fn post_read_texts<F: RunFailure>(
+    texts: &[String],
+    out: &mut Ostream<'_>,
+    diag: &mut Diag,
+) -> Result<(), F> {
+    for text in texts {
+        let _ = out.flush();
+        if out.closed() {
+            return Err(F::closed_pipe());
+        }
+        diag.err_post(text);
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-353
 // ```c++
 // void CObjectOStream::Close(void)

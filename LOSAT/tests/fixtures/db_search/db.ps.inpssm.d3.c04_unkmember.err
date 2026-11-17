@@ -1,0 +1,2 @@
+BLAST query/options error: Unrecognized format for PSSM in tests/fixtures/pssm/d3a_c04_unkmember.asn (must be PssmWithParameters)
+Please refer to the BLAST+ user manual.

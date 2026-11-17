@@ -111,6 +111,24 @@ FASTA files:
   (`gen_sets.py 11 30`), whose HSPs of length 0 with `-strand minus` make segments of length 0 of a query row,
   where NCBI's `FillUnalignedRegions` frees one that it still reads.
 
+- The database `x2d_a0m` (rows `db.x2d.*`, line RG item X2d; title `x2d a0m subjects`, `-blastdb_version 4`) is the
+  two subjects `LOSAT/tests/fasta/outfmt0/x2d_a0m_s.fna`: `x2d_a0_r0`, whose frame +1 ends with the word W V K and
+  two letters, and `x2d_motif`, a match of the PSSM `LOSAT/tests/fixtures/pssm/x2d_d50.asn.gz`'s rows 18 to 29 (rows from 0).
+  That PSSM scores its `-` column 50 at rows 13 to 15, so with `-window_size 0 -threshold 1` the one-hit alignment
+  of length -1 on that word gets its gapped start on frame +1's NULLB; `x2d_b1m_s.fna` there is the same with
+  `x2d_b1_r0` (the word and one letter: the start one past the NULLB). Made by the line's `gen_x2d.py` (the
+  PSSM's rows of -6 but row 9 at -61, W +60 at row 10, V -60, K +1, S +4 at row 14, the motif MHYFREDQILTA at
+  +25; subjects of random codons without another TGG or any CCA, so that no other frame holds a W).
+
+- The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
+  `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
+  whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's
+  frames for its traceback only from 12 bases (blast_hits.c:1161-1163); with `-window_size 0` the one-hit HSP on `w11`
+  reaches the traceback, which reads the translation never made (NCBI crashes, LOSAT refuses). `xs_*_s.fna` there:
+  the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
+  (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
+  `w11` followed by 21 A, searched in `-subject_loc` 1-11 and 1-12 (NCBI measures the range).
+
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
   one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)
@@ -691,6 +709,32 @@ The rows `db.t7.b.*`, `db.t7.c.*`, `db.t7.p.*` and `db.t7.j.*` (the T7 fix of th
 `t7/ps9gb` (`lcl|Subject_9`, then `gb|AB000001.1|`) and `t7/ngbs9`, `t7/pgbs9` (the other order), each with an empty
 title and the taxid 100009 of `../seqdb/taxdb/t5`, written by NCBI's `makeblastdb -parse_seqids -blastdb_version 5
 -taxid_map` 2.17.0 from the letters of `t7/bg.fna` and `t7/bg.faa`.
+
+A damaged taxonomy database in dustmasker, segmasker and blastdbcmd (line RG item T5b): `t5b/make_t5b.py` (run from
+`LOSAT/` with the directory of NCBI's makeblastdb) writes the version 5 databases `t5b/nm`, `t5b/pm` (volume 1) and
+`t5b/nmb`, `t5b/pmb` (volume 2) with `-parse_seqids` and a `-taxid_map` (the letters of `ids/ndup.fna` and
+`ids/pdup.faa`), the alias files `t5b/nmv`, `t5b/pmv` over both, and `t5b/batch.txt` (the ids with taxid 99990).
+Volume 1: two titled sequences without a taxid, titled and untitled 9606, untitled 99990, titled 150 (the slot of
+99990 in NCBI's 256-slot taxonomy cache of a volume), titled 99990, one of two lines 99990 and 150, untitled 77777;
+volume 2: untitled 99990, titled 9606. With `../seqdb/taxdb/<variant>` on the search path they serve the rows
+`db_t5b_*` of `../dustmasker` and `../segmasker` (`-conffile conf/t5b_<variant>.ini`), the blastdbcmd cases
+`T5B101`-`T5B504` (`../blastdbcmd_discovery.rs`) and `../taxdb_tool_texts.rs` (the merged streams, `-logfile`, and
+the runs on `btd_empty` where NCBI crashes, which LOSAT refuses). `make_t5b.py --taxdb` (no NCBI program) writes the
+taxonomy databases of fix 2, `t5b/taxdb/kingdom_past_page` and `t5b/taxdb/names_past_page`: the `taxdb.btd` of
+`../seqdb/taxdb/good` (266 bytes) with an index whose record of 9606 reaches past NCBI's mapping of the file (the end
+of its 4,096-byte page), after its third tab (68..5,000: its names inside the mapping, its kingdom not) or wholly
+(4,096..5,000). NCBI reads memory past its mapping there; with them on the search path the databases serve the rows
+`db_t5b_*_past_page_*` of the maskers, the blastdbcmd cases `T5B601`-`T5B608`, the rows `db.t5b.*` of
+`../db_search_manifest/blastp.tsv` and `blastn.tsv`, and the refusals of `../taxdb_tool_texts.rs` (a name written from
+past the mapping). Fix 3 adds `t5b/taxdb/zero_kingdom_past_page` (an entry of taxid 0 whose record runs past the
+mapping after its third tab: the blastdbcmd cases `T5B609`-`T5B610`, `-tax_info` writes `N/A` for taxid 0) and
+`t5b/taxdb/dup_last_btd_empty` (an empty `taxdb.btd` with good's index and its last taxid again after it: the search
+for that taxid reads a record, so no lookup writes the offset error, and NCBI faults at the first lookup that reads a
+record; the rows `db.t5b.de.*` of the six programs, LOSAT's refusals). The rows `db.t5b.ldo.*` of the six programs
+(merge 2 with line DBID loadord) put `../seqdb/taxdb/btd_empty`, `t5b/taxdb/names_past_page` and
+`t5b/taxdb/dup_last_btd_empty` on the search path of loadord's batch whose prefetch NCBI stops at a Seq-id lookup
+(`multidb/ldl` or `ldb` with `ldp`, and their nucleotide copies): the loads before the stop write the offset error,
+nothing, or make NCBI fault (LOSAT's refusal), then NCBI's error.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
@@ -1421,8 +1465,21 @@ most 9 in BLOSUM62).
   volume (the merge, the per-volume hit list size, outfmt 7's `# N hits found` before the cut, volume 0's K). A row
   `rps-gz:rps_mini3v!01.freq` leaves one volume's `.freq` out (`!00.freq`: the first, which NCBI answers with its
   warning and mode 0).
+- `rps_wide` and `rps_wide_ug.loo.gz` (version 5, PS12m): one profile of 133,000 columns (`gnl|CDD|901`: the first
+  fragment of `rps_mini`, 190 columns, tiled 700 times by `rps/build_wide.py tile`), made by makeprofiledb with
+  `-threshold 20 -force`, so that its table holds the nine words that match exactly (700 hits each, one per tile) and
+  the volume has 65 buckets of 2,048 rows: two groups of the scan of `losat rpsblast` and `rpstblastn` (the first
+  of 64 buckets, `RPS_GROUP_BUCKETS`, the second of one bucket, rows 131,072 to 133,000), and each cell's hits lie in both. Its `.freq` is left out (rows with `-comp_based_stats 0`
+  only) and `.rps.gz` is 113 KB (a 15 MB file of one tile's rows repeated). `rps_wide_ug.loo.gz` is its `.loo` with the
+  hits of the nine cells not in ascending order (reversed, rotated by a third, first and last swapped; `build_wide.py
+  ungroup`), which makeprofiledb never writes: rows `db.rps.ungrouped.6` and `db.rpstbn.ungrouped.6` put it in place
+  of `rps_wide.loo` (`rps-gz:rps_wide!loo=rps_wide_ug.loo.gz`), `db.rps.wide.6` and `db.rpstbn.wide.6` search the
+  table as it is; NCBI's bytes are the same for both (the order of a cell is invisible to its scan), LOSAT regroups
+  the cells when it opens the volume. Queries `tests/fasta/rps/wide.faa` (the 190 residues of the fragment, which hit
+  each tile) and `wide.fna` (their back-translation, `build_nq.py`, seed 21).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE][@ALIAS]` with the files
-  `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
+  `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place, inflated when `FILE`
+  ends in `.gz`), `BLASTDB` set
   to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
   run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).

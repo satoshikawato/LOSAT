@@ -286,7 +286,7 @@ pub(super) struct XmlDocument<'a> {
 /// ```
 /// The BLAST XML, XML2 and JSON branches of `CBlastFormat::x_PrintStructuredReport`.
 pub(super) fn write_structured_xml(
-    document: XmlDocument<'_>,
+    structured: XmlDocument<'_>,
     report: &BlastnReportInputs<'_>,
     hit_lists: &[Option<BlastnHitList>],
     query_lengths: &[usize],
@@ -295,13 +295,13 @@ pub(super) fn write_structured_xml(
     writer: &mut crate::cli::NcbiOstream<'_>,
     format_warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
-    // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
+    // The XML2 / JSON documents of outfmt 13 to 16 take the path of outfmt 5: the same
     // per-query records, written by another writer.
     let XmlDocument {
         kind: xml2_kind,
         only_xml2: xml_only_xml2,
         side_sink,
-    } = document;
+    } = structured;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
     // ```c++
     //     if (m_FormatType == CFormattingArgs::eAsnText

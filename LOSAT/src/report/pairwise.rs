@@ -2078,78 +2078,7 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:73-111
-// ```c
-// if (m_Program == "psiblast" || m_Program == "blastp") {
-//     CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
-// }
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/version.cpp:46-69
-// ```c
-// "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Schaffer, ..."
-// "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, ..."
-// ```
-fn write_blastp_pairwise_intro<W: Write>(
-    writer: &mut W,
-    version: &str,
-    program: &str,
-) -> io::Result<()> {
-    if program == "psiblast" {
-        return write_psiblast_pairwise_intro(writer, version);
-    }
-    if program == "rpsblast" {
-        return write_rpsblast_pairwise_intro(writer, version);
-    }
-    writeln!(writer, "BLASTP {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference for composition-based statistics: Alejandro A. Schaffer,"
-    )?;
-    writeln!(
-        writer,
-        "L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri"
-    )?;
-    writeln!(
-        writer,
-        "I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),"
-    )?;
-    writeln!(
-        writer,
-        "\"Improving the accuracy of PSI-BLAST protein database searches with"
-    )?;
-    writeln!(
-        writer,
-        "composition-based statistics and other refinements\", Nucleic Acids"
-    )?;
-    writeln!(writer, "Res. 29:2994-3005.")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:386-405
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-395
 // ```c++
 //       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
 //                                               m_Outfile);
@@ -2160,153 +2089,31 @@ fn write_blastp_pairwise_intro<W: Write>(
 //     }
 //
 //     m_Outfile << NcbiEndl << NcbiEndl;
-//     ...
-//     else
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                                           m_Outfile);
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426 (quoted below:
-// the references of compositional matrix adjustment and of composition-based statistics are
-// psiblast's, deltablast's and blastp's only)
-/// The prolog of rpsblast's pairwise report: the program line and the Gapped BLAST reference
-/// only.
-fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
-    writeln!(writer, "RPSBLAST {}", version)?;
+/// The prolog of blastp's, psiblast's and rpsblast's pairwise reports before the database: the
+/// version line (`reference::write_version_line`), two newlines and the references of
+/// `PrintProlog` (`reference::write_prolog_references`: the Gapped BLAST reference, psiblast's
+/// compositionally adjusted matrices and the composition-based statistics of psiblast and
+/// blastp). `program` is `psiblast`, `rpsblast`, or blastp's for any other.
+fn write_blastp_pairwise_intro<W: Write>(
+    writer: &mut W,
+    version: &str,
+    program: &str,
+) -> io::Result<()> {
+    let program = match program {
+        "psiblast" | "rpsblast" => program,
+        _ => "blastp",
+    };
+    super::reference::write_version_line(writer, false, program, version)?;
     writeln!(writer)?;
     writeln!(writer)?;
-    writeln!(
+    super::reference::write_prolog_references(
         writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426
-// ```c++
-//     if (m_Program == "psiblast" || m_Program == "deltablast") {
-//         m_Outfile << "\n";
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                               m_Outfile, CReference::eCompAdjustedMatrices);
-//     }
-//     if (m_Program == "psiblast" || m_Program == "blastp") {
-//         m_Outfile << "\n";
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                               m_Outfile, CReference::eCompBasedStats,
-//                               (bool)(m_Program == "psiblast"));
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:81-88
-// ```c++
-//     string reference("Reference");
-//     if (pub == blast::CReference::eCompAdjustedMatrices) {
-//         reference += " for compositional score matrix adjustment";
-//     } else if (pub == blast::CReference::eCompBasedStats) {
-//         reference += " for composition-based statistics";
-//         if (is_psiblast) {
-//             reference += " starting in round 2";
-//         }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/version.cpp:62-72
-// ```c
-//     // eCompBasedStats
-//     "Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, \
-// John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul \
-// (2001), \"Improving the accuracy of PSI-BLAST protein database searches \
-// with composition-based statistics and other refinements\", Nucleic Acids \
-// Res. 29:2994-3005.",
-//     // eCompAdjustedMatrices
-//     "Stephen F. Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala, \
-// Aleksandr Morgulis, Alejandro A. Sch&auml;ffer, and Yi-Kuo Yu (2005) \"Protein \
-// database searches using compositionally adjusted substitution matrices\", \
-// FEBS J. 272:5101-5109.",
-// ```
-/// psiblast's outfmt 0 intro: the program, the gapped BLAST reference, the reference of the
-/// compositionally adjusted matrices and the reference of composition-based statistics "starting
-/// in round 2", each wrapped at 68 columns (`x_WrapOutputLine`) as NCBI writes them.
-fn write_psiblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
-    writeln!(writer, "PSIBLAST {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference for compositional score matrix adjustment: Stephen F."
-    )?;
-    writeln!(
-        writer,
-        "Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,"
-    )?;
-    writeln!(
-        writer,
-        "Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)"
-    )?;
-    writeln!(
-        writer,
-        "\"Protein database searches using compositionally adjusted"
-    )?;
-    writeln!(writer, "substitution matrices\", FEBS J. 272:5101-5109.")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference for composition-based statistics starting in round 2:"
-    )?;
-    writeln!(
-        writer,
-        "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei"
-    )?;
-    writeln!(
-        writer,
-        "Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and"
-    )?;
-    writeln!(
-        writer,
-        "Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST"
-    )?;
-    writeln!(
-        writer,
-        "protein database searches with composition-based statistics and"
-    )?;
-    writeln!(
-        writer,
-        "other refinements\", Nucleic Acids Res. 29:2994-3005."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        program,
+        false,
+    )
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:125-138
@@ -2333,7 +2140,7 @@ fn write_psiblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io:
 // `NStr::Wrap` measures the `std::string` in bytes, so a line can end inside a UTF-8
 // sequence (`\xe6\xbc` and `\xa2` on two lines). Each line and its newline are NCBI's
 // insertions (`cli::insert`).
-fn write_flatfile_wrapped<W: Write + ?Sized>(
+pub(crate) fn write_flatfile_wrapped<W: Write + ?Sized>(
     writer: &mut W,
     text: &[u8],
     width: usize,
@@ -4343,31 +4150,20 @@ fn write_blastn_description_table<W: Write>(
 //         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
 //                                           m_Outfile, CReference::eMegaBlast);
 // ```
-// NCBI reference: c++/src/algo/blast/api/version.cpp:58-61
-// ```c++
-//     // eMegaBlast
-//     "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \
-// \"A greedy algorithm for aligning DNA sequences\", \
-// J Comput Biol 2000; 7(1-2):203-14.",
-// ```
-// The reference is printed after "Reference: " and wrapped at 68 columns
-// (blastfmtutil.cpp:116-121); the layout is that of `write_translated_pairwise_intro`.
+// The prolog of a megablast search: the reference is the megablast one
+// (`reference::write_prolog_references`); the layout is that of
+// `write_translated_pairwise_intro`.
 fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
-    writeln!(writer, "BLASTN {version}")?;
+    super::reference::write_version_line(writer, false, "blastn", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
-    writeln!(
+    super::reference::write_prolog_references(
         writer,
-        "Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb"
-    )?;
-    writeln!(
-        writer,
-        "Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J"
-    )?;
-    writeln!(writer, "Comput Biol 2000; 7(1-2):203-14.")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        "blastn",
+        true,
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
@@ -7088,7 +6884,7 @@ fn write_translated_pairwise_intro(
     //         out << BlastGetVersion(program) << "\n";
     // }
     // ```
-    writeln!(writer, "{} {}", program, version)?;
+    super::reference::write_version_line(writer, false, program, version)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
     // ```c++
     //     m_Outfile << NcbiEndl << NcbiEndl;
@@ -7101,26 +6897,13 @@ fn write_translated_pairwise_intro(
     //     m_Outfile << NcbiEndl << NcbiEndl;
     // ```
     writer.flush()?;
-    writeln!(
+    super::reference::write_prolog_references(
         writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        program,
+        false,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:275-282

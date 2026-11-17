@@ -800,9 +800,14 @@ struct XPairGroup {
 /// two compressed letters (below alphabet^2), in groups of 16 (`XPairGroup`), made in order as they
 /// are first read: the pairs a node reaches are a prefix of the row (`XWords::neighbors_paired`),
 /// and most nodes read the first group only.
-struct XPairRow {
+/// The row holds what its merge reads (`alphabet`, and `info`'s sorted rows): `make` and `emit`
+/// take no table, so nothing of the table is loaded on `emit`'s path (with the table as an
+/// argument, the link-time optimizer moved `make`'s loads of its fields into `emit`'s loop).
+struct XPairRow<'a> {
     a: u8,
     b: u8,
+    alphabet: u8,
+    info: &'a CompressedNeighborInfo,
     groups: [std::sync::OnceLock<XPairGroup>; X_PAIR_GROUPS],
     /// The merge of `XPairRow::make` after the groups made (`next`, see there; `made` groups).
     merge: Mutex<XPairMerge>,
@@ -824,7 +829,7 @@ fn x_pair_key(sum: i32, i: usize) -> i32 {
     (sum << 4) | (X_PAIR_ALPHABET - i) as i32
 }
 
-impl XPairRow {
+impl XPairRow<'_> {
     /// Group `g` (and the groups before it that are not made yet): the merge takes the row's pairs in
     /// order from the two sorted rows (the rows i of the pairs (i, j), j ascending), continuing from
     /// the last group made. `next[i]` is the rank j of row i's next pair. Row i's next pair is the
@@ -837,13 +842,15 @@ impl XPairRow {
     /// at a time (`merge`); a group is read only once it is set.
     #[cold]
     #[inline(never)]
-    fn make(&self, table: &XPairTable, g: usize) -> &XPairGroup {
+    fn make(&self, g: usize) -> &XPairGroup {
         let mut merge = self.merge.lock().unwrap_or_else(PoisonError::into_inner);
         let merge = &mut *merge;
-        let alphabet = table.alphabet;
+        // Read once: the row's other fields share it with the merge's (a `Mutex`) and groups.
+        let (info, alphabet) = (self.info, usize::from(self.alphabet));
         let (a, b) = (usize::from(self.a), usize::from(self.b));
-        let row_a = &table.matrix_sorted[a][..alphabet];
-        let row_b = &table.matrix_sorted[b][..alphabet];
+        let row_a = &info.matrix_sorted[a][..alphabet];
+        let row_b = &info.matrix_sorted[b][..alphabet];
+        let (char_a, char_b) = (&info.matrix_sorted_char[a], &info.matrix_sorted_char[b]);
         let made = merge.made;
         if made == 0 {
             // Every sum of the row lies between its first and last pair's (the rows are sorted):
@@ -881,8 +888,7 @@ impl XPairRow {
                     merge.keys[i + 1] = x_pair_key(row_a[i + 1] + row_b[j], i + 1);
                 }
                 group.sums[slot] = (key >> 4) as i16;
-                group.codes[slot] = table.matrix_sorted_char[a][i]
-                    + alphabet as u8 * table.matrix_sorted_char[b][j];
+                group.codes[slot] = char_a[i] + alphabet as u8 * char_b[j];
             }
             let at = usize::from(merge.made);
             assert!(
@@ -901,7 +907,7 @@ impl XPairRow {
     /// all and no slot past them. A group at a time, without a branch inside a group; the last
     /// group of an alphabet's pairs is not full, so the loop ends there.
     #[inline(always)]
-    fn emit(&self, table: &XPairTable, key: i32, partial: u32, scale: u32, sink: &mut impl XSink) {
+    fn emit(&self, key: i32, partial: u32, scale: u32, sink: &mut impl XSink) {
         if key > i32::from(i16::MAX) {
             return;
         }
@@ -909,7 +915,7 @@ impl XPairRow {
         for (g, group) in self.groups.iter().enumerate() {
             let group = match group.get() {
                 Some(group) => group,
-                None => self.make(table, g),
+                None => self.make(g),
             };
             let reached: usize = group.sums.iter().map(|&sum| usize::from(sum >= key)).sum();
             sink.many_coded(partial, scale, &group.codes[..reached]);
@@ -922,29 +928,30 @@ impl XPairRow {
 
 // No NCBI counterpart: the pairs of letters of `add_word_hits`' two innermost loops (`XWords`),
 // for one compressed matrix; it changes no value NCBI computes.
-/// The rows (`XPairRow`) of every pair of query letters for a compressed matrix (`alphabet`,
-/// `matrix_sorted` and `matrix_sorted_char` of its `CompressedNeighborInfo`), made for each build
-/// (`XWords::new`) and freed with it, each row made when first read (`XPairTable::row`, about 820
-/// bytes, its groups as they are read): a build reads the rows of the letter pairs of its query
-/// words, at most the 23 x 23 pairs of the letters inside the 15-letter alphabet (0.40 MiB), and
-/// 12.5 KiB for the table's `OnceLock`s. A build ends before its search scans, which reuses the
-/// memory.
-struct XPairTable {
+/// The rows (`XPairRow`) of every pair of query letters for a compressed matrix (`alphabet`, and
+/// `matrix_sorted` and `matrix_sorted_char` of its `CompressedNeighborInfo`, which the build's
+/// `XWords` reads too), made for each build (`XWords::new`) and freed with it, each row made when
+/// first read (`XPairTable::row`, about 880 bytes on x86-64, its groups as they are read): a build
+/// reads the rows of the letter pairs of its query words, at most the 23 x 23 pairs of the letters
+/// inside the 15-letter alphabet (0.44 MiB), and 12.25 KiB for the table's `OnceLock`s. A build
+/// ends before its search scans, which reuses the memory.
+struct XPairTable<'a> {
     alphabet: usize,
-    matrix_sorted: [[i32; BLASTAA_SIZE]; BLASTAA_SIZE],
-    matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
-    rows: Vec<std::sync::OnceLock<Box<XPairRow>>>,
+    info: &'a CompressedNeighborInfo,
+    rows: Vec<std::sync::OnceLock<Box<XPairRow<'a>>>>,
 }
 
-impl XPairTable {
+impl<'a> XPairTable<'a> {
     /// The row of query letters (a, b).
     #[inline(always)]
-    fn row(&self, a: usize, b: usize) -> &XPairRow {
+    fn row(&self, a: usize, b: usize) -> &XPairRow<'a> {
         self.rows[a * BLASTAA_SIZE + b].get_or_init(|| {
             X_PAIR_ROWS.fetch_add(1, Ordering::Relaxed);
             Box::new(XPairRow {
                 a: a as u8,
                 b: b as u8,
+                alphabet: self.alphabet as u8,
+                info: self.info,
                 groups: [const { std::sync::OnceLock::new() }; X_PAIR_GROUPS],
                 merge: Mutex::new(XPairMerge {
                     next: [0; X_PAIR_ALPHABET],
@@ -982,7 +989,7 @@ pub fn x_clutpairs_print_summary() {
 /// Every sum of two letters that `XWords` reads (letters inside the compressed alphabet) lies in
 /// (i16::MIN, i16::MAX] for every matrix of NCBI's (test `pair_tables_hold_every_matrix`): checked
 /// here.
-fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> XPairTable {
+fn x_pair_table<'a>(header: &XHeader, info: &'a CompressedNeighborInfo) -> XPairTable<'a> {
     let alphabet = header.alphabet;
     // A row's groups, and a code below alphabet^2 (one byte).
     assert!(
@@ -1005,8 +1012,7 @@ fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> XPairTable {
     X_PAIR_TABLES.fetch_add(1, Ordering::Relaxed);
     XPairTable {
         alphabet,
-        matrix_sorted: info.matrix_sorted,
-        matrix_sorted_char: info.matrix_sorted_char,
+        info,
         rows: (0..BLASTAA_SIZE * BLASTAA_SIZE)
             .map(|_| std::sync::OnceLock::new())
             .collect(),
@@ -1066,7 +1072,8 @@ struct XWords<'a> {
     /// EXPERIMENT (LOSAT_X_CLUTPAIRS): the pair table of the matrix (`XPairTable`), from which
     /// `neighbors_paired` and `neighbors_below_last_paired` take the cells of the two innermost
     /// positions; `None` with the switch off (`neighbors`, `neighbors_below_last`).
-    pairs: Option<XPairTable>,
+    /// Boxed: `XWords`' other fields keep the places they have without it.
+    pairs: Option<Box<XPairTable<'a>>>,
 }
 
 // No NCBI counterpart: the order of the build's work (item SC9i of line NP).
@@ -1160,7 +1167,7 @@ impl<'a> XWords<'a> {
             power,
             last,
             below_last,
-            pairs: pairs.then(|| x_pair_table(header, info)),
+            pairs: pairs.then(|| Box::new(x_pair_table(header, info))),
         }
     }
 
@@ -1234,7 +1241,7 @@ impl<'a> XWords<'a> {
                 // The row of the query letters at the last two positions, read once for the word.
                 let last = self.length_of::<Q>() - 1;
                 let row = pairs.row(word[last - 1] as usize, word[last] as usize);
-                self.neighbors_paired(pairs, row, query_word, score, 0, 0, sink);
+                self.neighbors_paired(row, query_word, score, 0, 0, sink);
             }
             None => self.neighbors(query_word, score, 0, 0, sink),
         }
@@ -1481,10 +1488,7 @@ impl<'a> XWords<'a> {
         // positions of `neighbors_below_last` (w - 3, w - 2), read once for the word.
         let row = self.pairs.as_ref().map(|pairs| {
             let word = query_word.letters();
-            (
-                pairs,
-                pairs.row(word[last - 2] as usize, word[last - 1] as usize),
-            )
+            pairs.row(word[last - 2] as usize, word[last - 1] as usize)
         });
         for letter in letters.clone() {
             let letter_score = self.matrix[last_char][letter as usize];
@@ -1493,8 +1497,7 @@ impl<'a> XWords<'a> {
             }
             let partial = (letter - letters.start) * self.power[last];
             match row {
-                Some((pairs, row)) => self.neighbors_below_last_paired(
-                    pairs,
+                Some(row) => self.neighbors_below_last_paired(
                     row,
                     query_word,
                     score + letter_score,
@@ -1609,7 +1612,6 @@ impl<'a> XWords<'a> {
     /// not change the table (`for_each_word_in`).
     fn neighbors_paired<Q: XQueryWord + ?Sized>(
         &self,
-        pairs: &XPairTable,
         row: &XPairRow,
         word: &Q,
         mut score: i32,
@@ -1627,7 +1629,7 @@ impl<'a> XWords<'a> {
         if current_pos + 2 == self.length_of::<Q>() {
             let last_char = query_word[current_pos + 1] as usize;
             let key = threshold.saturating_sub(score - self.info.row_max[last_char]);
-            row.emit(pairs, key, partial, scale, sink);
+            row.emit(key, partial, scale, sink);
             return;
         }
         let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
@@ -1637,7 +1639,6 @@ impl<'a> XWords<'a> {
                 break;
             }
             self.neighbors_paired(
-                pairs,
                 row,
                 word,
                 score + letter_score,
@@ -1672,7 +1673,6 @@ impl<'a> XWords<'a> {
     )]
     fn neighbors_below_last_paired<Q: XQueryWord + ?Sized>(
         &self,
-        pairs: &XPairTable,
         row: &XPairRow,
         word: &Q,
         mut score: i32,
@@ -1691,7 +1691,7 @@ impl<'a> XWords<'a> {
         if pos + 1 == below_last {
             let next_char = query_word[below_last] as usize;
             let key = threshold.saturating_sub(score - self.info.row_max[next_char]);
-            row.emit(pairs, key, partial, scale, sink);
+            row.emit(key, partial, scale, sink);
             return;
         }
         let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
@@ -1701,7 +1701,6 @@ impl<'a> XWords<'a> {
                 break;
             }
             self.neighbors_below_last_paired(
-                pairs,
                 row,
                 word,
                 score + letter_score,
@@ -4922,8 +4921,9 @@ mod tests {
     }
 
     // LOSAT_X_CLUTPAIRS: every matrix of NCBI's with a compressed matrix has a pair table for each
-    // compressed alphabet (its letters' sums fit the rows' i16), and a row counts the pairs of each key as a scan of its sums does, at the ends
-    // of i32 too.
+    // compressed alphabet (its letters' sums fit the rows' i16); a row's merge gives the pairs in
+    // the order of the stable sort by sum, and `emit` the cells of the pairs of each key that a
+    // scan of the sorted pairs gives, at the ends of i32 too.
     #[test]
     fn pair_tables_hold_every_matrix() {
         for word_size in [5usize, 6, 7] {
@@ -4960,7 +4960,7 @@ mod tests {
                         want.sort_by(|x, y| y.0.cmp(&x.0));
                         // Every group (the last makes the ones before it), then read as `emit`
                         // reads them.
-                        row.make(&table, X_PAIR_GROUPS - 1);
+                        row.make(X_PAIR_GROUPS - 1);
                         let mut got: Vec<(i32, u32)> = Vec::new();
                         for group in &row.groups {
                             let group = group.get().expect("made above");
@@ -4993,7 +4993,7 @@ mod tests {
                                 .map(|&(_, code)| 7 + code * 3)
                                 .collect();
                             let mut emitted = Vec::new();
-                            row.emit(&table, key, 7, 3, &mut emitted);
+                            row.emit(key, 7, 3, &mut emitted);
                             assert_eq!(emitted, scanned, "{matrix:?} ({a}, {b}) key {key}");
                         }
                     }

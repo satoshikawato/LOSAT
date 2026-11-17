@@ -16,6 +16,7 @@ use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwRedoScratch;
+use crate::algorithm::pssm_search::redo1::{FrameSubject, ProteinSubject};
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::traceback0::{trace_hsps, TraceHsps, TraceSubject};
 use crate::common::GapEditOp;
@@ -79,6 +80,43 @@ impl RpsTraceScratch {
 pub(crate) struct RpsTraced {
     pub(crate) hit_list: Option<BlastpHitList>,
     pub(crate) k_mark: Option<u32>,
+}
+
+/// The letters of a query's contexts without their sentinels, in the context order (NCBI's
+/// `translation_buffer + frame_offsets[context] + 1`; a protein query's one context).
+fn frame_letters<'q>(query: &'q RpsQuery<'_>) -> Vec<&'q [u8]> {
+    query
+        .frames
+        .iter()
+        .map(|frame| &frame.aa_seq[1.min(frame.aa_seq.len())..frame.aa_seq.len().max(1) - 1])
+        .collect()
+}
+
+/// A translated query's translation buffer as the redo reads it (NCBI's `one_query->sequence`,
+/// `RpsQuery::translation_length` bytes): the frames' letters in the context order, each frame
+/// with letters followed by its sentinel but the last context (an empty frame takes no byte).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:378-381
+/// ```c
+///     one_query->sequence = &query->sequence[query_offset];
+///     one_query->length =
+///         one_query_info->contexts[num_frames-1].query_offset +
+///         one_query_info->contexts[num_frames-1].query_length;
+/// ```
+/// (`query_offset` is the first context's, blast_setup_cxx.cpp:72-77 the layout, quoted at
+/// `RpsQuery::translation_length`.)
+fn translation_buffer(query: &RpsQuery<'_>) -> Vec<u8> {
+    let (last, earlier) = query.frames.split_last().expect("a query has a context");
+    let mut buffer = Vec::with_capacity(query.translation_length());
+    for frame in earlier {
+        let length = frame.length();
+        if length > 0 {
+            buffer.extend_from_slice(&frame.aa_seq[1..length + 2]);
+        }
+    }
+    buffer.extend_from_slice(&last.aa_seq[1.min(last.aa_seq.len())..last.aa_seq.len().max(1) - 1]);
+    debug_assert_eq!(buffer.len(), query.translation_length());
+    buffer
 }
 
 /// `s_BlastHSPListRPSUpdate`'s part before the sort: the query and the subject of each HSP
@@ -298,20 +336,38 @@ impl RpsTraceback<'_> {
             &[]
         };
         if let Some(redo) = self.redo.as_ref() {
+            // Without the Gumbel block the redo reads context 0's search space (the redo's copy
+            // of the query information keeps it, blast_traceback.c:1238-1245).
             let statistics = RpsQueryStats {
                 batch_kbp: &query.batch_kbp,
                 stats: first.stats(gumbel),
             };
-            return self.trace_query_redo(redo, prelim, letters, q_idx, statistics, scratch);
+            return if translated {
+                let frames = frame_letters(query);
+                let buffer = translation_buffer(query);
+                self.trace_query_redo(
+                    redo,
+                    prelim,
+                    &buffer,
+                    FrameSubject { frames: &frames },
+                    q_idx,
+                    statistics,
+                    scratch,
+                )
+            } else {
+                self.trace_query_redo(
+                    redo,
+                    prelim,
+                    letters,
+                    ProteinSubject,
+                    q_idx,
+                    statistics,
+                    scratch,
+                )
+            };
         }
         let probabilities = residue_probabilities(letters);
-        // The frames' letters without their sentinels, in the context order (NCBI's
-        // `translation_buffer + frame_offsets[context] + 1`).
-        let frames: Vec<&[u8]> = query
-            .frames
-            .iter()
-            .map(|frame| &frame.aa_seq[1.min(frame.aa_seq.len())..frame.aa_seq.len().max(1) - 1])
-            .collect();
+        let frames = frame_letters(query);
         let mut lists: Vec<BlastpHspList<XPrelimHsp>> = prelim
             .hsplist_array
             .into_iter()

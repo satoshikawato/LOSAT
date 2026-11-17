@@ -642,6 +642,7 @@ impl RpsRun<'_> {
                 gap_extend: files.aux.gap_extend,
                 x_drop_final_bits: self.x_drop_final_bits,
                 smith_waterman: self.options.use_sw_tback,
+                program: self.program,
             }),
         };
         let prelim_karlin = KarlinParams {

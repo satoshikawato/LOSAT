@@ -61,9 +61,20 @@ pub(crate) const COMPO_SCORE_MIN: i32 = i16::MIN as i32;
 /// module's scaling, `RedoMatch`'s subject range, reap and evaluation): one source, one instance
 /// for each, so that each instance has one caller and stays inlined where it is, as before the
 /// second redo (line PS `DECISIONS.md` 11 and 63; series PR, item PS11c-3). `XDropRedo` is
-/// psiblast's and RPS-BLAST's redo (`Blast_RedoOneMatch`), `SwRedo` RPS-BLAST's `-use_sw_tback`
-/// (`Blast_RedoOneMatchSmithWaterman`).
-pub(crate) trait RedoInstance {}
+/// psiblast's and rpsblast's redo (`Blast_RedoOneMatch`), `SwRedo` rpsblast's `-use_sw_tback`
+/// (`Blast_RedoOneMatchSmithWaterman`), `FrameRedo` rpstblastn's (`Blast_RedoOneMatch` with a
+/// translated subject: series PR, item PS12b).
+pub(crate) trait RedoInstance {
+    /// NCBI's `subject_is_translated` of the redo (`s_GetAlignParams`): the subject is the six
+    /// frames of a translated sequence, each alignment in its frame.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2422-2423
+    /// ```c
+    ///     /* does this kind of search translate the database sequence */
+    ///     int subject_is_translated = (context->prog_number == eBlastTypeTblastn) || (context->prog_number == eBlastTypeRpsTblastn);
+    /// ```
+    const SUBJECT_IS_TRANSLATED: bool = false;
+}
 
 /// The X-drop redo (`RedoInstance`).
 pub(crate) enum XDropRedo {}
@@ -71,8 +82,15 @@ pub(crate) enum XDropRedo {}
 /// The Smith-Waterman redo (`RedoInstance`).
 pub(crate) enum SwRedo {}
 
+/// The X-drop redo of a translated subject (`RedoInstance`): rpstblastn's, whose subject is the
+/// user query's frames.
+pub(crate) enum FrameRedo {}
+
 impl RedoInstance for XDropRedo {}
 impl RedoInstance for SwRedo {}
+impl RedoInstance for FrameRedo {
+    const SUBJECT_IS_TRANSLATED: bool = true;
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:43-54
 // ```c

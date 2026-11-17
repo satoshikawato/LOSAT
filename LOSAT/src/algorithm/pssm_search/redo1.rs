@@ -41,13 +41,17 @@ use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
-use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+use crate::core::composition_adjustment::adjust_scores::{
+    blast_get_composition_range, read_aa_composition, BlastAminoAcidComposition,
+};
 use crate::core::composition_adjustment::compo_scale::{
-    pssm_composition_based_stats, PosMatrixInfo, RedoInstance, XDropRedo,
+    pssm_composition_based_stats, FrameRedo, PosMatrixInfo, RedoInstance, XDropRedo,
 };
 use crate::core::composition_adjustment::redo_alignment::{
-    build_query_word_hashes, test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
-    EMatrixAdjustRule, MINIMUM_LENGTH_NEAR_IDENTICAL,
+    build_query_word_hashes, get_nucl_length, get_seq_frame, get_translated_length,
+    test_near_identical, windows_from_translated_aligns, BlastCompoAlignment,
+    BlastCompoAlignmentContext, BlastCompoSequenceData, EMatrixAdjustRule,
+    MINIMUM_LENGTH_NEAR_IDENTICAL, WINDOW_BORDER,
 };
 use crate::core::link_hsps::{link_in_place, EvenGapLinkParams, LinkContext, LinkHsp};
 use crate::stats::KarlinParams;
@@ -203,6 +207,52 @@ struct Align {
     match_end: i32,
     frame: i32,
     edit_script: Vec<GapEditOp>,
+}
+
+impl Align {
+    /// The incoming alignment of a preliminary HSP (`s_ResultHspToDistinctAlign`): its score
+    /// scaled, its subject frame.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:788-797
+    /// ```c
+    ///         new_align =
+    ///             BlastCompo_AlignmentNew((int) (hsp->score * localScalingFactor),
+    ///                                     eDontAdjustMatrix,
+    ///                                     hsp->query.offset, hsp->query.end, hsp->context,
+    ///                                     hsp->subject.offset, hsp->subject.end,
+    ///                                     hsp->subject.frame, hsp);
+    /// ```
+    #[inline(always)]
+    fn incoming(hsp: &BlastpPreliminaryHsp) -> Self {
+        Align {
+            score: (hsp.raw_score as f64 * SCALING_FACTOR) as i32,
+            rule: EMatrixAdjustRule::DontAdjustMatrix,
+            query_start: hsp.query_start,
+            query_end: hsp.query_end,
+            match_start: hsp.subject_start,
+            match_end: hsp.subject_end,
+            frame: hsp.subject_frame,
+            edit_script: Vec::new(),
+        }
+    }
+
+    /// The alignment as the composition library holds it (`BlastCompo_Alignment` of query 0),
+    /// with `context`.
+    #[inline(always)]
+    fn compo(&self, context: Option<BlastCompoAlignmentContext>) -> BlastCompoAlignment {
+        BlastCompoAlignment {
+            score: self.score,
+            matrix_adjust_rule: self.rule,
+            query_index: 0,
+            query_start: self.query_start,
+            query_end: self.query_end,
+            match_start: self.match_start,
+            match_end: self.match_end,
+            frame: self.frame,
+            context,
+            next: None,
+        }
+    }
 }
 
 /// A redone HSP of a match's list (`BlastHSP`), before its identities are counted: its e-value and
@@ -534,8 +584,59 @@ impl PssmRedo1<'_> {
             matrix: self.matrix,
             link: self.link,
         }
-        .redo_match(run, oid, hsps, subject_read.residues()))
+        .redo_match(run, oid, hsps, subject_read.residues(), ProteinSubject))
     }
+}
+
+/// The subject of the X-drop redo (NCBI's matching sequence), and the letters its HSPs are
+/// counted on: a protein sequence (psiblast's subject, rpsblast's query: [`ProteinSubject`]) or
+/// a translated sequence's six frames (rpstblastn's query: [`FrameSubject`]), whose letters are
+/// NCBI's translation buffer (`one_query->sequence`, `one_query->length` bytes: the frames in
+/// the context order, one sentinel between two frames with letters).
+pub(crate) trait RedoSubject<'a>: Copy {
+    /// The instance of the steps the redos share.
+    type Instance: RedoInstance;
+    /// The letters an HSP of `frame` aligns to, as the redo's subject `subject` holds them.
+    fn frame_letters(self, subject: &'a [u8], frame: i32) -> &'a [u8];
+}
+
+/// A protein subject ([`RedoSubject`]): the redo's subject is its letters.
+#[derive(Clone, Copy)]
+pub(crate) struct ProteinSubject;
+
+impl<'a> RedoSubject<'a> for ProteinSubject {
+    type Instance = XDropRedo;
+
+    #[inline(always)]
+    fn frame_letters(self, subject: &'a [u8], _frame: i32) -> &'a [u8] {
+        subject
+    }
+}
+
+/// A translated subject ([`RedoSubject`]): the letters of each frame, without sentinels, by
+/// context (`BLAST_FrameToContext`).
+#[derive(Clone, Copy)]
+pub(crate) struct FrameSubject<'a> {
+    pub(crate) frames: &'a [&'a [u8]],
+}
+
+impl<'a> RedoSubject<'a> for FrameSubject<'a> {
+    type Instance = FrameRedo;
+
+    fn frame_letters(self, _subject: &'a [u8], frame: i32) -> &'a [u8] {
+        self.frames[crate::core::blast_util::frame_to_context(frame)]
+    }
+}
+
+/// A window of the subject (`s_WindowInfo`'s `subject_range`): `[begin, end)` of the frame
+/// `frame`'s letters. `end` may lie before `begin` (`end - begin` is NCBI's length, then below 0:
+/// `rpstblastn -strand`, whose translation buffer is shorter than `GET_NUCL_LENGTH` assumes). A
+/// protein subject's window (the whole sequence) is never read.
+#[derive(Clone, Copy, Default)]
+struct SubjectWindow {
+    begin: i32,
+    end: i32,
+    frame: i32,
 }
 
 /// What the redo of one match reads besides its run: the matrix information, the Gumbel block
@@ -577,14 +678,18 @@ impl RedoMatch<'_> {
     ///                             localScalingFactor);
     ///                     s_ComputeNumIdentities(
     /// ```
-    pub(crate) fn redo_match(
+    ///
+    /// A translated subject (rpstblastn) compares the frames in the reap, its e-values read the
+    /// subject's length of `s_GetSubjectLength` and its HSPs keep their frames.
+    pub(crate) fn redo_match<'a, S: RedoSubject<'a>>(
         &self,
         run: &mut RedoRun<'_>,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
-        subject: &[u8],
+        subject: &'a [u8],
+        kind: S,
     ) -> Option<(BlastpHspList, i32, f64)> {
-        let alignments = self.redo_one_match(run, hsps, subject);
+        let alignments = self.redo_one_match::<S>(run, hsps, subject);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-354
         // ```c
         //     for (align = *alignments;  NULL != align;  align = align->next) {
@@ -604,7 +709,7 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained::<XDropRedo>(&mut redone);
+            reap_contained::<S::Instance>(&mut redone);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-446
         // ```c
@@ -631,7 +736,19 @@ impl RedoMatch<'_> {
         // psiblast's e-values are not adjusted by a composition p-value (that is blastp's and
         // blastx's, with `-comp_based_stats 2u`/`3u`).
         let query_length = self.query_length;
-        let subject_length = subject.len() as i32;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:364-368
+        // ```c
+        // Int4 s_GetSubjectLength(Int4 total_subj_length, EBlastProgramType program_number)
+        // {
+        // 	return ((program_number == eBlastTypeRpsTblastn) ?
+        // 				(GET_NUCL_LENGTH(total_subj_length) - 1 ) /3 : total_subj_length);
+        // }
+        // ```
+        let subject_length = if S::Instance::SUBJECT_IS_TRANSLATED {
+            (get_nucl_length(subject.len() as i32) - 1) / 3
+        } else {
+            subject.len() as i32
+        };
         let best_evalue = match &self.link {
             Some(link) => link_redone(&mut redone, link, run, subject_length)?,
             None => {
@@ -684,7 +801,12 @@ impl RedoMatch<'_> {
                 raw_score: score,
                 query_context: template.q_idx as i32,
                 query_frame: template.query_frame,
-                subject_frame: 0,
+                // (`Blast_HSPInit(.., (Int2) align->frame, ..)`, blast_kappa.c:326-330.)
+                subject_frame: if S::Instance::SUBJECT_IS_TRANSLATED {
+                    align.frame
+                } else {
+                    0
+                },
                 query_length: template.query_length,
                 q_idx: template.q_idx,
                 s_idx: template.s_idx,
@@ -693,7 +815,7 @@ impl RedoMatch<'_> {
                 &traced,
                 align.edit_script,
                 run.query_nomask,
-                subject,
+                kind.frame_letters(subject, align.frame),
                 self.matrix,
             );
             hsp.e_value = e_value;
@@ -720,9 +842,68 @@ impl RedoMatch<'_> {
         Some((hsp_list, best_score, best_evalue))
     }
 
-    /// `Blast_RedoOneMatch` for the one window of a protein query and subject (the whole query,
-    /// the whole subject, `s_WindowsFromProteinAligns`): the distinct redone alignments, the
-    /// list's head first.
+    /// `Blast_RedoOneMatch`: the distinct redone alignments, the list's head first. A protein
+    /// subject is one window, the whole subject with the alignments in their order
+    /// (`s_WindowsFromProteinAligns`); a translated subject's windows are its alignments' frames
+    /// around them (`s_WindowsFromTranslatedAligns` with a position-based matrix, `frame_windows`),
+    /// each with its alignments in `s_DistinctAlignmentsSort`'s order, and all windows add to the
+    /// one list (`alignments[query_index]`). NCBI keeps `matrix_adjust_rule` from one window to
+    /// the next.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1121-1141
+    /// ```c
+    ///     EMatrixAdjustRule matrix_adjust_rule = eDontAdjustMatrix;
+    ///     ...
+    ///     status =
+    ///             s_WindowsFromAligns(incoming_aligns, query_info, hspcnt, numQueries,
+    ///                     kWindowBorder, matchingSeq->length, &windows,
+    ///                     &nWindows, query_is_translated, subject_is_translated, params->positionBased);
+    ///     if (status != 0) {
+    ///         goto function_level_cleanup;
+    ///     }
+    ///     /* for all windows */
+    ///     for (window_index = 0;  window_index < nWindows;  window_index++) {
+    /// ```
+    fn redo_one_match<'a, S: RedoSubject<'a>>(
+        &self,
+        run: &mut RedoRun<'_>,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Vec<Align> {
+        let mut alignments: Vec<Align> = Vec::new();
+        let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
+        if S::Instance::SUBJECT_IS_TRANSLATED {
+            for (window, order) in frame_windows(hsps, run.query.len() as i32, subject.len() as i32)
+            {
+                let window_hsps: Vec<BlastpPreliminaryHsp> =
+                    order.iter().map(|&k| hsps[k]).collect();
+                self.redo_window::<S>(
+                    run,
+                    &window_hsps,
+                    subject,
+                    window,
+                    &mut alignments,
+                    &mut matrix_adjust_rule,
+                );
+            }
+        } else {
+            self.redo_window::<S>(
+                run,
+                hsps,
+                subject,
+                SubjectWindow::default(),
+                &mut alignments,
+                &mut matrix_adjust_rule,
+            );
+        }
+        alignments
+    }
+
+    /// The redo of one window of `Blast_RedoOneMatch` (`window`, whose alignments are `hsps` in
+    /// their order): the distinct redone alignments go to the head of `alignments`. A
+    /// translated subject's range is the window of its frame (`frame_range`), and the matrix is
+    /// adjusted for each alignment that is not contained, to the composition around it in the
+    /// window (`s_GetComposition`, `window_composition`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1174-1286
     /// ```c
@@ -787,38 +968,19 @@ impl RedoMatch<'_> {
     /// ```
     /// `params->cutoff_s` is 1 without sum statistics, else `RedoLink::cutoff_s`
     /// (blast_kappa.c:2453-2461).
-    fn redo_one_match(
+    fn redo_window<'a, S: RedoSubject<'a>>(
         &self,
         run: &mut RedoRun<'_>,
         hsps: &[BlastpPreliminaryHsp],
-        subject: &[u8],
-    ) -> Vec<Align> {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:788-797
-        // ```c
-        //         new_align =
-        //             BlastCompo_AlignmentNew((int) (hsp->score * localScalingFactor),
-        //                                     eDontAdjustMatrix,
-        //                                     hsp->query.offset, hsp->query.end, hsp->context,
-        //                                     hsp->subject.offset, hsp->subject.end,
-        //                                     hsp->subject.frame, hsp);
-        // ```
-        let incoming: Vec<Align> = hsps
-            .iter()
-            .map(|hsp| Align {
-                score: (hsp.raw_score as f64 * SCALING_FACTOR) as i32,
-                rule: EMatrixAdjustRule::DontAdjustMatrix,
-                query_start: hsp.query_start,
-                query_end: hsp.query_end,
-                match_start: hsp.subject_start,
-                match_end: hsp.subject_end,
-                frame: hsp.subject_frame,
-                edit_script: Vec::new(),
-            })
-            .collect();
+        subject: &'a [u8],
+        window: SubjectWindow,
+        alignments: &mut Vec<Align>,
+        matrix_adjust_rule: &mut EMatrixAdjustRule,
+    ) {
+        // The incoming alignments (`Align::incoming`) in the window's order.
+        let incoming: Vec<Align> = hsps.iter().map(Align::incoming).collect();
         let lambda = run.karlin.lambda;
         let query_length = run.query.len() as i32;
-        let mut alignments: Vec<Align> = Vec::new();
-        let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
         let mut subject_data: Vec<u8> = Vec::new();
         let mut near_identical = true;
         let mut old_near_identical = false;
@@ -833,17 +995,31 @@ impl RedoMatch<'_> {
                 );
             }
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
-                subject_data = self.subject_range::<XDropRedo>(
-                    run,
-                    subject,
-                    &incoming[0],
-                    near_identical,
-                    &mut subject_maybe_biased,
-                );
+                subject_data = if S::Instance::SUBJECT_IS_TRANSLATED {
+                    frame_range(
+                        run,
+                        subject,
+                        window,
+                        &incoming[0],
+                        near_identical,
+                        &mut subject_maybe_biased,
+                    )
+                } else {
+                    self.subject_range::<S::Instance>(
+                        run,
+                        subject,
+                        &incoming[0],
+                        near_identical,
+                        &mut subject_maybe_biased,
+                    )
+                };
             }
-            if !is_contained(in_align, &alignments, lambda) {
+            if !is_contained(in_align, alignments, lambda) {
                 let mut adjust_search_failed = false;
-                if hsp_index == 0 || near_identical != old_near_identical {
+                if S::Instance::SUBJECT_IS_TRANSLATED
+                    || hsp_index == 0
+                    || near_identical != old_near_identical
+                {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1436-1442
                     // ```c
                     //     if (query_composition->numTrueAminoAcids == 0 ||
@@ -868,14 +1044,18 @@ impl RedoMatch<'_> {
                     //                                        calc_lambda,
                     //                                        (compositionTestIndex > 0));
                     // ```
-                    let subject_composition = read_aa_composition(&subject_data);
+                    let subject_composition = if S::Instance::SUBJECT_IS_TRANSLATED {
+                        window_composition(&subject_data, window, in_align)
+                    } else {
+                        read_aa_composition(&subject_data)
+                    };
                     if run.query_true_amino_acids == 0
                         || subject_composition.num_true_amino_acids == 0
                     {
                         adjust_search_failed = true;
                     } else {
-                        matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
-                        pssm_composition_based_stats::<XDropRedo>(
+                        *matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
+                        pssm_composition_based_stats::<S::Instance>(
                             &mut run.matrix.rows,
                             self.info,
                             &subject_composition.prob,
@@ -895,20 +1075,29 @@ impl RedoMatch<'_> {
                     num_adjustments += 1;
                 }
                 if !adjust_search_failed {
-                    let new_align = self.redo_one_alignment(
-                        run,
-                        &hsps[hsp_index],
-                        matrix_adjust_rule,
-                        &subject_data,
-                    );
+                    let new_align = if S::Instance::SUBJECT_IS_TRANSLATED {
+                        redo_window_alignment(
+                            run,
+                            &hsps[hsp_index],
+                            *matrix_adjust_rule,
+                            &subject_data,
+                            window,
+                        )
+                    } else {
+                        self.redo_one_alignment(
+                            run,
+                            &hsps[hsp_index],
+                            *matrix_adjust_rule,
+                            &subject_data,
+                        )
+                    };
                     if new_align.score >= self.link.map_or(1, |link| link.cutoff_s) {
-                        with_distinct_ends(new_align, &mut alignments, num_adjustments == 1);
+                        with_distinct_ends(new_align, alignments, num_adjustments == 1);
                     }
                 }
             }
             old_near_identical = near_identical;
         }
-        alignments
     }
 
     /// `s_SequenceGetProteinRange` for the whole subject: its letters, masked by SEG ("S 10 1.8
@@ -950,35 +1139,17 @@ impl RedoMatch<'_> {
     ) -> Vec<u8> {
         let mut data = subject.to_vec();
         if *subject_maybe_biased {
-            let test_identical = near_identical && {
-                let align = BlastCompoAlignment {
-                    score: window_align.score,
-                    matrix_adjust_rule: window_align.rule,
-                    query_index: 0,
-                    query_start: window_align.query_start,
-                    query_end: window_align.query_end,
-                    match_start: window_align.match_start,
-                    match_end: window_align.match_end,
-                    frame: window_align.frame,
-                    context: None,
-                    next: None,
-                };
-                test_near_identical(
+            let test_identical = near_identical
+                && test_near_identical(
                     &BlastCompoSequenceData::from_ncbistdaa(subject),
                     0,
                     &run.query_data,
                     0,
                     Some(&run.query_words),
-                    &align,
-                )
-            };
+                    &window_align.compo(None),
+                );
             if !test_identical {
-                let intervals =
-                    crate::utils::seg::SegMasker::new(10, 1.8, 2.1).mask_sequence(&data);
-                *subject_maybe_biased = !intervals.is_empty();
-                for interval in &intervals {
-                    data[interval.start..interval.end].fill(ncbistdaa::X);
-                }
+                *subject_maybe_biased = seg_subject(&mut data);
             }
         }
         data
@@ -1037,6 +1208,272 @@ impl RedoMatch<'_> {
             frame: 0,
             edit_script: traced.edit_script,
         }
+    }
+}
+
+/// `s_DoSegSequenceData` of the redo's subject letters `data` ("S 10 1.8 2.1", the masked
+/// letters X): `subject_maybe_biased` becomes whether SEG masked anything.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1435-1446
+/// ```c
+///     status = BlastFilteringOptionsFromString(program_name,
+///                                              BLASTP_MASK_INSTRUCTIONS,
+///                                              &filter_options, NULL);
+///     if (status == 0) {
+///         status = BlastSetUp_Filter(program_name, seqData->data,
+///                                    seqData->length, 0, filter_options,
+///                                    &mask_seqloc, NULL);
+///         filter_options = SBlastFilterOptionsFree(filter_options);
+///     }
+///     if (is_seq_biased) {
+///         *is_seq_biased = (mask_seqloc != NULL);
+///     }
+/// ```
+#[inline(always)]
+fn seg_subject(data: &mut [u8], subject_maybe_biased: &mut bool) {
+    let intervals = crate::utils::seg::SegMasker::new(10, 1.8, 2.1).mask_sequence(data);
+    *subject_maybe_biased = !intervals.is_empty();
+    for interval in &intervals {
+        data[interval.start..interval.end].fill(ncbistdaa::X);
+    }
+}
+
+/// `s_WindowsFromTranslatedAligns` of the incoming alignments of `hsps` with a position-based
+/// matrix (`windows_from_translated_aligns`, `is_pos_based`) in a translated subject of
+/// `subject_length` bytes (the translation buffer), for a query of `query_length` letters:
+/// each window and the indices in `hsps` of its alignments, in the order the redo reads them.
+fn frame_windows(
+    hsps: &[BlastpPreliminaryHsp],
+    query_length: i32,
+    subject_length: i32,
+) -> Vec<(SubjectWindow, Vec<usize>)> {
+    let mut list: Option<Box<BlastCompoAlignment>> = None;
+    for (k, hsp) in hsps.iter().enumerate().rev() {
+        let mut align = Box::new(
+            Align::incoming(hsp).compo(Some(BlastCompoAlignmentContext::PreliminaryHspIndex(k))),
+        );
+        align.next = list;
+        list = Some(align);
+    }
+    let windows =
+        windows_from_translated_aligns(&list, &[query_length], subject_length, WINDOW_BORDER, true)
+            .expect("the redo's alignments are of query 0");
+    windows
+        .into_iter()
+        .map(|window| {
+            let mut order = Vec::with_capacity(window.hspcnt as usize);
+            let mut current = window.align.as_deref();
+            while let Some(align) = current {
+                if let Some(BlastCompoAlignmentContext::PreliminaryHspIndex(k)) = align.context {
+                    order.push(k);
+                }
+                current = align.next.as_deref();
+            }
+            let range = window.subject_range;
+            (
+                SubjectWindow {
+                    begin: range.begin,
+                    end: range.end,
+                    frame: range.context,
+                },
+                order,
+            )
+        })
+        .collect()
+}
+
+/// `s_SequenceGetProteinRange` of a translated subject (`self->index < 0`, `align->frame !=
+/// 0`) for the window `window` whose first alignment is `window_align`: NCBI's buffer of the
+/// translation buffer's length plus 2 bytes (`calloc`), whose second byte on holds the frame's
+/// letters as NCBI finds them in `subject` (`GET_TRANSLATED_LENGTH` letters of `GET_NUCL_LENGTH`
+/// of the buffer's length, after the earlier frames' lengths plus a sentinel each), masked by SEG
+/// unless the window's first alignment is near identical (`s_TestNearIdentical` on that buffer);
+/// then the byte before the window is zeroed (the fit: the window's letters start at byte
+/// `1 + window.begin`).
+///
+/// Every read is inside `subject` and the buffer, also where NCBI's frame arithmetic does not
+/// match the buffer (`-strand plus|minus`, whose buffer holds three frames): with `nl =
+/// GET_NUCL_LENGTH(l)` the three lengths `GET_TRANSLATED_LENGTH(nl, f)` of `f` = 0, 1, 2 add up
+/// to `nl - 2`, so the copy of frame index 5 ends at `2 * (nl - 2) + 5 = 2 * ((l - 5) / 2) + 5 <=
+/// l`; a frame has letters only where `nl >= 3`, `l >= 7`. The window's alignments end inside
+/// their frame, so before `l`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1597-1643
+/// ```c
+///     seqData->buffer  = calloc((self->length + 2), sizeof(Uint1));
+///     ...
+///     seqData->data    = seqData->buffer + 1;
+///     seqData->length  = self->length;
+///
+///     origData = (self->index >= 0) ? local_data->seq_arg.seq->sequence
+///                             : seq->sequence;
+///     if((self->index < 0) && (align->frame != 0)) {
+///     	int i=0, offsets =0;
+///     	int f = GET_SEQ_FRAME(align->frame);
+///     	int nucl_length = GET_NUCL_LENGTH(self->length);
+///     	seqData->length = GET_TRANSLATED_LENGTH(nucl_length, f);
+///     	for(; i < f; i++) {
+///     		offsets = GET_TRANSLATED_LENGTH(nucl_length, i) +1;
+///     		origData += offsets;
+///     	}
+///     }
+///     /* Copy the sequence data */
+///     for (idx = 0;  idx < seqData->length;  idx++) {
+///         seqData->data[idx] = origData[idx];
+///     }
+///
+///     if ( !(KAPPA_BLASTP_NO_SEG_SEQUENCE) ) {
+///         if (compo_adjust_mode
+///             && (!subject_maybe_biased || *subject_maybe_biased)) {
+///
+///             if ( (!shouldTestIdentical)
+///                  || (shouldTestIdentical
+///                      && (!s_TestNearIdentical(seqData, 0, queryData,
+///                                               q_range->begin, query_words,
+///                                               align)))) {
+///
+///                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+///                                              subject_maybe_biased);
+///             }
+///         }
+///     }
+///     /* Fit the data to the range. */
+///     seqData ->data    = &seqData->data[range->begin - 1];
+///     *seqData->data++  = '\0';
+///     seqData ->length  = range->end - range->begin;
+/// ```
+fn frame_range(
+    run: &RedoRun<'_>,
+    subject: &[u8],
+    window: SubjectWindow,
+    window_align: &Align,
+    near_identical: bool,
+    subject_maybe_biased: &mut bool,
+) -> Vec<u8> {
+    let length = subject.len();
+    let mut buffer = vec![0u8; length + 2];
+    let f = get_seq_frame(window_align.frame);
+    let nucl_length = get_nucl_length(length as i32);
+    let frame_length = get_translated_length(nucl_length, f) as usize;
+    if frame_length > 0 {
+        let offset: usize = (0..f)
+            .map(|i| get_translated_length(nucl_length, i) as usize + 1)
+            .sum();
+        buffer[1..1 + frame_length].copy_from_slice(&subject[offset..offset + frame_length]);
+    }
+    if *subject_maybe_biased {
+        // `s_TestNearIdentical` reads the buffer (not only the frame's letters) at the window's
+        // first alignment.
+        let data = BlastCompoSequenceData {
+            buffer,
+            data_offset: 1,
+            length: length as i32 + 1,
+        };
+        let test_identical = near_identical
+            && test_near_identical(
+                &data,
+                0,
+                &run.query_data,
+                0,
+                Some(&run.query_words),
+                &window_align.compo(None),
+            );
+        buffer = data.buffer;
+        if !test_identical {
+            seg_subject(&mut buffer[1..1 + frame_length], subject_maybe_biased);
+        }
+    }
+    buffer[window.begin as usize] = 0;
+    buffer
+}
+
+/// `s_GetComposition` of a translated subject: the composition of the letters of `window`
+/// (in `data`, `frame_range`'s buffer) around the alignment `align` (`Blast_GetCompositionRange`
+/// of its range in the window's `end - begin` letters). Where the window holds fewer letters
+/// than the alignment reaches (`-strand plus|minus`), NCBI's range ends at the alignment's end
+/// (the scan to the right stops at once): the letters read here reach that end, which stays
+/// inside the buffer (`frame_range`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:921-936
+/// ```c
+///     data = seq->data;
+///     length = range->end - range->begin;
+///     if (query_is_translated || subject_is_translated) {
+///         int start;
+///         int end;
+///         start = ((query_is_translated) ?
+///                  align->queryStart : align->matchStart) - range->begin;
+///         end   = ((query_is_translated) ?
+///                  align->queryEnd   : align->matchEnd  ) - range->begin;
+///         Blast_GetCompositionRange(&left, &right, data, length, start, end);
+///     } else {
+///         /* Use the whole subject to compute the composition */
+///         left = 0;
+///         right = length;
+///     }
+///     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+/// ```
+fn window_composition(
+    data: &[u8],
+    window: SubjectWindow,
+    align: &Align,
+) -> BlastAminoAcidComposition {
+    let length = (window.end - window.begin).max(0) as usize;
+    let start = (align.match_start - window.begin) as usize;
+    let finish = (align.match_end - window.begin) as usize;
+    let letters = &data[1 + window.begin as usize..][..length.max(finish)];
+    let (left, right) = blast_get_composition_range(letters, start, finish)
+        .expect("an alignment's range lies in the letters read");
+    read_aa_composition(&letters[left..right])
+}
+
+/// `s_RedoOneAlignment` in a window of a translated subject: the gapped alignment of the
+/// preliminary HSP `hsp` from its gapped start on the window's letters (in `data`,
+/// `frame_range`'s buffer; `end - begin` of them, none where the window ends before it begins:
+/// then only the left extension runs, NCBI's `s_start < s_length` failing), shifted back into the
+/// frame (`s_NewAlignmentFromGapAlign`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1925-1926
+/// ```c
+///     q_start = hsp->query.gapped_start - query_range->begin;
+///     s_start = hsp->subject.gapped_start - subject_range->begin;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1760-1765
+/// ```c
+///     queryStart = gap_align->query_start + query_range->begin;
+///     queryEnd   = gap_align->query_stop + query_range->begin;
+///     queryIndex = query_range->context;
+///     matchStart = gap_align->subject_start + subject_range->begin;
+///     matchEnd   = gap_align->subject_stop  + subject_range->begin;
+///     frame      = subject_range->context;
+/// ```
+fn redo_window_alignment(
+    run: &mut RedoRun<'_>,
+    hsp: &BlastpPreliminaryHsp,
+    rule: EMatrixAdjustRule,
+    data: &[u8],
+    window: SubjectWindow,
+) -> Align {
+    let traced = pssm_gapped_alignment_with_traceback(
+        &run.matrix,
+        &data[1 + window.begin as usize..],
+        (window.end - window.begin).max(0) as usize,
+        hsp.gapped_query_start as usize,
+        (hsp.gapped_subject_start - window.begin) as usize,
+        run.gap_open,
+        run.gap_extend,
+        run.x_dropoff,
+        &mut run.scratch,
+    );
+    Align {
+        score: traced.score,
+        rule,
+        query_start: traced.query_start,
+        query_end: traced.query_stop,
+        match_start: traced.subject_start + window.begin,
+        match_end: traced.subject_stop + window.begin,
+        frame: window.frame,
+        edit_script: traced.edit_script,
     }
 }
 
@@ -1390,7 +1827,8 @@ fn score_compare(a: &Align, b: &Align) -> std::cmp::Ordering {
 ///                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
 ///                 }
 /// ```
-/// Every HSP of a PSSM search has the query frame and subject frame 0.
+/// Every HSP of a PSSM search has the query frame 0, and the subject frame 0 unless the subject
+/// is translated (`RedoInstance::SUBJECT_IS_TRANSLATED`).
 fn reap_contained<C: RedoInstance>(redone: &mut Vec<Redone>) {
     let mut keep = vec![true; redone.len()];
     for iread in 1..redone.len() {
@@ -1400,21 +1838,24 @@ fn reap_contained<C: RedoInstance>(redone: &mut Vec<Redone>) {
                 continue;
             }
             let hsp2 = &redone[ireadback].align;
-            if contained_in_hsp(
-                hsp2.query_start,
-                hsp2.query_end,
-                hsp1.query_start,
-                hsp2.match_start,
-                hsp2.match_end,
-                hsp1.match_start,
-            ) && contained_in_hsp(
-                hsp2.query_start,
-                hsp2.query_end,
-                hsp1.query_end,
-                hsp2.match_start,
-                hsp2.match_end,
-                hsp1.match_end,
-            ) && hsp1.score <= hsp2.score
+            if (!C::SUBJECT_IS_TRANSLATED || hsp2.frame == hsp1.frame)
+                && contained_in_hsp(
+                    hsp2.query_start,
+                    hsp2.query_end,
+                    hsp1.query_start,
+                    hsp2.match_start,
+                    hsp2.match_end,
+                    hsp1.match_start,
+                )
+                && contained_in_hsp(
+                    hsp2.query_start,
+                    hsp2.query_end,
+                    hsp1.query_end,
+                    hsp2.match_start,
+                    hsp2.match_end,
+                    hsp1.match_end,
+                )
+                && hsp1.score <= hsp2.score
             {
                 keep[iread] = false;
                 break;

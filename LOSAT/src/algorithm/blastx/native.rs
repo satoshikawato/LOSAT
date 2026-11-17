@@ -3294,6 +3294,7 @@ mod archive_error_tests {
                 &[],
                 &[],
                 None,
+                None,
                 0,
                 None,
             )
@@ -3350,6 +3351,7 @@ mod reader_batch_tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: skipped,
+            gapped_k: None,
         }]
     }
 

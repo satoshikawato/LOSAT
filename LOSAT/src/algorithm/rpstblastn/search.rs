@@ -44,7 +44,7 @@ use crate::algorithm::blastx::query_setup::{
 use crate::algorithm::blastx::results::{Hsp, HspList};
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::rps_search::engine::{
-    RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
+    batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
 };
 use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, Consensus,
@@ -65,8 +65,8 @@ pub(crate) struct TranslatedRpsSearch {
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
-    /// `-use_sw_tback` and `-comp_based_stats` as given: the composition-based statistics of
-    /// later items are refused per run (`check_options`).
+    /// `-use_sw_tback` and `-comp_based_stats` as given: `-use_sw_tback` with composition-based
+    /// statistics (a later item) is refused per run (`check_options`).
     pub(crate) use_sw_tback: bool,
     pub(crate) comp_based_stats: String,
     /// Whether the database has several volumes, whose results NCBI merges
@@ -362,6 +362,29 @@ impl TranslatedRpsSearch {
         if batches.is_empty() {
             return outcome;
         }
+        // The composition-based statistics mode (`-comp_based_stats`; 1 by default), and with
+        // it BLOSUM62's score block for the redo's matrix information (rpsblast's,
+        // `rps_hooks::rps_search`), before any batch.
+        let cbs = self.search.requested_cbs;
+        let gapped = gapped_karlin(options);
+        let sbp = if cbs > 0 {
+            match crate::algorithm::pssm_search::in_pssm::score_block(
+                options.scoring,
+                crate::core::psi::KarlinBlk {
+                    lambda: gapped.lambda,
+                    k: gapped.k,
+                    h: gapped.h,
+                },
+            ) {
+                Ok(sbp) => Some(sbp),
+                Err(error) => {
+                    outcome[0] = Some(Err(error));
+                    return outcome;
+                }
+            }
+        } else {
+            None
+        };
         // The batches [0, states.len()) have not failed; a failing batch ends the window's search
         // there (`fail`), as its error ends NCBI's loop.
         let mut states: Vec<WindowBatch> = Vec::with_capacity(batches.len());
@@ -402,8 +425,18 @@ impl TranslatedRpsSearch {
         //       (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
         //        program == eBlastTypeRpsTblastn);
         // ```
-        let gapped = gapped_karlin(options);
         let gumbel = gumbel_block(options, db_length);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:932-940
+        // ```c
+        //     int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
+        //     params->prelim_evalue = cbs_stretch*evalue;
+        // ```
+        // (The stretch is NCBI's only inside the Gumbel block's branch: blast_parameters.c:922-945.)
+        let prelim_evalue = if cbs > 1 && gumbel.is_some() {
+            5.0 * options.evalue
+        } else {
+            options.evalue
+        };
         // `avg_subject_length` of the hit cutoff: the shortest profile (`SeqDb::min_length`, as
         // rpsblast's `cutoff_subject_length`).
         let cutoff_subject_length = database.x_seqdb().min_length();
@@ -421,7 +454,8 @@ impl TranslatedRpsSearch {
             }
             let volume = &volumes.volumes[index];
             // The volume's files: the same for every batch, so their error is the first batch's.
-            let files = match setup.reopen(volume, false) {
+            // With composition-based statistics the volume's frequency ratios (`.freq`) open too.
+            let files = match setup.reopen(volume, cbs > 0) {
                 Ok(Ok(files)) => files,
                 Ok(Err(RpsVolumeError::Files(text))) => {
                     fail(
@@ -533,9 +567,9 @@ impl TranslatedRpsSearch {
                 gumbel: gumbel.as_ref(),
                 cutoff_subject_length,
                 evalue: options.evalue,
-                prelim_evalue: options.evalue,
-                cbs: 0,
-                sbp: None,
+                prelim_evalue,
+                cbs,
+                sbp: sbp.as_ref(),
                 hitlist_size: options.hitlist_size.max(1) as usize,
                 prelim_hitlist_size: crate::algorithm::blastx::results::prelim_hitlist_size(
                     options,
@@ -556,6 +590,12 @@ impl TranslatedRpsSearch {
             );
             drop(run);
             drop(masks);
+            // The `.aux` Ks of the footers' K (volume 0's, with composition-based statistics).
+            let aux_karlin_k = if position == 0 && cbs > 0 {
+                files.aux.karlin_k.clone()
+            } else {
+                Vec::new()
+            };
             drop(files);
             let traced = match traced {
                 Ok(traced) => traced,
@@ -578,6 +618,7 @@ impl TranslatedRpsSearch {
                         break;
                     }
                 };
+                let k_marks: Vec<Option<u32>> = lists.iter().map(|traced| traced.k_mark).collect();
                 let mut lists: Vec<Option<BlastpHitList>> = lists
                     .into_iter()
                     .map(|traced| {
@@ -592,6 +633,19 @@ impl TranslatedRpsSearch {
                 let state = &mut states[batch];
                 if position == 0 {
                     std::mem::swap(&mut state.hit_lists, &mut lists);
+                    // The K of the footers: volume 0's marks and `.aux` Ks, as rpsblast's
+                    // (`thread_results[0]`).
+                    if cbs > 0 {
+                        state.gapped_k = Some(footer_gapped_k(
+                            &k_marks,
+                            &aux_karlin_k,
+                            gapped.k,
+                            state
+                                .parameters
+                                .as_deref()
+                                .is_some_and(|parameters| parameters[0].valid),
+                        ));
+                    }
                 } else {
                     merge_volume(&mut state.hit_lists, lists);
                 }
@@ -611,14 +665,6 @@ impl TranslatedRpsSearch {
         if self.use_sw_tback && requested_cbs > 0 {
             bail!(
                 "-use_sw_tback with composition-based statistics is not supported by LOSAT's {PROGRAM} yet"
-            );
-        }
-        // NCBI's options error of an ungapped search with composition-based statistics comes
-        // from BLASTX's `resolve`; the refusal of the modes LOSAT does not run yet follows it.
-        if requested_cbs > 0 && !self.ungapped {
-            bail!(
-                "-comp_based_stats {} is not supported by LOSAT's {PROGRAM} yet",
-                self.comp_based_stats
             );
         }
         if self.search.sum_stats {
@@ -702,6 +748,8 @@ struct WindowBatch {
     /// Whether a volume searched the batch.
     searched: bool,
     hit_lists: Vec<Option<BlastpHitList>>,
+    /// The queries' footer K with composition-based statistics (`footer_gapped_k`).
+    gapped_k: Option<Vec<f64>>,
 }
 
 impl WindowBatch {
@@ -712,6 +760,7 @@ impl WindowBatch {
             reported: None,
             searched: false,
             hit_lists: vec![None; queries],
+            gapped_k: None,
         }
     }
 
@@ -735,8 +784,41 @@ impl WindowBatch {
             prepared: self.prepared.x_for_results(),
             parameters,
             search_skipped: false,
+            gapped_k: self.gapped_k,
         }
     }
+}
+
+/// The gapped K of the footers of a batch's queries with composition-based statistics: the
+/// redo of each list writes `kbp_gap[0]` (`RpsTraced::k_mark`, `batch_gapped_k` of the batch),
+/// and only a footer that reads `kbp_gap[0]` shows it: the first query's, where its first valid
+/// context is 0 (frame +1, `first_frame_valid`); every other footer shows the table's K
+/// `table_k`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
+/// ```c++
+///     // find the first valid context corresponding to this query
+///     for (i = 0; i < context_per_query; i++) {
+///         BlastContextInfo *ctx = query_info->contexts +
+///                                 query_number * context_per_query + i;
+///         if (ctx->is_valid) {
+///             ...
+///     const int ctx_index = query_number * context_per_query + i;
+///     ...
+///     if (sbp->kbp_gap) {
+///         s_InitializeKarlinBlk(sbp->kbp_gap[ctx_index], &m_GappedKarlinBlk);
+///     }
+/// ```
+fn footer_gapped_k(
+    k_marks: &[Option<u32>],
+    karlin_k: &[f64],
+    table_k: f64,
+    first_frame_valid: bool,
+) -> Vec<f64> {
+    if !first_frame_valid {
+        return vec![table_k; k_marks.len()];
+    }
+    batch_gapped_k(&[0..k_marks.len()], k_marks, karlin_k, table_k, true)
 }
 
 /// Each batch of a window prepared (`prepare_batch`), the batches at the same time on the run's
@@ -799,6 +881,7 @@ fn unsearched_batch(
         prepared: prepared.x_for_results(),
         parameters,
         search_skipped: true,
+        gapped_k: None,
     }
 }
 

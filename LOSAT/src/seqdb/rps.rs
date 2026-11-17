@@ -731,7 +731,7 @@ impl RpsVolumeFiles {
     /// The rows start after the header and `num_profiles + 1` offsets, with the profile count
     /// of the `.rps` file (`freq_header->start_offsets + num_profiles + 1`,
     /// blast_traceback.c:956-957), and their stride is the `.rps` alphabet.
-    pub(crate) fn open_freq(&mut self, base: &Path) -> Result<(), RpsOpenError> {
+    pub(crate) fn open_freq(&mut self, base: &Path, program: &str) -> Result<(), RpsOpenError> {
         let shown = canonical_volume_path(base);
         let missing = || {
             RpsOpenError::Ncbi(format!(
@@ -753,7 +753,7 @@ impl RpsVolumeFiles {
             .and_then(|bytes| bytes.checked_add(self.rows_start()));
         if needed.is_none_or(|needed| freq.len().map_or(true, |len| len < needed)) {
             return Err(RpsOpenError::Refused(
-                "a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's RPSBLAST".to_string(),
+                format!("a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"),
             ));
         }
         self.freq = Some(freq);
@@ -1104,7 +1104,7 @@ mod tests {
         let base = write_volume(&dir, 28, AUX);
         write_freq(&base, 28);
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        files.open_freq(&base).unwrap();
+        files.open_freq(&base, "RPSBLAST").unwrap();
         files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
         assert_eq!(ratios.len(), 2);
         assert_eq!(ratios[0][0], 4000.0 / 1e9);
@@ -1116,7 +1116,7 @@ mod tests {
         let base = write_volume(&dir, 26, AUX);
         write_freq(&base, 28);
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        files.open_freq(&base).unwrap();
+        files.open_freq(&base, "RPSBLAST").unwrap();
         files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
         let flat: Vec<i32> = (0..7)
             .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
@@ -1149,16 +1149,19 @@ mod tests {
         );
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
         assert_eq!(
-            files.open_freq(&base).err(),
+            files.open_freq(&base, "RPSBLAST").err(),
             Some(RpsOpenError::Ncbi(text.clone()))
         );
         std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
-        assert_eq!(files.open_freq(&base).err(), Some(RpsOpenError::Ncbi(text)));
+        assert_eq!(
+            files.open_freq(&base, "RPSBLAST").err(),
+            Some(RpsOpenError::Ncbi(text))
+        );
         write_freq(&base, 28);
         let freq = std::fs::read(base.with_extension("freq")).unwrap();
         std::fs::write(base.with_extension("freq"), &freq[..freq.len() - 4]).unwrap();
         assert!(matches!(
-            files.open_freq(&base),
+            files.open_freq(&base, "RPSBLAST"),
             Err(RpsOpenError::Refused(_))
         ));
         let _ = std::fs::remove_dir_all(&dir);

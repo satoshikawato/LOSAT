@@ -331,7 +331,7 @@ impl RpsVolumeSetup {
             Err(RpsVolumeFault::NoMatrix) => return Ok(Err(RpsVolumeError::NoMatrix)),
         };
         if cbs {
-            match files.open_freq(volume.base()) {
+            match files.open_freq(volume.base(), self.program) {
                 Ok(()) => {}
                 Err(RpsOpenError::Refused(text)) => bail!(text),
                 Err(RpsOpenError::Ncbi(text)) => return Ok(Err(RpsVolumeError::Files(text))),

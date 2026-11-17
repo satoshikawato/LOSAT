@@ -184,9 +184,10 @@ fn the_evaluation_is_the_x_drop_redos() {
         for (search_space, expect) in [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)] {
             let matching = redo_match(&info, consensus.len(), search_space, expect);
             let mut run = run_of(&consensus);
-            let alignments = matching.redo_one_match(&mut run, &hsps, &subject);
+            let alignments = matching.redo_one_match::<ProteinSubject>(&mut run, &hsps, &subject);
             let copied = matching.evaluate(&run, 7, &hsps, &subject, alignments);
-            let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject);
+            let original =
+                matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject, ProteinSubject);
             assert_eq!(format!("{copied:?}"), format!("{original:?}"));
         }
     }

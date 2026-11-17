@@ -2131,6 +2131,20 @@ fn write_pairwise(
             ),
         }
     });
+    // The queries' gapped K where a batch gives its own (`BatchResults::gapped_k`), in the
+    // reports' order of the queries; the table's K elsewhere.
+    let query_gapped_k: Option<Vec<f64>> = batches
+        .iter()
+        .any(|batch| batch.gapped_k.is_some())
+        .then(|| {
+            batches
+                .iter()
+                .flat_map(|batch| match &batch.gapped_k {
+                    Some(gapped_k) => gapped_k.clone(),
+                    None => vec![report.gapped_karlin.k; batch.queries.len()],
+                })
+                .collect()
+        });
     write_blastx_pairwise_report(
         hits,
         writer,
@@ -2153,6 +2167,7 @@ fn write_pairwise(
         database,
         records_parsed,
         &record_titles,
+        query_gapped_k.as_deref(),
         probe,
         first_hsp,
         anchored

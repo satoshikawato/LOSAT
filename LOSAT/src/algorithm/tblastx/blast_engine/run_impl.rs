@@ -992,11 +992,12 @@ impl OneHitChunkMerge<'_> {
     #[cold]
     #[inline(never)]
     fn refuse(self, _undefined: ChunkMergeUndefined) {
+        // After the reports of the batches before (`ErrorAfterBatchReports`).
         self.failure.fail(
             self.s_idx,
-            anyhow::anyhow!(
+            anyhow::Error::new(ErrorAfterBatchReports(anyhow::anyhow!(
                 "TBLASTX -window_size 0: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support"
-            ),
+            ))),
         );
     }
 }
@@ -4877,10 +4878,15 @@ impl BatchReports<'_> {
     }
 }
 
-/// An error of a query batch's search that NCBI raises after the reports of the batches
-/// before (`run_in_pool`): the average subject length (`context_cutoffs::context_cutoffs`).
+/// An error of a query batch's search that comes after the reports of the batches before: NCBI's
+/// (`run_in_pool`), the average subject length (`context_cutoffs::context_cutoffs`); and LOSAT's
+/// refusals of what the search meets, an ungapped extension that scores higher past the end of its
+/// query frame (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's
+/// Q-X2c: "the results of the query batches before are written") and a one-hit merge of lengths
+/// that add up to 0 (`OneHitChunkMerge::refuse`). The run then writes the same bytes whether its
+/// reports are streamed or held (`report_stream`).
 #[derive(Debug)]
-struct ErrorAfterBatchReports(anyhow::Error);
+pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
 
 impl std::fmt::Display for ErrorAfterBatchReports {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5406,6 +5412,7 @@ fn search_query_batch<S: TbxScore>(
         tbx_sent,
         scan_debug_range,
         x_read_failure: &x_read_failure,
+        query_batch: QueryBatch::new(contexts_ref, &x_read_failure),
     };
     // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
     // of each subject (a database length of 0) with the preliminary stage's option spaces.
@@ -5641,6 +5648,7 @@ fn search_query_batch<S: TbxScore>(
                 x_board_batch: &x_board_batch,
                 x_seed_end,
                 x_pair_lut_is_stub,
+                x_read_failure: &x_read_failure,
             },
             x_units_stage,
             &mut x_lap,

@@ -274,6 +274,11 @@ impl XSliced {
     fn window(&self) -> usize {
         self.window
     }
+
+    /// The group's slice tables, in slice order.
+    pub(super) fn slices(&self) -> &[XGroup] {
+        &self.slices
+    }
 }
 
 // No NCBI counterpart: the stub's `longest_chain` reads every table (module doc, item 5).
@@ -649,6 +654,7 @@ impl<M: TbxScore> XPairPar<M> {
             s_idx: inp.s_idx,
             s_len: inp.s_len,
             sc: self.sc,
+            query_batch: inp.query_batch(),
         };
         let mut b = XPendBatch::new(BATCH);
 
@@ -1115,6 +1121,8 @@ mod tests {
                 wordsize: word as i32,
                 s_idx: 0,
                 s_len: 999,
+                failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
+                passed: None,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

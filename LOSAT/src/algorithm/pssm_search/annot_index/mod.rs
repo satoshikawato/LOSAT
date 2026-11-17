@@ -110,7 +110,7 @@ pub(crate) enum Refusal {
 
 impl Refusal {
     /// The refusal's text, after "a PSSM query whose annot holds ...", in LOSAT's form
-    /// ("... is not supported by LOSAT's <PROGRAM>", `in_pssm::PssmReader::refuse`).
+    /// (`"... is not supported by LOSAT's <PROGRAM>"`, `in_pssm::PssmReader::refuse`).
     pub(crate) fn text(self) -> &'static str {
         match self {
             Refusal::EmptyRegion => "a PSSM query whose annot has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)",

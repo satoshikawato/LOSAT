@@ -7105,11 +7105,14 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 /// Seq-align of empty subject rows, `blastx::empty_rows::prefetch_reads_empty_row`): the one
 /// producer of its text.
 pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
-    format!(
-        "Warning: [{}] Error pre-fetching sequence data\n",
-        program.to_ascii_lowercase()
+    // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
+    // stream failed).
+    crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        Some(&program.to_ascii_lowercase()),
+        b"Error pre-fetching sequence data",
     )
-    .into_bytes()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753

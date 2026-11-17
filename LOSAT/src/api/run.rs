@@ -780,28 +780,70 @@ fn taxdb_setting(
 // (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
 // BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
 // (`start::CallStart::settings`).
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247 (quoted at
-// `common::database::database_error_of`)
-/// The result of a run (`run_local`) as the caller of the library gets it: the end without a post
-/// and with exit status 0 that NCBI's `CATCH_ALL` makes of a header record's `CEofException`
-/// (`NativeError` exit 0, `common::database::database_error_of`) is the run's success, with the
-/// reports written before it, as the command line's exit status says.
-pub(super) fn run_ended(result: anyhow::Result<()>) -> anyhow::Result<()> {
-    match result {
-        Err(error) if ends_without_post(&error) => Ok(()),
-        other => other,
-    }
+/// How a `run_local` call's run ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RunEnd {
+    /// After its last query.
+    Searched,
+    /// Where NCBI's `CATCH_ALL` ends the run with exit status 0 and no word (a `CEofException`:
+    /// a header record's, `common::database::database_error_of`, or the `-in_pssm` reader's,
+    /// `pssm_search::in_pssm`): the reports written before it are the run's, and no query is
+    /// searched after it (`batches::Batches`).
+    WithoutPost,
 }
 
-/// Whether `error` ends the run without a post and with exit status 0 (`run_ended`).
-pub(super) fn ends_without_post(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<crate::cli::NativeError>()
-        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
-}
-
-/// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
+/// One `run_local` call: the program's entry for the parsed arguments and `inputs`
+/// (`run_local_entry`), whose end is the command line's run's: a run that NCBI ends with exit
+/// status 0 and no word ends the call without an error (`RunEnd::WithoutPost`), and an NCBI error
+/// after NCBI's main-thread diagnostic stream failed is the text that the command line writes for
+/// it.
 pub(super) fn run_local(
+    command: Commands,
+    inputs: Inputs<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    start: &mut CallStart,
+) -> anyhow::Result<RunEnd> {
+    // The call's code runs on this thread with the call's own diagnostic stream (one batch of
+    // `run_batches` after another's of another call, too), and its searches' workers with it
+    // (`utils::threading::with_search_pool`).
+    let _run = start.enter();
+    let Err(error) = run_local_entry(command, inputs, outputs, start) else {
+        return Ok(RunEnd::Searched);
+    };
+    let Some(native) = error.downcast_ref::<crate::cli::NativeError>() else {
+        return Err(error);
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
+    // A `CEofException` (a `CIOException`: the `-in_pssm` reader's, `pssm_search::in_pssm`, or a
+    // header record's, `common::database::database_error_of`): NCBI's run returns 0 without a
+    // word, so the call succeeds with what it wrote.
+    if native.exit == 0 && native.message.is_empty() {
+        return Ok(RunEnd::WithoutPost);
+    }
+    // After NCBI's object manager failed the stream (`ncbi_exception::main_diag_failbit`, this
+    // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
+    // (`cli::catch_all_text`), as the command line writes the error.
+    if crate::ncbi_exception::main_diag_failbit() {
+        let message = crate::cli::catch_all_text(&native.message).into_owned();
+        return Err(crate::cli::NativeError {
+            exit: native.exit,
+            message,
+        }
+        .into());
+    }
+    Err(error)
+}
+
+/// The program's entry of a `run_local` call.
+fn run_local_entry(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
@@ -1070,7 +1112,7 @@ pub fn run(
                 };
                 run_local(command, inputs, &mut outputs, &mut start)
             };
-            run_ended(result).map_err(|error| sink.failed(&error))?;
+            result.map_err(|error| sink.failed(&error))?;
         }
         Ok(())
     })
@@ -1143,7 +1185,7 @@ pub fn run_to_file(
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        run_ended(result).map_err(|error| sink.failed(&error))
+        result.map(drop).map_err(|error| sink.failed(&error))
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
@@ -1208,7 +1250,7 @@ fn collect_one(
         };
         run_local(command, inputs, &mut outputs, start)
     };
-    run_ended(result).map_err(|error| sink.failed(&error))?;
+    result.map_err(|error| sink.failed(&error))?;
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }

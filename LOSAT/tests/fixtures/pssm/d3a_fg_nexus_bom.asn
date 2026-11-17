@@ -1,0 +1,6 @@
+﻿PssmWithParameters ::= {
+  pssm {
+    isProtein TRUE
+  }
+}
+-- #NEXUS

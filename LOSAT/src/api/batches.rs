@@ -34,8 +34,8 @@ use super::local_blast::{
 };
 use super::parts::Parts;
 use super::run::{
-    check_inputs, ends_without_post, query_range_of, run_local, searched_queries, CountingWriter,
-    HspRecord, QueryRounds, QueryStats,
+    check_inputs, query_range_of, run_local, searched_queries, CountingWriter, HspRecord,
+    QueryRounds, QueryStats, RunEnd,
 };
 use super::search::Search;
 use super::start::{CallStart, RunLog};
@@ -68,9 +68,10 @@ pub struct Batch {
 
 impl Batch {
     /// The batch `range` in which the run ended without a post and with exit status 0
-    /// (`run::run_ended`: NCBI's end at a header record that ends before its read enters the
-    /// set's elements): no HSPs, the statistics and rounds of queries that were not searched,
-    /// and what the command line writes to its standard error for the batch, `diagnostics`.
+    /// (`run::RunEnd::WithoutPost`: NCBI's end at a header record that ends before its read
+    /// enters the set's elements): no HSPs, the statistics and rounds of queries that were not
+    /// searched, and what the command line writes to its standard error for the batch,
+    /// `diagnostics`.
     fn ended(range: Range<usize>, diagnostics: Vec<u8>) -> Self {
         let queries = range.len();
         Batch {
@@ -362,9 +363,9 @@ impl Batches<'_> {
     }
 
     /// Searches the batch `range`, as the command line's loop searches it, and whether the run
-    /// ended in it without a post and with exit status 0 (`run::run_ended`), where NCBI's loop
-    /// ends: no batch is searched after it, and the batch itself has no HSPs (NCBI wrote no
-    /// report of it) and its diagnostics (`Batch::ended`).
+    /// ended in it without a post and with exit status 0 (`run::RunEnd::WithoutPost`), where
+    /// NCBI's loop ends: no batch is searched after it, and the batch itself has no HSPs (NCBI
+    /// wrote no report of it) and its diagnostics (`Batch::ended`).
     fn search_batch(&mut self, range: Range<usize>) -> Result<(Batch, bool), Error> {
         let inputs = match self.inputs.pssm {
             Some(_) => self.inputs,
@@ -443,10 +444,9 @@ impl Batches<'_> {
         if !self.searched_one {
             bytes.splice(0..0, std::mem::take(&mut self.start_messages));
         }
-        if result.as_ref().is_err_and(ends_without_post) {
+        if result.map_err(|error| self.log.failed(&error))? == RunEnd::WithoutPost {
             return Ok((Batch::ended(range, bytes), true));
         }
-        result.map_err(|error| self.log.failed(&error))?;
         let finished = observer
             .parts
             .finish(
@@ -545,7 +545,7 @@ mod tests {
 
     /// The version 4 protein database `tests/db_search/t5/phd_utf8` (its OID 1 a UTF8String
     /// title) copied to `dir` as `name`, with the header record of OID 2 cut to its first byte:
-    /// NCBI's searches end there with exit status 0 and no message (`run::run_ended`).
+    /// NCBI's searches end there with exit status 0 and no message (`run::RunEnd::WithoutPost`).
     #[cfg(unix)]
     fn utf8_then_cut_database(dir: &std::path::Path) -> String {
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5");

@@ -633,3 +633,161 @@ fn unpacked_handles_come_last() {
     assert!(mask_handle_order(123) < mask_handle_order(-1));
     assert!(mask_handle_order(-1) < mask_handle_order(0));
 }
+
+/// `AsString()` of the handle of `id` whose info `first` made, as NCBI's `duplicate Bioseq id`
+/// exception writes it (NCBI BLAST+ 2.17.0 psiblast `-in_pssm`, line RG D3-1 fix round 5
+/// `r5/out_ids5/ncbi/`: the case of each pair, `one_*`).
+fn text(first: &ParsedSeqId, id: &ParsedSeqId) -> String {
+    assert_eq!(mask_handle_key(first), mask_handle_key(id), "one handle");
+    let mut out = Vec::new();
+    crate::seqid::label::fasta(&handle_seq_id(first, id), &mut out);
+    String::from_utf8(out).unwrap()
+}
+
+#[test]
+fn the_handles_seq_id_is_its_infos_with_the_case_of_its_own() {
+    // lcl_case, gnl_db_case, gnl_tag_case, gnl_id_dbcase, gnl_packed_case: the letters' case.
+    assert_eq!(text(&lstr("Query_1"), &lstr("QUERY_1")), "lcl|QUERY_1");
+    let tag = |s: &str| ObjectId::Str(b(s));
+    assert_eq!(text(&gnl("DB", tag("x")), &gnl("db", tag("x"))), "gnl|db|x");
+    assert_eq!(
+        text(&gnl("DB", tag("Xy")), &gnl("DB", tag("xY"))),
+        "gnl|DB|xY"
+    );
+    assert_eq!(
+        text(&gnl("Db", ObjectId::Id(7)), &gnl("dB", ObjectId::Id(7))),
+        "gnl|dB|7"
+    );
+    assert_eq!(
+        text(&gnl("DB", tag("ABC123456")), &gnl("db", tag("abc123456"))),
+        "gnl|db|abc123456"
+    );
+    // lcl_long_case_tail: past the 64th letter the info's case stays; gnl_long_case_tail counts
+    // the database's letters first.
+    let long = "Abcdefghij".repeat(7);
+    let tail = format!("{}{}", &long[..66], long[66..].to_ascii_uppercase());
+    let all = long.to_ascii_uppercase();
+    assert_eq!(text(&lstr(&long), &lstr(&tail)), format!("lcl|{long}"));
+    assert_eq!(
+        text(&lstr(&long), &lstr(&all)),
+        format!("lcl|{}{}", &all[..64], &long[64..])
+    );
+    assert_eq!(
+        text(&gnl("DB", tag(&long)), &gnl("DB", tag(&tail))),
+        format!("gnl|DB|{long}")
+    );
+    // gb_acc_case, gb_ddbj_case, emb_gb, tpg_case, ref_case, sp_acc_only_case: a packed
+    // accession takes its own case and the info's alternative.
+    let acc = |a: &str| tx(a, Some(1), "", "");
+    assert_eq!(
+        text(&P::Genbank(acc("AAA00001")), &P::Ddbj(acc("aAa00001"))),
+        "gb|aAa00001.1|"
+    );
+    assert_eq!(
+        text(&P::Embl(acc("AAA00001")), &P::Genbank(acc("AAA00001"))),
+        "emb|AAA00001.1|"
+    );
+    assert_eq!(
+        text(&P::Other(acc("NP_000549")), &P::Other(acc("np_000549"))),
+        "ref|np_000549.1|"
+    );
+    // gb_plain_case: a plain accession takes its own case; gb_name_case, sp_name_case,
+    // prf_name_case: a name keeps the info's.
+    assert_eq!(
+        text(&P::Genbank(acc("ABCDEFG1")), &P::Genbank(acc("abcdefg1"))),
+        "gb|abcdefg1.1|"
+    );
+    assert_eq!(
+        text(
+            &P::Genbank(tx("", None, "ABC", "")),
+            &P::Genbank(tx("", None, "abc", ""))
+        ),
+        "gb||ABC"
+    );
+    assert_eq!(
+        text(
+            &P::Swissprot(tx("P69905", Some(2), "HBA_HUMAN", "")),
+            &P::Swissprot(tx("P69905", Some(2), "hba_human", ""))
+        ),
+        "sp|P69905.2|HBA_HUMAN"
+    );
+    // pat_country_case, pat_number_case, pat_doctype: the info's patent.
+    let number = |n: &str| PatentNumber::Number(b(n));
+    assert_eq!(
+        text(
+            &pat(1, "US", number("123"), None),
+            &pat(1, "us", number("123"), None)
+        ),
+        "pat|US|123|1"
+    );
+    assert_eq!(
+        text(
+            &pat(1, "US", number("RE33188"), None),
+            &pat(1, "US", number("re33188"), None)
+        ),
+        "pat|US|RE33188|1"
+    );
+    // A PDB id is its own (review 4c `ps.one_pdb_molcase`: `pdb|1abc|A | pdb|1ABC|A`).
+    assert_eq!(
+        text(
+            &pdb("1ABC", Some(65), None, None),
+            &pdb("1abc", Some(65), None, None)
+        ),
+        "pdb|1abc|A"
+    );
+}
+
+#[test]
+fn which_handles_write_their_own_seq_id() {
+    let acc = |a: &str| tx(a, Some(1), "", "");
+    let own = [
+        lstr("Query_1"),
+        lstr(&"a".repeat(64)),
+        gnl("DB", ObjectId::Str(b("x"))),
+        P::Gi(5),
+        P::Gibbsq(7),
+        giim(5, Some("x")),
+        pdb("1abc", Some(65), None, None),
+        P::Other(acc("NP_000549")),
+        P::Tpg(acc("DAA00001")),
+        P::Genbank(acc("ABCDEFG1")),
+        P::Genbank(tx("", Some(1), "", "")),
+        pat(1, "12", PatentNumber::Number(b("123")), None),
+    ];
+    for id in &own {
+        assert!(handle_fasta_is_own(id), "{id:?}");
+    }
+    let shown = [
+        lstr(&"a".repeat(65)),
+        gnl("DB", ObjectId::Str(b(&"a".repeat(63)))),
+        P::Genbank(acc("AAA00001")),
+        P::Embl(acc("AAA00001")),
+        P::Ddbj(acc("AAA00001")),
+        P::Genbank(tx("", None, "ABC", "")),
+        P::Swissprot(tx("P69905", Some(2), "HBA_HUMAN", "")),
+        pat(1, "US", PatentNumber::Number(b("123")), None),
+    ];
+    for id in &shown {
+        assert!(!handle_fasta_is_own(id), "{id:?}");
+    }
+}
+
+#[test]
+fn the_giim_tree_finds_the_first_handle_not_equal() {
+    // seq_id_tree.cpp:2926-2941: two equal `giim` ids are two handles, another `db` finds the first.
+    let id = |db: &str| GiimportId {
+        id: 5,
+        db: Some(b(db)),
+        release: None,
+    };
+    let mut tree = GiimTree::default();
+    let (a, new_a) = tree.find_or_create(&id("x"));
+    let (b2, new_b) = tree.find_or_create(&id("x"));
+    let (c, new_c) = tree.find_or_create(&id("y"));
+    assert!(new_a && new_b && !new_c);
+    assert_ne!(a, b2);
+    assert_eq!(c, a);
+    assert_eq!(tree.made_from(5, c), &id("x"));
+    tree.drop_handle(5, a);
+    assert_eq!(tree.find(&id("y")), Some(b2));
+}

@@ -2037,6 +2037,37 @@ pub(crate) mod arch {
     pub unsafe fn blend8(a: V, b: V, mask: V) -> V {
         _mm_blendv_epi8(a, b, mask)
     }
+    // The wrappers below are used by blastp's 128-bit restricted alignment
+    // (`blastp/x_restricted_gap.rs`, LOSAT_X_BPGAP128) on x86-64 and wasm32 only; the aarch64
+    // layer does not have them.
+    /// 16-bit lanes: `a - b` with signed saturation.
+    #[inline(always)]
+    pub unsafe fn subs16(a: V, b: V) -> V {
+        _mm_subs_epi16(a, b)
+    }
+    /// The 16-bit lanes of `v` moved up by one lane; lane 0 is lane 7 of `fill` (`palignr`).
+    #[inline(always)]
+    pub unsafe fn up16_1(v: V, fill: V) -> V {
+        _mm_alignr_epi8::<14>(v, fill)
+    }
+    /// The 16-bit lanes of `v` moved up by two lanes; lanes 0 and 1 are lanes 6 and 7 of `fill`.
+    #[inline(always)]
+    pub unsafe fn up16_2(v: V, fill: V) -> V {
+        _mm_alignr_epi8::<12>(v, fill)
+    }
+    /// The 16-bit lanes of `v` moved up by four lanes; lanes 0-3 are lanes 4-7 of `fill`.
+    #[inline(always)]
+    pub unsafe fn up16_4(v: V, fill: V) -> V {
+        _mm_alignr_epi8::<8>(v, fill)
+    }
+    /// `lut32` for indices below 32, with its index offset `minus16` (-16 in every byte) given by
+    /// the caller, so that a loop makes it once (on wasm32 a constant is made again at each use).
+    #[inline(always)]
+    pub unsafe fn lut32k(t0: V, t1: V, idx: V, minus16: V) -> V {
+        let i0 = _mm_add_epi8(idx, _mm_set1_epi8(0x70));
+        let i1 = _mm_add_epi8(idx, minus16);
+        _mm_or_si128(_mm_shuffle_epi8(t0, i0), _mm_shuffle_epi8(t1, i1))
+    }
 }
 
 // No NCBI counterpart: vector instruction wrappers (one operation on all lanes); they do not
@@ -2304,6 +2335,42 @@ pub(crate) mod arch {
     #[inline(always)]
     pub unsafe fn blend8(a: V, b: V, mask: V) -> V {
         v128_bitselect(b, a, mask)
+    }
+    // The wrappers below are used by blastp's 128-bit restricted alignment
+    // (`blastp/x_restricted_gap.rs`, LOSAT_X_BPGAP128) on x86-64 and wasm32 only; the aarch64
+    // layer does not have them.
+    /// 16-bit lanes: `a - b` with signed saturation.
+    #[inline(always)]
+    pub unsafe fn subs16(a: V, b: V) -> V {
+        i16x8_sub_sat(a, b)
+    }
+    // `up16_*`: a window of the concatenation `v ++ fill` that starts in `fill` (the bytes of
+    // `fill` taken from its end, indices 30, 31, ..), which V8 compiles to one `palignr`, as the
+    // `up*b` shifts of `x_xdrop_w128.rs`.
+    /// The 16-bit lanes of `v` moved up by one lane; lane 0 is lane 7 of `fill`.
+    #[inline(always)]
+    pub unsafe fn up16_1(v: V, fill: V) -> V {
+        i8x16_shuffle::<30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13>(v, fill)
+    }
+    /// The 16-bit lanes of `v` moved up by two lanes; lanes 0 and 1 are lanes 6 and 7 of `fill`.
+    #[inline(always)]
+    pub unsafe fn up16_2(v: V, fill: V) -> V {
+        i8x16_shuffle::<28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11>(v, fill)
+    }
+    /// The 16-bit lanes of `v` moved up by four lanes; lanes 0-3 are lanes 4-7 of `fill`.
+    #[inline(always)]
+    pub unsafe fn up16_4(v: V, fill: V) -> V {
+        i8x16_shuffle::<24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7>(v, fill)
+    }
+    /// `lut32` for indices below 32, with its index offset `minus16` (-16 in every byte) given by
+    /// the caller, so that a loop makes it once (a constant is made again at each use). The index
+    /// bytes of 16 and more of each swizzle give 0, which selects the table half.
+    #[inline(always)]
+    pub unsafe fn lut32k(t0: V, t1: V, idx: V, minus16: V) -> V {
+        v128_or(
+            i8x16_swizzle(t0, idx),
+            i8x16_swizzle(t1, i8x16_add(idx, minus16)),
+        )
     }
 }
 

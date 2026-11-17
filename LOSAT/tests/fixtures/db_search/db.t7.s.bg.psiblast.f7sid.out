@@ -1,0 +1,11 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: pq1 query protein one
+# Database: User specified sequence set (Input: )
+# Fields: query id, subject id, evalue
+# 4 hits found
+pq1	Unknown	1.67e-109
+pq1	Unknown	5.34e-76
+pq1	Unknown	9.7
+pq1	s2	1.32e-53
+# BLAST processed 1 queries

@@ -3,8 +3,9 @@
 //! `scan_chunk_bucketed` (SEEDBUCKET's order of the same hits). Each starts the chunk with
 //! `begin_chunk_scan` and ends it with `finish_chunk_scan`; the two two-hit scans scan with
 //! `scan_next_hits` and run the two-hit test and extension of each hit with `two_hit_one_hit`. They
-//! read the batch's values (`WordFinderCx`), the subject frame's (`FrameCx`) and the chunk's
-//! (`ChunkCx`).
+//! read the subject's values (`WordFinderCx`: the batch's, with the subject's own `cutoff_scores`
+//! where NCBI computes the statistics of each subject), the subject frame's (`FrameCx`) and the
+//! chunk's (`ChunkCx`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:440-619
 //! (`s_BlastAaWordFinder_TwoHit`: the scan :502-507, the hit loop :509-608, `Blast_ExtendWordExit`
@@ -27,21 +28,26 @@ use super::{
     sort_init_hsps_by_score_ncbi, tblastx_scan_interiors, trace_hsp_target,
     trace_init_hsp_if_match, trace_match_target, x_soft_chunk, x_soft_scan_letters,
     x_tbx_sent_subject, AtomicOrdering, AtomicU64, DiagStruct, DiagnosticCounters, HashSet,
-    InitHSP, Instant, OffsetPair, QueryContext, QueryFrame, SubjectChunk, TblastxChunkScanResult,
-    TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
+    InitHSP, Instant, OffsetPair, QueryBatch, QueryContext, QueryFrame, SubjectChunk,
+    TblastxChunkScanResult, TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
 };
+use crate::algorithm::tblastx::extension::OneHitAlone;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::subjects::XReadFailure;
 
-/// The batch's values the word finder reads, made once per batch by `search_query_batch` under the
-/// names the frame loop read them by: the diagonal table's window and the word size, the table's
-/// mask and size, the diagnostics (`diag_enabled`, `diagnostics`), LOSAT_TIMING (`timing_enabled`
-/// and the clocks of the scan and the extension), LOSAT_DEBUG_EXTENSION
-/// (`extension_debug_enabled`), the query contexts with their cutoffs and X-drops, the scan's
-/// LOSAT_X_TBXSCANBF (`x_scan_bf`) and offset-array size, LOSAT_X_TBXUNGAPSENT (`tbx_sent`),
-/// LOSAT_DEBUG_SCAN_SOFF's range (`scan_debug_range`), and the search's failure (`x_read_failure`,
-/// where the one-hit word finder reports an error).
-/// `Sync`: every worker's `process_subject` reads it.
+/// The values the word finder reads, made once per batch by `search_query_batch` under the names
+/// the frame loop read them by: the diagonal table's window and the word size, the table's mask
+/// and size, the diagnostics (`diag_enabled`, `diagnostics`), LOSAT_TIMING (`timing_enabled` and
+/// the clocks of the scan and the extension), LOSAT_DEBUG_EXTENSION (`extension_debug_enabled`),
+/// the query contexts with their cutoffs and X-drops, the scan's LOSAT_X_TBXSCANBF (`x_scan_bf`)
+/// and offset-array size, LOSAT_X_TBXUNGAPSENT (`tbx_sent`), LOSAT_DEBUG_SCAN_SOFF's range
+/// (`scan_debug_range`), the search's failure (`x_read_failure`, where the one-hit word finder
+/// reports an error), and the query batch as the extensions read it past a context's ends
+/// (`query_batch`, which refuses into `x_read_failure`). `Sync`: every worker's `process_subject`
+/// reads it (`SubjectStatistics::word_finder_cx`), and where NCBI computes the statistics of each subject copies it once per
+/// subject with that subject's own `cutoff_scores` (`context_cutoffs::subject_cutoffs`); the frame
+/// loop's two-hit and one-hit word finders save their extensions against the `cutoff_scores` of
+/// the one they are given (`FrameCx::cx`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:473-493 (what
 /// `s_BlastAaWordFinder_TwoHit` reads of the diagonal table and the lookup table) and :575 (the
@@ -67,6 +73,9 @@ pub(super) struct WordFinderCx<'a> {
     pub(super) tbx_sent: bool,
     pub(super) scan_debug_range: Option<(i32, i32)>,
     pub(super) x_read_failure: &'a XReadFailure,
+    /// The query batch as the extensions read it past a context's ends (its refusals go to
+    /// `x_read_failure`; extension/query_batch.rs).
+    pub(super) query_batch: QueryBatch<'a>,
 }
 
 /// The subject's and the subject frame's values the word finder reads, made per frame by the
@@ -76,13 +85,14 @@ pub(super) struct WordFinderCx<'a> {
 /// listed frames, whether it collects the HSP-saving statistics (`is_long_sequence`,
 /// `collect_hsp_saving_stats`), and the frame (`s_f_idx`, `s_frame`, its letters with and without
 /// the sentinels, and its `-lcase_masking` chunks with their ranges, `None` without lower-case
-/// letters). It also carries the batch's `WordFinderCx` (`cx`), which the four chunk scans read
-/// through it.
+/// letters). It also carries the subject's `WordFinderCx` (`cx`: the batch's, with the subject's
+/// `cutoff_scores`), which the four chunk scans read through it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (the subject frame of
 /// the frame loop of `s_BlastSearchEngineCore`).
 pub(super) struct FrameCx<'a> {
-    // The chunk scans take only the frame and read the batch's values through this field, a
+    // The chunk scans take only the frame and read the subject's values (`WordFinderCx`: the
+    // batch's, or their copy with the subject's own `cutoff_scores`) through this field, a
     // pointer loaded from the frame, as the closures they were made from read `word_finder_cx`
     // through their captures. Given as a parameter of its own (`&WordFinderCx`, which LLVM knows
     // nothing writes during the call), its fields were held in registers across the scan loops,
@@ -501,11 +511,15 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         } else {
             None
         };
+        // NCBI's walks run on the query batch (`query`, `query_offset`): past the context's ends
+        // they go on into it (extension/query_batch.rs; aa_ungapped.c:841, 897).
+        let in_batch = frame.cx.query_batch.at(ctx_idx, frame.s_idx);
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
             if !subject_sent {
                 extend_hit_two_hit_with(
                     sc,
                     query,
+                    in_batch,
                     subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
@@ -523,6 +537,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
                 unsafe {
                     sc.sent_two_hit(
                         query_full,
+                        in_batch,
                         subject_full,
                         (last_hit + wordsize) as usize,
                         subject_offset as usize,
@@ -800,7 +815,8 @@ fn scan_chunk_plain<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         wordsize,
@@ -1009,7 +1025,8 @@ fn scan_chunk_bucketed<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         wordsize,
@@ -1192,6 +1209,37 @@ fn scan_chunk_bucketed<S: TbxScore>(
     )
 }
 
+/// The one-hit extension of the word at batch offset `query_offset` (in context `ctx_idx`, `ctx`)
+/// and `subject_offset` of the chunk's letters `subject`, on the query batch, from where its first
+/// pass on the context alone stopped (`again`: a walk ended at the context's end where NCBI's could
+/// go on past the NULLB; `extend_hit_one_hit_alone`, extension/query_batch.rs). Out of the scan's
+/// loop, from values the loop keeps.
+#[cold]
+#[inline(never)]
+fn one_hit_in_batch<S: TbxScore>(
+    sc: S,
+    frame: &FrameCx<'_>,
+    ctx: &QueryContext,
+    ctx_idx: usize,
+    query_offset: u32,
+    subject: &[u8],
+    subject_offset: u32,
+    x_dropoff_per_context: &[i32],
+    again: crate::algorithm::tblastx::extension::Again,
+) -> Option<crate::algorithm::tblastx::extension::OneHit> {
+    let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
+    crate::algorithm::tblastx::extension::extend_hit_one_hit_resume(
+        sc,
+        &ctx.aa_seq[1..ctx.aa_seq.len() - 1],
+        frame.cx.query_batch.at(ctx_idx, frame.s_idx),
+        subject,
+        q_raw,
+        subject_offset as usize,
+        x_dropoff_per_context[ctx_idx],
+        again,
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-807
 // ```c
 //     scan_range[0] = 0;
@@ -1263,7 +1311,8 @@ fn scan_chunk_one_hit<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         wordsize,
@@ -1381,15 +1430,80 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 // The context's letters (`query->sequence` from the context's offset,
                 // blast_query_info.c:311-315), as the two-hit extensions read them.
                 let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+                // What the scan does with the extension's result, written once for the two passes
+                // below (the first pass's result stays in its registers).
+                let mut record = |hit: crate::algorithm::tblastx::extension::OneHit| {
+                    // [C] if (score >= cutoffs->cutoff_score)
+                    // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                    // [C]                      query_offset, subject_offset, hsp_len, score);
+                    if hit.score >= cutoff_scores[ctx_idx] {
+                        // NCBI reference (598d8ae6):
+                        // c++/src/algo/blast/core/aa_ungapped.c:1054,1083
+                        // ```c
+                        //     init_hit_width = q_right_off - q_left_off + 1;
+                        // ...
+                        //     *hsp_len = left_disp + right_disp + init_hit_width;
+                        // ```
+                        // A word whose running sum is reset after its best part (a low
+                        // -threshold allows it) gives a length of 0 or less, saved as any
+                        // other: its ends are at or before its starts, and below 0 near a
+                        // frame's start. NCBI links it with the others and its
+                        // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
+                        // first linking call and drops it there (`chaining.rs`, the impl
+                        // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
+                        let hsp_q_absolute = ctx.frame_base + hit.q_start;
+                        init_hsps.push(InitHSP {
+                            q_start_absolute: hsp_q_absolute,
+                            q_end_absolute: hsp_q_absolute + hit.length,
+                            s_start: hit.s_start,
+                            s_end: hit.s_start + hit.length,
+                            q_seed_absolute: query_offset as i32,
+                            s_seed: subject_offset as i32,
+                            score: hit.score,
+                            ctx_idx,
+                            s_f_idx,
+                            q_idx: ctx.q_idx,
+                            s_idx: s_idx as u32,
+                            q_frame: ctx.frame,
+                            s_frame: s_frame.frame,
+                            q_orig_len: ctx.orig_len,
+                            s_orig_len: s_len,
+                        });
+                    }
+                    // [C] diag_array[diag_coord].last_hit =
+                    // [C]     s_last_off - (wordsize - 1) + diag_offset;
+                    diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
+                };
                 // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
-                let Some(hit) = crate::algorithm::tblastx::extension::extend_hit_one_hit(
+                // On the context alone; where a walk could go on into the query batch past the
+                // context's ends, as NCBI's do, again on the batch (`one_hit_in_batch`;
+                // extension/query_batch.rs; aa_ungapped.c:841, 897).
+                let again = match crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
                     sc,
                     query,
                     subject,
                     q_raw,
                     subject_offset as usize,
                     x_dropoff_per_context[ctx_idx],
-                ) else {
+                ) {
+                    Some(OneHitAlone::Hit(hit)) => {
+                        record(hit);
+                        continue;
+                    }
+                    Some(OneHitAlone::Again(again)) => one_hit_in_batch(
+                        sc,
+                        frame,
+                        ctx,
+                        ctx_idx,
+                        query_offset,
+                        subject,
+                        subject_offset,
+                        x_dropoff_per_context,
+                        again,
+                    ),
+                    None => None,
+                };
+                let Some(hit) = again else {
                     // A word past the letters, which the scan does not give.
                     x_read_failure.fail(
                         s_idx,
@@ -1401,46 +1515,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                     );
                     continue;
                 };
-                // [C] if (score >= cutoffs->cutoff_score)
-                // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                // [C]                      query_offset, subject_offset, hsp_len, score);
-                if hit.score >= cutoff_scores[ctx_idx] {
-                    // NCBI reference (598d8ae6):
-                    // c++/src/algo/blast/core/aa_ungapped.c:1054,1083
-                    // ```c
-                    //     init_hit_width = q_right_off - q_left_off + 1;
-                    // ...
-                    //     *hsp_len = left_disp + right_disp + init_hit_width;
-                    // ```
-                    // A word whose running sum is reset after its best part (a low
-                    // -threshold allows it) gives a length of 0 or less, saved as any
-                    // other: its ends are at or before its starts, and below 0 near a
-                    // frame's start. NCBI links it with the others and its
-                    // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
-                    // first linking call and drops it there (`chaining.rs`, the impl
-                    // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
-                    let hsp_q_absolute = ctx.frame_base + hit.q_start;
-                    init_hsps.push(InitHSP {
-                        q_start_absolute: hsp_q_absolute,
-                        q_end_absolute: hsp_q_absolute + hit.length,
-                        s_start: hit.s_start,
-                        s_end: hit.s_start + hit.length,
-                        q_seed_absolute: query_offset as i32,
-                        s_seed: subject_offset as i32,
-                        score: hit.score,
-                        ctx_idx,
-                        s_f_idx,
-                        q_idx: ctx.q_idx,
-                        s_idx: s_idx as u32,
-                        q_frame: ctx.frame,
-                        s_frame: s_frame.frame,
-                        q_orig_len: ctx.orig_len,
-                        s_orig_len: s_len,
-                    });
-                }
-                // [C] diag_array[diag_coord].last_hit =
-                // [C]     s_last_off - (wordsize - 1) + diag_offset;
-                diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
+                record(hit);
             }
         }
     }
@@ -1499,7 +1574,8 @@ pub(super) fn scan_chunk<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         window,

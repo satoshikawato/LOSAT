@@ -519,6 +519,24 @@ db_t5c_stored_fasta_nt	-infmt blastdb -in ../db_search/t5/psfs -outfmt fasta
 # Taxids of other encodings (fix 2 of line RG item T5c): ../db_search/t5/ptx_app42 and ptx_sx9 (make_t5.py --taxid-only), whose first record's taxid NCBI's ReadInt4 reads as makeblastdb's (the application INTEGER tag 0x42, nine content bytes of sign extension). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, T5c fix 2.
 db_t5c_taxid_app42	-infmt blastdb -in ../db_search/t5/ptx_app42
 db_t5c_taxid_sx9	-infmt blastdb -in ../db_search/t5/ptx_sx9
+# A damaged taxonomy database (line RG item T5b): ../db_search/t5b (make_t5b.py there), the taxonomy database ../seqdb/taxdb/<variant> on the search path of conf/t5b_<variant>.ini; as dustmasker's rows of T5b. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-4.
+db_t5b_bad_magic_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_interval	-infmt blastdb -in ../db_search/t5b/pmv -outfmt interval -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt seqloc_asn1_text -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt maskinfo_asn1_text -conffile conf/t5b_bad_magic.ini
+db_t5b_offset_last_past_end_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_interval	-infmt blastdb -in ../db_search/t5b/pmv -outfmt interval -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt seqloc_asn1_text -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt maskinfo_asn1_text -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_good_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_good.ini
+db_t5b_bad_magic_le_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_bad_magic_le.ini
+db_t5b_count_zero_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_count_zero.ini
+db_t5b_count_smaller_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_count_smaller.ini
+db_t5b_count_larger_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_count_larger.ini
+db_t5b_index_trailing_8_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_index_trailing_8.ini
+# A record of taxdb.btd that reaches past NCBI's mapping of the file (line RG item T5b fix 2): the taxonomy databases ../db_search/t5b/taxdb/<variant> (make_t5b.py --taxdb) on the search path of conf/t5b_<variant>.ini. kingdom_past_page: 9606's record runs past the mapping after its third tab (its names are NCBI's, a title made from them too); names_past_page: 9606's record lies wholly past it, and the loads, whose names no output writes, go on as NCBI's (a title made from them is refused, taxdb_tool_texts.rs). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, the T5b fix 2 subagent of ad-RG-T5-5.
+db_t5b_kingdom_past_page_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_kingdom_past_page.ini
+db_t5b_names_past_page_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt maskinfo_asn1_text -conffile conf/t5b_names_past_page.ini
 # Line RG item T5d (2026-11-16, the local official release; tests/db_search/t5/make_t5.py --header-only): header records that NCBI's read fails on, after the records before.
 db_t5d_vstr	-infmt blastdb -in ../db_search/t5/phd_vstr
 db_t5d_prim	-infmt blastdb -in ../db_search/t5/phd_prim

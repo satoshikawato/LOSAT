@@ -255,8 +255,8 @@ fn every_seq_id_encodes_as_makeblastdb_stored_it() {
 /// `tabular_ids`, `all_tabular_ids`); `match_rows` still fails when no sequence gives an NCBI row.
 fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
     let subject = ParsedSubject::new(set.clone()).ok()?;
-    let [id, accession, accession_version] = subject.tabular_ids(protein).ok()?;
-    let all_ids = subject.all_tabular_ids(protein).ok()?;
+    let [id, accession, accession_version] = subject.tabular_ids(protein).ok()??;
+    let all_ids = subject.all_tabular_ids(protein).ok()?.ids;
     let titles: Vec<&[u8]> = subject
         .deflines()
         .iter()
@@ -287,6 +287,8 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         nucleotide: !protein,
         qcovs: -1,
         qcovus: -1,
+        lookup: crate::report::tabular::SubjectLookup::Found,
+        index: 0,
     };
     let hsp = TabularHsp {
         q_start: 1,
@@ -312,7 +314,14 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         program_version: "BLASTP 2.17.0+",
         matrix: None,
     }
-    .row(&mut out, &TabularQuery::local(b"q", 1), &shown, &hsp);
+    .row(
+        &mut out,
+        &mut crate::report::tabular::TabularRows::default(),
+        &TabularQuery::local(b"q", 1),
+        &shown,
+        None,
+        &hsp,
+    );
     let row = text(out.strip_suffix(b"\n").expect("one row"));
     Some(row.split('\t').map(str::to_string).collect())
 }

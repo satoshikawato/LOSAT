@@ -37,15 +37,20 @@
 //! fewer than three tabs, or with an empty kingdom, is "not found"; an
 //! entry whose record would end before it begins is "not found".
 //!
-//! What NCBI does with a damaged file without a defined result is refused with
-//! [`SeqDbError::Unsupported`] (it reads outside the file or crashes): a
-//! record that reaches past the last 4096-byte page of `taxdb.btd` (within
-//! that page NCBI reads the zero padding of its mapping, and so does this
-//! reader), which includes every record of an empty `taxdb.btd` (NCBI
-//! dereferences a null pointer). Lookups
-//! of such a file that read no record (a taxid outside the index, a record
-//! that ends before it begins, the offset error of the last entry) give
-//! NCBI's result.
+//! A record that reaches past the end of `taxdb.btd` is read as NCBI reads its
+//! mapping: the zero bytes of the mapping's last 4096-byte page, and after that
+//! page memory that does not belong to the file, whose bytes, or whether NCBI
+//! faults reading them, depend on NCBI's memory map. Only an empty `taxdb.btd`
+//! faults for certain (NCBI maps it as a null pointer): a lookup that reads a
+//! record of it is refused with [`SeqDbError::Unsupported`]. A record past the
+//! mapping of a file that is not empty gives NCBI's result where its bytes lie
+//! inside the mapping: the names before the record's third tab when that tab is
+//! inside, the kingdom never ([`TaxNames::super_kingdom`]); where no third tab
+//! is inside, whether the lookup finds names at all is not defined
+//! ([`TaxLookup::PastMapping`]). The callers refuse only what they write of it
+//! (PD-LOSAT-NCBI-DEFECTS, rule 3 and approved exception 14). Lookups
+//! that read no record (a taxid outside the index, a record that ends before it
+//! begins, the offset error of the last entry) give NCBI's result.
 //!
 //! The reader opens nothing until a name is asked for ([`LazyTaxDb`]); it
 //! reads the index by position (about 22 reads of 8 bytes per lookup), so it
@@ -91,8 +96,76 @@ pub struct TaxNames {
     pub common_name: Vec<u8>,
     /// `blast_name` (may be empty; `-` and `unclassified` are values of the file).
     pub blast_name: Vec<u8>,
-    /// `s_kingdom`: the super kingdom, never empty.
-    pub super_kingdom: Vec<u8>,
+    /// `s_kingdom`: the super kingdom, never empty. `Err` where the record reaches past NCBI's
+    /// mapping of `taxdb.btd`: NCBI copies the kingdom from memory past it, whose bytes (or
+    /// whether NCBI faults there) depend on its memory map; a caller that writes the kingdom
+    /// refuses it ([`PastMapping::error`]).
+    pub super_kingdom: Result<Vec<u8>, PastMapping>,
+}
+
+/// What `CSeqDBTaxInfo::GetTaxNames` gives for a taxid ([`TaxDb::lookup`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaxLookup {
+    /// False before the search finds the taxid (a missing database, a taxid outside the
+    /// index or not in it): the caller's `info.taxid` is not set.
+    NotInIndex,
+    /// False after the search found it (`info.taxid = tax_id`; seqdbtax.cpp:258-259): the offset
+    /// error of the last entry, a record of no positive size or not of four fields.
+    Unnamed,
+    /// True: the names.
+    Named(TaxNames),
+    /// The search found the taxid (`info.taxid = tax_id`) and its record reaches past NCBI's
+    /// mapping of `taxdb.btd` before its third tab: NCBI looks for the tabs in memory past the
+    /// mapping, so whether it finds names, and which, depends on its memory map (or it faults).
+    /// Nothing of the lookup but its texts can be written.
+    PastMapping(PastMapping),
+}
+
+impl TaxLookup {
+    /// The names, `None` where NCBI's lookup returns false. Err: a lookup whose result depends on
+    /// memory past NCBI's mapping of `taxdb.btd` ([`TaxLookup::PastMapping`]), for a caller that
+    /// writes something of it.
+    pub fn into_names(self) -> Result<Option<TaxNames>, SeqDbError> {
+        match self {
+            TaxLookup::Named(names) => Ok(Some(names)),
+            TaxLookup::NotInIndex | TaxLookup::Unnamed => Ok(None),
+            TaxLookup::PastMapping(past) => Err(past.error("names")),
+        }
+    }
+}
+
+/// A record of `taxdb.btd` that reaches past NCBI's mapping of the file (the end of its last
+/// 4096-byte page), which NCBI reads there: memory that does not belong to the file, whose bytes,
+/// or whether NCBI faults reading them, depend on its memory map ([`TaxLookup::PastMapping`],
+/// [`TaxNames::super_kingdom`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PastMapping {
+    /// `taxdb.btd`.
+    pub path: PathBuf,
+    /// The taxid looked up.
+    pub taxid: i32,
+    /// The record, `begin..end` in bytes of the file.
+    pub begin: u64,
+    pub end: u64,
+    /// The size of the file.
+    pub len: u64,
+}
+
+impl PastMapping {
+    /// LOSAT's refusal of a caller that writes `what` ("names", "super kingdom") of this lookup:
+    /// those bytes come from past NCBI's mapping of `taxdb.btd`.
+    pub fn error(&self, what: &str) -> SeqDbError {
+        SeqDbError::Unsupported {
+            path: self.path.clone(),
+            message: format!(
+                "the {what} of taxid {} in the taxonomy database, read from its record (bytes \
+                 {}..{}) past the end of the file ({} bytes) and NCBI BLAST+'s mapping of it: \
+                 NCBI reads memory past its mapping there, whose bytes, or whether NCBI faults, \
+                 depend on its memory map",
+                self.taxid, self.begin, self.end, self.len
+            ),
+        }
+    }
 }
 
 /// The two files, open.
@@ -335,9 +408,15 @@ impl TaxDb {
     // or more: `SeqDB_SplitString` finds nothing in it and the lookup fails.
     // A record that reaches past the end of `taxdb.btd` is read by NCBI from
     // beyond the file: zero bytes up to the end of the last page of its
-    // mapping (observed: `offset_next_past_end`, `btd_truncated`), unmapped
-    // memory (a crash) after that. The page is 4096 bytes on the oracle
-    // platform; beyond it the lookup is refused.
+    // mapping (observed: `offset_next_past_end`, `btd_truncated`), then memory
+    // past the mapping, whose bytes, or whether NCBI faults reading them, depend
+    // on its memory map (review of line RG item T5b: a record of 266-byte
+    // `taxdb.btd` that ends at 5,000, 9,000 or 20,000 bytes completes, one that
+    // ends at 1 MiB faults). The page is 4096 bytes on the oracle platform.
+    // `SeqDB_SplitString` reads only up to the tab it finds and `GetString`
+    // copies a field whole, so a third tab inside the mapping gives the first
+    // three names and a kingdom that reaches past it. An empty `taxdb.btd` is
+    // mapped as a null pointer (`m_DataPtr`): every record read faults.
     /// `CSeqDBTaxInfo::GetTaxNames` for `tax_id`: `Ok(Some(names))` when NCBI
     /// returns true, `Ok(None)` when it returns false (the taxid is not in the
     /// database, the record is not of four fields, the database is missing).
@@ -346,21 +425,34 @@ impl TaxDb {
     /// `messages` (only [`MSG_OFFSET_ERROR`]; those of opening are in
     /// [`Self::open_messages`]). A record that ends after the file is padded with
     /// zero bytes up to the end of a 4096-byte page, as NCBI's mapping is. Err: a
-    /// record that reaches past that page (NCBI reads unmapped memory).
+    /// record of an empty `taxdb.btd` (NCBI faults), and a record past the
+    /// mapping before its third tab ([`TaxLookup::into_names`]).
     pub fn names(
         &self,
         tax_id: i32,
         messages: &mut Vec<String>,
     ) -> Result<Option<TaxNames>, SeqDbError> {
+        self.lookup(tax_id, messages)?.into_names()
+    }
+
+    /// [`Self::names`], telling apart the two ways in which NCBI's lookup returns false: before
+    /// its search finds the taxid in the index ([`TaxLookup::NotInIndex`]: `info.taxid` keeps
+    /// its value) and after ([`TaxLookup::Unnamed`]: `info.taxid = tax_id`, the names stay empty),
+    /// which blastdbcmd's `-tax_info` writes apart (`N/A` or empty names), and giving a record
+    /// past NCBI's mapping of `taxdb.btd` as it is ([`TaxLookup::PastMapping`],
+    /// [`TaxNames::super_kingdom`]): a caller that writes nothing of the names (the texts of
+    /// `GetBioseq`'s lookups) goes on as NCBI does where it completes. Err: a read error, or a
+    /// record of an empty `taxdb.btd` (NCBI faults for certain).
+    pub fn lookup(&self, tax_id: i32, messages: &mut Vec<String>) -> Result<TaxLookup, SeqDbError> {
         let Some(files) = &self.files else {
-            return Ok(None);
+            return Ok(TaxLookup::NotInIndex);
         };
         let mut low_index: i32 = 0;
         let mut high_index: i32 = files.count - 1;
         let low_taxid = Self::entry(files, low_index)?.0;
         let high_taxid = Self::entry(files, high_index)?.0;
         if tax_id < low_taxid || tax_id > high_taxid {
-            return Ok(None);
+            return Ok(TaxLookup::NotInIndex);
         }
         let mut new_index = (low_index + high_index) / 2;
         let mut old_index = new_index;
@@ -384,14 +476,14 @@ impl TaxDb {
         }
         let (found, begin_data) = Self::entry(files, new_index)?;
         if found != tax_id {
-            return Ok(None);
+            return Ok(TaxLookup::NotInIndex);
         }
         let end_data: u32 = if new_index == high_index {
             // Last index is special...
             let end = files.data.len() as u32;
             if end < begin_data {
                 messages.push(MSG_OFFSET_ERROR.to_string());
-                return Ok(None);
+                return Ok(TaxLookup::Unnamed);
             }
             end
         } else {
@@ -401,26 +493,47 @@ impl TaxDb {
         // `Uint4` difference.
         let size = end_data.wrapping_sub(begin_data) as i32;
         if size <= 0 {
-            return Ok(None);
+            return Ok(TaxLookup::Unnamed);
         }
         let begin = u64::from(begin_data);
         let end = begin + size as u64;
         let len = files.data.len();
-        // NCBI maps the file; the last page is padded with zero bytes. Past that page
-        // it reads unmapped memory (a crash on the oracle platform).
-        let mapped = len.div_ceil(MAP_PAGE) * MAP_PAGE;
-        if end > mapped {
+        if len == 0 {
+            // NCBI maps an empty file as a null pointer: it faults reading the record.
             return Err(SeqDbError::Unsupported {
                 path: files.data.path().to_path_buf(),
                 message: format!(
                     "the taxonomy record of taxid {tax_id} (bytes {begin}..{end}) reaches past \
-                     the mapped end of the file ({len} bytes); NCBI BLAST+ reads unmapped memory"
+                     the mapped end of the file (0 bytes); NCBI BLAST+ reads unmapped memory (it \
+                     maps the empty file as a null pointer)"
                 ),
             });
         }
+        // NCBI maps the file; the last page is padded with zero bytes.
+        let mapped = len.div_ceil(MAP_PAGE) * MAP_PAGE;
         let mut record = files.data.read_range(begin.min(len), end.min(len))?;
-        record.resize(size as usize, 0);
-        Ok(split_record(tax_id, &record))
+        record.resize((end.min(mapped).saturating_sub(begin)) as usize, 0);
+        if end <= mapped {
+            return Ok(split_record(tax_id, &record).map_or(TaxLookup::Unnamed, TaxLookup::Named));
+        }
+        // The part of the record inside the mapping (none where it begins past it).
+        let past = PastMapping {
+            path: files.data.path().to_path_buf(),
+            taxid: tax_id,
+            begin,
+            end,
+            len,
+        };
+        Ok(match split_names(&record) {
+            Some((fields, _)) => TaxLookup::Named(TaxNames {
+                taxid: tax_id,
+                scientific_name: fields[0].to_vec(),
+                common_name: fields[1].to_vec(),
+                blast_name: fields[2].to_vec(),
+                super_kingdom: Err(past),
+            }),
+            None => TaxLookup::PastMapping(past),
+        })
     }
 
     /// The number of entries of the index (`m_AllTaxidCount`); 0 for a database NCBI treats as
@@ -434,7 +547,7 @@ impl TaxDb {
     /// an index that is not sorted the search may end elsewhere). `None` when no lookup writes the
     /// message, and for a database NCBI treats as missing. No other lookup writes a text (those of
     /// opening are [`Self::open_messages`]), and this one writes it at every lookup of the taxid.
-    /// Err: a read error, or the lookup of that taxid refused.
+    /// Err: a read error, or the lookup of that taxid faults (an empty `taxdb.btd`).
     pub fn offset_error_taxid(&self) -> Result<Option<i32>, SeqDbError> {
         let Some(files) = &self.files else {
             return Ok(None);
@@ -445,23 +558,26 @@ impl TaxDb {
             return Ok(None);
         }
         let mut messages = Vec::new();
-        self.names(taxid, &mut messages)?;
+        self.lookup(taxid, &mut messages)?;
         Ok(messages
             .iter()
             .any(|message| message == MSG_OFFSET_ERROR)
             .then_some(taxid))
     }
 
-    // No NCBI counterpart: LOSAT's check, from the index alone, of whether `names` (the port of
-    // `GetTaxNames` above) can fail; it changes no value NCBI computes.
-    /// Whether [`Self::names`] could fail (`Err`) for some taxid, decided by one sequential pass
-    /// over the index alone (the report streams' check before the search,
-    /// `algorithm::common::database::reports_may_refuse`). Besides a read error, a lookup fails
-    /// only where it reads the record `offset[i]..offset[i+1]` of the entry `i` that its search
-    /// ends on (below the search's last `high_index`; one that ends on it reads to the end of
-    /// `taxdb.btd`, which cannot fail) and that record, of positive size, reaches past the mapped
-    /// end of `taxdb.btd`. So `Ok(false)`, whatever the order of the index, when no two
-    /// consecutive entries make such a record; a database that NCBI treats as missing finds
+    // No NCBI counterpart: LOSAT's check, from the index alone, of whether `lookup` (the port of
+    // `GetTaxNames` above) reads past NCBI's mapping of `taxdb.btd`; it changes no value NCBI
+    // computes.
+    /// Whether [`Self::lookup`] can fail or give a part of a record from past NCBI's mapping of
+    /// `taxdb.btd` for some taxid ([`TaxLookup::PastMapping`], a kingdom `Err`), decided by one
+    /// sequential pass over the index alone (the checks before a search,
+    /// `algorithm::common::database::taxdb_may_refuse`): only a lookup that reads a record past the
+    /// mapping (the end of the file's last 4096-byte page; every record of an empty file, which
+    /// NCBI maps as a null pointer) does. Besides a read error, a lookup reads the record
+    /// `offset[i]..offset[i+1]` of the entry `i` that its search ends on (below the search's last
+    /// `high_index`; one that ends on it reads to the end of `taxdb.btd`, inside the mapping). So
+    /// `Ok(false)`, whatever the order of the index, when no two consecutive entries make a record
+    /// of positive size that reaches past the mapping; a database that NCBI treats as missing finds
     /// nothing. The index is read in blocks of 64 Ki entries.
     pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
         const INDEX_BLOCK: u64 = 1 << 16;
@@ -482,7 +598,7 @@ impl TaxDb {
             for entry in block.chunks_exact(ENTRY_LEN as usize) {
                 let offset = be32(&entry[4..8]);
                 if let Some(begin) = previous {
-                    // `names`: `int(m_End - m_Begin)` of the wrapped `Uint4` difference.
+                    // `lookup`: `int(m_End - m_Begin)` of the wrapped `Uint4` difference.
                     let size = offset.wrapping_sub(begin) as i32;
                     if size > 0 && u64::from(begin) + size as u64 > mapped {
                         return Ok(true);
@@ -495,113 +611,26 @@ impl TaxDb {
         Ok(false)
     }
 
-    /// Whether [`Self::names`] could refuse some taxid, or give a scientific name for which
-    /// `unwritable` is true, decided by one sequential pass over the two files instead of a
-    /// lookup per taxid (OF5b BLASTX, `taxdb_may_refuse`): `Ok(false)` means that no lookup of
-    /// any taxid can fail that way. `Ok(true)` means that one can, or that the files are not in
-    /// the layout the pass relies on (the index not strictly increasing in taxid, the offsets
-    /// not non-decreasing, a record of 64 MiB or more), where the answer is left to the
-    /// per-taxid lookups. A database that NCBI treats as missing finds nothing: `Ok(false)`.
-    ///
-    /// With a strictly increasing index every lookup ends on its own entry, and the record it
-    /// reads is `offset[i]..offset[i+1]`, the last entry's `offset..file length` (`names`). So
-    /// the pass applies the same rules to each entry's record: no record when its size is not
-    /// positive, a refusal when it reaches past the mapped end of `taxdb.btd`, else the split of
-    /// the bytes (zero bytes past the end of the file) and the check of the first field. The
-    /// index is read in blocks of 64 Ki entries and `taxdb.btd` in 8 MiB windows.
-    pub fn any_lookup_may_refuse(
-        &self,
-        unwritable: &dyn Fn(&[u8]) -> bool,
-    ) -> Result<bool, SeqDbError> {
-        const INDEX_BLOCK: u64 = 1 << 16;
-        const DATA_WINDOW: u64 = 8 << 20;
-        const MAX_RECORD: u64 = 64 << 20;
-        let Some(files) = &self.files else {
+    /// Whether [`Self::lookup`] faults (`Err`) for some taxid (the report streams' check before
+    /// the search, `algorithm::common::database::reports_may_refuse`, whose prefetch writes no
+    /// name): only where `taxdb.btd` is empty (NCBI maps it as a null pointer, [`Self::maps_null`])
+    /// and a lookup reads a record of positive size ([`Self::any_lookup_may_fail`], whose mapping is
+    /// then empty); `Ok(false)` for a `taxdb.btd` that is not empty.
+    pub fn any_lookup_faults(&self) -> Result<bool, SeqDbError> {
+        if !self.maps_null() {
             return Ok(false);
-        };
-        let data_len = files.data.len();
-        let mapped = data_len.div_ceil(MAP_PAGE) * MAP_PAGE;
-        let count = files.count as u64;
-        // The data window: `window` holds the bytes `window_start..window_start + window.len()`.
-        let mut window: Vec<u8> = Vec::new();
-        let mut window_start = 0u64;
-        // The previous entry, whose record ends where the current one begins.
-        let mut pending: Option<u32> = None;
-        // Whether the lookup of the record `begin_data..end_data` could be refused or give an
-        // unwritable name: `Ok(true)` stops the pass.
-        let mut check = |begin_data: u32, end_data: u32| -> Result<bool, SeqDbError> {
-            let size = end_data.wrapping_sub(begin_data) as i32;
-            if size <= 0 {
-                return Ok(false);
-            }
-            let begin = u64::from(begin_data);
-            let end = begin + size as u64;
-            if end > mapped {
-                return Ok(true);
-            }
-            if end - begin >= MAX_RECORD {
-                return Ok(true);
-            }
-            // The bytes of the file inside the record; the rest is zero padding.
-            let in_file_end = end.min(data_len);
-            let in_file_begin = begin.min(data_len);
-            if in_file_end > in_file_begin
-                && !(window_start <= in_file_begin
-                    && in_file_end <= window_start + window.len() as u64)
-            {
-                let stop = data_len.min((in_file_begin + DATA_WINDOW).max(in_file_end));
-                window = files.data.read_range(in_file_begin, stop)?;
-                window_start = in_file_begin;
-            }
-            let from = (in_file_begin - window_start) as usize;
-            let to = (in_file_end - window_start) as usize;
-            let record: std::borrow::Cow<[u8]> = if in_file_end == end {
-                std::borrow::Cow::Borrowed(&window[from..to])
-            } else {
-                let mut padded = window[from..to].to_vec();
-                padded.resize(size as usize, 0);
-                std::borrow::Cow::Owned(padded)
-            };
-            Ok(split_fields(&record).is_some_and(|fields| unwritable(fields[0])))
-        };
-        let mut previous_taxid: Option<i32> = None;
-        let mut previous_offset = 0u32;
-        let mut block: Vec<u8> = Vec::new();
-        let mut i = 0u64;
-        while i < count {
-            let n = INDEX_BLOCK.min(count - i);
-            block.resize((n * ENTRY_LEN) as usize, 0);
-            files
-                .index
-                .read_exact_at(&mut block, HEADER_LEN + ENTRY_LEN * i)?;
-            for entry in block.chunks_exact(ENTRY_LEN as usize) {
-                let taxid = be32(&entry[0..4]) as i32;
-                let offset = be32(&entry[4..8]);
-                if previous_taxid.is_some_and(|previous| taxid <= previous)
-                    || (pending.is_some() && offset < previous_offset)
-                {
-                    return Ok(true);
-                }
-                if let Some(begin) = pending {
-                    if check(begin, offset)? {
-                        return Ok(true);
-                    }
-                }
-                previous_taxid = Some(taxid);
-                previous_offset = offset;
-                pending = Some(offset);
-            }
-            i += n;
         }
-        // The last entry's record ends at the end of the file (an end before its beginning is
-        // NCBI's "offset error": no names, no read).
-        if let Some(begin) = pending {
-            let end = data_len as u32;
-            if end >= begin && check(begin, end)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        self.any_lookup_may_fail()
+    }
+
+    /// Whether NCBI maps `taxdb.btd` as a null pointer (an empty file): a lookup that reads a
+    /// record faults ([`Self::lookup`]). Only then can a lookup whose names reach no output (the
+    /// texts of a `GetBioseq`) fail; otherwise it writes at most the offset error of
+    /// [`Self::offset_error_taxid`].
+    pub fn maps_null(&self) -> bool {
+        self.files
+            .as_ref()
+            .is_some_and(|files| files.data.is_empty())
     }
 }
 
@@ -627,23 +656,25 @@ impl TaxDb {
 // Three splits at the first tab of what is left; a split that finds no tab
 // leaves the buffer as it is and returns false. The kingdom is what remains,
 // and must not be empty (`EraseFront` of the whole buffer empties it).
+/// The three splits of `bytes` at their first tabs (seqdbtax.cpp:279-283): scientific name,
+/// common name, BLAST name, and what is left after the third tab; `None` when `bytes` holds fewer
+/// than three tabs.
+fn split_names(bytes: &[u8]) -> Option<([&[u8]; 3], &[u8])> {
+    let mut rest = bytes;
+    let mut fields: [&[u8]; 3] = [&[]; 3];
+    for field in &mut fields {
+        let i = rest.iter().position(|&b| b == b'\t')?;
+        *field = &rest[..i];
+        rest = &rest[i + 1..];
+    }
+    Some((fields, rest))
+}
+
 /// The split of one record into four fields (seqdbtax.cpp:279-298): scientific name, common
 /// name, BLAST name, kingdom; `None` when NCBI's lookup returns false for the record.
 fn split_fields(record: &[u8]) -> Option<[&[u8]; 4]> {
-    let mut rest = record;
-    let mut fields: [&[u8]; 4] = [&[]; 4];
-    let mut all = true;
-    for field in fields.iter_mut().take(3) {
-        match rest.iter().position(|&b| b == b'\t') {
-            Some(i) => {
-                *field = &rest[..i];
-                rest = &rest[i + 1..];
-            }
-            None => all = false,
-        }
-    }
-    fields[3] = rest;
-    (all && !rest.is_empty()).then_some(fields)
+    let ([sci, common, blast], kingdom) = split_names(record)?;
+    (!kingdom.is_empty()).then_some([sci, common, blast, kingdom])
 }
 
 /// The split of one record into four fields (seqdbtax.cpp:279-298).
@@ -653,7 +684,7 @@ fn split_record(taxid: i32, record: &[u8]) -> Option<TaxNames> {
         scientific_name: fields[0].to_vec(),
         common_name: fields[1].to_vec(),
         blast_name: fields[2].to_vec(),
-        super_kingdom: fields[3].to_vec(),
+        super_kingdom: Ok(fields[3].to_vec()),
     })
 }
 
@@ -668,6 +699,8 @@ fn be32(bytes: &[u8]) -> u32 {
 pub struct LazyTaxDb {
     search: SearchPath,
     db: OnceLock<Result<TaxDb, (PathBuf, String)>>,
+    /// Whether the next call hands over the texts of opening again ([`LazyTaxDb::restart`]).
+    again: std::sync::atomic::AtomicBool,
 }
 
 impl LazyTaxDb {
@@ -676,7 +709,16 @@ impl LazyTaxDb {
         Self {
             search,
             db: OnceLock::new(),
+            again: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Back to a handle that has handed over nothing: the next call hands over the texts of
+    /// opening, as a new handle's first would (a run that searches the batches before a failed
+    /// one again, `algorithm::common::database::TaxdbRun::restart`). The database read is kept:
+    /// a new handle opens the same files to the same answers.
+    pub fn restart(&self) {
+        self.again.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Opens the database if no call has (`CTaxDBFileInfo`, at the first `GetTaxNames`) and returns
@@ -705,7 +747,7 @@ impl LazyTaxDb {
         });
         match db {
             Ok(db) => {
-                if opened {
+                if opened || self.handed_again() {
                     messages.extend(db.open_messages().iter().cloned());
                 }
                 Ok(db)
@@ -715,6 +757,13 @@ impl LazyTaxDb {
                 message: message.clone(),
             }),
         }
+    }
+
+    /// Whether this call hands over the texts of opening again after [`LazyTaxDb::restart`] (the
+    /// first call after it, once).
+    fn handed_again(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.again.load(Ordering::Relaxed) && self.again.swap(false, Ordering::Relaxed)
     }
 
     /// `GetTaxNames` through the lazily opened database. The `ERR_POST` texts
@@ -729,25 +778,33 @@ impl LazyTaxDb {
         self.open_into(messages)?.names(tax_id, messages)
     }
 
+    /// [`TaxDb::lookup`] through the lazily opened database, the texts as [`LazyTaxDb::names`]
+    /// appends them.
+    pub fn lookup(&self, tax_id: i32, messages: &mut Vec<String>) -> Result<TaxLookup, SeqDbError> {
+        self.open_into(messages)?.lookup(tax_id, messages)
+    }
+
+    /// The lazily opened database (this opens it, dropping the texts of opening: ask it after the
+    /// run's first lookup). An open that was refused is the same error on every call.
+    pub fn database(&self) -> Result<&TaxDb, SeqDbError> {
+        self.open_into(&mut Vec::new())
+    }
+
     /// [`TaxDb::entry_count`] of the lazily opened database (this opens it).
     pub fn entry_count(&self) -> Result<u64, SeqDbError> {
         Ok(self.open_into(&mut Vec::new())?.entry_count())
+    }
+
+    /// [`TaxDb::any_lookup_faults`] of the lazily opened database (this opens it). An open that
+    /// was refused or a file that cannot be read is an `Err`.
+    pub fn any_lookup_faults(&self) -> Result<bool, SeqDbError> {
+        self.open_into(&mut Vec::new())?.any_lookup_faults()
     }
 
     /// [`TaxDb::any_lookup_may_fail`] of the lazily opened database (this opens it). An open that
     /// was refused or a file that cannot be read is an `Err`.
     pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
         self.open_into(&mut Vec::new())?.any_lookup_may_fail()
-    }
-
-    /// [`TaxDb::any_lookup_may_refuse`] of the lazily opened database (this opens it). An open
-    /// that was refused or a file that cannot be read is an `Err`.
-    pub fn any_lookup_may_refuse(
-        &self,
-        unwritable: &dyn Fn(&[u8]) -> bool,
-    ) -> Result<bool, SeqDbError> {
-        self.open_into(&mut Vec::new())?
-            .any_lookup_may_refuse(unwritable)
     }
 
     /// Whether the database has been opened (a name has been asked for).
@@ -836,9 +893,10 @@ const TAX_CACHE_SLOTS: usize = 256;
 // `CSeqDBException` of `GetTaxNames` counts as not found), so a volume asks the taxonomy database
 // again only where the slot of the taxid holds another one; on other threads it asks at every
 // load. The texts that a lookup writes come from `GetTaxNames` and so only where it is asked:
-// `algorithm::common::database::TaxdbRun` keeps that per volume for the search's texts. A lookup
-// that reads past the mapped end of `taxdb.btd` crashes NCBI at the first: there is nothing to
-// keep.
+// `algorithm::common::database::TaxdbRun` keeps that per volume for the texts of the loads (the
+// search's and the readers'). A lookup that faults (a record of an empty `taxdb.btd`, which NCBI
+// maps as a null pointer) or whose names NCBI reads past its mapping of the file (no defined
+// result) is refused at the first by the reader that writes them: there is nothing to keep.
 /// The sources' names that a reader of a database's Bioseqs looked up, by taxid: NCBI's taxonomy
 /// cache of a volume (`CSeqDBVol::m_TaxCache`, 256 slots, a taxid in the slot `taxid & 255`, which
 /// holds the last taxid looked up there). The one memo of the lookups of the readers of the stored
@@ -849,9 +907,10 @@ const TAX_CACHE_SLOTS: usize = 256;
 /// which every later lookup of that taxid gives again (`TaxDb::names` reads nothing else). A
 /// lookup that writes a text (those of opening the database, which come with the first lookup;
 /// the offset error of the last entry) or fails is asked again each time, as NCBI writes the
-/// offset error at each lookup where it asks: the readers that refuse it do so at the first, and
-/// the search's texts are `TaxdbRun`'s. So its answers do not depend on what it holds, and it
-/// holds at most 256 of them (nothing until the first lookup).
+/// offset error at each lookup where it asks: the texts are those of the loads, which
+/// `algorithm::common::database::TaxdbRun` writes for the search and the readers alike, and the
+/// readers' lookups of names leave them out. So its answers do not depend on what it holds, and
+/// it holds at most 256 of them (nothing until the first lookup).
 #[derive(Debug, Default)]
 pub struct TaxCache {
     slots: std::cell::RefCell<Vec<Option<(i32, std::sync::Arc<SourceNames>)>>>,
@@ -859,13 +918,14 @@ pub struct TaxCache {
 
 impl TaxCache {
     /// The names of `taxid`: the slot's where it holds `taxid`, else `lookup` (`TaxDb::names` or
-    /// `LazyTaxDb::names` of the reader's database), which appends its texts to `messages`.
-    pub fn names(
+    /// `LazyTaxDb::names` of the reader's database, or a refusal of the reader's own, `E`), which
+    /// appends its texts to `messages`.
+    pub fn names<E>(
         &self,
         taxid: i32,
         messages: &mut Vec<String>,
-        lookup: impl FnOnce(&mut Vec<String>) -> Result<Option<TaxNames>, SeqDbError>,
-    ) -> Result<std::sync::Arc<SourceNames>, SeqDbError> {
+        lookup: impl FnOnce(&mut Vec<String>) -> Result<Option<TaxNames>, E>,
+    ) -> Result<std::sync::Arc<SourceNames>, E> {
         let slot = taxid as usize & (TAX_CACHE_SLOTS - 1);
         if let Some(Some((held, names))) = self.slots.borrow().get(slot) {
             if *held == taxid {
@@ -993,6 +1053,42 @@ mod tests {
         (names, messages)
     }
 
+    // seqdbtax.cpp:258-259 (`info.taxid = tax_id` once the search finds the taxid, before the
+    // lookup can still fail): blastdbcmd's `-tax_info` writes empty names then, `N/A` only for a
+    // taxid the search does not find (probe of line RG T5b, `T/t5b/out/extra`).
+    #[test]
+    fn a_lookup_tells_a_taxid_not_found_from_one_found_without_names() {
+        let lookup = |variant: &str, taxid: i32| {
+            let mut messages = Vec::new();
+            let found = open_fixture(variant)
+                .unwrap()
+                .lookup(taxid, &mut messages)
+                .unwrap();
+            (found, messages)
+        };
+        assert!(matches!(lookup("good", 9606), (TaxLookup::Named(_), m) if m.is_empty()));
+        for taxid in [150, 0, 77777, 100000] {
+            assert_eq!(lookup("good", taxid), (TaxLookup::NotInIndex, Vec::new()));
+        }
+        // A record without three tabs, an empty record of the last entry, the offset error.
+        assert_eq!(lookup("tabs0", 9606), (TaxLookup::Unnamed, Vec::new()));
+        assert_eq!(lookup("tabs1", 9606), (TaxLookup::Unnamed, Vec::new()));
+        assert_eq!(
+            lookup("offset_last_at_end", 99990),
+            (TaxLookup::Unnamed, Vec::new())
+        );
+        assert_eq!(
+            lookup("offset_last_past_end", 99990),
+            (TaxLookup::Unnamed, vec![MSG_OFFSET_ERROR.to_string()])
+        );
+        // A database NCBI treats as missing finds no taxid.
+        assert_eq!(
+            lookup("bad_magic", 9606),
+            (TaxLookup::NotInIndex, Vec::new())
+        );
+        assert_eq!(lookup("no_bti", 9606), (TaxLookup::NotInIndex, Vec::new()));
+    }
+
     fn names_of_lazy(lazy: &LazyTaxDb, taxid: i32) -> (Option<TaxNames>, Vec<String>) {
         let mut messages = Vec::new();
         let names = lazy.names(taxid, &mut messages).unwrap();
@@ -1004,7 +1100,10 @@ mod tests {
             &names.scientific_name,
             &names.common_name,
             &names.blast_name,
-            &names.super_kingdom,
+            names
+                .super_kingdom
+                .as_deref()
+                .expect("a kingdom inside the mapping"),
         ]
     }
 
@@ -1086,7 +1185,7 @@ mod tests {
                     .0
                     .unwrap_or_else(|| panic!("n={n} i={i}"));
                 assert_eq!(names.scientific_name, format!("s{i}").into_bytes());
-                assert_eq!(names.super_kingdom, format!("k{i}").into_bytes());
+                assert_eq!(names.super_kingdom, Ok(format!("k{i}").into_bytes()));
                 assert_eq!(names_of(&db, 10 * i + 6).0, None);
                 assert_eq!(names_of(&db, 10 * i + 4).0, None);
             }
@@ -1327,17 +1426,19 @@ mod tests {
         assert_eq!(names.scientific_name, b"a");
         assert_eq!(
             names.super_kingdom,
-            b"d".to_vec()
+            Ok(b"d"
+                .to_vec()
                 .into_iter()
                 .chain(*b"e\tf\tg\th")
-                .collect::<Vec<u8>>()
+                .collect::<Vec<u8>>())
         );
     }
 
     #[test]
-    fn record_reaching_past_the_end_reads_page_padding_and_then_is_refused() {
+    fn record_reaching_past_the_end_reads_page_padding_and_then_memory_past_the_mapping() {
         let (mut index, data) =
             build(&[(1, b"a\tb\tc\td"), (2, b"e\tf\tg\th"), (3, b"i\tj\tk\tl")]);
+        let off2 = 24 + 8 + 4;
         let off3 = 24 + 16 + 4;
         // Entry 2 ends 10 bytes after the file: zero padding belongs to its kingdom.
         index[off3..off3 + 4].copy_from_slice(&be(data.len() as u32 + 10));
@@ -1346,18 +1447,70 @@ mod tests {
         let mut kingdom = b"h".to_vec();
         kingdom.extend(*b"i\tj\tk\tl");
         kingdom.extend([0u8; 10]);
-        assert_eq!(names.super_kingdom, kingdom);
+        assert_eq!(names.super_kingdom, Ok(kingdom));
         // Entry 3 (the last) begins after the end: NCBI's message.
         assert_eq!(names_of(&db, 3), (None, vec![MSG_OFFSET_ERROR.to_string()]));
-        // Past the page: refused. Entry 1 is fine.
+        // Past the page: the three names before the third tab inside the mapping, a kingdom
+        // NCBI reads past it. Entry 1 is fine.
         index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 1));
         let (_dir, db) = open_built(&index, &data);
+        let past = PastMapping {
+            path: db.files.as_ref().unwrap().data.path().to_path_buf(),
+            taxid: 2,
+            begin: 7,
+            end: MAP_PAGE + 1,
+            len: data.len() as u64,
+        };
         let mut messages = Vec::new();
+        assert_eq!(
+            db.lookup(2, &mut messages).unwrap(),
+            TaxLookup::Named(TaxNames {
+                taxid: 2,
+                scientific_name: b"e".to_vec(),
+                common_name: b"f".to_vec(),
+                blast_name: b"g".to_vec(),
+                super_kingdom: Err(past.clone()),
+            })
+        );
+        assert!(messages.is_empty());
+        assert!(names_of(&db, 1).0.is_some());
+        // A record past the mapping without its third tab inside it: no defined result, which
+        // only a caller that writes the names refuses.
+        index[off2..off2 + 4].copy_from_slice(&be(data.len() as u32 - 2));
+        let (_dir, db) = open_built(&index, &data);
+        let past = PastMapping {
+            path: db.files.as_ref().unwrap().data.path().to_path_buf(),
+            begin: data.len() as u64 - 2,
+            ..past
+        };
+        assert_eq!(
+            db.lookup(2, &mut messages).unwrap(),
+            TaxLookup::PastMapping(past.clone())
+        );
         assert!(matches!(
             db.names(2, &mut messages),
             Err(SeqDbError::Unsupported { .. })
         ));
-        assert!(names_of(&db, 1).0.is_some());
+        assert!(messages.is_empty());
+        // A record that begins past the mapping.
+        index[off2..off2 + 4].copy_from_slice(&be(MAP_PAGE as u32));
+        index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 9));
+        let (_dir, db) = open_built(&index, &data);
+        assert!(matches!(
+            db.lookup(2, &mut messages).unwrap(),
+            TaxLookup::PastMapping(PastMapping {
+                begin: 4096,
+                end: 4105,
+                ..
+            })
+        ));
+        // Neither faults for certain, nor does the pass over the index say so; an empty
+        // taxdb.btd does.
+        assert!(!db.any_lookup_faults().unwrap());
+        assert!(!db.maps_null());
+        let empty = open_fixture("btd_empty").unwrap();
+        assert!(empty.any_lookup_faults().unwrap());
+        assert!(empty.maps_null());
     }
 
     #[test]
@@ -1395,7 +1548,7 @@ mod tests {
         let db = open_fixture("high_bytes_latin1").unwrap();
         let names = names_of(&db, 10090).0.unwrap();
         assert_eq!(names.common_name, b"mus\xe9");
-        assert_eq!(names.super_kingdom, b"Euk\xffaryota");
+        assert_eq!(names.super_kingdom.as_deref(), Ok(&b"Euk\xffaryota"[..]));
     }
 
     #[test]
@@ -1486,19 +1639,24 @@ mod tests {
         assert!(checked > 300, "{checked}");
     }
 
-    /// What [`TaxDb::any_lookup_may_refuse`] must agree with: the lookup of every taxid of the
-    /// index with `names`, refused (`Err`) or giving a scientific name with a byte >= 0x80.
-    fn brute_force_may_refuse(db: &TaxDb) -> bool {
+    /// What [`TaxDb::any_lookup_may_fail`] must agree with: the lookup of every taxid of the
+    /// index, failing (`Err`) or giving a part of its record from past NCBI's mapping of
+    /// `taxdb.btd` (`TaxLookup::PastMapping`, a kingdom `Err`); `names` then refuses the first.
+    fn brute_force_may_fail(db: &TaxDb) -> bool {
         let Some(files) = &db.files else {
             return false;
         };
         (0..files.count).any(|i| {
             let taxid = TaxDb::entry(files, i).unwrap().0;
-            match db.names(taxid, &mut Vec::new()) {
-                Err(_) => true,
-                Ok(Some(names)) => names.scientific_name.iter().any(|&b| b >= 0x80),
-                Ok(None) => false,
-            }
+            !matches!(
+                db.lookup(taxid, &mut Vec::new()),
+                Ok(TaxLookup::NotInIndex
+                    | TaxLookup::Unnamed
+                    | TaxLookup::Named(TaxNames {
+                        super_kingdom: Ok(_),
+                        ..
+                    }))
+            )
         })
     }
 
@@ -1535,8 +1693,8 @@ mod tests {
             let Ok(db) = open_fixture(&variant) else {
                 continue;
             };
-            let pass = db.any_lookup_may_fail().unwrap();
-            let fails = |taxid: i32| db.names(taxid, &mut Vec::new()).is_err();
+            let pass = db.any_lookup_faults().unwrap();
+            let fails = |taxid: i32| db.lookup(taxid, &mut Vec::new()).is_err();
             let indexed: Vec<i32> = db.files.as_ref().map_or(Vec::new(), |files| {
                 (0..files.count)
                     .map(|i| TaxDb::entry(files, i).unwrap().0)
@@ -1570,7 +1728,6 @@ mod tests {
     /// layout the pass relies on.
     #[test]
     fn one_pass_over_the_files_agrees_with_the_lookups_on_every_variant() {
-        let unwritable = |name: &[u8]| name.iter().any(|&b| b >= 0x80);
         let mut refusing = 0;
         let mut clean = 0;
         let mut dirs: Vec<_> = std::fs::read_dir(fixture_dir())
@@ -1584,8 +1741,8 @@ mod tests {
             let Ok(db) = open_fixture(&variant) else {
                 continue;
             };
-            let brute = brute_force_may_refuse(&db);
-            let walk = db.any_lookup_may_refuse(&unwritable).unwrap();
+            let brute = brute_force_may_fail(&db);
+            let walk = db.any_lookup_may_fail().unwrap();
             assert!(
                 walk || !brute,
                 "{variant}: the pass says no, a lookup refuses"
@@ -1599,40 +1756,48 @@ mod tests {
                 clean += 1;
             }
         }
-        assert!(refusing >= 2 && clean >= 20, "{refusing} {clean}");
+        // `btd_empty` refuses (an empty taxdb.btd maps no page); a scientific name of any bytes is
+        // no refusal (the two `high_bytes_*` variants are clean); the test of the index's blocks
+        // (`the_pass_counts_entries_and_reads_past_one_index_block`) refuses past the first.
+        assert!(refusing >= 1 && clean >= 20, "{refusing} {clean}");
     }
 
     #[test]
-    fn the_pass_counts_entries_and_reads_past_one_window() {
+    fn the_pass_counts_entries_and_reads_past_one_index_block() {
         assert_eq!(open_fixture("good").unwrap().entry_count(), 7);
         assert_eq!(open_fixture("no_btd").unwrap().entry_count(), 0);
         assert_eq!(open_fixture("bad_magic").unwrap().entry_count(), 0);
-        // 70,000 entries (more than one block of the index) and about 20 MiB of records (more
-        // than two windows of the data), one with a byte >= 0x80 in its name near the end.
-        let dir = temp_dir("walk");
+        // 70,000 entries (more than one block of the index); in the damaged copy the record of an
+        // entry near the end reaches past NCBI's mapping of taxdb.btd (the two entries after it
+        // begin past the file's last page), whose lookup gives its kingdom from past the mapping.
         let n = 70_000u32;
-        let mut index = Vec::new();
-        index.extend(MAGIC.to_be_bytes());
-        index.extend(n.to_be_bytes());
-        index.extend([0u8; 16]);
         let mut data = Vec::new();
+        let mut offsets = Vec::new();
         for i in 0..n {
-            index.extend((i as i32 + 1).to_be_bytes());
-            index.extend((data.len() as u32).to_be_bytes());
-            let name = if i == n - 3 {
-                "caf\u{e9}".to_string()
-            } else {
-                format!("name {i}")
-            };
-            data.extend(format!("{name}\tc\tb\t{}K\n", "x".repeat(300)).as_bytes());
+            offsets.push(data.len() as u32);
+            data.extend(format!("name {i}\tc\tb\tK\n").as_bytes());
         }
-        std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
-        std::fs::write(dir.join("taxdb.btd"), &data).unwrap();
-        let db = TaxDb::open(&path_of(&dir)).unwrap();
-        assert_eq!(db.entry_count(), u64::from(n));
-        let unwritable = |name: &[u8]| name.iter().any(|&b| b >= 0x80);
-        assert!(db.any_lookup_may_refuse(&unwritable).unwrap());
-        assert!(!db.any_lookup_may_refuse(&|_| false).unwrap());
+        let past = (data.len().div_ceil(MAP_PAGE as usize) * MAP_PAGE as usize + 4096) as u32;
+        let mut damaged = offsets.clone();
+        damaged[n as usize - 2] = past;
+        damaged[n as usize - 1] = past;
+        for (tag, offsets, refuses) in [("walk", &offsets, false), ("walkpast", &damaged, true)] {
+            let dir = temp_dir(tag);
+            let mut index = Vec::new();
+            index.extend(MAGIC.to_be_bytes());
+            index.extend(n.to_be_bytes());
+            index.extend([0u8; 16]);
+            for (i, offset) in offsets.iter().enumerate() {
+                index.extend((i as i32 + 1).to_be_bytes());
+                index.extend(offset.to_be_bytes());
+            }
+            std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
+            std::fs::write(dir.join("taxdb.btd"), &data).unwrap();
+            let db = TaxDb::open(&path_of(&dir)).unwrap();
+            assert_eq!(db.entry_count(), u64::from(n));
+            assert_eq!(db.any_lookup_may_fail().unwrap(), refuses, "{tag}");
+            assert_eq!(brute_force_may_fail(&db), refuses, "{tag}");
+        }
     }
 
     /// `TaxCache::names` of `taxid` through `db`, with the number of lookups it made.
@@ -1700,11 +1865,14 @@ mod tests {
             assert!(names.unwrap().names().is_none());
             assert_eq!((messages, asked), (vec![MSG_OFFSET_ERROR.to_string()], 1));
         }
-        // A refused lookup (past the mapped end) is asked again.
+        // A refused lookup (a record that lies past NCBI's mapping of taxdb.btd, whose names are
+        // not defined) is asked again.
         let (mut index, data) =
             build(&[(1, b"a\tb\tc\td"), (2, b"e\tf\tg\th"), (3, b"i\tj\tk\tl")]);
+        let off2 = 24 + 8 + 4;
         let off3 = 24 + 16 + 4;
-        index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 1));
+        index[off2..off2 + 4].copy_from_slice(&be(MAP_PAGE as u32));
+        index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 9));
         let (_dir, db) = open_built(&index, &data);
         let cache = TaxCache::default();
         for _ in 0..2 {

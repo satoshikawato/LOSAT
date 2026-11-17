@@ -647,14 +647,14 @@ fn the_error_comes_before_its_error_archive_in_one_stream() {
 }
 
 /// BLASTX reads its query file once before the search with outfmt 5 and 13 to 16, to refuse a
-/// title its writers cannot write before any byte (`blast_xml::prescan_queries`; outfmt 11 writes
-/// NCBI's `#` and posts instead and reads the query once, as the search does, so a reader error
-/// comes first there too). Under `-parse_deflines` that read stops where the search's
-/// does, so a reader error that NCBI meets before it writes a title comes first: a first line
-/// that is not a defline (any format, NCBI 2.17.0, probe `SM/prescan/probe.py`), or a Seq-id NCBI
-/// cannot make in the batch of the record with the title. With `BATCH_SIZE=1` that record is its
-/// own batch, which NCBI writes before it reads the bad Seq-id: LOSAT refuses its title before any
-/// byte (NCBI stops with an exception).
+/// title of punctuation alone, on which NCBI crashes, before any byte (`blast_xml::prescan_queries`;
+/// outfmt 11 reads the query once, as the search does, so a reader error comes first there too).
+/// Under `-parse_deflines` that read stops where the search's does, so a reader error that NCBI
+/// meets before it writes a title comes first: a first line that is not a defline (any format,
+/// NCBI 2.17.0, probe `SM/prescan/probe.py`), or a Seq-id NCBI cannot make in the batch of the
+/// record with the title. With `BATCH_SIZE=1` that record is its own batch, which NCBI writes
+/// before it reads the bad Seq-id: its title (not US-ASCII) fails the first header, so NCBI writes
+/// nothing and stops with its exception (rc 255), and LOSAT writes the same.
 #[test]
 fn blastx_reads_its_query_before_the_search_as_the_search_does() {
     let dir = temp_dir("prescan");
@@ -750,13 +750,30 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
             stderr.contains("a query and a subject record have the Seq-id lcl|s1"),
             "s1 n{threads}: {stderr}"
         );
+        // The first record is its own batch, which NCBI writes before it reads `>gi|abc`: its title
+        // fails the header (`BlastOutput_query-def`), nothing is written, and NCBI stops with its
+        // exception (`tests/fixtures/outfmt16/prescan_badgi_blastx_5.*`, NCBI BLAST+ 2.17.0 on the
+        // same two files).
         let (status, stdout, stderr) = search(&bad_gi, "5", threads, Some("1"));
-        assert_eq!(status, 1, "gi|abc BATCH_SIZE=1 n{threads}: {stderr}");
-        assert!(stdout.is_empty(), "gi|abc BATCH_SIZE=1 n{threads}");
-        assert!(
-            stderr.contains("a query title with a character outside the US-ASCII range")
-                && stderr.contains("not supported by LOSAT"),
+        let frozen = |extension: &str| {
+            std::fs::read(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/outfmt16")
+                    .join(format!("prescan_badgi_blastx_5.{extension}")),
+            )
+            .unwrap()
+        };
+        let code = String::from_utf8(frozen("rc")).unwrap();
+        assert_eq!(
+            status,
+            code.trim().parse::<i32>().unwrap(),
             "gi|abc BATCH_SIZE=1 n{threads}: {stderr}"
+        );
+        assert_eq!(stdout, frozen("out"), "gi|abc BATCH_SIZE=1 n{threads}");
+        assert_eq!(
+            stderr.as_bytes(),
+            frozen("err"),
+            "gi|abc BATCH_SIZE=1 n{threads}"
         );
     }
 }
@@ -906,6 +923,219 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
             assert!(
                 stdout.starts_with("BLASTN 2.17.0+\n") && !stdout.contains("Query="),
                 "{db} outfmt {outfmt}: {stdout}"
+            );
+        }
+    }
+}
+
+// Line RG T3c (PD-LOSAT-NCBI-DEFECTS 1.39): the same database sequences for BLASTX (`bxqid`, `bxqgi`:
+// proteins) and TBLASTX (`txqid`, `txqgi`). NCBI's merge of the Seq-align id throws (exit 255, probes
+// `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`), and for the display id its description line shows the query's
+// title (`tx.t3c.d.qgi.f1`). Both programs write their prolog before the search, as NCBI does, so the
+// refusal follows it.
+#[test]
+fn blastx_and_tblastx_query_anchored_refuse_a_database_sequence_named_as_a_query() {
+    for (program, prefix, version) in [
+        ("blastx", "bx", "BLASTX 2.17.0+\n"),
+        ("tblastx", "tx", "TBLASTX 2.17.0+\n"),
+    ] {
+        let query = format!("{prefix}q.fa");
+        for (db, refusal) in [
+            (
+                format!("{prefix}qid"),
+                "database sequence 0 has the Seq-id lcl|Query_1, the id of a query (generated, or \
+                 the PSSM's) in the query batch that reports it",
+            ),
+            (
+                format!("{prefix}qgi"),
+                "database sequence 0 has the display id lcl|Query_1 (the id of its description \
+                 line)",
+            ),
+        ] {
+            for outfmt in ["0", "1", "3"] {
+                let (status, stdout, stderr) =
+                    of1_run(&[program, "-query", &query, "-db", &db, "-outfmt", outfmt]);
+                if outfmt == "0" {
+                    assert_eq!(status, 0, "{program} {db} outfmt 0: {stderr}");
+                    continue;
+                }
+                assert_eq!(status, 1, "{program} {db} outfmt {outfmt}: {stderr}");
+                assert!(
+                    stderr.contains(refusal),
+                    "{program} {db} outfmt {outfmt}: {stderr}"
+                );
+                assert!(
+                    stdout.starts_with(version) && !stdout.contains("Query="),
+                    "{program} {db} outfmt {outfmt}: {stdout}"
+                );
+            }
+        }
+    }
+}
+
+// Line RG T3c fix 1: `txself.fa` is one record read as the query and as the subject under
+// `-parse_deflines`. TBLASTX's formats 1 to 4 add their Dense-segs with `fForceTranslation`, not
+// `fPreserveRows`, so NCBI's `CAlnMix` takes the query's row and the record's subject rows for one
+// sequence and folds the record's HSPs with itself into the query row (probes `tx.t3c.self.f1` to
+// `f4`, exit 0; `report::query_anchored::aln_mix`): LOSAT writes the report, the same at 1 and 4
+// threads (its bytes are NCBI's: rows `db.of1.tx.self.*` of the fixtures).
+#[test]
+fn tblastx_query_anchored_writes_one_record_as_a_query_and_a_subject() {
+    for outfmt in ["0", "1", "4"] {
+        let mut outputs = Vec::new();
+        for threads in ["1", "4"] {
+            let (status, stdout, stderr) = of1_run(&[
+                "tblastx",
+                "-query",
+                "txself.fa",
+                "-subject",
+                "txself.fa",
+                "-parse_deflines",
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                threads,
+            ]);
+            assert_eq!(status, 0, "outfmt {outfmt} n{threads}: {stderr}");
+            assert!(
+                stdout.contains("Query= txself"),
+                "outfmt {outfmt} n{threads}: {stdout}"
+            );
+            if outfmt != "0" {
+                assert!(
+                    stdout.contains("For reading frame +1 of query sequence:"),
+                    "outfmt {outfmt} n{threads}: {stdout}"
+                );
+            }
+            outputs.push(stdout);
+        }
+        assert_eq!(outputs[0], outputs[1], "outfmt {outfmt}: n1 and n4 differ");
+    }
+}
+
+/// NCBI BLAST+ 2.17.0's standard error where its merge of a query-anchored section throws at
+/// `file`, `line`, in `function`, with `message` (`CATCH_ALL`'s report, exit 255).
+fn merge_exception(file: &str, line: u32, function: &str, message: &str) -> String {
+    format!(
+        "Error: NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/\
+         PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_\
+         1751374548/c++/compilers/unix/../../src/objtools/alnmgr/{file}\", line {line}: Error: \
+         (CAlnException::eMergeFailure) ncbi::objects::{function}() - {message}\n\n"
+    )
+}
+
+// Line RG T3c fix 2 (PD-LOSAT-NCBI-DEFECTS 1.39, rule 2): `txrep2.fa` is one record of two copies of a
+// coding piece. As the query (`-query_loc 1-300`, the first copy; or after `lcl|other1` in `txrep2b.fa`)
+// and the subject (`-subject_loc 301-600`, the second) under `-parse_deflines`, the first HSP of the
+// record with itself that NCBI's merge takes puts subject positions on the query's own row where the
+// query has none, and `x_Merge` throws `Start iterator already exists for seq2` (probes
+// `f1.rep2.qs.f1`, `f1.rep2.qs.f3`, `f1.rep2b.b1.sl.f1` of `T/t3/fix1_t3c/cases_fix1.tsv`). `txmg0.fa` is
+// a tandem record `A+A` and `txmg0s.fa` that record, then a subject holding `A` (`-subject_loc
+// 154-303 -seg no`): the merge joins segments of the query's row and `Build` throws `Infinite loop
+// detected` (review 2 of fix 1, `mg0.sx.f1`). NCBI's application catches the exception and exits with
+// 255, its stream flushed: the reports of the queries before, the query's heading and description
+// table, no epilog, and the exception on standard error. LOSAT writes the same, at 1 and 4 threads and
+// with `BATCH_SIZE=1` (formats 1 to 4 are written batch by batch); the whole bytes are the fixture rows
+// `db.of1.tx.throw.*`. Outfmt 0 of the same search is a report.
+#[test]
+fn tblastx_query_anchored_ends_with_ncbi_s_exception_where_its_merge_throws() {
+    let start_iterator = merge_exception(
+        "alnmerger.cpp",
+        790,
+        "CAlnMixMerger::x_Merge",
+        "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.",
+    );
+    let infinite_loop = merge_exception(
+        "alnsegments.cpp",
+        168,
+        "CAlnMixSegments::Build",
+        "CAlnMixSegments::Build(): Internal error: Infinite loop detected.",
+    );
+    let of1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/of1");
+    let rep2: &[&str] = &["-subject", "txrep2.fa", "-subject_loc", "301-600"];
+    let mg0: &[&str] = &[
+        "-subject",
+        "txmg0s.fa",
+        "-subject_loc",
+        "154-303",
+        "-seg",
+        "no",
+    ];
+    // (query, subject, `-query_loc 1-300`, `BATCH_SIZE`, outfmt, NCBI's exception)
+    let cases: [(&str, &[&str], bool, Option<&str>, &str, Option<&String>); 8] = [
+        ("txrep2.fa", rep2, true, None, "0", None),
+        ("txrep2.fa", rep2, true, None, "1", Some(&start_iterator)),
+        ("txrep2.fa", rep2, true, None, "3", Some(&start_iterator)),
+        (
+            "txrep2b.fa",
+            rep2,
+            false,
+            Some("1"),
+            "1",
+            Some(&start_iterator),
+        ),
+        ("txrep2b.fa", rep2, false, None, "2", Some(&start_iterator)),
+        ("txmg0.fa", mg0, false, None, "0", None),
+        ("txmg0.fa", mg0, false, None, "1", Some(&infinite_loop)),
+        ("txmg0.fa", mg0, false, None, "4", Some(&infinite_loop)),
+    ];
+    for (query, subject, query_loc, batch_size, outfmt, exception) in cases {
+        let mut outputs = Vec::new();
+        for threads in ["1", "4"] {
+            let mut command = losat();
+            command
+                .current_dir(&of1)
+                .args(["tblastx", "-query", query])
+                .args(subject)
+                .args([
+                    "-parse_deflines",
+                    "-outfmt",
+                    outfmt,
+                    "-num_threads",
+                    threads,
+                ]);
+            if query_loc {
+                command.args(["-query_loc", "1-300"]);
+            }
+            if let Some(size) = batch_size {
+                command.env("BATCH_SIZE", size);
+            }
+            let output = command.output().unwrap();
+            let (status, stdout, stderr) = (
+                output.status.code().unwrap_or(-1),
+                String::from_utf8(output.stdout).unwrap(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            );
+            let what = format!("{query} {batch_size:?} outfmt {outfmt} n{threads}");
+            let Some(exception) = exception else {
+                assert_eq!(status, 0, "{what}: {stderr}");
+                assert!(stdout.contains("Lambda"), "{what}: {stdout}");
+                continue;
+            };
+            assert_eq!(status, 255, "{what}: {stderr}");
+            assert_eq!(&stderr, exception, "{what}");
+            assert!(stdout.starts_with("TBLASTX 2.17.0+\n"), "{what}: {stdout}");
+            // The report ends with the query's description table, before its alignments.
+            let last = &stdout[stdout.rfind("\n\n\nQuery= ").expect("a query's report")..];
+            assert!(
+                last.contains("Sequences producing significant alignments:")
+                    && last.ends_with("\n\n")
+                    && !last.contains("Lambda")
+                    && !last.contains("For reading frame"),
+                "{what}: {stdout}"
+            );
+            // The report of `lcl|other1` before it, also in the same batch.
+            assert_eq!(
+                stdout.contains("Query= other1"),
+                query == "txrep2b.fa",
+                "{what}: {stdout}"
+            );
+            outputs.push(stdout);
+        }
+        if outputs.len() == 2 {
+            assert_eq!(
+                outputs[0], outputs[1],
+                "{query} outfmt {outfmt}: n1 and n4 differ"
             );
         }
     }

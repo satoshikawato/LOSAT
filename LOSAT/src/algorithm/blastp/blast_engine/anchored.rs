@@ -21,7 +21,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::query_anchored::{
-    database_label, record_label, subject_is_query_record, ReportSequences,
+    database_label, record_label, subject_is_query_record, Mask, ReportSequences,
 };
 
 /// What the sections of a BLASTP report read (module doc).
@@ -45,11 +45,11 @@ pub(super) struct AnchoredSequences<'a> {
 }
 
 /// Appends the masks `masks` as positions.
-fn push_masks(masks: &[(i32, i32)], out: &mut Vec<(u32, u32)>) {
+fn push_masks(masks: &[(i32, i32)], out: &mut Vec<Mask>) {
     out.extend(
         masks
             .iter()
-            .map(|&(from, to)| (from.max(0) as u32, to.max(0) as u32)),
+            .map(|&(from, to)| (from.max(0) as u32, to.max(0) as u32, 0)),
     );
 }
 
@@ -118,13 +118,13 @@ impl ReportSequences for AnchoredSequences<'_> {
         }
     }
 
-    fn query_masks(&self, q_idx: usize, out: &mut Vec<(u32, u32)>) {
+    fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>) {
         if let Some(masks) = self.query_masks.and_then(|masks| masks.get(q_idx)) {
             push_masks(masks, out);
         }
     }
 
-    fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<(u32, u32)>) {
+    fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<Mask>) {
         if let Some(masks) = self.subject_masks.get(&(q_idx as u32, s_idx)) {
             push_masks(masks, out);
         }

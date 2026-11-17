@@ -124,9 +124,15 @@ mod seqalign_samples;
 mod suite_layout;
 #[path = "../tax_report_streams.rs"]
 mod tax_report_streams;
+#[path = "../taxdb_tool_texts.rs"]
+mod taxdb_tool_texts;
 #[path = "../taxonomy_read_order.rs"]
 mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]
 mod web_v1_search_space;
 #[path = "../x_reach_directory.rs"]
 mod x_reach_directory;
+#[path = "../xml_dbname.rs"]
+mod xml_dbname;
+#[path = "../xml_post_order.rs"]
+mod xml_post_order;

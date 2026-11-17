@@ -38,6 +38,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
+use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
@@ -96,10 +97,11 @@ impl TblastxDatabase {
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
-        let total = db.total_length();
+        // The statistics' setup total (`DbStatistics::setup_total`: not negative, below 2^63; a
+        // `LENGTH` of 2^63 or more is NCBI's negative `Int8`, read as such) as the engine holds it.
+        let total = db.statistics().setup_total;
         usize::try_from(total)
             .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
             .with_context(|| {
                 format!(
                     "a database of {total} letters is not supported by LOSAT's TBLASTX on this platform"
@@ -197,16 +199,21 @@ impl TblastxDatabase {
     //     return seqdb.GetTotalLength();
     // }
     // ```
-    /// The numbers of the database that the statistics read (the total fits an `Int8`,
-    /// `open`), with `-dbsize`.
+    /// The numbers of the database that the statistics read (`SeqDb::statistics`: the setup's
+    /// total and NCBI's `Int4` count, `BlastSeqSrcGetTotLen` for the linking, the average subject
+    /// length), with `-dbsize`.
     pub(crate) fn numbers(&self, dbsize: Option<i64>) -> SubjectSetNumbers {
-        let (total, count) = self.db.statistics_numbers();
+        let statistics = self.db.statistics();
         SubjectSetNumbers {
-            total: i64::try_from(total).expect("checked when opened"),
-            count: i64::from(count),
-            link_total: i64::try_from(self.db.total_length()).expect("checked when opened"),
+            total: statistics.setup_total,
+            count: i64::from(statistics.setup_count),
+            // NCBI's `Int8` of `GetTotalLength`: negative for a `LENGTH` of 2^63 or more, which
+            // takes the subject's own branch of the link cutoffs (blast_engine.c:1451-1456).
+            link_total: statistics.engine_db_length,
+            average: Some(statistics.average),
             dbsize,
             searchsp: None,
+            statistics: Some(statistics),
         }
     }
 
@@ -215,10 +222,10 @@ impl TblastxDatabase {
         self.db.filtered_empty()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(crate) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(crate) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -246,8 +253,8 @@ impl TblastxDatabase {
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
-    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, the taxonomy
-    /// database's refusals and the non-ASCII refusal come before any byte).
+    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, and the taxonomy
+    /// database's refusals before any byte).
     pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len()).collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
@@ -505,39 +512,121 @@ pub(crate) fn subject_read_texts<'h>(
 /// fails or one without a Bioseq with a Seq-align whose first Std-seg has a minus query frame
 /// and a plus subject frame (`CSeq_align::GetSeqStrand` reads the first segment): `ordered`
 /// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`).
+///
+/// `before`: the batches of the run before it that the loop still holds (none where it wrote and
+/// dropped them, `report_stream`, which records each batch instead: `note_loaded`), as NCBI's
+/// data loader loaded them ([`LoadedBefore`]), read only where the batch stops; the outfmt 5
+/// reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
 pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
+    before: LoadedBefore<'_>,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    query: usize,
-) -> Result<Vec<u8>> {
+    queries: &shared::PrefetchQueries<'_>,
+) -> Result<crate::report::diag_log::Posts> {
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,
+        loaded_subjects(before, titles),
         prefetch_subjects(ordered, titles),
         PROGRAM,
-        query,
+        queries,
     )
 }
 
-/// The stop of NCBI's prefetch of the query batch whose reported hits are `ordered` and whose
-/// first query is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each
-/// `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
-/// before, whose reported hits are `before`, which TBLASTX writes after the stop (the XML formats
-/// are not streamed, `report_stream`).
+/// The stop of NCBI's prefetch of the query batch of `queries` whose reported hits are
+/// `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+/// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
+/// whose reported hits are `before` (the reports read every reported subject), which TBLASTX
+/// writes after the stop (the XML formats are not streamed, `report_stream`).
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
     before: &[TblastxHsp],
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    query: usize,
+    queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
     shared::held_batch_prefetch_stop(
         &database.db,
+        &database.taxdb,
         prefetch_subjects(before, titles),
+        std::iter::empty(),
         prefetch_subjects(ordered, titles),
         PROGRAM,
-        query,
+        queries,
+    )
+}
+
+/// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
+/// batch whose reported hits are `ordered` (`shared::TaxdbRun::note_loaded`; [`loaded_subjects`]
+/// of the batch alone, `rows`: the first format's), for a later batch's stop: where the loop
+/// writes each batch's reports and drops its hits (`report_stream`), so that `batch_prefetch`'s
+/// `before` no longer holds them. The stream never writes outfmt 5 (`report_stream::Off`), so no
+/// report of the batch is cut (`shared::XmlCuts::NONE`); `queries` are the batch's queries as its
+/// hits number them (`q_idx`, from 0 in the batch).
+pub(crate) fn note_loaded(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    queries: std::ops::Range<usize>,
+    titles: &DatabaseTitles,
+    rows: SubjectFetch,
+) {
+    if database.parsed_seqids() {
+        let batch = [queries];
+        database.taxdb.note_loaded(&database.db, || {
+            loaded_subjects(
+                LoadedBefore {
+                    hits: ordered,
+                    spans: &batch,
+                    rows,
+                    cuts: shared::XmlCuts::NONE,
+                },
+                titles,
+            )
+        });
+    }
+}
+
+/// The query batches of the run before a batch's prefetch that the loop holds
+/// (`shared::LoadedBefore`, read by [`loaded_subjects`]): their reported hits in report order
+/// (`hits`, by query of the run), the queries of each batch (`spans`), which rows of the first
+/// format read a subject where a batch's prefetch is off (`rows`), and the outfmt 5 reports cut
+/// before their hits (`cuts`).
+pub(crate) type LoadedBefore<'a> = shared::LoadedBefore<'a, TblastxHsp>;
+
+/// The sequences that NCBI's BLAST database data loader loaded for reported hits `ordered` whose
+/// loads are `loads` (`shared::batch_loads`, review 3 of line DBID loadord, H2): every subject
+/// where its batch's prefetch ran (TBLASTX's prefetched set is its reported set,
+/// `shared::BatchLoads::reported_rows`); where it is off, those that the rows of a report NCBI
+/// writes read (`ordered` is then one query's hits, `shared::LoadedBefore::subjects`), which
+/// LOSAT takes as all of them unless no row reads one (`SubjectFetch::Never`): rows that read a
+/// subject for its identities only (`nident`) read those of HSPs with identities, which the
+/// stores of the batch count (`run_impl`'s fetches of a batch whose prefetch is off), so every
+/// subject is a superset (TBLASTX's own: its hits carry no identities before those fetches).
+fn batch_loaded<'s>(
+    ordered: &'s [TblastxHsp],
+    loads: shared::BatchLoads,
+    titles: &'s DatabaseTitles,
+) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+    let loaded = if loads.reported_rows() == SubjectFetch::Never {
+        &[]
+    } else {
+        ordered
+    };
+    prefetch_subjects(loaded, titles)
+}
+
+/// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
+/// (`shared::LoadedBefore::subjects`, [`batch_loaded`] of each; none of an outfmt 5 report that
+/// NCBI's XML stream cut, review 6 of line DBID loadord, H2).
+fn loaded_subjects<'s>(
+    before: LoadedBefore<'s>,
+    titles: &'s DatabaseTitles,
+) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+    before.subjects(
+        |hits, span| Some(query_hits(hits, span)),
+        |_, hits| seq_aligns_of(hits),
+        move |_, hits, loads| batch_loaded(hits, loads, titles),
     )
 }
 
@@ -759,7 +848,7 @@ impl ReportedSubjects {
         &self,
         oids: crate::seqdb::OidMap<'_>,
         reads: bool,
-    ) -> Result<Vec<Arc<[u8]>>> {
+    ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,

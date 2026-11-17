@@ -87,7 +87,8 @@ pub use crate::utils::threading::validate_threads;
 // of one argv share, and the routing of their outputs (`api/local_blast.rs`).
 pub use crate::api::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    with_run_pool, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
+    with_run_pool, FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink,
+    ReportOutputs,
 };
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;

@@ -317,7 +317,7 @@ pub(crate) struct XReadFailure {
 }
 
 impl XReadFailure {
-    pub(crate) fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             first: AtomicUsize::new(usize::MAX),
             failed: Mutex::new(None),
@@ -336,6 +336,11 @@ impl XReadFailure {
             *failed = Some((oid, error));
             self.first.fetch_min(oid, Ordering::Relaxed);
         }
+    }
+
+    /// Whether a read failed (without the lock of `take`).
+    pub(crate) fn failed(&self) -> bool {
+        self.first.load(Ordering::Relaxed) != usize::MAX
     }
 
     /// The error of the failed read kept, if any, taken.
@@ -566,10 +571,18 @@ pub(crate) struct SubjectSetNumbers {
     /// `total`, except for a database whose alias files give `STATS_TOTLEN` (the statistics' total)
     /// or whose list kept no sequence (`GetTotalLength`, `SeqDb::total_length`).
     pub(crate) link_total: i64,
+    /// A database's `BlastSeqSrcGetAvgSeqLen` (`DbStatistics::average`), the subject length of
+    /// the word cutoffs (blast_engine.c:1372-1374); `None` for a FASTA set, whose average is
+    /// `total / count`.
+    pub(crate) average: Option<i32>,
     /// `-dbsize`.
     pub(crate) dbsize: Option<i64>,
     /// `-searchsp`.
     pub(crate) searchsp: Option<i64>,
+    /// A database's numbers (`SeqDb::statistics`): the preliminary stage's option spaces and the
+    /// statistics of each subject read them (`SubjectSetNumbers::preliminary_spaces`,
+    /// `per_subject`); `None` for a FASTA set.
+    pub(crate) statistics: Option<crate::seqdb::DbStatistics>,
 }
 
 impl SubjectSetNumbers {
@@ -579,8 +592,10 @@ impl SubjectSetNumbers {
             total: records.iter().map(|record| record.seq().len() as i64).sum(),
             count: records.len() as i64,
             link_total: records.iter().map(|record| record.seq().len() as i64).sum(),
+            average: None,
             dbsize,
             searchsp: None,
+            statistics: None,
         }
     }
 
@@ -602,34 +617,129 @@ impl SubjectSetNumbers {
     // ```
     /// The length adjustment and the effective search space of a context of `query_len_aa`
     /// residues (`try_compute_eff_lengths_tblastx`), or `-searchsp` above 0 as the space.
+    // `stats::setup::eff_lengths_database` and `calc_eff_lengths` (one owner for the six
+    // programs, line RG D1a-3): `-dbsize` above 0 or the total, divided by 3 for the translated
+    // subject, NCBI's `Int4` count, and `-searchsp` above 0 as every context's search space.
     pub(crate) fn context_lengths(
         &self,
         query_len_aa: i64,
         karlin: &crate::stats::KarlinParams,
-    ) -> Option<super::ncbi_cutoffs::EffLengthsResult> {
-        let lengths = match self.searchsp {
-            Some(searchsp) if searchsp > 0 => super::ncbi_cutoffs::EffLengthsResult {
-                length_adjustment: if query_len_aa > 0 {
-                    crate::stats::length_adjustment::compute_length_adjustment_ncbi(
-                        query_len_aa,
-                        self.effective_length() / 3,
-                        self.count,
-                        karlin,
-                    )
-                    .length_adjustment
-                } else {
-                    0
-                },
-                eff_searchsp: searchsp,
-            },
-            _ => super::ncbi_cutoffs::try_compute_eff_lengths_tblastx(
-                query_len_aa,
-                self.effective_length(),
-                self.count,
-                karlin,
-            )?,
+    ) -> Result<super::ncbi_cutoffs::EffLengthsResult, SearchSpaceOverflow> {
+        let searchsp = self.searchsp.filter(|&searchsp| searchsp > 0).unwrap_or(0);
+        self.context_lengths_with(query_len_aa, karlin, searchsp)
+    }
+
+    /// `context_lengths` with the context's option space `searchsp` (`-searchsp`, or the
+    /// preliminary stage's: `preliminary_spaces`).
+    pub(crate) fn context_lengths_with(
+        &self,
+        query_len_aa: i64,
+        karlin: &crate::stats::KarlinParams,
+        searchsp: i64,
+    ) -> Result<super::ncbi_cutoffs::EffLengthsResult, SearchSpaceOverflow> {
+        let none = super::ncbi_cutoffs::EffLengthsResult {
+            length_adjustment: 0,
+            eff_searchsp: searchsp,
         };
-        Some(lengths)
+        let Some((db_length, count)) = crate::stats::setup::eff_lengths_database(
+            self.total,
+            self.count as i32,
+            self.dbsize.unwrap_or(0),
+            searchsp != 0,
+            true,
+        ) else {
+            return Ok(none);
+        };
+        if query_len_aa <= 0 {
+            return Ok(none);
+        }
+        let lengths = crate::stats::setup::calc_eff_lengths(
+            query_len_aa,
+            db_length,
+            count,
+            karlin,
+            searchsp,
+            "TBLASTX",
+        )?;
+        Ok(super::ncbi_cutoffs::EffLengthsResult {
+            length_adjustment: i64::from(lengths.length_adjustment),
+            eff_searchsp: lengths.eff_searchsp,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // `stats::setup::preliminary_option_space`)
+    /// The option spaces of the preliminary stage for the contexts `contexts` (each one's query
+    /// length in residues, 0 for an invalid one, and its ungapped Karlin block, which the
+    /// effective lengths of TBLASTX read): where they differ from the setup's (a database whose
+    /// statistics' total before the fallback to OID 0 is not positive) or where the statistics of
+    /// each subject read them (`per_subject`); `None` otherwise.
+    pub(crate) fn preliminary_spaces<'k>(
+        &self,
+        contexts: impl Iterator<Item = (i64, &'k crate::stats::KarlinParams)>,
+    ) -> Result<Option<Vec<i64>>, SearchSpaceOverflow> {
+        let Some(statistics) = self.statistics else {
+            return Ok(None);
+        };
+        if statistics.gumbel_db_length > 0 && !statistics.per_subject() {
+            return Ok(None);
+        }
+        let searchsp = self.searchsp.filter(|&searchsp| searchsp > 0).unwrap_or(0);
+        contexts
+            .map(|(query_length, karlin)| {
+                crate::stats::setup::preliminary_option_space(
+                    query_length,
+                    statistics.gumbel_db_length,
+                    statistics.request_count,
+                    self.dbsize.unwrap_or(0),
+                    searchsp,
+                    true,
+                    karlin,
+                    "TBLASTX",
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+
+    /// Whether the setup's own spaces are not the preliminary stage's (the statistics' total before
+    /// the fallback to OID 0 is not positive: `preliminary_spaces`).
+    pub(crate) fn preliminary_spaces_differ(&self) -> bool {
+        self.statistics
+            .is_some_and(|statistics| statistics.gumbel_db_length <= 0)
+    }
+
+    /// Whether NCBI's preliminary search computes the statistics of each subject on its own
+    /// (`DbStatistics::per_subject`).
+    pub(crate) fn per_subject(&self) -> bool {
+        self.statistics
+            .is_some_and(|statistics| statistics.per_subject())
+    }
+
+    /// The effective lengths of a context of `query_len_aa` residues for the subject of
+    /// `subject_nucl` bases (`BLAST_OneSubjectUpdateParameters`, `stats::setup::subject_eff_lengths`),
+    /// with the context's preliminary option space `option_space`.
+    pub(crate) fn subject_context_lengths(
+        &self,
+        query_len_aa: i64,
+        subject_nucl: i64,
+        option_space: i64,
+        karlin: &crate::stats::KarlinParams,
+    ) -> Result<super::ncbi_cutoffs::EffLengthsResult, SearchSpaceOverflow> {
+        let lengths = crate::stats::setup::subject_eff_lengths(
+            query_len_aa,
+            subject_nucl,
+            self.count as i32,
+            self.dbsize.unwrap_or(0),
+            option_space,
+            true,
+            karlin,
+            "TBLASTX",
+        )?;
+        Ok(super::ncbi_cutoffs::EffLengthsResult {
+            length_adjustment: i64::from(lengths.length_adjustment),
+            eff_searchsp: lengths.eff_searchsp,
+        })
     }
 
     /// The database length of the effective lengths, in bases: `-dbsize` when above 0, else
@@ -655,23 +765,9 @@ impl SubjectSetNumbers {
 /// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8`
 /// (`db_length` bases of the database, or of `-dbsize`, against a context of `query_length`
 /// residues): NCBI's arithmetic overflows there (as BLASTP's and BLASTX's `-dbsize`).
-#[derive(Debug)]
-pub(crate) struct SearchSpaceOverflow {
-    pub(crate) db_length: i64,
-    pub(crate) query_length: usize,
-}
-
-impl std::fmt::Display for SearchSpaceOverflow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's TBLASTX",
-            self.db_length, self.query_length
-        )
-    }
-}
-
-impl std::error::Error for SearchSpaceOverflow {}
+/// LOSAT's refusal of an effective search space past NCBI's `Int8` (the shared one of
+/// `stats::setup::calc_eff_lengths`).
+pub(crate) use crate::stats::setup::SearchSpaceOverflow;
 
 #[cfg(test)]
 mod tests {

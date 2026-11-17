@@ -46,7 +46,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::report::tabular::PrintedIds;
+use crate::report::tabular::{PrintedIds, SubjectFetch};
 use crate::seqdb::{
     BlockMasks, BlockRange, MaskBlock, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType,
     SequenceBlock,
@@ -139,12 +139,79 @@ impl XWaitingBytes for u64 {
 #[cfg(test)]
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
-/// `SeqDb::read_block`, mapped with LOSAT_X_BNMAPPED.
-fn x_read_block(db: &SeqDb, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375,388-391
+// ```c++
+//         len = seqdb.GetSequence(oid, &buf);
+//     ...
+//     /* For preliminary stage, even though sequence buffer points to a memory
+//        mapped location, we still need to call ReleaseSequence. This can only be
+//        guaranteed by making the engine believe tat sequence is allocated.
+//     */
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1376-1378
+// ```c
+//     if ((status =
+//        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
+//           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
+// ```
+// NCBI's preliminary stage reads each sequence in place in the mapped volume (`GetFileDataPtr`,
+// seqdbvol.cpp:1817, quoted above `block_subject`), and each search thread allocates its search
+// structures once. LOSAT reads a block with one positioned read (`seqdb::file`, no mapping, so
+// that native builds and WebAssembly share the reader): each worker keeps one buffer for its
+// blocks, read again for each block. It is allocated once per worker and grows only for a larger
+// block, and only its bytes past the last block's length are zeroed.
+/// `SeqDb::read_block` (the preliminary stage's blocks). With LOSAT_X_BNMAPPED, into the worker's
+/// block buffer `kept` (`SeqDb::x_read_block_into`: below 1 MiB the worker's own buffer, kept from
+/// one block to the next; a block of 1 MiB or more, a long sequence or at one thread a block of
+/// exactly 1 MiB, in a buffer of `utils::x_mapped::X_BYTES`); `x_done_kept_block` gives the
+/// buffer back. Out of line, as the read of a block was before: inlined into the one-thread loop
+/// (`search_blocks_of`), its call of `Volume::read_block_in` with arguments on the stack made the
+/// loop pass the stack argument of every subject's `search_subject` call with pushes (+3
+/// instructions per subject on syn megablast).
+#[inline(never)]
+fn x_read_block(
+    db: &SeqDb,
+    range: BlockRange,
+    kept: &mut Vec<u8>,
+) -> Result<SequenceBlock, SeqDbError> {
     if super::x_bn_mapped() {
-        db.x_read_block_mapped(range)
+        db.x_read_block_into(range, kept)
     } else {
         db.read_block(range)
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives the buffer of a block of `x_read_block` back for the worker's next
+/// block (`SequenceBlock::x_into_kept`: into `kept` below 1 MiB, else to
+/// `utils::x_mapped::X_BYTES`).
+fn x_done_kept_block(block: SequenceBlock, kept: &mut Vec<u8>) {
+    if super::x_bn_mapped() {
+        block.x_into_kept(kept);
+    }
+}
+
+/// No NCBI counterpart (where LOSAT keeps its bytes): a worker of the parallel preliminary stage
+/// (the rounds' `map_init`, `x_db_stream.rs`'s window), its search scratch and its block buffer
+/// (`x_read_block`), both kept from one block to the next.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct XWorker<T> {
+    scratch: T,
+    bytes: Vec<u8>,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<T> XWorker<T> {
+    fn new(scratch: T) -> Self {
+        Self {
+            scratch,
+            bytes: Vec::new(),
+        }
     }
 }
 
@@ -157,7 +224,7 @@ fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError
     }
 }
 
-/// With LOSAT_X_BNMAPPED, gives a block read by `x_read_block` or `x_read_sequence` back to
+/// With LOSAT_X_BNMAPPED, gives a sequence read by `x_read_sequence` back to
 /// `utils::x_mapped::X_BYTES`.
 fn x_done_block(block: SequenceBlock) {
     if super::x_bn_mapped() {
@@ -421,6 +488,7 @@ impl BlastnDatabase {
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
+        // The setup's total is not negative (`DbStatistics::setup_total`).
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -431,7 +499,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: num_seqs as usize,
+            db_num_seqs: num_seqs,
         };
         Ok(Self {
             db,
@@ -643,50 +711,111 @@ impl BlastnDatabase {
     /// then the warning where the prefetch fails, at a subject whose lookup fails or one without
     /// a Bioseq that a Seq-align on the query's minus strand flips (`gapped`: each HSP is a
     /// Seq-align, else a subject's first HSP decides).
+    /// `before`: the batches of the call before it that the loop still holds (none where it wrote
+    /// and dropped them, LOSAT_X_RPTSTREAM, which records each batch instead: `note_loaded`), as
+    /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops; the outfmt
+    /// 5 reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn batch_prefetch(
         &self,
         titles: &DatabaseTitles,
+        before: LoadedBefore<'_>,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-        query: usize,
-    ) -> Result<Vec<u8>> {
+        queries: &shared::PrefetchQueries<'_>,
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
-            Self::prefetch_subjects(titles, hit_lists, gapped),
+            Self::loaded_subjects(titles, before, gapped),
+            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
             PROGRAM,
-            query,
+            queries,
         )
     }
 
-    /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
-    /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
+    /// The stop of NCBI's prefetch of the query batch of `queries` whose final hit lists are
+    /// `hit_lists`, for the XML2 and JSON formats, which write the taxonomy
     /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
-    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`),
-    /// which BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
+    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`;
+    /// the reports read every reported subject), which BLASTN writes after the stop (the XML
+    /// formats are not streamed, `x_rpt_stream`).
     pub(super) fn batch_prefetch_stop(
         &self,
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
-        query: usize,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         shared::held_batch_prefetch_stop(
             &self.db,
-            Self::prefetch_subjects(titles, before, gapped),
-            Self::prefetch_subjects(titles, hit_lists, gapped),
+            &self.taxdb,
+            Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every),
+            std::iter::empty(),
+            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
             PROGRAM,
-            query,
+            queries,
+        )
+    }
+
+    /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
+    /// batch whose final hit lists are `hit_lists` (`shared::TaxdbRun::note_loaded`;
+    /// `loaded_subjects` of the batch alone, `rows`: the first format's), for a later batch's
+    /// stop: where the loop writes each batch's reports and drops its lists (LOSAT_X_RPTSTREAM),
+    /// so that `batch_prefetch`'s `before` no longer holds them. The stream never writes outfmt 5
+    /// (`x_rpt_stream`), so no report of the batch is cut (`shared::XmlCuts::NONE`).
+    pub(super) fn note_loaded(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+        rows: SubjectFetch,
+    ) {
+        if self.parsed_seqids() {
+            let batch = [0..hit_lists.len()];
+            self.taxdb.note_loaded(&self.db, || {
+                Self::loaded_subjects(
+                    titles,
+                    LoadedBefore {
+                        hits: hit_lists,
+                        spans: &batch,
+                        rows,
+                        cuts: shared::XmlCuts::NONE,
+                    },
+                    gapped,
+                )
+            });
+        }
+    }
+
+    /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
+    /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
+    /// prefetch is on, else those that the rows of the reports NCBI writes read,
+    /// `shared::BatchLoads::reported_rows`; review 3 of line DBID loadord, H2; review 6, H2).
+    fn loaded_subjects<'s>(
+        titles: &'s DatabaseTitles,
+        before: LoadedBefore<'s>,
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        before.subjects(
+            |hit_lists, span| hit_lists.get(span),
+            move |_, hit_lists| seq_aligns_of(hit_lists, gapped),
+            // BLASTN's prefetched set is its reported set.
+            move |_, hit_lists, loads| {
+                Self::prefetch_subjects(titles, hit_lists, gapped, loads.reported_rows())
+            },
         )
     }
 
     /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`
-    /// reads (`batch_prefetch`).
+    /// reads (`batch_prefetch`), or, as its reports read them where the prefetch is off, those
+    /// whose rows read them (`rows`, by each HSP's `num_ident`; BLASTN's formatter does not fetch
+    /// for the identities, so its rows read every subject or none).
     fn prefetch_subjects<'s>(
         titles: &'s DatabaseTitles,
         hit_lists: &'s [Option<BlastnHitList>],
         gapped: bool,
+        rows: SubjectFetch,
     ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
         hit_lists
             .iter()
@@ -695,7 +824,7 @@ impl BlastnDatabase {
                 let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
                 &hit_list.hsplist_array[..count]
             })
-            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .filter(move |hsp_list| hsp_list.hsps.iter().any(|hsp| rows.reads(hsp.num_ident)))
             .map(move |hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -735,10 +864,10 @@ impl BlastnDatabase {
         self.db.average_length()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -750,6 +879,12 @@ impl BlastnDatabase {
     /// the schedules count; the statistics' number (`metadata`) can be another.
     pub(super) fn num_subjects(&self) -> usize {
         self.db.num_seqs() as usize
+    }
+
+    /// Whether NCBI's traceback sorts the results by e-value at its end
+    /// (`DbStatistics::sorts_results`).
+    pub(super) fn sorts_results(&self) -> bool {
+        self.db.statistics().sorts_results()
     }
 
     /// The number of sequences and the total length that the statistics read
@@ -1146,20 +1281,26 @@ where
         let found: Vec<Result<Vec<(u32, R)>>> = pool.install(|| {
             round
                 .par_iter()
-                .map_init(new_scratch, |scratch, &range| -> Result<Vec<(u32, R)>> {
-                    let block = x_read_block(db, range).map_err(search_read_error)?;
-                    let mut kept = Vec::new();
-                    for i in 0..block.len() {
-                        let ordinal = range.first_ordinal + i as u32;
-                        if let Some(result) =
-                            search(scratch, ordinal, block_subject(&block, &range, i)?)
-                        {
-                            kept.push((ordinal, result));
+                .map_init(
+                    || XWorker::new(new_scratch()),
+                    |worker, &range| -> Result<Vec<(u32, R)>> {
+                        let block = x_read_block(db, range, &mut worker.bytes)
+                            .map_err(search_read_error)?;
+                        let mut kept = Vec::new();
+                        for i in 0..block.len() {
+                            let ordinal = range.first_ordinal + i as u32;
+                            if let Some(result) = search(
+                                &mut worker.scratch,
+                                ordinal,
+                                block_subject(&block, &range, i)?,
+                            ) {
+                                kept.push((ordinal, result));
+                            }
                         }
-                    }
-                    x_done_block(block);
-                    Ok(kept)
-                })
+                        x_done_kept_block(block, &mut worker.bytes);
+                        Ok(kept)
+                    },
+                )
                 .collect()
         });
         // The sequences that keep nothing change no hit list, so the order of the
@@ -1236,16 +1377,18 @@ where
     let _ = (pool, parallel, blocks_per_thread);
 
     let mut scratch = new_scratch();
+    // The block buffer, kept from one block to the next (`x_read_block`).
+    let mut bytes = Vec::new();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block = x_read_block(db, range).map_err(search_read_error)?;
+        let block = x_read_block(db, range, &mut bytes).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
             if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, &range, i)?) {
                 merge(ordinal, result);
             }
         }
-        x_done_block(block);
+        x_done_kept_block(block, &mut bytes);
         next_ordinal = range.end_ordinal();
     }
     Ok(())
@@ -1731,6 +1874,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         tabular: output_formats
             .iter()
             .any(|format| format.tabular_reads_subject()),
+        stops_at_failed_lookup: output_formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+        }),
         pairwise,
         structured: output_formats
             .iter()
@@ -1768,6 +1915,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
 /// The Seq-aligns of the results `hit_lists` that NCBI's prefetch counts against
 /// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP of a `gapped` search, one
 /// for each subject of an ungapped one (`shared::subject_seq_aligns`).
+/// The query batches of a call before a batch's prefetch that the loop holds
+/// (`shared::LoadedBefore`, read by `BlastnDatabase::loaded_subjects`): their final hit lists by
+/// query (`hits`), the queries of each batch (`spans`; those past `hits` are not held), and which
+/// rows of the first format read a subject where a batch's prefetch is off (`rows`).
+pub(super) type LoadedBefore<'a> = shared::LoadedBefore<'a, Option<BlastnHitList>>;
+
 pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -> usize {
     hit_lists
         .iter()
@@ -2046,12 +2199,13 @@ impl ReportedSubjects {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
-    /// written where a tabular report `reads` the subject, else its id is empty.
+    /// written where a tabular report `reads` the subject, else its id is empty; `None` where the
+    /// lookup fails (`common::tabular::SubjectId`).
     pub(super) fn tabular_subject_ids(
         &self,
         oids: crate::seqdb::OidMap<'_>,
         reads: bool,
-    ) -> Result<Vec<Arc<[u8]>>> {
+    ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
@@ -2880,9 +3034,9 @@ mod tests {
                 .tabular_subject_ids(database.db.oid_map(), true)
                 .unwrap()
                 .iter()
-                .map(|id| id.as_ref())
+                .map(|id| id.as_deref())
                 .collect::<Vec<_>>(),
-            [&b"n06"[..], b"n10"]
+            [Some(&b"n06"[..]), Some(b"n10")]
         );
         // Without the letters (the tabular formats without alignment rows): no stored data.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
@@ -3011,7 +3165,7 @@ mod tests {
         BlastnDatabase {
             metadata: SubjectMetadata {
                 db_len_total: db.total_length() as usize,
-                db_num_seqs: db.num_seqs() as usize,
+                db_num_seqs: db.num_seqs() as i32,
             },
             db,
             name: name.to_string(),

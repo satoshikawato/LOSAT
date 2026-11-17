@@ -134,16 +134,18 @@ fn unsupported_formats_fail_before_searching() {
     let subjects = subjects(&inputs.subject.0);
     // A delimiter that a field separates its entries with is NCBI's error
     // (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`).
-    for outfmt in ["2", "6 delim=; qseqid staxids", "abc"] {
+    for outfmt in ["17", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
             ],
@@ -179,6 +181,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -242,6 +245,7 @@ fn run_local_outputs(
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -298,6 +302,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt: "6",
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
@@ -353,6 +358,7 @@ fn a_word_size_of_one_searches() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,

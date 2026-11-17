@@ -569,11 +569,11 @@ impl BerError {
             Failure::Eof { pos } => match frame {
                 Frame::SetArray | Frame::Root => {
                     let eof = NcbiException::new(END_OF_FILE, "end of file")
-                        .backlog(HANDLE_EOF_RETHROW, Frame::SetArray.info());
+                        .rethrow_same(HANDLE_EOF_RETHROW, Frame::SetArray.info());
                     match frame {
-                        Frame::Root => {
-                            Failure::Rethrown(eof.backlog(HANDLE_EOF_RETHROW, Frame::Root.info()))
-                        }
+                        Frame::Root => Failure::Rethrown(
+                            eof.rethrow_same(HANDLE_EOF_RETHROW, Frame::Root.info()),
+                        ),
                         _ => Failure::Rethrown(eof),
                     }
                 }
@@ -586,9 +586,9 @@ impl BerError {
                 },
             },
             Failure::Rethrown(exception) => match frame {
-                Frame::Root => {
-                    Failure::Rethrown(exception.backlog(HANDLE_EOF_RETHROW, Frame::Root.info()))
-                }
+                Frame::Root => Failure::Rethrown(
+                    exception.rethrow_same(HANDLE_EOF_RETHROW, Frame::Root.info()),
+                ),
                 _ => Failure::Rethrown(exception),
             },
             unported @ Failure::Unported { .. } => unported,
@@ -613,7 +613,7 @@ impl BerError {
     fn member_read(self, member: &'static str) -> Self {
         match *self.0 {
             Failure::Serial { exception, frames } => BerError(Box::new(Failure::Serial {
-                exception: exception.with_extra(frame_extra(&frames)).backlog(
+                exception: exception.with_extra(frame_extra(&frames)).rethrow_same(
                     READ_WITH_SET_FLAG_MEMBER,
                     format!("error while reading {member}"),
                 ),

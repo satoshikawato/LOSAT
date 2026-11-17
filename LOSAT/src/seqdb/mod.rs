@@ -200,6 +200,13 @@ pub enum SeqDbError {
     Integrity { path: PathBuf, message: String },
     /// A valid database that needs something LOSAT does not read.
     Unsupported { path: PathBuf, message: String },
+    /// A file that NCBI BLAST+ crashes on where it reads it (an ISAM whose header does not fit its
+    /// files, as an empty `.psi` or `.psd`: NCBI's constructor reads its index bounds whatever
+    /// `x_InitSearch` returned, `isam_num::NumericIsam::open_volume`; probe I of line BDC, review 4
+    /// of line DBID loadord), which LOSAT refuses as an `Unsupported` database: the text of one
+    /// whose message is `message` followed by [`NCBI_CRASHES_ON_IT`]
+    /// ([`SeqDbError::ncbi_crashes`]).
+    NcbiCrashes { path: PathBuf, message: String },
     /// A request outside the database (ordinal id, block range).
     Range(String),
     /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
@@ -222,10 +229,20 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Unsupported { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
+            SeqDbError::NcbiCrashes { path, message } => write!(
+                f,
+                "{}: unsupported database: {} {NCBI_CRASHES_ON_IT}",
+                path.display(),
+                message
+            ),
             SeqDbError::Ncbi(exception) => f.write_str(exception.what().trim_end()),
         }
     }
 }
+
+/// The end of the text of LOSAT's refusal of a database file that NCBI BLAST+ crashes on where it
+/// reads it ([`SeqDbError::NcbiCrashes`]).
+pub const NCBI_CRASHES_ON_IT: &str = "(NCBI crashes on it)";
 
 impl SeqDbError {
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
@@ -233,6 +250,13 @@ impl SeqDbError {
     /// with `-parse_seqids`; `SeqDb::read_header`).
     pub fn is_parsed_seqids(&self) -> bool {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
+    }
+
+    /// Whether this is LOSAT's refusal of a file that NCBI BLAST+ crashes on where it reads it
+    /// ([`SeqDbError::NcbiCrashes`]; review 5 of line DBID loadord, L4: the variant, not the text,
+    /// says it).
+    pub fn ncbi_crashes(&self) -> bool {
+        matches!(self, SeqDbError::NcbiCrashes { .. })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
@@ -371,6 +395,7 @@ impl SeqDbError {
             SeqDbError::Io { .. }
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
+            | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
         }
@@ -550,15 +575,99 @@ pub struct NameRecord {
     pub title: Vec<u8>,
     /// `GetDate`.
     pub date: String,
-    /// `GetNumSeqs`.
-    pub num_seqs: u32,
-    /// `GetTotalLength`.
+    /// `GetNumSeqs`: NCBI's `int` (the walk of `NSEQ` converted, so negative for a negative
+    /// `NSEQ` or one of 2^31 or more).
+    pub num_seqs: i32,
+    /// `GetTotalLength`: NCBI's `Uint8`.
     pub total_length: u64,
     /// The filtering algorithms of the name's database, which the formatter of a search with a
     /// database mask reads (`GetMaskAlgorithmDetails`, `SeqDb::name_mask_details`), or the error
     /// of reading them, met only where the formatter asks for them; read with the record when
     /// the search has a database mask (`read_name_records`), `None` otherwise.
     pub mask_algorithms: Option<Result<MaskAlgorithms, SeqDbError>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:163-209
+// ```c++
+// static Int4
+// s_SeqDbGetNumSeqs(void* seqdb_handle, void*)
+// {
+//     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
+//     return seqdb.GetNumSeqs();
+// }
+// ...
+// static Int8
+// s_SeqDbGetTotLen(void* seqdb_handle, void*)
+// {
+//     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
+//     return seqdb.GetTotalLength();
+// }
+// ...
+// static Int4
+// s_SeqDbGetAvgLength(void* seqdb_handle, void* ignoreme)
+// {
+//    Int8 total_length = s_SeqDbGetTotLen(seqdb_handle, ignoreme);
+//    Int4 num_seqs = MAX(1, s_SeqDbGetNumSeqs(seqdb_handle, ignoreme));
+//
+//    return (Int4) (total_length/num_seqs);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:905-938 (quoted at
+// `SeqDb::statistics_total_length`) and c++/src/algo/blast/core/blast_engine.c:1407, 1434
+// ```c
+//     db_length = BlastSeqSrcGetTotLen(seq_src);
+//     ...
+//         if (db_length == 0) {
+// ```
+/// The numbers of a database that NCBI's statistics read, with NCBI's types (line RG D1a-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DbStatistics {
+    /// The setup's total length (`BLAST_GapAlignSetUp`, `Int8`): `STATS_TOTLEN`, else
+    /// `GetTotalLength`, when positive; else the length of OID 0 (0 without an OID:
+    /// `SeqDb::first_oid_read_fails`).
+    pub setup_total: i64,
+    /// The setup's number of sequences (`Int4`): `STATS_NSEQ`, else `GetNumSeqs`, with a
+    /// positive total; else 1 (0 without an OID). Negative for a negative `NSEQ` or one of 2^31
+    /// or more (the `int` of NCBI's walk).
+    pub setup_count: i32,
+    /// The Gumbel block's database length before `-dbsize` (`sbp->gbp->db_length`, before the
+    /// division of a translated subject): the setup's total before its fallback to OID 0, so 0
+    /// for a `LENGTH` of 0 and negative for one of 2^63 or more.
+    pub gumbel_db_length: i64,
+    /// `BlastSeqSrcGetTotLen` (`Int8` of `GetTotalLength`), which the preliminary search and the
+    /// traceback read: 0 computes the statistics of each subject on its own, and only a
+    /// positive one sorts the results by e-value at the end of the traceback.
+    pub engine_db_length: i64,
+    /// The number of sequences of the requests' effective search space (`STATS_NSEQ`, else
+    /// `GetNumSeqs`, without the setup's fallback to 1; split_query_aux_priv.cpp:164-173, quoted
+    /// at `OptionsHandle::set_database_filter`).
+    pub request_count: i32,
+    /// `GetMinLength` (`SeqDb::min_length`).
+    pub min_length: i32,
+    /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
+    pub average: i32,
+}
+
+impl DbStatistics {
+    /// Whether NCBI's preliminary search computes the statistics of each subject on its own
+    /// (`db_length == 0`, blast_engine.c:1434).
+    pub fn per_subject(&self) -> bool {
+        self.engine_db_length == 0
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
+    // ```c
+    //     /* Re-sort the hit lists according to their best e-values, because they
+    //        could have changed. Only do this for a database search. */
+    //     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
+    //         Blast_HSPResultsSortByEvalue(results);
+    //     }
+    // ```
+    /// Whether NCBI's traceback sorts each query's hit list by e-value at its end: not for a
+    /// total length of 0 or of 2^63 or more, where the hit lists keep the traceback's order.
+    pub fn sorts_results(&self) -> bool {
+        self.engine_db_length > 0
+    }
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -618,8 +727,6 @@ pub struct SeqDb {
     oid_list_set_up: AtomicBool,
     /// Whether a list was applied (`SeqDb::restrict`): NCBI's `CSeqDB` then scans the totals.
     list_applied: bool,
-    /// The name the database was opened with (`-db`), for LOSAT's refusals.
-    name: String,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -755,7 +862,6 @@ impl SeqDb {
                 if self.list_applied {
                     use alias::WalkKey;
                     self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
-                    self.check_printed_counts()?;
                 }
                 vec![self.name_record(one, masks)]
             }
@@ -930,6 +1036,11 @@ impl SeqDb {
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
     pub fn volume_index(&self, ordinal: u32) -> Result<usize, SeqDbError> {
         self.find_volume(ordinal).map(|at| at.volume)
+    }
+
+    /// The number of the volume that holds NCBI's OID `oid` ([`SeqDb::locate_oid`]).
+    pub fn oid_volume(&self, oid: u32) -> Result<usize, SeqDbError> {
+        self.locate_oid(oid).map(|at| at.volume)
     }
 
     /// Opens the one database at the path `name` (without extension), taken
@@ -1188,7 +1299,6 @@ impl SeqDb {
             all_bits_special_set: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
-            name: name.to_string(),
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -1205,7 +1315,7 @@ impl SeqDb {
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
         if db.is_version5() {
             match db.lmdb_entries() {
-                Ok(_) | Err(SeqDbError::Unsupported { .. }) => {}
+                Ok(_) | Err(SeqDbError::Unsupported { .. } | SeqDbError::NcbiCrashes { .. }) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -1514,10 +1624,10 @@ impl SeqDb {
     // NCBI's reports open the database again without the list (`CBlastFormatUtil::
     // GetBlastDbInfo` reads a `CSeqDB` of the name alone): the `Database:` lines of the
     // pairwise report and the database counts of XML and JSON are the walks of the alias tree.
-    /// The number of sequences the reports print: `GetNumSeqs` of the database without a list
-    /// (`check_alias_values` refuses a negative one).
-    pub fn printed_num_seqs(&self) -> u32 {
-        self.printed_num_seqs.max(0) as u32
+    /// The number of sequences the reports print: `GetNumSeqs` of the database without a list,
+    /// NCBI's `int` (negative for a negative `NSEQ` or one of 2^31 or more).
+    pub fn printed_num_seqs(&self) -> i32 {
+        self.printed_num_seqs
     }
 
     /// The total length the reports print: `GetTotalLength` of the database without a list.
@@ -1586,26 +1696,44 @@ impl SeqDb {
         }
     }
 
-    /// The total length and the number of sequences that the statistics of a search read
-    /// (`BLAST_CalcEffLengths`, `BlastSetup_GetScoreBlock`): `STATS_TOTLEN` or `GetTotalLength`,
-    /// and `STATS_NSEQ` or `GetNumSeqs`; the length of OID 0 and one sequence where the total
-    /// is not positive (a list that kept no sequence). The number is 0 for an alias file's
-    /// `NSEQ 0`, which NCBI's average subject length divides by (`SeqDb::average_length`).
-    pub fn statistics_numbers(&self) -> (u64, u32) {
+    /// The numbers of the database that NCBI's statistics read, with NCBI's types
+    /// (`DbStatistics`): the setup's total and count (`BLAST_GapAlignSetUp`), the Gumbel block's
+    /// length, the engine's `BlastSeqSrcGetTotLen`, the shortest and the average length.
+    pub fn statistics(&self) -> DbStatistics {
         let total = self.statistics_total_length();
-        if total > 0 {
-            let stats = self.stats_num_seqs;
-            let num_seqs = if stats > 0 {
-                stats
-            } else {
-                self.counts.num_seqs
-            };
-            return (total as u64, num_seqs.max(0) as u32);
+        let request_count = if self.stats_num_seqs > 0 {
+            self.stats_num_seqs
+        } else {
+            self.counts.num_seqs
+        };
+        let (setup_total, setup_count) = if total > 0 {
+            (total, request_count)
+        } else {
+            match self.first_oid_length {
+                // A length of OID 0 is below 2^32 (a volume's `Uint4`).
+                Some(length) => (length as i64, 1),
+                None => (0, 0),
+            }
+        };
+        DbStatistics {
+            setup_total,
+            setup_count,
+            gumbel_db_length: total,
+            engine_db_length: self.counts.total_length as i64,
+            request_count,
+            min_length: self.counts.min_length,
+            average: self.average_length(),
         }
-        match self.first_oid_length {
-            Some(length) => (length, 1),
-            None => (0, 0),
-        }
+    }
+
+    /// The total length and the number of sequences that the statistics of a search read
+    /// (`BLAST_CalcEffLengths`, `BlastSetup_GetScoreBlock`): `DbStatistics::setup_total` and
+    /// `setup_count`, NCBI's `Int8` and `Int4`. The number is 0 for an alias file's `NSEQ 0`,
+    /// which NCBI's average subject length divides by (`SeqDb::statistics_count_is_zero`), and
+    /// negative for a negative `NSEQ` or one of 2^31 or more.
+    pub fn statistics_numbers(&self) -> (i64, i32) {
+        let statistics = self.statistics();
+        (statistics.setup_total, statistics.setup_count)
     }
 
     /// Whether the alias files give an OID range (`FIRST_OID`, `LAST_OID`) or a key that
@@ -1627,10 +1755,10 @@ impl SeqDb {
     // ```
     /// Whether the total length of the statistics is not positive before their fallback to the
     /// length of OID 0 (`STATS_TOTLEN` and `GetTotalLength` are not: a list that kept no
-    /// sequence, without `STATS_TOTLEN`): the effective search space that NCBI's BLAST archive
-    /// records is then computed with a database length of 0 (`note_archive_database_filter`).
+    /// sequence, without `STATS_TOTLEN`, or of 2^63 or more): with no OID either, the first query
+    /// batch's setup fails (`first_oid_read_fails`).
     pub fn statistics_length_is_empty(&self) -> bool {
-        self.statistics_total_length() <= 0
+        self.statistics().gumbel_db_length <= 0
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-936 (at
@@ -1667,8 +1795,8 @@ impl SeqDb {
     /// (BLASTN, TBLASTX, and the protein programs with `-ungapped`, `-searchsp` or `OLD_FSC`)
     /// divide the total by it, and NCBI BLAST+ 2.17.0 crashes (SIGFPE).
     pub fn statistics_count_is_zero(&self) -> bool {
-        let (total, count) = self.statistics_numbers();
-        total > 0 && count == 0
+        let statistics = self.statistics();
+        statistics.setup_total > 0 && statistics.setup_count == 0
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:199-209
@@ -1704,63 +1832,7 @@ impl SeqDb {
         } else {
             UNLISTED_WALK_KEYS
         };
-        self.walk_errors(keys)?;
-        // Values NCBI reads in ways LOSAT does not reproduce yet (line RG, item D1a-2).
-        let refuse = |message: &str| {
-            Err(SeqDbError::Unsupported {
-                path: PathBuf::from(self.alias_name()),
-                message: format!("{message}; LOSAT does not read such alias files yet"),
-            })
-        };
-        if self.counts.num_seqs < 0 {
-            return refuse(&format!(
-                "the number of sequences of the alias files (NSEQ) is {} as NCBI's int",
-                self.counts.num_seqs
-            ));
-        }
-        // A total of 2^63 or more is negative as NCBI's Int8: NCBI's search reads that negative
-        // `db_length` the usual way (blast_setup.c:925-935, the cutoffs of blast_engine.c:1454),
-        // not per subject; LOSAT's statistics take no negative total (line RG D1a-3).
-        let negative_total = (self.counts.total_length as i64) < 0 && self.num_seqs > 0;
-        if !self.list_applied && (self.statistics_per_subject() || negative_total) {
-            return refuse(&format!(
-                "the total length of the alias files (LENGTH) is {} as NCBI's Int8 while the \
-                 database includes sequences",
-                self.counts.total_length as i64
-            ));
-        }
-        if !self.list_applied {
-            self.check_printed_counts()?;
-        }
-        Ok(())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
-    // ```c
-    //        if (db_length == 0) {
-    //            /* This is not a database search, hence need to recalculate and save
-    //             the effective search spaces and length adjustments for all
-    //             queries based on the length of the current single subject
-    //             sequence. */
-    //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
-    //                           seq_arg.seq->length, score_options, query_info,
-    //                           sbp, hit_params, word_params,
-    //                           eff_len_options)) != 0)
-    // ```
-    // `db_length` is `BlastSeqSrcGetTotLen`, NCBI's `GetTotalLength` (`counts`): an alias file's
-    // `LENGTH 0`, or a list whose scan of the totals visits no sequence (the walk of
-    // `OidFilter::walk` stops before the listed OIDs that the search reads: line RG D1a-2,
-    // survey A, the iteration range of the only alias file of a `-db`).
-    /// Whether NCBI's search computes the statistics of each subject on its own: `GetTotalLength`
-    /// is 0 while the search reads sequences. LOSAT's database searches do not (an alias file's
-    /// `LENGTH 0` is refused by [`SeqDb::check_alias_values`], a list's scan by the search's
-    /// opener). Every included sequence counts as read here, while NCBI's TBLASTN and TBLASTX
-    /// skip the subjects shorter than `min_subj_seq_length` before this check
-    /// (blast_engine.c:1429): a database whose searched subjects are all that short is refused
-    /// though NCBI searches it the usual way, until the statistics of each subject are ported
-    /// (line RG D1a-3, which removes this refusal).
-    pub fn statistics_per_subject(&self) -> bool {
-        self.counts.total_length == 0 && self.num_seqs > 0
+        self.walk_errors(keys)
     }
 
     /// The first exception of the walks of `keys`, in that order.
@@ -1769,37 +1841,6 @@ impl SeqDb {
             Some(exception) => Err(SeqDbError::Ncbi(exception.clone())),
             None => Ok(()),
         }
-    }
-
-    /// LOSAT's refusals of the counts the reports print (line RG, item D1a-2): a negative
-    /// `GetNumSeqs`, and a total length of 10^18 or more, which NCBI's commas print with the
-    /// upper digits lost.
-    fn check_printed_counts(&self) -> Result<(), SeqDbError> {
-        let refuse = |message: String| {
-            Err(SeqDbError::Unsupported {
-                path: PathBuf::from(self.alias_name()),
-                message: format!("{message}; LOSAT does not read such alias files yet"),
-            })
-        };
-        if self.printed_num_seqs < 0 {
-            return refuse(format!(
-                "the number of sequences of the alias files (NSEQ) is {} as NCBI's int",
-                self.printed_num_seqs
-            ));
-        }
-        if self.printed_total_length >= 1_000_000_000_000_000_000 {
-            return refuse(format!(
-                "the total length of the alias files (LENGTH) is {}, which NCBI prints with \
-                 digits lost",
-                self.printed_total_length
-            ));
-        }
-        Ok(())
-    }
-
-    /// The name of the database for LOSAT's refusals of its alias files.
-    fn alias_name(&self) -> &str {
-        &self.name
     }
 
     /// Title of the database.
@@ -2133,37 +2174,14 @@ impl SeqDb {
         self.volumes[at.volume].protein_mapped_bytes_after(at.vol_oid)
     }
 
-    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer that glibc maps
-    /// from 1 MiB on (`Volume::x_read_block_mapped`).
-    pub fn x_read_block_mapped(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
-        let Some(volume) = self.volumes.get(range.volume) else {
-            return Err(SeqDbError::Range(format!(
-                "volume {} is outside the database ({} volumes)",
-                range.volume,
-                self.volumes.len()
-            )));
-        };
-        volume.x_read_block_mapped(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            self.volume_starts[range.volume] + range.first,
-        )
-    }
-
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
-    /// (`Volume::x_read_block_into`).
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
+    /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
+    /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);
+    /// `SequenceBlock::x_into_kept` gives the buffer back.
     pub fn x_read_block_into(
         &self,
         range: BlockRange,
-        buf: Vec<u8>,
+        kept: &mut Vec<u8>,
     ) -> Result<SequenceBlock, SeqDbError> {
         let Some(volume) = self.volumes.get(range.volume) else {
             return Err(SeqDbError::Range(format!(
@@ -2177,7 +2195,7 @@ impl SeqDb {
             range.end,
             range.first_ordinal,
             self.volume_starts[range.volume] + range.first,
-            buf,
+            kept,
         )
     }
 
@@ -2204,8 +2222,8 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_length(at.vol_oid, self.location_oid(&at))
     }
 
-    /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
-    /// ambiguity runs that overlap it, read without the rest of the sequence.
+    /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal`.
+    #[cfg(test)]
     pub fn nucleotide_iupac_range(
         &self,
         ordinal: u32,
@@ -2215,7 +2233,8 @@ impl SeqDb {
         self.nucleotide_iupac_range_at(self.find_volume(ordinal)?, from, to)
     }
 
-    /// [`SeqDb::nucleotide_iupac_range`] of the nucleotide at `at`.
+    /// The IUPAC letters `[from, to)` of the nucleotide at `at`: the bases of the range and the
+    /// ambiguity runs that overlap it, read without the rest of the sequence.
     pub fn nucleotide_iupac_range_at(
         &self,
         at: SeqLocation,
@@ -2225,6 +2244,18 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_iupac_range(at.vol_oid, self.location_oid(&at), from, to)
     }
 
+    /// [`SeqDb::nucleotide_iupac_at`] of nucleotide `ordinal`.
+    pub fn nucleotide_iupac(&self, ordinal: u32) -> Result<Vec<u8>, SeqDbError> {
+        self.nucleotide_iupac_at(self.find_volume(ordinal)?)
+    }
+
+    /// The IUPAC letters of the whole nucleotide at `at`: [`SeqDb::nucleotide_iupac_range_at`]
+    /// of `[0, length)`, the length read once, with the sequence's ambiguity data
+    /// (`Volume::nucleotide_iupac`).
+    pub fn nucleotide_iupac_at(&self, at: SeqLocation) -> Result<Vec<u8>, SeqDbError> {
+        self.volumes[at.volume].nucleotide_iupac(at.vol_oid, self.location_oid(&at))
+    }
+
     /// The length and the ambiguity runs of nucleotide `ordinal`, read once for any number of
     /// [`SeqDb::nucleotide_iupac_range_with`] calls on it.
     pub fn nucleotide_ambiguity(&self, ordinal: u32) -> Result<NucleotideAmbiguity, SeqDbError> {
@@ -2232,8 +2263,8 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_ambiguity(at.vol_oid, self.location_oid(&at))
     }
 
-    /// [`SeqDb::nucleotide_iupac_range`] with the length and the runs of
-    /// [`SeqDb::nucleotide_ambiguity`] for the same `ordinal`: one read of the range's bytes.
+    /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal` with the length and the runs
+    /// of [`SeqDb::nucleotide_ambiguity`] for the same `ordinal`: one read of the range's bytes.
     pub fn nucleotide_iupac_range_with(
         &self,
         ordinal: u32,

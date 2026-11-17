@@ -1,0 +1,109 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2g f3147 subjects
+           1 sequences; 15 total letters
+
+
+
+Query= f3147_q
+
+Length=51
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1   VYPR*R*VRTVVVT  42
+0        1               L.  2
+0        13         .K       14
+0        2            .      2
+0        13              .   13
+
+For reading frame +2 of query sequence:
+
+Query_1  2   CILGDAKSGQWL*PRD  49
+0        14           K.       15
+0        10  .L                11
+0        12            .V      13
+0        8       ..            9
+0        8                  .  8
+0        7       .             7
+0        7                  .  7
+0        14        .           14
+0        5          .          5
+0        11    .               11
+
+For reading frame +3 of query sequence:
+
+Query_1  12  VTLSQDSGCD  41
+0        1     .TFH.ND.  8
+0        5      .N.DA.   10
+0        6      ND.A     9
+0        1   L.          2
+0        7            .  7
+0        11    .         11
+
+For reading frame -1 of query sequence:
+
+Query_1  45  LGHNHCPDLASPRIH  1
+0        4       .SN.         7
+0        4     .SN            6
+0        6     ND             7
+0        8          .         8
+0        10       .           10
+0        6      .             6
+0        4                 .  4
+0                    .        
+0        5             .      5
+0        11  .                11
+
+For reading frame -2 of query sequence:
+
+Query_1  50  DPWVTTTVLT*RHLGY  3
+0        1                .TF  3
+0        12    ..              13
+0        1           ..        2
+0        1      L.             2
+0        7   .                 7
+0        15    .               15
+0        8   .                 8
+0        4               .     4
+0        2         .           2
+0        2        .            2
+0        11          .         11
+
+For reading frame -3 of query sequence:
+
+Query_1  40  SQPLS*LSVT*D  5
+0        11        .W.     13
+0        1           L.    2
+0        1         .T      2
+0        7              .  7
+0        8              .  8
+0        5   .             5
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 143
+
+
+  Database: x2g f3147 subjects
+    Posted date:  Nov 15, 2026  2:20 AM
+  Number of letters in database: 15
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 2

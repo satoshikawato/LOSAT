@@ -719,7 +719,7 @@ const TAXDB_TAXIDS: [i32; 11] = [
 ];
 
 /// The taxonomy name files on the search path, read by the lookups of the taxonomy columns
-/// (`names`) and of the checks before a search (`offset_error_taxid`, `any_lookup_may_*`).
+/// (`names`) and of the checks before a search (`offset_error_taxid`, `any_lookup_faults`, `any_lookup_may_fail`).
 fn read_taxdb(dir: &Path, trace: &mut Trace) {
     let search = SearchPath::new(dir, Some(dir.as_os_str()), None).unwrap();
     match TaxDb::open(&search) {
@@ -732,8 +732,8 @@ fn read_taxdb(dir: &Path, trace: &mut Trace) {
             trace.note(db.open_messages());
             trace.note(&db.entry_count());
             trace.read(db.offset_error_taxid());
+            trace.read(db.any_lookup_faults());
             trace.read(db.any_lookup_may_fail());
-            trace.read(db.any_lookup_may_refuse(&|name: &[u8]| name.contains(&b'\t')));
             for tax_id in TAXDB_TAXIDS {
                 let mut messages = Vec::new();
                 trace.read(db.names(tax_id, &mut messages));

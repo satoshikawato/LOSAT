@@ -54,7 +54,7 @@ use super::{
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
 /// What the steps of the offset pairs of one subject chunk read that is the same for every pair,
-/// besides the batch's word finder (`prelim_subject::ScanBatch`, built once per batch and passed
+/// besides the batch's word finder (`prelim_subject::ScanBatch` or `special_subject`'s copy, passed
 /// to `extend_offset_pairs` as a parameter of its own: the word and lookup word lengths, the query
 /// with and without its sentinels, the context of a pair's query offset, the contexts and their
 /// cutoffs, X-dropoffs and reduced cutoffs, the scoring, the diagonal table's form, sizes and hash

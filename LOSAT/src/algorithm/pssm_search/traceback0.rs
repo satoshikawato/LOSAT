@@ -62,6 +62,9 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) stats: EvalueStats<'a>,
     pub(crate) expect_value: f64,
     pub(crate) hitlist_size: usize,
+    /// Whether NCBI sorts the results at the end of the traceback (`DbStatistics::sorts_results`):
+    /// where it does not, the lists go into the hit list in the order of their OIDs.
+    pub(crate) sorts_results: bool,
     /// psiblast's `-sum_stats true`: the traceback's linking parameters
     /// (`EvenGapLinkParams::traceback`) and the query's context as the linking reads it
     /// (`kbp_gap_psi`); `None` without sum statistics.
@@ -126,7 +129,15 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
                 );
             }
         }
-        let traced = self.trace_lists(work, pool)?;
+        let mut traced = self.trace_lists(work, pool)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted at
+        // `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary lists by
+        // OID (blast_traceback.c:1500-1520, 1700-1707). Where the results are sorted at the end
+        // (blast_traceback.c:1768-1772), the order of insertion changes nothing; where they are not,
+        // it is the report's order (as `blastp::blast_engine::traceback::OrdinaryTraceback`).
+        if !self.sorts_results {
+            traced.sort_by_key(|list| list.as_ref().map_or(u32::MAX, |list| list.oid));
+        }
         let mut hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
             .take(preliminary_hit_lists.len())
             .collect();

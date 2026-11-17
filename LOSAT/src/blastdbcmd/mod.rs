@@ -28,7 +28,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, Ostream};
 use crate::ncbi_app::{Diag, Tool};
-use crate::ncbi_str::with_commas;
+use crate::ncbi_str::{int_with_commas, with_commas};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
 /// The name in LOSAT's refusals.
@@ -182,7 +182,6 @@ fn run_body(
         return retrieve::process(
             &db,
             args,
-            &path,
             diag,
             stdin,
             &mut out,
@@ -199,10 +198,10 @@ fn run_body(
             return metadata::metadata(&db, name, args, &path, diag, &mut out);
         }
         if args.given("tax_info") {
-            return taxonomy::tax_info(&db, args, &path, diag, &mut out);
+            return taxonomy::tax_info(&db, args, diag, &mut out);
         }
         let protein = db.seqtype() == SeqType::Protein;
-        return retrieve::process(&db, args, &path, diag, stdin, &mut out, None, protein);
+        return retrieve::process(&db, args, diag, stdin, &mut out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
@@ -396,10 +395,11 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
         out,
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
          BLASTDB Version: {}\n",
-        with_commas(u64::from(db.printed_num_seqs())),
+        int_with_commas(db.printed_num_seqs()),
         with_commas(db.printed_total_length()),
         db.date(),
-        with_commas(u64::from(db.max_length())),
+        // `GetMaxLength` is NCBI's `int` of the index files' longest length.
+        int_with_commas(db.max_length() as i32),
         if db.is_version5() { "5" } else { "4" },
     );
 }

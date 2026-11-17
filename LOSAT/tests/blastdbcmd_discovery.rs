@@ -209,15 +209,87 @@ const CASES: &[Case] = &[
     ("T520", None, false, &["-db", "../db_search/t5/ptx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
     ("T521", None, false, &["-db", "../db_search/t5/ntx_app42", "-entry", "all", "-outfmt", "%o %T %t"], 0),
     ("T522", None, false, &["-db", "../db_search/t5/ntx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    // Merge 5 of line RG item T5c with item K4h (`make_t5.py --k5-only`): titles ending in `]` (`%t`
+    // keeps the stored title) and scientific names with two-byte UTF-8 and a control byte, written
+    // as they are (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-17).
+    ("T525", Some("../seqdb/taxdb/k5"), false, &["-db", "../db_search/t5/pk5", "-entry", "all", "-outfmt", "%t %T %S"], 0),
+    ("T526", Some("../seqdb/taxdb/k5"), false, &["-db", "../db_search/t5/pk5s", "-entry", "all", "-outfmt", "%t %T %S"], 0),
+    // Line RG item T5b: a damaged taxonomy database (`../seqdb/taxdb/<variant>`) on the search path
+    // of `../db_search/t5b` (make_t5b.py there): NCBI posts the texts of opening it once, at the
+    // first lookup, and the offset error of its last entry at each lookup that asks for taxid
+    // 99990 (the FASTA formatter's two `GetBioseq` calls follow the volume's 256-slot cache;
+    // `GetTaxInfo` of `%S` and `-tax_info` look up directly), and goes on (exit status 0). In
+    // `btd_empty` the lookups of 99990 read no record (no crash). T5B501-T5B504: `-tax_info` of a
+    // taxid found in the index without names writes empty names, `N/A` only for one not found.
+    // NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-4.
+    ("T5B101", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all"], 0),
+    ("T5B102", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B103", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/pmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B104", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T %S"], 0),
+    ("T5B105", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %C %N"], 0),
+    ("T5B106", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410003.1,AB410002.1"], 0),
+    ("T5B107", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410008.1", "-target_only"], 0),
+    ("T5B108", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
+    ("T5B109", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-taxids", "9606", "-no_taxid_expansion"], 0),
+    ("T5B110", Some("../seqdb/taxdb/bad_magic"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T %S"], 0),
+    ("T5B201", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all"], 0),
+    ("T5B202", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B203", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/pmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B204", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T %S"], 0),
+    ("T5B205", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %C %N"], 0),
+    ("T5B206", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410003.1,AB410002.1"], 0),
+    ("T5B207", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410008.1", "-target_only"], 0),
+    ("T5B208", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
+    ("T5B209", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-taxids", "9606", "-no_taxid_expansion"], 0),
+    ("T5B210", Some("../seqdb/taxdb/count_zero"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T %S"], 0),
+    ("T5B301", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all"], 0),
+    ("T5B302", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B303", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/pmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B304", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T %S"], 0),
+    ("T5B305", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %C %N"], 0),
+    ("T5B306", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410003.1,AB410002.1"], 0),
+    ("T5B307", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410008.1", "-target_only"], 0),
+    ("T5B308", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
+    ("T5B309", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-taxids", "9606", "-no_taxid_expansion"], 0),
+    ("T5B310", Some("../seqdb/taxdb/offset_last_past_end"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T %S"], 0),
+    ("T5B401", Some("../seqdb/taxdb/btd_empty"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410008.1", "-target_only"], 0),
+    ("T5B402", Some("../seqdb/taxdb/btd_empty"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
+    ("T5B501", Some("../seqdb/taxdb/tabs0"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
+    ("T5B502", Some("../seqdb/taxdb/tabs1"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
+    ("T5B503", Some("../seqdb/taxdb/offset_last_at_end"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
+    ("T5B504", Some("../seqdb/taxdb/empty_fields"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
+    // Line RG item T5b fix 2: a record of `taxdb.btd` that reaches past NCBI's mapping of the file
+    // (`../db_search/t5b/taxdb/<variant>`, make_t5b.py --taxdb). `kingdom_past_page`: 9606's
+    // record runs past the mapping after its third tab, so its names are NCBI's and only its
+    // super kingdom comes from memory past the mapping (`%K`, refused in taxdb_tool_texts.rs);
+    // `names_past_page`: 9606's record lies wholly past it, so only the runs that write none of
+    // its names go on (the loads of titled sequences, `%a %T`). NCBI BLAST+ 2.17.0 (local oracle),
+    // 2026-11-15, the T5b fix 2 subagent of ad-RG-T5-5.
+    ("T5B601", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all"], 0),
+    ("T5B602", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/pmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B603", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T %S %L %B"], 0),
+    ("T5B604", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %C %N"], 0),
+    ("T5B605", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%B"], 0),
+    ("T5B606", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410002.1,AB410011.1"], 0),
+    ("T5B607", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T"], 0),
+    ("T5B608", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
+    // Line RG item T5b fix 3: `zero_kingdom_past_page` (make_t5b.py --taxdb), whose record of taxid 0
+    // runs past NCBI's mapping of taxdb.btd after its third tab: `-tax_info` writes `N/A` for taxid 0
+    // whatever its lookup reads (blastdbcmd.cpp:711-718), also in a format with the super kingdom.
+    // NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, the T5b fix 3 subagent of ad-RG-T5-5.
+    ("T5B609", Some("../db_search/t5b/taxdb/zero_kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%K"], 0),
+    ("T5B610", Some("../db_search/t5b/taxdb/zero_kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%f"], 0),
     // Line RG item T5d: header records that NCBI's read fails on (`make_t5.py --taxid-only` and
     // `--header-only`): `Error: [blastdbcmd] ` and the message of NCBI's exception (`GetMsg()`),
-    // exit 1, after the records before (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-16).
+    // exit 1, after the records before (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-16;
+    // T541 and T542 were T525 and T526 before the merge with item T5c, whose cases took those
+    // numbers).
     ("T523", None, false, &["-db", "../db_search/t5/ptx_big5", "-entry", "all", "-outfmt", "%o %T %t"], 1),
     ("T524", None, false, &["-db", "../db_search/t5/ntx_big5", "-entry", "all", "-outfmt", "%o %T %t"], 1),
-    ("T525", None, false, &["-db", "../db_search/t5/phd_vstr", "-entry", "all", "-outfmt", "%o %t"], 1),
-    ("T526", None, false, &["-db", "../db_search/t5/phd_extra", "-entry", "all"], 1),
     ("T527", None, false, &["-db", "../db_search/t5/phd_seqid", "-entry", "all", "-outfmt", "%o %t"], 1),
     ("T528", None, false, &["-db", "../db_search/t5/nhd_cut", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T541", None, false, &["-db", "../db_search/t5/phd_vstr", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T542", None, false, &["-db", "../db_search/t5/phd_extra", "-entry", "all"], 1),
     // Fix 1 of line RG item T5d: header records that NCBI reads (`make_t5.py --header-only utf8
     // utf8id long longx`): a UTF8String where a VisibleString is expected, read as the
     // VisibleString with `Warning: (803.10) [blastdbcmd] CObjectIStreamAsnBinary: UTF8String data

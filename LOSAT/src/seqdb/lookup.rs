@@ -401,16 +401,13 @@ impl IdLookup<'_> {
         let string_isam = || {
             opened(&self.isams.strings[at], || {
                 let name = volume.base().to_string_lossy();
-                if !StringIsam::index_exists(&name, protein) {
+                let Some(isam) = StringIsam::open_existing(&name, protein)? else {
                     return Ok(None);
-                }
-                let isam = StringIsam::open_volume(&name, protein)?;
+                };
                 if !isam.is_initialized() {
-                    return Err(SeqDbError::Unsupported {
+                    return Err(SeqDbError::NcbiCrashes {
                         path: volume.base().to_path_buf(),
-                        message: "a string ISAM whose header does not fit its files (NCBI \
-                                  crashes on it)"
-                            .to_string(),
+                        message: "a string ISAM whose header does not fit its files".to_string(),
                     });
                 }
                 if self.isams.index_in_memory {
@@ -466,8 +463,24 @@ impl IdLookup<'_> {
                 None => Vec::new(),
             },
             SeqDbIdType::Ti => {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-223
+                // ```c++
+                // CSeqDBVol::x_OpenTiFile(void) const{
+                //     CFastMutexGuard mtx_gurad(m_MtxTi);
+                //     if (m_IsamTi.NotEmpty()) {
+                //     	m_IsamTi->AddReference();
+                //     }
+                //     else if (CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 't') &&
+                //              m_Idx->GetNumOIDs() != 0) {
+                //         m_IsamTi = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 't', eTiId);
+                //     }
+                // }
+                // ```
+                // The trace-id ISAM exists where `IndexExists` says so, as the string and PIG
+                // ISAMs (`isam::index_exists`: two regular files).
                 let index = with_extension(volume.base(), seqtype, "ti");
-                if index.exists() && with_extension(volume.base(), seqtype, "td").exists() {
+                if super::isam::index_exists(&index, &with_extension(volume.base(), seqtype, "td"))
+                {
                     return Err(SeqDbError::Unsupported {
                         path: index,
                         message: "an ISAM of trace ids".to_string(),
@@ -654,6 +667,9 @@ pub struct SeqidLookup<'a> {
     envs: Vec<(&'a LmdbEntry, Env<'a, DbFile>)>,
     /// What the lookups keep of each LMDB file of `envs` (`LmdbKept`).
     kept: std::cell::RefCell<Vec<LmdbKept>>,
+    /// Whether the text-id lookups pass over an LMDB file without the accession table
+    /// ([`SeqidLookup::in_indexed_files`]) instead of failing as NCBI's.
+    skip_unindexed: bool,
 }
 
 /// What a `SeqidLookup` keeps of one LMDB file between its lookups.
@@ -718,6 +734,47 @@ impl SeqDb {
             },
             kept: std::cell::RefCell::new(envs.iter().map(|_| LmdbKept::default()).collect()),
             envs,
+            skip_unindexed: false,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:190-198
+    // ```c++
+    // CSeqDBVol::x_OpenStrFile(void) const{
+    //     CFastMutexGuard mtx_gurad(m_MtxStr);
+    //     if (m_IsamStr.NotEmpty()) {
+    //     	m_IsamStr->AddReference();
+    //     }
+    //     else if(CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 's') &&
+    //             m_Idx->GetNumOIDs() != 0) {
+    //         m_IsamStr = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 's', eStringId);
+    //     }
+    // }
+    // ```
+    // `x_OpenPigFile` (seqdbvol.cpp:136-145, quoted at `NumericIsam::open_pig_volume`) likewise;
+    // the GI ISAM's failure to open is caught (`NumericIsam::open_volume`). The constructor of an
+    // ISAM whose files exist (regular files, `CFile::Exists`) throws `Error: Could not open input
+    // file` where one does not open (seqdbisam.cpp:1102-1171, quoted at `StringIsam::open`), at
+    // the first lookup that reaches the volume, which then fails on a file with NCBI's exception
+    // (the prefetch's stop, `common::database::batch_prefetch`).
+    /// Whether a lookup of a reported sequence's Seq-align id (`seqid_lookup`) may fail to open an
+    /// ISAM of a volume with NCBI's exception: the open that the lookup makes of the string ISAM
+    /// (`.psi`/`.psd`, `.nsi`/`.nsd`) or the PIG ISAM (`.ppi`/`.ppd`) of a volume with sequences,
+    /// `isam::open_if_exists` (no ISAM where a file is no regular file, as NCBI's
+    /// `CSeqDBIsam::IndexExists`; review 4 of line DBID loadord, H1), fails. Each file is opened
+    /// and closed, never read (asked once for the run, `TaxdbRun::prefetch_can_stop`; review 3 of
+    /// line DBID loadord, M1).
+    pub fn isams_may_fail_to_open(&self) -> bool {
+        let protein = self.seqtype == SeqType::Protein;
+        let fails = |(index, data): (std::path::PathBuf, std::path::PathBuf)| {
+            super::isam::open_if_exists(&index, &data).is_err()
+        };
+        self.volumes.iter().any(|volume| {
+            if volume.num_oids() == 0 {
+                return false;
+            }
+            StringIsam::file_names(&volume.base().to_string_lossy(), protein).map_or(true, fails)
+                || fails(NumericIsam::pig_file_names(volume.base(), self.seqtype))
         })
     }
 }
@@ -778,9 +835,13 @@ impl SeqidLookup<'_> {
     // ```
     /// `CSeqDB::SeqidToOid`: the OID that NCBI's lookup of the Seq-id `seqid` gives first, the
     /// one whose Bioseq NCBI's BLAST database data loader serves for it
-    /// (`CBlastDbDataLoader::x_GetOid`; the search's own database, so its list's OIDs only).
-    /// `None`: not found (`seqid_to_oids`).
-    #[cfg(test)]
+    /// (`CBlastDbDataLoader::x_GetOid`, bdbloader.cpp:393; the search's own database, so its
+    /// list's OIDs only), and its exception: the one lookup of NCBI's prefetch and formatters
+    /// (`common::database::HeaderReader::found_instead`, `stop_lookup_unsure`). Without `multi`
+    /// the ISAMs of the volumes return at the first OID found, so a volume after the first one
+    /// that holds the id is never opened (an ISAM there that does not open stops none of them;
+    /// review 3 of line DBID loadord, H3), where `seqid_to_oids` with `multi`, LOSAT's list of
+    /// every holder, fails on it. `None`: not found (`seqid_to_oids`).
     pub fn seqid_to_oid(&self, seqid: &ParsedSeqId) -> Result<Option<u32>, SeqDbError> {
         Ok(self.seqid_to_oids(seqid, false)?.first().copied())
     }
@@ -876,7 +937,9 @@ impl SeqidLookup<'_> {
         let mut oids = Vec::new();
         let mut kept = self.kept.borrow_mut();
         for ((entry, env), kept) in self.envs.iter().zip(kept.iter_mut()) {
-            let db = kept.acc2oid(entry, env)?;
+            let Some(db) = self.acc2oid_of(kept, entry, env)? else {
+                continue;
+            };
             let found = entry.case_variant_oids_in(env, &db, &key, from, &mut kept.prefixes)?;
             oids.extend(
                 found
@@ -894,7 +957,9 @@ impl SeqidLookup<'_> {
         let mut oids = Vec::new();
         let mut kept = self.kept.borrow_mut();
         for ((entry, env), kept) in self.envs.iter().zip(kept.iter_mut()) {
-            let db = kept.acc2oid(entry, env)?;
+            let Some(db) = self.acc2oid_of(kept, entry, env)? else {
+                continue;
+            };
             let found = entry.oids_of(env, &db, key)?;
             oids.extend(
                 found
@@ -904,6 +969,50 @@ impl SeqidLookup<'_> {
             );
         }
         Ok(oids)
+    }
+
+    /// The `acc2oid` database of one LMDB file (`LmdbKept::acc2oid`): `None` for a file without
+    /// the accession table where the lookup passes over such files ([`Self::in_indexed_files`]).
+    fn acc2oid_of(
+        &self,
+        kept: &mut LmdbKept,
+        entry: &LmdbEntry,
+        env: &Env<'_, DbFile>,
+    ) -> Result<Option<super::lmdb_read::Db>, SeqDbError> {
+        match kept.acc2oid(entry, env) {
+            Ok(db) => Ok(Some(db)),
+            Err(error)
+                if self.skip_unindexed
+                    && error.ncbi_message().as_deref()
+                        == Some(super::tax_files::NO_ACCESSION_INFO) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Whether the accession table of one of the database's LMDB files cannot be had, so that a
+    /// lookup of a text id fails on a file (`DB contains no accession info.` of a list that puts
+    /// version 5 databases with and without the table side by side, NCBI's exception,
+    /// `LookupFailure::ncbi_message`): the databases where the prefetch of a query batch can stop
+    /// (`common::database::batch_prefetch`).
+    pub fn lacks_an_accession_table(&self) -> bool {
+        let mut kept = self.kept.borrow_mut();
+        self.envs
+            .iter()
+            .zip(kept.iter_mut())
+            .any(|((entry, env), kept)| kept.acc2oid(entry, env).is_err())
+    }
+
+    /// This lookup in the LMDB files that have the accession table only: where a list puts
+    /// version 5 databases with and without it side by side, NCBI's lookup of a text id fails
+    /// (`DB contains no accession info.`), but the sequences of the other files that hold such an
+    /// id are those whose loads register it in NCBI's BLAST database data loader
+    /// (`common::database::stop_lookup_unsure`). A file without the table holds no text id.
+    pub fn in_indexed_files(mut self) -> Self {
+        self.skip_unindexed = true;
+        self
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1381-1459

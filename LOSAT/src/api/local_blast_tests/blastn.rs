@@ -131,10 +131,12 @@ fn unsupported_formats_fail_before_searching() {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
             ],
@@ -176,6 +178,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -382,6 +385,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt,
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut output),
             }],
             diagnostics: &mut diagnostics,
@@ -433,6 +437,7 @@ fn run_local_outputs(
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -495,6 +500,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -572,6 +578,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -593,6 +600,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt: "6",
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
@@ -880,6 +888,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut diagnostics,
@@ -895,5 +904,93 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
             .unwrap();
         assert_eq!(batches.len(), extensions.0.len(), "{task}");
         assert!(batches.len() > 1, "{task}");
+    }
+}
+
+// Line RG item T7-W (review 3 of line RG T7): with `-parse_deflines`, LOSAT refuses outfmt 0 of a
+// `-subject` record whose description id is longer than 65 bytes, where NCBI BLAST+ 2.17.0 pads
+// the description line without end (`db_subject::check_pairwise_records`). The refusal is outfmt
+// 0's: a call in which outfmt 0 fails alone (`FormatRefusal::FailsAlone`, a LOSAT Web format that
+// the argv does not ask for) writes outfmt 6, and one in which it fails the call (the command
+// line's one format) fails with it.
+#[test]
+fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_call() {
+    use crate::api::local_blast::FormatRefusal;
+    let a = fixture_sequence("LC738884.fasta");
+    let long =
+        "gnl|ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH|ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJ long id";
+    let query = TempFasta::new("t7w_parse_q.fna", &[("q1", &a[0..2000])]);
+    let subject = TempFasta::new("t7w_parse_s.fna", &[(long, &a[0..2000])]);
+    let queries = reader_records(
+        &query.0,
+        ReaderConfig::query("BLASTN", false, true).with_parse_deflines(true),
+    );
+    let subjects = reader_records(
+        &subject.0,
+        ReaderConfig::subject("BLASTN", false, true).with_parse_deflines(true),
+    );
+    let args = || -> BlastnArgs {
+        let (query, subject) = (
+            query.0.display().to_string(),
+            subject.0.display().to_string(),
+        );
+        let argv = [
+            "losat",
+            "blastn",
+            "-query",
+            &query,
+            "-subject",
+            &subject,
+            "-parse_deflines",
+        ];
+        let cli: Cli = try_parse_from(argv).expect("blastn argv");
+        match cli.command {
+            Commands::Blastn(args) => args,
+            _ => unreachable!("blastn subcommand"),
+        }
+    };
+    let refusal = "description id longer than 65 bytes";
+    for alone in [true, false] {
+        let (mut six, mut zero, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut six),
+                    refusal: FormatRefusal::FailsCall,
+                },
+                FormatOutput {
+                    outfmt: "0",
+                    sink: OutputSink::Writer(&mut zero),
+                    refusal: if alone {
+                        FormatRefusal::FailsAlone
+                    } else {
+                        FormatRefusal::FailsCall
+                    },
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_blastn(args(), &queries, &subjects, &mut outputs);
+        if alone {
+            result.expect("outfmt 0 fails alone");
+            let error = outputs.formats[1]
+                .refusal
+                .take_refused()
+                .expect("outfmt 0 refused");
+            assert!(format!("{error:#}").contains(refusal), "{error:#}");
+            assert!(outputs.formats[0].refusal.take_refused().is_none());
+            drop(outputs);
+            let rows = String::from_utf8_lossy(&six).into_owned();
+            assert!(
+                rows.starts_with("q1\t") && rows.contains("\t100.000\t2000\t"),
+                "{rows}"
+            );
+        } else {
+            let error = result.expect_err("outfmt 0 fails the call");
+            assert!(format!("{error:#}").contains(refusal), "{error:#}");
+        }
     }
 }

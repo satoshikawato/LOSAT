@@ -16,7 +16,7 @@ use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::letters::{apply_masks, reverse_complement};
-use super::retrieve::{numeric_target, parse_target, Config, Source, Stop};
+use super::retrieve::{numeric_target, parse_target, Config, Output, Source, Stop};
 
 /// `CBlastDB_FastaFormatter` with its one `CFastaOstream` (`m_fasta`), whose record of the
 /// ids written keeps `-long_seqids` from writing one twice.
@@ -83,16 +83,29 @@ impl FastaFormatter {
     // }
     // ```
     /// Writes the FASTA of sequence `oid` to `out` (nothing for a sequence NCBI's `GetBioseq`
-    /// gives no Bioseq for: no definition line, or no letters).
+    /// gives no Bioseq for: no definition line, or no letters), after the texts of the taxonomy
+    /// lookups of NCBI's two `GetBioseq` calls.
     pub fn write(
         &mut self,
         source: &Source,
         oid: u32,
         config: &Config,
         target: Option<&str>,
-        out: &mut dyn Write,
+        out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         let set = source.deflines(oid)?;
+        // `GetBioseq` looks the taxids up for a Bioseq it gives, one with definition lines and
+        // letters (seqdbvol.cpp:1362-1386), the first call for `oid` and the second for the
+        // target or `oid` again.
+        let length = if set.deflines.is_empty() {
+            0
+        } else {
+            source.length(oid)?
+        };
+        let bioseq = length >= 1;
+        if bioseq {
+            source.post_bioseq_texts(oid, &set, None, out)?;
+        }
         // `GetBioseq(oid, gi, seqid)`: the target's line for the ids and the title, every line
         // the filter keeps for the sources (`x_GetTaxonomy` of `x_GetTaxDefline`, the target's
         // line first).
@@ -104,6 +117,9 @@ impl FastaFormatter {
             Some(target_seqid) => Some(target_set(&set, target_seqid)?),
             None => None,
         };
+        if bioseq {
+            source.post_bioseq_texts(oid, &set, target_seqid.as_ref(), out)?;
+        }
         let shown = kept.as_ref().unwrap_or(&set);
         let Some(defline) = shown.deflines.first() else {
             return Ok(());
@@ -114,8 +130,7 @@ impl FastaFormatter {
                 super::PROGRAM
             )));
         }
-        let length = source.length(oid)?;
-        if length < 1 {
+        if !bioseq {
             return Ok(());
         }
         let range = config.range.clipped(length);

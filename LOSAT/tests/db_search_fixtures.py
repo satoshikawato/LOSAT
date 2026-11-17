@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db`, `tblastx -db` and `psiblast -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
-LOSAT/tests/db_search_manifest/<program>.tsv (one file per program, read by `read_manifest`, which
-returns the rows in the order of `PROGRAMS`, then the order of each file; README.md there) lists the rows (columns: row_id, program, kind, db, query, extra_args,
+LOSAT/tests/db_search_manifest/<program>.tsv (one file per program, and <program>.<family>.tsv for a row family
+with its own file, `family_files`; read by `read_manifest`, which returns the rows in the order of `PROGRAMS`, each
+program's file before its family files, then the order of each file; README.md there) lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
 master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
@@ -56,7 +57,8 @@ stderr and exit status with the frozen files (and checks that each frozen file's
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
-failure's exit status counts as any other failure's, a row whose query the reader refuses is
+failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
+too (the library holds its output where the command line holds it), a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
 row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
@@ -84,7 +86,7 @@ TESTS = ENGINE / "tests"
 sys.path.insert(0, str(TESTS))
 import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
 
-MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS
+MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS, <program>.<family>.tsv
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
@@ -103,37 +105,68 @@ ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHI
 
 
 def manifest_file(program: str) -> Path:
-    """The file of a program's rows."""
+    """The file of a program's rows, but those of its row families that have their own file."""
     return MANIFEST / f"{program}.tsv"
 
 
+def row_family(row_id: str) -> str:
+    """The family of a row: the second word of its id (`db.ldo.bp.before.0` is a row of `ldo`)."""
+    words = row_id.split(".")
+    return words[1] if len(words) > 1 else ""
+
+
+def family_files(program: str) -> dict[str, Path]:
+    """The row families of `program` that have their own file `<program>.<family>.tsv` (a file over
+    512 KiB moves a family there, `check_manifest_sizes.py`), by family, in the order of their names."""
+    return {path.name[len(program) + 1:-len(".tsv")]: path for path in sorted(MANIFEST.glob(f"{program}.*.tsv"))}
+
+
+def program_files(program: str) -> list[Path]:
+    """The files of `program`'s rows in the order `read_manifest` reads them: its file, then its family files."""
+    return [manifest_file(program), *family_files(program).values()]
+
+
+def row_file(row: dict[str, str], families: dict[str, Path]) -> Path:
+    """The one file of `row`: its family's own file where its program has one (`families`, of
+    `family_files`), else its program's file. `read_manifest` checks it and `write_manifest` writes there."""
+    return families.get(row_family(row["row_id"]), manifest_file(row["program"]))
+
+
 def read_manifest() -> tuple[dict[str, list[str]], list[dict[str, str]]]:
-    """The comment lines of each program's file (by program) and all rows: the programs in the order
-    of `PROGRAMS`, each file's rows in its order. A row in the file of another program is an error."""
-    comments: dict[str, list[str]] = {program: [] for program in PROGRAMS}
+    """The comment lines of each file (by file name) and all rows: the programs in the order of
+    `PROGRAMS`, each program's file first, then its family files (`family_files`), each file's rows
+    in its order. A row in the file of another program, or in another file of its program than its
+    own (`row_file`), is an error."""
+    comments: dict[str, list[str]] = {}
     rows: list[dict[str, str]] = []
     for program in PROGRAMS:
-        path = manifest_file(program)
-        if not path.exists():
+        if not manifest_file(program).exists():
             # A missing file would drop its rows from every check without notice.
-            raise SystemExit(f"{MANIFEST.name}/{path.name}: missing (every program in PROGRAMS has a file)")
-        header: list[str] = []
-        for line in path.read_text().split("\n"):
-            if line.startswith("#"):
-                comments[program].append(line)
-            elif line and not header:
-                header = line.split("\t")
-                if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
-                    raise SystemExit(f"{path.name}: unexpected header {line!r}")
-            elif line:
-                cells = line.split("\t")
-                if not len(COLUMNS) <= len(cells) <= len(header):
-                    raise SystemExit(f"{path.name}: {len(cells)} cells in {line[:60]!r}")
-                row = {column: "" for column in header}
-                row.update(zip(header, cells))
-                if row["program"] != program:
-                    raise SystemExit(f"{path.name}: the row {row['row_id']} is a {row['program']!r} row")
-                rows.append(row)
+            raise SystemExit(f"{MANIFEST.name}/{manifest_file(program).name}: missing (every program in PROGRAMS"
+                             " has a file)")
+        families = family_files(program)
+        for path in program_files(program):
+            comments[path.name] = []
+            header: list[str] = []
+            for line in path.read_text().split("\n"):
+                if line.startswith("#"):
+                    comments[path.name].append(line)
+                elif line and not header:
+                    header = line.split("\t")
+                    if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
+                        raise SystemExit(f"{path.name}: unexpected header {line!r}")
+                elif line:
+                    cells = line.split("\t")
+                    if not len(COLUMNS) <= len(cells) <= len(header):
+                        raise SystemExit(f"{path.name}: {len(cells)} cells in {line[:60]!r}")
+                    row = {column: "" for column in header}
+                    row.update(zip(header, cells))
+                    if row["program"] != program:
+                        raise SystemExit(f"{path.name}: the row {row['row_id']} is a {row['program']!r} row")
+                    if row_file(row, families) != path:
+                        raise SystemExit(f"{path.name}: the row {row['row_id']} belongs in "
+                                         f"{row_file(row, families).name}")
+                    rows.append(row)
     return comments, rows
 
 
@@ -152,19 +185,21 @@ def header_cells(rows: list[dict[str, str]]) -> list[str]:
 
 
 def write_manifest(comments: dict[str, list[str]], rows: list[dict[str, str]]) -> None:
-    """Write each program's file: its comment lines, the header (the `files` columns when some row of
-    any program has them, so the files keep one header) and its rows. A file whose text is the same is left alone."""
+    """Write each file: its comment lines (`comments`, by file name), the header (the `files` columns
+    when some row of any program has them, so the files keep one header) and its rows (`row_file`).
+    A file whose text is the same is left alone."""
     header = "\t".join(header_cells(rows))
     MANIFEST.mkdir(exist_ok=True)
     for program in PROGRAMS:
-        own = [row for row in rows if row["program"] == program]
-        if not own and not manifest_file(program).exists():
-            continue
-        lines = comments.get(program, []) + [header] + ["\t".join(row_cells(row)) for row in own]
-        text = "\n".join(lines) + "\n"
-        path = manifest_file(program)
-        if not path.exists() or path.read_text() != text:
-            path.write_text(text)
+        families = family_files(program)
+        for path in program_files(program):
+            own = [row for row in rows if row["program"] == program and row_file(row, families) == path]
+            if not own and not path.exists():
+                continue
+            lines = comments.get(path.name, []) + [header] + ["\t".join(row_cells(row)) for row in own]
+            text = "\n".join(lines) + "\n"
+            if not path.exists() or path.read_text() != text:
+                path.write_text(text)
 
 
 def extra_tokens(row: dict[str, str]) -> list[str]:
@@ -175,23 +210,26 @@ def is_env_token(token: str) -> bool:
     return token.partition("=")[0] in ENV_NAMES
 
 
-def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str]] | None:
-    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...]`:
-    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`) and the files put in their
-    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux); None for another cell."""
+def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
+    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
+    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux) and the alias file the run
+    searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files, `-db ALIAS`; its
+    DBLIST names them); None for another cell."""
     if not cell.startswith("rps-gz:"):
         return None
-    names, *changes = cell.removeprefix("rps-gz:").split("!")
+    body, at, alias = cell.removeprefix("rps-gz:").partition("@")
+    names, *changes = body.split("!")
     dropped = {"." + change for change in changes if "=" not in change}
     replaced = dict(("." + change.split("=")[0], change.split("=")[1]) for change in changes if "=" in change)
-    return names.split("+"), dropped, replaced
+    return names.split("+"), dropped, replaced, (alias if at else None)
 
 
 def inflate_rps(cell: str) -> Path:
     """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
     files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
-    leaves out or replaces."""
-    names, dropped, replaced = rps_cell(cell)
+    leaves out or replaces, and the cell's alias file."""
+    names, dropped, replaced, alias = rps_cell(cell)
     rps_dir = TESTS / "db_search" / "rps"
     target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
@@ -205,6 +243,8 @@ def inflate_rps(cell: str) -> Path:
             (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
         for extension, file in replaced.items():
             (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+    if alias is not None:
+        (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target
 
 
@@ -215,11 +255,12 @@ def rps_dir_token(row: dict[str, str]) -> bool:
 
 def subjects_argv(cell: str) -> list[str]:
     """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
-    for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the inflated directory)."""
+    (`-db ALIAS` with `@ALIAS`) for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the
+    inflated directory)."""
     if cell.startswith("subject:"):
         return ["-subject", cell.removeprefix("subject:")]
     if (rps := rps_cell(cell)) is not None:
-        return ["-db", " ".join(rps[0])]
+        return ["-db", rps[3] if rps[3] is not None else " ".join(rps[0])]
     return ["-db", cell]
 
 
@@ -467,8 +508,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        # The library writes as the search goes (`api::run`): nothing holds the bytes before a
-        # refusal, as the command line holds them.
+        # A refusal follows no byte in either path (the library holds its output where the command
+        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
+        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
+        # library skips.
         if row["stdout_bytes"]:
             out_path = FROZEN / f"{row['row_id']}.out"
             out = out_path.read_bytes() if out_path.exists() else b""
@@ -476,7 +519,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                 problems.append("frozen .out does not match the manifest")
             if run.stdout != out:
                 problems.append("stdout " + first_difference(out, run.stdout))
-        elif run.stdout and not library:
+        elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")

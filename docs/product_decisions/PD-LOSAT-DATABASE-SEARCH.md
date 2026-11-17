@@ -67,24 +67,32 @@
   databases with and without parsed Seq-ids, which lines DBID H3, N1b L1 and ordname refused
   (also of a RefSeq chromosome, mRNA or ncRNA sequence, whose own NCBI functions make nothing of
   a database Bioseq), and kept refused one whose tax id's lookup reads past the end of
-  `taxdb.btd` (NCBI crashes); the same
+  `taxdb.btd` (NCBI reads past its mapping of the file; whether it crashes depends on its memory
+  map); the same
   day line RG item T3a refused in BLASTP's outfmt 1 to 4 a reported sequence whose Seq-align id is
   the id `lcl|Query_N` of a query of its batch read without `-parse_deflines`, and also its
   display id in outfmt 1 to 4 (outfmt 0 stays line RG item X7's), and in outfmt 0 to 4 of
   BLASTP, psiblast and rpsblast a sequence of the description table whose display id is the id
   of a query read with `-parse_deflines`, where that table looks the title up again by the
   display id, which LOSAT wrote as the sequence's own; on 2026-11-15 line RG item T3b refused the
-  same in BLASTN's and TBLASTN's outfmt 1 to 4, which it opened; on 2026-11-14 line RG item T5c
+  same in BLASTN's and TBLASTN's outfmt 1 to 4, which it opened, and line RG item T3c in BLASTX's
+  and TBLASTX's outfmt 1 to 4, which it opened; on 2026-11-14 line RG item T5c
   wrote the end of a protein title ending in `]` that NCBI rewrites from the first tax id
   (`x_AdjustProteinTitleSuffix`, with or without a taxonomy database) in the outfmt 0 heading,
   outfmt 18 and the tabular subject ids, which version 1.3 refused in databases with parsed
   Seq-ids and LOSAT wrote unchanged in the tabular ids of a database without them, and where the
   rewritten title has no first word (`MAG: (plastid) [ ]` cut to `MAG:` from the tax id) the
-  general id of line DBID ordname, in every program; on 2026-11-16 line RG item T5d wrote NCBI's
-  exception where NCBI's read of a header record fails, which LOSAT refused, and on 2026-11-17
-  its fix 1 read the header records with a UTF8String or a tag in the long form as NCBI reads
-  them, which it had refused, and its fix 2 wrote NCBI's warning of such a record also where
-  NCBI's fetches or its version check of an accession read it)
+  general id of line DBID ordname, in every program; on 2026-11-15 line RG item T5b refused a
+  lookup of the taxonomy database that reads past NCBI's mapping of `taxdb.btd` only where NCBI
+  faults for certain (a record of an empty `taxdb.btd`, which NCBI maps as a null pointer) and
+  where a report writes a name whose bytes come from past the mapping, and wrote the others as NCBI
+  writes them where it completes, which lines DBID and RG item T5 refused at every lookup
+  (approved exception 14 of PD-LOSAT-NCBI-DEFECTS, which the Owner decided on 2026-11-15); on
+  2026-11-16 line RG item T5d wrote NCBI's exception where NCBI's read of a header record fails,
+  which LOSAT refused, and on 2026-11-17 its fix 1 read the header records with a UTF8String or a
+  tag in the long form as NCBI reads them, which it had refused, its fix 2 wrote NCBI's warning of
+  such a record also where NCBI's fetches or its version check of an accession read it, and its
+  fix 3 where NCBI's scope reads it for another sequence that holds a reported sequence's id)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -190,9 +198,28 @@ twice. A version 5 list that mixes databases with and without the accession tabl
 `makeblastdb -parse_seqids` is searched as NCBI searches it, and a batch whose prefetch looks a
 reported parsed Seq-id up in a file without the table stops as NCBI's does, with `BLAST Database
 error: DB contains no accession info.` (exit 2) after the prologs and the reports of the batches
-before (line DBID item mixdb2); refused is a run whose reports read such a Seq-id with the prefetch
-off, and a stopping batch whose other sequences' loads write texts of the taxonomy database or
-throw on their ids (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+before (line DBID item mixdb2), and with the texts of the taxonomy database of the loads that NCBI's
+prefetch makes before the stopping lookup, in the order of the Seq-id handles of the batch's Seq-align
+ids (line DBID item loadord); refused is a run whose reports read such a Seq-id with the prefetch
+off, a stopping batch where a load whose order to the stop NCBI takes from the addresses of
+its Seq-id handles writes such a text, or where a lookup that throws on its id may come before the
+stop, one where a load that NCBI makes only where it skips an earlier stopping lookup writes such a
+text, one whose stopping ids NCBI may all never look up (another sequence holds an id of its
+handle that the batch may load first or the run loaded before, in a batch, query or psiblast
+round before, or in a call of the library's batches before; or a query that NCBI's scope holds at
+the prefetch has it: the batch's records as read, those that `-query_loc` drops included, by
+their `lcl|Query_N` or the ids of `-parse_deflines`, or the query of `-in_pssm`, and with outfmt 5
+those of the batches before; of several stopping ids, the first that NCBI surely looks up ends
+the loads), and one where a load whose order to the stop LOSAT does not know would make a lookup
+of a tax id that a BLAST XML report before the batch left (outfmt 5: NCBI's XML stream cuts the
+report before its hits at a query title or id outside US-ASCII, and it makes none of its loads,
+line RG item K4h; the texts of such lookups come at the first load after the cut report that
+makes the same lookup: a load of the reports or prefetches of the batches between the cut report
+and the stopping batch, else a load of the stopping batch's prefetch before the stopping lookup,
+or not at all, in every search program since review 5 of line DBID item loadord; the cut report
+loads nothing, so the sequences that it shows count as loaded for no stop, since review 6)
+(`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
+line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an
@@ -214,10 +241,38 @@ range); a `LENGTH` or `STATS_TOTLEN` over volumes without sequences is searched 
 it (no hit, the empty-database warning where no count is given); `blastdbcmd -ipg` and
 `-ipg_batch` write a PIG whose OID a range leaves out, as NCBI's formatter reads by OID; and a
 database's errors come in NCBI's order (a list, the alias files' values, the first header, the
-accession tables). Refused until item D1a-3: `NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at
-least 2^63 while sequences are included (NCBI computes the statistics of each subject, or reads
-a negative `Int8`), `LENGTH` of 10^18 or more (NCBI's commas lose digits); until item D1a-4:
-OID ranges, `STATS_NSEQ`, `STATS_TOTLEN` and `MIN_SEQ_LENGTH` in RPSBLAST databases. Refused for
+accession tables). Since item D1a-3 (2026-11-14): an `NSEQ` negative as NCBI's `int` or of
+2^31 or more, and a `LENGTH` of 2^63 or more (a negative `Int8`), go through the statistics and
+the reports as NCBI's `int` and `Int8` (`SeqDb::statistics`, `stats::setup`): the effective
+lengths with the negative count, NCBI's test `(Uint4)(Int4)(total / count) == 0` of "The average
+subject length is too short" (it fails for a count of 2^31 or a length of 2^32 times the count),
+`Unknown error code 1` for BLASTX and TBLASTN without the Gumbel block and a negative average
+(NCBI's hit-saving parameters), the Gumbel block's negative length (negative e-values, printed
+0), no sort of the results at the end of the traceback where `GetTotalLength` is not positive (the
+order of NCBI's one-thread traceback: by OID, then the hit list's heap), and the reports'
+signed counts with NCBI's commas, which lose digits from 4,294,967,296,000,000,000. Refused,
+where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases summed past
+`Int8` (outfmt 0 to 5 and 13 to 16), their numbers of sequences summed past `int` (outfmt 5),
+and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
+the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
+`-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
+(the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
+NCBI's option spaces of the statistics before their fallback to OID 0
+(`SplitQuery_SetEffectiveSearchSpace`, prelim_stage.cpp:219-220; `stats::setup::
+preliminary_option_space`): for a negative length each context's query length, for a length of 0
+none (with `-dbsize` the spaces of `-dbsize` and the walk's count), while the traceback and the
+reports read the setup's. Where `GetTotalLength` is 0 (an alias file's `LENGTH 0`, also with
+`STATS_*`, or a list whose count visits no sequence) NCBI's preliminary search computes the
+statistics of each subject it searches (`BLAST_OneSubjectUpdateParameters`, blast_engine.c:1434-1443;
+TBLASTN and TBLASTX skip the shorter subjects first), and so does LOSAT in the six programs: the
+effective lengths, the hit-saving cutoffs without the composition-based stretch of the e-value, the
+word cutoffs and the link cutoffs of the subject's length; the e-values of the traceback and the
+reports' counts and spaces are the setup's (Spouge's database factor 1), and the order of the
+results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
+where NCBI formats them (after the search: its own errors of the search come first). Refused until
+item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a total length of 0 or less
+(`LENGTH` 0 or of 2^63 or more) in RPSBLAST databases (NCBI's RPS search has no
+loop over subjects and opens each volume alone, whose statistics then read the volume's own length). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
@@ -248,7 +303,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | --- | --- |
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` of the sequence's number n in its volume | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `MEMB_BIT`, `MASKLIST` | filters (P4); `FIRST_OID`, `LAST_OID` read since line RG D1a, `VDBLIST` ignored as NCBI's reader ignores it |
-| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-3 and D1a-4 |
+| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks, negative and wrapped counts since D1a-3 (2026-11-14); the values listed above as refused |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`), so LOSAT searches the volume without reading them, whatever they hold; since 2026-11-14 BLASTN reads the mask column for `-db_soft_mask` and `-db_hard_mask` (line NP, M4a-2a and M4a-2b; LOSAT refuses the third) |
@@ -628,7 +683,8 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
 | A database sequence without parsed Seq-ids with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; a sequence with parsed Seq-ids may have several (version 1.3) |
 | A reported subject whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats and outfmt 0 |
-| A shown subject with an empty title, or a protein title ending in `]` (line RG item T5c), and a tax id (makeblastdb `-taxid`) whose lookup in the taxonomy database reads past the mapped end of `taxdb.btd` (line RG item T5; outfmt 0, 18 and the tabular subject ids, all six programs) | NCBI reads unmapped memory and crashes. A title made from a name the taxonomy database gives is written as NCBI makes it (line RG item T5; line DBID H3 refused it in outfmt 0, line DBID ordname in a nucleotide's tabular subject id) |
+| A shown subject with an empty title, or a protein title ending in `]` (line RG item T5c), and a tax id (makeblastdb `-taxid`) whose scientific name NCBI reads past its mapping of `taxdb.btd`: a record of an empty `taxdb.btd`, or a record that reaches past the mapping's last 4096-byte page without its third tab inside it (line RG items T5 and T5b; outfmt 0, 18 and the tabular subject ids, all six programs) | An empty `taxdb.btd` NCBI maps as a null pointer and crashes on; past the mapping of another it reads memory whose bytes, or whether it crashes, depend on its memory map (PD-LOSAT-NCBI-DEFECTS: what the output writes from past the mapping is refused, rule 3; the rest is written as NCBI writes it where it completes, approved exception 14). A title made from a name the taxonomy database gives is written as NCBI makes it (line RG item T5; line DBID H3 refused it in outfmt 0, line DBID ordname in a nucleotide's tabular subject id) |
+| Any other lookup in the taxonomy database that reads a record of an empty `taxdb.btd` (the prefetch's lookups of a reported subject's tax ids, psiblast's PSSM, the name fields), and a name a report writes whose bytes NCBI reads past its mapping of a damaged `taxdb.btd`: a super kingdom (`sskingdom`, `sskingdoms`) of a record past the mapping, any name of a record without its third tab inside the mapping (`sscinames` and the other name fields, the `sciname` of outfmt 13 to 16, outfmt 18) (line RG item T5b) | As the row above. A lookup whose names no report writes (the prefetch's, psiblast's PSSM) and the names inside the mapping are written as NCBI writes them where it completes |
 | A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
@@ -915,7 +971,11 @@ program writes, the same bytes at every `-num_threads` (P1, P1.1), apart from wh
   write their reports batch by batch, first read every header of a database of up to 2^20 sequences
   to learn whether a refusal below can occur. The Seq-align id of a reported sequence is looked up
   as NCBI's formatters look it up (`CSeqDB::SeqidToOid`: the LMDB keys of version 5, the ISAM files
-  of version 4, under the search's id or taxonomy list), whatever its kind: version 5 finds `bbs|`,
+  of version 4, under the search's id or taxonomy list; an ISAM with a file that is not a regular
+  file, such as a directory, is none, as NCBI's `CSeqDBIsam::IndexExists` says, so the lookup
+  finds nothing in that volume, since line DBID item loadord; the ISAMs of the volumes in their
+  order up to the first one that holds the id, never a later one, since line DBID item v4late),
+  whatever its kind: version 5 finds `bbs|`,
   `nat|` and `lcl|<integer>` by their keys, and `gnl|BL_ORD_ID|n` of the sequence's own number in
   its volume is found also beside another id. NCBI's scope first looks among the sequences of the
   batch it has already read, without case, so another reported sequence that holds the id can be
@@ -939,6 +999,7 @@ a result that LOSAT does not reproduce.
 | A Seq-align id that the lookup does not find: `gnl|PIG|` (makeblastdb fills the PIG files from no FASTA id), in version 4 `bbs|` and `nat|` (makeblastdb writes no ISAM key for them), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of each volume is no sequence (makeblastdb stores such an id only when the FASTA names it), any other id of a version 4 database without ISAM files; and a local id that alone decides the definition line (`lcl|777` before `gi|777`), which the lookup finds but the formatters do not; a `giim` id (`gim|123`), which the lookup finds but NCBI's Seq-id handles never take for one with an equal id, so the scope never finds its Bioseq | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
 | A Seq-align id that the lookup finds first on another sequence, for example `gb|X|` after `gb|X.1|`, `emb|X.1|` after `gb|X.1|`, `gb|X|` after `emb|X.1|`, `lcl|X` after `gb|X.1|`, in version 5 `lcl|300` after `bbs|300` and `bbs|301` after `lcl|301` (one LMDB key), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of a volume is another sequence. The lookup does not refuse the same record in two volumes or in two databases of an alias (with other tax ids: the row below) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | Writes the other sequence's names, in every program but BLASTN also its identities, where one of its ids equals the Seq-align id (`gb|X.1|` for `gb|X|`, a `gnl|BL_ORD_ID|n` that is its own number); otherwise as in the row above | 2, 3 |
 | A Seq-align id that another sequence also holds, in any letter case, where the lookup finds the sequence itself (or the same record) first: `lcl|555` and `gb|X.1|` with `lcl|555` in a second definition line, `lcl|abc` and `lcl|ABC`, `bbs|123` in two databases of an alias, `pir||PIRNAME` and `pir||pirname`, `prf||PRFNAME` and `prf||prfname` or the names alone `gb||locusy` and `gb||LOCUSY` in two databases (version 5 keys these in their own letter case; LOSAT looks up the other keys of their letters and keeps the sequences that hold an id of the same handle: not `gb||locusy` and `emb||LOCUSY`, nor `sp||NAMEY` and `tr||namey`). Not the same record in two volumes or databases (with other tax ids: the row below) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | Where both are reported (also for different queries), its scope, which reads them in the order of its prefetch and compares ids without case, can write the other sequence's names, in every program but BLASTN also its identities; for `pdb|1ABC|A` and `pdb|1abc|A` in two databases it stops (exit 2) | 2, 3 |
+| A Seq-align id for which LOSAT cannot list the other sequences that hold it, where NCBI's lookup does not read what fails: in version 4 an ISAM file of a volume after the first one that holds the id in the search's list that does not open (a regular file of mode 000; NCBI's lookup returns at the first volume that holds the id and never opens the later ones, since line DBID item v4late: LOSAT stopped there with NCBI's `Error: Could not open input file` before), in version 5 a page of the other keys of its letters (the row above) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below); where only the prefetch reads it, the formats whose taxonomy database's texts differ between the sequence that the lookup gives and none (another holder's Bioseq that its scope read before stands for it without a load) | Goes on (exit 0) with the names and letters that its lookup or its scope gives, as in the two rows above, or stops where the sequence the lookup gives is another one whose definition lines `GetBioseq` rejects for the id (`oid headers do not contain target gi/seq_id`); an id that only such a volume can hold, or any id where it comes first in the order of the volumes' names, opens it and stops (exit 2, `BLAST Database error: Error: Could not open input file`), which LOSAT writes where it knows what the batch's prefetch writes before the stop | 2 |
 | The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In the formats that show a title made from the tax ids (outfmt 0 for an empty title whose tax id the taxonomy database names or a protein title ending in `]` where a definition line has no title; the tabular formats where a printed id is the first word of the title that replaces an `lcl|Subject_N` id, for a nucleotide or a protein title ending in `]`), and in every format where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; for such a title the formats named; for the texts 0, 5, 6, 7, 10, 13 to 17, 20, and 8, 9, 12 with `PRE_FETCH_SEQS_LIMIT=2147483647` | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
 | A Seq-align id whose lookup fails (an LMDB file without the accession table where the batch's prefetch is off, or in a batch whose prefetch loads other sequences that write texts of the taxonomy database or throw on their ids, above; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0 to 7, 10, 13 to 18, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255); with the prefetch off writes `Unknown` for it, then outfmt 0 to 4, 13, 14 and 17 stop (exit 2), outfmt 6 crashes (exit 255), the JSON and XML2 documents 15 and 16 end with a trace (exit 0), and 5, 7, 10 and 18 go on (exit 0) | 3 |
 | Following hits of a query whose Seq-align ids `Match` but that are not copies of one record: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj` | 0, 5, 13 to 16; tabular `qcovs` and `qcovus` | Shows them as one hit; writes the coverage of both on the first row and `N/A` on the other | 2 |
@@ -947,14 +1008,23 @@ a result that LOSAT does not reproduce.
 | In `psiblast`, such hits that its cut of a longer list to `-max_target_seqs` counts (copies of one record count as one) | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
 | In `psiblast`, a sequence of its longer list beyond `-max_target_seqs`, which no report shows: one whose Seq-align id's lookup throws on the id (`gnl|BL_ORD_ID|0` stored with a text tag) where the report reads the sequences it shows or the run writes a PSSM; one for which the prefetch can read another sequence whose definition lines do not hold the id (`pdb|1abc|A` for `pdb|1ABC|A` in two databases of an alias; line DBID P3), or, where the taxonomy database's texts can differ between what NCBI's prefetch can read for it: another sequence that also holds the id (as the blobs read before in the run decide), or the same record in another volume (an id found nowhere is not read, as by NCBI; another sequence that the lookup finds first with an id that compares equal is read, its tax ids looked up, as by NCBI, also for a subject whose definition line the formatters do not find) | 0, 6, 7, 10, 20 | For the failed lookup its prefetch writes "Error pre-fetching sequence data" and leaves the shown sequences it has not loaded yet to the formatter, which reads them one by one (its scope can match an id of a sequence read before weakly, as with `PRE_FETCH_SEQS_LIMIT`), and its PSSM drops that sequence's letters ("Failed to retrieve sequence"); otherwise it stops (exit 2, `oid headers do not contain target gi/seq_id`) or looks up the other sequence's tax ids | 2, 3 |
 | Where NCBI's prefetch reads a reported sequence by its Seq-align id and no report reads it (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, at which the prefetch reads every reported sequence also for them; a tabular field list that reads nothing of the sequence, below; psiblast's sequences beyond `-max_target_seqs`), in a batch whose prefetch is on (a positive `PRE_FETCH_SEQS_LIMIT` turns off the prefetch of a batch whose Seq-aligns outnumber it; each batch counts its own): another sequence that the prefetch can read for it whose definition lines do not hold the id (`pdb|1ABC|A` and `pdb|1abc|A` in two databases of an alias); where the taxonomy database's texts can differ between what the prefetch can read, as in psiblast's row above; a Seq-align id whose lookup fails on a file of the database (an LMDB page that does not read: NCBI's prefetch rethrows the `CSeqDBException`); and a Seq-align id whose lookup throws on the id in a batch whose other reported sequences' loads make the taxonomy database write a text (its texts of opening, the offset error of a tax id). Without a taxonomy database on the search path too, but for the texts | 8, 9, 12; 6, 7, 10, 20 without a field that reads the sequence | Stops (exit 2, `oid headers do not contain target gi/seq_id`, or `BLAST Database error`); looks up the other sequence's tax ids; the prefetch loads the batch's sequences in the order of its Seq-id handles (the ids its mapper packs, such as GIs and accessions, by their packed value, then the others by the address of each id's record, which LOSAT does not model) and ends at the failed lookup with "Error pre-fetching sequence data" | 2, 3 |
-| A Seq-align id or display id that is the id of a query read with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch: NCBI's formatter empties its scope after each batch but there); in BLASTP's, BLASTN's and TBLASTN's outfmt 1 to 4 also the id `lcl|Query_N` of a query read without it (any letter case). The display id is the id of the sequence's line in the description table (`GetDisplayIds`, `lcl|abc` of `gi|779|lcl|abc`), by which that line looks the title up again (`showdefline.cpp:498`) | the Seq-align id: every format; the display id: 0 to 4 in BLASTP, psiblast and rpsblast, 1 to 4 in BLASTN and TBLASTN, where the table lists the sequence (one of the first `-num_descriptions` subjects; in a psiblast round with the previous round's set, a subject of the first `-num_descriptions` HSPs, at least one); for `lcl|Query_N` both in 1 to 4 only (outfmt 0 is line RG item X7's) | Shows the query's title and letters for it; for the display id the query's title in that line | 2 |
-| A Seq-align id or display id (row above) by which NCBI's scope finds a query read with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch) as a weak match (`x_GetSeqMatch`): `sp||NAME` for `sp|P00001.1|NAME` and the other way, `gb|X.1|` for `gb|X|`, `pir||ABCD` for `pir|ABCD|` | the Seq-align id: every format; the display id: 0 to 4 in BLASTP, psiblast and rpsblast, 1 to 4 in BLASTN and TBLASTN, where the table lists the sequence (as in the row above) | Shows the query's title and letters for it; for the display id the query's title in that line (not `gb|X|` for `gb|X.1|`, nor `pir|ABCD|` for `pir||ABCD`) | 2 |
+| A Seq-align id or display id that is the id of a query read with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch: NCBI's formatter empties its scope after each batch but there); in BLASTP's, BLASTN's, BLASTX's, TBLASTN's and TBLASTX's outfmt 1 to 4 also the id `lcl|Query_N` of a query read without it (any letter case). The display id is the id of the sequence's line in the description table (`GetDisplayIds`, `lcl|abc` of `gi|779|lcl|abc`), by which that line looks the title up again (`showdefline.cpp:498`) | the Seq-align id: every format; the display id: 0 to 4 in BLASTP, psiblast and rpsblast, 1 to 4 in BLASTN, BLASTX, TBLASTN and TBLASTX, where the table lists the sequence (one of the first `-num_descriptions` subjects; in a psiblast round with the previous round's set, a subject of the first `-num_descriptions` HSPs, at least one); for `lcl|Query_N` both in 1 to 4 only (outfmt 0 is line RG item X7's) | Shows the query's title and letters for it; for the display id the query's title in that line | 2 |
+| A Seq-align id or display id (row above) by which NCBI's scope finds a query read with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch) as a weak match (`x_GetSeqMatch`): `sp||NAME` for `sp|P00001.1|NAME` and the other way, `gb|X.1|` for `gb|X|`, `pir||ABCD` for `pir|ABCD|` | the Seq-align id: every format; the display id: 0 to 4 in BLASTP, psiblast and rpsblast, 1 to 4 in BLASTN, BLASTX, TBLASTN and TBLASTX, where the table lists the sequence (as in the row above) | Shows the query's title and letters for it; for the display id the query's title in that line (not `gb|X|` for `gb|X.1|`, nor `pir|ABCD|` for `pir||ABCD`) | 2 |
 | In a query batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off (0 or below, or a value below the batch's number of Seq-aligns): a Seq-align id that an id of another sequence matches weakly, as in the row above, in any letter case and across the alternatives (`tpg|X.1|NAME` and `prf||NAME`). In version 4 where the lookup of the Seq-align id or of its name alone finds such a sequence; in version 5 an accession without a version where the lookup finds a version of it, and any Seq-align id with a name or of `pir` or `prf` (version 5 keys a name only in its own letter case and only without an accession, and a `pir` or `prf` id by its FASTA text) | 0, 5, 6, 7, 10, 13 to 17, 20 | It reads the batch's reported sequences one by one (the prefetch of a batch loads each by its own id), and where it has read that other sequence first, it writes that sequence's names (in BLASTP also its identities; psiblast's PSSM also reads its letters) | 2 |
 | A stored title or Seq-id with a byte outside ' ' to '~' (makeblastdb stores `#` for such a byte) | every format | Prints `#` and an error message each time it reads the line, exit 0 | 2 |
 | A definition line without a Seq-id (makeblastdb writes none) | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
-| A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
+| A title in no encoding that NCBI recognises (or the name in the taxonomy database from which NCBI makes an empty title, or which `x_AdjustProteinTitleSuffix` writes at the end of a protein title ending in ` [ ]`), for an `lcl|Subject_N` id: the rows that `SetSubjectId` cannot make (the subject Bioseq's ids hold that id), and the first row of a query's report that either `SetSubjectId` or `x_SetSubjectIds` cannot make (`sallseqid`, `sallgi` or `sallacc` of a sequence whose definition line with that id follows one with another id): `x_SetTaxInfo` comes after them in the same `try` and never runs (`tabular.cpp:839-854`) | 6, 7, 10, 20 with `sacc` or `saccver` (the default fields of 6, 7, 10); `staxid` in such a first row | Stops at the row's `sacc` or `saccver` (null pointer, exit 255); prints an uninitialised `staxid` | 3 |
+
+A sequence without parsed Seq-ids or with an `lcl|Subject_N` id whose title, or the name in the
+taxonomy database from which NCBI makes an empty title or the end of a protein title ending in ` [ ]`
+(line RG item T5c, rows `db.t5.sfu.*`), is in no encoding that NCBI recognises is NCBI's in every format: the
+tabular rows of NCBI's catch (`Unknown`, the Seq-align id in `sallseqid`, `gnl|BL_ORD_ID|n` or
+`Subject_N`, after the ids of the definition lines before the first that holds `lcl|Subject_N`; the
+titles and taxonomy of the row before) and refused only where NCBI stops or prints an uninitialised
+number (the row above; [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) version 1.37, line RG
+item T7).
 
 A tabular field list reads the sequence that NCBI's formatters find by the Seq-align id only with
 the default fields, a subject id (`sseqid`, `sgi`, `sacc`, `saccver`, `sallseqid`, `sallgi`,

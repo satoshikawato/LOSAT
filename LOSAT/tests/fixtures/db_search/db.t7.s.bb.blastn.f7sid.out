@@ -1,0 +1,11 @@
+# BLASTN 2.17.0+
+# Query: nq1 query nucleotide one
+# Database: User specified sequence set (Input: tests/db_search/t7/bb.fna)
+# Fields: query id, subject id, evalue
+# 5 hits found
+nq1	Unknown	0.0
+nq1	Unknown	1.74e-128
+nq1	Unknown	0.001
+nq1	Unknown	2.12e-70
+nq1	Unknown	0.004
+# BLAST processed 1 queries

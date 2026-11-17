@@ -182,6 +182,13 @@ impl NcbiException {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
+    // ```c++
+    // #define NCBI_RETHROW_SAME(prev_exception, message)                \
+    //     do { prev_exception.AddBacklog(DIAG_COMPILE_INFO, message,    \
+    //                                    prev_exception.GetSeverity()); \
+    //     throw; }  while (0)
+    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
     // ```c++
     // void CException::AddBacklog(const CDiagCompileInfo& info,
@@ -198,19 +205,22 @@ impl NcbiException {
     // }
     // ```
     // `x_Init` sets the place and the message; the error code stays (the class's constructor
-    // sets it), and so does a `CSerialException`'s frame stack, which the frames of the stack
-    // that the exception leaves after this call extend (`seqid::ber`).
-    /// `NCBI_RETHROW_SAME(self, message)` at `site` (`AddBacklog`): the exception gets the place
-    /// of `site` and `message`, keeps its error code (`site.kind` is not used), and its
-    /// predecessor is its copy before the call, which keeps the main text of the chain.
-    pub fn backlog(self, site: ThrowSite, message: impl Into<String>) -> Self {
+    // sets it), and so does the extra text of the class (a `CSerialException`'s frame stack,
+    // which the frames of the stack that the exception leaves after this call extend,
+    // `seqid::ber`).
+    /// `NCBI_RETHROW_SAME(self, message)` at `site` (`AddBacklog`): the same exception (its class,
+    /// error code and extra text; `site.kind` is not used) with the place of `site` and `message`,
+    /// its predecessor its copy before the call, which keeps the main text of the chain. The one
+    /// owner of the macro: the object frames of NCBI's object streams (`seqid::ber`'s reads,
+    /// `report::serial::xml`'s `END_OBJECT_FRAME`).
+    pub fn rethrow_same(self, site: ThrowSite, message: impl Into<String>) -> Self {
         NcbiException {
             site: ThrowSite {
                 kind: self.site.kind,
                 ..site
             },
             message: message.into(),
-            extra: None,
+            extra: self.extra.clone(),
             main_text: false,
             predecessor: Some(Box::new(self)),
         }
@@ -297,6 +307,21 @@ impl NcbiException {
             os.push('\n');
         }
         os
+    }
+
+    /// The exception as the error of a report's writer, where NCBI's formatter throws it while the
+    /// report is written (the merge of a query-anchored section,
+    /// `report::query_anchored::write_section`): the writers before the program's report pass
+    /// `io::Error`s on, and the report finds the exception again ([`NcbiException::of_io_error`],
+    /// `cli::NativeError::of_writer`), as NCBI's leaves the formatter for the application's
+    /// `CATCH_ALL`.
+    pub(crate) fn into_io_error(self) -> std::io::Error {
+        std::io::Error::other(self)
+    }
+
+    /// The exception that an error of a report's writer carries ([`NcbiException::into_io_error`]).
+    pub(crate) fn of_io_error(error: &std::io::Error) -> Option<&NcbiException> {
+        error.get_ref()?.downcast_ref()
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7844-7856
@@ -432,7 +457,7 @@ impl NcbiException {
     // unless an application changes them, ncbiexpt.cpp:603-605). The main text is the newest
     // exception of the chain, from the newest, that has it (`HasMainText`), else the oldest: an
     // exception that `rethrow` makes has it (the constructor's `m_MainText(true)`,
-    // ncbiexpt.cpp:179), one that `backlog` makes has not, so the main text is then its
+    // ncbiexpt.cpp:179), one that `rethrow_same` makes has not, so the main text is then its
     // predecessor's (the exception of NCBI's object stream under a member's
     // `error while reading <member>`).
     /// `NCBI_REPORT_EXCEPTION_X(err_subcode, title, e)` in a source file whose
@@ -459,6 +484,16 @@ impl NcbiException {
         out
     }
 }
+
+/// `what()` ([`NcbiException::what`]).
+impl std::fmt::Display for NcbiException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.what())
+    }
+}
+
+/// The error of a report's writer ([`NcbiException::into_io_error`]).
+impl std::error::Error for NcbiException {}
 
 /// A message of severity `Error` with the error id `id` (`m_ErrText`, or `<err_code>.<err_subcode>`)
 /// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,

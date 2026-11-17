@@ -3,7 +3,7 @@ use super::{
     args::ResolvedOptions,
     input::FastaRecord,
     kappa::KappaState,
-    parameters::{subject_parameters, ContextParameters},
+    parameters::{subject_parameters, subject_update, ContextParameters},
     preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
     reader_batch::UnitPrep,
@@ -523,7 +523,8 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.numbers()?.total,
+        // The Gumbel block's length of the e-values (`SubjectNumbers::gumbel_total`).
+        db_length: subjects.numbers()?.gumbel_total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -573,7 +574,8 @@ pub(crate) fn search_internal_observed<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.numbers()?.total,
+        // The Gumbel block's length of the e-values (`SubjectNumbers::gumbel_total`).
+        db_length: subjects.numbers()?.gumbel_total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -611,229 +613,34 @@ impl Runtime<'_> {
             None => Ok(self.subjects.length(oid)),
         }
     }
-}
-impl PreliminarySink for Runtime<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
-    // ```c++
-    //
-    //     int status = m_PrelimSearch->CheckInternalData();
-    //     if (status != 0)
-    //     {
-    //          // Search was not run, but we send back an empty CSearchResultSet.
-    //          CRef<ILocalQueryData> local_query_data = m_QueryFactory->MakeLocalQueryData(m_Opts);
-    //               msg_vec.push_back(q_msg);
-    //               seqid_vec.push_back(query_id);
-    //               CRef<objects::CSeq_align_set> tmp_align;
-    //               sa_vec.push_back(tmp_align);
-    //               pair<double, double> tmp_pair(-1.0, -1.0);
-    //               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
-    //               ancill_vec.push_back(tmp_ancillary_data);
-    //
-    //               for(unsigned int i =1; i < num_subjects; i++)
-    // ```
-    fn unsearched_batch(
+
+    /// `PreliminarySink::subject` for the statistics of each subject: the subject's own
+    /// parameters (`parameters::subject_update`, at the subject's length) in place of the
+    /// chunk's `params`.
+    #[cold]
+    #[inline(never)]
+    fn subject_own(
         &mut self,
-        ordinal: usize,
+        oid: usize,
+        input: &[PreliminaryHsp],
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
+        option_spaces: &[i64],
     ) -> Result<()> {
-        self.output.push(BatchResults {
-            query_ordinal: ordinal,
-            queries: vec![Vec::new(); batch.original_lengths.len()],
-            prepared: batch.x_for_results(),
-            parameters: params.to_vec(),
-            search_skipped: true,
-            fetched_utf8: None,
-        });
-        Ok(())
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-235
-    // ```c++
-    //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
-    //     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
-    //                                        m_InternalData);
-    //     int retval = 0;
-    //
-    //     unique_ptr<const CBlastOptionsMemento> opts_memento
-    //         (m_Options->CreateSnapshot());
-    //     BLAST_SequenceBlk* queries = m_InternalData->m_Queries;
-    //     LookupTableOptions * lut_options = opts_memento->m_LutOpts;
-    //     BlastInitialWordOptions * word_options = opts_memento->m_InitWordOpts;
-    //
-    //     // Query splitting data structure (used only if applicable)
-    //     CRef<SBlastSetupData> setup_data(new SBlastSetupData(m_QueryFactory, m_Options));
-    //     CRef<CQuerySplitter> query_splitter = setup_data->m_QuerySplitter;
-    //     if (query_splitter->IsQuerySplit()) {
-    //
-    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
-    // ```
-    fn batch_start(
-        &mut self,
-        ordinal: usize,
-        batch: &PreparedQueryBatch,
-        _params: &[ContextParameters],
-    ) -> Result<()> {
-        self.ordinal = ordinal;
-        self.stream = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                batch.contexts.iter().map(|c| c.length as i32).collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                batch.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
-        Ok(())
+        let length = self.subject_length(oid)?;
+        let own = subject_update(
+            batch,
+            params,
+            self.options,
+            self.subjects.numbers()?,
+            length,
+            option_spaces,
+        )?;
+        self.subject_with(oid, input, batch, &own)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
-    // ```c++
-    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-    //             try {
-    //                 CRef<IQueryFactory> chunk_qf =
-    //                     query_splitter->GetQueryFactoryForChunk(i);
-    //                 _TRACE("Query chunk " << i << "/" <<
-    //                        query_splitter->GetNumberOfChunks());
-    //                 CRef<SInternalData> chunk_data =
-    //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
-    // ```
-    fn chunk_start(&mut self, chunk: &QueryChunk) -> Result<()> {
-        self.chunk = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                chunk
-                    .prepared
-                    .contexts
-                    .iter()
-                    .map(|c| c.length as i32)
-                    .collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                chunk.prepared.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
-        Ok(())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:583-593
-    // ```c++
-    //                      overlap, score_options->gapped_calculation,
-    //                      Blast_ProgramIsMapping(program_number));
-    //
-    //         if((hit_params->options->hsp_filt_opt != NULL) &&
-    //            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-    //            	Blast_HSPListSubjectBestHit(program_number,
-    //            								hit_params->options->hsp_filt_opt->subject_besthit_opts,
-    //            								query_info, combined_hsp_list);
-    //         }
-    //
-    //     } /* End loop on chunks of subject sequence */
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1450-1458
-    // ```c++
-    //          searches. */
-    //       if (hit_params->link_hsp_params && !kNucleotide &&
-    //           !gapped_calculation) {
-    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-    //             hit_params->link_hsp_params, word_params, db_length,
-    //             seq_arg.seq->length);
-    //       }
-    //
-    //       if (Blast_SubjectIsTranslated(program_number)) {
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-552
-    // ```c++
-    //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
-    // #endif
-    //
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3916-3921
-    // ```c++
-    //
-    //       /* use priate interval tree when recomputing alignments */
-    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-    //                                         hit_options->min_diag_separation))
-    //       {
-    //          BlastHSP* new_hsp;
-    // ```
-    fn containment(&mut self, h: &PreliminaryHsp, contained: bool) {
-        self.observer.containment(h, contained);
-    }
-    // No NCBI counterpart: tells the search whether the containment callback is read; it does not
-    // change any value NCBI computes.
-    fn x_wants_containment(&self) -> bool {
-        !self.observer.x_passive()
-    }
-    fn preliminary_purge(
-        &mut self,
-        oid: usize,
-        before: &[PreliminaryHsp],
-        after: &[PreliminaryHsp],
-    ) -> Result<()> {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-568
-        // ```c++
-        //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
-        // #endif
-        //
-        //         }
-        //
-        //         Blast_HSPListSortByScore(hsp_list);
-        //
-        //
-        //         if (score_options->is_ooframe && kTranslatedSubject)
-        //             subject->length = prot_length;
-        //         } else {
-        //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-        //                     hit_params->options, &hsp_list);
-        //         }
-        //
-        //         if (hsp_list->hspcnt == 0) continue;
-        //
-        //         /* The subject ordinal id is not yet filled in this HSP list */
-        //         hsp_list->oid = subject->oid;
-        // ```
-        self.observer.preliminary_call(oid);
-        // The score-only list is newly allocated with oid=0; the engine sets
-        // its real subject OID only after endpoint purge/score sort.
-        self.observer.numeric("PRE_ENDPOINT_IN", 0, before);
-        self.observer.numeric("PRE_ENDPOINT_OUT", 0, after);
-        Ok(())
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
-    // ```c++
-    //       if (hit_params->link_hsp_params && !kNucleotide &&
-    //           !gapped_calculation) {
-    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-    //             hit_params->link_hsp_params, word_params, db_length,
-    //             seq_arg.seq->length);
-    // ```
-    // search::compute_subject has performed this exact preparation before
-    // WordFinder with worker-local state. Adopt it without recomputation,
-    // retaining serial observer and linking state in input OID order.
-    fn subject_start(
-        &mut self,
-        oid: usize,
-        _batch: &PreparedQueryBatch,
-        _params: &[ContextParameters],
-        prepared: Option<crate::core::link_hsps::LinkCutoffs>,
-    ) -> Result<()> {
-        self.ungapped_link_state = prepared;
-        if let Some(prepared) = prepared {
-            let length = self.subject_length(oid)? as i32;
-            let link = super::linking::link_parameters(self.options)
-                .expect("ungapped sum-stat parameters");
-            self.observer
-                .link_setup(length, self.db_length, prepared, &link);
-        }
-        Ok(())
-    }
-    fn subject(
+    /// The body of `PreliminarySink::subject` with the parameters `params` of the subject.
+    fn subject_with(
         &mut self,
         oid: usize,
         input: &[PreliminaryHsp],
@@ -1447,6 +1254,248 @@ impl PreliminarySink for Runtime<'_> {
             .expect("chunk stream")
             .write_observed(oid, hsps, self.observer)?;
         Ok(())
+    }
+}
+impl PreliminarySink for Runtime<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
+    // ```c++
+    //
+    //     int status = m_PrelimSearch->CheckInternalData();
+    //     if (status != 0)
+    //     {
+    //          // Search was not run, but we send back an empty CSearchResultSet.
+    //          CRef<ILocalQueryData> local_query_data = m_QueryFactory->MakeLocalQueryData(m_Opts);
+    //               msg_vec.push_back(q_msg);
+    //               seqid_vec.push_back(query_id);
+    //               CRef<objects::CSeq_align_set> tmp_align;
+    //               sa_vec.push_back(tmp_align);
+    //               pair<double, double> tmp_pair(-1.0, -1.0);
+    //               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
+    //               ancill_vec.push_back(tmp_ancillary_data);
+    //
+    //               for(unsigned int i =1; i < num_subjects; i++)
+    // ```
+    fn unsearched_batch(
+        &mut self,
+        ordinal: usize,
+        batch: &PreparedQueryBatch,
+        params: &[ContextParameters],
+    ) -> Result<()> {
+        self.output.push(BatchResults {
+            query_ordinal: ordinal,
+            queries: vec![Vec::new(); batch.original_lengths.len()],
+            prepared: batch.x_for_results(),
+            parameters: params.to_vec(),
+            search_skipped: true,
+            fetched_utf8: None,
+        });
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-235
+    // ```c++
+    //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+    //     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+    //                                        m_InternalData);
+    //     int retval = 0;
+    //
+    //     unique_ptr<const CBlastOptionsMemento> opts_memento
+    //         (m_Options->CreateSnapshot());
+    //     BLAST_SequenceBlk* queries = m_InternalData->m_Queries;
+    //     LookupTableOptions * lut_options = opts_memento->m_LutOpts;
+    //     BlastInitialWordOptions * word_options = opts_memento->m_InitWordOpts;
+    //
+    //     // Query splitting data structure (used only if applicable)
+    //     CRef<SBlastSetupData> setup_data(new SBlastSetupData(m_QueryFactory, m_Options));
+    //     CRef<CQuerySplitter> query_splitter = setup_data->m_QuerySplitter;
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    fn batch_start(
+        &mut self,
+        ordinal: usize,
+        batch: &PreparedQueryBatch,
+        _params: &[ContextParameters],
+    ) -> Result<()> {
+        self.ordinal = ordinal;
+        self.stream = Some(if self.options.culling_limit > 0 {
+            HspStream::with_culling(
+                batch.contexts.iter().map(|c| c.length as i32).collect(),
+                self.options.culling_limit,
+                prelim_hitlist_size(self.options),
+            )
+        } else {
+            HspStream::new(
+                batch.original_lengths.len(),
+                prelim_hitlist_size(self.options),
+            )
+        });
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
+    // ```c++
+    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+    //             try {
+    //                 CRef<IQueryFactory> chunk_qf =
+    //                     query_splitter->GetQueryFactoryForChunk(i);
+    //                 _TRACE("Query chunk " << i << "/" <<
+    //                        query_splitter->GetNumberOfChunks());
+    //                 CRef<SInternalData> chunk_data =
+    //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+    // ```
+    fn chunk_start(&mut self, chunk: &QueryChunk) -> Result<()> {
+        self.chunk = Some(if self.options.culling_limit > 0 {
+            HspStream::with_culling(
+                chunk
+                    .prepared
+                    .contexts
+                    .iter()
+                    .map(|c| c.length as i32)
+                    .collect(),
+                self.options.culling_limit,
+                prelim_hitlist_size(self.options),
+            )
+        } else {
+            HspStream::new(
+                chunk.prepared.original_lengths.len(),
+                prelim_hitlist_size(self.options),
+            )
+        });
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:583-593
+    // ```c++
+    //                      overlap, score_options->gapped_calculation,
+    //                      Blast_ProgramIsMapping(program_number));
+    //
+    //         if((hit_params->options->hsp_filt_opt != NULL) &&
+    //            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+    //            	Blast_HSPListSubjectBestHit(program_number,
+    //            								hit_params->options->hsp_filt_opt->subject_besthit_opts,
+    //            								query_info, combined_hsp_list);
+    //         }
+    //
+    //     } /* End loop on chunks of subject sequence */
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1450-1458
+    // ```c++
+    //          searches. */
+    //       if (hit_params->link_hsp_params && !kNucleotide &&
+    //           !gapped_calculation) {
+    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+    //             hit_params->link_hsp_params, word_params, db_length,
+    //             seq_arg.seq->length);
+    //       }
+    //
+    //       if (Blast_SubjectIsTranslated(program_number)) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-552
+    // ```c++
+    //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
+    // #endif
+    //
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3916-3921
+    // ```c++
+    //
+    //       /* use priate interval tree when recomputing alignments */
+    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    //                                         hit_options->min_diag_separation))
+    //       {
+    //          BlastHSP* new_hsp;
+    // ```
+    fn containment(&mut self, h: &PreliminaryHsp, contained: bool) {
+        self.observer.containment(h, contained);
+    }
+    // No NCBI counterpart: tells the search whether the containment callback is read; it does not
+    // change any value NCBI computes.
+    fn x_wants_containment(&self) -> bool {
+        !self.observer.x_passive()
+    }
+    fn preliminary_purge(
+        &mut self,
+        oid: usize,
+        before: &[PreliminaryHsp],
+        after: &[PreliminaryHsp],
+    ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-568
+        // ```c++
+        //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
+        // #endif
+        //
+        //         }
+        //
+        //         Blast_HSPListSortByScore(hsp_list);
+        //
+        //
+        //         if (score_options->is_ooframe && kTranslatedSubject)
+        //             subject->length = prot_length;
+        //         } else {
+        //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+        //                     hit_params->options, &hsp_list);
+        //         }
+        //
+        //         if (hsp_list->hspcnt == 0) continue;
+        //
+        //         /* The subject ordinal id is not yet filled in this HSP list */
+        //         hsp_list->oid = subject->oid;
+        // ```
+        self.observer.preliminary_call(oid);
+        // The score-only list is newly allocated with oid=0; the engine sets
+        // its real subject OID only after endpoint purge/score sort.
+        self.observer.numeric("PRE_ENDPOINT_IN", 0, before);
+        self.observer.numeric("PRE_ENDPOINT_OUT", 0, after);
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
+    // ```c++
+    //       if (hit_params->link_hsp_params && !kNucleotide &&
+    //           !gapped_calculation) {
+    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+    //             hit_params->link_hsp_params, word_params, db_length,
+    //             seq_arg.seq->length);
+    // ```
+    // search::compute_subject has performed this exact preparation before
+    // WordFinder with worker-local state. Adopt it without recomputation,
+    // retaining serial observer and linking state in input OID order.
+    fn subject_start(
+        &mut self,
+        oid: usize,
+        _batch: &PreparedQueryBatch,
+        _params: &[ContextParameters],
+        prepared: Option<crate::core::link_hsps::LinkCutoffs>,
+    ) -> Result<()> {
+        self.ungapped_link_state = prepared;
+        if let Some(prepared) = prepared {
+            let length = self.subject_length(oid)? as i32;
+            let link = super::linking::link_parameters(self.options)
+                .expect("ungapped sum-stat parameters");
+            self.observer
+                .link_setup(length, self.db_length, prepared, &link);
+        }
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 (quoted above
+    // `search::search_preliminary`): where NCBI computes the statistics of each subject (the
+    // batch's `subject_option_spaces`), the e-values of a subject's HSPs read the subject's own
+    // parameters, the ones `search::compute_own_subject` searched it with (`parameters::
+    // subject_update` of the same chunk, options' spaces and length); a subject without HSPs
+    // reads none. One test per subject on the default path.
+    fn subject(
+        &mut self,
+        oid: usize,
+        input: &[PreliminaryHsp],
+        batch: &PreparedQueryBatch,
+        params: &[ContextParameters],
+    ) -> Result<()> {
+        if let (Some(option_spaces), false) =
+            (batch.subject_option_spaces.as_deref(), input.is_empty())
+        {
+            return self.subject_own(oid, input, batch, params, option_spaces);
+        }
+        self.subject_with(oid, input, batch, params)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:268-271
@@ -2138,8 +2187,13 @@ impl PreliminarySink for Runtime<'_> {
         //        larger than the final hit list size */
         //     s_BlastPruneExtraHits(results, hit_params->options->hitlist_size);
         // ```
-        for query in &mut queries {
-            query.lists.sort_by(super::results::compare_list);
+        // Not where `BlastSeqSrcGetTotLen` (`Subjects::total_length`) is 0 or negative: the lists
+        // keep the traceback's order, by OID through `update_observed` (and the composition
+        // heap's reversed order with composition-based statistics), NCBI's one-thread order.
+        if self.subjects.total_length()? > 0 {
+            for query in &mut queries {
+                query.lists.sort_by(super::results::compare_list);
+            }
         }
         for (q, query) in queries.iter().enumerate() {
             self.observer.targets("IN", q, &query.lists);

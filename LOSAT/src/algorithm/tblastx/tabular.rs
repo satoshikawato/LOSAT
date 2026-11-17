@@ -47,7 +47,6 @@
 //! is BLASTN's alone (`N/A`).
 
 use std::io::Write;
-use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -60,7 +59,7 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
-    TabularKind, TabularQuery, TabularSpec, TabularWriter,
+    TabularKind, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
 
@@ -146,7 +145,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
     pub database: &'a str,
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
-    pub subject_ids: &'a [Arc<[u8]>],
+    pub subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
 }
@@ -196,10 +195,7 @@ pub(super) fn write_tblastx_tabular(
                 .iter()
                 .map(|record| (record.believed(), record.title.as_slice())),
             run.args.show_gis,
-            false,
-            false,
-            "TBLASTX",
-        )?
+        )
     } else {
         Vec::new()
     };
@@ -208,6 +204,7 @@ pub(super) fn write_tblastx_tabular(
             ids: tab.subject_ids,
             length: &record_length,
             parsed: &records_parsed,
+            records: run.subjects,
         },
         Some(database) => TabularSubjects::Database {
             ids: tab.subject_ids,
@@ -382,6 +379,8 @@ pub(super) fn write_tblastx_tabular(
             writer.write_all(&buf)?;
             buf.clear();
         }
+        // The query's formatter (`TabularRows`).
+        let mut rows = TabularRows::default();
         let mut first = 0usize;
         while first < query_hits.len() {
             let s_idx = hits[query_hits[first]].hit.s_idx;
@@ -423,6 +422,15 @@ pub(super) fn write_tblastx_tabular(
             };
             // `qcovus` is inserted for BLASTN alone (`eQueryCovPerUniqSubj`): `N/A`.
             let subject = values.nucleotide_subject(names, qcovs, -1);
+            // A subject whose lookups fail shows what the last found subject set
+            // (`TabularRows::last_found`), made again from its index.
+            let kept_values = match rows.last_found() {
+                Some(kept) if table.fails(&subject) => Some(subjects.values(kept, spec, PROGRAM)?),
+                _ => None,
+            };
+            let kept = kept_values
+                .as_ref()
+                .map(|values| values.nucleotide_subject(names, -1, -1));
             let subject_record_length = i32::try_from(record_length(s_idx))?;
             for &hsp_index in group {
                 let hsp = &hits[hsp_index];
@@ -464,7 +472,9 @@ pub(super) fn write_tblastx_tabular(
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
+                if let (Some(names), Some(warnings), true) =
+                    (names, warnings.as_deref_mut(), table.sets_subject(&subject))
+                {
                     let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
@@ -602,7 +612,14 @@ pub(super) fn write_tblastx_tabular(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &tabular_query, &subject, &row);
+                        table.row(
+                            &mut buf,
+                            &mut rows,
+                            &tabular_query,
+                            &subject,
+                            kept.as_ref(),
+                            &row,
+                        );
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -610,7 +627,14 @@ pub(super) fn write_tblastx_tabular(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &tabular_query, &subject, &row),
+                    None => table.row(
+                        &mut buf,
+                        &mut rows,
+                        &tabular_query,
+                        &subject,
+                        kept.as_ref(),
+                        &row,
+                    ),
                 }
             }
         }

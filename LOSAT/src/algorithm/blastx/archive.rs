@@ -206,12 +206,22 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
 /// The `EffectiveSearchSpace` option of a reader batch whose results are `batches` (its units;
 /// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
 /// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
-/// `effective_lengths`), when NCBI searched the batch (a unit was searched).
-pub(crate) fn batch_searched_space(batches: &[BatchResults]) -> Option<i64> {
-    batches
-        .iter()
-        .any(|batch| !batch.search_skipped)
-        .then(|| batches[0].parameters[0].search_space)
+/// `effective_lengths`) and that context's query length (0 for an invalid one;
+/// `archive::RequestLength::space`), when NCBI searched the batch (a unit was searched).
+pub(crate) fn batch_searched_space(
+    batches: &[BatchResults],
+) -> Option<crate::report::archive::SearchedContext0> {
+    batches.iter().any(|batch| !batch.search_skipped).then(|| {
+        let parameters = &batches[0].parameters[0];
+        crate::report::archive::SearchedContext0 {
+            space: parameters.search_space,
+            query_length: if parameters.valid {
+                batches[0].prepared.contexts[0].length as i64
+            } else {
+                0
+            },
+        }
+    })
 }
 
 /// The requests of a run's batches (`RunRequests`): nucleotide queries, protein subjects (the
@@ -237,7 +247,7 @@ impl RequestRecord for FastaRecord {
             Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
             _ => {
                 let mut line = vec![b'>'];
-                line.extend_from_slice(self.title.as_bytes());
+                line.extend_from_slice(&self.title);
                 Cow::Owned(line)
             }
         };
@@ -246,7 +256,7 @@ impl RequestRecord for FastaRecord {
             ids: self.believed().map(|ids| ids.ids.as_slice()),
             seq_loc: self.archive_seq_loc(),
             defline,
-            title: self.title.as_bytes(),
+            title: &self.title,
             // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
             letters: self.archive_letters(),
             protein,

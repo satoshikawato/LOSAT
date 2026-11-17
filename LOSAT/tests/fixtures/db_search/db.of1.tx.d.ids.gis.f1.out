@@ -1,0 +1,153 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide subjects of the TBLASTX query-anchored rows with Seq-ids
+           5 sequences; 1,224 total letters
+
+
+
+Query= txq coding query
+
+Length=571
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+gi|626262|gb|AB000201.1|  tx_pm plus then minus                       130     5e-35  1
+tx_c_ltx_c minus query frames                                         105     1e-27  1
+gnl|tst|tx_twotx_two two subject frames                               84.0    7e-23  2
+ref|NM_000202.1|tx_mp minus then plus                                 61.6    3e-14  1
+tx_far_ltx_far weak                                                   44.1    6e-09  1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1      1    HPASQKWHIKIVIRVNLLRFMFGHLQLYHMPWQYYTKNEFPQNAGHRARKCESI*L*KKK  180
+626262       1    ................A.................................            150
+tx_c_l       125                                                      ..WV*YAS  148
+tx_c_l       97                              ..N.Y.F                            117
+tx_c_l       10                                  .S...Q                         27
+tx_two       92                       ..............................            181
+tx_two       1    ..............................                                90
+NM_000202.1  278                                                            .G  283
+
+Query_1      181  SGYGERALL*KEQYRGRVPtatattttatatICD*RSYPTQAAVR*IINDFGRDYDKNRG  360
+tx_c_l       149  YNH.D....                                                     175
+NM_000202.1  284  TS..*CTF.QE.*HG..L.                                           340
+NM_000202.1  162        ...*.T*.G....                                           200
+
+Query_1      361  FYNG*lp*s*lasspasRSLVFHNSSPYISGGTI*SLIQ*SWWP*AASPGHQASLVKVTQ  540
+tx_c_l       145                                       .L*..*.C.......I.......  213
+
+Query_1      541  ECVCA  555
+tx_c_l       214  .W.W.  228
+
+For reading frame +2 of query sequence:
+
+Query_1      14   KNGI*K*SYESICLGSCLDIFSYTTCPGNTTPRTNFHKMRVTVLANASLYDFRRKNLVMA  193
+626262       62                   ..VT..SI....S..R..S.P.T.                      133
+tx_c_l       215                 ..VTFTNDIWW..EAAHGHHDY...I.                    135
+tx_two       14   RS.T*RLLSG....DL.SG.Y..I.                                     88
+tx_two       93                   .S..Y.CII.R...IQKM.                           149
+NM_000202.1  126                                                      ..F.....  103
+
+Query_1      194  SAHSCKKNNTEEGCqqqqqqqqqqqqqFVTSGVTPHRLRFGR*LTILVGIMIKIGDFIMG  373
+tx_c_l       123                                             .SE..WV..EVW..VV.  73
+NM_000202.1  102  ...........K......................                            1
+
+Query_1      374  NFLEVNLPPLLPAGLLCFITPVLT  445
+tx_c_l       72   YL..IY.TS....S..RV.*..F.  1
+
+For reading frame +3 of query sequence:
+
+Query_1      57   VHVWTSSAIPHALAILHQERISTKCGSPCSQMRVYMTLEEKIWLWRARTPVKRTIPRKGA  236
+626262       57   IY..SP..LS....V..E..V.P.R.TS.AE                               149
+NM_000202.1  164                                                  ..L.NI.R....  199
+
+Query_1      237  nsnsnnnnsnsnnL*LAELPHTGCGSVDN*RFW*GL**KSGIL*WVTSLKLTCLLSCQQV  416
+626262       62                                                       ..VTFSSI  85
+tx_c_l       113                                  .Y..**.....*......F.*R......  30
+tx_far_l     71                                                 ......IRR.F.HP  30
+
+Query_1      417  SCVS*LQSL  443
+626262       86   T.         91
+tx_c_l       29   ...*YD...  3
+tx_far_l     29   LW..*      15
+
+For reading frame -1 of query sequence:
+
+Query_1   445  CKDWSYETQETCWQERRQVNFKEVTHYKIPDFYHNPYQNR*LSTEPQPVWGNSASHKlll  266
+626262    259                                  ..F.W.                        242
+tx_c_l    1    ......Y...............................F.                      120
+tx_two    113                                  ..M.W.                        130
+tx_far_l  7      .Q.....RG..N...M...R..                                      72
+
+Query_1   265  lllllllllLAPFLGIVLFTGVRARHNQIFSSKVI*TRICEHGDPHFVEIRSWCSIARAC  86
+626262    142                                           .DV.R.G.T..S..T....  86
+
+Query_1   85   GIAEDVQT*  59
+626262    85   DR..GD..*  59
+
+For reading frame -2 of query sequence:
+
+Query_1      555  STHALLCYFY**CLVArrsssrppRLLDEALDCASRYVRTGVMKHKRPAGRRGGKLTSRk  376
+tx_c_l       228  .P.P.....H**Y...                                              181
+
+Query_1      375  lpiikspifiiiptkIVNYLPNRSLCGVTPLVTNcccccccccccCWHPSSVLFFLQECA  196
+NM_000202.1  254                              ..DG...*P.FIR............C..K..Q  159
+NM_000202.1  340                                                .Q............  299
+
+Query_1      195  LAITRFFLLKSYRLAFASTVTRILWKFvlgvvlpghvv*LKMSKHEPKQIDSYDYFYMPF  16
+626262       194                  SG.A.CV.RE.IFCI...WK.IKCSVPE.KSQKYH.V..LDV..  325
+tx_two       72                                            .PE.KS....PDNNL.V.L  16
+NM_000202.1  158  W.                                                            153
+NM_000202.1  298  ....SS.                                                       278
+
+Query_1      15   LASRV  1
+626262       326  .*G.M  340
+tx_two       15   .RC.M  1
+
+For reading frame -3 of query sequence:
+
+Query_1      557  TAHTHSCVTFTNDAWWPGEAAHGHHDYWMRL*IVPPDM*GLEL*NTRDLLAGEEAS*LQG  378
+tx_c_l       230  .............I.............K..I                               138
+
+Query_1      377  SYPL*NPRFLS*SLPKSLIIYRTAACVG*LR*SQIvavavvvvavaVGTLPRYCSFYRSA  198
+tx_c_l       171                                                            ..  166
+NM_000202.1  199                                                 ....P.YV.*...  161
+
+Query_1      197  RSP*PDFFF*SHIDSHLRAR*PAFCGNSFLV*YCQGMWYS*RCPNMNLSRLTRMTIFICH  18
+626262       146                   ...C...W....F.*.....**.*.*..I..RA...I..LM..  18
+tx_c_l       165  ...*                                                          154
+tx_two       89                                       .*..CK...I...K..LI...M..  18
+tx_two       165                       ...W....F.*..H.I*.NC....IHV              85
+
+Query_1      17   FWLAG  3
+626262       17   .*D..  3
+tx_two       17   .CD..  3
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 54696
+
+
+  Database: nucleotide subjects of the TBLASTX query-anchored rows with Seq-ids
+    Posted date:  Nov 15, 2026  10:24 AM
+  Number of letters in database: 1,224
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

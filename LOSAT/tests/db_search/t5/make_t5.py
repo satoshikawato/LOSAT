@@ -52,6 +52,27 @@ and nine content bytes of sign extension, which NCBI's `ReadInt4` reads as 9606,
 bytes, which it fails on (`eOverflow`, `TTaxId` is an `int`) wherever it reads the header (probe
 `remaining-gaps-20261112/T/taxid_t5c.md` of line RG).
 
+With `--sfu-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --sfu-only`, merge 4 of line RG
+item T5c with item T7) it writes only the version 4 protein databases of titles ending in ` [ ]` with
+the taxid 100009, whose name (`Bad \x81 name`) NCBI's `x_AdjustProteinTitleSuffix` writes at their end
+and `GenerateDefline` then cannot decode (the lookup fails: `Unknown`): `psfu_100009` without
+`-parse_seqids` (SFU_STORED; the alias `psfu`) and `psfux` with `-parse_seqids` and `-taxid_map`
+(SFUX: an `lcl|Subject_901` record, a titled line followed by an untitled one, whose outfmt 0 heading
+NCBI skips, and a control).
+
+With `--k5-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --k5-only`, merge 5 of line RG
+item T5c with item K4h) it writes only the taxonomy database `tests/seqdb/taxdb/k5/` of
+`tests/seqdb/taxdb/k5.tsv` (the rows of `taxdb.tsv`, 99990 still the last entry, and K5_TAXA: names
+with two-byte UTF-8, with control bytes and with a byte that `GenerateDefline` cannot decode in all four
+fields), the version 4 protein databases of titles ending in `]` with those taxids: `pk5_<taxid>`
+without `-parse_seqids` (K5_STORED; the alias `pk5`), `pk5x` (taxid 5003 alone) and `pk5s` with
+`-parse_seqids` and `-taxid_map` (K5S), and the queries `k5_qa` and `k5_qc` (`.faa`, and `.fna` of
+the same letters back-translated): q0 without hits, q1 with a title of two-byte UTF-8 (`qa`, NCBI's
+outfmt 5 stream leaves its `Iteration` out) or a control byte (`qc`) hitting every record, q2 hitting
+only the records of group A (K5_A), so that `BATCH_SIZE=1` with `PRE_FETCH_SEQS_LIMIT` of that count
+turns q1's prefetch off and q2's on. makeblastdb stores a title byte outside 0x20..0x7E as `#`, so
+these bytes reach a database title only through the name at its rewritten end.
+
 With `--header-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --header-only`, line RG item
 T5d) it writes the version 4 databases `phd_<name>` and `nhd_<name>` of HEADER_EDITS (`-taxid
 9606`; the three records of `hd.faa` / `hd.fna`, the nucleotides the codons of the proteins, so
@@ -107,6 +128,11 @@ ALIASES = {
     "ntab": ("n", NAMED),
     "npall": ("np", PARSED),
     "ppall": ("pp", PARSED),
+    # Line RG item T7: the name NCBI cannot decode before and after a named sequence (rows db.t7.*).
+    "nt7_bf": ("n", [100009, 100001]),
+    "nt7_fb": ("n", [100001, 100009]),
+    "pt7_bf": ("p", [100009, 100001]),
+    "pt7_fb": ("p", [100001, 100009]),
 }
 
 CTRL_A = "\x01"
@@ -203,6 +229,17 @@ WORD_STORED = {
     None: ["MAG: (plastid) [ ]", " ", "chi, partial [ ]"],
 }
 
+# The titles of `psfu_<taxid>` (merge 4 of line RG item T5c: the rewritten end takes a name that
+# NCBI cannot decode; `kappa, partial [Homo sapiens]` keeps its end).
+SFU_STORED = {
+    100009: ["chi, partial [ ]", "hypothetical protein [ ]", "kappa, partial [Homo sapiens]"],
+}
+# The records of `psfux` (version 4, -parse_seqids, -taxid_map), as SUFFIX.
+SFUX = [
+    [("lcl|Subject_901", "chi, partial [ ]", 100009)],
+    [("gb|AC400031.1|", "omega, partial [ ]", None), ("gb|AD400031.1|", "", 100009)],
+    [("lcl|Subject_904", "delta, partial [Homo sapiens]", 100001)],
+]
 
 # The inner bytes of the taxid `[2]` of the first record of `ptx_<name>` and `ntx_<name>` (fix 2 of
 # line RG item T5c); makeblastdb writes `02 02 25 86` (INTEGER 9606).
@@ -215,6 +252,50 @@ TAXID_ENCODINGS = {
     "big5": "02050080000000",
 }
 TAXID_TITLES = ["patched record, its taxid in another encoding", "plain record as makeblastdb writes it"]
+
+# The names that `--k5-only` adds to `taxdb.tsv`'s rows for `tests/seqdb/taxdb/k5` (merge 5 of line RG
+# item T5c with item K4h): (taxid, scientific, common, blast, kingdom), below 99990 so that it stays
+# the last entry (`offset_last_past_end`'s offset error).
+K5_TAXA = [
+    (5001, b"Caf\xc3\xa9 sp.", b"caf\xc3\xa9 common", b"b\xc3\xa9blast", b"K\xc3\xa9ngdom"),
+    (5002, b"Ctl\x07 name", b"c\x1bcommon", b"b\x7fblast", b"K\x01ngdom"),
+    (5003, b"Bad \x81 name", b"x\x81common", b"ybl\x81st", b"Bacteria"),
+]
+# The records of `pk5_<taxid>`: (title, group); group A holds K5_A, group B K5_B.
+K5_STORED = {
+    99990: [("chi, partial [ ]", "A"), ("alpha, partial [Homo sapiens]", "A"), ("hypothetical protein [ ]", "A"),
+            ("bchi, partial [ ]", "B")],
+    5001: [("eta, partial [ ]", "A"), ("MAG: (plastid) [ ]", "A"), ("beta2, partial [ ]", "B")],
+    5002: [("theta, partial [ ]", "A"), ("iota, partial [Homo sapiens]", "A"), ("btheta, partial [ ]", "B")],
+    77777: [("lambda, partial [ ]", "A"), ("blambda [ ]", "B")],
+    9606: [("mu, partial [ ]", "A"), ("nu, partial [Homo sapiens]", "A"), ("bmu, partial [ ]", "B")],
+}
+K5X_STORED = [("kappa, partial [ ]", "A"), ("zeta, partial [Homo sapiens]", "A"), ("bkappa, partial [ ]", "B")]
+# The records of `pk5s`: ([(Seq-id, title, taxid or None)], group).
+K5S = [
+    ([("lcl|Subject_901", "chi, partial [ ]", 99990)], "A"),
+    ([("lcl|Subject_902", "eta, partial [ ]", 5001)], "A"),
+    ([("lcl|Subject_903", "theta, partial [ ]", 5002)], "A"),
+    ([("lcl|Subject_904", "lambda, partial [ ]", 77777)], "A"),
+    ([("lcl|Subject_905", "alpha, partial [Homo sapiens]", 9606)], "A"),
+    ([("gb|AC500001.1|", "omega, partial [ ]", None), ("gb|AD500001.1|", "", 99990)], "A"),
+    ([("gb|AC500002.1|", "sigma, partial [ ]", None), ("gb|AD500002.1|", "", 5001)], "A"),
+    ([("gb|AC500003.1|", "tau, partial [ ]", None), ("gb|AD500003.1|", "", 5002)], "A"),
+    ([("gb|AC500004.1|", "upsilon, partial [ ]", None), ("gb|AD500004.1|", "", 77777)], "A"),
+    ([("lcl|Subject_911", "bchi, partial [ ]", 99990)], "B"),
+    ([("lcl|Subject_912", "btheta, partial [ ]", 5002)], "B"),
+    ([("gb|AC500011.1|", "bomega, partial [ ]", None), ("gb|AD500011.1|", "", 5001)], "B"),
+]
+K5_A = ("MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHK"
+        "YPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM")
+K5_Q2 = ("SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCM"
+         "CVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG")
+K5_B = ("LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCR"
+        "DINVPFNLYDMNMGDFMTGCDYQCKPL")
+K5_NOHIT = "WWWWWWWWWWHHHHHHHHHHWWWWWWWWWW"
+K5_QUERIES = {"qa": b"q1 a\xc3\xa9b z", "qc": b"q1 c\x07d z"}
+K5_CODONS = dict(A="GCT", R="CGT", N="AAT", D="GAT", C="TGT", Q="CAA", E="GAA", G="GGT", H="CAT", I="ATT",
+                 L="CTG", K="AAA", M="ATG", F="TTT", P="CCG", S="TCT", T="ACT", W="TGG", Y="TAT", V="GTT")
 
 
 def tlv_end(data, at):
@@ -629,6 +710,97 @@ def suffix_main(ncbi_bin):
     os.rmdir(work)
 
 
+def sfu_main(ncbi_bin):
+    """`psfu_100009` with its alias `psfu` (`stored_main`) and `psfux` (SFUX)."""
+    stored_main(ncbi_bin, "psfu", SFU_STORED)
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    fasta, taxmap = os.path.join(work, "psfux.fa"), os.path.join(work, "psfux.map")
+    with open(fasta, "w") as f, open(taxmap, "w") as m:
+        for lines in SFUX:
+            parts = []
+            for seqid, title, taxid in lines:
+                parts.append(seqid + (" " + title if title else ""))
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+            f.write(">" + CTRL_A.join(parts) + "\n" + seq + "\n")
+    out = os.path.join(here, "psfux")
+    subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+                    "-blastdb_version", "4", "-taxid_map", taxmap, "-title", "psfux", "-out", out],
+                   check=True, stdout=subprocess.DEVNULL, env=env)
+    # makeblastdb's version 4 JSON metadata file is not read by a search.
+    if os.path.exists(out + ".pjs"):
+        os.remove(out + ".pjs")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def k5_main(ncbi_bin):
+    """`tests/seqdb/taxdb/k5`, `pk5_<taxid>` with the alias `pk5`, `pk5x`, `pk5s` and the queries
+    `k5_q*` (K5_TAXA, K5_STORED, K5X_STORED, K5S, K5_QUERIES)."""
+    here = os.path.join("tests", "db_search", "t5")
+    taxdir = os.path.join("tests", "seqdb", "taxdb")
+    rows = [line for line in open(os.path.join(taxdir, "taxdb.tsv"), "rb").read().split(b"\n") if line]
+    rows += [b"\t".join([str(row[0]).encode()] + list(row[1:])) for row in K5_TAXA]
+    rows.sort(key=lambda row: int(row.split(b"\t")[0]))
+    tsv = os.path.join(taxdir, "k5.tsv")
+    with open(tsv, "wb") as f:
+        f.write(b"\n".join(rows) + b"\n")
+    subprocess.run([sys.executable, os.path.join(taxdir, "make_taxdb.py"), "write", tsv,
+                    os.path.join(taxdir, "k5")], check=True)
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    seqs = {"A": K5_A, "B": K5_B}
+
+    def make(name, records, taxid, parse, taxmap=None):
+        fasta = os.path.join(work, name + ".fa")
+        with open(fasta, "w") as f:
+            for defline, group in records:
+                f.write(">" + defline + "\n" + seqs[group] + "\n")
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot",
+               "-blastdb_version", "4", "-title", name, "-out", os.path.join(here, name)]
+        if taxid is not None:
+            cmd += ["-taxid", str(taxid)]
+        if parse:
+            cmd += ["-parse_seqids", "-taxid_map", taxmap]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read by a search.
+        if os.path.exists(os.path.join(here, name + ".pjs")):
+            os.remove(os.path.join(here, name + ".pjs"))
+
+    for taxid, records in K5_STORED.items():
+        make(f"pk5_{taxid}", records, taxid, False)
+    with open(os.path.join(here, "pk5.pal"), "w") as f:
+        f.write(f"TITLE pk5\nDBLIST {' '.join(f'pk5_{taxid}' for taxid in K5_STORED)} \n")
+    make("pk5x", K5X_STORED, 5003, False)
+    taxmap = os.path.join(work, "pk5s.map")
+    records = []
+    with open(taxmap, "w") as m:
+        for lines, group in K5S:
+            records.append((CTRL_A.join(seqid + (" " + title if title else "") for seqid, title, _ in lines),
+                            group))
+            for seqid, _, taxid in lines:
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+    make("pk5s", records, None, True, taxmap)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+    for name, title in K5_QUERIES.items():
+        queries = [(b"q0 none", K5_NOHIT), (title, K5_A + K5_B), (b"q2 two", K5_Q2)]
+        with open(os.path.join(here, f"k5_{name}.faa"), "wb") as f:
+            for t, letters_ in queries:
+                f.write(b">" + t + b"\n" + letters_.encode() + b"\n")
+        with open(os.path.join(here, f"k5_{name}.fna"), "wb") as f:
+            for t, letters_ in queries:
+                f.write(b">" + t + b"\n" + "".join(K5_CODONS[c] for c in letters_).encode() + b"\n")
+
+
 def map_key(seqid):
     """The key of `-taxid_map` for the Seq-id `seqid`: its accession.version, a PDB molecule
     with `_` and its chain, the local or general tag."""
@@ -751,5 +923,9 @@ if __name__ == "__main__":
         dup_main(sys.argv[1])
     elif "--header-only" in sys.argv[2:]:
         header_main(sys.argv[1], [name for name in sys.argv[2:] if not name.startswith("--")])
+    elif "--sfu-only" in sys.argv[2:]:
+        sfu_main(sys.argv[1])
+    elif "--k5-only" in sys.argv[2:]:
+        k5_main(sys.argv[1])
     else:
         main()

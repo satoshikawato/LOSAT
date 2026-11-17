@@ -1317,16 +1317,6 @@ impl ReportedAsks {
         asks
     }
 
-    /// Whether NCBI's scope resolves the reported sequences at each batch, before its reports
-    /// (`common::database::scope_reads_at_batch`): a report reads their Bioseqs (the formats of
-    /// `ReportedSubjects::for_batch`'s `fetched`), or the first format's prefetch loads them.
-    pub(super) fn scope_reads_at_batch(self) -> bool {
-        crate::algorithm::common::database::scope_reads_at_batch(
-            self.tabular_reads || self.pairwise || self.structured || self.taxids || self.taxonomy,
-            self.prefetched,
-        )
-    }
-
     /// What two reports of one batch ask.
     pub(super) fn or(self, other: Self) -> Self {
         Self {
@@ -1391,14 +1381,7 @@ pub(super) fn batch_titles(
             .map(|at| (first_query, at)),
     };
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(
-        database,
-        results,
-        gapped,
-        asks.pairwise,
-        earlier,
-        asks.scope_reads_at_batch(),
-    );
+    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
     super::x_timing::run(XRun::Titles, x_t);
     if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
         match &titles {
@@ -1658,8 +1641,9 @@ pub(super) fn reported_batch(
         // subjects it shows, after the query's own warnings
         // (`ReportedSubjects::fetch_by_query`), where the format's rows read
         // their Bioseqs (`TabularSpec::subject_fetch`).
-        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-        if unfetched && taxdb_found {
+        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up nor, but where a
+        // lookup reads a UTF8String header (`load_read_texts`), post a warning.
+        if unfetched && (taxdb_found || database.db.scope_utf8_seen()) {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1704,10 +1688,16 @@ pub(super) fn reported_batch(
         }
     } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
-        // prefetch only its stop (`ReportedSubjects::batch_prefetch_stop`).
-        reported
+        // prefetch only its stop, or the warning of a UTF8String header that a load's lookup reads
+        // (`ReportedSubjects::batch_prefetch_stop`).
+        let warning = reported
             .batch_prefetch_stop(database, results, options.gapped, prefetch_queries)
             .map_err(reported_error)?;
+        diagnostics.write_all(&warning)?;
+    } else if matches!(options.outfmt, 13..=16) && database.parsed_seqids() {
+        // The XML2 and JSON formats, a batch whose prefetch is off: the `Hit`s load their subjects
+        // one by one.
+        reported.scope_utf8_hit_reads(database, results, options.gapped);
     }
     // The batch's prefetch (or its reports' reads one by one) did not stop: the run's record of
     // what NCBI's data loader loaded for it, for a later batch's stop

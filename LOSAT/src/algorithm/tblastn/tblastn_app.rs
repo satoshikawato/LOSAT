@@ -14,7 +14,7 @@ use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::blast_engine::QueryReading;
-use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::algorithm::common::database::PreliminaryReadError;
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -1886,31 +1886,14 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
-        // NCBI's first read, in a batch's Seq-aligns, of a header with a UTF8String where a
-        // VisibleString is expected: the batch's first query and the read (`query_posts` below).
-        let mut utf8_read: Option<(usize, crate::algorithm::common::database::Utf8Read)> = None;
+        let mut utf8_read: super::database::FirstUtf8 = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
-        // the search's batches (`database::fetch_excluded`), and the note of each batch's first
-        // fetch that read a header with a UTF8String where a VisibleString is expected, by the
-        // batch's first query (the batches may be searched side by side).
+        // the search's batches (`database::fetch_excluded`, `database::FetchedUtf8`).
         let fetch_excluded = database.and_then(super::database::fetch_excluded);
-        let fetched_utf8: std::collections::BTreeMap<usize, crate::seqdb::Utf8Reads> =
-            match fetch_excluded {
-                Some(_) => query_input
-                    .batches(batch_size)
-                    .into_iter()
-                    .map(|batch| (batch.searched.start, Default::default()))
-                    .collect(),
-                None => Default::default(),
-            };
-        let batch_fetches = |range: &std::ops::Range<usize>| {
-            fetch_excluded
-                .as_ref()
-                .map(|excluded| super::stage_d_pipeline::BatchFetches {
-                    excluded,
-                    utf8: fetched_utf8.get(&range.start),
-                })
-        };
+        let fetched_utf8 = super::database::FetchedUtf8::of(fetch_excluded.as_ref(), || {
+            query_input.batches(batch_size)
+        });
+        let batch_fetches = |range: &std::ops::Range<usize>| fetched_utf8.of_batch(range);
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2152,38 +2135,10 @@ fn search(
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.
             if let Some(database) = database {
-                let earlier = crate::algorithm::common::database::EarlierUtf8 {
-                    fetched: fetched_utf8
-                        .get(&range.start)
-                        .and_then(crate::seqdb::Utf8Reads::take)
-                        .map(|note| (range.start, note.at)),
-                    aligned: super::database::drop_unaligned(database, &mut batch_results)
-                        .map(|at| (range.start, at)),
-                };
-                let read = super::database::read_titles(
-                    database,
-                    &batch_results,
-                    range.start,
-                    earlier,
-                    parsed_shown(&outputs.formats).scope_reads_at_batch(),
-                    &mut titles,
-                );
-                match read {
-                    Ok(read) => {
-                        if utf8_read.is_none() {
-                            utf8_read = read.map(|read| (range.start, read));
-                        }
-                    }
-                    Err(error) => match error.downcast::<HeaderReadError>() {
-                        Ok(failure) => {
-                            if utf8_read.is_none() {
-                                utf8_read = failure.utf8.map(|read| (range.start, read));
-                            }
-                            failed = Some((range, failure.error));
-                            break;
-                        }
-                        Err(error) => return Err(error),
-                    },
+                let reads = (&fetched_utf8.notes, &mut titles, &mut utf8_read);
+                if let Some(error) = database.batch_titles(&mut batch_results, &range, reads)? {
+                    failed = Some((range, error));
+                    break;
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-299
@@ -2534,6 +2489,15 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
+            let utf8_first = utf8_read.as_ref().map(|(_, read)| read);
+            if first_xml2 {
+                prefetch_posts.extend(database.xml2_scope_utf8(
+                    (reported, &mut subject_reads),
+                    &results,
+                    &batch_spans,
+                    utf8_first,
+                )?);
+            }
             if first_prefetches && (taxdb_found || database.parsed_seqids()) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
@@ -2573,6 +2537,7 @@ fn search(
                     Ok::<(), anyhow::Error>(())
                 };
                 for span in &batch_spans {
+                    database.reach_batch(utf8_first, span);
                     let hitlists = &results[span.clone()];
                     // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
                     let seq_aligns = super::database::seq_aligns_of(hitlists);
@@ -2587,8 +2552,9 @@ fn search(
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-                        if !taxdb_found {
+                        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up
+                        // but a lookup that reads a UTF8String header (`load_read_texts`).
+                        if !taxdb_found && !database.scope_utf8_seen() {
                             continue;
                         }
                         let rows = first_rows;
@@ -2673,6 +2639,7 @@ fn search(
         // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
+            database.reach_batch(utf8_read.as_ref().map(|(_, read)| read), &span);
             // The batches before are those of `results`, which the stop truncated (above).
             let prefetched = |query: usize| {
                 prefetch_posts
@@ -2811,14 +2778,7 @@ fn search(
         // The posts before each query's report: NCBI's posts of the bytes replaced in the search
         // strategy request of each reported batch follow the reader's messages of the batch, in
         // its first query (`query_warnings::query_posts`).
-        // NCBI's warning of its first read of a UTF8String header follows them in the first
-        // query of the batch that read it, a reported one (`utf8_read`; a failed batch's below).
-        let header_read = match (&utf8_read, database) {
-            (Some((first, read)), Some(database)) if *first < queries.len() => read
-                .post(&database.db, "tblastn")
-                .map(|posts| (*first, posts)),
-            _ => None,
-        };
+        let header_read = super::database::header_read(utf8_read.as_ref(), database, queries.len());
         let query_posts = crate::report::query_warnings::query_posts(
             query_warning_lines,
             args.strategy
@@ -2903,14 +2863,10 @@ fn search(
             if let Some(strategy) = args.strategy.as_ref() {
                 strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
-            // NCBI's warning of its first read of a UTF8String header, where the failed batch's
-            // Seq-aligns made it before the failure.
-            if let (Some((first, read)), Some(database)) = (&utf8_read, database) {
-                if *first == range.start {
-                    if let Some(posts) = read.post(&database.db, "tblastn") {
-                        posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                    }
-                }
+            let failed_read =
+                super::database::failed_header_read(utf8_read.as_ref(), database, &range);
+            if let Some(posts) = failed_read {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
             return Err(error);
         }

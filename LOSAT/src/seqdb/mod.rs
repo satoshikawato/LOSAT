@@ -753,6 +753,11 @@ pub struct SeqDb {
     /// Whether a reader met a reported sequence whose Seq-align id the lookup gives first to
     /// another sequence with such a header (`SeqDb::note_scope_utf8`).
     scope_utf8: AtomicBool,
+    /// Whether the model of the run's loads has reached the batch whose own reads post that
+    /// warning (`SeqDb::end_scope_utf8_loads`).
+    scope_utf8_ended: AtomicBool,
+    /// Whether a load of that model posts the warning (`SeqDb::claim_utf8_post`).
+    utf8_claimed: AtomicBool,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1310,6 +1315,8 @@ impl SeqDb {
             mask_algorithms: OnceLock::new(),
             utf8_posted: AtomicBool::new(false),
             scope_utf8: AtomicBool::new(false),
+            scope_utf8_ended: AtomicBool::new(false),
+            utf8_claimed: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2400,15 +2407,38 @@ impl SeqDb {
     /// true once, at the first call (`ERR_POST_X_ONCE` posts once per process; a search opens
     /// its database once, so once per run of a program).
     pub fn take_utf8_post(&self) -> bool {
-        !self
-            .utf8_posted
-            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        !self.utf8_claimed.load(std::sync::atomic::Ordering::Relaxed)
+            && !self
+                .utf8_posted
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Whether the run has posted that warning (`take_utf8_post`), so that no read need name
-    /// its member again.
+    /// Whether the run has posted that warning (`take_utf8_post`), or a load of the model of its
+    /// loads posts it (`claim_utf8_post`), so that no read need name its member again.
     pub fn utf8_posted(&self) -> bool {
         self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
+            || self.utf8_claimed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// `take_utf8_post` for a load of the model of the run's loads (`scope_utf8_loads`), which
+    /// writes the warning with the load's text where the program writes it: true once, and none
+    /// of the run's other posts is taken after (`take_utf8_post`). A search of the batches again
+    /// from the start forgets it (`restart_utf8_loads`).
+    pub fn claim_utf8_post(&self) -> bool {
+        !self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
+            && !self
+                .utf8_claimed
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The batches are searched and their loads modelled again from the start, nothing of the
+    /// first model written (BLASTP's search of the batches before a failed one): no load posts
+    /// the warning yet (`claim_utf8_post`, `end_scope_utf8_loads`).
+    pub fn restart_utf8_loads(&self) {
+        self.utf8_claimed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.scope_utf8_ended
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to
@@ -2417,6 +2447,33 @@ impl SeqDb {
     pub fn note_scope_utf8(&self) {
         self.scope_utf8
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The model of the run's loads reaches a batch whose own reads (its fetches, Seq-aligns and
+    /// the reads of its reported sequences, `algorithm::common::database::Utf8Read`) post NCBI's
+    /// warning of a UTF8String header, before any load of the batch: no load posts it after
+    /// (`scope_utf8_loads`), whether the run has written it yet or not (a program that models
+    /// every batch before it writes a report).
+    pub fn end_scope_utf8_loads(&self) {
+        self.scope_utf8_ended
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a load whose Seq-align id's lookup reads such a header may post NCBI's warning: a
+    /// reader met such a subject (`scope_utf8_seen`), the run has not posted it
+    /// (`take_utf8_post`), and no batch before the load posts it with its own reads
+    /// (`end_scope_utf8_loads`).
+    pub fn scope_utf8_loads(&self) -> bool {
+        self.scope_utf8_seen()
+            && !self.utf8_posted()
+            && !self
+                .scope_utf8_ended
+                .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The sequence at `at` (by its ordinal id).
+    pub(crate) fn sequence_at(&self, at: SeqLocation) -> DbSequence {
+        self.sequence(self.ordinal_of(self.location_oid(&at)))
     }
 
     /// Whether a reader noted such a sequence (`note_scope_utf8`): only then do the batches'

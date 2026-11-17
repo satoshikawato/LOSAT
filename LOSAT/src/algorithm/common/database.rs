@@ -788,14 +788,15 @@ pub(crate) struct Utf8Read {
 /// the fetches with `check_oid_exclusion` of its traceback or redo (`FetchExcluded`), then its
 /// Seq-aligns of the final hit lists (`SeqAligned` under a seqid list, which reads them all),
 /// the reads of the reported sequences (`read_header`, which the Seq-aligns of the other
-/// databases read), then the formatters' scope, which reads other sequences (a lookup's version
-/// check, the copies and the weak matches it compares).
+/// databases read). The reads of NCBI's scope that come after them (the data loader's, where it
+/// resolves a Seq-align id: a lookup's version check, the sequence the lookup gives first) are
+/// the loads' (`ParsedSubject::scope_utf8`, posted where the model of the loads makes the load,
+/// `load_read_texts`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Utf8Phase {
     Fetch,
     Aligned,
     Reported,
-    Scope,
 }
 
 impl Utf8Phase {
@@ -847,6 +848,17 @@ impl Utf8Read {
                 &self.path,
             ))
         })
+    }
+
+    /// Before the model of the loads of the batch of the queries `batch` (a program that models
+    /// every batch before it writes a report: BLASTP's and TBLASTN's call): where the read `read`
+    /// (the call's first, `HeaderReader::first_utf8`) is of that batch or one before, its batch
+    /// posts NCBI's warning before its loads, so no load of the model posts it from here on
+    /// (`SeqDb::end_scope_utf8_loads`).
+    pub(crate) fn reach(read: Option<&Utf8Read>, batch: &std::ops::Range<usize>, db: &SeqDb) {
+        if read.is_some_and(|read| read.query < batch.end) {
+            db.end_scope_utf8_loads();
+        }
     }
 
     /// `post` of the read `read`, where there is one.
@@ -1651,13 +1663,6 @@ pub(crate) struct HeaderReader<'a> {
     /// VisibleString is expected (`first_utf8`): the reader's own and those before it
     /// (`note_earlier`), in the order of `Utf8Phase`.
     utf8: crate::seqdb::Utf8Reads,
-    /// The query of the reader's last read of a reported sequence, whose report the scope's
-    /// reads of other sequences serve (`Utf8Phase::Scope`).
-    query: std::cell::Cell<usize>,
-    /// Whether NCBI's scope resolves the reported sequences' Seq-align ids at each batch, before
-    /// its reports (`scope_reads`): its read of the sequence that a lookup gives first, where
-    /// that is another one, is noted (`Utf8Phase::Scope`).
-    scope: std::cell::Cell<bool>,
     /// The first queries of NCBI's query batches among the reader's queries, ascending
     /// (`batch_starts`; none: one batch), which order its reads before their phases.
     batches: std::cell::OnceCell<Vec<usize>>,
@@ -2248,8 +2253,6 @@ impl<'a> HeaderReader<'a> {
         Self {
             db,
             utf8: Default::default(),
-            query: std::cell::Cell::new(0),
-            scope: std::cell::Cell::new(false),
             batches: std::cell::OnceCell::new(),
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
@@ -2262,9 +2265,9 @@ impl<'a> HeaderReader<'a> {
     /// The first of the batch's reads, in NCBI's order, of a record that holds a UTF8String where
     /// a VisibleString is expected, with the query it is posted with (`Utf8Read`): the reads of
     /// the batch's fetches and Seq-aligns (`note_earlier`), then the reader's own (`read_header`,
-    /// in their order: the programs' `read_titles` read in NCBI's), then those of the scope's
-    /// lookups and of the other sequences it reads (`Utf8Phase::Scope`). NCBI's warning names
-    /// it; `None` where the run has posted it.
+    /// in their order: the programs' `read_titles` read in NCBI's). The scope's reads come after
+    /// them, at the loads (`ParsedSubject::scope_utf8`). NCBI's warning names it; `None` where
+    /// the run has posted it.
     pub(crate) fn first_utf8(&self) -> Option<Utf8Read> {
         let note = self.utf8.first()?;
         if self.db.utf8_posted() {
@@ -2288,13 +2291,6 @@ impl<'a> HeaderReader<'a> {
     /// Seq-aligns, before the next batch's (`Utf8Phase`).
     pub(crate) fn batch_starts(&self, starts: Vec<usize>) {
         let _ = self.batches.set(starts);
-    }
-
-    /// Sets whether NCBI's scope resolves the reported sequences' Seq-align ids at each batch,
-    /// before its reports ([`scope_reads_at_batch`]; none where unset): there NCBI reads the
-    /// header of the sequence that a lookup gives first (`found_instead`).
-    pub(crate) fn scope_reads(&self, reads: bool) {
-        self.scope.set(reads);
     }
 
     /// The place in NCBI's order of a read of `phase` by `query`: its batch's (`batches`), then
@@ -2333,23 +2329,16 @@ impl<'a> HeaderReader<'a> {
         }
     }
 
-    /// Notes the read, by the scope that serves the report of the reader's last read
-    /// (`query`), of the header at `at` that took a UTF8String for a VisibleString.
-    #[cold]
-    #[inline(never)]
-    fn note_scope_utf8(&self, at: crate::seqdb::SeqLocation) {
-        if !self.db.utf8_posted() {
-            self.utf8
-                .note(self.order(Utf8Phase::Scope, self.query.get()), at);
-        }
-    }
-
-    /// Notes the reads of the lookup `lookup` that took a UTF8String for a VisibleString
-    /// (`SeqidLookup::take_utf8`: the version check of an accession).
-    fn note_lookup_utf8(&self, lookup: &crate::seqdb::lookup::SeqidLookup<'_>) {
-        if let Some(note) = lookup.take_utf8() {
-            self.note_scope_utf8(note.at);
-        }
+    /// The first read of the lookup `lookup` that took a UTF8String for a VisibleString
+    /// (`SeqidLookup::take_utf8`: the version check of an accession), where the run has not
+    /// posted NCBI's warning: the sequence read, which the load of the looked-up Seq-align id
+    /// reads with the warning (`ParsedSubject::scope_utf8`).
+    fn lookup_utf8(
+        &self,
+        lookup: &crate::seqdb::lookup::SeqidLookup<'_>,
+    ) -> Option<crate::seqdb::DbSequence> {
+        let note = lookup.take_utf8()?;
+        (!self.db.utf8_posted()).then(|| self.scoped_utf8(self.db.sequence_at(note.at)))
     }
 
     /// The taxonomy database of the search path (`taxdb`), opened at the first call.
@@ -2595,9 +2584,9 @@ impl<'a> HeaderReader<'a> {
         };
         let id = subject.alignment_id();
         // NCBI's lookup (`SeqidToOid`), whose version check reads its candidates' headers, also
-        // where it fails after them (`note_lookup_utf8`).
+        // where it fails after them (`lookup_utf8`): the load of the id reads them first.
         let found = lookup.seqid_to_oid(id);
-        self.note_lookup_utf8(lookup);
+        *scope_utf8 = self.lookup_utf8(lookup);
         let first = match found {
             Ok(_) if giim => return (None, None, None),
             Ok(first) => first,
@@ -2611,7 +2600,7 @@ impl<'a> HeaderReader<'a> {
         let own = self.db.oid(ordinal).get();
         // The data loader reads the header of the sequence that this lookup gives first
         // (`scope_read`), whatever the scan below finds.
-        if let Some(first) = first.filter(|&first| first != own) {
+        if let Some(first) = first.filter(|&first| first != own && scope_utf8.is_none()) {
             *scope_utf8 = self.scope_read(self.db.ordinal_of(first));
         }
         // What the lookup gives instead, where the scan of the other holders goes on.
@@ -2850,8 +2839,9 @@ impl<'a> HeaderReader<'a> {
                 release: None,
                 version: None,
             };
+            // LOSAT's own scan, not a read of NCBI's lookup: its version checks note nothing.
             let alone = lookup.seqid_to_oids(&name_alone, true);
-            self.note_lookup_utf8(lookup);
+            let _ = lookup.take_utf8();
             found.extend(alone?);
         }
         let own = self.db.oid(ordinal).get();
@@ -2884,8 +2874,9 @@ impl<'a> HeaderReader<'a> {
     // is never read).
     /// The read by NCBI's scope of the header of the sequence `other`, which the lookup of a
     /// reported sequence's Seq-align id gives first: `other` where its record holds a UTF8String
-    /// where a VisibleString is expected and the run has not posted NCBI's warning, noted where
-    /// the scope resolves the ids at each batch (`scope_reads`; `Utf8Phase::Scope`).
+    /// where a VisibleString is expected and the run has not posted NCBI's warning. The load of
+    /// the id posts it (`load_read_texts`), where NCBI's scope resolves the id: a batch's
+    /// prefetch, or a report, or psiblast's PSSM, that reads the subject.
     #[cold]
     #[inline(never)]
     fn scope_read(&self, other: u32) -> Option<crate::seqdb::DbSequence> {
@@ -2894,11 +2885,16 @@ impl<'a> HeaderReader<'a> {
         }
         let at = self.db.location_of(other)?;
         self.db.utf8_string_path_at(at)?;
-        if self.scope.get() {
-            self.note_scope_utf8(at);
-        }
+        Some(self.scoped_utf8(self.db.sequence(other)))
+    }
+
+    /// `other`, a sequence whose header the load of a reported sequence's Seq-align id reads with
+    /// NCBI's warning, noted for the run (`SeqDb::note_scope_utf8`: its loads then look for it).
+    #[cold]
+    #[inline(never)]
+    fn scoped_utf8(&self, other: crate::seqdb::DbSequence) -> crate::seqdb::DbSequence {
         self.db.note_scope_utf8();
-        Some(self.db.sequence(other))
+        other
     }
 
     /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
@@ -3076,7 +3072,6 @@ fn reported_header(
     program: &str,
 ) -> Result<ReportedHeader> {
     let db = headers.db;
-    headers.query.set(query);
     match &header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) if set.utf8 => {
             headers.note_utf8(ordinal, query)
@@ -3655,23 +3650,6 @@ impl ParsedShown {
     pub(crate) fn reads_bioseq(self) -> bool {
         self.tabular || self.pairwise || self.structured || self.sam || self.taxonomy
     }
-
-    /// [`scope_reads_at_batch`] of these reports.
-    pub(crate) fn scope_reads_at_batch(self) -> bool {
-        scope_reads_at_batch(self.reads_bioseq(), self.prefetched)
-    }
-}
-
-/// Whether NCBI's scope resolves a run's reported sequences by their Seq-align ids at each
-/// batch, before its reports (`HeaderReader::scope_reads`): a report reads their Bioseqs
-/// (`reads_bioseq`: the batch's prefetch loads them, or where `PRE_FETCH_SEQS_LIMIT` turns it off
-/// the reports read them one by one, which `ParsedSubject::fetched` refuses where that read
-/// writes NCBI's warning), or the first format's prefetch loads them (`prefetched`,
-/// [`ParsedShown::prefetched`]) and no `PRE_FETCH_SEQS_LIMIT` can turn a batch's prefetch off
-/// (with one, [`check_prefetched_parsed`] refuses such a read). The archive and the Seq-annots
-/// without the prefetch resolve nothing.
-pub(crate) fn scope_reads_at_batch(reads_bioseq: bool, prefetched: bool) -> bool {
-    reads_bioseq || (prefetched && !prefetch_may_be_off())
 }
 
 /// LOSAT's refusals of the reported database sequence `ordinal` with parsed Seq-ids `subject` in
@@ -5906,8 +5884,14 @@ impl TaxdbRun {
         db: &SeqDb,
     ) -> Option<std::sync::Arc<crate::report::query_warnings::LoadTexts>> {
         let texts = self.prefetch_texts(db);
-        (texts.offset_error_taxid.is_some() || texts.opening)
-            .then(|| std::sync::Arc::clone(&self.load_texts))
+        (texts.offset_error_taxid.is_some() || texts.opening).then(|| self.ledger())
+    }
+
+    /// The run's ledger of the texts of the loads that NCBI does not make (`load_texts`), also
+    /// where the lookups write none: a load whose Seq-align id's lookup reads a UTF8String header
+    /// leaves NCBI's warning there (`ReadLoad::of_scope_utf8`).
+    fn ledger(&self) -> std::sync::Arc<crate::report::query_warnings::LoadTexts> {
+        std::sync::Arc::clone(&self.load_texts)
     }
 
     /// [`TaxdbRun::volume_lookups_of`] of a load, with the length of the start of its text that
@@ -6451,26 +6435,36 @@ pub(crate) fn tabular_names<'t>(
 ///                 }
 /// ```
 ///
-/// A batch whose loads write a text and that reports a subject whose Seq-align id the lookup
-/// gives first to another sequence with a UTF8String header (`ParsedSubject::scope_utf8`) is
-/// refused: NCBI's warning comes at the load that reads that header (`HeaderReader::scope_read`),
-/// after the texts of the loads before it, in an order that LOSAT does not reproduce
-/// ([`batch_prefetch`]).
+/// Where a subject's Seq-align id has a lookup that reads a header with a UTF8String where a
+/// VisibleString is expected (`ParsedSubject::scope_utf8`), NCBI's warning (803.10) comes at that
+/// subject's load, in the order of `subjects` (a query's report, whose batch's prefetch is off,
+/// writes the texts of its reads before the report: `load_read_texts`).
 pub(crate) fn prefetch_messages<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
     program: &str,
 ) -> Result<Vec<u8>> {
-    let reads = prefetch_loads(db, run, subjects, false, program)?;
+    let reads = subject_read_texts(
+        db,
+        run,
+        subjects
+            .into_iter()
+            .map(|(ordinal, parsed)| (0, ordinal, parsed)),
+        false,
+        program,
+    )?;
     Ok(reads.into_iter().flat_map(|read| read.text).collect())
 }
 
-/// The loads of a prefetch of `subjects` (each `(ordinal, parsed Seq-ids)`; [`subject_read_texts`]
-/// with no key), in their order: the one producer of [`prefetch_messages`] and of
-/// [`batch_prefetch`]'s loads. `at_posts`: the loads' texts are made again where the batch's posts
-/// are written (`diag_log::Posts::loads`), where a load that asks the taxonomy database takes the
-/// texts that a load NCBI does not make left (`ReadLoad::placed`).
+/// The loads of a batch's prefetch of `subjects` (each `(ordinal, parsed Seq-ids)`;
+/// [`subject_read_texts`] with no key): [`batch_prefetch`]'s. Where the load of a subject's
+/// Seq-align id posts NCBI's warning of a UTF8String header (`ParsedSubject::scope_utf8`,
+/// `load_read_texts`), the loads come in NCBI's order ([`scope_utf8_prefetch_loads`]); else in
+/// the order of `subjects` (the bytes of a set of loads do not depend on their order:
+/// [`prefetch_messages`]). `at_posts`: the loads' texts are made again where the batch's posts are
+/// written (`diag_log::Posts::loads`), where a load that asks the taxonomy database takes the texts
+/// that a load NCBI does not make left (`ReadLoad::placed`).
 fn prefetch_loads<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -6478,8 +6472,10 @@ fn prefetch_loads<'s>(
     at_posts: bool,
     program: &str,
 ) -> Result<crate::report::query_warnings::QueryReads> {
-    if db.scope_utf8_seen() {
-        return scope_utf8_prefetch_loads(db, run, subjects, at_posts, program);
+    let subjects: Vec<(u32, Option<&'s crate::report::db_subject::ParsedSubject>)> =
+        subjects.into_iter().collect();
+    if db.scope_utf8_loads() && scope_utf8_among(&subjects) {
+        return scope_utf8_prefetch_loads(db, run, &subjects, at_posts, program);
     }
     subject_read_texts(
         db,
@@ -6492,66 +6488,117 @@ fn prefetch_loads<'s>(
     )
 }
 
-/// [`prefetch_loads`] of a run whose reader met a subject whose Seq-align id the lookup gives
-/// first to another sequence with a UTF8String header (`SeqDb::scope_utf8_seen`): the batch
-/// that reports such a subject is refused where its loads write a text, or, `at_posts`, may take
-/// one where its posts are written.
+/// Whether one of `subjects` has a Seq-align id whose lookup reads a header with a UTF8String
+/// where a VisibleString is expected (`ParsedSubject::scope_utf8`).
+fn scope_utf8_among(subjects: &[(u32, Option<&crate::report::db_subject::ParsedSubject>)]) -> bool {
+    subjects
+        .iter()
+        .any(|(_, parsed)| parsed.is_some_and(|subject| subject.scope_utf8_read().is_some()))
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366 (quoted at `load_before_stop`)
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-406 (quoted
+// at `report::db_subject::ParsedSubject::scope_utf8` and above `StopUnsure`)
+// The prefetch loads the batch's Seq-align ids in the order of a map of Seq-id handles (by packed
+// number, then by the address of each handle's info, `load_before_stop`); each load looks its id
+// up (`x_GetOid`: the version check and the header of the first OID, where the warning comes)
+// before it loads the blob, whose taxonomy writes the load's texts (`TaxdbRun::load`).
+/// [`prefetch_loads`] where a load posts NCBI's warning of a UTF8String header: the loads in
+/// NCBI's order of their Seq-id handles ([`prefetch_load_key`]; a batch of more than
+/// [`PREFETCH_ONE_MAP_IDS`] ids, or two subjects of one Seq-align id, in an order that LOSAT does
+/// not know), so that the warning comes after the texts of the loads before it. The batch is
+/// refused where a load whose order to the warning's comes from the addresses of NCBI's Seq-id
+/// infos (a handle of the same packed number, both unpacked included; the probe of line DBID
+/// loadord: `gnl|BL_ORD_ID|3` before `ref|NP_000003.1|` with one command line and after it with
+/// another) or is not known could change the bytes: another load whose lookup posts the warning,
+/// or one that asks the taxonomy database (in a run whose lookups can write a text, `ReadLoad`)
+/// where the batch's loads write a text of it or may take one that a report before left
+/// (`at_posts`).
 #[cold]
 #[inline(never)]
-fn scope_utf8_prefetch_loads<'s>(
+fn scope_utf8_prefetch_loads(
     db: &SeqDb,
     run: &TaxdbRun,
-    subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    subjects: &[(u32, Option<&crate::report::db_subject::ParsedSubject>)],
     at_posts: bool,
     program: &str,
 ) -> Result<crate::report::query_warnings::QueryReads> {
-    let mut scope_utf8 = None;
-    let reads = subject_read_texts(
+    let places = prefetch_places(db, subjects);
+    let mut order: Vec<usize> = (0..subjects.len()).collect();
+    order.sort_by_key(|&index| places[index].order);
+    let mut reads = subject_read_texts(
         db,
         run,
-        subjects.into_iter().map(|(ordinal, parsed)| {
-            if scope_utf8.is_none() {
-                scope_utf8 = parsed
-                    .and_then(|subject| subject.scope_utf8_read())
-                    .map(|other| (ordinal, other));
-            }
-            (0, ordinal, parsed)
-        }),
+        order
+            .iter()
+            .map(|&index| (index as u32, subjects[index].0, subjects[index].1)),
         false,
         program,
     )?;
-    let writes = reads.iter().any(|read| {
-        !read.text.is_empty()
-            || (at_posts
-                && read
-                    .load
-                    .as_ref()
-                    .is_some_and(|load| load.looks_up || load.offset))
-    });
-    if let Some((ordinal, other)) = scope_utf8.filter(|_| writes) {
-        return Err(scope_utf8_load_refusal(db, ordinal, other, program));
+    let lead = |read: &crate::report::query_warnings::SubjectRead| {
+        read.load.as_ref().map_or(0, |load| load.lead)
+    };
+    let Some(posting) = reads.iter().position(|read| lead(read) > 0) else {
+        return Ok(reads);
+    };
+    let at = places[reads[posting].subject as usize];
+    // `at_posts`: the texts that the loads NCBI did not make before left (a BLAST XML report that
+    // the stream cut, `ReadLoad::left_out`) go to the first load that asks for them where the
+    // posts are written, which the model of the batch does not know yet.
+    let taxonomy_texts = at_posts || reads.iter().any(|read| read.text.len() > lead(read));
+    for (index, read) in reads.iter().enumerate() {
+        let place = places[read.subject as usize];
+        let Some(why) = place.order_unknown(at).filter(|_| index != posting) else {
+            continue;
+        };
+        let scoped = subjects[read.subject as usize]
+            .1
+            .is_some_and(|subject| subject.scope_utf8_read().is_some());
+        let asks = read
+            .load
+            .as_ref()
+            .is_some_and(|load| load.looks_up || load.offset);
+        if scoped || (asks && taxonomy_texts) {
+            let (ordinal, parsed) = subjects[reads[posting].subject as usize];
+            let other = parsed
+                .and_then(|subject| subject.scope_utf8_read())
+                .expect("the load that posts the warning reads such a header");
+            return Err(parsed_refusal(
+                db.oid(ordinal),
+                &format!(
+                    "has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: NCBI BLAST+ 2.17.0's prefetch writes its warning (803.10) at the load of that id, and the load of database sequence {} ({}) may come before it or after it ({why}), which changes what the prefetch writes before the warning",
+                    db.oid(subjects[read.subject as usize].0),
+                    if scoped {
+                        "whose lookup also reads such a header"
+                    } else {
+                        "which asks the taxonomy database"
+                    },
+                ),
+                program,
+            ));
+        }
+    }
+    for read in &mut reads {
+        read.subject = 0;
     }
     Ok(reads)
 }
 
-/// LOSAT's refusal of the reported sequence `ordinal` whose Seq-align id the lookup gives first
-/// to the sequence `other`, whose header holds a UTF8String where a VisibleString is expected,
-/// where NCBI's prefetch of its batch writes other texts ([`prefetch_messages`], a failed lookup
-/// in [`batch_prefetch`]): the warning comes at the load that reads that header, in an order of
-/// the loads that LOSAT does not reproduce.
-fn scope_utf8_load_refusal(
+/// Why the order of two loads of NCBI's prefetch whose Seq-id handles have the same packed number
+/// (or are both unpacked) is not known ([`scope_utf8_prefetch_loads`]).
+const ADDRESS_ORDER: &str = "their Seq-id handles have the same packed number, or neither is packed, and NCBI's map orders such handles by the address of their info";
+
+/// The place of each of `subjects` (a batch's prefetch's loads) in NCBI's map of Seq-id handles
+/// ([`LoadPlace`] without the stops, as [`load_before_stop`] makes it).
+fn prefetch_places(
     db: &SeqDb,
-    ordinal: u32,
-    other: crate::seqdb::DbSequence,
-    program: &str,
-) -> anyhow::Error {
-    parsed_refusal(
-        db.oid(ordinal),
-        &format!(
-            "has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: NCBI BLAST+ 2.17.0's prefetch writes its warning (803.10) at the load that reads that header, among the other texts of the batch's loads, in an order that LOSAT does not reproduce"
-        ),
-        program,
-    )
+    subjects: &[(u32, Option<&crate::report::db_subject::ParsedSubject>)],
+) -> Vec<LoadPlace> {
+    let prefetched: Vec<PrefetchSubject<'_>> = subjects
+        .iter()
+        .map(|&(ordinal, parsed)| PrefetchSubject::unflipped(ordinal, parsed))
+        .collect();
+    load_places(db, &prefetched).0
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
@@ -6620,6 +6667,11 @@ enum SubjectLoad<'s> {
 
 /// [`subject_read_texts`] of the loads `loads`, each `(key, ordinal, what it reads)`: also the
 /// loads of the sequences that a skipped stopping lookup is given instead ([`prefetch_stop`]).
+/// The first load of a subject whose Seq-align id's lookup reads a header with a UTF8String where a
+/// VisibleString is expected (`ParsedSubject::scope_utf8`) posts NCBI's warning (803.10) where the
+/// run has not: the start of its text (`ReadLoad::lead`), before the texts of its blob's taxonomy,
+/// also without `taxdb.bti` on the search path. The loads come in NCBI's order (the callers': a
+/// report's reads, a prefetch's Seq-id handles, [`prefetch_loads`], [`prefetch_stop`]).
 fn load_read_texts<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -6628,15 +6680,19 @@ fn load_read_texts<'s>(
     program: &str,
 ) -> Result<crate::report::query_warnings::QueryReads> {
     use crate::report::query_warnings::{ReadLoad, SubjectRead};
-    if !run.found(db) {
-        return Ok(Vec::new());
-    }
-    let Some(search_path) = db.search_path() else {
-        return Ok(Vec::new());
+    let lower = program.to_ascii_lowercase();
+    let taxonomy = run.found(db).then(|| db.search_path()).flatten();
+    // NCBI's warning of a UTF8String header that a load's lookup reads (`ParsedSubject::scope_utf8`):
+    // only in a run whose reader met such a subject and that has not posted it.
+    let scope_utf8 = db.scope_utf8_loads();
+    let Some(search_path) = taxonomy else {
+        if !scope_utf8 {
+            return Ok(Vec::new());
+        }
+        return Ok(scope_utf8_reads(db, run, loads, &lower));
     };
     run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
-    let lower = program.to_ascii_lowercase();
     let texts = run.load_texts(db);
     let offset_taxid = run.prefetch_texts(db).offset_error_taxid;
     let mut reads = Vec::new();
@@ -6650,6 +6706,13 @@ fn load_read_texts<'s>(
             SubjectLoad::Read(parsed) => (parsed, None),
             SubjectLoad::Instead { stop, by } => (None, Some((stop, by))),
         };
+        // The lookup of the Seq-align id comes before the blob's load (`x_GetOid`).
+        let lead = if scope_utf8 {
+            scope_utf8_lead(db, parsed, &lower)
+        } else {
+            Vec::new()
+        };
+        let scoped = parsed.is_some_and(|subject| subject.scope_utf8_read().is_some());
         // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads`: the blob of
         // the sequence the scope gets, whose taxids its volume looks up). In
         // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
@@ -6664,15 +6727,15 @@ fn load_read_texts<'s>(
             },
             None => Some(ordinal),
         };
-        if let Some(blob) = blob {
-            let lookups = match lookups_of {
-                Some((stop, by)) => blob_taxids(db, stop, Some(by), blob, program)?,
-                None => blob_taxids(db, ordinal, parsed, blob, program)?,
-            };
-            let (text, opening) = run.load_text(db, &taxdb, blob, &lookups, &lower, program)?;
-            match &texts {
-                Some(texts) => {
-                    let mut load = ReadLoad {
+        let (text, load) = match blob {
+            Some(blob) => {
+                let lookups = match lookups_of {
+                    Some((stop, by)) => blob_taxids(db, stop, Some(by), blob, program)?,
+                    None => blob_taxids(db, ordinal, parsed, blob, program)?,
+                };
+                let (text, opening) = run.load_text(db, &taxdb, blob, &lookups, &lower, program)?;
+                let load = texts.as_ref().map(|texts| {
+                    Ok::<_, anyhow::Error>(ReadLoad {
                         texts: std::sync::Arc::clone(texts),
                         volume: db
                             .volume_index(blob)
@@ -6680,28 +6743,137 @@ fn load_read_texts<'s>(
                             as u32,
                         looks_up: !lookups.is_empty(),
                         offset: offset_taxid.is_some_and(|taxid| lookups.contains(&taxid)),
+                        lead: 0,
                         opening,
-                    };
-                    let text = load.place(text);
-                    reads.push(SubjectRead {
-                        subject: key,
-                        text,
-                        load: Some(load),
-                    });
-                }
-                None if !text.is_empty() => reads.push(SubjectRead {
+                        scope_utf8: scoped,
+                    })
+                });
+                (text, load.transpose()?)
+            }
+            None => (Vec::new(), None),
+        };
+        // A load that NCBI does not make leaves its warning to the next that reads such a header
+        // (`ReadLoad::left_out`): every load of such a subject has the facts of its load.
+        let load = match load {
+            None if scoped => Some(ReadLoad::of_scope_utf8(run.ledger())),
+            load => load,
+        };
+        match load {
+            Some(mut load) => {
+                let text = load.place_after(lead, text);
+                reads.push(SubjectRead {
                     subject: key,
                     text,
-                    load: None,
-                }),
-                None => {}
+                    load: Some(load),
+                });
             }
+            None if !text.is_empty() || !lead.is_empty() => reads.push(SubjectRead {
+                subject: key,
+                text: [lead, text].concat(),
+                load: None,
+            }),
+            None => {}
         }
         if first && rows_open {
             run.open_for_rows(db, program)?;
         }
     }
     Ok(reads)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393-406 (quoted
+// at `report::db_subject::ParsedSubject::scope_utf8`)
+/// The warning (803.10) that the load of `parsed`'s Seq-align id posts, where its lookup reads a
+/// header with a UTF8String where a VisibleString is expected (`ParsedSubject::scope_utf8`) and
+/// the run has not posted it (`SeqDb::claim_utf8_post`, once): `Warning: (803.10) [<program>] ...`
+/// naming the member of that header (`seqid::ber::utf8_string_warning`); else empty.
+#[cold]
+#[inline(never)]
+fn scope_utf8_lead(
+    db: &SeqDb,
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    lower: &str,
+) -> Vec<u8> {
+    let Some(other) = parsed.and_then(|subject| subject.scope_utf8_read()) else {
+        return Vec::new();
+    };
+    let Some(path) = db
+        .location_of(other.ordinal())
+        .and_then(|at| db.utf8_string_path_at(at))
+    else {
+        return Vec::new();
+    };
+    if !db.claim_utf8_post() {
+        return Vec::new();
+    }
+    crate::seqid::ber::utf8_string_warning(Some(lower), &path)
+}
+
+/// The reads of a query's report whose batch's prefetch is off, for the XML2 and JSON formats
+/// (whose writers write the taxonomy texts of each `Hit`'s load themselves, `TaxdbPrinter`): the
+/// `Hit`s' loads in their order (`subjects`, each `(key, ordinal, parsed Seq-ids)`), of which the
+/// first whose Seq-align id's lookup reads a header with a UTF8String where a VisibleString is
+/// expected posts NCBI's warning there (`report::query_warnings::ReadCursor`, at the `Hit`); empty
+/// where none does (`SeqDb::scope_utf8_loads`).
+pub(crate) fn scope_utf8_hit_reads<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<
+        Item = (
+            u32,
+            u32,
+            Option<&'s crate::report::db_subject::ParsedSubject>,
+        ),
+    >,
+    program: &str,
+) -> crate::report::query_warnings::QueryReads {
+    if !db.scope_utf8_loads() {
+        return Vec::new();
+    }
+    scope_utf8_reads(
+        db,
+        run,
+        subjects
+            .into_iter()
+            .map(|(key, ordinal, parsed)| (key, ordinal, SubjectLoad::Read(parsed))),
+        &program.to_ascii_lowercase(),
+    )
+}
+
+/// [`load_read_texts`] without `taxdb.bti` on the search path, in a run whose reader met a subject
+/// whose Seq-align id's lookup reads a UTF8String header (`SeqDb::scope_utf8_seen`): the loads
+/// write no taxonomy text, and each load of such a subject has an entry, the first posting NCBI's
+/// warning (`scope_utf8_lead`).
+#[cold]
+#[inline(never)]
+fn scope_utf8_reads<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    loads: impl IntoIterator<Item = (u32, u32, SubjectLoad<'s>)>,
+    lower: &str,
+) -> crate::report::query_warnings::QueryReads {
+    use crate::report::query_warnings::{ReadLoad, SubjectRead};
+    let mut fetched: std::collections::HashSet<u32> = Default::default();
+    let mut reads = Vec::new();
+    for (key, ordinal, load) in loads {
+        if !fetched.insert(ordinal) {
+            continue;
+        }
+        let SubjectLoad::Read(Some(parsed)) = load else {
+            continue;
+        };
+        if parsed.scope_utf8_read().is_none() {
+            continue;
+        }
+        let mut load = ReadLoad::of_scope_utf8(run.ledger());
+        let text = load.place_after(scope_utf8_lead(db, Some(parsed), lower), Vec::new());
+        reads.push(SubjectRead {
+            subject: key,
+            text,
+            load: Some(load),
+        });
+    }
+    reads
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
@@ -6724,22 +6896,31 @@ fn load_read_texts<'s>(
 /// sequence loaded before (the query's report, an earlier query or round) is loaded again or not,
 /// which LOSAT does not model, so such a read is refused where the two give other texts (the slot
 /// then holds another taxid) and else writes nothing. The lookups are the run's from then on. Empty
-/// without `taxdb.bti` on the search path.
+/// without `taxdb.bti` on the search path. Where the lookup of the read's Seq-align id (of the
+/// subject `parsed`) reads a header with a UTF8String where a VisibleString is expected and the run
+/// has not posted NCBI's warning (an off batch whose report read nothing of the subject), the read
+/// posts it before those texts (`load_read_texts`).
 pub(crate) fn pssm_load_texts(
     db: &SeqDb,
     run: &TaxdbRun,
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
     blob: u32,
     lookups: &[i32],
     program: &str,
 ) -> Result<Vec<u8>> {
+    let lead = if db.scope_utf8_loads() {
+        scope_utf8_lead(db, parsed, &program.to_ascii_lowercase())
+    } else {
+        Vec::new()
+    };
     if lookups.is_empty() || !run.found(db) {
-        return Ok(Vec::new());
+        return Ok(lead);
     }
     let Some(search_path) = db.search_path() else {
-        return Ok(Vec::new());
+        return Ok(lead);
     };
     let taxdb = run.taxdb(search_path);
-    let mut text = String::new();
+    let mut text = String::from_utf8(lead).expect("NCBI's warning is ASCII");
     run.volume_lookups_of(
         db,
         &taxdb,
@@ -7018,11 +7199,12 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         return Err(prefetch_stop(db, run, run, &subjects, program, queries));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
+    let mut failing = Vec::new();
     let mut fails = false;
     let mut uncertain: Option<(u32, String)> = None;
     let mut asked: std::collections::HashSet<u32> = Default::default();
     let mut loaded = Vec::new();
-    for PrefetchSubject {
+    for prefetched @ PrefetchSubject {
         ordinal,
         parsed,
         flipped,
@@ -7036,6 +7218,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
                         String::from_utf8_lossy(&subject.alignment_fasta()).into_owned(),
                     )
                 });
+                failing.push(prefetched);
                 continue;
             }
             if flipped && !fails && asked.insert(ordinal) {
@@ -7058,20 +7241,19 @@ pub(crate) fn batch_prefetch<'s, 'b>(
             program,
         ));
     }
-    // The failed lookup ends the loads: whether the load that reads a UTF8String header comes
-    // before it is that order's too.
-    if failed_lookup.is_some() && db.scope_utf8_seen() {
-        if let Some((ordinal, other)) = loaded.iter().find_map(|&(ordinal, parsed)| {
-            parsed
-                .and_then(|subject| subject.scope_utf8_read())
-                .map(|other| (ordinal, other))
-        }) {
-            return Err(scope_utf8_load_refusal(db, ordinal, other, program));
-        }
+    // The failed lookup ends the loads: NCBI's warning of a UTF8String header that a load's
+    // lookup reads comes before it where that load does.
+    if failed_lookup.is_some() && db.scope_utf8_loads() && scope_utf8_among(&loaded) {
+        scope_utf8_before_failure(db, &loaded, &failing, program)?;
     }
     let reads = prefetch_loads(db, run, loaded, true, program)?;
     if let Some((ordinal, id)) = &failed_lookup {
-        if reads.iter().any(|read| !read.text.is_empty()) {
+        // NCBI's warning of a UTF8String header before the failure is not a text of the
+        // taxonomy database (`scope_utf8_before_failure`).
+        if reads
+            .iter()
+            .any(|read| read.text.len() > read.load.as_ref().map_or(0, |load| load.lead))
+        {
             return Err(parsed_refusal(
                 db.oid(*ordinal),
                 &format!(
@@ -7087,6 +7269,76 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         posts.lines(&prefetch_warning(program));
     }
     Ok(posts)
+}
+
+/// Where a load of a batch's prefetch whose lookup throws on its id (`failing`, which ends the
+/// loads, [`batch_prefetch`]) and one whose lookup reads a header with a UTF8String where a
+/// VisibleString is expected (`ParsedSubject::scope_utf8`) are among its loads `loaded`: `Ok`
+/// where the first such load in NCBI's order of the Seq-id handles ([`load_places`]) comes before
+/// every failing lookup (the prefetch writes NCBI's warning there, before its own,
+/// [`prefetch_loads`]). LOSAT's refusal where it comes after one (the formatters read that subject
+/// one by one, where its warning comes, which LOSAT does not place for a batch whose prefetch is
+/// on) or where their order comes from the addresses of NCBI's Seq-id infos or is not known.
+#[cold]
+#[inline(never)]
+fn scope_utf8_before_failure(
+    db: &SeqDb,
+    loaded: &[(u32, Option<&crate::report::db_subject::ParsedSubject>)],
+    failing: &[PrefetchSubject<'_>],
+    program: &str,
+) -> Result<()> {
+    let subjects: Vec<PrefetchSubject<'_>> = loaded
+        .iter()
+        .map(|&(ordinal, parsed)| PrefetchSubject::unflipped(ordinal, parsed))
+        .chain(failing.iter().copied())
+        .collect();
+    let (places, _) = load_places(db, &subjects);
+    let (loads, fails) = places.split_at(loaded.len());
+    let Some((index, at)) = loads
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            loaded[*index]
+                .1
+                .is_some_and(|subject| subject.scope_utf8_read().is_some())
+        })
+        .min_by_key(|(_, place)| place.order)
+    else {
+        return Ok(());
+    };
+    let (ordinal, parsed) = loaded[index];
+    let other = parsed
+        .and_then(|subject| subject.scope_utf8_read())
+        .expect("a subject whose lookup reads such a header");
+    let failure = fails
+        .iter()
+        .zip(failing)
+        .min_by_key(|(place, _)| place.order)
+        .expect("a failing lookup");
+    let why = if let Some(why) = at.order_unknown(*failure.0) {
+        Some(why)
+    } else if at.order > failure.0.order {
+        Some("NCBI loads it after that lookup, so its formatters read it one by one with the warning, which LOSAT does not place in a batch whose prefetch is on")
+    } else {
+        None
+    };
+    match why {
+        None => Ok(()),
+        Some(why) => Err(parsed_refusal(
+            db.oid(ordinal),
+            &format!(
+                "has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: NCBI BLAST+ 2.17.0's prefetch writes its warning (803.10) at the load of that id, before its loads end at the lookup of {}, which throws, or not ({why})",
+                String::from_utf8_lossy(
+                    &failure
+                        .1
+                        .parsed
+                        .expect("a failing lookup has parsed Seq-ids")
+                        .alignment_fasta()
+                ),
+            ),
+            program,
+        )),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:778-786
@@ -7169,20 +7421,82 @@ pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
 /// [`batch_prefetch`], the texts of the loads before the stop after those lookups come before the
 /// error, and the batch is refused where a load whose order LOSAT does not know writes a text.
 /// `run` also holds the subjects that NCBI's data loader loaded for the batches before
-/// ([`TaxdbRun::note_loaded`], which BLASTX records as it writes each batch).
+/// ([`TaxdbRun::note_loaded`], which BLASTX records as it writes each batch). A batch that does not
+/// stop: `Ok` with NCBI's warning of a UTF8String header that a load's lookup reads
+/// ([`scope_utf8_prefetch_post`]; empty where none), which the caller writes where the batch's
+/// prefetch comes.
 pub(crate) fn batch_prefetch_stop<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
     queries: &PrefetchQueries<'_>,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if stops(&subjects) {
         Err(prefetch_stop(db, run, run, &subjects, program, queries))
     } else {
-        Ok(())
+        scope_utf8_prefetch_post(db, &subjects, program)
     }
+}
+
+/// NCBI's warning (803.10) where a load of the prefetch of a batch that does not stop, of the XML2
+/// and JSON formats (whose loads' taxonomy texts are the formats' own, at each `Hit`,
+/// [`batch_prefetch_stop`]), has a lookup that reads a header with a UTF8String where a
+/// VisibleString is expected (`ParsedSubject::scope_utf8`), and the run has not posted it: the
+/// first such load in NCBI's order of the Seq-id handles ([`load_places`]) posts it
+/// (`load_read_texts`), the only text of the prefetch. Refused where two such loads whose
+/// warnings differ have an order that comes from the addresses of NCBI's Seq-id infos or is not
+/// known. Empty where no load posts it.
+pub(crate) fn scope_utf8_prefetch_post(
+    db: &SeqDb,
+    subjects: &[PrefetchSubject<'_>],
+    program: &str,
+) -> Result<Vec<u8>> {
+    if !db.scope_utf8_loads() {
+        return Ok(Vec::new());
+    }
+    let scoped: Vec<(u32, Option<&crate::report::db_subject::ParsedSubject>)> = subjects
+        .iter()
+        .filter(|subject| !subject.parsed.is_some_and(|parsed| parsed.prefetch_fails()))
+        .map(|subject| (subject.ordinal, subject.parsed))
+        .collect();
+    if !scope_utf8_among(&scoped) {
+        return Ok(Vec::new());
+    }
+    let places = prefetch_places(db, &scoped);
+    let path = |index: usize| {
+        scoped[index]
+            .1
+            .and_then(|subject| subject.scope_utf8_read())
+            .and_then(|other| db.location_of(other.ordinal()))
+            .and_then(|at| db.utf8_string_path_at(at))
+    };
+    let mut candidates: Vec<usize> = (0..scoped.len())
+        .filter(|&index| path(index).is_some())
+        .collect();
+    candidates.sort_by_key(|&index| places[index].order);
+    let Some(&first) = candidates.first() else {
+        return Ok(Vec::new());
+    };
+    for &other in &candidates[1..] {
+        let unknown = places[other].order_unknown(places[first]);
+        if let Some(why) = unknown.filter(|_| path(other) != path(first)) {
+            return Err(parsed_refusal(
+                db.oid(scoped[first].0),
+                &format!(
+                    "has a Seq-align id whose lookup reads a header with a UTF8String where a VisibleString is expected, as the Seq-align id of database sequence {} does another one, and NCBI BLAST+ 2.17.0's prefetch writes the warning (803.10) of the first of their loads, whose order LOSAT does not know ({why})",
+                    db.oid(scoped[other].0)
+                ),
+                program,
+            ));
+        }
+    }
+    Ok(scope_utf8_lead(
+        db,
+        scoped[first].1,
+        &program.to_ascii_lowercase(),
+    ))
 }
 
 /// [`batch_prefetch_stop`] where the XML2 and JSON reports of the batches before are written after
@@ -7203,10 +7517,10 @@ pub(crate) fn held_batch_prefetch_stop<'s, 'b, 'l>(
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
     queries: &PrefetchQueries<'_>,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if !stops(&subjects) {
-        return Ok(());
+        return scope_utf8_prefetch_post(db, &subjects, program);
     }
     let before: Vec<PrefetchSubject<'b>> = before.into_iter().collect();
     run.keep_loaded(before.iter().copied());
@@ -7360,6 +7674,34 @@ fn prefetch_load_key(db: &SeqDb, subject: &PrefetchSubject<'_>) -> (u64, Option<
 /// [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids (whose stops' order LOSAT does not know either).
 /// The one owner of NCBI's order of a stopping batch's loads and lookups.
 fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
+    let (places, many) = load_places(db, subjects);
+    // The stopping subjects, each ordinal once, by their index in `subjects`.
+    let mut ordinals = std::collections::HashSet::new();
+    let mut stopping: Vec<usize> = (0..subjects.len())
+        .filter(|&index| ordinals.insert(subjects[index].ordinal) && places[index].stops)
+        .collect();
+    assert!(
+        !stopping.is_empty(),
+        "a stopping batch has a stopping subject"
+    );
+    // A sort that keeps the order of the batch among the handles of one key (ties).
+    stopping.sort_by_key(|&index| if many { 0 } else { places[index].order });
+    LoadOrder {
+        places,
+        stops: stopping,
+        many,
+    }
+}
+
+/// The place of each of a batch's reported sequences `subjects` (in any order, a sequence possibly
+/// more than once) in NCBI's map of the prefetch's Seq-id handles (quoted above
+/// [`LoadBeforeStop`]): its handle's key ([`prefetch_load_key`]), whether its lookup stops the
+/// batch (`ParsedSubject::prefetch_stops`), and why its place is not known: a Seq-align id that
+/// another subject has too, and every subject of a batch of more than [`PREFETCH_ONE_MAP_IDS`]
+/// distinct Seq-align ids (the second value). The one owner of that map for the stops
+/// ([`load_before_stop`]) and for the place of NCBI's warning of a UTF8String header among the
+/// loads ([`scope_utf8_prefetch_loads`]).
+fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>, bool) {
     let stops = |subject: &PrefetchSubject<'_>| {
         subject
             .parsed
@@ -7373,14 +7715,9 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
     let mut handles: std::collections::HashMap<&[u8], u32> = Default::default();
     let mut shared = std::collections::HashSet::new();
     let mut ids = 0;
-    // The stopping subjects, each ordinal once, by their index in `subjects`.
-    let mut stopping = Vec::new();
-    for (index, (subject, (_, handle))) in subjects.iter().zip(&keys).enumerate() {
+    for (subject, (_, handle)) in subjects.iter().zip(&keys) {
         if !ordinals.insert(subject.ordinal) {
             continue;
-        }
-        if stops(subject) {
-            stopping.push(index);
         }
         match handle {
             Some(handle) => match handles.entry(handle) {
@@ -7396,16 +7733,19 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
             None => ids += 1,
         }
     }
-    assert!(
-        !stopping.is_empty(),
-        "a stopping batch has a stopping subject"
-    );
     let many = ids > PREFETCH_ONE_MAP_IDS;
     let places = subjects
         .iter()
         .zip(&keys)
-        .map(|(subject, (order, _))| LoadPlace {
+        .map(|(subject, (order, handle))| LoadPlace {
             order: *order,
+            handle: handle.as_ref().map(|handle| {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                handle.hash(&mut hasher);
+                hasher.finish()
+            }),
+            many,
             stops: stops(subject),
             unknown: if many {
                 Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100")
@@ -7416,13 +7756,7 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
             },
         })
         .collect::<Vec<_>>();
-    // A sort that keeps the order of the batch among the handles of one key (ties).
-    stopping.sort_by_key(|&index| if many { 0 } else { places[index].order });
-    LoadOrder {
-        places,
-        stops: stopping,
-        many,
-    }
+    (places, many)
 }
 
 /// NCBI's order of the loads and lookups of a stopping batch's subjects ([`load_before_stop`]).
@@ -7448,6 +7782,28 @@ struct LoadPlace {
     stops: bool,
     /// Why LOSAT does not know its place, whatever the stops' keys.
     unknown: Option<&'static str>,
+    /// Its handle's identity (a hash of [`prefetch_load_key`]'s; `None` where no pure function
+    /// knows it): two subjects of one handle are one load of NCBI's map.
+    handle: Option<u64>,
+    /// The batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
+    many: bool,
+}
+
+impl LoadPlace {
+    /// Why NCBI's order of this load and the load `other` is not known, for the place of NCBI's
+    /// warning of a UTF8String header among a prefetch's loads ([`scope_utf8_prefetch_loads`]):
+    /// a batch of more than [`PREFETCH_ONE_MAP_IDS`] ids, or two handles of one key (one packed
+    /// number, or neither packed), which NCBI's map orders by the address of their info
+    /// ([`ADDRESS_ORDER`]); `None` where the keys order them or they are one handle (one load).
+    fn order_unknown(self, other: LoadPlace) -> Option<&'static str> {
+        if self.many {
+            return Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100");
+        }
+        if self.order != other.order || (self.handle.is_some() && self.handle == other.handle) {
+            return None;
+        }
+        Some(ADDRESS_ORDER)
+    }
 }
 
 impl LoadOrder {
@@ -7914,19 +8270,6 @@ fn prefetch_stop(
     }) {
         return refuse("another of its subjects has an id whose lookup throws, which the prefetch catches and which ends its loads, and which comes before it or may");
     }
-    // The load of a subject whose Seq-align id the lookup gives first to another sequence with a
-    // UTF8String header writes NCBI's warning there (`HeaderReader::scope_read`), before the stop
-    // or never, as the loads come (line RG item T5d, decision G3).
-    if db.scope_utf8_seen() {
-        if let Some(other) = subjects
-            .iter()
-            .find_map(|subject| subject.parsed.and_then(|parsed| parsed.scope_utf8_read()))
-        {
-            return refuse(&format!(
-                "another of its subjects has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected, and NCBI writes its warning (803.10) at the load that reads that header, before the stop or not at all"
-            ));
-        }
-    }
     // The loads before the stop, then those whose order LOSAT does not know, then the sequences
     // that a skipped stopping lookup is given instead (loaded by that stopping id). The bytes of a
     // set of loads do not depend on their order ([`prefetch_messages`]: a text comes with the
@@ -7938,23 +8281,37 @@ fn prefetch_stop(
     // part of them writes anything before the stop.
     const INSTEAD: &str = "the sequence that NCBI's BLAST database data loader gives for a stopping id before it whose lookup NCBI may not make, which NCBI loads where it does not";
     let mut unknown = None;
-    let reads = subjects
+    // Where a load's lookup reads a header with a UTF8String where a VisibleString is expected
+    // (`ParsedSubject::scope_utf8`), NCBI's warning comes at that load (`load_read_texts`), after
+    // the texts of the loads before it: the loads before the stop come in the order of their
+    // Seq-id handles (by key; of one key, in an order that LOSAT does not know, below).
+    let scope_utf8 = db.scope_utf8_loads();
+    let mut yes: Vec<usize> = (0..subjects.len())
+        .filter(|&index| before[index] == LoadBeforeStop::Yes)
+        .collect();
+    if scope_utf8 {
+        yes.sort_by_key(|&index| order.places[index].order);
+    }
+    let reads = yes
         .iter()
-        .zip(&before)
-        .filter(|(_, before)| **before == LoadBeforeStop::Yes)
-        .chain(
-            subjects
-                .iter()
-                .zip(&before)
-                .filter(|(_, before)| matches!(before, LoadBeforeStop::Unknown(_))),
-        )
-        .map(|(subject, before)| {
-            let why = match before {
-                LoadBeforeStop::Unknown(why) => Some(*why),
-                _ => None,
-            };
+        .map(|&index| (None, index))
+        .chain((0..subjects.len()).filter_map(|index| match before[index] {
+            LoadBeforeStop::Unknown(why) => Some((Some(why), index)),
+            _ => None,
+        }))
+        .map(|(why, index)| {
+            let subject = &subjects[index];
             (why, subject.ordinal, SubjectLoad::Read(subject.parsed))
         });
+    // The subject of each load (its index in `subjects`), by its place in `whys`.
+    let indexes: Vec<usize> = yes
+        .iter()
+        .copied()
+        .chain(
+            (0..subjects.len())
+                .filter(|&index| matches!(before[index], LoadBeforeStop::Unknown(_))),
+        )
+        .collect();
     let given = instead.iter().flat_map(|(index, holders)| {
         let (ordinal, parsed, _) = stopping(*index);
         holders.iter().map(move |&holder| {
@@ -8025,15 +8382,65 @@ fn prefetch_stop(
             "the load of another of its subjects, which LOSAT does not know NCBI's prefetch to make before the stop ({why}), asks the taxonomy database for what a BLAST XML report before it did not (NCBI's XML stream cut its Iteration at a query title or id outside US-ASCII, so it made none of its loads), and NCBI writes there the texts of those asks where it makes it"
         ));
     }
+    let lead = |read: &crate::report::query_warnings::SubjectRead| {
+        read.load.as_ref().map_or(0, |load| load.lead)
+    };
+    // NCBI's warning of a UTF8String header at a load before the stop: another load of the same
+    // key (whose order to it comes from the addresses of NCBI's Seq-id infos) may come before it,
+    // which changes the bytes where that load's lookup reads such a header too, or where it asks
+    // the taxonomy database and the loads write a text of it.
+    if let Some(posting) = reads
+        .iter()
+        .find(|read| lead(read) > 0 && whys[read.subject as usize].is_none())
+    {
+        let at = order.places[indexes[posting.subject as usize]];
+        let taxonomy_texts = reads.iter().any(|read| read.text.len() > lead(read));
+        for read in &reads {
+            if std::ptr::eq(read, posting) || whys[read.subject as usize].is_some() {
+                continue;
+            }
+            let index = indexes[read.subject as usize];
+            if order.places[index].order_unknown(at).is_none() {
+                continue;
+            }
+            let scoped = subjects[index]
+                .parsed
+                .is_some_and(|parsed| parsed.scope_utf8_read().is_some());
+            let asks = read
+                .load
+                .as_ref()
+                .is_some_and(|load| load.looks_up || load.offset);
+            if scoped || (asks && taxonomy_texts) {
+                return refuse(&format!(
+                    "NCBI's prefetch writes the warning (803.10) of a UTF8String header at the load of database sequence {} before the stop, and the load of database sequence {} may come before it or after it ({ADDRESS_ORDER})",
+                    db.oid(subjects[indexes[posting.subject as usize]].ordinal),
+                    db.oid(subjects[index].ordinal),
+                ));
+            }
+        }
+    }
     let mut text = String::new();
+    let mut unknown_utf8 = None;
     for read in &reads {
         match whys[read.subject as usize] {
+            Some(why) if lead(read) > 0 => {
+                unknown_utf8.get_or_insert((indexes[read.subject as usize], why));
+            }
             Some(why) if !read.text.is_empty() => {
                 unknown.get_or_insert(why);
             }
             Some(_) => {}
             None => text.push_str(&String::from_utf8_lossy(&read.text)),
         }
+    }
+    if let Some((index, why)) = unknown_utf8 {
+        let other = subjects[index]
+            .parsed
+            .and_then(|parsed| parsed.scope_utf8_read())
+            .expect("a load whose lookup reads such a header");
+        return refuse(&format!(
+            "the lookup of another of its subjects' Seq-align id gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected, and LOSAT does not know NCBI's prefetch to make that load before the stop ({why}), where it writes its warning (803.10)"
+        ));
     }
     if let Some(why) = unknown {
         return refuse(&format!(
@@ -8228,18 +8635,6 @@ pub(crate) fn check_prefetched_parsed(
     // NCBI's exception its stop (`batch_prefetch`).
     if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
         return Ok(());
-    }
-    // Where `PRE_FETCH_SEQS_LIMIT` may turn a batch's prefetch off, the reader notes no read of
-    // the prefetch (`scope_reads_at_batch`): this batch's prefetch reads the UTF8String header of
-    // the sequence that the lookup gives first, with NCBI's warning.
-    if let Some(other) = subject.scope_utf8_read().filter(|_| prefetch_may_be_off()) {
-        return Err(parsed_refusal(
-            db.oid(ordinal),
-            &format!(
-                "has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: with PRE_FETCH_SEQS_LIMIT, NCBI BLAST+ 2.17.0's prefetch of a batch reads that header with its warning (803.10) or not, as the batch's Seq-aligns count, which LOSAT does not reproduce"
-            ),
-            program,
-        ));
     }
     match prefetch_reads(db, ordinal, subject, false, program)? {
         Ok(_) => Ok(()),
@@ -10706,13 +11101,9 @@ mod taxdb_prepass_tests {
                 (3, error.clone())
             );
             assert_eq!(
-                stopped(batch_prefetch_stop(
-                    &db,
-                    &run,
-                    alone,
-                    "BLASTN",
-                    &stop_queries(3)
-                )),
+                stopped(
+                    batch_prefetch_stop(&db, &run, alone, "BLASTN", &stop_queries(3)).map(drop)
+                ),
                 (3, error.clone())
             );
             // With another subject whose load writes the texts of opening the taxonomy database:
@@ -10743,26 +11134,26 @@ mod taxdb_prepass_tests {
                         error
                     );
                     assert_eq!(
-                        stopped(batch_prefetch_stop(
-                            &db,
-                            &run,
-                            both(),
-                            "BLASTN",
-                            &stop_queries(0)
-                        ))
+                        stopped(
+                            batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(0))
+                                .map(drop)
+                        )
                         .1,
                         error
                     );
                     assert_eq!(
-                        stopped(held_batch_prefetch_stop(
-                            &db,
-                            &TaxdbRun::default(),
-                            std::iter::empty(),
-                            std::iter::empty(),
-                            both(),
-                            "BLASTN",
-                            &stop_queries(0)
-                        ))
+                        stopped(
+                            held_batch_prefetch_stop(
+                                &db,
+                                &TaxdbRun::default(),
+                                std::iter::empty(),
+                                std::iter::empty(),
+                                both(),
+                                "BLASTN",
+                                &stop_queries(0)
+                            )
+                            .map(drop)
+                        )
                         .1,
                         error
                     );
@@ -10786,7 +11177,8 @@ mod taxdb_prepass_tests {
                             both(),
                             "BLASTN",
                             &stop_queries(0),
-                        ),
+                        )
+                        .map(drop),
                         held_batch_prefetch_stop(
                             &db,
                             &TaxdbRun::default(),
@@ -10795,7 +11187,8 @@ mod taxdb_prepass_tests {
                             both(),
                             "BLASTN",
                             &stop_queries(0),
-                        ),
+                        )
+                        .map(drop),
                     ] {
                         assert_eq!(stopped(stop), (0, format!("{open}{error}")));
                     }
@@ -10842,25 +11235,25 @@ mod taxdb_prepass_tests {
                     )
                     .unwrap();
                     assert_eq!(
-                        stopped(batch_prefetch_stop(
-                            &db,
-                            &run,
-                            both(),
-                            "BLASTN",
-                            &stop_queries(1)
-                        )),
+                        stopped(
+                            batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(1))
+                                .map(drop)
+                        ),
                         (1, error.clone())
                     );
                     assert_eq!(
-                        stopped(held_batch_prefetch_stop(
-                            &db,
-                            &TaxdbRun::default(),
-                            [subject(other, &None)],
-                            std::iter::empty(),
-                            both(),
-                            "BLASTN",
-                            &stop_queries(1)
-                        )),
+                        stopped(
+                            held_batch_prefetch_stop(
+                                &db,
+                                &TaxdbRun::default(),
+                                [subject(other, &None)],
+                                std::iter::empty(),
+                                both(),
+                                "BLASTN",
+                                &stop_queries(1)
+                            )
+                            .map(drop)
+                        ),
                         (1, error.clone())
                     );
                 }
@@ -10873,6 +11266,7 @@ mod taxdb_prepass_tests {
                 "BLASTN",
                 &stop_queries(0),
             )
+            .map(drop)
             .unwrap();
         }
         // Another subject whose lookup throws on its id, which the prefetch catches and which ends
@@ -10915,7 +11309,8 @@ mod taxdb_prepass_tests {
                 [subject(other, &throws), subject(stop as u32, &parsed[stop])],
                 "BLASTN",
                 &stop_queries(0),
-            ),
+            )
+            .map(drop),
         ] {
             let refused = refused.unwrap_err();
             assert!(!refused.is::<HeaderReadError>());
@@ -11718,7 +12113,9 @@ mod taxdb_prepass_tests {
             for &ordinal in ordinals {
                 let subject = &parsed[ordinal as usize];
                 let lookups = blob_taxids(&db, ordinal, Some(subject), ordinal, "PSIBLAST")?;
-                text.extend(pssm_load_texts(&db, &run, ordinal, &lookups, "PSIBLAST")?);
+                text.extend(pssm_load_texts(
+                    &db, &run, None, ordinal, &lookups, "PSIBLAST",
+                )?);
             }
             Ok(String::from_utf8(text).unwrap())
         };
@@ -11854,14 +12251,14 @@ mod utf8_read_tests {
 
     /// NCBI's scope reads the header of the sequence that the lookup of a reported sequence's
     /// Seq-align id gives first (the data loader's `x_GetOid`), with the warning of its
-    /// UTF8String: noted where the scope resolves the ids at the batch, never for the subject
-    /// that the lookup gives first; a copy of the record but for that string is the subject
-    /// to every report.
+    /// UTF8String: never the reader's batch-level read (`first_utf8`), but the first load of that
+    /// id in the model of the loads (`load_read_texts`), never for the subject that the lookup
+    /// gives first; a copy of the record but for that string is the subject to every report.
     #[test]
     fn the_scope_reads_the_sequence_the_lookup_gives_first() {
+        const WARNING: &[u8] = b"Warning: (803.10) [blastp] CObjectIStreamAsnBinary: UTF8String data for VisibleString member Blast-def-line-set.E.title, ASN.1 specification may need an update\n";
         for other in ["same", "none"] {
             let db = dup_list(other);
-            // The archive and the Seq-annots without the prefetch resolve nothing.
             let headers = HeaderReader::new(&db);
             let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
             else {
@@ -11877,22 +12274,48 @@ mod utf8_read_tests {
                     Some(crate::report::db_subject::FoundInstead::Sequence(_))
                 ));
             }
+            // The first load of the id posts the warning (also without `taxdb.bti`); a later load
+            // nothing.
+            let run = TaxdbRun::default();
+            let load = || {
+                subject_read_texts(&db, &run, [(7, 1, Some(&*subject))], false, "BLASTP").unwrap()
+            };
+            let reads = load();
+            assert_eq!(reads.len(), 1, "{other}");
+            assert_eq!(reads[0].subject, 7);
+            assert_eq!(reads[0].text, WARNING, "{other}");
+            assert_eq!(
+                reads[0].load.as_ref().map(|load| load.lead),
+                Some(WARNING.len())
+            );
+            assert!(load().iter().all(|read| read.text.is_empty()), "{other}");
+            // Once posted, the scope's read of a later batch's reader is none.
             let headers = HeaderReader::new(&db);
-            headers.scope_reads(true);
-            read_header(&headers, 1, 2, "BLASTP").unwrap();
-            let read = headers.first_utf8().expect("the scope's read");
-            assert_eq!(read.query, 2);
-            assert_eq!(read.path, "Blast-def-line-set.E.title");
-            // Once posted, the scope's read of a later batch writes nothing.
-            assert!(read.post(&db, "blastp").is_some());
-            let headers = HeaderReader::new(&db);
-            headers.scope_reads(true);
             let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
             else {
                 panic!("parsed Seq-ids");
             };
             assert_eq!(headers.first_utf8(), None);
             assert_eq!(subject.scope_utf8_read(), None);
+            // A batch whose own reads post a warning ends the loads' posts (`Utf8Read::reach`).
+            let db = dup_list(other);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
+            else {
+                panic!("parsed Seq-ids");
+            };
+            let read = Utf8Read {
+                query: 2,
+                path: "Blast-def-line-set.E.title".to_owned(),
+            };
+            Utf8Read::reach(Some(&read), &(0..2), &db);
+            assert!(db.scope_utf8_loads());
+            Utf8Read::reach(Some(&read), &(2..4), &db);
+            assert!(!db.scope_utf8_loads());
+            let reads =
+                subject_read_texts(&db, &run, [(7, 1, Some(&*subject))], false, "BLASTP").unwrap();
+            assert!(reads.iter().all(|read| read.text.is_empty()), "{other}");
+            assert!(read.post(&db, "blastp").is_some());
         }
         // The subject first: the scope reads no other holder.
         let t5 = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5");
@@ -11903,7 +12326,6 @@ mod utf8_read_tests {
         );
         let db = SeqDb::open(&list, SeqType::Protein).unwrap();
         let headers = HeaderReader::new(&db);
-        headers.scope_reads(true);
         let ReportedHeader::Parsed(subject) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
             panic!("parsed Seq-ids");
         };

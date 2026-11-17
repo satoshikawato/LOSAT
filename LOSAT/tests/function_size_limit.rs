@@ -32,10 +32,14 @@ use std::path::Path;
 /// longest function of that name in that file; any other function of the same name is held at the
 /// limit.
 #[rustfmt::skip]
+// Line RG item T5d (2026-11-17): the three batch loops place NCBI's warning of a UTF8String header
+// (803.10) at the batch's reads (their fetches, Seq-aligns and loads); their new code is in
+// functions of its own (`HeaderReader`, `load_read_texts`, `call_titles`, `FetchNotes`,
+// `FetchedUtf8`, `batch_titles`, `scope_utf8_hit_reads`), the calls and the batches' state stay.
 const CAPS: &[(&str, &str, usize)] = &[
-    ("algorithm/blastn/blast_engine/run.rs", "run_in_pool", 1516),
-    ("algorithm/blastp/blast_engine.rs", "run_call", 1794),
-    ("algorithm/tblastn/tblastn_app.rs", "search", 1453),
+    ("algorithm/blastn/blast_engine/run.rs", "run_in_pool", 1542),
+    ("algorithm/blastp/blast_engine.rs", "run_call", 1805),
+    ("algorithm/tblastn/tblastn_app.rs", "search", 1470),
     ("algorithm/tblastx/sum_stats_linking/linking.rs", "link_hsp_group_ncbi", 1422),
 ];
 

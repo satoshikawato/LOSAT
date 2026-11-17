@@ -10462,6 +10462,50 @@ fn run_resolved_in_pool(
     }
 }
 
+/// The titles of the call's reported database subjects (`ListedSubjects::read_titles`, or with
+/// LOSAT_X_BPLISTEDLEAN `x_read_titles_lean`), read one batch after the other: the first queries of
+/// the call's `query_batches` (`shared::HeaderReader::batch_starts`). Their `utf8` is NCBI's first
+/// read, in the Seq-aligns of the call's batches, of a header with a UTF8String where a
+/// VisibleString is expected: its warning comes before anything the batch writes after its search
+/// (`header_read`), and before an error of the batch's prefetch.
+fn call_titles<'a>(
+    listed_subjects: Option<&'a database::ListedSubjects>,
+    database: Option<&'a database::BlastpDatabase>,
+    hit_lists: &[Option<BlastpHitList>],
+    query_batches: &[crate::blastinput::seq_range::RangedBatch],
+    x_listed_lean: bool,
+) -> Result<Option<database::ListedTitles<'a>>> {
+    let batch_starts: Vec<usize> = query_batches
+        .iter()
+        .map(|batch| batch.searched.start)
+        .collect();
+    Ok(match (listed_subjects, database) {
+        (Some(listed), Some(database)) => Some(if x_listed_lean {
+            listed.x_read_titles_lean(database, hit_lists, &batch_starts)?
+        } else {
+            listed.read_titles(database, hit_lists, &batch_starts)?
+        }),
+        _ => None,
+    })
+}
+
+/// NCBI's warning of the call's first read of a UTF8String header among its batches' own reads
+/// (`read`, `call_titles`), in the first query of the batch whose Seq-aligns read it, with the
+/// posts that follow the reader's messages of the batch (`query_warnings::query_posts`), where the
+/// run has not posted it (a load of the model of the loads may have, `shared::load_read_texts`).
+fn header_read(
+    read: Option<&database::Utf8Read>,
+    query_batches: &[crate::blastinput::seq_range::RangedBatch],
+    database: Option<&database::BlastpDatabase>,
+    program: &str,
+) -> Option<(usize, crate::report::diag_log::Posts)> {
+    let read = read?;
+    let batch = query_batches
+        .iter()
+        .find(|batch| batch.searched.contains(&read.query))?;
+    Some((batch.searched.start, read.post(database?.seqdb(), program)?))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_call(
     args: ResolvedBlastpArgs,
@@ -11171,9 +11215,7 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
-    // Whether the PSSM's position-based redo ran (`pssm_hooks::pssm_traceback`), which notes the
-    // subjects its fetches read itself (`ListedSubjects::note_fetched`).
-    let pssm_redone = std::cell::Cell::new(false);
+    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -11182,15 +11224,8 @@ fn run_call(
         Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
     } else if ordinary_traceback && args.psi_search.is_some() {
         // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
-        // the position-based redo of modes 1 to 3, whose heaps tell which subjects its fetches
-        // read, `ListedSubjects::note_fetched`).
-        let redone = |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap]| {
-            pssm_redone.set(true);
-            if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
-                let all = |_: usize| 0..heaps.len();
-                listed.note_fetched(database, Some(heaps), &all);
-            }
-        };
+        // the position-based redo of modes 1 to 3, `FetchNotes::pssm_redo`).
+        let redone = |heaps: &[_]| fetch_notes.pssm_redo(heaps);
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -11340,18 +11375,11 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
-    // The subjects that the call's fetches with `check_oid_exclusion` read (a seqid list's,
-    // `ListedSubjects::note_fetched`): every subject of the ordinary traceback, or those the
-    // composition-based redo's early termination test leaves (its heaps as it left them; the
-    // PSSM's position-based redo noted its own above).
-    if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
-        let batch_of = |q_idx: usize| kappa_query_batches[q_idx].clone();
-        if ordinary_hit_lists.is_none() {
-            listed.note_fetched(database, Some(&redone_matches), &batch_of);
-        } else if !pssm_redone.get() {
-            listed.note_fetched(database, None, &batch_of);
-        }
-    }
+    fetch_notes.after(
+        &redone_matches,
+        ordinary_hit_lists.is_none(),
+        &kappa_query_batches,
+    );
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {
@@ -11484,38 +11512,14 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    // The first queries of the call's batches, which read their headers one batch after the
-    // other (`shared::HeaderReader::batch_starts`).
-    let batch_starts: Vec<usize> = query_batches
-        .iter()
-        .map(|batch| batch.searched.start)
-        .collect();
-    // Whether NCBI's scope resolves the reported subjects at each batch, before its reports
-    // (`shared::scope_reads_at_batch`): a format reads their Bioseqs, or the first format's
-    // prefetch loads them.
-    let scope_reads = crate::algorithm::common::database::scope_reads_at_batch(
-        requested_formats
-            .iter()
-            .any(|outfmt| outfmt.reads_subjects()),
-        requested_formats
-            .first()
-            .is_some_and(|outfmt| outfmt.prefetches_subjects())
-            && !crate::algorithm::common::database::prefetch_always_off(),
-    );
-    let listed_titles = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => Some(if x_listed_lean {
-            listed.x_read_titles_lean(database, &hit_lists, &batch_starts, scope_reads)?
-        } else {
-            listed.read_titles(database, &hit_lists, &batch_starts, scope_reads)?
-        }),
-        _ => None,
-    };
-    // NCBI's first read, in the Seq-aligns of the call's batches, of a header with a UTF8String
-    // where a VisibleString is expected: its warning comes before anything the batch writes after
-    // its search (`query_posts` below), and before an error of the batch's prefetch.
-    let utf8_read = listed_titles
-        .as_ref()
-        .and_then(|titles| titles.utf8.as_ref());
+    let listed_titles = call_titles(
+        listed_subjects.as_ref(),
+        database,
+        &hit_lists,
+        &query_batches,
+        x_listed_lean,
+    )?;
+    let utf8_read = database::ListedTitles::utf8_of(&listed_titles);
     report_prep::refuse_prefetch_environment(&setup, outputs, utf8_read)?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
@@ -12041,17 +12045,7 @@ fn run_call(
     // strategy request of each of the call's batches follow the reader's messages of the batch
     // (after psiblast's warnings of the PSSM reads of the query before), in its first query
     // (`query_warnings::query_posts`).
-    // NCBI's warning of its first read of a UTF8String header follows them, in the first query of
-    // the batch whose Seq-aligns read it (`utf8_read`).
-    let header_read = utf8_read.and_then(|read| {
-        let batch = query_batches
-            .iter()
-            .find(|batch| batch.searched.contains(&read.query))?;
-        Some((
-            batch.searched.start,
-            read.post(database?.seqdb(), args.app.ncbi_name())?,
-        ))
-    });
+    let header_read = header_read(utf8_read, &query_batches, database, args.app.ncbi_name());
     let mut query_posts = crate::report::query_warnings::query_posts(
         query_warning_lines,
         reports

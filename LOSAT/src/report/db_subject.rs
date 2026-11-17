@@ -538,11 +538,14 @@ impl ParsedSubject {
     //     ...
     //     IBlastDbAdapter::TSeqIdList filtered = m_BlastDb->GetSeqIDs(oid);
     // ```
-    /// The subject with `other`, the sequence that the lookup of the Seq-align id gives first
-    /// where that is another one whose header holds a UTF8String where a VisibleString is
-    /// expected (`common::database::HeaderReader`): NCBI's data loader reads that header
-    /// (`x_GetOid`'s `GetSeqIDs` of the first OID) wherever its scope resolves the id, and posts
-    /// the warning there where the run has not (probe of line RG item T5d fix 3).
+    /// The subject with `other`, the sequence whose header the lookup of the Seq-align id reads
+    /// first where it holds a UTF8String where a VisibleString is expected (its version check of
+    /// an accession, or the sequence it gives first where that is another one;
+    /// `common::database::HeaderReader`): NCBI's data loader reads that header (`x_GetOid`'s
+    /// `GetSeqIDs` of the first OID) wherever its scope resolves the id, and posts the warning
+    /// there where the run has not (probe of line RG item T5d fix 3): the load of the id in LOSAT's
+    /// model of the loads (`common::database::load_read_texts`: a batch's prefetch, a report that
+    /// reads its subjects one by one, psiblast's PSSM).
     pub fn scope_utf8(mut self, other: Option<DbSequence>) -> Self {
         self.scope_utf8 = other;
         self
@@ -715,25 +718,7 @@ impl ParsedSubject {
     /// another can stand for by a weak match (`WeakMatch`), after what the lookup finds.
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool) -> Result<(), String> {
         self.found_fetched(taxonomy)?;
-        self.weakly_fetched(one_by_one)?;
-        self.scope_utf8_fetched(one_by_one)
-    }
-
-    /// `fetched`'s refusal of a subject whose Seq-align id the lookup gives first to another
-    /// sequence with a UTF8String header (`scope_utf8`), where the batch that reports it reads one
-    /// by one (`one_by_one`): NCBI's formatters read that header inside the query's report (after
-    /// outfmt 0's `Sequences producing significant alignments:`, outfmt 7's `# N hits found`,
-    /// before the tabular row; probe of line RG item T5d fix 3, `PRE_FETCH_SEQS_LIMIT=0` with
-    /// `2>&1`), where LOSAT does not place the warning; psiblast's PSSM reads it after the round's
-    /// report (`pssm_read`).
-    fn scope_utf8_fetched(&self, one_by_one: bool) -> Result<(), String> {
-        match self.scope_utf8.filter(|_| one_by_one) {
-            None => Ok(()),
-            Some(other) => Err(format!(
-                "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, NCBI BLAST+ 2.17.0 reads that header where its report or PSSM reads the subject, and writes its warning (803.10) there",
-                String::from_utf8_lossy(&self.alignment_fasta())
-            )),
-        }
+        self.weakly_fetched(one_by_one)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
@@ -769,8 +754,7 @@ impl ParsedSubject {
             }
             _ => {}
         }
-        self.weakly_fetched(one_by_one)?;
-        self.scope_utf8_fetched(one_by_one)
+        self.weakly_fetched(one_by_one)
     }
 
     /// Another sequence (`DbSequence`) that holds an id NCBI's scope takes for the Seq-align id
@@ -2713,27 +2697,21 @@ mod tests {
         );
     }
 
-    // Line RG item T5d fix 3: the sequence that the lookup gives first, another one whose header
-    // holds a UTF8String, is read by NCBI's scope with its warning; where the batch reads one by
-    // one, the warning comes inside the report (or after it, psiblast's PSSM), which LOSAT
-    // refuses.
+    // Line RG item T5d fixes 3 and 4: the sequence that the lookup gives first, another one whose
+    // header holds a UTF8String, is read by NCBI's scope with its warning, which the load of the
+    // id posts (`common::database::load_read_texts`), also where the batch reads one by one: no
+    // refusal.
     #[test]
-    fn a_utf8string_header_that_the_scope_reads_one_by_one_is_refused() {
+    fn a_utf8string_header_that_the_scope_reads_is_no_refusal() {
         let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
         assert_eq!(subject.scope_utf8_read(), None);
-        assert_eq!(subject.fetched(false, true), Ok(()));
-        let read = subject
-            .clone()
-            .scope_utf8(Some(DbSequence::of_unrestricted(3)));
+        let read = subject.scope_utf8(Some(DbSequence::of_unrestricted(3)));
         assert_eq!(read.scope_utf8_read(), Some(DbSequence::of_unrestricted(3)));
-        assert_eq!(read.fetched(true, false), Ok(()));
-        assert_eq!(read.pssm_read(false), Ok(()));
-        let error = read.fetched(false, true).unwrap_err();
-        assert!(
-            error.contains("gives database sequence 3 first, whose header holds a UTF8String"),
-            "{error}"
-        );
-        assert!(read.pssm_read(true).is_err());
+        for one_by_one in [false, true] {
+            assert_eq!(read.fetched(true, one_by_one), Ok(()));
+            assert_eq!(read.fetched(false, one_by_one), Ok(()));
+            assert_eq!(read.pssm_read(one_by_one), Ok(()));
+        }
     }
 
     // Line DBID pssmread (probe `R/pssmread`, reviews 1 and 2): LOSAT's refusals of what

@@ -113,10 +113,12 @@ pub(super) struct BlastpDatabase {
 }
 
 impl BlastpDatabase {
-    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), for
-    /// the search again of the batches before a failed one.
+    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), and the
+    /// loads' posts of NCBI's warning of a UTF8String header (`SeqDb::restart_utf8_loads`), for the
+    /// search again of the batches before a failed one.
     pub(super) fn restart_taxonomy(&self) {
         self.taxdb.restart();
+        self.db.restart_utf8_loads();
     }
 
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
@@ -994,6 +996,68 @@ impl XFetchedUtf8 {
     }
 }
 
+impl ListedTitles<'_> {
+    /// The `utf8` of the call's titles, where there are titles (`blast_engine::call_titles`).
+    pub(super) fn utf8_of<'t>(titles: &'t Option<ListedTitles<'_>>) -> Option<&'t Utf8Read> {
+        titles.as_ref().and_then(|titles| titles.utf8.as_ref())
+    }
+}
+
+/// The notes of the subjects that a call's fetches with `check_oid_exclusion` read (a seqid
+/// list's, `ListedSubjects::note_fetched`) around its traceback: the PSSM's position-based redo
+/// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
+/// (`after`) every subject of the ordinary traceback, or those that the
+/// composition-based redo's early termination test leaves (its heaps as it left them).
+pub(super) struct FetchNotes<'a> {
+    listed: Option<&'a ListedSubjects>,
+    database: Option<&'a BlastpDatabase>,
+    /// Whether the PSSM's position-based redo ran and noted its own.
+    pssm_redone: std::cell::Cell<bool>,
+}
+
+impl<'a> FetchNotes<'a> {
+    pub(super) fn new(
+        listed: Option<&'a ListedSubjects>,
+        database: Option<&'a BlastpDatabase>,
+    ) -> Self {
+        Self {
+            listed,
+            database,
+            pssm_redone: std::cell::Cell::new(false),
+        }
+    }
+
+    /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
+    /// subjects its fetches read.
+    pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) {
+        self.pssm_redone.set(true);
+        if let (Some(listed), Some(database)) = (self.listed, self.database) {
+            let all = |_: usize| 0..heaps.len();
+            listed.note_fetched(database, Some(heaps), &all);
+        }
+    }
+
+    /// After the traceback: `heaps`, the composition-based redo's, which made the hit lists where
+    /// `redone` (else the ordinary traceback did), the batch of each query being in `batches`
+    /// (`redo_run::kappa_query_batches`).
+    pub(super) fn after(
+        &self,
+        heaps: &[BlastCompoHeap],
+        redone: bool,
+        batches: &[std::ops::Range<usize>],
+    ) {
+        let (Some(listed), Some(database)) = (self.listed, self.database) else {
+            return;
+        };
+        let batch_of = |q_idx: usize| batches[q_idx].clone();
+        if redone {
+            listed.note_fetched(database, Some(heaps), &batch_of);
+        } else if !self.pssm_redone.get() {
+            listed.note_fetched(database, None, &batch_of);
+        }
+    }
+}
+
 impl ListedSubjects {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
     // ```c
@@ -1109,18 +1173,14 @@ impl ListedSubjects {
 
     /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
     /// start at the queries `batch_starts`, with the call's reads before them that took a
-    /// UTF8String for a VisibleString (`note_fetched`, `drop_unaligned`). `scope_reads`: whether
-    /// NCBI's scope resolves the reported sequences at each batch
-    /// (`shared::scope_reads_at_batch`).
+    /// UTF8String for a VisibleString (`note_fetched`, `drop_unaligned`).
     fn header_reader<'a>(
         &self,
         database: &'a BlastpDatabase,
         batch_starts: &[usize],
-        scope_reads: bool,
     ) -> shared::HeaderReader<'a> {
         let headers = shared::HeaderReader::new(&database.db);
         headers.batch_starts(batch_starts.to_vec());
-        headers.scope_reads(scope_reads);
         headers.note_earlier(
             *self
                 .earlier_utf8
@@ -1189,18 +1249,16 @@ impl ListedSubjects {
     /// Reads the definition lines of the subjects of the final hit lists (`hit_lists`,
     /// after the redo and before anything is dropped from them), in NCBI's order. A reader
     /// error of NCBI's own is a `HeaderReadError` that names the query whose hit list
-    /// reached it; LOSAT's refusals are errors of their own. `scope_reads` as in
-    /// `header_reader`.
+    /// reached it; LOSAT's refusals are errors of their own.
     pub(super) fn read_titles<'a>(
         &'a self,
         database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         batch_starts: &[usize],
-        scope_reads: bool,
     ) -> Result<ListedTitles<'a>> {
         let mut titles: Vec<Option<shared::StoredTitle>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
-        let headers = self.header_reader(database, batch_starts, scope_reads);
+        let headers = self.header_reader(database, batch_starts);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -1731,6 +1789,27 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// `shared::scope_utf8_hit_reads` of the subjects of ranks `ranks` (an XML2 or JSON report's
+    /// `Hit`s, in order, of a batch whose prefetch is off).
+    pub(super) fn scope_utf8_hit_reads(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+    ) -> crate::report::query_warnings::QueryReads {
+        shared::scope_utf8_hit_reads(
+            &database.db,
+            &database.taxdb,
+            ranks.into_iter().map(|rank| {
+                (
+                    rank as u32,
+                    self.listed.ordinals[rank],
+                    self.parsed_subject(rank),
+                )
+            }),
+            self.program,
+        )
+    }
+
     /// The searched queries of the first batch of `batches` (each batch's searched queries, in
     /// order) whose prefetch is on (`prefetch`) and reads a subject whose lookup fails on a file
     /// with NCBI's exception (`ParsedSubject::prefetch_stops`): NCBI's prefetch stops the run
@@ -1793,7 +1872,9 @@ impl ListedTitles<'_> {
     /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
     /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`),
     /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
-    /// traceback beyond the cut, which no report reads), recorded where the batch stops.
+    /// traceback beyond the cut, which no report reads), recorded where the batch stops. `Ok`: the
+    /// warning of a UTF8String header that a load of a batch that does not stop posts
+    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
     pub(super) fn batch_prefetch_stop(
         &self,
         database: &BlastpDatabase,
@@ -1801,7 +1882,7 @@ impl ListedTitles<'_> {
         loaded: impl IntoIterator<Item = usize>,
         ranks: impl IntoIterator<Item = usize>,
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<()> {
+    ) -> Result<Vec<u8>> {
         shared::held_batch_prefetch_stop(
             &database.db,
             &database.taxdb,
@@ -1811,6 +1892,21 @@ impl ListedTitles<'_> {
             self.program,
             queries,
         )
+    }
+
+    /// NCBI's warning of a UTF8String header that a load of the prefetch of the subjects of ranks
+    /// `ranks` (a batch of the XML2 and JSON formats whose prefetch is on and does not stop) posts
+    /// (`shared::scope_utf8_prefetch_post`); empty where none.
+    pub(super) fn scope_utf8_prefetch(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+    ) -> Result<Vec<u8>> {
+        let subjects: Vec<shared::PrefetchSubject<'_>> = ranks
+            .into_iter()
+            .map(|rank| self.prefetch_subject(rank))
+            .collect();
+        shared::scope_utf8_prefetch_post(&database.db, &subjects, self.program)
     }
 
     /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader
@@ -2111,12 +2207,21 @@ impl ListedTitles<'_> {
                     shared::pssm_load_texts(
                         &database.db,
                         &database.taxdb,
+                        self.parsed_subject(rank as usize),
                         blob,
                         &lookups,
                         self.program,
                     )?
                 }
-                None => Vec::new(),
+                // The lookup read the header without a blob (`x_GetOid`'s check of the ids).
+                None => shared::pssm_load_texts(
+                    &database.db,
+                    &database.taxdb,
+                    self.parsed_subject(rank as usize),
+                    ordinal,
+                    &[],
+                    self.program,
+                )?,
             };
             texts.push((rank, text));
         }
@@ -4265,9 +4370,7 @@ mod tests {
         let mut hit_lists = vec![Some(first), None, Some(second)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
-        let titles = listed
-            .read_titles(&database, &hit_lists, &[0], false)
-            .unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
             let hit_list = hit_list.as_ref().unwrap();
             hit_list.hsplist_array[..hit_list.hsplist_count]
@@ -4343,11 +4446,9 @@ mod tests {
         let first = hit_lists[0].as_mut().unwrap();
         first.hsplist_array.retain(|hsp_list| hsp_list.oid == 1);
         first.hsplist_count = first.hsplist_array.len();
-        let records = listed
-            .read_titles(&database, &hit_lists, &[0], false)
-            .unwrap();
+        let records = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         let lean = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0], false)
+            .x_read_titles_lean(&database, &hit_lists, &[0])
             .unwrap();
         let ListedShown::Lean(lean_titles) = &lean.shown else {
             panic!("lean titles");
@@ -4424,9 +4525,7 @@ mod tests {
         let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [1, 3]);
-        let titles = listed
-            .read_titles(&database, &hit_lists, &[0], false)
-            .unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         assert_eq!(
             titles.records()[1].title(),
             b"p04 lower case and ambiguity codes"
@@ -4435,7 +4534,7 @@ mod tests {
         assert_eq!(titles.records()[0].seq(), b"I");
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles do not read it either.
         let lean = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0], false)
+            .x_read_titles_lean(&database, &hit_lists, &[0])
             .unwrap();
         assert_eq!(lean.title(1), b"p04 lower case and ambiguity codes");
         assert_eq!(lean.title(0), b"");
@@ -4449,7 +4548,7 @@ mod tests {
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 1, 3, 9]);
         let error = listed
-            .read_titles(&database, &hit_lists, &[0], false)
+            .read_titles(&database, &hit_lists, &[0])
             .err()
             .expect("a missing header file")
             .downcast::<HeaderReadError>()
@@ -4463,7 +4562,7 @@ mod tests {
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are read in the same order, with
         // the same error.
         let lean_error = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0], false)
+            .x_read_titles_lean(&database, &hit_lists, &[0])
             .err()
             .expect("a missing header file")
             .downcast::<HeaderReadError>()
@@ -4530,9 +4629,7 @@ mod tests {
         clean.update(list(0));
         let mut hit_lists = vec![Some(clean)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-        let titles = listed
-            .read_titles(&database, &hit_lists, &[0], false)
-            .unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
         // The subject with the bad byte: read as `#`, and rejected when it is reported.
         let mut bad = BlastpHitList::new(10);
@@ -4540,9 +4637,7 @@ mod tests {
         bad.update(list(0));
         let mut hit_lists = vec![Some(bad)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-        let titles = listed
-            .read_titles(&database, &hit_lists, &[0], false)
-            .unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
         assert!(
@@ -4554,7 +4649,7 @@ mod tests {
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles hold the same title and flag, and
         // give the same refusal.
         let lean = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0], false)
+            .x_read_titles_lean(&database, &hit_lists, &[0])
             .unwrap();
         assert_eq!(lean.title(1), b"p10 l#st protein");
         let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();

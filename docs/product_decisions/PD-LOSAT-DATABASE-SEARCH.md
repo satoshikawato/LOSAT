@@ -665,10 +665,22 @@ search code with a different subject source.
   reads the subject's Bioseq and where the batch's prefetch loads it (also a table of fields that
   read nothing of it, and outfmt 8 with `PRE_FETCH_SEQS_LIMIT=2147483647`), not in the archive nor
   the Seq-annots without the prefetch; another holder after the subject is not read. A sequence
-  that differs from the subject only by such a string is the subject to every report. Refused
-  there: a batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off (the warning comes inside the
-  report) or may turn off with a format that reads nothing of the subject, and a prefetch that
-  writes other texts or fails a lookup (the order of its loads). In blastdbcmd before the
+  that differs from the subject only by such a string is the subject to every report. The
+  warning comes at the load of that id (fix 4 of item T5d): in the batch's prefetch after the
+  taxonomy database's texts of the loads before it in NCBI's order of the Seq-id handles (by packed
+  number), before a failed lookup's `Error pre-fetching sequence data` and a stopping prefetch's
+  `BLAST Database error`; where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off, inside the
+  report at its first read of the subject (outfmt 0's description line, a tabular row, a BLAST XML,
+  XML2 or JSON `Hit`; psiblast's PSSM after the round's report where the report reads nothing of
+  it), and in the prefetch of a batch that the limit leaves on with a format that reads nothing of
+  the subject. Refused there: two such loads, or that load and one that asks the taxonomy database
+  where the batch writes a text of it, whose order NCBI takes from the addresses of its Seq-id
+  infos (one packed number, or neither packed: NCBI 2.17.0 wrote the warning before the texts of
+  opening in one run and after them in the next, blastx probe `gt.bad_magic`, fix 4) or that LOSAT
+  does not know (a batch of more than 200 Seq-align ids, as line DBID loadord's stops), and a
+  prefetch whose loads end at a lookup that throws on its id before that load (the formatters then
+  read the subject one by one with the warning, which LOSAT does not place in a batch whose
+  prefetch is on). In blastdbcmd before the
   record's text, and before `Entry not found` where the version check of `-entry` or
   `-entry_batch` read it; segmasker and dustmasker write none. A tag in the long form is read
   with no message (`PeekLongTag`), or fails as NCBI's read does.

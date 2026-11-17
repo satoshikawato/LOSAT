@@ -3754,19 +3754,6 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
-    // Whether NCBI's scope resolves the reported sequences at each batch, before its reports
-    // (`common::database::scope_reads_at_batch`): a format reads their Bioseqs, or the first
-    // format's prefetch loads them.
-    let scope_reads = crate::algorithm::common::database::scope_reads_at_batch(
-        outputs.formats.iter().any(|format| {
-            let format = report::output_format(format.outfmt);
-            format.tabular_reads_subject()
-                || matches!(format, report::TblastxOutputFormat::Pairwise(_))
-                || format.is_structured_xml()
-                || format.writes_taxonomy()
-        }),
-        prefetches && !crate::algorithm::common::database::prefetch_always_off(),
-    );
     // The query records that NCBI's scope holds at the prefetch of the batch of the input records
     // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
     // reader added for the batch (the records that `-query_loc` drops included, numbered in the
@@ -4154,7 +4141,6 @@ fn run_batch_loop(
                 ordered,
                 start,
                 earlier,
-                scope_reads,
                 &mut reports.titles.borrow_mut(),
             );
             match read {
@@ -4303,15 +4289,19 @@ fn run_batch_loop(
                     }
                 }};
             }
-            if xml2_prefetch
-                && database.parsed_seqids()
-                && !ordered.is_empty()
-                && !crate::algorithm::common::database::prefetch_off(
-                    super::super::database::seq_aligns_of(ordered),
-                )
-            {
+            let off = crate::algorithm::common::database::prefetch_off(
+                super::super::database::seq_aligns_of(ordered),
+            );
+            if xml2_prefetch && off {
+                let (titles, mut reads) = (reports.titles.borrow(), reports.reads.borrow_mut());
+                super::super::database::scope_utf8_hit_reads(
+                    database, ordered, &titles, start, &mut reads,
+                );
+            }
+            if xml2_prefetch && database.parsed_seqids() && !ordered.is_empty() && !off {
                 let scope = || batch_scope(input_start..input_end);
-                if let Err(error) = super::super::database::batch_prefetch_stop(
+                // The stop, or the warning of a UTF8String header that a load's lookup reads.
+                match super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
                     ordered,
@@ -4319,7 +4309,8 @@ fn run_batch_loop(
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                         .after_unrecorded_calls(unrecorded_calls),
                 ) {
-                    prefetch_failed!(error);
+                    Ok(warning) => warnings[start].lines(&warning),
+                    Err(error) => prefetch_failed!(error),
                 }
             }
             if prefetches && (taxdb_found || database.parsed_seqids()) {
@@ -4339,8 +4330,9 @@ fn run_batch_loop(
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-                    if taxdb_found {
+                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up, but
+                    // a lookup that reads a UTF8String header posts a warning (`load_read_texts`).
+                    if taxdb_found || database.db.scope_utf8_seen() {
                         debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
                         let (query_code, db_code) = (
                             crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),

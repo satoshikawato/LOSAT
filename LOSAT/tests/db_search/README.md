@@ -686,7 +686,11 @@ that holds a reported sequence's Seq-align id (fix 3 of item T5d, rows `db.t5d.*
 nucleotide `nds`, `ndo_same`, `ndo_none`, the version 4 `pds4` and `pdo4_same`, and `dup_batch.txt`. NCBI orders a
 list's volumes by path: `pdo_* pds` puts the other sequence first, whose header the data loader reads (`x_GetOid`)
 wherever the scope resolves the subject's id, with the warning; `pda pdo_none` the subject first, whose other holder
-is not read. Probe: `remaining-gaps-20261112/T/fix3_t5d.md`.
+is not read. Probe: `remaining-gaps-20261112/T/fix3_t5d.md`. Rows `db.t5d.*.dup.same.pf0.*` (fix 4 of item T5d): with
+`PRE_FETCH_SEQS_LIMIT=0` the warning comes inside the report, where it reads the subject (a tabular row, outfmt 0's
+description line, a JSON `Hit`; psiblast's PSSM before the first round's report where the report reads nothing),
+`db.t5d.blastp.dup.same.15` at the JSON prefetch, `db.t5d.blastp.dup.none.magic.6e` (`BLASTDB=../seqdb/taxdb/bad_magic`)
+before the taxonomy database's texts of opening of the same load. Probe: `remaining-gaps-20261112/T/fix4_t5d.md`.
 
 Rewritten ends that NCBI cannot decode (merge 4 of line RG item T5c with item T7; rows `db.t5.sfu.*`, `db.t5.sfux.*`):
 `t5/make_t5.py NCBI_BIN --sfu-only` writes `t5/psfu_100009` (version 4 without `-parse_seqids`, `-taxid 100009`; the

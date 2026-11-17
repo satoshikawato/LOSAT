@@ -11023,13 +11023,7 @@ fn run_in_pool(
             };
             // NCBI's warning of its first read of a UTF8String header follows the batch's reader
             // messages and request posts (`warnings[start]`), before its prefetch.
-            let read = database::read_titles(
-                database,
-                &batch_hit_lists,
-                earlier,
-                database::parsed_shown(&output_formats).scope_reads_at_batch(),
-                &mut titles,
-            );
+            let read = database::read_titles(database, &batch_hit_lists, earlier, &mut titles);
             if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
                 match &read {
                     Ok(read) => read.as_ref(),
@@ -11265,8 +11259,8 @@ fn run_in_pool(
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !taxdb_found {
-                        // No prefetch, and the reports' fetches look nothing up.
+                    if !taxdb_found && !database.db.scope_utf8_seen() {
+                        // No prefetch, and the reports' fetches look nothing up nor post a warning.
                         Ok(Posts::new())
                     } else {
                         let fetches = first_rows != crate::report::tabular::SubjectFetch::Never;
@@ -11364,21 +11358,29 @@ fn run_in_pool(
                         _ => batch_records.input(),
                     })
                 };
-                (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
-                    .then(|| {
-                        database
-                            .batch_prefetch_stop(
-                                &titles,
-                                &hit_lists,
-                                &batch_hit_lists,
-                                !args.ungapped,
-                                &crate::algorithm::common::database::PrefetchQueries::new(
-                                    start, &scope,
-                                )
-                                .after_unrecorded_calls(args.first_query_ordinal > 0),
+                let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
+                if off {
+                    database.scope_utf8_hit_reads(
+                        &titles,
+                        &batch_hit_lists,
+                        start,
+                        &mut query_reads,
+                    );
+                }
+                (seq_aligns > 0 && !off).then(|| {
+                    database
+                        .batch_prefetch_stop(
+                            &titles,
+                            &hit_lists,
+                            &batch_hit_lists,
+                            !args.ungapped,
+                            &crate::algorithm::common::database::PrefetchQueries::new(
+                                start, &scope,
                             )
-                            .map(|()| Posts::new())
-                    })
+                            .after_unrecorded_calls(args.first_query_ordinal > 0),
+                        )
+                        .map(Posts::of_lines)
+                })
             } else {
                 None
             };

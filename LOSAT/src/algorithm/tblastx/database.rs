@@ -357,19 +357,16 @@ pub(crate) fn drop_unaligned(
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
 /// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
 /// read of a record with a UTF8String where a VisibleString is expected is returned
-/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `scope_reads`: whether
-/// NCBI's scope resolves the reported sequences at the batch (`shared::scope_reads_at_batch`).
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
 pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
     earlier: shared::EarlierUtf8,
-    scope_reads: bool,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
     headers.note_earlier(earlier);
-    headers.scope_reads(scope_reads);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
     for hsp in ordered {
@@ -506,6 +503,44 @@ pub(crate) fn subject_read_texts<'h>(
     shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows_open, PROGRAM)
 }
 
+/// The XML2 and JSON formats, a batch whose prefetch is off, whose reported hits are `ordered` (in
+/// report order, by ordinal id, each HSP's `q_idx` counted from the batch's first query `start`):
+/// each query's report's `Hit` loads (`shared::scope_utf8_hit_reads`), into `reads` by query of the
+/// run.
+pub(crate) fn scope_utf8_hit_reads(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    start: usize,
+    reads: &mut Vec<crate::report::query_warnings::QueryReads>,
+) {
+    if !database.db.scope_utf8_seen() {
+        return;
+    }
+    let parsed = |ordinal: u32| match titles.get(&ordinal) {
+        Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+        _ => None,
+    };
+    let mut from = 0;
+    while from < ordered.len() {
+        let query = ordered[from].hit.q_idx;
+        let to = from + ordered[from..].partition_point(|hsp| hsp.hit.q_idx == query);
+        let subjects = ordered[from..to]
+            .iter()
+            .map(|hsp| (hsp.hit.s_idx, hsp.hit.s_idx, parsed(hsp.hit.s_idx)));
+        let query_reads =
+            shared::scope_utf8_hit_reads(&database.db, &database.taxdb, subjects, PROGRAM);
+        if !query_reads.is_empty() {
+            let index = start + query as usize;
+            if reads.len() <= index {
+                reads.resize_with(index + 1, Vec::new);
+            }
+            reads[index] = query_reads;
+        }
+        from = to;
+    }
+}
+
 /// NCBI's prefetch of the query batch whose reported hits are `ordered` (in report order, by
 /// ordinal id) on standard error (`shared::batch_prefetch`): the taxonomy texts of
 /// [`prefetch_messages`], then the warning where the prefetch fails, at a subject whose lookup
@@ -538,14 +573,16 @@ pub(crate) fn batch_prefetch(
 /// `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
 /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
 /// whose reported hits are `before` (the reports read every reported subject), which TBLASTX
-/// writes after the stop (the XML formats are not streamed, `report_stream`).
+/// writes after the stop (the XML formats are not streamed, `report_stream`). `Ok`: the warning of
+/// a UTF8String header that a load of a batch that does not stop posts
+/// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
     before: &[TblastxHsp],
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
@@ -979,15 +1016,7 @@ mod tests {
             let ordered: Vec<TblastxHsp> =
                 ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
             let mut titles = DatabaseTitles::new();
-            read_titles(
-                database,
-                &ordered,
-                0,
-                Default::default(),
-                false,
-                &mut titles,
-            )
-            .unwrap();
+            read_titles(database, &ordered, 0, Default::default(), &mut titles).unwrap();
             String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);

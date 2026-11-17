@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -123,6 +123,10 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   for that id (`s_SeqDB_SeqIdIn` stops at the first id, `oid headers do not contain target gi/seq_id`; review 1 of
   the item, H1). `make_multidb.py --v4late-only MAKEBLASTDB` builds only these (the databases before keep their
   dates).
+- `pfo_q.faa`, `pfo_qx.fna`, `pfo_q.fna`, `pfo_qt.faa` (line DBID pfoff): the two queries of mix2_q.faa, mix2_qx.fna,
+  mix2_q.fna and mix2_qt.faa in the other order, so that with `PRE_FETCH_SEQS_LIMIT=1 BATCH_SIZE=1` (the prefetch
+  off) the first query's report reads a parsed subject whose lookup throws (`DB contains no accession info.`) and the
+  second's does not. `make_multidb.py --pfoff-only MAKEBLASTDB` writes only these (no database; MAKEBLASTDB is not run).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -557,6 +561,16 @@ def make_v4late(binary):
         os.remove(os.path.join(HERE, name + ".pjs"))
 
 
+def make_pfoff(_binary):
+    """Writes the queries pfo_q*.f* (line DBID pfoff): those of mix2_q*.f* in the other order."""
+    for source, name in (("mix2_q.faa", "pfo_q.faa"), ("mix2_qx.fna", "pfo_qx.fna"), ("mix2_q.fna", "pfo_q.fna"),
+                         ("mix2_qt.faa", "pfo_qt.faa")):
+        records = read_fasta_path(os.path.join(HERE, source))
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, lines in reversed(records):
+                f.write(header + "".join(lines))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -628,6 +642,8 @@ if __name__ == "__main__":
         make_loadord7(sys.argv[2])
     elif sys.argv[1] == "--v4late-only":
         make_v4late(sys.argv[2])
+    elif sys.argv[1] == "--pfoff-only":
+        make_pfoff(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -642,3 +658,4 @@ if __name__ == "__main__":
         make_loadord6(sys.argv[1])
         make_loadord7(sys.argv[1])
         make_v4late(sys.argv[1])
+        make_pfoff(sys.argv[1])

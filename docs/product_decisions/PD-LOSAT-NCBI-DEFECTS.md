@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.42
+- Version: 1.44
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -128,7 +128,12 @@
   1.42 2026-11-17 (a version 4 lookup returns at the first volume that holds the id, as NCBI's, so
   an ISAM file of a later volume that does not open stops none of its lookups; refused, where
   LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07)
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.44 2026-11-17 (outfmt 13 to 16 of a reported sequence whose lookup in a version 5 list fails
+  where the batch's prefetch is off are written as NCBI writes them: 15 and 16 post the exception
+  and leave the query's report out, 13 and 14 stop with `BLAST Database error`; the refusal of
+  1.31 narrowed to the other formats; line DBID item pfoff, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; 1.43 is line RG item T5b's on dev)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -951,9 +956,13 @@ masked). Line NP item M4a-2c.
   `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
   name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
   DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
-  `Unknown` for such a hit, and then outfmt 0 to 4, 13, 14 and 17 stop with that error, outfmt 6
-  crashes (`CCoreException`, exit 255), the JSON and XML2 documents 15 and 16 end with its trace
-  (exit 0), and 5, 7, 10 and 18 go on (exit 0).
+  `Unknown` for such a hit, and then outfmt 0 to 4 and 17 stop with that error, outfmt 6
+  crashes (`CCoreException`, exit 255), and 5, 7, 10 and 18 go on (exit 0). The JSON and XML2
+  reports throw at that `Hit` (`s_SeqAlignToXMLHit`: `GetBioseqHandle`, then `GetLength` outside
+  its catch): 15 and 16 catch it for the query (`BlastJSON_FormatReport`,
+  `BlastXML2_FormatReport`), post `Error: [<program>] ` with the exception's text and trace, leave
+  the query's report out (its `,` separator stays) and go on with the next query (exit 0); 13 and
+  14 leave the query's file empty and stop with that error (exit 2).
   Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
   with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
   NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
@@ -973,7 +982,9 @@ masked). Line NP item M4a-2c.
   their number and the others after them, and ends at the first lookup that fails. It refuses a
   run where the reports read such a Seq-id with the prefetch off (`... whose lookup in the
   database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
-  BLAST Database error, and where the prefetch is off its formatters fail to read it)`), a
+  BLAST Database error, and where the prefetch is off its formatters fail to read it)`) but
+  writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.44,
+  line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

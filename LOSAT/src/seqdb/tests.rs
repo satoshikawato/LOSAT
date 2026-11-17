@@ -2531,3 +2531,79 @@ fn open_probe() {
         },
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1201-1209 (quoted
+// at `isam::index_exists`): `IndexExists` is `CFile::Exists` of both files, `IsFile`.
+/// Review 4 of line DBID loadord, H1: a directory in place of a file of a version 4 volume's
+/// string ISAM (`.psi`, `.psd`) or PIG ISAM (`.ppi`, `.ppd`) is no ISAM, as NCBI's `IndexExists`
+/// says: the lookup finds nothing in the volume, with no error, and the search's gate
+/// (`isams_may_fail_to_open`, which asks the lookup's own open) says that no lookup can stop on
+/// it. An index file that is a regular file and does not open (mode 000) is NCBI's `Could not
+/// open input file` at the lookup, and the gate says so.
+#[test]
+fn a_directory_in_place_of_an_isam_file_is_no_isam() {
+    use super::damaged_files_tests::TempDir;
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastdbcmd/db/m");
+    let accession = super::seqidlist::parse_list_id(b"ref|XP_1001.1|").unwrap();
+    // The lookups of `pmg` (XP_1001.1 and PIG 1001 at OID 0): the string ISAM's, then the PIG
+    // ISAM's.
+    let lookups = |db: &SeqDb| {
+        (
+            db.seqid_lookup()
+                .unwrap()
+                .seqid_to_oids(&accession, true)
+                .map_err(|error| error.to_string()),
+            db.id_lookup()
+                .unwrap()
+                .pig_to_oid(1001)
+                .map_err(|error| error.to_string()),
+        )
+    };
+    let intact = TempDir::new("isamdir");
+    intact.copy_fixtures(&source, &["pmg"]);
+    let db = SeqDb::open(&intact.name("pmg"), SeqType::Protein).unwrap();
+    assert!(!db.isams_may_fail_to_open());
+    assert_eq!(lookups(&db), (Ok(vec![0]), Ok(Some(Some(0)))));
+    for ext in ["psi", "psd", "ppi", "ppd"] {
+        let dir = TempDir::new("isamdir");
+        dir.copy_fixtures(&source, &["pmg"]);
+        let file = dir.0.join(format!("pmg.{ext}"));
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        std::fs::write(file.join("placeholder"), b"").unwrap();
+        let db = SeqDb::open(&dir.name("pmg"), SeqType::Protein).unwrap();
+        assert!(!db.isams_may_fail_to_open(), "{ext}");
+        let (string, pig) = lookups(&db);
+        if ext.starts_with("ps") {
+            assert_eq!((string, pig), (Ok(Vec::new()), Ok(Some(Some(0)))), "{ext}");
+        } else {
+            // No volume has PIG files: NCBI's OID is never set.
+            assert_eq!((string, pig), (Ok(vec![0]), Ok(None)), "{ext}");
+        }
+    }
+    #[cfg(unix)]
+    for ext in ["psi", "ppi"] {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("isamdir");
+        dir.copy_fixtures(&source, &["pmg"]);
+        let file = dir.0.join(format!("pmg.{ext}"));
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(&file).is_ok() {
+            // A user that reads every file (root): nothing fails to open.
+            continue;
+        }
+        let db = SeqDb::open(&dir.name("pmg"), SeqType::Protein).unwrap();
+        assert!(db.isams_may_fail_to_open(), "{ext}");
+        let (string, pig) = lookups(&db);
+        let failed = if ext == "psi" {
+            string.unwrap_err()
+        } else {
+            pig.unwrap_err()
+        };
+        assert!(
+            failed.starts_with("Error: Could not open input file ("),
+            "{ext}: {failed}"
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+}

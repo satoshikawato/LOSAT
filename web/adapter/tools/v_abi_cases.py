@@ -222,6 +222,10 @@ def fasta_input() -> list[dict]:
         paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
         if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
             continue
+        # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`), as in
+        # `outfmt0_fixtures`.
+        if "-parse_deflines" in shlex.split(args):
+            continue
         argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
         argv += ["-task", task] if task else []
         search = {"program": program, "argv": argv + shlex.split(args), "cwd": str(fixtures.ENGINE),

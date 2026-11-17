@@ -7367,6 +7367,7 @@ fn search(
                 .query_scopes
                 .as_ref()
                 .map(|scopes| scopes.numbered_from(0)),
+            prefetch_scope: None,
             strategy_next: next,
             call_requests: None,
             x_plan_blocks: true,
@@ -7792,6 +7793,7 @@ fn search(
                                     .query_scopes
                                     .as_ref()
                                     .map(|scopes| scopes.numbered_from(block.start)),
+                                prefetch_scope: None,
                                 strategy_next: None,
                                 call_requests: None,
                                 x_plan_blocks: false,
@@ -9370,6 +9372,7 @@ fn unsearched_batches_then_engine_error(
         // BLASTP only (`args.app` above): no psiblast PSSM stops here.
         stopped_pssms: None,
         query_scopes: reports.query_scopes,
+        prefetch_scope: None,
         strategy_next: None,
         call_requests: None,
         x_plan_blocks: false,
@@ -9440,6 +9443,12 @@ struct BlastpReports<'a> {
     /// (`query_batch::QueryScopes`, numbered from the call's first), whose ids the reported
     /// subjects must not have (`ListedTitles::refuse_ids_of_queries`); `None` elsewhere.
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
+    /// psiblast's round of a query (`psi_round`), a call of its own one record: the query records
+    /// that NCBI's scope holds at the round's prefetch (the query's batch, the records that
+    /// `-query_loc` skips before it included, or the PSSM's query of `-in_pssm`), made only where
+    /// the prefetch stops (`common::database::PrefetchQueries`); `None` elsewhere: the call's
+    /// batches are its input records (`report_prep::prefetch_reported_subjects`).
+    prefetch_scope: Option<&'a (dyn Fn() -> crate::blastinput::query_batch::QueryScope + Sync)>,
     /// `-export_search_strategy`: the batch whose request the run writes right after this call's
     /// batches are reported (`NextRequest`), set by the caller.
     strategy_next: Option<NextRequest<'a>>,
@@ -9469,6 +9478,7 @@ impl<'a> BlastpReports<'a> {
             psi_round: None,
             stopped_pssms: None,
             query_scopes: None,
+            prefetch_scope: None,
             strategy_next: None,
             call_requests: None,
             x_plan_blocks: false,

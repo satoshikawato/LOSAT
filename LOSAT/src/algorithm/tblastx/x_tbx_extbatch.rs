@@ -198,11 +198,14 @@ unsafe fn resolve<M: TbxScore, const SENT: usize>(
     let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
     let query_full = &ctx.aa_seq;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`; another matrix's extension as in `x_hit`.
+    // The walks go on into the query batch past the context's ends, as in `x_hit`.
+    let in_batch = h.query_batch.at(c.ctx_idx as usize, h.s_idx);
     let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
         if !M::BLOSUM62 && SENT == 0 {
             extend_hit_two_hit_with(
                 h.sc,
                 &query_full[1..query_full.len() - 1],
+                in_batch,
                 h.subject,
                 c.s_left as usize,
                 c.s_right as usize,
@@ -213,6 +216,7 @@ unsafe fn resolve<M: TbxScore, const SENT: usize>(
         } else if SENT == 0 {
             extend_hit_two_hit_fitting(
                 &query_full[1..query_full.len() - 1],
+                in_batch,
                 h.subject,
                 c.s_left as usize,
                 c.s_right as usize,
@@ -225,6 +229,7 @@ unsafe fn resolve<M: TbxScore, const SENT: usize>(
             unsafe {
                 h.sc.sent_two_hit_of::<SENT>(
                     query_full,
+                    in_batch,
                     h.subject_sent,
                     c.s_left as usize,
                     c.s_right as usize,
@@ -671,6 +676,7 @@ impl<M: TbxScore> XPairPar<M> {
             s_idx: inp.s_idx,
             s_len: inp.s_len,
             sc: self.sc,
+            query_batch: inp.query_batch(),
         };
         let mut b = XPendBatch {
             c: [XCand::default(); BATCH],
@@ -898,6 +904,8 @@ mod tests {
                 wordsize: 3,
                 s_idx: 0,
                 s_len: 999,
+                failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
+                passed: None,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {
@@ -1039,6 +1047,7 @@ mod tests {
             let cutoff_scores: Vec<i32> = (0..contexts.len()).map(|i| 8 + i as i32).collect();
             let x_dropoff_per_context: Vec<i32> = (0..contexts.len()).map(|_| 0).collect();
             let window = 40;
+            let failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
             let h = XHitCtx {
                 diag_offset: window,
                 window,
@@ -1054,6 +1063,7 @@ mod tests {
                 s_idx: 7,
                 s_len: 999,
                 sc: Blosum62Score,
+                query_batch: QueryBatch::new(&contexts, &failure),
             };
             let n = 1 + rng.below(BATCH as u64) as usize;
             let mut b = XPendBatch {
@@ -1087,8 +1097,16 @@ mod tests {
                     ..XCand::default()
                 };
                 diag[i].set_raw_bits(FLAG_BIT | i as u32);
-                let (q0, qe, s0, _se, score, right, s_last) =
-                    extend_hit_two_hit_fitting(q, &subject, s_left, s_right, q_raw, x_drop, false);
+                let (q0, qe, s0, _se, score, right, s_last) = extend_hit_two_hit_fitting(
+                    q,
+                    crate::algorithm::tblastx::extension::InBatch::ALONE,
+                    &subject,
+                    s_left,
+                    s_right,
+                    q_raw,
+                    x_drop,
+                    false,
+                );
                 let mut cell = DiagStruct::default();
                 if right {
                     cell.set_flag(1);

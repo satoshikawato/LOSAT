@@ -2233,6 +2233,29 @@ fn search(
         // taxonomy texts at each `Hit`: of the prefetch only its stop
         // (`shared::held_batch_prefetch_stop`).
         let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
+        // The query records that NCBI's scope holds at the prefetch of the batch of the searched
+        // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): the PSSM's
+        // query of `-in_pssm` (`PsiSearch::query_scope`), else the input records that NCBI's
+        // reader added for the batch (`RangedBatch::input`: the records that `-query_loc` drops
+        // included, numbered in the run, `FastaRecord::local_id`), and in outfmt 5, whose scope
+        // the formatter keeps (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those
+        // of the batches before.
+        let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
+            outputs.formats.iter().map(|format| format.outfmt),
+        );
+        // The batches are made here only (review 3 of line DBID loadord, M1).
+        let batch_scope = |span: &std::ops::Range<usize>| {
+            if let Some(psi) = pssm.as_deref() {
+                return psi.query_scope();
+            }
+            let input = query_input
+                .batches(batch_size)
+                .into_iter()
+                .find(|batch| batch.searched == *span)
+                .map_or(0..0, |batch| batch.input);
+            let input = if xml_scope { 0..input.end } else { input };
+            crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
+        };
         // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
@@ -2315,8 +2338,11 @@ fn search(
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
         let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
-        // Outfmt 5 first: a later batch's prefetch stop asks whether a report before it was cut
-        // (`shared::XmlReportsBefore`), from the reads of the queries' reports modelled here.
+        // Outfmt 5 first: whether NCBI's XML stream cuts a query's report before its hits
+        // (`shared::XmlCuts`), the one answer for the record of the batches' loads before a
+        // stopping batch (`LoadedBefore`: a cut report loads nothing) and for the texts that the
+        // cut reports left (`shared::XmlReportsBefore`, from the reads of the queries' reports
+        // modelled here).
         let xml_first = outputs
             .formats
             .first()
@@ -2333,6 +2359,7 @@ fn search(
                 )
             })
         };
+        let xml_cuts = crate::algorithm::common::database::XmlCuts::of(xml_first, &xml_cut);
         // The posts of each batch's prefetch, with its first query (`query_warnings::query_posts`).
         let mut prefetch_posts = Vec::new();
         let mut query_warning_lines: Vec<Vec<u8>> = queries
@@ -2432,6 +2459,16 @@ fn search(
         // those refusals do; without `taxdb.bti` nothing is read. A failed batch is not reported
         // and prefetches nothing (`failed`, a header file or the sequence file that NCBI cannot
         // read during the batch's search).
+        // Which rows of the first format read the subjects' Bioseqs where a batch's prefetch is off
+        // (`TabularSpec::subject_fetch`; every row of a format that is not a field list): what the
+        // reports of such a batch load (`shared::batch_loads`).
+        let first_rows = outputs
+            .formats
+            .first()
+            .and_then(|format| super::tabular::tabular_spec(format.outfmt))
+            .map_or(SubjectFetch::Every, |spec| {
+                spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
+            });
         if let (Some(reported), Some(database)) = (&reported, database) {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
             // ```c++
@@ -2508,9 +2545,7 @@ fn search(
                         if !taxdb_found {
                             continue;
                         }
-                        let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
-                            spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
-                        });
+                        let rows = first_rows;
                         for (query, hitlist) in span.clone().zip(hitlists) {
                             let shown = std::slice::from_ref(hitlist);
                             if hitlist
@@ -2553,16 +2588,32 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let xml_before =
-                        xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
-                            reads: subject_reads.queries(),
-                            cut: &xml_cut,
-                        });
+                    let prefetched = |query: usize| {
+                        prefetch_posts
+                            .iter()
+                            .find(|(first, _)| *first == query)
+                            .map(|(_, posts)| posts)
+                    };
+                    let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+                    let scope = || batch_scope(span);
+                    // The batches before (`results`): what NCBI's data loader loaded for them
+                    // (`super::database::LoadedBefore`), read only where this batch stops; a call
+                    // of the library's batches after the first (`api::run_batches`) has those of
+                    // the calls before unrecorded.
                     let messages = database.batch_prefetch(
                         reported,
+                        super::database::LoadedBefore {
+                            hits: &results[..span.start],
+                            spans: &batch_spans,
+                            rows: first_rows,
+                            cuts: xml_cuts,
+                        },
                         hitlists,
-                        span.start,
-                        xml_before.as_ref(),
+                        &crate::algorithm::common::database::PrefetchQueries::new(
+                            span.start, &scope,
+                        )
+                        .after_unrecorded_calls(args.first_query_ordinal > 0)
+                        .after_xml_reports(xml_before.as_ref()),
                     )?;
                     rows_open(hitlists)?;
                     // After the reader's messages of the batch, in its first query
@@ -2577,18 +2628,27 @@ fn search(
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
             // The batches before are those of `results`, which the stop truncated (above).
-            let xml_before =
-                xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
-                    reads: subject_reads.queries(),
-                    cut: &xml_cut,
-                });
+            let prefetched = |query: usize| {
+                prefetch_posts
+                    .iter()
+                    .find(|(first, _)| *first == query)
+                    .map(|(_, posts)| posts)
+            };
+            let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+            let scope = || batch_scope(&span);
             let error = database.prefetch_stop_error(
                 reported.as_ref(),
-                &results,
+                super::database::LoadedBefore {
+                    hits: &results,
+                    spans: &batch_spans,
+                    rows: first_rows,
+                    cuts: xml_cuts,
+                },
                 &subjects,
-                span.start,
+                &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
+                    .after_unrecorded_calls(args.first_query_ordinal > 0)
+                    .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
-                xml_before.as_ref(),
             );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                 Ok(failure) => failed = Some((span, failure.error)),

@@ -1494,58 +1494,76 @@ impl ListedTitles<'_> {
             .cloned()
     }
 
+    /// The subject of rank `rank` as a batch's prefetch reads it (a protein has no strand).
+    fn prefetch_subject(&self, rank: usize) -> shared::PrefetchSubject<'_> {
+        shared::PrefetchSubject::unflipped(self.listed.ordinals[rank], self.parsed_subject(rank))
+    }
+
     /// NCBI's prefetch of a query batch's subjects of ranks `ranks` on standard error
     /// (`shared::batch_prefetch`): the taxonomy texts of `prefetch_messages`, then the warning
     /// where the prefetch fails at a subject whose lookup fails (a protein has no strand); the
-    /// stop of the batch whose first query is `query` (`shared::batch_prefetch`; `xml_before`: the
-    /// outfmt 5 reports before it, `shared::XmlReportsBefore`).
+    /// stop of the batch of `queries` (`shared::batch_prefetch`), after the batches of the call
+    /// before it, for which NCBI's BLAST database data loader loaded the subjects of ranks
+    /// `before` (read only where the batch stops; `shared::batch_loads`; the outfmt 5 reports
+    /// before it, `shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
+        before: impl IntoIterator<Item = usize>,
         ranks: impl IntoIterator<Item = usize>,
-        query: usize,
-        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
-            ranks.into_iter().map(|rank| {
-                shared::PrefetchSubject::unflipped(
-                    self.listed.ordinals[rank],
-                    self.parsed_subject(rank),
-                )
-            }),
+            before.into_iter().map(|rank| self.prefetch_subject(rank)),
+            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
             self.program,
-            query,
-            xml_before,
+            queries,
         )
     }
 
-    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` whose first query
-    /// is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` (the batch of
+    /// `queries`), for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
     /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
-    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`).
+    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`),
+    /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
+    /// traceback beyond the cut, which no report reads), recorded where the batch stops.
     pub(super) fn batch_prefetch_stop(
         &self,
         database: &BlastpDatabase,
         before: &[Option<BlastpHitList>],
+        loaded: impl IntoIterator<Item = usize>,
         ranks: impl IntoIterator<Item = usize>,
-        query: usize,
+        queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
-        let subject = |rank: usize| {
-            shared::PrefetchSubject::unflipped(
-                self.listed.ordinals[rank],
-                self.parsed_subject(rank),
-            )
-        };
         shared::held_batch_prefetch_stop(
             &database.db,
-            Self::reported_ranks(before).map(subject),
-            ranks.into_iter().map(subject),
+            &database.taxdb,
+            Self::reported_ranks(before).map(|rank| self.prefetch_subject(rank)),
+            loaded.into_iter().map(|rank| self.prefetch_subject(rank)),
+            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
             self.program,
-            query,
+            queries,
         )
+    }
+
+    /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader
+    /// loaded for a call's batches (`shared::TaxdbRun::note_loaded`): psiblast's round of a query,
+    /// a call of its own, for the stop of a later round's or query's prefetch, and the batches
+    /// before a stop of the XML2 and JSON formats.
+    pub(super) fn note_loaded<I: IntoIterator<Item = usize>>(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl FnOnce() -> I,
+    ) {
+        if self.parsed.is_empty() {
+            return;
+        }
+        database.taxdb.note_loaded(&database.db, || {
+            ranks().into_iter().map(|rank| self.prefetch_subject(rank))
+        });
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
@@ -1657,6 +1675,10 @@ impl ListedTitles<'_> {
         // included subjects that the formatter's cut drops from its hit list, in its order (each
         // subject once: its HSPs follow each other).
         let mut read: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        // The PSSM's reads one by one are kept for the run's record of loads only where a
+        // prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`, asked at the first
+        // such read; review 4 of line DBID loadord, M1).
+        let mut records_loads: Option<bool> = None;
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -1672,6 +1694,15 @@ impl ListedTitles<'_> {
             {
                 if self.parsed_subject(hsp_list.oid as usize).is_some() {
                     read.insert(hsp_list.oid as usize);
+                    if prefetch.reads_one_by_one(query)
+                        && *records_loads
+                            .get_or_insert_with(|| database.taxdb.prefetch_can_stop(&database.db))
+                    {
+                        if reads.one_by_one.len() <= query {
+                            reads.one_by_one.resize_with(query + 1, Vec::new);
+                        }
+                        reads.one_by_one[query].push(hsp_list.oid as usize);
+                    }
                 }
                 if keep && index >= kept {
                     beyond.push(hsp_list.oid);
@@ -4545,6 +4576,10 @@ pub(super) struct PssmReads {
     refused: Option<(crate::seqdb::Oid, String, &'static str)>,
     loads: Vec<Option<QueryLoads>>,
     other_blobs: std::collections::BTreeMap<usize, Option<u32>>,
+    /// By query (of the call), the ranks of the included subjects with parsed Seq-ids that the
+    /// PSSM of a query whose batch reads one by one reads by their Seq-align ids, before the cut
+    /// (`one_by_one`).
+    one_by_one: Vec<Vec<usize>>,
 }
 
 /// What the PSSM's reads of a query need beyond its hit list after the formatter's cut
@@ -4571,6 +4606,17 @@ fn pssm_includes(
 impl PssmReads {
     /// LOSAT's refusal of the reads, where a PSSM is made (`-out_pssm` and `-out_ascii_pssm`, and
     /// a round that makes the next round's PSSM).
+    /// The included subjects with parsed Seq-ids, by rank, that the PSSM of the call's query
+    /// `query` reads by their Seq-align ids where its batch reads one by one (prefetch off:
+    /// `shared::BatchPrefetch::reads_one_by_one`), before the cut: loads of NCBI's BLAST
+    /// database data loader that no prefetch made (`shared::TaxdbRun::note_loaded`; where the
+    /// prefetch is on, it loaded them first). Empty for the other queries, where no PSSM reads
+    /// are made, and where no prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`:
+    /// nothing reads them then).
+    pub(super) fn one_by_one(&self, query: usize) -> &[usize] {
+        self.one_by_one.get(query).map_or(&[], Vec::as_slice)
+    }
+
     pub(super) fn check(&self) -> Result<()> {
         match &self.refused {
             Some((oid, reason, program)) => Err(shared::parsed_refusal(

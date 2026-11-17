@@ -255,7 +255,7 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    some such searches crash (SIGSEGV, exit 139; 21 of 5,000 random short searches with
    `-threshold` 1 to 3 in the round-2 audit). LOSAT reads the letters past the sequence
    as the sentinel (`NULLB`, `BLAST_SCORE_MIN`), as for the letter right after it. NCBI run
-   under `valgrind -q`, which reports the invalid reads and does not crash, gives LOSAT's
+   under `valgrind -q`, which reports the invalid reads and did not crash in those searches, gives LOSAT's
    output byte for byte in all 23 crashing cases of the audit's second and third passes
    (`docs/evidence/losat_web_e2e/audit/round2/a2_blastp.md`, `a3_blastp.md`). Searches
    whose window stays inside the sequences and its sentinel match NCBI (fixture
@@ -287,9 +287,11 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    ones it finishes. LOSAT's output is the same at 1 and 4 threads in all 850. Fixtures
    `db.x2.tblastn.qpast.*`, `db.x2.tblastn.frame.*`, `db.x2.tblastn.pssmpast.6` (`-in_pssm`: the
    window reads the byte after the NULLB after frame -3, which NCBI's buffer never sets) and
-   `db.x2f.bx.*` of `LOSAT/tests/db_search_manifest/` (`-subject` and `-db`, the query and the
+   `db.x2f.bx.*` (`db.x2f.bx.page.6` is an ncbi-near row: it takes the output of NCBI's native run on the same
+   volume with 16 zero bytes after its last page, `db.x2f.bx.pagepad.6`, because valgrind itself faults on it) of
+   `LOSAT/tests/db_search_manifest/` (`-subject` and `-db`, the query and the
    subject side), and BLASTP's `db.j2a.bp.past.6` (the round-2 audit's case R2A2-2, on which NCBI
-   crashed natively in the audit), frozen from NCBI under valgrind where NCBI reads past its
+   crashed natively in the audit), frozen from NCBI under valgrind (except `db.x2f.bx.page.6`) where NCBI reads past its
    buffers. Not covered, and still refused: with TBLASTN `-in_pssm`, a window past the PSSM's last
    position (`pssm->data` holds one row per position and no sentinel row: the read is past a
    matrix, not past a sequence), and a gapped start that a PSSM whose '-' column scores above

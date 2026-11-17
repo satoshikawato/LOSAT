@@ -400,6 +400,12 @@ def valgrind_messages(stderr: bytes) -> bool:
     return re.search(rb"^==\d+==", stderr, re.MULTILINE) is not None
 
 
+def refuse_valgrind_messages(row: dict[str, str], stderr: bytes) -> None:
+    """Stops `freeze` before it writes any file of an `ncbi-valgrind` row whose NCBI stderr holds valgrind's lines."""
+    if under_valgrind(row) and valgrind_messages(stderr):
+        raise SystemExit(f"{row['row_id']}: valgrind's messages in NCBI's stderr; give --valgrind a --log-file")
+
+
 def frozen_id(row: dict[str, str]) -> str:
     """The row id that names the frozen files of `row`'s expectation (`near_row_id`, else its own)."""
     return near_row_id(row) or row["row_id"]
@@ -463,22 +469,23 @@ def freeze(args: argparse.Namespace) -> int:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = written.run
+            refuse_valgrind_messages(row, run.stderr)
             out = run.stdout
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
             pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                            timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = pssms.run
+            refuse_valgrind_messages(row, run.stderr)
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env), preexec_fn=ncbi_stack(row))
+            refuse_valgrind_messages(row, run.stderr)
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
-        if under_valgrind(row) and valgrind_messages(run.stderr):
-            raise SystemExit(f"{row['row_id']}: valgrind's messages in NCBI's stderr; give --valgrind a --log-file")
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)

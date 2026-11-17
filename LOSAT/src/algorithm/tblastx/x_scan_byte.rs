@@ -631,25 +631,37 @@ fn candidates(
         &letters[1..words + 1],
         &letters[2..words + 2],
     );
+    // The mask is read once per call: as a constant, the vectorized loop's mask vector is built
+    // again at every use by V8 (the Wasm build), three instructions in each 8 words.
+    let mask = std::hint::black_box(X_MASK as u16);
     for k in 0..words {
-        index[k] = ((a[k] as u16) << 10 | (b[k] as u16) << 5 | c[k] as u16) & X_MASK as u16;
+        index[k] = ((a[k] as u16) << 10 | (b[k] as u16) << 5 | c[k] as u16) & mask;
     }
     list(index, presence, cand)
 }
 
-/// The candidates of `index` by their presence bytes, without a branch.
+/// The candidates of `index` by their presence bytes, without a branch. Every index is below
+/// `X_MASK + 1`: both candidate stages write it masked. Each word's position is written at the
+/// next free entry, which moves on by the word's presence byte (one add per word; the Wasm build
+/// has no scaled addressing to form the entry from a count).
 #[inline(always)]
 fn list(index: &[u16], presence: &[u8], cand: &mut [MaybeUninit<u16>; X_BLOCK]) -> usize {
     let presence: &[u8; X_MASK + 1] = presence.try_into().expect("presence bytes");
-    let out = cand.as_mut_ptr().cast::<u16>();
-    let mut n = 0usize;
+    let start = cand.as_mut_ptr().cast::<u16>();
+    let mut out = start;
     for (k, &ix) in index.iter().enumerate() {
-        let bit = presence[ix as usize & X_MASK] as usize;
-        // SAFETY: `n <= k < index.len() <= X_BLOCK`.
-        unsafe { out.add(n).write(k as u16) };
-        n += bit;
+        debug_assert!(ix as usize <= X_MASK);
+        // SAFETY: the candidate stages mask every index to `X_MASK`, the last index of `presence`.
+        let bit = unsafe { *presence.get_unchecked(ix as usize) } as usize;
+        // SAFETY: `out` is `start + n` with `n <= k < index.len() <= X_BLOCK` (`n` = the
+        // candidates before word `k`), inside `cand`.
+        unsafe {
+            out.write(k as u16);
+            out = out.add(bit);
+        }
     }
-    n
+    // SAFETY: `out` was moved on from `start` inside `cand`.
+    unsafe { out.offset_from(start) as usize }
 }
 
 /// The AVX2 candidate stage: `candidates` with the indexes made 16 at a time (three shifted loads
@@ -690,10 +702,13 @@ unsafe fn candidates_avx2(
 }
 
 /// Whether three hits for each of the `left` candidates fit after `totalhits` (then no candidate
-/// of up to `AA_HITS_PER_CELL` hits can stop the scan).
+/// of up to `AA_HITS_PER_CELL` hits can stop the scan). `0 <= totalhits <= array_size +
+/// X_SCAN_BYTE_SLACK` and `left <= X_BLOCK`, so the sum is exact in `usize` on every target (in
+/// the Wasm build's 32 bits too, which a 64-bit sum turned into 64-bit loop counters).
 #[inline(always)]
 fn room_for_rest(totalhits: i32, left: usize, array_size: i32) -> bool {
-    totalhits as i64 + (AA_HITS_PER_CELL * left) as i64 <= array_size as i64
+    debug_assert!(totalhits >= 0 && array_size >= 0 && left <= X_BLOCK);
+    totalhits as usize + AA_HITS_PER_CELL * left <= array_size as usize
 }
 
 /// The plain-loop copy stage for the candidates `cand[..n]` of the block that starts at
@@ -836,27 +851,40 @@ unsafe fn copy_block<const AVX2: bool, const RUN: bool>(
     let mut i = first;
     while i < n {
         if room_for_rest(totalhits, n - i, array_size) {
+            // The cells of up to `AA_HITS_PER_CELL` hits, up to the next larger cell. The larger
+            // cell's test and copy are after this loop, so its values (the overflow array, the
+            // array size) are not kept through it (the Wasm build kept them in stack slots and
+            // reloaded the subject offset from one for every candidate).
+            let mut cell = std::ptr::null::<BackboneCell>();
+            let mut numhits = 0;
             while i < n {
                 let k = *cand.add(i) as usize;
-                let cell = table.backbone.add(*index.add(k) as usize);
-                let numhits = (*cell).num_used;
-                let s_off = (block_first + k) as u32;
-                i += 1;
-                if numhits as usize <= AA_HITS_PER_CELL {
-                    write::<AVX2, RUN>(table, dest.add(totalhits as usize), cell, s_off);
-                    totalhits += numhits;
-                } else {
-                    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123
-                    if numhits > array_size - totalhits {
-                        return (totalhits, Some(s_off));
-                    }
-                    write::<AVX2, RUN>(table, dest.add(totalhits as usize), cell, s_off);
-                    totalhits += numhits;
-                    if !room_for_rest(totalhits, n - i, array_size) {
-                        break;
-                    }
+                cell = table.backbone.add(*index.add(k) as usize);
+                numhits = (*cell).num_used;
+                if numhits as usize > AA_HITS_PER_CELL {
+                    break;
                 }
+                write::<AVX2, RUN>(
+                    table,
+                    dest.add(totalhits as usize),
+                    cell,
+                    (block_first + k) as u32,
+                );
+                totalhits += numhits;
+                i += 1;
             }
+            if i == n {
+                break;
+            }
+            // The larger cell at `i`; the room is computed again for the candidates after it.
+            let s_off = (block_first + *cand.add(i) as usize) as u32;
+            // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123
+            if numhits > array_size - totalhits {
+                return (totalhits, Some(s_off));
+            }
+            write::<AVX2, RUN>(table, dest.add(totalhits as usize), cell, s_off);
+            totalhits += numhits;
+            i += 1;
         } else {
             let k = *cand.add(i) as usize;
             let cell = table.backbone.add(*index.add(k) as usize);

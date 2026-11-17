@@ -227,6 +227,12 @@ fn x_cross_batches() -> bool {
     match x_cell_mode() {
         #[cfg(target_arch = "x86_64")]
         XCellTest::Cross { .. } => true,
+        // EXPERIMENT (LOSAT_X_BXCROSS128): the same batches in 128 bits.
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        XCellTest::Cross128 { .. } => true,
         _ => false,
     }
 }
@@ -249,6 +255,17 @@ fn x_bx_cross_defer() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCROSSDEFER"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BXCROSS128 switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXCROSS128): 0 = off, 1 = LOSAT_X_BXCROSS's batches in 128-bit vectors
+/// (`XCellTest::Cross128`) where the AVX2 batches do not run (wasm32 simd128; x86-64 with SSSE3,
+/// SSE4.1 and POPCNT but not AVX2), 2 = those in place of the AVX2 batches too (diagnostic: the
+/// tests run them end to end). A switch of the strict set, on unless it is `0`.
+fn x_bx_cross128() -> usize {
+    static ON: OnceLock<usize> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCROSS128", 1..=2, 1).unwrap_or(0))
+}
+
 // No NCBI counterpart: reads the LOSAT_X_BXCTXONCE switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BXCTXONCE): whether a query batch's context table is made once per lookup
@@ -268,6 +285,7 @@ fn x_cell_mode() -> XCellTest {
             std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str(),
             x_bx_cross(),
             x_bx_cross_defer(),
+            x_bx_cross128(),
         )
     })
 }
@@ -959,9 +977,15 @@ mod tests {
             XCellTest::Diag(XDiagMode::PerHit),
             XCellTest::Diag(XDiagMode::Scalar),
         ];
-        for (cross, defer) in [(false, false), (true, false), (true, true)] {
-            let auto = x_cell_test("", cross, defer);
-            if auto != XCellTest::Diag(XDiagMode::PerHit) {
+        for (cross, defer, cross128) in [
+            (false, false, 0),
+            (true, false, 1),
+            (true, true, 1),
+            (true, false, 2),
+            (true, true, 2),
+        ] {
+            let auto = x_cell_test("", cross, defer, cross128);
+            if auto != XCellTest::Diag(XDiagMode::PerHit) && !modes.contains(&auto) {
                 modes.push(auto);
             }
         }

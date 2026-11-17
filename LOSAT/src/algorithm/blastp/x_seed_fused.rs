@@ -558,6 +558,11 @@ pub(crate) enum XCellTest {
     /// batch's calls deferred to a later batch that meets their entries, or the drain's end.
     #[cfg(target_arch = "x86_64")]
     Cross { defer: bool },
+    /// LOSAT_X_BXCROSS128: [`XCellTest::Cross`]'s batches in two 128-bit vectors of four lanes
+    /// ([`x_scan_cells_w128_cross`]; wasm32 simd128, x86-64 with SSSE3, SSE4.1 and POPCNT), where the
+    /// AVX2 batches do not run.
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+    Cross128 { defer: bool },
 }
 
 impl XCellTest {
@@ -569,6 +574,10 @@ impl XCellTest {
             XCellTest::Cross { defer: true } => "avx2-cross-defer",
             #[cfg(target_arch = "x86_64")]
             XCellTest::Cross { defer: false } => "avx2-cross",
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+            XCellTest::Cross128 { defer: true } => "w128-cross-defer",
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+            XCellTest::Cross128 { defer: false } => "w128-cross",
         }
     }
 }
@@ -586,6 +595,24 @@ fn x_avx2_available() -> bool {
 #[cfg(target_arch = "x86_64")]
 fn x_cross_available() -> bool {
     x_avx2_available() && std::arch::is_x86_feature_detected!("popcnt")
+}
+
+// No NCBI counterpart: whether the CPU has what LOSAT_X_BXCROSS128's functions are compiled for; it
+// does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXCROSS128): SSSE3, SSE4.1 and POPCNT on x86-64 (the 128-bit layer of
+/// `utils/xdrop_simd.rs`, and `popcnt` as for LOSAT_X_BXCROSS); always on wasm32 simd128.
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+fn x_cross128_available() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+            && std::arch::is_x86_feature_detected!("popcnt")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        true
+    }
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once (LOSAT_X_BPDIAG; the AVX2 batch where the
@@ -623,20 +650,44 @@ fn x_diag_mode() -> XDiagMode {
 /// blastp (the scalar batch was slower than the per-hit loop; module header). The AVX2 batch is
 /// [`XCellTest::Cross`] with `cross` (LOSAT_X_BXCROSS) where the CPU also has POPCNT (its calls
 /// deferred with `defer`, LOSAT_X_BXCROSSDEFER), otherwise [`XDiagMode::Avx2DeferMasked`].
-pub(crate) fn x_cell_test(requested: &str, cross: bool, defer: bool) -> XCellTest {
+///
+/// EXPERIMENT (LOSAT_X_BXCROSS128): with `cross` and `cross128` 1 (the switch's value), where
+/// [`XCellTest::Cross`] does not run (no AVX2 or no POPCNT, or another architecture) and the CPU has
+/// what [`x_cross128_available`] asks, the cell test is [`XCellTest::Cross128`] (its calls deferred
+/// with `defer`); with `cross128` 2 (diagnostic) it is that in place of [`XCellTest::Cross`] too;
+/// with 0 the choice is the one before the switch.
+pub(crate) fn x_cell_test(requested: &str, cross: bool, defer: bool, cross128: usize) -> XCellTest {
     XCellTest::Diag(match requested {
         "per-hit" => XDiagMode::PerHit,
         "scalar" => XDiagMode::Scalar,
         _ => {
+            #[cfg(any(
+                target_arch = "x86_64",
+                all(target_arch = "wasm32", target_feature = "simd128")
+            ))]
+            if cross && cross128 == 2 && x_cross128_available() {
+                return XCellTest::Cross128 { defer };
+            }
+            #[cfg(target_arch = "x86_64")]
+            if cross && x_cross_available() {
+                return XCellTest::Cross { defer };
+            }
+            #[cfg(any(
+                target_arch = "x86_64",
+                all(target_arch = "wasm32", target_feature = "simd128")
+            ))]
+            if cross && cross128 != 0 && x_cross128_available() {
+                return XCellTest::Cross128 { defer };
+            }
             #[cfg(target_arch = "x86_64")]
             if x_avx2_available() {
-                if cross && x_cross_available() {
-                    return XCellTest::Cross { defer };
-                }
                 return XCellTest::Diag(XDiagMode::Avx2DeferMasked);
             }
-            #[cfg(not(target_arch = "x86_64"))]
-            let _ = (cross, defer);
+            #[cfg(not(any(
+                target_arch = "x86_64",
+                all(target_arch = "wasm32", target_feature = "simd128")
+            )))]
+            let _ = (cross, defer, cross128);
             XDiagMode::PerHit
         }
     })
@@ -666,7 +717,7 @@ impl XDiagCounts {
 
     /// EXPERIMENT (LOSAT_X_BXCROSS): a cell and its hits as they are staged (their candidates are
     /// counted when the batches run, [`XDiagCounts::add_candidates`]).
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
     #[inline(always)]
     fn add_staged(&mut self, hits: usize) {
         self.cells += 1;
@@ -674,7 +725,7 @@ impl XDiagCounts {
     }
 
     /// EXPERIMENT (LOSAT_X_BXCROSS): the candidates of the staged hits tested in one drain.
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
     #[inline(always)]
     fn add_candidates(&mut self, candidates: u32) {
         self.candidates += u64::from(candidates);
@@ -695,7 +746,7 @@ impl XDiagCounts {
 /// drain) and the windows of eight staged hits with a repeated entry, tested in parts
 /// ([`x_cross_window`], added once per drain). blastx adds them to the totals of its timing line
 /// once per subject (`blastx/x_seed_diag.rs`), as it does the other cell tests' counts.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[derive(Default)]
 struct XCrossCounts {
     diag: XDiagCounts,
@@ -1092,10 +1143,13 @@ where
     };
     let table = &mut XDiagTable::new(diag_array, diag_mask);
     #[cfg_attr(
-        not(target_arch = "x86_64"),
+        not(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        )),
         expect(
             clippy::infallible_destructuring_match,
-            reason = "the `Cross` variant exists on x86_64 only, so off x86_64 `Diag` is the only pattern"
+            reason = "the `Cross` and `Cross128` variants exist on x86_64 and wasm32 simd128 only, so elsewhere `Diag` is the only pattern"
         )
     )]
     let mode = match mode {
@@ -1103,6 +1157,29 @@ where
         #[cfg(target_arch = "x86_64")]
         XCellTest::Cross { defer } => {
             let counts = x_scan_cells_cross::<X_CROSS_CHUNK, K, F>(
+                branch_free,
+                defer,
+                lookup,
+                subject,
+                subject_length,
+                table,
+                test,
+                &mut candidate,
+            );
+            let XDiagCounts {
+                cells,
+                hits,
+                candidates,
+            } = counts.diag;
+            return [cells, hits, candidates, counts.splits];
+        }
+        // EXPERIMENT (LOSAT_X_BXCROSS128): the same batches in 128-bit vectors.
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        XCellTest::Cross128 { defer } => {
+            let counts = x_scan_cells_cross128::<X_CROSS_CHUNK, K, F>(
                 branch_free,
                 defer,
                 lookup,
@@ -1264,17 +1341,7 @@ where
         x_cross_available(),
         "the cross-cell AVX2 batch needs AVX2 and POPCNT"
     );
-    assert!(
-        (0..=i64::from(table.mask) + 1).contains(&i64::from(lookup.query_length)),
-        "the cross-cell stage needs every query offset at most the diagonal mask"
-    );
-    // `mask + 1` a power of two (written in i64, so that `mask + 1` cannot overflow): the
-    // recovery `(coord + s) & mask` of `x_cross_query` equals `q` only then (mask 5, q 2, s 3
-    // stages coord (2 - 3) & 5 = 5 and recovers (5 + 3) & 5 = 0).
-    assert!(
-        i64::from(table.mask) >= 0 && i64::from(table.mask) & (i64::from(table.mask) + 1) == 0,
-        "the cross-cell stage needs a diagonal mask of the form 2^k - 1"
-    );
+    x_cross_check_bounds(lookup.query_length, table.mask);
     let mut counts = XCrossCounts::default();
     // SAFETY: the CPU has AVX2 and POPCNT, and every query offset of the lookup is below
     // `query_length`, so at most the mask (asserted above).
@@ -1308,6 +1375,97 @@ where
                 &mut counts,
             ),
             (false, false) => x_scan_cells_avx2_cross::<false, false, CHUNK, K, F>(
+                lookup,
+                subject,
+                subject_length,
+                table,
+                test,
+                candidate,
+                &mut counts,
+            ),
+        }
+    }
+    counts
+}
+
+// No NCBI counterpart: a check of the bound LOSAT_X_BXCROSS's stage rests on.
+/// EXPERIMENT (LOSAT_X_BXCROSS): the checks of [`x_scan_cells_cross`] (and of
+/// [`x_scan_cells_cross128`]) that every query offset of a lookup of `query_length` letters is at
+/// most `mask`, and that `mask + 1` is a power of two, once per subject scan.
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+fn x_cross_check_bounds(query_length: i32, mask: i32) {
+    assert!(
+        (0..=i64::from(mask) + 1).contains(&i64::from(query_length)),
+        "the cross-cell stage needs every query offset at most the diagonal mask"
+    );
+    // `mask + 1` a power of two (written in i64, so that `mask + 1` cannot overflow): the
+    // recovery `(coord + s) & mask` of `x_cross_query` equals `q` only then (mask 5, q 2, s 3
+    // stages coord (2 - 3) & 5 = 5 and recovers (5 + 3) & 5 = 0).
+    assert!(
+        i64::from(mask) >= 0 && i64::from(mask) & (i64::from(mask) + 1) == 0,
+        "the cross-cell stage needs a diagonal mask of the form 2^k - 1"
+    );
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_scan_cells_cross`] with the 128-bit kernel
+/// ([`x_scan_cells_w128_cross`]): the same checks, the same instances of `branch_free` and `defer`.
+/// Out of line and called by blastx's [`x_scan_two_hit_with`] only, as [`x_scan_cells_cross`].
+// No NCBI counterpart: chooses LOSAT's cell test; it does not change any value NCBI computes.
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_cells_cross128<const CHUNK: usize, K: XCell, F>(
+    branch_free: bool,
+    defer: bool,
+    lookup: &BlastAaLookupTable<K>,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> XCrossCounts
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    assert!(
+        x_cross128_available(),
+        "the cross-cell 128-bit batch needs SSSE3, SSE4.1 and POPCNT"
+    );
+    x_cross_check_bounds(lookup.query_length, table.mask);
+    let mut counts = XCrossCounts::default();
+    // SAFETY: on x86-64 the CPU has SSSE3, SSE4.1 and POPCNT, and every query offset of the
+    // lookup is below `query_length`, so at most the mask (asserted above).
+    unsafe {
+        match (branch_free, defer) {
+            (true, true) => x_scan_cells_w128_cross::<true, true, CHUNK, K, F>(
+                lookup,
+                subject,
+                subject_length,
+                table,
+                test,
+                candidate,
+                &mut counts,
+            ),
+            (true, false) => x_scan_cells_w128_cross::<true, false, CHUNK, K, F>(
+                lookup,
+                subject,
+                subject_length,
+                table,
+                test,
+                candidate,
+                &mut counts,
+            ),
+            (false, true) => x_scan_cells_w128_cross::<false, true, CHUNK, K, F>(
+                lookup,
+                subject,
+                subject_length,
+                table,
+                test,
+                candidate,
+                &mut counts,
+            ),
+            (false, false) => x_scan_cells_w128_cross::<false, false, CHUNK, K, F>(
                 lookup,
                 subject,
                 subject_length,
@@ -1410,34 +1568,34 @@ unsafe fn x_scan_cells_avx2_defer_masked<const BRANCH_FREE: bool, K: XCell, F>(
 /// EXPERIMENT (LOSAT_X_BXCROSS): the number of staged hits at which the batches run (a constant
 /// of each instance, so a cell's stores and the chunk test take no register); the stage's two
 /// arrays then take 8 KiB and stay in the first cache level.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 const X_CROSS_CHUNK: usize = 1024;
 
 /// EXPERIMENT (LOSAT_X_BXCROSS, tests only): the chunk of the second instance the tests run,
 /// which drains the stage every few cells (and inside long cells), so that the hits left by a
 /// drain and the windows with a repeated entry occur across drains on small inputs.
-#[cfg(all(test, target_arch = "x86_64"))]
+#[cfg(all(test, any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128"))))]
 const X_CROSS_TEST_CHUNK: usize = 64;
 
 /// EXPERIMENT (LOSAT_X_BXCROSS): the hits a piece of a cell's copy stages with fixed vector work
 /// (three registers of eight lanes).
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 const X_CROSS_PIECE: usize = 3 * X_DIAG_LANES;
 
 /// EXPERIMENT (LOSAT_X_BXCROSS): the room in each array past the chunk: a piece starts with fewer
 /// than the chunk staged and stores [`X_CROSS_PIECE`] lanes (those past its hits are never read as hits),
 /// so a drain starts with fewer than the chunk plus 24 staged, and its move of the fewer than eight
 /// left reads eight lanes from below that count ([`x_cross_drain`]).
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 const X_CROSS_SLACK: usize = 32;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 const _: () = assert!(X_CROSS_SLACK >= X_CROSS_PIECE + X_DIAG_LANES - 1);
 // The `u16` loads of `x_cross_cell` (three of `X_DIAG_LANES` hits, 16 bytes each, from the start of
 // a piece of a list) end `X_CROSS_PIECE` hits from it: the padding of a table of 16-bit hits holds
 // them, past a cell's own entries (2 bytes into the 8-byte cell, one piece) and past an overflow
 // list (its last piece has at least one hit left).
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 const _: () = {
     use crate::algorithm::tblastx::lookup::BackboneCell16;
     assert!(
@@ -1446,7 +1604,7 @@ const _: () = {
     )
 };
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 thread_local! {
     /// EXPERIMENT (LOSAT_X_BXCROSS): the stage of a thread's scans (the two arrays of [`XCross`]
     /// in one allocation), kept between them.
@@ -1461,14 +1619,14 @@ thread_local! {
 /// `base`) and its subject offset (at `base + STRIDE`); its query offset is recovered from the two
 /// ([`x_cross_query`]). The number of hits staged is the scan's (a local, passed to and returned by
 /// [`x_cross_cell`] and [`x_cross_drain`]); between two cells it is below `CHUNK`.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[derive(Clone, Copy)]
 struct XCross<'a, const CHUNK: usize> {
     base: *mut i32,
     _stage: std::marker::PhantomData<&'a mut Vec<i32>>,
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 impl<'a, const CHUNK: usize> XCross<'a, CHUNK> {
     /// The values of each array: the chunk and the slack.
     const STRIDE: usize = CHUNK + X_CROSS_SLACK;
@@ -1540,7 +1698,7 @@ impl<'a, const CHUNK: usize> XCross<'a, CHUNK> {
 /// query offsets `0..=mask` of the lookup ([`x_scan_cells_cross`] checks the bound and that the
 /// table's length is a power of two once per subject; [`x_cross_cell`] checks each cell's offsets in
 /// debug builds).
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(always)]
 fn x_cross_query(coord: i32, s: i32, mask: i32) -> i32 {
     coord.wrapping_add(s) & mask
@@ -2490,7 +2648,7 @@ where
 /// # Safety
 /// `i` must be below the staged count, and the hit's query offset at most `table.mask`.
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(always)]
 unsafe fn x_cross_hit<const CHUNK: usize, F>(
     cross: XCross<'_, CHUNK>,
@@ -2550,7 +2708,7 @@ unsafe fn x_cross_conflict(coords: std::arch::x86_64::__m256i) -> bool {
 /// EXPERIMENT (LOSAT_X_BXCROSS): the end of the part of a window's eight coordinates that starts at
 /// lane `start` (below 8): the first lane after it whose coordinate a lane of the part before it
 /// holds, or 8. The lanes `start..end` hold distinct coordinates.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(always)]
 fn x_cross_part_end(coords: &[i32; X_DIAG_LANES], start: usize) -> usize {
     (start + 1..X_DIAG_LANES)
@@ -2665,7 +2823,7 @@ unsafe fn x_batch_avx2_lanes_mark<const MARK: bool>(
 /// offsets at most `table.mask`.
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(always)]
 unsafe fn x_cross_calls<const CHUNK: usize, F>(
     cross: XCross<'_, CHUNK>,
@@ -2693,7 +2851,7 @@ unsafe fn x_cross_calls<const CHUNK: usize, F>(
     }
 }
 
-#[cfg(all(test, target_arch = "x86_64"))]
+#[cfg(all(test, any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128"))))]
 thread_local! {
     /// EXPERIMENT (LOSAT_X_BXCROSSDEFER, tests only): the units of this thread that met the marker
     /// with calls deferred (the calls made, the unit run again) and with none (a stored value, the
@@ -2703,7 +2861,7 @@ thread_local! {
 
 /// EXPERIMENT (LOSAT_X_BXCROSSDEFER, tests only): counts a unit that met the marker with calls
 /// deferred (`stored` false) or none (true).
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(always)]
 fn x_cross_mark_met(stored: bool) {
     #[cfg(test)]
@@ -2722,7 +2880,7 @@ fn x_cross_mark_met(stored: bool) {
 /// last_hit is `s_last_off - (word - 1) + offset`); a unit that meets it with no call deferred
 /// takes it as a stored value and runs with its calls at once, so any table content gives the same
 /// calls (module header).
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 const X_CROSS_MARKER: i32 = -1;
 
 /// EXPERIMENT (LOSAT_X_BXCROSSDEFER): records a unit's candidates for deferred calls: its first
@@ -2763,7 +2921,7 @@ unsafe fn x_cross_defer<const CHUNK: usize>(
 /// not yet moved.
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(never)]
 unsafe fn x_cross_flush<const CHUNK: usize, F>(
     cross: XCross<'_, CHUNK>,
@@ -2798,7 +2956,7 @@ unsafe fn x_cross_flush<const CHUNK: usize, F>(
 
 /// EXPERIMENT (LOSAT_X_BXCROSSDEFER): [`x_cross_flush`] where a unit met the marker (rare), out of
 /// the loop.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
 #[cold]
 #[inline(never)]
 unsafe fn x_cross_flush_cold<const CHUNK: usize, F>(
@@ -3055,6 +3213,875 @@ where
     (candidates, pending)
 }
 
+// ---- EXPERIMENT (LOSAT_X_BXCROSS128): LOSAT_X_BXCROSS's batches in 128-bit vectors ----
+
+// No NCBI counterpart: the vector kernel of LOSAT's cell test; it holds no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXCROSS128): a kernel of LOSAT_X_BXCROSS's batches of eight staged hits:
+/// what the scan's stage ([`x_cross_cell_with`]), the drain ([`x_cross_drain_with`]) and its units
+/// run in the kernel's vectors. [`XCrossW128`]: two vectors of four lanes of the 128-bit layer
+/// (`utils/xdrop_simd.rs` `arch`, x86-64 SSE and wasm32 simd128). The kernel's out-of-line
+/// functions are compiled for its instructions and inline the driver with their kernel.
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+trait XCrossKernel {
+    /// The eight entries a unit read (LOSAT_X_BXCROSSDEFER's records).
+    type Old: Copy;
+    /// The vectors a cell's stage uses (its subject offset and the mask, made once per cell).
+    type Cell: Copy;
+
+    /// The vectors of a cell at subject offset `s` with the table's `mask`.
+    ///
+    /// # Safety
+    /// Inlined into code compiled for the kernel's instructions.
+    unsafe fn cell(s: i32, mask: i32) -> Self::Cell;
+
+    /// Stages the first `piece` (at most [`X_CROSS_PIECE`]) hits from `p`: their coordinates
+    /// `(q - s) & mask` at `at` and the subject offset at `at + stride`, [`X_CROSS_PIECE`] lanes
+    /// each (those past `piece` are never read as hits).
+    ///
+    /// # Safety
+    /// As [`x_cross_cell_with`]; the [`X_CROSS_PIECE`] lanes from `at` and from `at + stride`
+    /// writable.
+    unsafe fn stage<H: XHit>(cell: Self::Cell, p: *const H, piece: usize, at: *mut i32, stride: usize);
+
+    /// Whether two of the eight staged coordinates from `coords` are equal.
+    ///
+    /// # Safety
+    /// Inlined into code compiled for the kernel's instructions; eight values readable at `coords`.
+    unsafe fn conflict(coords: *const i32) -> bool;
+
+    /// The test of eight lanes (lane `i` the hit at `lane_coords[i]` with the subject offset
+    /// `*s.add(i)`) of [`x_batch_avx2_lanes_mark`]: reads the eight entries, stores their new
+    /// values and returns the candidate lanes and the entries read; with `MARK` it returns `None`
+    /// before any store where an entry holds [`X_CROSS_MARKER`], and its candidate lanes store the
+    /// marker.
+    ///
+    /// # Safety
+    /// Inlined into code compiled for the kernel's instructions; every coordinate at most
+    /// `table.mask`; eight values readable at `s`.
+    unsafe fn lanes_mark<const MARK: bool>(
+        lane_coords: [u32; X_DIAG_LANES],
+        s: *const i32,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+    ) -> Option<(u32, Self::Old)>;
+
+    /// The eight entries of `old` stored at `dst`.
+    ///
+    /// # Safety
+    /// Inlined into code compiled for the kernel's instructions; eight values writable at `dst`.
+    unsafe fn store_old(dst: *mut i32, old: Self::Old);
+
+    /// The eight values at `row + from` copied to `row`, all loaded before any is stored.
+    ///
+    /// # Safety
+    /// Inlined into code compiled for the kernel's instructions; the values readable and writable.
+    unsafe fn move8(row: *mut i32, from: usize);
+
+    /// The kernel's [`x_cross_drain_with`], out of line.
+    ///
+    /// # Safety
+    /// As [`x_cross_drain_with`].
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn drain<const DEFER: bool, const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        staged: usize,
+        end: bool,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+        counts: &mut XCrossCounts,
+    ) -> usize
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct);
+
+    /// The kernel's [`x_cross_window_with`], cold and out of line.
+    ///
+    /// # Safety
+    /// As [`x_cross_window_with`].
+    unsafe fn window<const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        b: usize,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+    ) -> u32
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct);
+
+    /// The kernel's [`x_cross_window_defer_with`], cold and out of line.
+    ///
+    /// # Safety
+    /// As [`x_cross_window_defer_with`].
+    unsafe fn window_defer<const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        b: usize,
+        pending: usize,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+    ) -> (u32, usize)
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct);
+
+    /// The kernel's [`x_cross_batch_with`] for a batch that met a stored value equal to the marker
+    /// while no call was deferred, cold and out of line.
+    ///
+    /// # Safety
+    /// As [`x_cross_batch_with`].
+    unsafe fn batch_cold<const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        b: usize,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+    ) -> u32
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct);
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_scan_cells_avx2_cross`]'s scan with the kernel `Kn`:
+/// `on_cell` stages the cell's hits ([`x_cross_cell_with`], which drains the stage when `CHUNK`
+/// hits are staged), and the hits staged at the end of the subject are tested by `Kn`'s drain.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; every query offset of `lookup` at most
+/// `table.mask` ([`x_scan_cells_cross128`]).
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 (quoted at `x_scan_two_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_scan_cells_cross_with<
+    Kn: XCrossKernel,
+    const BRANCH_FREE: bool,
+    const DEFER: bool,
+    const CHUNK: usize,
+    K: XCell,
+    F,
+>(
+    lookup: &BlastAaLookupTable<K>,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut stage = X_CROSS_STAGE.take();
+    {
+        let cross = XCross::<CHUNK>::new::<DEFER>(&mut stage);
+        let mut staged = 0usize;
+        x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
+            // SAFETY: as this function's contract; `staged` is 0 at the start and below the chunk
+            // after every call of `x_cross_cell_with`.
+            staged = unsafe {
+                x_cross_cell_with::<Kn, K::Hit, DEFER, CHUNK, F>(
+                    cross, staged, hits, s, table, test, candidate, counts,
+                )
+            };
+        });
+        Kn::drain::<DEFER, CHUNK, F>(cross, staged, true, table, test, candidate, counts);
+    }
+    X_CROSS_STAGE.set(stage);
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_cell`] with the kernel `Kn`: stages one cell's hits
+/// in pieces of [`X_CROSS_PIECE`] ([`XCrossKernel::stage`]), the count advanced by each piece's
+/// hits, and drains the stage when `CHUNK` or more are staged. The cell and its hits are counted
+/// here, its candidates by the drain. Returns the number of hits staged.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; `staged` below `CHUNK`; every query offset of
+/// `hits` at most `table.mask`; for `u16` hits the 48 bytes from the list's start inside the
+/// table's allocations (`XCell::PAD_CELLS`, `XCell::PAD_HITS`).
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-516 (the coordinate, quoted at
+// `XDiagTable::coord`) and blast_aascan.c:60-99 (the copy of a cell's hits, quoted at
+// `x_scan_cells`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_cross_cell_with<Kn: XCrossKernel, H: XHit, const DEFER: bool, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    mut staged: usize,
+    hits: &[H],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) -> usize
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    debug_assert!(
+        hits.iter().all(|q| (0..=table.mask).contains(&q.q())),
+        "a query offset of the cell at subject offset {s} is above the mask {}",
+        table.mask
+    );
+    counts.diag.add_staged(hits.len());
+    let cell = Kn::cell(s, table.mask);
+    let mut p = hits.as_ptr();
+    let mut left = hits.len();
+    loop {
+        let piece = left.min(X_CROSS_PIECE);
+        // staged < CHUNK, so the piece's lanes end at staged + 24 < STRIDE in each array
+        // (`XCross::new`).
+        Kn::stage(
+            cell,
+            p,
+            piece,
+            cross.coord().add(staged),
+            XCross::<CHUNK>::STRIDE,
+        );
+        staged += piece;
+        if staged >= CHUNK {
+            staged = Kn::drain::<DEFER, CHUNK, F>(
+                cross, staged, false, table, test, candidate, counts,
+            );
+        }
+        if left <= X_CROSS_PIECE {
+            break;
+        }
+        left -= X_CROSS_PIECE;
+        p = p.add(X_CROSS_PIECE);
+    }
+    staged
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_drain`] with the kernel `Kn`: the staged hits in
+/// windows of eight from the first one, a window with distinct entries as one batch, otherwise in
+/// parts (`Kn`'s cold window functions); with `DEFER` (LOSAT_X_BXCROSSDEFER) each unit's calls
+/// deferred to a later unit that meets their entries, or the end of the windows. Then with `end`
+/// the fewer than eight left go one after the other, otherwise they move to the front of the
+/// stage. Returns the hits left staged.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; as [`x_cross_drain`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_cross_drain_with<Kn: XCrossKernel, const DEFER: bool, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    staged: usize,
+    end: bool,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) -> usize
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let full = staged & !(X_DIAG_LANES - 1);
+    let mut candidates = 0u32;
+    let mut windows = 0u32;
+    // The records of deferred calls (LOSAT_X_BXCROSSDEFER; always 0 without `DEFER`).
+    let mut pending = 0usize;
+    let mut b = 0;
+    while b < full {
+        if Kn::conflict(cross.coord().add(b)) {
+            if DEFER {
+                let (window, left) = Kn::window_defer(cross, b, pending, table, test, candidate);
+                candidates += window;
+                pending = left;
+            } else {
+                candidates += Kn::window(cross, b, table, test, candidate);
+            }
+            windows += 1;
+        } else if !DEFER {
+            candidates += x_cross_batch_with::<Kn, CHUNK, F>(cross, b, table, test, candidate);
+        } else {
+            match x_cross_batch_marked_with::<Kn, CHUNK>(cross, b, table, test) {
+                Some((lanes, old)) => {
+                    x_cross_defer_with::<Kn, CHUNK>(cross, &mut pending, b, lanes, old);
+                    candidates += lanes.count_ones();
+                }
+                None if pending != 0 => {
+                    // A deferred candidate's entry (or a stored value equal to the marker): the
+                    // calls, then the batch again from the loop's head.
+                    x_cross_flush_cold(cross, pending, table, test, candidate);
+                    pending = 0;
+                    continue;
+                }
+                // A stored value equal to the marker, no call deferred: the batch with its calls
+                // at once.
+                None => candidates += Kn::batch_cold(cross, b, table, test, candidate),
+            }
+        }
+        b += X_DIAG_LANES;
+    }
+    if DEFER {
+        // The deferred calls, before the hits left are tested (they read the entries) or moved
+        // (over the staged hits the records name).
+        x_cross_flush(cross, pending, table, test, candidate);
+    }
+    let left = if end {
+        for i in full..staged {
+            candidates += x_cross_hit(cross, i, table, test, candidate);
+        }
+        0
+    } else {
+        // Fewer than eight left from `full`: the loads end at full + 8 <= staged + 8 < CHUNK + 32
+        // = STRIDE, inside each array.
+        for row in [cross.coord(), cross.subject()] {
+            Kn::move8(row, full);
+        }
+        staged - full
+    };
+    counts.diag.add_candidates(candidates);
+    counts.splits += u64::from(windows);
+    left
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_batch_avx2_lanes`] with the kernel `Kn`: the test of eight
+/// lanes without the marker; returns the candidate lanes.
+///
+/// # Safety
+/// As [`XCrossKernel::lanes_mark`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_batch_lanes_with<Kn: XCrossKernel>(
+    lane_coords: [u32; X_DIAG_LANES],
+    s: *const i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> u32 {
+    let Some((lanes, _)) = Kn::lanes_mark::<false>(lane_coords, s, table, test) else {
+        unreachable!("without the marker the batch always stores")
+    };
+    lanes
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_batch`] with the kernel `Kn`: the staged hits
+/// `b..b + 8` (distinct entries) as one batch, the candidates called in lane order. Returns the
+/// number of candidates.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; as [`x_cross_batch`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_cross_batch_with<Kn: XCrossKernel, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let p = cross.coord().add(b);
+    // The coordinates from scalar loads, not taken out of the conflict test's vectors (the
+    // volatile reads keep the compiler from extracting them; x_cell_avx2_defer_masked).
+    let lane_coords: [u32; X_DIAG_LANES] =
+        std::array::from_fn(|i| std::ptr::read_volatile(p.add(i)) as u32);
+    debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
+    let lanes = x_batch_lanes_with::<Kn>(lane_coords, cross.subject().add(b), table, test);
+    x_cross_calls(cross, b, lanes, table, test, candidate);
+    lanes.count_ones()
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_batch_marked`] with the kernel `Kn`.
+///
+/// # Safety
+/// As [`x_cross_batch_with`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_cross_batch_marked_with<Kn: XCrossKernel, const CHUNK: usize>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> Option<(u32, Kn::Old)> {
+    let p = cross.coord().add(b);
+    // The coordinates from scalar loads, as in x_cross_batch_with.
+    let lane_coords: [u32; X_DIAG_LANES] =
+        std::array::from_fn(|i| std::ptr::read_volatile(p.add(i)) as u32);
+    debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
+    Kn::lanes_mark::<true>(lane_coords, cross.subject().add(b), table, test)
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_defer`] with the kernel `Kn`'s entries.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; `pending` below [`XCross::PENDING`].
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_cross_defer_with<Kn: XCrossKernel, const CHUNK: usize>(
+    cross: XCross<'_, CHUNK>,
+    pending: &mut usize,
+    b: usize,
+    lanes: u32,
+    old: Kn::Old,
+) {
+    let r = *pending;
+    debug_assert!(r < XCross::<CHUNK>::PENDING);
+    Kn::store_old(cross.pending_old().add(X_DIAG_LANES * r), old);
+    *cross.pending_at().add(2 * r) = b as i32;
+    *cross.pending_at().add(2 * r + 1) = lanes as i32;
+    *pending = r + usize::from(lanes != 0);
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_unit`] with the kernel `Kn` (`s` the eight lanes'
+/// subject offsets).
+///
+/// # Safety
+/// As [`x_cross_unit`].
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_cross_unit_with<Kn: XCrossKernel, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    pending: &mut usize,
+    b: usize,
+    lane_coords: [u32; X_DIAG_LANES],
+    s: *const i32,
+    keep: u32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    loop {
+        if let Some((lanes, old)) = Kn::lanes_mark::<true>(lane_coords, s, table, test) {
+            let lanes = lanes & keep;
+            x_cross_defer_with::<Kn, CHUNK>(cross, pending, b, lanes, old);
+            return lanes;
+        }
+        if *pending == 0 {
+            // A stored value equal to the marker, no call deferred: the unit with its calls at
+            // once (as without the deferral).
+            x_cross_mark_met(true);
+            let lanes = x_batch_lanes_with::<Kn>(lane_coords, s, table, test) & keep;
+            x_cross_calls(cross, b, lanes, table, test, candidate);
+            return lanes;
+        }
+        x_cross_flush_cold(cross, *pending, table, test, candidate);
+        *pending = 0;
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_window`] with the kernel `Kn`: the staged hits
+/// `b..b + 8`, two of which name one entry, in parts, each a batch whose lanes past the part repeat
+/// its first hit. Returns the number of candidates.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; as [`x_cross_window`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_cross_window_with<Kn: XCrossKernel, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let coords: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.coord().add(b + i));
+    let subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.subject().add(b + i));
+    let mut candidates = 0;
+    let mut start = 0;
+    while start < X_DIAG_LANES {
+        let end = x_cross_part_end(&coords, start);
+        // Batch lane i: window lane start + i inside the part, else the part's first lane.
+        let lane = |i: usize| if start + i < end { start + i } else { start };
+        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| coords[lane(i)] as u32);
+        debug_assert!(x_batch_coords_distinct(
+            &lane_coords.map(|c| c as usize)[..end - start]
+        ));
+        let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
+        let lanes = x_batch_lanes_with::<Kn>(lane_coords, lane_subjects.as_ptr(), table, test)
+            & ((1u32 << (end - start)) - 1);
+        x_cross_calls(cross, b + start, lanes, table, test, candidate);
+        candidates += lanes.count_ones();
+        start = end;
+    }
+    candidates
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_window_defer`] with the kernel `Kn`.
+///
+/// # Safety
+/// Inlined into code compiled for `Kn`'s instructions; as [`x_cross_window_defer`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[inline(always)]
+unsafe fn x_cross_window_defer_with<Kn: XCrossKernel, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    mut pending: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> (u32, usize)
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let coords: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.coord().add(b + i));
+    let subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.subject().add(b + i));
+    let mut candidates = 0;
+    let mut start = 0;
+    while start < X_DIAG_LANES {
+        let end = x_cross_part_end(&coords, start);
+        // Batch lane i: window lane start + i inside the part, else the part's first lane.
+        let lane = |i: usize| if start + i < end { start + i } else { start };
+        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| coords[lane(i)] as u32);
+        debug_assert!(x_batch_coords_distinct(
+            &lane_coords.map(|c| c as usize)[..end - start]
+        ));
+        let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
+        let part = (1u32 << (end - start)) - 1;
+        let lanes = x_cross_unit_with::<Kn, CHUNK, F>(
+            cross,
+            &mut pending,
+            b + start,
+            lane_coords,
+            lane_subjects.as_ptr(),
+            part,
+            table,
+            test,
+            candidate,
+        );
+        candidates += lanes.count_ones();
+        start = end;
+    }
+    (candidates, pending)
+}
+
+// No NCBI counterpart: the vector kernel of LOSAT's cell test; it holds no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXCROSS128): the kernel of two 128-bit vectors of four lanes per batch of
+/// eight (`utils/xdrop_simd.rs` `arch`): the conflict test compares each half with itself one and
+/// two places round and the low half with the high one zero to three places round; the batch's
+/// entries are read and stored by lane, as the AVX2 kernel's; the candidate lanes are the two
+/// halves' masks.
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[derive(Clone, Copy)]
+struct XCrossW128;
+
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+impl XCrossKernel for XCrossW128 {
+    type Old = [crate::utils::xdrop_simd::arch::V; 2];
+    type Cell = [crate::utils::xdrop_simd::arch::V; 2];
+
+    #[inline(always)]
+    unsafe fn cell(s: i32, mask: i32) -> Self::Cell {
+        use crate::utils::xdrop_simd::arch::*;
+        [splat_i32(s), splat_i32(mask)]
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516 (the coordinate, quoted at
+    // `XDiagTable::coord`) and blast_aascan.c:60-99 (the copy of a cell's hits, quoted at
+    // `x_scan_cells`)
+    #[inline(always)]
+    unsafe fn stage<H: XHit>(cell: Self::Cell, p: *const H, piece: usize, at: *mut i32, stride: usize) {
+        use crate::utils::xdrop_simd::arch::*;
+        let [subject, mask] = cell;
+        let queries = H::x_load24_w128(p, piece);
+        for (k, &query) in queries.iter().enumerate() {
+            store(at.add(4 * k), and(sub32(query, subject), mask));
+            store(at.add(stride + 4 * k), subject);
+        }
+    }
+
+    // No NCBI counterpart: a check of the property the batches rest on (module header).
+    #[inline(always)]
+    unsafe fn conflict(coords: *const i32) -> bool {
+        use crate::utils::xdrop_simd::arch::*;
+        let lo = load(coords);
+        let hi = load(coords.add(4));
+        // The six pairs within a half: one and two places round (three places round is one
+        // place round taken from the other lane).
+        let within = or(
+            or(eq32(lo, rot32_1(lo)), eq32(lo, rot32_2(lo))),
+            or(eq32(hi, rot32_1(hi)), eq32(hi, rot32_2(hi))),
+        );
+        // The sixteen pairs across the halves.
+        let across = or(
+            or(eq32(lo, hi), eq32(lo, rot32_1(hi))),
+            or(eq32(lo, rot32_2(hi)), eq32(lo, rot32_3(hi))),
+        );
+        any_set(or(within, across))
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    #[inline(always)]
+    unsafe fn lanes_mark<const MARK: bool>(
+        lane_coords: [u32; X_DIAG_LANES],
+        s: *const i32,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+    ) -> Option<(u32, Self::Old)> {
+        use crate::utils::xdrop_simd::arch::*;
+        let s = [load(s), load(s.add(4))];
+        let diag_offset = splat_i32(test.diag_offset);
+        let subject_plus_offset = s.map(|s| add32(s, diag_offset));
+        // coord <= mask < entries.len() (the caller's contract; XDiagTable::new)
+        let e = |i: usize| {
+            table
+                .entries
+                .get_unchecked(lane_coords[i] as usize)
+                .raw_bits() as i32
+        };
+        let old = [set32(e(0), e(1), e(2), e(3)), set32(e(4), e(5), e(6), e(7))];
+        // LOSAT_X_BXCROSSDEFER: an entry of a deferred candidate (the marker) ends the batch before
+        // any store; the caller makes the deferred calls and tests the eight again.
+        if MARK {
+            let marker = splat_i32(X_CROSS_MARKER);
+            if any_set(or(eq32(old[0], marker), eq32(old[1], marker))) {
+                return None;
+            }
+        }
+        // From here to the stores: x_batch_avx2_lanes_mark's test, by half.
+        let mut lanes = 0u32;
+        let mut lane_new = [0u32; X_DIAG_LANES];
+        for half in 0..2 {
+            let old = old[half];
+            let flag = sra32::<31>(old);
+            let last = sra32::<1>(shl32::<1>(old));
+            let diff = sub32(s[half], sub32(last, diag_offset));
+            let sum_below_last = gt_i32(last, subject_plus_offset[half]);
+            let in_window = gt_i32(splat_i32(test.window), diff);
+            let keep = blend8(in_window, sum_below_last, flag);
+            let below_word = gt_i32(splat_i32(test.word_size), diff);
+            let candidates = andnot(or(flag, below_word), in_window);
+            let written = and(
+                subject_plus_offset[half],
+                splat_i32(X_LAST_HIT_MASK as i32),
+            );
+            let new = blend8(written, old, keep);
+            // With MARK a candidate lane (all ones) stores the marker, the others the new value.
+            let new = if MARK { or(new, candidates) } else { new };
+            store(lane_new.as_mut_ptr().add(4 * half), new);
+            lanes |= mask32(candidates) << (4 * half);
+        }
+        for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
+            // coord <= mask < entries.len()
+            table
+                .entries
+                .get_unchecked_mut(coord as usize)
+                .set_raw_bits(raw);
+        }
+        Some((lanes, old))
+    }
+
+    #[inline(always)]
+    unsafe fn store_old(dst: *mut i32, old: Self::Old) {
+        use crate::utils::xdrop_simd::arch::*;
+        store(dst, old[0]);
+        store(dst.add(4), old[1]);
+    }
+
+    #[inline(always)]
+    unsafe fn move8(row: *mut i32, from: usize) {
+        use crate::utils::xdrop_simd::arch::*;
+        let lo = load(row.add(from));
+        let hi = load(row.add(from + 4));
+        store(row, lo);
+        store(row.add(4), hi);
+    }
+
+    #[inline(always)]
+    unsafe fn drain<const DEFER: bool, const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        staged: usize,
+        end: bool,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+        counts: &mut XCrossCounts,
+    ) -> usize
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+    {
+        x_cross_drain_w128::<DEFER, CHUNK, F>(cross, staged, end, table, test, candidate, counts)
+    }
+
+    #[inline(always)]
+    unsafe fn window<const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        b: usize,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+    ) -> u32
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+    {
+        x_cross_window_w128(cross, b, table, test, candidate)
+    }
+
+    #[inline(always)]
+    unsafe fn window_defer<const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        b: usize,
+        pending: usize,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+    ) -> (u32, usize)
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+    {
+        x_cross_window_defer_w128(cross, b, pending, table, test, candidate)
+    }
+
+    #[inline(always)]
+    unsafe fn batch_cold<const CHUNK: usize, F>(
+        cross: XCross<'_, CHUNK>,
+        b: usize,
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        candidate: &mut F,
+    ) -> u32
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+    {
+        x_cross_batch_cold_w128(cross, b, table, test, candidate)
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_scan_cells_avx2_cross`] with the 128-bit kernel
+/// ([`XCrossW128`]), compiled for its instructions as a whole (x86-64: SSSE3, SSE4.1 and POPCNT;
+/// wasm32: simd128, the target's). Never inlined.
+///
+/// # Safety
+/// On x86-64 the CPU must have SSSE3, SSE4.1 and POPCNT; every query offset of `lookup` must be at
+/// most `table.mask` ([`x_scan_cells_cross128`]).
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 (quoted at `x_scan_two_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+#[inline(never)]
+unsafe fn x_scan_cells_w128_cross<
+    const BRANCH_FREE: bool,
+    const DEFER: bool,
+    const CHUNK: usize,
+    K: XCell,
+    F,
+>(
+    lookup: &BlastAaLookupTable<K>,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_scan_cells_cross_with::<XCrossW128, BRANCH_FREE, DEFER, CHUNK, K, F>(
+        lookup,
+        subject,
+        subject_length,
+        table,
+        test,
+        candidate,
+        counts,
+    );
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_drain`] with the 128-bit kernel, out of line (it
+/// runs once per chunk of staged hits and once per subject).
+///
+/// # Safety
+/// As [`x_scan_cells_w128_cross`] and [`x_cross_drain`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+#[inline(never)]
+unsafe fn x_cross_drain_w128<const DEFER: bool, const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    staged: usize,
+    end: bool,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) -> usize
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_cross_drain_with::<XCrossW128, DEFER, CHUNK, F>(
+        cross, staged, end, table, test, candidate, counts,
+    )
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_window`] with the 128-bit kernel, cold and never
+/// inlined, so that the drain's loop keeps none of its values.
+///
+/// # Safety
+/// As [`x_scan_cells_w128_cross`] and [`x_cross_window`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+#[cold]
+#[inline(never)]
+unsafe fn x_cross_window_w128<const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_cross_window_with::<XCrossW128, CHUNK, F>(cross, b, table, test, candidate)
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_window_defer`] with the 128-bit kernel, cold and
+/// never inlined.
+///
+/// # Safety
+/// As [`x_scan_cells_w128_cross`] and [`x_cross_window_defer`].
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+#[cold]
+#[inline(never)]
+unsafe fn x_cross_window_defer_w128<const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    pending: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> (u32, usize)
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_cross_window_defer_with::<XCrossW128, CHUNK, F>(cross, b, pending, table, test, candidate)
+}
+
+/// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_batch_cold`] with the 128-bit kernel.
+///
+/// # Safety
+/// As [`x_scan_cells_w128_cross`] and [`x_cross_batch`].
+#[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+#[cold]
+#[inline(never)]
+unsafe fn x_cross_batch_cold_w128<const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    b: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_cross_mark_met(true);
+    x_cross_batch_with::<XCrossW128, CHUNK, F>(cross, b, table, test, candidate)
+}
+
 /// EXPERIMENT (LOSAT_X_BPDIAG): the cell's hits in batches of eight by [`x_test_batch_avx2`], the
 /// last batch of fewer than eight by [`x_test_batch_scalar`]; returns the number of candidates.
 /// No entry is read ahead (see [`x_cell_scalar`]).
@@ -3234,6 +4261,11 @@ mod tests {
             modes.push(XCellTest::Cross { defer: false });
             modes.push(XCellTest::Cross { defer: true });
         }
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+        if x_cross128_available() {
+            modes.push(XCellTest::Cross128 { defer: false });
+            modes.push(XCellTest::Cross128 { defer: true });
+        }
         modes
     }
 
@@ -3248,6 +4280,12 @@ mod tests {
         for mode in cell_modes() {
             #[cfg(target_arch = "x86_64")]
             if let XCellTest::Cross { .. } = mode {
+                runs.push((mode, X_CROSS_TEST_CHUNK));
+                runs.push((mode, X_CROSS_CHUNK));
+                continue;
+            }
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+            if let XCellTest::Cross128 { .. } = mode {
                 runs.push((mode, X_CROSS_TEST_CHUNK));
                 runs.push((mode, X_CROSS_CHUNK));
                 continue;
@@ -3329,6 +4367,66 @@ mod tests {
         (counts.diag.candidates as u32, counts.splits)
     }
 
+    /// LOSAT_X_BXCROSS128: [`run_cells_cross`] with the 128-bit kernel. LOSAT_X_BXCROSS's cell test over `cells` as for one subject's scan, its calls deferred with
+    /// `DEFER` (LOSAT_X_BXCROSSDEFER): every cell staged with the batches run at `CHUNK` staged
+    /// hits, and the stage drained after the last; checks the cells and hits counted and returns
+    /// the candidates and the windows tested in parts counted.
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+    fn run_cells_cross128<const DEFER: bool, const CHUNK: usize, F>(
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        cells: &[(i32, Vec<i32>)],
+        candidate: &mut F,
+    ) -> (u32, u64)
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+    {
+        assert!(x_cross128_available());
+        assert!(
+            cells
+                .iter()
+                .all(|(_, hits)| hits.iter().all(|q| (0..=table.mask).contains(q))),
+            "the stage recovers query offsets up to the mask only"
+        );
+        let mut stage = Vec::new();
+        let cross = XCross::<CHUNK>::new::<DEFER>(&mut stage);
+        let mut counts = XCrossCounts::default();
+        let mut staged = 0usize;
+        for (s, hits) in cells {
+            // SAFETY: on x86-64 the CPU has SSSE3, SSE4.1 and POPCNT, the query offsets are at most the mask
+            // (asserted above), and `staged` is the count the last call returned (0 at first).
+            staged = unsafe {
+                x_cross_cell_with::<XCrossW128, i32, DEFER, CHUNK, F>(
+                    cross,
+                    staged,
+                    hits,
+                    *s,
+                    table,
+                    test,
+                    candidate,
+                    &mut counts,
+                )
+            };
+        }
+        // SAFETY: as above; `staged` is below the chunk, and the stage made for `DEFER`.
+        let left = unsafe {
+            x_cross_drain_w128::<DEFER, CHUNK, F>(
+                cross,
+                staged,
+                true,
+                table,
+                test,
+                candidate,
+                &mut counts,
+            )
+        };
+        assert_eq!(left, 0, "the end of the subject drains the stage");
+        assert_eq!(counts.diag.cells, cells.len() as u64, "cells staged");
+        let hits: usize = cells.iter().map(|(_, hits)| hits.len()).sum();
+        assert_eq!(counts.diag.hits, hits as u64, "hits staged");
+        (counts.diag.candidates as u32, counts.splits)
+    }
+
     /// [`run_cells_cross`] with the instances of `chunk` and `defer` (LOSAT_X_BXCROSSDEFER);
     /// returns the candidates and the windows tested in parts counted.
     #[cfg(target_arch = "x86_64")]
@@ -3354,6 +4452,36 @@ mod tests {
             }
             (X_CROSS_CHUNK, true) => {
                 run_cells_cross::<true, X_CROSS_CHUNK, F>(table, test, cells, candidate)
+            }
+            _ => panic!("no instance of chunk {chunk}"),
+        }
+    }
+
+    /// LOSAT_X_BXCROSS128: [`run_cells_cross128`] with the instances of `chunk` and `defer` (LOSAT_X_BXCROSSDEFER);
+    /// returns the candidates and the windows tested in parts counted.
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+    fn run_cells_cross128_with<F>(
+        (chunk, defer): (usize, bool),
+        table: &mut XDiagTable<'_>,
+        test: XDiagTest,
+        cells: &[(i32, Vec<i32>)],
+        candidate: &mut F,
+    ) -> (u32, u64)
+    where
+        F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+    {
+        match (chunk, defer) {
+            (X_CROSS_TEST_CHUNK, false) => {
+                run_cells_cross128::<false, X_CROSS_TEST_CHUNK, F>(table, test, cells, candidate)
+            }
+            (X_CROSS_TEST_CHUNK, true) => {
+                run_cells_cross128::<true, X_CROSS_TEST_CHUNK, F>(table, test, cells, candidate)
+            }
+            (X_CROSS_CHUNK, false) => {
+                run_cells_cross128::<false, X_CROSS_CHUNK, F>(table, test, cells, candidate)
+            }
+            (X_CROSS_CHUNK, true) => {
+                run_cells_cross128::<true, X_CROSS_CHUNK, F>(table, test, cells, candidate)
             }
             _ => panic!("no instance of chunk {chunk}"),
         }
@@ -3401,7 +4529,7 @@ mod tests {
         let mut counted = 0u32;
         #[cfg(target_arch = "x86_64")]
         let mut buffer = Vec::new();
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(not(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128"))))]
         let _ = chunk;
         let mut table = XDiagTable::new(entries, mask);
         let mut candidate = |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {
@@ -3412,11 +4540,18 @@ mod tests {
             XCellTest::Diag(mode) => Some(mode),
             #[cfg(target_arch = "x86_64")]
             XCellTest::Cross { .. } => None,
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+            XCellTest::Cross128 { .. } => None,
         };
         #[cfg(target_arch = "x86_64")]
         if let XCellTest::Cross { defer } = mode {
             counted =
                 run_cells_cross_with((chunk, defer), &mut table, test, cells, &mut candidate).0;
+        }
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+        if let XCellTest::Cross128 { defer } = mode {
+            counted =
+                run_cells_cross128_with((chunk, defer), &mut table, test, cells, &mut candidate).0;
         }
         for (s, hits) in cells {
             // LOSAT_X_BXCROSS's cell test ran above.
@@ -3924,10 +5059,10 @@ mod tests {
         F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
     {
         #[cfg_attr(
-            not(target_arch = "x86_64"),
+            not(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128"))),
             expect(
                 clippy::infallible_destructuring_match,
-                reason = "the `Cross` variant exists on x86_64 only, so off x86_64 `Diag` is the only pattern"
+                reason = "the `Cross` and `Cross128` variants exist on x86_64 and wasm32 simd128 only, so elsewhere `Diag` is the only pattern"
             )
         )]
         let mode = match mode {
@@ -3959,8 +5094,35 @@ mod tests {
                 }
                 .diag;
             }
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
+            XCellTest::Cross128 { defer } => {
+                return match chunk {
+                    X_CROSS_TEST_CHUNK => x_scan_cells_cross128::<X_CROSS_TEST_CHUNK, K, F>(
+                        branch_free,
+                        defer,
+                        lookup,
+                        subject,
+                        subject_length,
+                        table,
+                        test,
+                        candidate,
+                    ),
+                    X_CROSS_CHUNK => x_scan_cells_cross128::<X_CROSS_CHUNK, K, F>(
+                        branch_free,
+                        defer,
+                        lookup,
+                        subject,
+                        subject_length,
+                        table,
+                        test,
+                        candidate,
+                    ),
+                    _ => panic!("no instance of chunk {chunk}"),
+                }
+                .diag;
+            }
         };
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(not(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128"))))]
         let _ = chunk;
         if branch_free {
             x_scan_two_hit_in_with::<true, _, F>(
@@ -4242,10 +5404,13 @@ mod tests {
             let mut runs = Vec::new();
             for mode in cell_modes() {
                 #[cfg_attr(
-                    not(target_arch = "x86_64"),
+                    not(any(
+                        target_arch = "x86_64",
+                        all(target_arch = "wasm32", target_feature = "simd128")
+                    )),
                     expect(
                         irrefutable_let_patterns,
-                        reason = "the `Cross` variant exists on x86_64 only, so off x86_64 `Diag` is the only pattern"
+                        reason = "the `Cross` and `Cross128` variants exist on x86_64 and wasm32 simd128 only, so elsewhere `Diag` is the only pattern"
                     )
                 )]
                 let XCellTest::Diag(mode) = mode
@@ -4377,7 +5542,7 @@ mod tests {
     // as the per-hit loop on that table. The query set has cells of 1-7 hits past a batch of eight
     // and cells in the overflow array (LOSAT_X_BXCROSS's three loads of eight hits read 48 bytes
     // from the start of a list, into the padding at the end of the cells and of the overflow).
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", target_feature = "simd128")))]
     #[test]
     fn the_cross_cell_test_on_u16_hits_equals_the_cell_tests_on_i32_hits() {
         let (wide, narrow, subjects, (size, mask, window)) = tables_of_both_widths();
@@ -4425,7 +5590,9 @@ mod tests {
         }
         let reference = run(&wide, &subjects, (size, mask, window), (PER_HIT, 0, false));
         assert!(reference.0.len() > 100, "{} candidates", reference.0.len());
+        #[cfg(target_arch = "x86_64")]
         let mut crossed = 0;
+        let mut crossed128 = 0;
         for (mode, chunk) in cell_runs() {
             for branch_free in [false, true] {
                 let what = format!("{mode:?} chunk {chunk} branch_free {branch_free}");
@@ -4435,12 +5602,21 @@ mod tests {
                 assert!(on_narrow.0 == reference.0, "{what}: candidate calls");
                 assert!(on_narrow.1 == reference.1, "{what}: diagonal entries");
                 assert_eq!(on_narrow.2[..3], on_wide.2[..3], "{what}: counts");
-                crossed += usize::from(matches!(mode, XCellTest::Cross { .. }));
+                #[cfg(target_arch = "x86_64")]
+                {
+                    crossed += usize::from(matches!(mode, XCellTest::Cross { .. }));
+                }
+                crossed128 += usize::from(matches!(mode, XCellTest::Cross128 { .. }));
             }
         }
+        #[cfg(target_arch = "x86_64")]
         assert!(
             crossed > 0 || !x_cross_available(),
             "the cross cell test must run where the CPU has it"
+        );
+        assert!(
+            crossed128 > 0 || !x_cross128_available(),
+            "the 128-bit cross cell test must run where the CPU has it"
         );
     }
 

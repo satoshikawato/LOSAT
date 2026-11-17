@@ -111,6 +111,7 @@ pub(crate) fn write_output<W: Write>(
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -120,7 +121,9 @@ pub(crate) fn write_output<W: Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> io::Result<()> {
     match pool {
-        Some(pool) if probe.is_none() && !super::tracing::enabled() => {
+        // The serial writer writes the rows of subjects whose load throws
+        // (`write_output_blastn_hitlists_to_writer`).
+        Some(pool) if probe.is_none() && !super::tracing::enabled() && !loads.any_throws() => {
             if !hit_lists.is_empty() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BNTABPAR", true);
             }
@@ -147,6 +150,7 @@ pub(crate) fn write_output<W: Write>(
                 writer,
                 query_ids,
                 subject_ids,
+                loads,
                 output_format,
                 query_titles,
                 subject_title,
@@ -599,6 +603,7 @@ mod tests {
                 &mut report,
                 args.1,
                 args.2,
+                &crate::report::db_subject::HitLoads::default(),
                 format,
                 args.3,
                 "User specified sequence set (Input: subject.fa)",

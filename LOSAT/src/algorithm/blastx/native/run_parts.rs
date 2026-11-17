@@ -356,7 +356,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             false,
-                            false,
+                            None,
                         )
                         .map_err(reported_error)?,
                     };

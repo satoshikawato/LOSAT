@@ -746,7 +746,7 @@ impl BlastnDatabase {
     /// `spans`: the queries of each of those batches, numbered from 0, as BLASTN holds them all;
     /// the reports read every reported subject that they load: `hit_loads` of `batches_prefetch`,
     /// the reports' own answer, which leaves out a subject whose `Hit` throws and one shown only
-    /// after it, with `writes_thrown`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which
+    /// after it, with `after`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which
     /// BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn batch_prefetch_stop(
@@ -754,13 +754,13 @@ impl BlastnDatabase {
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         spans: &[std::ops::Range<usize>],
-        writes_thrown: bool,
+        after: Option<crate::report::db_subject::AfterThrow>,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         let prefetch = batches_prefetch(before, 0, spans, gapped);
-        let loads = hit_loads(before, &prefetch, writes_thrown, |ordinal| {
+        let loads = hit_loads(before, &prefetch, after, |ordinal| {
             titled_parsed(titles, ordinal)
         });
         shared::held_batch_prefetch_stop(
@@ -1984,11 +1984,11 @@ pub(super) struct ReportedSubjects {
     pub(super) loads: HitLoads,
 }
 
-/// Whether every format of `output_formats` writes a `Hit` whose subject's lookup throws as NCBI
-/// does (`Xml2Kind::every`, for `hit_loads`).
-pub(super) fn writes_thrown(output_formats: &[BlastnOutputFormat]) -> bool {
-    crate::report::blast_xml2::Xml2Kind::every(
-        output_formats.iter().map(|format| format.xml2_kind()),
+/// What the formats `output_formats` do after a subject whose lookup throws where its batch's
+/// prefetch is off (`FormatThrow::of_run`, for `hit_loads`).
+pub(super) fn after_throw(output_formats: &[BlastnOutputFormat]) -> Option<crate::report::db_subject::AfterThrow> {
+    crate::report::db_subject::FormatThrow::of_run(
+        output_formats.iter().map(BlastnOutputFormat::format_throw),
     )
 }
 
@@ -2000,11 +2000,11 @@ pub(super) fn writes_thrown(output_formats: &[BlastnOutputFormat]) -> bool {
 pub(super) fn hit_loads<'p>(
     hit_lists: &[Option<BlastnHitList>],
     prefetch: &shared::BatchPrefetch,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::AfterThrow>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     HitLoads::of(
-        writes_thrown,
+        after,
         hit_lists.iter().enumerate().map(|(query, hit_list)| {
             (
                 prefetch.reads_one_by_one(query),
@@ -2064,8 +2064,8 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 /// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`;
 /// `batches`: the queries of each batch, numbered from `first_query`, whose prefetch, where only
 /// the prefetch reads a subject, is `batches_prefetch`'s, with the Seq-aligns of a `gapped`
-/// search or not; `writes_thrown`: every format writes a `Hit` whose lookup throws,
-/// `writes_thrown`, for the one answer of the reports' loads, `hit_loads`, which the refusals
+/// search or not; `after`: what the formats do after a subject whose lookup throws
+/// (`after_throw`), for the one answer of the reports' loads, `hit_loads`, which the refusals
 /// take). The records are made on `pool` (`x_reported_records`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
@@ -2074,7 +2074,7 @@ pub(super) fn reported_subjects(
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::AfterThrow>,
     batches: &[std::ops::Range<usize>],
     first_query: usize,
     gapped: bool,
@@ -2108,7 +2108,7 @@ pub(super) fn reported_subjects(
             }),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below).
-    let loads = hit_loads(hit_lists, &prefetch, writes_thrown, |ordinal| {
+    let loads = hit_loads(hit_lists, &prefetch, after, |ordinal| {
         titled_parsed(titles, ordinal)
     });
     let rank = |ordinal: u32| -> u32 {

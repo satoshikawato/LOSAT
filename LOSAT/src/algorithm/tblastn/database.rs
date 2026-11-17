@@ -795,13 +795,12 @@ fn parsed_shown(
     }
 }
 
-/// Whether every format of `formats` writes a `Hit` whose subject's lookup throws as NCBI does
-/// (`Xml2Kind::every`, for `reported_subjects`'s loads).
-fn writes_thrown(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> bool {
-    crate::report::blast_xml2::Xml2Kind::every(
-        formats
-            .iter()
-            .map(|format| super::stage_e_report::xml2_kind(format.outfmt)),
+/// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
+/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
+fn after_throw(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> Option<crate::report::db_subject::AfterThrow> {
+    crate::report::db_subject::FormatThrow::of_outfmts(
+        formats.iter().map(|format| format.outfmt),
+        crate::blastinput::app::Program::Tblastn,
     )
 }
 
@@ -855,7 +854,7 @@ pub(super) fn reported_subjects(
     let loads = hit_loads(
         hitlists,
         &prefetch,
-        writes_thrown(formats),
+        after_throw(formats),
         |ordinal| match titles.get(&u32::try_from(ordinal).ok()?) {
             Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
             _ => None,
@@ -993,11 +992,11 @@ pub(super) fn reported_subjects(
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::AfterThrow>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     HitLoads::of(
-        writes_thrown,
+        after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
             (
                 prefetch.reads_one_by_one(query),

@@ -506,11 +506,11 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`). `writes_thrown`: every report is outfmt 13
-    /// to 16, which write a lookup that throws there as NCBI does (`HitLoads::of`: where
-    /// `one_by_one`, a report loads the subjects of its `Hit`s before the first whose lookup
-    /// throws, and none after it; the refusals, the names, the taxonomy reads and the run's
-    /// record of the loads, `note_loaded`, take that one answer).
+    /// one by one (`shared::ParsedShown::one_by_one`). `after`: what the reports do after a
+    /// subject whose lookup throws (`FormatThrow::of_run`; `None`: a report refuses it), for
+    /// `HitLoads::of` (where `one_by_one`, which subjects throw and which no report loads; the
+    /// refusals, the names, the tables' rows, the taxonomy reads and the run's record of the
+    /// loads, `note_loaded`, take that one answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -529,7 +529,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
-        writes_thrown: bool,
+        after: Option<crate::report::db_subject::AfterThrow>,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -565,7 +565,7 @@ impl ReportedSubjects {
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
         // of each query, `report::reported`).
         let loads = HitLoads::of(
-            writes_thrown,
+            after,
             batches.iter().flat_map(|batch| {
                 batch.queries.iter().map(|lists| {
                     (

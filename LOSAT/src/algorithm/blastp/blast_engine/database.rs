@@ -2195,16 +2195,16 @@ impl ListedTitles<'_> {
     /// reports) do at each subject's `Hit`, by rank (`HitLoads::of`, the one answer of the
     /// call): `prefetch` tells by query whether its batch reads one by one
     /// (`BatchPrefetch::reads_one_by_one`); the `Hit`s are those that `blast_xml::write_blastp_xml`
-    /// makes, of the lists with HSPs. `writes_thrown`: every format is outfmt 13 to 16
-    /// (`Xml2Kind::every`), else every subject is loaded.
+    /// makes, of the lists with HSPs. `after`: what the run's formats do after a subject whose
+    /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded).
     pub(super) fn hit_loads(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
-        writes_thrown: bool,
+        after: Option<crate::report::db_subject::AfterThrow>,
     ) -> HitLoads {
         HitLoads::of(
-            writes_thrown && !self.parsed.is_empty(),
+            after.filter(|_| !self.parsed.is_empty()),
             hit_lists.iter().enumerate().map(|(query, hit_list)| {
                 let lists = hit_list.as_ref().map_or(&[][..], |hit_list| {
                     &hit_list.hsplist_array

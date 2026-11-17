@@ -3160,6 +3160,7 @@ fn write_blastp_tabular_hit_lists(
     query_titles: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     subject_accessions: &[Option<[Arc<[u8]>; 2]>],
+    loads: &crate::report::db_subject::HitLoads,
     query_batch_skipped: &[bool],
     hits_found: Option<&[usize]>,
     context: &ReportContext,
@@ -3197,7 +3198,16 @@ fn write_blastp_tabular_hit_lists(
         let Some(hit_list) = hit_list_opt else {
             continue;
         };
+        // `saccver` of the query's last row that loaded its subject: what a row whose load
+        // throws prints (`outfmt6::write_thrown_hit_fields`; the query's formatter is new).
+        let mut kept: &[u8] = &[];
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+            // The subject's load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
+            let thrown = hsp_list
+                .hsps
+                .first()
+                .is_some_and(|first| loads.thrown(first.s_idx as usize).is_some());
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -3205,7 +3215,8 @@ fn write_blastp_tabular_hit_lists(
             // ```
             // The subject's first row (the default fields read it) loads it where the query's
             // batch did not prefetch it (`QueryWarnings::subject_read`).
-            if let (Some(first), Some(warnings)) = (hsp_list.hsps.first(), warnings.as_deref_mut())
+            if let (Some(first), Some(warnings), false) =
+                (hsp_list.hsps.first(), warnings.as_deref_mut(), thrown)
             {
                 warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
             }
@@ -3235,8 +3246,25 @@ fn write_blastp_tabular_hit_lists(
                 let query_id = query_ids
                     .get(hsp.q_idx as usize)
                     .map_or(&b""[..], |id| id.as_ref());
+                if thrown {
+                    crate::report::outfmt6::write_thrown_hit_fields(
+                        writer,
+                        query_id,
+                        kept,
+                        hsp.e_value,
+                        hsp.bit_score,
+                        &config,
+                    )?;
+                    if let Some(probe) = probe.as_mut() {
+                        writer.flush()?;
+                        probe.end(hsp_index);
+                    }
+                    hsp_index += 1;
+                    continue;
+                }
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
+                kept = subject_id.accession_version;
                 crate::report::outfmt6::write_hit_fields_bytes(
                     writer,
                     query_id,
@@ -11809,6 +11837,7 @@ fn run_call(
             spec,
             &subject_ids,
             parsed_for_checks,
+            &prefetched.hit_loads,
         ) {
             continue;
         }
@@ -11826,13 +11855,17 @@ fn run_call(
                     spec,
                     &subject_ids,
                     parsed_for_checks,
+                    &prefetched.hit_loads,
                     listed_titles.is_some(),
                     true,
                     s_idx,
                 )
             },
             |s_idx| match listed_titles.as_ref() {
-                Some(titles) => crate::report::tabular::failed_database_title(titles.oid(s_idx)),
+                Some(titles) => crate::report::tabular::failed_database_subject(
+                    titles.oid(s_idx),
+                    prefetched.hit_loads.thrown(s_idx),
+                ),
                 None => crate::report::tabular::failed_record_title(
                     s_idx,
                     subject_records[s_idx].shown_id(),

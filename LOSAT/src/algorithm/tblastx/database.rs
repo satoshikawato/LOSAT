@@ -535,7 +535,7 @@ pub(crate) fn batch_prefetch(
 /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
 /// whose reported hits are `before` (by ordinal id; `before_queries` queries, those of each batch
 /// `before_spans`), of the subjects that those reports load (`hit_loads` of the batches before
-/// alone, of `batches_prefetch`, the reports' own answer, with `writes_thrown`; review 2 of line
+/// alone, of `batches_prefetch`, the reports' own answer, with `after`; review 2 of line
 /// DBID pfoff-1, N-M2), which TBLASTX writes after the stop (the XML formats are not streamed,
 /// `report_stream`).
 #[allow(clippy::too_many_arguments)]
@@ -544,13 +544,13 @@ pub(crate) fn batch_prefetch_stop(
     before: &[TblastxHsp],
     before_queries: usize,
     before_spans: &[std::ops::Range<usize>],
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::AfterThrow>,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
     let prefetch = batches_prefetch(before, before_queries, before_spans);
-    let loads = hit_loads(before, &prefetch, writes_thrown, titles);
+    let loads = hit_loads(before, &prefetch, after, titles);
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
@@ -686,17 +686,17 @@ pub(crate) struct ReportedSubjects {
 /// What the XML2 and JSON reports of the reported hits `ordered` (in report order, subjects named
 /// by ordinal id) do at each subject's `Hit` (`HitLoads::of`, the one answer, by ordinal id):
 /// `prefetch` tells by the hits' query index whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `writes_thrown` whether every format writes a `Hit` that
-/// throws as NCBI does (`Xml2Kind::every`); the `Hit`s are those that `blast_xml` makes (the HSPs
+/// (`BatchPrefetch::reads_one_by_one`), `after` what the formats do after a subject whose lookup
+/// throws (`FormatThrow::of_outfmts`); the `Hit`s are those that `blast_xml` makes (the HSPs
 /// of each query, a subject's following each other).
 fn hit_loads(
     ordered: &[TblastxHsp],
     prefetch: &shared::BatchPrefetch,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::AfterThrow>,
     titles: &DatabaseTitles,
 ) -> HitLoads {
     HitLoads::of(
-        writes_thrown,
+        after,
         ordered
             .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx)
             .map(|hits| {
@@ -714,15 +714,14 @@ fn hit_loads(
     )
 }
 
-/// Whether every format of the run, `outfmts` as `-outfmt` gives them, writes a `Hit` whose
-/// subject's lookup throws as NCBI does (`Xml2Kind::every`, for `hit_loads`): the stop of a batch's
+/// What the formats of the run, `outfmts` as `-outfmt` gives them, do after a subject whose lookup
+/// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads`): the stop of a batch's
 /// prefetch (`batch_prefetch_stop`) and the reports (`reported_subjects`) ask it of the run's
 /// formats alike (review 2 of line DBID pfoff-1, N-M2).
-pub(crate) fn writes_thrown<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> bool {
-    crate::report::blast_xml2::Xml2Kind::every(
-        outfmts
-            .into_iter()
-            .map(|outfmt| super::report::output_format(outfmt).xml2_kind()),
+pub(crate) fn after_throw<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> Option<crate::report::db_subject::AfterThrow> {
+    crate::report::db_subject::FormatThrow::of_outfmts(
+        outfmts,
+        crate::blastinput::app::Program::Tblastx,
     )
 }
 
@@ -773,7 +772,7 @@ fn batches_prefetch(
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
 /// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
-/// each batch `spans`; `writes_thrown`: every format writes a `Hit` that throws as NCBI does, for
+/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws, for
 /// the one answer of what the reports load, `hit_loads`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
@@ -783,7 +782,7 @@ pub(crate) fn reported_subjects(
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::AfterThrow>,
     queries: usize,
     spans: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
@@ -801,7 +800,7 @@ pub(crate) fn reported_subjects(
             .map(|hsp| (hsp.hit.q_idx as usize, hsp.hit.s_idx)),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
-    let loads = hit_loads(ordered, &prefetch, writes_thrown, titles);
+    let loads = hit_loads(ordered, &prefetch, after, titles);
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)

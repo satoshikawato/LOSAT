@@ -802,6 +802,81 @@ impl TabularSpec {
         self.subject_fetch(program) != SubjectFetch::Never || self.has(SubjectLength)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875
+    // ```c++
+    //     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+    //        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+    //     {
+    //         try {
+    //        		const CBioseq_Handle& subject_bh =
+    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    //     ...
+    //         } catch (const CException&) {
+    //             list<CRef<CSeq_id> > subject_ids;
+    //             CRef<CSeq_id> id(new CSeq_id());
+    //             id->Assign(align.GetSeq_id(1));
+    //             subject_ids.push_back(id);
+    //             SetSubjectId(subject_ids);
+    //             bioseqs_found = false;
+    //         }
+    //
+    //     }
+    //     ...
+    //     if (!bioseqs_found)
+    //         return -1;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
+    // every application, quoted at `cli::NativeError::exception`)
+    // Where a batch's prefetch is off, the formatter loads each row's subject by its Seq-align id
+    // and a lookup that throws on a file throws at each such load (probe of line DBID pfoff-2,
+    // `R/pfoff/p2`; DECISIONS 62 (12)).
+    /// What `program`'s row of an HSP with the engine's identities `num_ident` (the Seq-align's
+    /// `num_ident`) does where its subject's lookup throws (`report::db_subject::AfterThrow`): a
+    /// field of the subject block (`reads_subject_bioseq`) loads the subject inside its `try`,
+    /// whose `catch` ends the row's fields, and the row is written (`WritesRow`,
+    /// `TabularWriter::row`); a row that reads the subject only after that block (`slen` by
+    /// `sequence::GetLength`, the letters and frames of `subject_fetch`) throws outside any
+    /// `catch`, and the application's `CATCH_ALL` ends the run there (`EndsRun`); `None`: the row
+    /// reads nothing of the subject. The one place that decides it per row.
+    pub fn row_throw(
+        &self,
+        program: crate::blastinput::app::Program,
+        num_ident: usize,
+    ) -> Option<crate::report::db_subject::AfterThrow> {
+        use crate::report::db_subject::AfterThrow;
+        if self.reads_subject_bioseq() {
+            Some(AfterThrow::WritesRow)
+        } else if self.has(SubjectLength) || self.subject_fetch(program).reads(num_ident) {
+            Some(AfterThrow::EndsRun)
+        } else {
+            None
+        }
+    }
+
+    /// What the report does with a subject whose lookup throws where its batch's prefetch is off
+    /// (`report::db_subject::FormatThrow`, `row_throw` of its rows): LOSAT refuses it in the
+    /// organism report (outfmt 18) and in outfmt 20; a table that reads nothing of the subject
+    /// never looks it up. A table of `nident` alone among the fields that read the subject reads
+    /// it on rows with identities only (`SubjectFetch::WithIdentities`), as `row_throw` decides.
+    pub fn format_throw(
+        &self,
+        program: crate::blastinput::app::Program,
+    ) -> crate::report::db_subject::FormatThrow {
+        use crate::report::db_subject::{AfterThrow, FormatThrow};
+        if !matches!(
+            self.kind,
+            TabularKind::Tabular | TabularKind::Commented | TabularKind::Csv
+        ) {
+            FormatThrow::Refused
+        } else if self.reads_subject_bioseq() {
+            FormatThrow::Writes(AfterThrow::WritesRow)
+        } else if self.reads_subject(program) {
+            FormatThrow::Writes(AfterThrow::EndsRun)
+        } else {
+            FormatThrow::Unread
+        }
+    }
+
     pub fn needs(&self) -> TabularNeeds {
         // The organism report shows the names of each definition line's taxid.
         if self.kind == TabularKind::TaxReport {
@@ -902,13 +977,17 @@ impl TabularSpec {
         match lookup {
             SubjectLookup::Found => None,
             SubjectLookup::Failed(failed) => self.failure_stage(failed.failure()),
+            SubjectLookup::Throws(_) => self.failure_stage(LookupFailure::thrown()),
         }
     }
 
-    /// `failed_stage` of a subject whose lookups fail as `failure` says.
+    /// `failed_stage` of a subject whose lookups fail as `failure` says. The load of the subject
+    /// (`failure.bioseq`) comes before the other lookups, in the subject block.
     pub fn failure_stage(&self, failure: LookupFailure) -> Option<FailedStage> {
         if !self.writes_rows() {
             None
+        } else if failure.bioseq {
+            self.reads_subject_bioseq().then_some(FailedStage::Bioseq)
         } else if failure.subject_id
             && self.has_any(&[
                 SubjectSeqId,
@@ -928,20 +1007,12 @@ impl TabularSpec {
     }
 
     /// Whether a row of this report can stop where NCBI has no result (`failed_lookup_stop`):
-    /// the report asks `sacc` or `saccver`, or `staxid` with a field that runs a lookup (a
-    /// failed first row). A report that cannot stop needs no check of its rows before it is
-    /// written.
+    /// the report asks `sacc` or `saccver`, or `staxid` (a failed first row: `staxid` loads the
+    /// subject, whose load may throw, `FailedStage::Bioseq`). A report that cannot stop needs no
+    /// check of its rows before it is written.
     pub fn may_stop_at_failed_lookup(&self) -> bool {
         self.writes_rows()
-            && (self.has_any(&[SubjectAccession, SubjectAccessionVersion])
-                || (self.has(SubjectTaxId)
-                    && self.has_any(&[
-                        SubjectSeqId,
-                        SubjectGi,
-                        SubjectAllSeqIds,
-                        SubjectAllGis,
-                        SubjectAllAccessions,
-                    ])))
+            && self.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
     }
 
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
@@ -1005,11 +1076,19 @@ pub fn failed_lookup_stop(
     first: bool,
 ) -> Option<&'static str> {
     let Some(spec) = spec else {
-        return failure.subject_id.then_some(FAILED_LOOKUP_NULL_POINTER);
+        return (failure.subject_id || (failure.bioseq && first))
+            .then_some(FAILED_LOOKUP_NULL_POINTER);
     };
     let stage = spec.failure_stage(failure)?;
-    if stage == FailedStage::SubjectId && spec.has_any(&[SubjectAccession, SubjectAccessionVersion])
-    {
+    // A load that throws leaves `m_SubjectId` as the last row that found its subject set it: empty
+    // only before such a row (the result set's first row; every row before a later one that
+    // throws has thrown too, which this check meets first).
+    let empty_id = match stage {
+        FailedStage::SubjectId => true,
+        FailedStage::Bioseq => first,
+        FailedStage::SubjectIds => false,
+    };
+    if empty_id && spec.has_any(&[SubjectAccession, SubjectAccessionVersion]) {
         Some(FAILED_LOOKUP_NULL_POINTER)
     } else if first && spec.has(SubjectTaxId) {
         Some("NCBI BLAST+ prints an uninitialised staxid in the row when it is the first row of a query's report (a different number in each run)")
@@ -1085,6 +1164,22 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
         s_idx + 1,
         String::from_utf8_lossy(shown_id)
     )
+}
+
+/// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails: where its
+/// load throws `thrown` (a batch whose prefetch is off, `SubjectLookup::Throws`), that load;
+/// otherwise its title (`failed_database_title`).
+pub fn failed_database_subject(
+    oid: impl std::fmt::Display,
+    thrown: Option<&crate::ncbi_exception::NcbiException>,
+) -> String {
+    match thrown {
+        Some(exception) => format!(
+            "database sequence {oid} has a Seq-align id whose lookup throws '{}' in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one",
+            exception.get_msg()
+        ),
+        None => failed_database_title(oid),
+    }
 }
 
 /// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails.
@@ -1451,6 +1546,14 @@ pub struct TabularSubject<'a> {
     pub index: usize,
 }
 
+impl TabularSubject<'_> {
+    /// Whether the subject's load throws (`SubjectLookup::Throws`): NCBI loads nothing for its
+    /// rows, so no text of a load or of a taxonomy lookup comes with them.
+    pub fn throws(&self) -> bool {
+        matches!(self.lookup, SubjectLookup::Throws(_))
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:222-230
 // ```c++
 //         if (((*itr)->IsGeneral() &&
@@ -1489,6 +1592,8 @@ pub enum SubjectLookup<'a> {
     #[default]
     Found,
     Failed(FailedLookup<'a>),
+    /// The load of the subject throws (`ThrownLookup`), before `GetSeqIdList` runs.
+    Throws(ThrownLookup<'a>),
 }
 
 /// A subject whose ids `GetSeqIdList` cannot make (`SubjectLookup::Failed`): the subject's
@@ -1518,8 +1623,25 @@ impl FailedLookup<'_> {
         LookupFailure {
             subject_id: self.subject_id,
             all_ids: self.all_ids.is_some(),
+            bioseq: false,
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875 (quoted at
+// `TabularSpec::row_throw`)
+/// A subject whose load by its Seq-align id throws where the query's batch has its prefetch off
+/// (`SubjectLookup::Throws`; `report::db_subject::HitLoad::Throws`): the Seq-align id that the
+/// `catch` pushes onto `m_SubjectIds`, and the exception, which ends the run at a row that reads
+/// the subject outside the subject block (`TabularWriter::ends_run`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThrownLookup<'a> {
+    /// The Seq-align id as `sallseqid`, `sallgi` and `sallacc` print it (`eFullId`, `eGi`,
+    /// `eAccession`; `ParsedSubject::alignment_tabular_ids`, `alignment_gi`).
+    pub full: &'a [u8],
+    pub gi: i64,
+    pub accession: &'a [u8],
+    pub exception: &'a crate::ncbi_exception::NcbiException,
 }
 
 /// Which of NCBI's lookups of a subject throw (`FailedLookup` without its ids): `SetSubjectId`
@@ -1529,6 +1651,9 @@ impl FailedLookup<'_> {
 pub struct LookupFailure {
     pub subject_id: bool,
     pub all_ids: bool,
+    /// Whether the load of the subject's Bioseq by its Seq-align id throws, before both
+    /// (`SubjectLookup::Throws`: a lookup that fails on a file where the batch's prefetch is off).
+    pub bioseq: bool,
 }
 
 impl LookupFailure {
@@ -1539,6 +1664,16 @@ impl LookupFailure {
         Self {
             subject_id: true,
             all_ids: database,
+            bioseq: false,
+        }
+    }
+
+    /// The failure of a subject whose load throws (`LookupFailure::bioseq`), whatever its other
+    /// lookups would do (NCBI makes none of them).
+    pub fn thrown() -> Self {
+        Self {
+            bioseq: true,
+            ..Self::default()
         }
     }
 }
@@ -1546,6 +1681,10 @@ impl LookupFailure {
 /// Where `SetFields` stops for a row whose subject lookup failed (`TabularSpec::failed_stage`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FailedStage {
+    /// The load of the subject (`GetBioseqHandle`, a field of the subject block asked): every
+    /// member that the block sets stays as the rows before left it (`m_SubjectId`, the taxonomy,
+    /// the titles), `m_SubjectLength` 0, and the Seq-align id is added to `m_SubjectIds`.
+    Bioseq,
     /// `SetSubjectId` (`sseqid`, `sgi`, `sacc`, `saccver` asked): `m_SubjectId` stays empty,
     /// `m_SubjectLength` 0, and the Seq-align id is added to the `m_SubjectIds` of the rows before.
     SubjectId,
@@ -1613,6 +1752,9 @@ pub struct TabularRows {
     /// `sallseqid`, `sallgi`, `sallacc` as the rows whose lookup failed since the last row that
     /// found its subject printed them; `None`: that row's own (its subject's ids).
     failed_ids: Option<[Vec<u8>; 3]>,
+    /// Whether a row since that one emptied `m_SubjectId` (`FailedStage::SubjectId`), which a
+    /// row whose load throws (`FailedStage::Bioseq`) then prints as it is.
+    subject_id_emptied: bool,
 }
 
 impl TabularRows {
@@ -1674,6 +1816,44 @@ fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
 }
 
 const NA: &[u8] = b"N/A";
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
+// every application, quoted at `cli::NativeError::exception`)
+/// The end of the run at a row whose subject's load throws outside the subject block
+/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`,
+/// ends the reads (`end_reads`: `QueryWarnings::end_run`, `ReadCursor::end_run`; NCBI loads
+/// nothing after it) and gives NCBI's exception as the run's error
+/// (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit status 2).
+pub fn run_end(
+    writer: &mut dyn Write,
+    buffered: &[u8],
+    end: RowEnd<'_>,
+    end_reads: impl FnOnce(),
+) -> anyhow::Error {
+    let exception = match end {
+        RowEnd::Thrown(exception) => exception,
+        RowEnd::Unsupported => {
+            return FailedLookupRefusal(ROW_WITHOUT_IDENTITIES.to_string()).into();
+        }
+    };
+    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+        return error.into();
+    }
+    end_reads();
+    crate::report::blast_xml::writer::run_ending_exception(exception)
+}
+
+/// How a row ends the run (`TabularWriter::ends_run`, `run_end`).
+#[derive(Clone, Copy, Debug)]
+pub enum RowEnd<'a> {
+    /// NCBI's exception of the subject's load (`ThrownLookup::exception`).
+    Thrown(&'a crate::ncbi_exception::NcbiException),
+    /// LOSAT's refusal of a row of no identities of a subject whose load throws, in a table whose
+    /// rows read the subject for `nident` alone (`ROW_WITHOUT_IDENTITIES`).
+    Unsupported,
+}
+
+const ROW_WITHOUT_IDENTITIES: &str = "a table whose rows read the subject for nident alone has a row of no identities of a subject whose lookup in the database fails where the query's batch has its prefetch off (NCBI BLAST+ 2.17.0 ends the run at the subject's first row with identities), which is not supported by LOSAT";
 
 /// The writer of a tabular report.
 pub struct TabularWriter<'a> {
@@ -1787,6 +1967,33 @@ impl TabularWriter<'_> {
         self.spec.failed_stage(subject.lookup).is_none()
     }
 
+    /// The exception that ends the run at `program`'s row of `subject` with the engine's
+    /// identities `num_ident` (`TabularSpec::row_throw` is `EndsRun` for a subject whose load
+    /// throws, `SubjectLookup::Throws`): the row is not written, and the caller writes the rows
+    /// before it and returns the exception (`blast_xml::writer::run_ending_exception`); `None`
+    /// for every other row.
+    pub fn ends_run<'s>(
+        &self,
+        subject: &TabularSubject<'s>,
+        program: crate::blastinput::app::Program,
+        num_ident: usize,
+    ) -> Option<RowEnd<'s>> {
+        use crate::report::db_subject::{AfterThrow, FormatThrow};
+        let SubjectLookup::Throws(thrown) = subject.lookup else {
+            return None;
+        };
+        match self.spec.row_throw(program, num_ident) {
+            Some(AfterThrow::EndsRun) => Some(RowEnd::Thrown(thrown.exception)),
+            // A row of no identities where `nident` alone reads the subject
+            // (`SubjectFetch::WithIdentities`) reads nothing, while the run's loads take the run to
+            // end at the subject's first row (`report::db_subject::HitLoads::of`, by subject).
+            None if self.spec.format_throw(program) == FormatThrow::Writes(AfterThrow::EndsRun) => {
+                Some(RowEnd::Unsupported)
+            }
+            _ => None,
+        }
+    }
+
     /// Whether a row of `subject` fails its lookups (`TabularSpec::failed_stage`), so that it is
     /// written with the subject of the result set's last row that found its subject
     /// (`TabularRows::last_found`, the `kept` of `row`).
@@ -1807,14 +2014,13 @@ impl TabularWriter<'_> {
         kept: Option<&TabularSubject<'_>>,
         hsp: &TabularHsp<'_>,
     ) {
-        if let (SubjectLookup::Failed(failed), Some(stage)) =
-            (subject.lookup, self.spec.failed_stage(subject.lookup))
-        {
-            self.failed_row(out, rows, query, subject, kept, hsp, failed, stage);
+        if let Some(stage) = self.spec.failed_stage(subject.lookup) {
+            self.failed_row(out, rows, query, subject, kept, hsp, stage);
             return;
         }
         rows.last_found = Some(subject.index);
         rows.failed_ids = None;
+        rows.subject_id_emptied = false;
         self.found_row(out, query, subject, hsp);
     }
 
@@ -1860,7 +2066,9 @@ impl TabularWriter<'_> {
     /// `sseqid` of the empty `m_SubjectId` (`SetSubjectId` threw) is `Unknown` and `sgi` 0;
     /// `sacc` and `saccver` read a null `FindBestChoice` (NCBI stops: `failed_lookup_stop`, before
     /// the report), so no row of this writer prints them. Where only `x_SetSubjectIds` threw, the
-    /// subject's own ids and length were set.
+    /// subject's own ids and length were set. Where the load threw (`FailedStage::Bioseq`), the
+    /// subject ids are the kept subject's (the empty ones before a row that found its subject,
+    /// or after a row that emptied them).
     #[allow(clippy::too_many_arguments)]
     #[cold]
     #[inline(never)]
@@ -1872,10 +2080,21 @@ impl TabularWriter<'_> {
         subject: &TabularSubject<'_>,
         kept: Option<&TabularSubject<'_>>,
         hsp: &TabularHsp<'_>,
-        failed: FailedLookup<'_>,
         stage: FailedStage,
     ) {
         let spec = self.spec;
+        // The Seq-align id that the catch pushes, and where `x_SetSubjectIds` threw, the lists
+        // of the definition lines before the one that throws.
+        let (pushed, pushed_gi, lines): ([&[u8]; 2], i64, _) = match subject.lookup {
+            SubjectLookup::Failed(failed) => ([failed.full, failed.accession], 0, failed.all_ids),
+            SubjectLookup::Throws(thrown) => ([thrown.full, thrown.accession], thrown.gi, None),
+            SubjectLookup::Found => ([&[][..], &[][..]], 0, None),
+        };
+        if stage == FailedStage::SubjectId {
+            rows.subject_id_emptied = true;
+        }
+        // `m_SubjectId` as the kept subject set it (a load that throws leaves it), or empty.
+        let kept_id = kept.filter(|_| stage == FailedStage::Bioseq && !rows.subject_id_emptied);
         let all_ids = spec.has_any(&[SubjectAllSeqIds, SubjectAllGis, SubjectAllAccessions]);
         if all_ids {
             // `m_SubjectIds` as the last row left it: the kept subject's lists, or those of the
@@ -1898,7 +2117,7 @@ impl TabularWriter<'_> {
             // (tabular.cpp:1374-1378).
             if stage == FailedStage::SubjectIds {
                 lists.iter_mut().for_each(Vec::clear);
-                for line in failed.all_ids.unwrap_or_default() {
+                for line in lines.unwrap_or_default() {
                     for (list, field) in lists.iter_mut().zip([
                         SubjectAllSeqIds,
                         SubjectAllGis,
@@ -1911,11 +2130,15 @@ impl TabularWriter<'_> {
                     }
                 }
             }
-            for (list, id) in lists.iter_mut().zip([failed.full, b"0", failed.accession]) {
+            for (n, list) in lists.iter_mut().enumerate() {
                 if !list.is_empty() {
                     list.push(b';');
                 }
-                list.extend_from_slice(id);
+                match n {
+                    0 => list.extend_from_slice(pushed[0]),
+                    1 => push_num(list, pushed_gi),
+                    _ => list.extend_from_slice(pushed[1]),
+                }
             }
         }
         // The query's block of `SetFields` sets `m_QueryLength` and `qcovhsp`; `qlen`'s own
@@ -1953,6 +2176,21 @@ impl TabularWriter<'_> {
                     }
                 }
                 continue;
+            }
+            if let Some(kept) = kept_id {
+                match field {
+                    SubjectSeqId => out.extend_from_slice(kept.id),
+                    SubjectAccession => out.extend_from_slice(kept.accession),
+                    SubjectAccessionVersion => out.extend_from_slice(kept.accession_version),
+                    SubjectGi => push_num(out, kept.gi),
+                    _ => {}
+                }
+                if matches!(
+                    field,
+                    SubjectSeqId | SubjectAccession | SubjectAccessionVersion | SubjectGi
+                ) {
+                    continue;
+                }
             }
             let lists = rows.failed_ids.as_ref();
             let list = |n: usize| lists.map_or(&[][..], |lists| lists[n].as_slice());
@@ -3276,6 +3514,160 @@ mod tests {
         );
     }
 
+    // NCBI tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId(list)`, `return -1`)
+    // where the load of the subject throws (`DB contains no accession info.`, a batch whose
+    // prefetch is off; probe of line DBID pfoff-2, `R/pfoff/p2`, `bp.U2.*`, DECISIONS 62 (12)):
+    // the row keeps the last loaded row's ids, titles and taxonomy, `sall*` add the Seq-align id
+    // (its GI in `sallgi`), `slen` and the counts are `x_ResetFields`' 0, `qlen` comes only with
+    // a field of the query block; before any loaded row `sseqid` is `Unknown`, the titles and
+    // names `N/A` (quoted in CSV).
+    #[test]
+    fn a_load_that_throws_writes_the_kept_row() {
+        let exception = crate::report::db_subject::LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )
+        .exception()
+        .unwrap();
+        let taxonomy = TabularTaxonomy {
+            taxid: 9606,
+            taxids: vec![9606],
+        };
+        let none = TabularTaxonomy::default();
+        let titles: [&[u8]; 1] = [b"found title"];
+        let all_ids = [DeflineIds {
+            id: b"gb|AAA00001.1|".to_vec(),
+            gi: 7,
+            accession: b"AAA00001".to_vec(),
+        }];
+        let found = TabularSubject {
+            id: b"gb|AAA00001.1|",
+            accession: b"AAA00001",
+            accession_version: b"AAA00001.1",
+            gi: 7,
+            all_ids: &all_ids,
+            length: 1350,
+            titles: Some(&titles),
+            taxonomy: &taxonomy,
+            names: None,
+            nucleotide: true,
+            qcovs: 99,
+            qcovus: -1,
+            lookup: SubjectLookup::Found,
+            index: 0,
+        };
+        let thrown = TabularSubject {
+            id: b"",
+            accession: b"",
+            accession_version: b"",
+            gi: 0,
+            all_ids: &[],
+            length: 0,
+            titles: None,
+            taxonomy: &none,
+            names: None,
+            nucleotide: true,
+            qcovs: 98,
+            qcovus: -1,
+            lookup: SubjectLookup::Throws(ThrownLookup {
+                full: b"gi|5|gb|BBB00002.1|",
+                gi: 5,
+                accession: b"BBB00002",
+                exception: &exception,
+            }),
+            index: 1,
+        };
+        assert!(thrown.throws() && !found.throws());
+        assert_eq!(
+            failed_rows(
+                "qseqid sseqid sacc saccver sgi slen qlen length pident evalue stitle staxids \
+                 sstrand qcovs",
+                &[found, thrown]
+            )
+            .lines()
+            .nth(1)
+            .unwrap(),
+            "nq1\tgb|AAA00001.1|\tAAA00001\tAAA00001.1\t7\t0\t900\t0\t0.000\t0.0\tfound title\t9606\tN/A\t98"
+        );
+        // `qlen` without a field of the query block keeps `x_ResetFields`' 0.
+        assert_eq!(
+            failed_rows("sseqid qlen slen evalue", &[found, thrown])
+                .lines()
+                .nth(1)
+                .unwrap(),
+            "gb|AAA00001.1|\t0\t0\t0.0"
+        );
+        // `sall*`: the kept lists and the Seq-align id, row by row.
+        assert_eq!(
+            failed_rows("qseqid sallseqid sallgi sallacc", &[found, thrown, thrown]),
+            "nq1\tgb|AAA00001.1|\t7\tAAA00001\n\
+             nq1\tgb|AAA00001.1|;gi|5|gb|BBB00002.1|\t7;5\tAAA00001;BBB00002\n\
+             nq1\tgb|AAA00001.1|;gi|5|gb|BBB00002.1|;gi|5|gb|BBB00002.1|\t7;5;5\t\
+             AAA00001;BBB00002;BBB00002\n"
+        );
+        // Before any loaded row: `Unknown`, `sgi` 0, the titles `N/A`.
+        assert_eq!(
+            failed_rows("qseqid sseqid sgi stitle sallseqid evalue", &[thrown]),
+            "nq1\tUnknown\t0\tN/A\tgi|5|gb|BBB00002.1|\t0.0\n"
+        );
+        // The refusals before the report: a first row with `sacc`, `saccver` (the default fields)
+        // or `staxid`; a later one has a result.
+        let spec = |fields: &str| {
+            TabularSpec::of(
+                ReportFormat::Tabular,
+                &FormatChoice {
+                    number: 6,
+                    spec: fields.to_string(),
+                    delimiter: String::new(),
+                },
+            )
+            .unwrap()
+        };
+        let thrown = LookupFailure::thrown();
+        assert!(failed_lookup_stop(None, thrown, true).is_some());
+        assert!(failed_lookup_stop(None, thrown, false).is_none());
+        assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, true).is_some());
+        assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, false).is_none());
+        assert!(failed_lookup_stop(Some(&spec("staxid")), thrown, true).is_some());
+        assert!(failed_lookup_stop(Some(&spec("qseqid sseqid")), thrown, true).is_none());
+        assert!(may_stop_at_failed_lookup(Some(&spec("staxid ssciname"))));
+    }
+
+    // NCBI tabular.cpp:833-898: which rows end the run where the load throws (`slen`, the
+    // letters after the subject block), which are written (a field of that block), and which
+    // read nothing; `nident` alone reads only on rows with identities.
+    #[test]
+    fn a_rows_fields_say_what_its_throw_does() {
+        use crate::blastinput::app::Program;
+        use crate::report::db_subject::{AfterThrow, FormatThrow};
+        let spec = |fields: &str| {
+            TabularSpec::of(
+                ReportFormat::CommaSeparatedValues,
+                &FormatChoice {
+                    number: 10,
+                    spec: fields.to_string(),
+                    delimiter: String::new(),
+                },
+            )
+            .unwrap()
+        };
+        let row = |fields: &str, program, ident| spec(fields).row_throw(program, ident);
+        assert_eq!(row("qseqid stitle slen", Program::Blastp, 1), Some(AfterThrow::WritesRow));
+        assert_eq!(row("qseqid slen", Program::Blastn, 1), Some(AfterThrow::EndsRun));
+        assert_eq!(row("qseqid sseq", Program::Tblastx, 1), Some(AfterThrow::EndsRun));
+        assert_eq!(row("qseqid nident", Program::Blastx, 1), Some(AfterThrow::EndsRun));
+        assert_eq!(row("qseqid nident", Program::Blastx, 0), None);
+        assert_eq!(row("qseqid nident", Program::Blastn, 1), None);
+        assert_eq!(row("qseqid evalue qcovs", Program::Tblastn, 1), None);
+        assert_eq!(
+            spec("qseqid nident").format_throw(Program::Blastx),
+            FormatThrow::Writes(AfterThrow::EndsRun)
+        );
+        assert_eq!(
+            spec("qseqid evalue").format_throw(Program::Blastx),
+            FormatThrow::Unread
+        );
+    }
+
     // NCBI BLAST+ 2.17.0 `blastn -db` of a sequence with an empty title and a taxid whose
     // name has 0x81 after one of Homo sapiens (probe `t.tx_bh.blastn.f6all|f6wide`): without
     // `sseqid` the lookup fails in `x_SetSubjectIds`, which clears `m_SubjectIds` first, so the
@@ -3393,6 +3785,7 @@ mod tests {
             let failure = LookupFailure {
                 subject_id: true,
                 all_ids,
+                bioseq: false,
             };
             failed_lookup_stop(spec.as_ref(), failure, first).is_some()
         };
@@ -3409,6 +3802,7 @@ mod tests {
         let only_all = LookupFailure {
             subject_id: false,
             all_ids: true,
+            bioseq: false,
         };
         assert!(
             failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none()

@@ -2579,6 +2579,12 @@ fn write_tblastx_outputs(
         Some(database) => &database.reported.parsed,
         None => &records_parsed,
     };
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = run
+        .database
+        .as_ref()
+        .map_or(&every_loaded, |database| &database.reported.loads);
     for (output, format) in outputs
         .formats
         .iter_mut()
@@ -2586,7 +2592,12 @@ fn write_tblastx_outputs(
         .filter(|(_, format)| format.is_tabular())
     {
         let spec = format.tabular_spec();
-        if crate::algorithm::common::tabular::checks_failed_lookups(spec, &subject_ids, parsed) {
+        if crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            &subject_ids,
+            parsed,
+            loads,
+        ) {
             let checked = crate::report::tabular::check_failed_lookups(
                 spec,
                 (0..run.queries.len()).map(|q_idx| {
@@ -2599,14 +2610,16 @@ fn write_tblastx_outputs(
                         spec,
                         &subject_ids,
                         parsed,
+                        loads,
                         run.database.is_some(),
                         false,
                         s_idx,
                     )
                 },
                 |s_idx| match &run.database {
-                    Some(database) => crate::report::tabular::failed_database_title(
+                    Some(database) => crate::report::tabular::failed_database_subject(
                         database.oids.oid(database.reported.ordinals[s_idx]),
+                        loads.thrown(s_idx),
                     ),
                     None => crate::report::tabular::failed_record_title(
                         s_idx,
@@ -3089,8 +3102,9 @@ fn write_tblastx_outputs(
                 report::TblastxOutputFormat::Tabular
                 | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                     // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
-                    // observer (which flushes around every row) the serial writer.
-                    Some(pool) if probe.is_none() => {
+                    // observer (which flushes around every row) the serial writer, which also
+                    // writes the rows of subjects whose load throws (`report::write_tabular`).
+                    Some(pool) if probe.is_none() && !loads.any_throws() => {
                         crate::algorithm::tblastx::x_rpt_par::write_tabular(
                             pool,
                             &hits,
@@ -3113,6 +3127,7 @@ fn write_tblastx_outputs(
                         &database,
                         run.query_ids,
                         &subject_ids,
+                        loads,
                         &unsearched,
                         run.epilog.then_some(run.queries_before),
                         probe.as_mut(),
@@ -4279,7 +4294,7 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    super::super::database::writes_thrown(
+                    super::super::database::after_throw(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     ordered,
@@ -4722,7 +4737,7 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    super::super::database::writes_thrown(
+                    super::super::database::after_throw(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     done.searched.len(),

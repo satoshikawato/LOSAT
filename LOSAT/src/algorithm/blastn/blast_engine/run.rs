@@ -6809,6 +6809,7 @@ fn check_tabular_lookups(
             spec,
             subject_ids,
             report.database_parsed,
+            report.database_loads,
         ) {
             continue;
         }
@@ -6826,14 +6827,16 @@ fn check_tabular_lookups(
                     spec,
                     subject_ids,
                     report.database_parsed,
+                    report.database_loads,
                     database.is_some(),
                     false,
                     s_idx,
                 )
             },
             |s_idx| match database {
-                Some((ordinals, reader)) => crate::report::tabular::failed_database_title(
+                Some((ordinals, reader)) => crate::report::tabular::failed_database_subject(
                     reader.oid_map().oid(ordinals[s_idx]),
+                    report.database_loads.thrown(s_idx),
                 ),
                 None => crate::report::tabular::failed_record_title(
                     s_idx,
@@ -7618,6 +7621,7 @@ fn post_process_hits_and_write(
                     &mut writer,
                     query_ids,
                     &subject_ids,
+                    report.database_loads,
                     output_format,
                     query_titles,
                     subject_title,
@@ -7757,6 +7761,7 @@ fn write_custom_tabular(
             sources: report.database_sources,
             lengths: &lengths,
             taxonomy: &taxonomy,
+            loads: report.database_loads,
         },
         _ => TabularSubjects::Records {
             ids: subject_ids,
@@ -11340,7 +11345,7 @@ fn run_in_pool(
                                 &titles,
                                 &hit_lists,
                                 &batch_spans,
-                                database::writes_thrown(&output_formats),
+                                database::after_throw(&output_formats),
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &prefetch_queries,
@@ -11981,7 +11986,7 @@ fn write_reports_untimed(
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
-                database::writes_thrown(output_formats),
+                database::after_throw(output_formats),
                 results.batches,
                 written.queries,
                 !args.ungapped,

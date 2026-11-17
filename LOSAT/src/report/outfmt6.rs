@@ -501,6 +501,29 @@ pub fn write_hit_fields_bytes<W: Write>(
     writeln!(writer)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:101-113 (quoted at
+// `report::tabular::TabularRows`: `x_ResetFields`) and 862-875 (quoted at
+// `report::tabular::TabularSpec::row_throw`: the subject block's `catch`, `return -1`)
+/// A default tabular row (`write_hit_fields_bytes`) whose subject's load throws where the query's
+/// batch has its prefetch off (`report::tabular::SubjectLookup::Throws`): the catch of the subject
+/// block ends the fields after the scores, so the counts and coordinates keep the 0 of
+/// `x_ResetFields` (`pident` 0.000 of an alignment length 0), and `saccver` prints `m_SubjectId`
+/// as the query's last row that loaded its subject set it, `kept_id` (the query's first rows
+/// throw before any such row: NCBI's null pointer, refused before the report,
+/// `report::tabular::failed_lookup_stop`).
+pub fn write_thrown_hit_fields<W: Write>(
+    writer: &mut W,
+    query_id: &[u8],
+    kept_id: &[u8],
+    e_value: f64,
+    bit_score: f64,
+    config: &OutputConfig,
+) -> io::Result<()> {
+    write_hit_fields_bytes(
+        writer, query_id, kept_id, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, e_value, bit_score, config,
+    )
+}
+
 /// The `# Query: ` line of the outfmt 7 header of a query with the title `query_title`
 /// (the bytes as they are; the ID of a local query is not shown).
 ///

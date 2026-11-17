@@ -1385,6 +1385,7 @@ impl ParsedSubject {
             .then_some(super::tabular::LookupFailure {
                 subject_id,
                 all_ids,
+                bioseq: false,
             }))
     }
 
@@ -1399,6 +1400,12 @@ impl ParsedSubject {
             out
         };
         [field(TabularId::Full), field(TabularId::Accession)]
+    }
+
+    /// The Seq-align id as `sallgi` prints it (`FindGi` of the id alone): its GI, 0 for an id that
+    /// is none.
+    pub fn alignment_gi(&self) -> i64 {
+        self.alignment_id.gi().unwrap_or(0)
     }
 
     /// The keys of the ids of queries that NCBI's scope would show for this sequence
@@ -2250,28 +2257,147 @@ pub fn rank_joins_as_copy(
 // 	    return;
 // 	}
 // ```
-/// What NCBI's XML2 and JSON reports (outfmt 13 to 16) do at the `Hit` of a subject: the one
-/// answer to "this `Hit` throws" and "this subject is never loaded", which the refusals
-/// (`ParsedSubject::fetched`), the names of the `Hit`s (`blast_xml::subjects::HitNames`), the
-/// taxonomy reads (`common::database::read_reported_taxonomy`) and the run's record of the loads
-/// (`TaxdbRun::note_loaded`, the stop's `before`) take ([`HitLoads::of`]).
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-870 (quoted at
+// `report::tabular::TabularSpec::row_throw`: a table's row whose subject block catches the throw)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898 (quoted at
+// `report::tabular::TabularSpec::reads_subject`: `slen` read outside any `catch`)
+/// What a report does after a subject whose lookup throws where its batch's prefetch is off
+/// (`ParsedSubject::lookup_throws`; DECISIONS 62 of line DBID): the one answer of each writer,
+/// which [`HitLoads::of`] takes for the run ([`FormatThrow::of_run`]). Ordered by what the
+/// reports load after the throw (each loads at least what the one before it loads).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AfterThrow {
+    /// NCBI's application ends the run with the exception (`CATCH_ALL`'s `BLAST Database error:
+    /// <message>`, exit status 2; `blast_xml::writer::run_ending_exception`): outfmt 13 and 14,
+    /// and a table whose rows read the subject only after its subject block (`slen`, the letters).
+    EndsRun,
+    /// The report function catches it and leaves the query's report out (outfmt 15 and 16,
+    /// `BlastXML2_FormatReport`, `BlastJSON_FormatReport`); the next query's report goes on.
+    EndsReport,
+    /// The `catch` of the table's subject block ends the row's fields, the row is written with
+    /// what the query's formatter kept (`report::tabular::TabularWriter::row`), and the report
+    /// goes on: a table with a field of that block (outfmt 6, 7 and 10).
+    WritesRow,
+}
+
+/// What one format of a run does with a subject whose lookup throws where its batch's prefetch is
+/// off ([`AfterThrow`]), as [`FormatThrow::of_run`] takes it for the run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FormatThrow {
+    /// LOSAT refuses such a subject (`ParsedSubject::fetched`): a format whose writer LOSAT does
+    /// not make write it as NCBI does (outfmt 0, 5, 17, 18, 20).
+    Refused,
+    /// The format reads nothing of the subject (a table of fields that read nothing of it; the
+    /// Seq-annots and the archive), so NCBI never looks it up there.
+    #[default]
+    Unread,
+    /// The format writes it as NCBI does, then does as the [`AfterThrow`] says.
+    Writes(AfterThrow),
+}
+
+impl FormatThrow {
+    /// What the format `format` does, with its field list `spec` (`None` for a format without
+    /// one, and for the default outfmt 6 and 7, whose `saccver` is a field of the subject block),
+    /// in `program`'s reports.
+    pub fn of(
+        format: crate::blastinput::app::ReportFormat,
+        spec: Option<&super::tabular::TabularSpec>,
+        program: crate::blastinput::app::Program,
+    ) -> Self {
+        use crate::blastinput::app::ReportFormat;
+        if let Some(kind) = super::blast_xml2::Xml2Kind::of(format) {
+            return FormatThrow::Writes(kind.after_throw());
+        }
+        match format {
+            ReportFormat::Tabular
+            | ReportFormat::TabularWithComments
+            | ReportFormat::CommaSeparatedValues => spec.map_or(
+                FormatThrow::Writes(AfterThrow::WritesRow),
+                |spec| spec.format_throw(program),
+            ),
+            ReportFormat::AsnText
+            | ReportFormat::AsnBinary
+            | ReportFormat::ArchiveFormat
+            | ReportFormat::JsonSeqalign => FormatThrow::Unread,
+            _ => FormatThrow::Refused,
+        }
+    }
+
+    /// What the `-outfmt` value `outfmt` does in `program`'s reports, as NCBI reads it
+    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused).
+    pub fn of_outfmt(outfmt: &str, program: crate::blastinput::app::Program) -> Self {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        let Some((format, choice)) = parse_formatting_string(outfmt).ok().and_then(|choice| {
+            ReportFormat::from_number(choice.number).map(|format| (format, choice))
+        }) else {
+            return FormatThrow::Refused;
+        };
+        let spec = super::tabular::TabularSpec::of(format, &choice);
+        Self::of(format, spec.as_ref(), program)
+    }
+
+    /// The answer of two formats of one run: a refusal by either refuses, a format that reads
+    /// nothing leaves the other's answer, and of two that write, the one that loads more after the
+    /// throw (a subject is loaded where some report loads it).
+    pub fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (FormatThrow::Refused, _) | (_, FormatThrow::Refused) => FormatThrow::Refused,
+            (FormatThrow::Unread, answer) | (answer, FormatThrow::Unread) => answer,
+            (FormatThrow::Writes(one), FormatThrow::Writes(other)) => {
+                FormatThrow::Writes(one.max(other))
+            }
+        }
+    }
+
+    /// What the reports of a run do after a subject whose lookup throws ([`FormatThrow::and`] of
+    /// its formats): `None` where a format refuses it or no format reads it, so that every
+    /// subject is loaded ([`HitLoads::of`]). The one answer of every program.
+    pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<AfterThrow> {
+        match formats.into_iter().fold(FormatThrow::Unread, FormatThrow::and) {
+            FormatThrow::Writes(after) => Some(after),
+            FormatThrow::Refused | FormatThrow::Unread => None,
+        }
+    }
+
+    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run.
+    pub fn of_outfmts<'a>(
+        outfmts: impl IntoIterator<Item = &'a str>,
+        program: crate::blastinput::app::Program,
+    ) -> Option<AfterThrow> {
+        Self::of_run(
+            outfmts
+                .into_iter()
+                .map(|outfmt| Self::of_outfmt(outfmt, program)),
+        )
+    }
+}
+
+/// What NCBI's reports do at the `Hit` (outfmt 13 to 16) or the rows (outfmt 6, 7 and 10) of a
+/// subject: the one answer to "this subject's lookup throws there" and "this subject is never
+/// loaded", which the refusals (`ParsedSubject::fetched`, the tables' rows at which NCBI has no
+/// result, `report::tabular::check_failed_lookups`), the names of the `Hit`s
+/// (`blast_xml::subjects::HitNames`), the tables' rows (`report::tabular::SubjectLookup::Throws`),
+/// the taxonomy reads (`common::database::read_reported_taxonomy`, the texts of the subjects that
+/// a report reads one by one) and the run's record of the loads (`TaxdbRun::note_loaded`, the
+/// stop's `before`) take ([`HitLoads::of`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HitLoad {
     /// A report loads the subject (or the batch's prefetch does), as every subject of a run that
     /// writes another format.
     #[default]
     Loaded,
-    /// A report reaches the subject's `Hit` and its lookup throws there (`lookup_throws`): NCBI
-    /// loads nothing for it, and the report ends there.
+    /// A report reaches the subject and its lookup throws there (`lookup_throws`): NCBI loads
+    /// nothing for it, and the report goes on or ends as the run's [`AfterThrow`] says.
     Throws,
-    /// No report reaches the subject's `Hit`: it is shown only after a `Hit` that throws.
+    /// No report reaches the subject: it is shown only after a subject that throws where the
+    /// reports end there.
     Unread,
 }
 
 /// [`HitLoad`] of each subject of a call's reports, by the key that the caller gives its subjects
-/// (a rank, or an ordinal id): those whose `Hit` throws, with the exception, and those that no
-/// report loads; every other subject is loaded. Empty (every subject loaded) where a format of the
-/// run refuses a lookup that throws, or no report reads one by one.
+/// (a rank, or an ordinal id): those whose lookup throws where a report reaches them, with the
+/// exception, and those that no report loads; every other subject is loaded. Empty (every subject
+/// loaded) where a format of the run refuses a lookup that throws, or no report reads one by one.
 #[derive(Debug, Default)]
 pub struct HitLoads {
     throws: std::collections::HashMap<usize, crate::ncbi_exception::NcbiException>,
@@ -2280,33 +2406,57 @@ pub struct HitLoads {
 
 impl HitLoads {
     /// The loads of the query reports `reports`, in the order of the reports: whether the
-    /// query's batch has its prefetch off, so that its report loads each subject at its `Hit`
-    /// (`one_by_one`, `common::database::BatchPrefetch::reads_one_by_one`), and the subject key of
-    /// each of its HSP lists in the report's order (`None` for a list that shows nothing). The
-    /// lists make `Hit`s as the writers make them (`blast_xml::hit_ranges`: a copy of one record
-    /// that follows another joins its `Hit`, `joins_as_copy`). In a report that reads one by one,
-    /// the `Hit`s before the first `Hit` whose subject's lookup throws (`lookup_throws` of
-    /// `parsed(key)`) load their subjects; that `Hit` throws (its subjects are not loaded), and
-    /// NCBI's report function ends the report there (`BlastXML2_FormatReport`'s `catch` for 15
-    /// and 16; 13 and 14 end the run), so the `Hit`s after it load nothing. A report whose batch
-    /// prefetches loads every subject (a lookup that throws stops the prefetch first,
-    /// `common::database::batch_prefetch_stop`). A subject is loaded where some report loads it;
-    /// one whose `Hit` throws in a report throws in every report that reaches it.
-    /// `writes_thrown`: every format of the run writes the `Hit` that throws as NCBI does
-    /// (`blast_xml2::Xml2Kind::every`), else every subject is loaded (the other formats refuse such
-    /// a subject, `ParsedSubject::fetched`).
+    /// query's batch has its prefetch off, so that its report loads each subject where it reaches
+    /// it (`one_by_one`, `common::database::BatchPrefetch::reads_one_by_one`), and the subject key
+    /// of each of its HSP lists in the report's order (`None` for a list that shows nothing). The
+    /// lists make `Hit`s as the XML writers make them (`blast_xml::hit_ranges`: a copy of one
+    /// record that follows another joins its `Hit`, `joins_as_copy`). In a report that reads one
+    /// by one, a `Hit` whose subject's lookup throws (`lookup_throws` of `parsed(key)`) throws (its
+    /// subjects are not loaded); what comes after it is the run's `after`
+    /// ([`FormatThrow::of_run`]):
+    /// - `WritesRow` (a table of a field of the subject block): each row looks its own Seq-align
+    ///   id up, so every subject whose lookup throws throws, every other one loads;
+    /// - `EndsReport` (outfmt 15 and 16): the `Hit`s after it in the report load nothing, the next
+    ///   report goes on;
+    /// - `EndsRun` (outfmt 13 and 14, a table that reads the subject after its subject block):
+    ///   nothing after it in the run loads.
+    ///
+    /// A report whose batch prefetches loads every subject (a lookup that throws stops the
+    /// prefetch first, `common::database::batch_prefetch_stop`). A subject is loaded where some
+    /// report loads it; one that throws in a report throws in every report that reaches it.
+    /// `after` `None`: a format of the run refuses the throw or none reads the subjects, and every
+    /// subject is loaded (`ParsedSubject::fetched` refuses such a subject where a format reads it).
     pub fn of<'p>(
-        writes_thrown: bool,
+        after: Option<AfterThrow>,
         reports: impl IntoIterator<Item = (bool, Vec<Option<usize>>)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
     ) -> Self {
         let mut loads = HitLoads::default();
-        if !writes_thrown {
+        let Some(after) = after else {
             return loads;
-        }
+        };
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
+        // The run ended at a `Hit` that threw (`EndsRun`).
+        let mut ended = false;
         for (one_by_one, subjects) in reports {
+            // A table looks each row's Seq-align id up.
+            if after == AfterThrow::WritesRow {
+                for key in subjects.into_iter().flatten() {
+                    match parsed(key)
+                        .filter(|_| one_by_one)
+                        .and_then(ParsedSubject::lookup_throws)
+                    {
+                        Some(exception) => {
+                            loads.throws.insert(key, exception);
+                        }
+                        None => {
+                            loaded.insert(key);
+                        }
+                    }
+                }
+                continue;
+            }
             let hits = super::blast_xml::hit_ranges(
                 &subjects,
                 |subject| *subject,
@@ -2315,16 +2465,19 @@ impl HitLoads {
                     _ => false,
                 },
             );
-            let mut thrown = false;
+            let mut thrown = ended;
             for range in hits {
                 let Some(first) = subjects[range.start] else {
                     continue;
                 };
-                if one_by_one && !thrown {
-                    if let Some(exception) = parsed(first).and_then(ParsedSubject::lookup_throws) {
-                        loads.throws.insert(first, exception);
-                        thrown = true;
-                    }
+                let throws = one_by_one && !thrown;
+                if let Some(exception) = parsed(first)
+                    .filter(|_| throws)
+                    .and_then(ParsedSubject::lookup_throws)
+                {
+                    loads.throws.insert(first, exception);
+                    thrown = true;
+                    ended |= after == AfterThrow::EndsRun;
                 }
                 let keys = subjects[range].iter().flatten().copied();
                 if thrown {
@@ -2373,6 +2526,11 @@ impl HitLoads {
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).
     pub fn thrown(&self, key: usize) -> Option<&crate::ncbi_exception::NcbiException> {
         self.throws.get(&key)
+    }
+
+    /// Whether the load of some subject throws (`HitLoad::Throws`).
+    pub fn any_throws(&self) -> bool {
+        !self.throws.is_empty()
     }
 }
 
@@ -2940,7 +3098,7 @@ mod tests {
         ));
         let subject = |key: usize| parsed[key].as_ref();
         let loads = HitLoads::of(
-            true,
+            Some(AfterThrow::EndsReport),
             [
                 // Read one by one: 1 loads, 0 throws, the copies 2 and 3, 4 and 6 load nothing.
                 (
@@ -2974,9 +3132,9 @@ mod tests {
         assert_eq!(renamed.load(0), HitLoad::Loaded);
         // A report whose batch prefetches, and a run that writes another format, load every
         // subject.
-        for (writes_thrown, one_by_one) in [(true, false), (false, true)] {
+        for (after, one_by_one) in [(Some(AfterThrow::EndsReport), false), (None, true)] {
             let every = HitLoads::of(
-                writes_thrown,
+                after,
                 [(one_by_one, vec![Some(0), Some(1)])],
                 subject,
             );
@@ -3001,6 +3159,80 @@ mod tests {
             .clone()
             .weak_match(Some(WeakMatch::Held(DbSequence::of_unrestricted(5))));
         assert!(weak.fetched(false, true, HitLoad::Throws).is_err());
+    }
+
+    // Line DBID pfoff-2 (DECISIONS 62 (12), probe `R/pfoff/p2`): what the tables load after a
+    // subject whose lookup throws (`AfterThrow`, `FormatThrow`): a table of a field of the subject
+    // block writes each row and goes on, every throwing subject throws and every other loads; a
+    // table that reads the subject after that block (`slen`, the letters) and outfmt 13 and 14
+    // end the run, so nothing after the first throw loads, in that report or a later one; a
+    // table of other fields reads nothing; the run's answer is its formats' (`FormatThrow::and`).
+    #[test]
+    fn the_formats_say_what_loads_after_a_throw() {
+        use crate::blastinput::app::Program;
+        let throws = || {
+            Some(FoundInstead::Failed(LookupFailure::ncbi(
+                crate::seqdb::tax_files::NO_ACCESSION_INFO,
+            )))
+        };
+        let plain =
+            |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+        // 1 and 3 throw; 0, 2 and 4 are found.
+        let parsed: Vec<ParsedSubject> = vec![
+            plain("AAA00001"),
+            plain("AAA00002").found_instead(throws()),
+            plain("AAA00003"),
+            plain("AAA00004").found_instead(throws()),
+            plain("AAA00005"),
+        ];
+        let subject = |key: usize| parsed.get(key);
+        let reports = || {
+            [
+                (true, vec![Some(0), Some(1), Some(2)]),
+                (true, vec![Some(3), Some(4)]),
+            ]
+        };
+        let rows = HitLoads::of(Some(AfterThrow::WritesRow), reports(), subject);
+        assert!(rows.loaded(0) && rows.loaded(2) && rows.loaded(4));
+        assert_eq!(rows.load(1), HitLoad::Throws);
+        assert_eq!(rows.load(3), HitLoad::Throws);
+        assert!(rows.any_throws());
+        let run = HitLoads::of(Some(AfterThrow::EndsRun), reports(), subject);
+        assert!(run.loaded(0));
+        assert_eq!(run.load(1), HitLoad::Throws);
+        // The run ended at 1: the next report reads nothing (3 does not throw).
+        for unread in [2, 3, 4] {
+            assert_eq!(run.load(unread), HitLoad::Unread, "{unread}");
+        }
+        let report = HitLoads::of(Some(AfterThrow::EndsReport), reports(), subject);
+        assert_eq!(report.load(2), HitLoad::Unread);
+        assert_eq!(report.load(3), HitLoad::Throws);
+        assert_eq!(report.load(4), HitLoad::Unread);
+        // The formats' answers.
+        let of = |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp);
+        assert_eq!(of("6"), FormatThrow::Writes(AfterThrow::WritesRow));
+        assert_eq!(of("7 qseqid sseqid evalue"), FormatThrow::Writes(AfterThrow::WritesRow));
+        assert_eq!(of("10 qseqid stitle slen"), FormatThrow::Writes(AfterThrow::WritesRow));
+        assert_eq!(of("6 qseqid slen"), FormatThrow::Writes(AfterThrow::EndsRun));
+        assert_eq!(of("6 qseqid pident"), FormatThrow::Writes(AfterThrow::EndsRun));
+        assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
+        assert_eq!(of("13"), FormatThrow::Writes(AfterThrow::EndsRun));
+        assert_eq!(of("15"), FormatThrow::Writes(AfterThrow::EndsReport));
+        assert_eq!(of("8"), FormatThrow::Unread);
+        for refused in ["0", "5", "17", "18", "20"] {
+            assert_eq!(of(refused), FormatThrow::Refused, "{refused}");
+        }
+        // BLASTN's `pident` reads nothing of the subject.
+        assert_eq!(
+            FormatThrow::of_outfmt("6 qseqid pident", Program::Blastn),
+            FormatThrow::Unread
+        );
+        // A run's answer: a refusal refuses, a format that reads nothing leaves the other's.
+        let after = |outfmts: &[&str]| FormatThrow::of_outfmts(outfmts.iter().copied(), Program::Blastp);
+        assert_eq!(after(&["6", "8"]), Some(AfterThrow::WritesRow));
+        assert_eq!(after(&["6", "0"]), None);
+        assert_eq!(after(&["6 qseqid evalue"]), None);
+        assert_eq!(after(&["6 qseqid slen", "15"]), Some(AfterThrow::EndsReport));
     }
 
     // Line DBID pssmread (probe `R/pssmread`, reviews 1 and 2): LOSAT's refusals of what
@@ -3635,6 +3867,7 @@ mod tests {
             Some(crate::report::tabular::LookupFailure {
                 subject_id: true,
                 all_ids: false,
+                bioseq: false,
             })
         );
         assert_eq!(

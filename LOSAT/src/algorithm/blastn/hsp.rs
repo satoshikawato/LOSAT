@@ -164,6 +164,28 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// What the format does with a subject whose lookup throws where its batch's prefetch is off
+    /// (`report::db_subject::FormatThrow::of`): the default tables write the row (their `saccver`
+    /// is a field of the subject block), a table with a field list as its fields say
+    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says; the
+    /// Seq-annots and the archive read nothing of the subject; LOSAT refuses it in the others.
+    pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
+        use crate::report::db_subject::{AfterThrow, FormatThrow};
+        match *self {
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
+                FormatThrow::Writes(AfterThrow::WritesRow)
+            }
+            BlastnOutputFormat::CustomTabular(spec) => {
+                spec.format_throw(crate::blastinput::app::Program::Blastn)
+            }
+            BlastnOutputFormat::Xml2(kind) => FormatThrow::Writes(kind.after_throw()),
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
+            BlastnOutputFormat::Pairwise(_)
+            | BlastnOutputFormat::Xml
+            | BlastnOutputFormat::Sam(_) => FormatThrow::Refused,
+        }
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
@@ -1251,6 +1273,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -1285,6 +1308,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             hit_list_opt.as_ref(),
             query_ids,
             subject_ids,
+            loads,
             output_format,
             query_titles,
             subject_title,
@@ -1319,6 +1343,7 @@ pub(crate) fn write_query_rows<W: Write>(
     hit_list_opt: Option<&BlastnHitList>,
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -1341,16 +1366,48 @@ pub(crate) fn write_query_rows<W: Write>(
         Some(value) => value,
         None => return Ok(()),
     };
+    // `saccver` of the query's last row that loaded its subject: what a row whose load throws
+    // prints (`outfmt6::write_thrown_hit_fields`; the query's formatter is new).
+    let mut kept: &[u8] = &[];
     for hsp_list in &hit_list.hsplist_array {
+        let Some(first) = hsp_list.hsps.first() else {
+            continue;
+        };
+        // The subject's load throws where the query's batch has its prefetch off
+        // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
+        if loads.thrown(first.s_idx as usize).is_some() {
+            for hsp in &hsp_list.hsps {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(*hsp_index);
+                }
+                let query_id = query_ids
+                    .get(hsp.q_idx as usize)
+                    .map_or(&b"unknown"[..], |id| id.as_ref());
+                crate::report::outfmt6::write_thrown_hit_fields(
+                    writer,
+                    query_id,
+                    kept,
+                    hsp.e_value,
+                    hsp.bit_score,
+                    config,
+                )?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(*hsp_index);
+                }
+                *hsp_index += 1;
+            }
+            continue;
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
         // ```c++
         //        		const CBioseq_Handle& subject_bh =
         //                 scope.GetBioseqHandle(align.GetSeq_id(1));
         // ```
         // Every row of BLASTN's tables reads its subject: the first loads it.
-        if !hsp_list.hsps.is_empty() {
-            read(hsp_list.oid, writer)?;
-        }
+        read(hsp_list.oid, writer)?;
+        kept = crate::algorithm::common::tabular::printed_id(subject_ids, first.s_idx as usize);
         write_hsp_rows(
             writer,
             &hsp_list.hsps,
@@ -1922,6 +1979,7 @@ mod tests {
             &mut output,
             &query_ids,
             &subject_ids,
+            &crate::report::db_subject::HitLoads::default(),
             BlastnOutputFormat::TabularWithComments,
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
@@ -1943,6 +2001,7 @@ mod tests {
             &mut output,
             &query_ids,
             &subject_ids,
+            &crate::report::db_subject::HitLoads::default(),
             BlastnOutputFormat::TabularWithComments,
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",

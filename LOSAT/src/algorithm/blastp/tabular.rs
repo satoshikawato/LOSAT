@@ -50,7 +50,7 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, FailedLookup,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds,
     SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
     TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
 };
@@ -127,6 +127,10 @@ pub(super) enum TabularSubjects<'a> {
         sources: &'a [crate::report::defline::SourceTaxname],
         length: &'a dyn Fn(usize) -> usize,
         taxonomy: &'a [TabularTaxonomy],
+        /// What the reports do at each subject, by rank (`report::db_subject::HitLoads`): a
+        /// subject whose load throws writes its rows as NCBI's `catch` leaves them
+        /// (`report::tabular::SubjectLookup::Throws`).
+        loads: &'a crate::report::db_subject::HitLoads,
     },
 }
 
@@ -142,6 +146,25 @@ struct SubjectValues<'a> {
     taxonomy: Cow<'a, TabularTaxonomy>,
     /// How the lookups of a subject fail (an empty id: `SetSubjectId`), `None` where they do not.
     failed: Option<FailedValues<'a>>,
+}
+
+impl<'a> SubjectValues<'a> {
+    /// The values of the database sequence `subject` whose load throws with `exception`
+    /// (`common::tabular::SubjectValues::thrown`): its rows print none of its own values, and
+    /// NCBI reads none of its ids, titles or taxonomy.
+    fn thrown(subject: &ParsedSubject, exception: &'a crate::ncbi_exception::NcbiException) -> Self {
+        SubjectValues {
+            id: &[],
+            accession: &[],
+            accession_version: &[],
+            gi: 0,
+            all_ids: Vec::new(),
+            titles: None,
+            length: 0,
+            taxonomy: Cow::Owned(TabularTaxonomy::default()),
+            failed: Some(FailedValues::thrown(subject, exception)),
+        }
+    }
 }
 
 impl SubjectValues<'_> {
@@ -174,12 +197,7 @@ impl SubjectValues<'_> {
     /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
     fn lookup(&self) -> SubjectLookup<'_> {
         match &self.failed {
-            Some(failed) => SubjectLookup::Failed(FailedLookup {
-                full: &failed.align_id[0],
-                accession: &failed.align_id[1],
-                subject_id: failed.subject_id,
-                all_ids: failed.all_ids.then_some(self.all_ids.as_slice()),
-            }),
+            Some(failed) => failed.lookup(&self.all_ids),
             None => SubjectLookup::Found,
         }
     }
@@ -266,6 +284,7 @@ impl<'a> TabularSubjects<'a> {
                             align_id: [local.clone(), local],
                             subject_id: true,
                             all_ids: false,
+                            thrown: None,
                         })
                     }
                     _ => None,
@@ -291,8 +310,15 @@ impl<'a> TabularSubjects<'a> {
                 parsed,
                 length,
                 taxonomy,
+                loads,
                 ..
             } => {
+                if let (Some(exception), Some(subject)) = (
+                    loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
+                ) {
+                    return Ok(SubjectValues::thrown(subject, exception));
+                }
                 // `None`: the lookup throws (`common::tabular::SubjectId`).
                 let found = ids.get(s_idx).and_then(Option::as_deref);
                 let id: &[u8] = found.unwrap_or_default();
@@ -361,6 +387,7 @@ impl<'a> TabularSubjects<'a> {
                                 align_id: [Cow::Owned(full), Cow::Owned(accession)],
                                 subject_id: true,
                                 all_ids: true,
+                                thrown: None,
                             }
                         }),
                     }),
@@ -831,6 +858,19 @@ fn write_tabular_rows<const RPS: bool>(
                     (q_idx as u32, list_index as u32, index_in_list as u32),
                     hsp.num_ident,
                 );
+                // A row that reads a subject whose load throws outside the subject block ends
+                // the run (`TabularWriter::ends_run`).
+                if let Some(exception) = table.ends_run(
+                    &subject,
+                    crate::blastinput::app::Program::Blastp,
+                    seqalign_num_ident,
+                ) {
+                    return Err(crate::report::tabular::run_end(writer, &buf, exception, || {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.end_run();
+                        }
+                    }));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
                 //        		const CBioseq_Handle& subject_bh =
@@ -840,7 +880,10 @@ fn write_tabular_rows<const RPS: bool>(
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
                 // (`QueryWarnings::subject_read`), before those of the row's own lookups.
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(seqalign_num_ident) {
+                    if warnings.reads_with_texts(q_idx)
+                        && fetch.reads(seqalign_num_ident)
+                        && !subject.throws()
+                    {
                         writer.write_all(&buf)?;
                         buf.clear();
                         warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;

@@ -1256,6 +1256,11 @@ impl ShownSubjects<'_> {
                 };
                 failed.then(|| LookupFailure::of_plain(false))
             }
+            // A subject whose load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads::thrown`) fails there, before every other lookup.
+            ShownSubjects::Database { reported, .. } if reported.loads().thrown(oid).is_some() => {
+                Some(LookupFailure::thrown())
+            }
             ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
                 Some(parsed)
                     if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
@@ -1268,12 +1273,22 @@ impl ShownSubjects<'_> {
                     .then_some(LookupFailure {
                         subject_id: true,
                         all_ids: false,
+                        bioseq: false,
                     }),
                 None => reported
                     .tabular_ids(oid)
                     .is_none()
                     .then(|| LookupFailure::of_plain(true)),
             },
+        }
+    }
+
+    /// Whether the load of the subject `oid` (a rank) throws where the query's batch has its
+    /// prefetch off (`report::db_subject::HitLoads::thrown`).
+    fn thrown(&self, oid: usize) -> bool {
+        match self {
+            ShownSubjects::Fasta { .. } => false,
+            ShownSubjects::Database { reported, .. } => reported.loads().thrown(oid).is_some(),
         }
     }
 
@@ -1394,7 +1409,10 @@ fn check_failed_lookups(
             |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
             |oid| match shown {
                 ShownSubjects::Database { reported, .. } => {
-                    crate::report::tabular::failed_database_title(reported.oid(oid))
+                    crate::report::tabular::failed_database_subject(
+                        reported.oid(oid),
+                        reported.loads().thrown(oid),
+                    )
                 }
                 ShownSubjects::Fasta { .. } => {
                     crate::report::tabular::failed_record_title(oid, local_id(&subjects[oid]))
@@ -1730,11 +1748,55 @@ pub(super) fn render_queries_with(
                 }
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
+                // `saccver` of the query's last row that loaded its subject: what a row whose
+                // load throws prints (the query's formatter is new).
+                let mut kept: std::borrow::Cow<'_, [u8]> = std::borrow::Cow::Borrowed(&[]);
                 for list in listed {
                     let subject = &subjects[list.oid];
+                    // The subject's load throws where the query's batch has its prefetch off
+                    // (`report::db_subject::HitLoads`): each row is written as the catch of
+                    // the subject block leaves it, `saccver` as the kept subject set it and the
+                    // counts and coordinates at `x_ResetFields`' 0 (an empty alignment).
+                    if shown.thrown(list.oid) {
+                        let thrown_subject = ShownSubject {
+                            saccver: kept.clone(),
+                        };
+                        let empty = DisplayAlignment::empty();
+                        for hsp in list.hsps.iter().filter(|h| has_seqalign(h, options.gapped)) {
+                            let values: Vec<_> = options
+                                .fields
+                                .iter()
+                                .map(|f| {
+                                    field_value(
+                                        f,
+                                        query,
+                                        &thrown_subject,
+                                        (hsp.evalue, hsp.bit_score),
+                                        &empty,
+                                    )
+                                })
+                                .collect();
+                            if let Some(probe) = probe.as_deref_mut() {
+                                writer.flush()?;
+                                probe.begin(next_hsp);
+                            }
+                            let mut line = values.join(&b'\t');
+                            line.push(b'\n');
+                            writer.write_all(&line)?;
+                            if let Some(probe) = probe.as_deref_mut() {
+                                writer.flush()?;
+                                probe.end(next_hsp);
+                            }
+                            next_hsp += 1;
+                        }
+                        continue;
+                    }
                     let shown_subject = ShownSubject {
                         saccver: shown.subject_saccver(subject, list.oid),
                     };
+                    if list.hsps.iter().any(|h| has_seqalign(h, options.gapped)) {
+                        kept = shown_subject.saccver.clone();
+                    }
                     let mut read = false;
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.41
+- Version: 1.42
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -124,7 +124,11 @@
   up ends the loads; refused, a stopping id that NCBI may never look up, as its scope or its data
   loader, which keeps the ids of what the run loaded, finds it first; a directory in place of a
   version 4 ISAM file is no ISAM, as NCBI's; line DBID item loadord, Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07)
+  instruction 2026-09-29, restated 2026-10-07);
+  1.42 2026-11-17 (a version 4 lookup returns at the first volume that holds the id, as NCBI's, so
+  an ISAM file of a later volume that does not open stops none of its lookups; refused, where
+  LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -898,12 +902,11 @@ masked). Line NP item M4a-2c.
   LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
   and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
   the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
-  (`docs/web/abi_v2.md` §7). That holds for these checks of the formats. A Web run still fails
-  as a whole, where the CLI completes the argv's format, in two more cases: (a) a format fails in
-  the middle of its report, `-sorthits` with a description total above 99999 bits in outfmt 0
-  (all programs), or an NCBI error of outfmt 0 alone such as BLASTX `Row is empty`; dev had both;
-  (b) a stream that the Web adds fails alone after it sent a chunk (BLASTX, a later query batch
-  with an undecodable `Subject_` title). These are current limits.
+  (`docs/web/abi_v2.md` §7). So does every error of one format's report, at a check before its
+  rows or in its middle (`-sorthits` with a description total above 99999 bits in outfmt 0, an
+  NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
+  after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
+  the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -1014,7 +1017,14 @@ masked). Line NP item M4a-2c.
   that volume and go on to the next (review 4 of item loadord: NCBI exit 0 where a later volume
   holds the id, 255 where none does; LOSAT stopped with NCBI's `Error: Could not open input
   file`, which NCBI writes for a regular file that does not open). Where its index or data file
-  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses.
+  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses. NCBI's
+  lookup (`SeqidToOid`, `SeqidToOids` without `multi`) returns at the first OID it finds, in the
+  order of the volumes, so an ISAM file of a later volume that does not open (a regular file of
+  mode 000) stops a lookup only of an id that no volume before it holds in the search's list
+  (review 3 of item loadord, H3, and item v4late: NCBI exit 0 where LOSAT stopped with `Error:
+  Could not open input file`); LOSAT, which also lists the other sequences that hold the id,
+  refuses where that list fails on such a file and a report shows what it can change
+  (`PD-LOSAT-DATABASE-SEARCH`).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

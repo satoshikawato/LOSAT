@@ -53,11 +53,12 @@ const body = (instructions, locals = 0) => {
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
-// Entry/export/memory variations exercise Wasm ABI inspection only. `writes` (threaded only)
-// appends that many fd_write calls of 4,096 bytes to standard output after the worker part,
-// exiting with the first nonzero WASI errno.
+// Entry/export/memory variations exercise Wasm ABI inspection only. `writes` appends that many
+// fd_write calls of 4,096 bytes to descriptor `fd` (standard output, or 2 for standard error)
+// after the worker part, exiting with the first nonzero WASI errno; a command that writes ends
+// with exit 0 after its writes (`status` is not used).
 function command({ threaded, status = 0, worker = null, entry = "_start",
-  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1], writes = 0 }) {
+  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1], writes = 0, fd = 1 }) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                 // proc_exit(i32)
     [0x60, 0, 0],                       // _start()
@@ -78,7 +79,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     exports.push([...name(exported), 0, imported]);
   }
   const functions = [1];
-  let main = [...i32(status), 0x10, 0];
+  let main = writes ? [] : [...i32(status), 0x10, 0];
   const bodies = [];
   if (worker) {
     // Spawn, then block in memory.atomic.wait32. A trapped worker cannot
@@ -102,7 +103,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     // the errno, local 1 counts the writes.
     main = [...main, ...i32(16), ...i32(4096), 0x36, 2, 0, ...i32(20), ...i32(4096), 0x36, 2, 0,
       0x03, 0x40,
-      ...i32(1), ...i32(16), ...i32(1), ...i32(24), 0x10, imported - 1, 0x22, 0,
+      ...i32(fd), ...i32(16), ...i32(1), ...i32(24), 0x10, imported - 1, 0x22, 0,
       0x04, 0x40, 0x20, 0, 0x10, 0, 0x0b,
       0x20, 1, ...i32(1), 0x6a, 0x22, 1, ...i32(writes), 0x49, 0x0d, 0,
       0x0b];
@@ -219,30 +220,44 @@ test("successful worker releases its parent and exits successfully", () => {
 
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
-// The native command's output write blocks while a slow reader drains a full pipe. Starting a
-// Worker makes Node open process.stdout, which sets a piped stdout non-blocking, so the
-// guest's fd_write to a full pipe returned EAGAIN (WASI errno 6) and LOSAT stopped with
-// "Resource temporarily unavailable (os error 6)". 64 writes of 4,096 bytes overfill the
-// 64 KiB pipe of a reader that waits a second; every byte must arrive and the exit be 0.
-test("threaded command output waits for a slow reader of a full pipe",
-  { skip: process.platform === "win32" && "needs sh" }, () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-runner-"));
-    try {
-      const fixture = path.join(directory, "command.wasm");
-      const bytes = command({ threaded: true, worker: "success", writes: 64 });
-      assert.ok(WebAssembly.validate(bytes));
-      fs.writeFileSync(fixture, bytes);
-      const result = spawnSync("sh", ["-c", '{ "$0" "$1" "$2"; echo "exit $?" >&2; } | { sleep 1; wc -c; }',
-        process.execPath, path.join(__dirname, "run_losat_wasi_threads.js"), fixture], {
-        env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
+// The native command's write to standard output or error blocks while a slow reader drains a full
+// pipe. Node can leave a piped descriptor 1 or 2 non-blocking (wasi_artifact.js, the comment above
+// blockingStdioWrite: the serial runner's ExperimentalWarning, a thread worker's stdio), and the
+// guest's fd_write to a full pipe returned EAGAIN (WASI errno 6): LOSAT stopped with "Resource
+// temporarily unavailable (os error 6)". Python sets the pipe non-blocking here before the host
+// starts (O_NONBLOCK belongs to the open file description that the host inherits), so the test
+// does not depend on what Node prints. 64 writes of 4,096 bytes overfill the 64 KiB pipe of a
+// reader that waits a second; every byte must arrive and the exit be 0.
+const NONBLOCK = "import fcntl, os, sys; fd = int(sys.argv[1]); "
+  + "fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)";
+for (const threaded of [false, true]) {
+  for (const fd of [1, 2]) {
+    test(`${threaded ? "threaded" : "serial"} command output to ${fd === 1 ? "stdout" : "stderr"} waits for a slow reader of a full pipe`,
+      { skip: process.platform === "win32" && "needs sh" }, () => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-runner-"));
+        try {
+          const fixture = path.join(directory, "command.wasm");
+          const bytes = command({ threaded, worker: threaded ? "success" : null, writes: 64, fd });
+          assert.ok(WebAssembly.validate(bytes));
+          fs.writeFileSync(fixture, bytes);
+          // Descriptor 4 keeps the test's stderr for the exit line; for fd 2 the host's standard
+          // error is the slow pipe and its standard output /dev/null.
+          const redirect = fd === 1 ? "4>&2" : "4>&2 2>&1 >/dev/null";
+          const result = spawnSync("sh", ["-c",
+            `{ python3 -c "$3" ${fd} && "$0" "$1" "$2"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }`,
+            process.execPath, path.join(__dirname, threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js"),
+            fixture, NONBLOCK], {
+            env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
+          });
+          assert.ifError(result.error);
+          assert.match(result.stderr, /^exit 0$/m, result.stderr);
+          assert.equal(Number(result.stdout.trim()), 64 * 4096, result.stderr);
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true });
+        }
       });
-      assert.ifError(result.error);
-      assert.match(result.stderr, /^exit 0$/m, result.stderr);
-      assert.equal(Number(result.stdout.trim()), 64 * 4096, result.stderr);
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+  }
+}
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;

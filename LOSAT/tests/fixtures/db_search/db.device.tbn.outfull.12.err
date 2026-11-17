@@ -1,5 +1,0 @@
-Error: (802.5) [tblastn] CObjectOStream: error at line 510: Seq-annot.data.align.E.segs.std.E.loc.E.int.strand: invalid enum value
-Error: (802.4) [tblastn] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
-Error: NCBI C++ Exception:
-    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 449: Error: (CSerialException::eInvalidData) ncbi::CEnumeratedTypeInfo::WriteEnum() - line 510: invalid enum value ( at Seq-annot.data.align.[].[].segs.std.[].[].loc.[].[].int.strand)
-

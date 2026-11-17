@@ -180,33 +180,39 @@
 //! EXPERIMENT (LOSAT_X_BXCROSS128, blastx's switch): LOSAT_X_BXCROSS's batches in 128-bit vectors,
 //! for the targets without its AVX2 kernel: the WebAssembly build (simd128) and x86-64 with SSSE3,
 //! SSE4.1 and POPCNT but without AVX2 ([`XCellTest::Cross128`], [`x_scan_cells_w128_cross`]). Both
-//! kernels run one driver, generic over [`XCrossKernel`]: the scan's stage ([`x_cross_scan`],
-//! [`x_cross_cell`]), the drain ([`x_cross_drain_with`]), its batches, units and windows
-//! ([`x_cross_batch`], [`x_cross_unit`], [`x_cross_window`], [`x_cross_window_defer`]) and
-//! the deferred records ([`x_cross_defer`]); a kernel gives a piece's stage, the conflict test and
-//! the test of eight lanes, and each kernel's out-of-line functions are compiled for its
-//! instructions. The 128-bit kernel ([`XCrossW128`], over `utils/xdrop_simd.rs` `arch`, one source
-//! for x86-64 SSE and wasm32 simd128) holds the eight lanes of a window in two vectors of four. Its
-//! conflict test compares each half with itself one and two lanes round (the six pairs within it)
-//! and the low half with the high one zero to three lanes round (the sixteen pairs across), so it
-//! sees all 28 pairs of lanes, as the AVX2 test does. Its batch reads and stores the entries by
-//! lane, as the AVX2 batch does, and computes the AVX2 batch's lane formulas (the same wrapping
-//! 32-bit operations) on each half. A piece of a cell is staged as six vectors of four lanes
-//! (`XHit::x_load24_w128`: `u16` hits by three 16-byte loads, the reads of the AVX2 stage; `i32`
-//! hits by a 16-byte load for each four hits inside the list and scalar loads for the rest, as SSE
-//! and simd128 have no masked load). So every window, part, unit and call is the AVX2 kernel's, and
-//! the argument above holds as it stands. The 128-bit kernel calls each unit's candidates at once
-//! (the drain without `DEFER`; LOSAT_X_BXCROSSDEFER does not act on it): in the WebAssembly build
-//! the deferral was slower (the bx case of v4-W W2 s3, a 50-kb piece of the fly genome x the fly
-//! proteome at one thread: x0.780 of `dev` with it, x0.749 without), while on x86-64 with `=2` it
-//! was 3 % faster, which a CPU without AVX2 forgoes so that the kernel has one form.
+//! kernels run one driver, generic over [`XCrossKernel`]: the scan and its stage ([`x_cross_scan`],
+//! [`x_cross_cell`]), the drain ([`x_cross_drain_with`]), its batches ([`x_cross_batch`],
+//! [`x_batch_lanes`]) and the deferred records ([`x_cross_defer`], [`x_cross_batch_marked`]). A
+//! kernel gives a piece's stage, the conflict test, the test of eight lanes and its window with a
+//! repeated entry, and each kernel's functions are compiled for its instructions (the trait's
+//! notes say why the AVX2 functions keep their machine code). The 128-bit kernel ([`XCrossW128`],
+//! over `utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128) holds the eight
+//! lanes of a window in two vectors of four. Its conflict test compares each half with itself one
+//! and two lanes round (the six pairs within it) and the low half with the high one zero to three
+//! lanes round (the sixteen pairs across), so it sees all 28 pairs of lanes, as the AVX2 test does.
+//! Its batch reads and stores the entries by lane, as the AVX2 batch does, and computes the AVX2
+//! batch's lane formulas (the same wrapping 32-bit operations) on each half. A piece of a cell is
+//! staged as six vectors of four lanes (`XHit::x_load24_w128`: `u16` hits by three 16-byte loads,
+//! the reads of the AVX2 stage; `i32` hits by a 16-byte load for each four hits inside the list and
+//! scalar loads for the rest, as SSE and simd128 have no masked load). A window with a repeated entry
+//! is tested hit by hit ([`x_cross_window_w128`]: [`x_cross_hit`], the reference's order) instead of
+//! in parts: at the fewest hits per used cell the fused loop takes a fifth of the windows repeat an
+//! entry, and the parts' batches cost the 128-bit kernel more than the eight scalar tests. So the
+//! staged stream, the batches of distinct entries and their calls are the AVX2 kernel's, the
+//! windows with a repeated entry take the per-hit order itself, and the argument above holds as it
+//! stands. The 128-bit kernel calls each batch's candidates at once (the drain without `DEFER`;
+//! LOSAT_X_BXCROSSDEFER does not act on it): in the WebAssembly build the deferral was slower (the
+//! bx case of v4-W W2 s3, a 50-kb piece of the fly genome x the fly proteome at one thread: x0.780
+//! of `dev` with it, x0.749 without), while on x86-64 with `=2` it was 3 % faster, which a CPU
+//! without AVX2 forgoes so that the kernel has one form.
 //! `LOSAT_X_BXCROSS128` is a switch of the strict set (class platform): on unless it is `0`; on,
 //! where LOSAT_X_BXCROSS is on and its AVX2 kernel does not run, the 128-bit kernel is the cell test
 //! of every table blastx's fused loop takes (`blastx/x_seed_diag.rs`; LOSAT_X_BXDIAGMIN chooses the
 //! tables, as for the AVX2 kernel); `=2` (diagnostic) runs it in place of the AVX2 kernel on any
 //! x86-64 CPU with SSSE3, SSE4.1 and POPCNT (the tests); `=0`, or LOSAT_X_BXCROSS=0, leaves the
 //! choice before the switch (the direct loop, or with a value of LOSAT_X_BXDIAG the per-hit loop).
-//! The timing line names `mode=w128-cross` and counts `cross_splits=` as for the AVX2 kernel.
+//! The timing line names `mode=w128-cross` and counts `cross_splits=` (the windows with a repeated
+//! entry) as for the AVX2 kernel.
 //!
 //! BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
 //! finds the cells with hits by the candidate loop of tblastn's branch-free scan
@@ -3222,12 +3228,16 @@ trait XCrossKernel: Sized {
         old: Self::Lanes,
     );
 
-    /// The kernel's [`x_cross_drain_with`], out of line. A kernel's forwarding methods to its
-    /// out-of-line functions are compiled for its instructions (`#[target_feature]` with
-    /// `#[inline]`, not `#[inline(always)]`): rustc marks a call of a `#[target_feature]`
-    /// function's `#[inline(never)]` only at call sites in functions with those features, so a
-    /// call written in a function without them (the generic driver) loses it once inlined into
-    /// the kernel's function, and LLVM then inlined the drain without `DEFER` into the AVX2 scan.
+    /// The kernel's [`x_cross_drain_with`], out of line. A kernel's method that calls its drain is
+    /// compiled for its instructions (`#[target_feature]` with `#[inline]`, not
+    /// `#[inline(always)]`): rustc marks a call of a `#[target_feature]` function's
+    /// `#[inline(never)]` only at call sites in functions with those features, so a call written in
+    /// a function without them (the generic driver) loses it once inlined into the kernel's
+    /// function, and LLVM then inlined the drain without `DEFER` into the AVX2 scan. The methods
+    /// that call the kernel's cold functions (`window`, `window_defer`, `batch_cold`) are
+    /// `#[inline(always)]`: LLVM does not inline a cold function, and with them inlined early the
+    /// AVX2 drain's blocks are laid out as before LOSAT_X_BXCROSS128 (with `#[inline]` they were
+    /// not).
     ///
     /// # Safety
     /// As [`x_cross_drain_with`].
@@ -3792,8 +3802,7 @@ impl XCrossKernel for XCrossAvx2 {
         x_cross_drain::<DEFER, CHUNK, F>(cross, staged, end, table, test, candidate, counts)
     }
 
-    #[target_feature(enable = "avx2,popcnt")]
-    #[inline]
+    #[inline(always)]
     unsafe fn window<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3807,8 +3816,7 @@ impl XCrossKernel for XCrossAvx2 {
         x_cross_window(cross, b, table, test, candidate)
     }
 
-    #[target_feature(enable = "avx2,popcnt")]
-    #[inline]
+    #[inline(always)]
     unsafe fn window_defer<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3823,8 +3831,7 @@ impl XCrossKernel for XCrossAvx2 {
         x_cross_window_defer(cross, b, pending, table, test, candidate)
     }
 
-    #[target_feature(enable = "avx2,popcnt")]
-    #[inline]
+    #[inline(always)]
     unsafe fn batch_cold<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -4041,8 +4048,7 @@ impl XCrossKernel for XCrossW128 {
         x_cross_drain_w128::<DEFER, CHUNK, F>(cross, staged, end, table, test, candidate, counts)
     }
 
-    #[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
-    #[inline]
+    #[inline(always)]
     unsafe fn window<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -6219,14 +6225,12 @@ mod tests {
     // marker's value (flag 1, last_hit -1, as a call near offsets of 2^31 stores) under a drain's
     // first batch or window, nothing deferred, and under a batch or a window's first part after a
     // cell of candidates (the calls made, then the unit again, nothing deferred).
-    #[cfg(any(
-        target_arch = "x86_64",
-        all(target_arch = "wasm32", target_feature = "simd128")
-    ))]
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn deferred_calls_meet_their_marker_and_a_stored_marker_is_a_value() {
-        if cross_modes().is_empty() {
-            eprintln!("no cross-cell kernel on this CPU: the deferred calls are not compared");
+        // Only the AVX2 kernel defers its calls (LOSAT_X_BXCROSS128's does not).
+        if !x_cross_available() {
+            eprintln!("no AVX2 and POPCNT on this CPU: the deferred calls are not compared");
             return;
         }
         let size = 1024usize;

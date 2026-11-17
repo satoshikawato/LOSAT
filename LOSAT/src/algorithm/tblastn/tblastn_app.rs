@@ -481,13 +481,17 @@ enum RunIo<'a> {
 
 /// An input of `run`: the opened file of `-query` or `-subject`, or web ABI v1's bytes.
 enum Input<'a> {
-    File(std::fs::File),
+    File(crate::blastinput::input_files::InputFile),
     Bytes(&'a [u8]),
 }
 
 /// The reader of `search_cli`'s queries over an `Input`.
 enum QuerySource<'a> {
-    File(crate::blastinput::fasta_reader::FastaInputSource<std::fs::File>),
+    File(
+        crate::blastinput::fasta_reader::FastaInputSource<
+            crate::blastinput::input_files::InputFile,
+        >,
+    ),
     Bytes(crate::blastinput::fasta_reader::FastaInputSource<&'a [u8]>),
 }
 

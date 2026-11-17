@@ -17,7 +17,7 @@ trait NativeRead: Read + Seek {
     fn available(&mut self) -> std::io::Result<usize>;
 }
 
-impl NativeRead for std::fs::File {
+impl NativeRead for crate::blastinput::input_files::InputFile {
     fn available(&mut self) -> std::io::Result<usize> {
         file_available(self)
     }
@@ -135,7 +135,9 @@ fn stream_matches_the_pinned_cpp_oracle() {
             ));
             let input: Box<dyn NativeRead> = if file_backend {
                 std::fs::write(&temporary, &data).unwrap();
-                Box::new(std::fs::File::open(&temporary).unwrap())
+                Box::new(crate::blastinput::input_files::InputFile::from(
+                    std::fs::File::open(&temporary).unwrap(),
+                ))
             } else {
                 Box::new(Input {
                     data: Cursor::new(data.clone()),

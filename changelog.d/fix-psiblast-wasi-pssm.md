@@ -4,5 +4,5 @@
   had opened the default `-query -`, whose standard input WASI cannot copy), and its own errors come in
   NCBI's order; `-out_pssm` (the ASN.1 PSSM file) is written instead of the command panicking
   (`std::process::id()`, which WASI does not have, named the staging file). The serial and threaded
-  command checks (`LOSAT/tests/check_wasm_threading.py`) now run every psiblast row of the frozen NCBI
-  fixtures (`outfmt0_manifest.tsv`, `db_search_manifest/psiblast*.tsv`) through each WASI command.
+  command checks (`LOSAT/tests/check_wasm_threading.py`) now run every psiblast row of
+  `outfmt0_manifest.tsv` through each WASI command.

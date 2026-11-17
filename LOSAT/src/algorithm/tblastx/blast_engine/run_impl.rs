@@ -2908,8 +2908,12 @@ fn write_tblastx_outputs(
                             // and the batches follow each other (`run_batch_loop`); `-db` renumbers
                             // the subjects only (`reported_subjects`).
                             debug_assert!(hits.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                            let windows =
-                                report::pairwise_windows(&hits, queries.len(), run.x_pairwise_pool);
+                            let windows = report::pairwise_windows(
+                                &hits,
+                                queries.len(),
+                                run.x_pairwise_pool,
+                                config.line_length,
+                            );
                             if windows.is_empty() {
                                 // No query: the prolog and the epilog alone.
                                 write(&[], 0..0)?;
@@ -4952,26 +4956,14 @@ impl Drop for XEndBatch<'_> {
     }
 }
 
-/// What the rest of `process_subject` reads of the statistics after a subject's length check: the
-/// hit-saving cutoffs (`cutoff_scores`, their minimum, the word finder's `WordFinderCx`) and the
-/// effective lengths of each context, the batch's (`context_cutoffs::context_cutoffs`, made once
-/// per batch) or, where NCBI computes the statistics of each subject, the subject's own
-/// (`context_cutoffs::subject_cutoffs`). One pointer per subject, so that the default path reads
-/// the batch's as it did before the statistics of each subject.
-struct SubjectStatistics<'a> {
-    cutoff_scores: &'a [i32],
-    cutoff_score_min: i32,
-    length_adj_per_context: &'a [i64],
-    eff_searchsp_per_context: &'a [i64],
-    word_finder_cx: word_finder::WordFinderCx<'a>,
-}
-
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
 /// adjustments and search spaces of the contexts: `context_cutoffs.rs`), then `process_subject`
-/// for every subject (`subject_loop.rs`; the linking, the reap and the re-evaluation of its HSP
-/// list: `subject_link.rs`; its report hits: `subject_report.rs`, with the diagnostics of
+/// for every subject (`subject_loop.rs`, with the end of each subject, `SubjectEmit`; the
+/// statistics each subject reads: `context_cutoffs.rs`; its linking parameters, the linking, the
+/// reap and the re-evaluation of its HSP list: `subject_link.rs`; the stages after the
+/// re-evaluation and its report hits: `subject_report.rs`, with the diagnostics of
 /// `subject_debug.rs`) and the collection of their hits (`batch_finish.rs`).
 /// These preliminary hit lists are the final ones: without gapped calculation NCBI's traceback
 /// stage aligns nothing, it only computes bit scores
@@ -5205,9 +5197,9 @@ fn search_query_batch<S: TbxScore>(
     let tx_opt: Option<std::sync::mpsc::Sender<(usize, Vec<TblastxHsp>)>> = None;
     let evalue_threshold = args.evalue;
     // The hit lists of the batch's queries (tblastx/hit_collector.rs). Each subject's final HSPs
-    // reach them as one message at the end of the subject (`emit_subject_hits`): through the
-    // channel to the writer thread, or, without one (a serial search, the WASI targets), into
-    // the collector the subject loop keeps here.
+    // reach them as one message at the end of the subject (`subject_loop::SubjectEmit::emit`):
+    // through the channel to the writer thread, or, without one (a serial search, the WASI
+    // targets), into the collector the subject loop keeps here.
     let local_collector: std::sync::Mutex<Option<HitCollector>> =
         std::sync::Mutex::new(if use_channel {
             None
@@ -5363,62 +5355,17 @@ fn search_query_batch<S: TbxScore>(
         None
     };
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
-    // ```c
-    //       	seq_arg.oid = subject_blk->oid;
-    // ...
-    //         seq_arg.check_oid_exclusion = TRUE;
-    // ...
-    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-    //       		for (index = 0; index < hspcnt; ++index) {
-    //       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-    //       		}
-    //       		Blast_HSPListPurgeNullHSPs(hsp_list);
-    //       		return 0;
-    //       	}
-    // ```
-    // The re-evaluation's fetch of a subject with HSPs excludes one that the negative seqid
-    // list keeps without a line (`FetchExcluded`): its HSPs are freed before the hit lists and
-    // the culling writer (`emit_subject_hits`), one check for the batch.
+    // The negative seqid list's check of the re-evaluation's fetch, one for the batch
+    // (`FetchExcluded`), which the end of each subject reads (`subject_loop::SubjectEmit`).
     let fetch_excluded = subjects
         .seqdb()
         .and_then(crate::algorithm::common::database::FetchExcluded::of);
-    // One message per subject of the loop, with its final HSPs or none, so that the collector
-    // reaches every OID (`HitCollector::push`): `st.hits` holds the subject's HSPs until here.
-    let emit_subject_hits = |st: &mut WorkerState<S>, s_idx: usize| {
-        let mut hits = std::mem::take(&mut st.hits);
-        if let (false, Some(excluded), Ok(ordinal)) = (
-            hits.is_empty(),
-            fetch_excluded.as_ref(),
-            u32::try_from(s_idx),
-        ) {
-            match excluded.excludes(ordinal) {
-                Ok(false) => {}
-                Ok(true) => hits.clear(),
-                Err(error) => {
-                    // A header that the fetch cannot read ends NCBI's search: the batch fails
-                    // with LOSAT's refusal, as a subject whose read failed fails it.
-                    hits.clear();
-                    x_read_failure.fail(
-                        s_idx,
-                        crate::algorithm::common::database::FetchExcluded::refusal(
-                            (ordinal, error),
-                            "TBLASTX",
-                        ),
-                    );
-                }
-            }
-        }
-        if let Some(tx) = &st.tx {
-            tx.send((s_idx, hits)).unwrap();
-        } else {
-            local_collector
-                .lock()
-                .unwrap()
-                .as_mut()
-                .expect("a subject loop without a writer thread keeps the collector")
-                .push(s_idx, hits);
-        }
+    // One message per subject of the loop, with its final HSPs or none
+    // (`subject_loop::SubjectEmit::emit`).
+    let subject_emit = subject_loop::SubjectEmit {
+        fetch_excluded: fetch_excluded.as_ref(),
+        x_read_failure: &x_read_failure,
+        local_collector: &local_collector,
     };
 
     // What the word finder of the frame loop reads of this batch (`word_finder::WordFinderCx`),
@@ -5449,7 +5396,7 @@ fn search_query_batch<S: TbxScore>(
     };
     // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
     // of each subject (a database length of 0) with the preliminary stage's option spaces.
-    let batch_statistics = SubjectStatistics {
+    let batch_statistics = context_cutoffs::SubjectStatistics {
         cutoff_scores: &cutoff_scores,
         cutoff_score_min,
         length_adj_per_context: &length_adj_per_context,
@@ -5499,7 +5446,7 @@ fn search_query_batch<S: TbxScore>(
         // A subject after a read of the database that failed is not searched; it leaves through
         // the stages above, as a subject too short to search does.
         if x_read_failure.skips(s_idx) {
-            emit_subject_hits(st, s_idx);
+            subject_emit.emit(st, s_idx);
             return;
         }
         // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
@@ -5526,68 +5473,38 @@ fn search_query_batch<S: TbxScore>(
         } = match subject_prep::subject_frames(subjects, s_idx, &db_code, wordsize) {
             Ok(Some(made)) => made,
             Ok(None) => {
-                emit_subject_hits(st, s_idx);
+                subject_emit.emit(st, s_idx);
                 return;
             }
             Err(error) => {
                 x_read_failure.fail(s_idx, error);
-                emit_subject_hits(st, s_idx);
+                subject_emit.emit(st, s_idx);
                 return;
             }
         };
         let s_frames_report = &s_frames;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
-        // ```c
-        //        if (db_length == 0) {
-        //            /* This is not a database search, hence need to recalculate and save
-        //             the effective search spaces and length adjustments for all
-        //             queries based on the length of the current single subject
-        //             sequence. */
-        //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
-        //                           seq_arg.seq->length, score_options, query_info,
-        //                           sbp, hit_params, word_params,
-        //                           eff_len_params)) != 0)
-        //               return status;
-        //       }
-        // ```
-        // Once per subject that passed the length check above: the statistics the rest of this
-        // closure reads (`SubjectStatistics`) are the subject's own (`context_cutoffs::
-        // subject_cutoffs`) or the batch's; the frame loop's word finder saves an extension
-        // against the subject's cutoffs (`s_BlastAaWordFinder_TwoHit` reads
-        // `word_params->cutoffs`, which `BLAST_OneSubjectUpdateParameters` updated above). An
-        // overflow of the search space fails the batch as a failed read does.
-        let x_own_cutoffs;
-        let x_own_statistics;
-        let statistics: &SubjectStatistics<'_> = match subject_option_spaces {
-            None => &batch_statistics,
-            Some(spaces) => {
-                x_own_cutoffs = match context_cutoffs::subject_cutoffs(
-                    contexts_ref,
-                    numbers,
-                    spaces,
-                    s_len as i64,
-                    evalue_threshold,
-                ) {
-                    Ok(cutoffs) => cutoffs,
-                    Err(overflow) => {
-                        x_read_failure.fail(s_idx, overflow.into());
-                        emit_subject_hits(st, s_idx);
-                        return;
-                    }
-                };
-                x_own_statistics = SubjectStatistics {
-                    cutoff_scores: &x_own_cutoffs.cutoff_scores,
-                    cutoff_score_min: x_own_cutoffs.cutoff_score_min,
-                    length_adj_per_context: &x_own_cutoffs.length_adj_per_context,
-                    eff_searchsp_per_context: &x_own_cutoffs.eff_searchsp_per_context,
-                    word_finder_cx: word_finder::WordFinderCx {
-                        cutoff_scores: &x_own_cutoffs.cutoff_scores,
-                        ..batch_statistics.word_finder_cx
-                    },
-                };
-                &x_own_statistics
+        // The statistics the rest of this closure reads (`SubjectStatistics`), once per subject
+        // that passed the length check above: the subject's own where NCBI computes the
+        // statistics of each subject (`context_cutoffs::per_subject_cutoffs`), else the batch's.
+        // An overflow of the search space fails the batch as a failed read does.
+        let x_own_cutoffs = match context_cutoffs::per_subject_cutoffs(
+            subject_option_spaces,
+            contexts_ref,
+            numbers,
+            s_len as i64,
+            evalue_threshold,
+        ) {
+            Ok(cutoffs) => cutoffs,
+            Err(overflow) => {
+                x_read_failure.fail(s_idx, overflow.into());
+                subject_emit.emit(st, s_idx);
+                return;
             }
         };
+        let x_own_statistics = x_own_cutoffs
+            .as_ref()
+            .map(|own| batch_statistics.of_subject(own));
+        let statistics = x_own_statistics.as_ref().unwrap_or(&batch_statistics);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
         // ```c
         //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -5629,22 +5546,16 @@ fn search_query_batch<S: TbxScore>(
         // [C] diag_offset = diag->offset;  (reset to window per-subject)
         let mut diag_offset: i32 = st.diag_offset;
 
-        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455
-        // CalculateLinkHSPCutoffs(program_number, query_info, gap_align->sbp,
-        //     hit_params->link_hsp_params, word_params, db_length, subject->length);
-        // Compute once before scanning; both linking passes read the same state.
+        // The subject's linking parameters (`subject_link::subject_linking_params`), computed once
+        // before scanning; both linking passes read the same state.
         let subject_len_nucl = s_len as i64;
-        let linking_params = LinkingParams {
+        let linking_params = subject_link::subject_linking_params(
+            avg_query_length,
             subject_len_nucl,
-            gap_decay_rate: BLAST_GAP_DECAY_RATE,
-            cutoffs: calculate_link_hsp_cutoffs_ncbi(
-                avg_query_length,
-                subject_len_nucl,
-                link_db_length_nucl,
-                statistics.cutoff_score_min,
-                &linking_params_for_cutoff,
-            ),
-        };
+            link_db_length_nucl,
+            statistics.cutoff_score_min,
+            &linking_params_for_cutoff,
+        );
 
         // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
         // Reference: blast_engine.c:491 BlastInitHitListReset(init_hitlist)
@@ -5854,7 +5765,7 @@ fn search_query_batch<S: TbxScore>(
                     Err(error) => {
                         x_read_failure.fail(s_idx, error);
                         st.hits.clear();
-                        emit_subject_hits(st, s_idx);
+                        subject_emit.emit(st, s_idx);
                         return;
                     }
                 }
@@ -5876,9 +5787,11 @@ fn search_query_batch<S: TbxScore>(
         );
 
         if !ungapped_hits.is_empty() {
-            // DEBUG: the HSP-saving statistics of a long subject and LOSAT_DIAGNOSTICS'
-            // `hsps_before_chain` (`subject_debug::print_hsp_saving_stats`).
-            subject_debug::print_hsp_saving_stats(
+            // The stages after the re-evaluation, up to the subject's final HSPs in `st.hits`
+            // (`subject_report::report_subject_hits`).
+            subject_report::report_subject_hits(
+                sc,
+                ungapped_hits,
                 subject_debug::HspSavingStats {
                     collect_hsp_saving_stats,
                     stats_hsp_saved,
@@ -5889,51 +5802,17 @@ fn search_query_batch<S: TbxScore>(
                     subject_len_nucl,
                     cutoff_score_min: statistics.cutoff_score_min,
                 },
-                &ungapped_hits,
-                diag_enabled,
-                &diagnostics,
-            );
-
-            // The second linking call (`subject_link::relink_subject_hits`), then the subject's
-            // report hits (`subject_report::linked_hits_to_report`).
-            let linked = subject_link::relink_subject_hits(
-                &link_args,
-                ungapped_hits,
-                &stage_args,
-                &x_link_timer,
+                &subject_report::SubjectReportArgs {
+                    link: &link_args,
+                    stage: &stage_args,
+                    x_link_timer: &x_link_timer,
+                    s_frames,
+                    s_frames_report,
+                    s_len,
+                },
                 &mut x_lap,
+                &mut st.hits,
             );
-            let final_hits = subject_report::linked_hits_to_report(
-                sc,
-                linked,
-                (s_frames, s_frames_report),
-                s_len,
-                &stage_args,
-                &mut x_lap,
-            );
-
-            if !final_hits.is_empty() {
-                if diag_enabled {
-                    diagnostics
-                        .base
-                        .hsps_after_overlap_filter
-                        .fetch_add(final_hits.len(), AtomicOrdering::Relaxed);
-                    diagnostics
-                        .output_from_ungapped
-                        .fetch_add(final_hits.len(), AtomicOrdering::Relaxed);
-                }
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
-                // ```c
-                // while (...) {
-                //    ...
-                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                // }
-                // ```
-                // The subject's final HSPs, sent at the end of the subject (`emit_subject_hits`).
-                debug_assert!(st.hits.is_empty());
-                st.hits = final_hits;
-            }
-            x_lap.lap(XStage::Emit);
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
         // ```c
@@ -5945,7 +5824,7 @@ fn search_query_batch<S: TbxScore>(
         // ```
         bar.inc(1);
         st.diag_offset = diag_offset;
-        emit_subject_hits(st, s_idx);
+        subject_emit.emit(st, s_idx);
     };
     // No NCBI counterpart: LOSAT_TIMING, the clock before the subject loop (x_search_timing.rs).
     let x_t_subjects = x_times.now();

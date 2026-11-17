@@ -752,6 +752,7 @@ fn seed_stage_of(
         x.word_length,
         x.word_length,
         x.scan_step,
+        x.subject_masked,
         target_strips,
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_na(x, &jobs[i], out);

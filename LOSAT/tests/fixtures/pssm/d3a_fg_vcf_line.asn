@@ -1,0 +1,6 @@
+PssmWithParameters ::= {
+##fileformat=VCFv4.2
+  pssm {
+    isProtein TRUE
+  }
+}

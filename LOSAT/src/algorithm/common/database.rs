@@ -857,7 +857,7 @@ pub(crate) fn pairwise_database_masked(
 // probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3): LOSAT refuses these (DECISIONS D1a3-2 of
 // line RG: Q2 = A, rule 3). The serial XML writer's `-n` of INT64_MIN is signed overflow too (it
 // writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT writes the digits of a summed length of
-// exactly -2^63 (`big_int`; PD-LOSAT-NCBI-DEFECTS approved exception 15, the Owner's Q1 = A of
+// exactly -2^63 (`big_int`; PD-LOSAT-NCBI-DEFECTS approved exception 16, the Owner's Q1 = A of
 // 2026-11-17, DECISIONS OQ-1117 of line RG).
 /// What LOSAT refuses of the database counts that the report of `outfmt` (NCBI's format number)
 /// would print where NCBI's arithmetic overflows (`num_sequences` is the `PairwiseDatabase` sum
@@ -3939,7 +3939,7 @@ mod tests {
 
     // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
     // wrapped sums and `-0`): the report counts LOSAT refuses, by format (not -2^63, whose digits
-    // it writes: approved exception 15); the prolog's (outfmt 0 to
+    // it writes: approved exception 16); the prolog's (outfmt 0 to
     // 4) at open (`check_report_sums`), the documents' when they are written (`report_sum_refusal`,
     // after NCBI's own errors of the search: p5_pr_sum2#6).
     #[test]
@@ -3993,7 +3993,7 @@ mod tests {
         // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
         assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
         // A length of exactly -2^63 is written as its digits (PD-LOSAT-NCBI-DEFECTS approved
-        // exception 15: NCBI's XML writer prints -0).
+        // exception 16: NCBI's XML writer prints -0).
         let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
         for outfmt in [0, 5, 6, 13, 14, 15, 16] {
             assert!(!refused(&int64_min, outfmt), "{outfmt}");
@@ -6447,11 +6447,14 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 /// Seq-align of empty subject rows, `blastx::empty_rows::prefetch_reads_empty_row`): the one
 /// producer of its text.
 pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
-    format!(
-        "Warning: [{}] Error pre-fetching sequence data\n",
-        program.to_ascii_lowercase()
+    // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
+    // stream failed).
+    crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        Some(&program.to_ascii_lowercase()),
+        b"Error pre-fetching sequence data",
     )
-    .into_bytes()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753

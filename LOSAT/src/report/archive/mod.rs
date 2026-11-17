@@ -885,12 +885,43 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         "BLAST query/options error:",
         "Error: NCBI C++ Exception:",
     ];
-    let known = PREFIXES
-        .iter()
-        .any(|prefix| native.message.starts_with(prefix))
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
+    // ```c++
+    //     catch (const std::exception& e) {                                       \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    // `CATCH_ALL`'s two reports of an exception, a `CException`'s and a `std::exception`'s
+    // (`NativeError::exception`, `NativeError::std_exception`: exit status 255, `Error: `): the
+    // latter is `Error: vector::reserve` of the `-in_pssm` reader's Dense-seg hook (NCBI BLAST+
+    // 2.17.0 tblastn -outfmt 11, line RG D3-1 `e09_densereserve`). After NCBI's object manager
+    // failed the main thread's diagnostic stream, that report is its line feed alone
+    // (`cli::catch_all_text`).
+    let catch_all = native.exit == 255
+        && (native.message.starts_with("Error: ") || crate::ncbi_exception::main_diag_failbit());
+    let known = catch_all
+        || PREFIXES
+            .iter()
+            .any(|prefix| native.message.starts_with(prefix))
         || (subject_file && native.message.starts_with("Command line argument error:"));
     if !known {
         return None;
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172 (quoted in
+    // `report::diag_log`: `mess.Write(m)` of each post)
+    // In a failed stream every post writes its header only (`ncbi_exception::post_line`) and saves
+    // that text: `CATCH_ALL`'s posts, which have no header, save empty messages, one per line
+    // feed that `cli::catch_all_text` writes (NCBI BLAST+ 2.17.0 tblastn -outfmt 11 of line RG
+    // D3-1 `k02_failed_then_choice_exc`: `message ""`).
+    if crate::ncbi_exception::main_diag_failbit() {
+        let written = crate::cli::catch_all_text(&native.message);
+        return Some(
+            written
+                .split_terminator('\n')
+                .map(|_| (ERROR, Vec::new()))
+                .collect(),
+        );
     }
     // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
     // several lines (an exception's chain), and the macro of an invalid input posts the line
@@ -1353,7 +1384,7 @@ mod tests {
         assert!(sink.is_empty());
     }
 
-    /// PD-LOSAT-NCBI-DEFECTS approved exception 15 (review C of line RG D1a-4, SF1): an archive
+    /// PD-LOSAT-NCBI-DEFECTS approved exception 16 (review C of line RG D1a-4, SF1): an archive
     /// whose request holds a big integer of -2^63 (`-dbsize -9223372036854775808`), which NCBI's
     /// ASN.1 text and XML archives write as `-0` (probes q6, q10b of review C), is written with its
     /// digits, not refused.

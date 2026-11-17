@@ -250,7 +250,7 @@ where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases
 `Int8` (outfmt 0 to 5 and 13 to 16) and their numbers of sequences summed past `int` (outfmt 5).
 A summed length of exactly 2^63 (NCBI's Int8 -2^63), which NCBI's serial writer prints as `-0` in
 BLAST XML and XML2 (outfmt 5, 14, 16), the strategy and the archive, is written as
-`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 15, the Owner's answer Q1 = A of
+`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 16, the Owner's answer Q1 = A of
 2026-11-17 to D1a-3's question, DECISIONS OQ-1117 of line RG; refused before). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
 (the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
@@ -291,7 +291,7 @@ profile that they leave out among the profiles the reports show (those of the fi
 `-max_target_seqs` subjects of a query's hit list, following profiles of one Seq-id counting as one
 subject, as NCBI's formatter counts them) is written as the included copy of its record that holds
 its Seq-id where there is one (NCBI's lookup by Seq-id finds it; fix round 2), and is refused where
-NCBI's report does not find it (`Unknown`, or a null pointer exception: PD-LOSAT-NCBI-DEFECTS 1.44)
+NCBI's report does not find it (`Unknown`, or a null pointer exception: PD-LOSAT-NCBI-DEFECTS 1.47)
 or finds another record, RPSBLAST before any output and RPSTBLASTN after the reports of
 the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
 HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
@@ -299,7 +299,7 @@ plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's ro
 diagonal table, bounds the ungapped extensions to the right and ends the gapped stage's interval
 tree, below the profiles, above them or negative, as in NCBI (blast_engine.c:1129-1149; part B); at
 the rows plus 1 the extensions read the row after the profiles as NCBI does (the zeros of the
-`.rps` file's last memory page: DECISIONS D1a4-9). Refused (PD-LOSAT-NCBI-DEFECTS 1.44, rule 3): a
+`.rps` file's last memory page: DECISIONS D1a4-9). Refused (PD-LOSAT-NCBI-DEFECTS 1.47, rule 3): a
 sum `LENGTH` plus `NSEQ` above 2,147,483,647 (NCBI frees the profiles twice and aborts), an `Lc` whose
 diagonal table passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), both
 where NCBI's engine meets them (the unit's search of the first query batch NCBI searches: an empty
@@ -313,7 +313,7 @@ where a query is searched: SIGFPE; a run without a valid query is reported as NC
 round 3, review C MF1; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
 first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
 `STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
-`-9223372036854775808` (approved exception 15; with one query batch NCBI's only request holds no
+`-9223372036854775808` (approved exception 16; with one query batch NCBI's only request holds no
 `DbLength`: fix round 1, review A MF4; refused until fix round 2). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block

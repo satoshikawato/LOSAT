@@ -86,6 +86,10 @@ pub(crate) struct TranslatedRpsSearch {
     /// `EffectiveSearchSpace` option (`WindowBatch::request_space`; RPSTBLASTN writes no BLAST
     /// archive); set by `for_database`.
     pub(crate) strategy: bool,
+    /// The set-up that checked the volumes in `for_database` (series PR, item PS12m): the run
+    /// maps them again for each batch with it (`RpsVolumeSetup::reopen`), which knows the volumes
+    /// whose cells were regrouped; set by `for_database`.
+    pub(crate) setup: Option<Arc<RpsVolumeSetup>>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -123,12 +127,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         }
         // The volumes' costs are read for the search strategy's requests only (`handle_sets`;
         // after volume files that failed NCBI's checks, `costs` opens the first volume's again).
+        let costs = strategy.then(|| setup.costs(volumes.first())).flatten();
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
-            costs: strategy.then(|| setup.costs(volumes.first())).flatten(),
+            costs,
             strategy_db_length,
             units: Some(units),
             strategy,
+            setup: Some(Arc::new(setup)),
             ..self.clone()
         }))
     }
@@ -150,11 +156,10 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         // render take the number before it.
         let processed = std::cell::Cell::new(0usize);
         let diagnostics = std::cell::RefCell::new(diagnostics);
-        let Some(units) = self.units.as_ref() else {
+        let (Some(units), Some(setup)) = (self.units.as_ref(), self.setup.as_deref()) else {
             bail!("LOSAT internal error: {PROGRAM}'s query batches are searched before its database is set up");
         };
         let volumes = RpsVolumeSet::with_order(database.x_seqdb(), units.order().to_vec());
-        let setup = RpsVolumeSetup::new(PROGRAM);
         // `-num_threads 0`: one thread for each volume (NCBI's "auto", as rpsblast's).
         let threads = if self.search.auto_threads {
             volumes.order.len()
@@ -196,7 +201,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     })
                     .collect();
                 let searched = self.search_window(
-                    &batches, options, database, &volumes, units, &setup, pool, &workers,
+                    &batches, options, database, &volumes, units, setup, pool, &workers,
                 );
                 replay(
                     &events,
@@ -204,11 +209,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     &mut |bytes| Ok(diagnostics.borrow_mut().write_all(bytes)?),
                     &mut |queries| take(&mut **diagnostics.borrow_mut(), queries, processed.get()),
                     &mut |queries, results| {
+                        // The window's searches are done: the pool is free to format the batch's
+                        // reports.
                         render(
                             &mut **diagnostics.borrow_mut(),
                             queries,
                             &mut vec![results],
                             processed.get(),
+                            Some(pool),
                         )?;
                         processed.set(processed.get() + queries.len());
                         Ok(())
@@ -1346,6 +1354,7 @@ mod tests {
             strategy_db_length: None,
             units: None,
             strategy: false,
+            setup: None,
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;
@@ -1570,6 +1579,7 @@ mod tests {
             strategy_db_length: None,
             units: None,
             strategy: false,
+            setup: None,
         };
         search.search.x_drop_gapped_bits = Some(1e9);
         let n_only = [record("n", &[b'N'; 210])];
@@ -1741,6 +1751,7 @@ mod tests {
             strategy_db_length: None,
             units: None,
             strategy: false,
+            setup: None,
         };
         search.search.x_drop_ungapped_bits = Some(9e6);
         let repeat = b"TGGTGTTGC".repeat(20);

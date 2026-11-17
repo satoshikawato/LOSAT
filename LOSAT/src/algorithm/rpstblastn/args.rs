@@ -237,6 +237,7 @@ impl RpstblastnArgs {
             strategy_db_length: None,
             units: None,
             strategy: false,
+            setup: None,
         })
     }
 

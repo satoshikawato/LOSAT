@@ -9,7 +9,7 @@
 use anyhow::{bail, Result};
 
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::seqdb::rps::{RpsOpenError, RpsVolumeFault, RpsVolumeFiles};
+use crate::seqdb::rps::{canonical_volume_path, RpsOpenError, RpsVolumeFault, RpsVolumeFiles};
 
 /// NCBI's own errors of a volume's files, which its search of a query batch raises (`BLAST
 /// engine error`, exit status 3).
@@ -437,7 +437,7 @@ impl RpsUnits {
     /// requests after the first hold it (the first is written before the first batch's set-up);
     /// a `D` of exactly -2^63 (an alias file's `LENGTH` or `STATS_TOTLEN` of 2^63), which NCBI's
     /// serial writer prints as `-0` (a signed overflow), is written as its digits
-    /// (PD-LOSAT-NCBI-DEFECTS approved exception 15: the Owner's answer to D1a-3's Q1, A, of
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 16: the Owner's answer to D1a-3's Q1, A, of
     /// 2026-11-17, DECISIONS OQ-1117 of line RG).
     pub(crate) fn strategy_db_length(&self) -> Option<i64> {
         self.adjusted.map(|(length, _)| length)
@@ -673,7 +673,7 @@ pub(crate) fn search_sets(
 /// following profiles of one Seq-align id as one subject: `formatter_kept`; outfmt 0's
 /// descriptions and alignments are within it), after outfmt 7 has counted the HSPs of the whole
 /// list. A profile left out among them is LOSAT's refusal of the batch (PD-LOSAT-NCBI-DEFECTS
-/// 1.44, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one
+/// 1.47, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one
 /// text for `rpsblast` and `rpstblastn` (`program`). A profile left out past the cut (several
 /// volumes, whose merged lists are longer than the hit list size) leaves its list: nothing reads
 /// it again but its header, which NCBI's Seq-aligns read by OID (a header file that fails there
@@ -908,11 +908,17 @@ impl<'a> Consensus<'a> {
     }
 }
 
-/// The set-up of the volumes of one run: the program of LOSAT's refusals and the matrix and gap
-/// costs of the first volume set up.
+/// The set-up of the volumes of one run: the program of LOSAT's refusals, the matrix and gap
+/// costs of the first volume set up, and the volumes it regrouped.
+#[derive(Debug, PartialEq)]
 pub(crate) struct RpsVolumeSetup {
     program: &'static str,
     first_costs: Option<(String, i32, i32)>,
+    /// The volumes (`canonical_volume_path`) whose cells `check` or `open` found not in groups of
+    /// buckets in order and regrouped (`RpsVolumeFiles::is_regrouped`; series PR, item PS12m):
+    /// `reopen` regroups them again without reading every hit. This set-up is the one owner of the
+    /// fact: a run that reopens volumes keeps the set-up that checked them.
+    regrouped: std::collections::BTreeSet<String>,
 }
 
 impl RpsVolumeSetup {
@@ -920,6 +926,7 @@ impl RpsVolumeSetup {
         Self {
             program,
             first_costs: None,
+            regrouped: std::collections::BTreeSet::new(),
         }
     }
 
@@ -1002,7 +1009,10 @@ impl RpsVolumeSetup {
         let opened = if check_hits {
             RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
         } else {
-            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program)
+            let regroup = self
+                .regrouped
+                .contains(&canonical_volume_path(volume.base()));
+            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program, regroup)
         };
         let mut files = match opened {
             Ok(files) => files,
@@ -1034,6 +1044,9 @@ impl RpsVolumeSetup {
 
     /// LOSAT's refusals of what NCBI's search does not reproducibly run on the volume's files.
     fn check_files(&mut self, volume: &Volume, files: &RpsVolumeFiles) -> Result<()> {
+        if files.is_regrouped() {
+            self.regrouped.insert(canonical_volume_path(volume.base()));
+        }
         let aux = &files.aux;
         if aux.matrix != "BLOSUM62" || aux.gap_open != 11 || aux.gap_extend != 1 {
             bail!(
@@ -1474,7 +1487,7 @@ mod tests {
 
     /// The strategy's `DbLength`: `D` of any sign where `x_AdjustDbSize` runs, -2^63 too, which the
     /// requests write as its digits where NCBI writes `-0` (PD-LOSAT-NCBI-DEFECTS approved
-    /// exception 15; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
+    /// exception 16; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
     /// the request's bytes: `report::archive::strategy`'s test
     /// `a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits`).
     #[test]

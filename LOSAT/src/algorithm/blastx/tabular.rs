@@ -476,6 +476,9 @@ pub(super) fn write_blastx_tabular(
     let loc = SubjectLoc::of(shown);
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let mut next_hsp = first_hsp;
+    // The bytes of one comment block or one row, written to the report stream as soon as they
+    // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
+    let mut buf: Vec<u8> = Vec::new();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -526,7 +529,6 @@ pub(super) fn write_blastx_tabular(
                             .count()
                     })
                     .sum();
-                let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,
                     &query.query_line(),
@@ -534,6 +536,8 @@ pub(super) fn write_blastx_tabular(
                     // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
                     (!batch.search_skipped || options.merged_volumes()).then_some(count),
                 )?;
+                writer.write_all(&buf)?;
+                buf.clear();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:787-790
                 // ```c++
                 //             if(m_QueryRange.NotEmpty())
@@ -598,7 +602,6 @@ pub(super) fn write_blastx_tabular(
                             ),
                         })
                 {
-                    writer.write_all(&buf)?;
                     writer.flush()?;
                     return Err(NativeError::exception(&row_is_empty()).into());
                 }
@@ -708,8 +711,6 @@ pub(super) fn write_blastx_tabular(
                         // follow the rows before it, before those of the row's own lookups.
                         if let Some(reads) = reads.as_mut() {
                             if fetch.reads(hsp.identity) {
-                                writer.write_all(&buf)?;
-                                buf.clear();
                                 reads.subject_read(
                                     0,
                                     list.oid as u32,
@@ -723,8 +724,6 @@ pub(super) fn write_blastx_tabular(
                         if let (Some(names), true) = (names, table.sets_subject(&tabular_subject)) {
                             let text = names.row_messages(spec, values.taxonomy);
                             if !text.is_empty() {
-                                writer.write_all(&buf)?;
-                                buf.clear();
                                 writer.flush()?;
                                 stderr.write_all(&text)?;
                                 stderr.flush()?;
@@ -750,7 +749,6 @@ pub(super) fn write_blastx_tabular(
                             (hsp.evalue, hsp.bit_score, raw.score)
                         };
                         if form == TabularEmptyRow::Throws {
-                            writer.write_all(&buf)?;
                             writer.flush()?;
                             return Err(
                                 NativeError::exception(&std_seg_lengths_not_accurate()).into()
@@ -890,38 +888,27 @@ pub(super) fn write_blastx_tabular(
                         // m_Ostream << "\n";
                         // ```
                         // One printed row is one HSP; the probe marks it without changing it.
-                        match probe.as_deref_mut() {
-                            Some(probe) => {
-                                writer.write_all(&buf)?;
-                                buf.clear();
-                                writer.flush()?;
-                                probe.begin(next_hsp);
-                                table.row(
-                                    &mut buf,
-                                    &mut table_rows,
-                                    &row_query,
-                                    &row_subject,
-                                    kept.as_ref(),
-                                    &row,
-                                );
-                                writer.write_all(&buf)?;
-                                buf.clear();
-                                writer.flush()?;
-                                probe.end(next_hsp);
-                            }
-                            None => table.row(
-                                &mut buf,
-                                &mut table_rows,
-                                &row_query,
-                                &row_subject,
-                                kept.as_ref(),
-                                &row,
-                            ),
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.begin(next_hsp);
+                        }
+                        table.row(
+                            &mut buf,
+                            &mut table_rows,
+                            &row_query,
+                            &row_subject,
+                            kept.as_ref(),
+                            &row,
+                        );
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.end(next_hsp);
                         }
                         next_hsp += 1;
                     }
                 }
-                writer.write_all(&buf)?;
                 // A text whose read the rows did not place comes after them.
                 if let Some(reads) = reads.as_mut() {
                     reads.before_query(1, &mut *writer, &mut *stderr)?;

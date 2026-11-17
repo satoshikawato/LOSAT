@@ -67,7 +67,8 @@
   databases with and without parsed Seq-ids, which lines DBID H3, N1b L1 and ordname refused
   (also of a RefSeq chromosome, mRNA or ncRNA sequence, whose own NCBI functions make nothing of
   a database Bioseq), and kept refused one whose tax id's lookup reads past the end of
-  `taxdb.btd` (NCBI crashes); the same
+  `taxdb.btd` (NCBI reads past its mapping of the file; whether it crashes depends on its memory
+  map); the same
   day line RG item T3a refused in BLASTP's outfmt 1 to 4 a reported sequence whose Seq-align id is
   the id `lcl|Query_N` of a query of its batch read without `-parse_deflines`, and also its
   display id in outfmt 1 to 4 (outfmt 0 stays line RG item X7's), and in outfmt 0 to 4 of
@@ -81,7 +82,12 @@
   outfmt 18 and the tabular subject ids, which version 1.3 refused in databases with parsed
   Seq-ids and LOSAT wrote unchanged in the tabular ids of a database without them, and where the
   rewritten title has no first word (`MAG: (plastid) [ ]` cut to `MAG:` from the tax id) the
-  general id of line DBID ordname, in every program)
+  general id of line DBID ordname, in every program; on 2026-11-15 line RG item T5b refused a
+  lookup of the taxonomy database that reads past NCBI's mapping of `taxdb.btd` only where NCBI
+  faults for certain (a record of an empty `taxdb.btd`, which NCBI maps as a null pointer) and
+  where a report writes a name whose bytes come from past the mapping, and wrote the others as NCBI
+  writes them where it completes, which lines DBID and RG item T5 refused at every lookup
+  (approved exception 14 of PD-LOSAT-NCBI-DEFECTS, which the Owner decided on 2026-11-15))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -283,7 +289,7 @@ profile that they leave out among the profiles the reports show (those of the fi
 `-max_target_seqs` subjects of a query's hit list, following profiles of one Seq-id counting as one
 subject, as NCBI's formatter counts them) is written as the included copy of its record that holds
 its Seq-id where there is one (NCBI's lookup by Seq-id finds it; fix round 2), and is refused where
-NCBI's report does not find it (`Unknown`, or a null pointer exception: PD-LOSAT-NCBI-DEFECTS 1.43)
+NCBI's report does not find it (`Unknown`, or a null pointer exception: PD-LOSAT-NCBI-DEFECTS 1.44)
 or finds another record, RPSBLAST before any output and RPSTBLASTN after the reports of
 the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
 HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
@@ -291,7 +297,7 @@ plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's ro
 diagonal table, bounds the ungapped extensions to the right and ends the gapped stage's interval
 tree, below the profiles, above them or negative, as in NCBI (blast_engine.c:1129-1149; part B); at
 the rows plus 1 the extensions read the row after the profiles as NCBI does (the zeros of the
-`.rps` file's last memory page: DECISIONS D1a4-9). Refused (PD-LOSAT-NCBI-DEFECTS 1.43, rule 3): a
+`.rps` file's last memory page: DECISIONS D1a4-9). Refused (PD-LOSAT-NCBI-DEFECTS 1.44, rule 3): a
 sum `LENGTH` plus `NSEQ` above 2,147,483,647 (NCBI frees the profiles twice and aborts), an `Lc` whose
 diagonal table passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), both
 where NCBI's engine meets them (the unit's search of the first query batch NCBI searches: an empty
@@ -679,7 +685,8 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
 | A database sequence without parsed Seq-ids with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; a sequence with parsed Seq-ids may have several (version 1.3) |
 | A reported subject whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats and outfmt 0 |
-| A shown subject with an empty title, or a protein title ending in `]` (line RG item T5c), and a tax id (makeblastdb `-taxid`) whose lookup in the taxonomy database reads past the mapped end of `taxdb.btd` (line RG item T5; outfmt 0, 18 and the tabular subject ids, all six programs) | NCBI reads unmapped memory and crashes. A title made from a name the taxonomy database gives is written as NCBI makes it (line RG item T5; line DBID H3 refused it in outfmt 0, line DBID ordname in a nucleotide's tabular subject id) |
+| A shown subject with an empty title, or a protein title ending in `]` (line RG item T5c), and a tax id (makeblastdb `-taxid`) whose scientific name NCBI reads past its mapping of `taxdb.btd`: a record of an empty `taxdb.btd`, or a record that reaches past the mapping's last 4096-byte page without its third tab inside it (line RG items T5 and T5b; outfmt 0, 18 and the tabular subject ids, all six programs) | An empty `taxdb.btd` NCBI maps as a null pointer and crashes on; past the mapping of another it reads memory whose bytes, or whether it crashes, depend on its memory map (PD-LOSAT-NCBI-DEFECTS: what the output writes from past the mapping is refused, rule 3; the rest is written as NCBI writes it where it completes, approved exception 14). A title made from a name the taxonomy database gives is written as NCBI makes it (line RG item T5; line DBID H3 refused it in outfmt 0, line DBID ordname in a nucleotide's tabular subject id) |
+| Any other lookup in the taxonomy database that reads a record of an empty `taxdb.btd` (the prefetch's lookups of a reported subject's tax ids, psiblast's PSSM, the name fields), and a name a report writes whose bytes NCBI reads past its mapping of a damaged `taxdb.btd`: a super kingdom (`sskingdom`, `sskingdoms`) of a record past the mapping, any name of a record without its third tab inside the mapping (`sscinames` and the other name fields, the `sciname` of outfmt 13 to 16, outfmt 18) (line RG item T5b) | As the row above. A lookup whose names no report writes (the prefetch's, psiblast's PSSM) and the names inside the mapping are written as NCBI writes them where it completes |
 | A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |

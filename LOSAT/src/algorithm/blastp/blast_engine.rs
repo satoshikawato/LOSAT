@@ -11699,11 +11699,9 @@ fn run_call(
         pssm_reads: &pssm_reads,
     };
     let mut query_warning_lines = report_prep::query_warning_lines(&prep);
-    let mut prefetch_posts = Vec::new();
-    let subject_reads = report_prep::prefetch_reported_subjects(
+    let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
-        &mut prefetch_posts,
         &mut psiblast_pssms,
     )?;
     report_prep::refuse_unreportable(&prep, &rows_of)?;
@@ -11991,7 +11989,7 @@ fn run_call(
         reports
             .call_requests
             .map_or_else(Vec::new, CallRequests::take_posts),
-        prefetch_posts,
+        prefetched.posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
@@ -12040,6 +12038,7 @@ fn run_call(
         subject_accessions: &subject_accessions,
         subject_stitles: &subject_stitles,
         hit_lists: &hit_lists,
+        hit_loads: &prefetched.hit_loads,
         engine_counts: &engine_counts,
         pairwise_hits: &pairwise_hits,
         psiblast_hits_found: &psiblast_hits_found,
@@ -12108,7 +12107,7 @@ fn run_call(
         // its batches' queries; so do the Seq-annots' posts of the bytes that NCBI's stream
         // replaces (`seqalign::write_query_to`).
         // The first format's writer also writes the texts of the subjects that the reports
-        // read one by one (`subject_reads`).
+        // read one by one (`ReportedPrefetch::subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
@@ -12124,7 +12123,7 @@ fn run_call(
                 &mut *outputs.diagnostics,
             );
             match first_lines {
-                Some(_) => warnings.with_subject_reads(subject_reads.queries()),
+                Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,
             }
         });

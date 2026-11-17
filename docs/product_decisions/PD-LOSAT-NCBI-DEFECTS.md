@@ -149,6 +149,13 @@
   1.46 2026-11-17 (TBLASTN, the explicit rejection of the traceback of an alignment on a subject of
   fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3; line RG
   item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.47 2026-11-17 (outfmt 13 to 16 of a reported sequence whose lookup in a version 5 list fails
+  where the batch's prefetch is off are written as NCBI writes them: 15 and 16 post the exception
+  and leave the query's report out, 13 and 14 stop with `BLAST Database error`; the taxonomy
+  database's texts at the `Hit`s that NCBI loads, none of the throwing `Hit` or of those after it
+  in that report; the refusal of 1.31 narrowed to the other formats; line DBID item pfoff, review 1
+  fix included, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07);
   1.49 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-2: exception 15 also for NCBI's
   ASN.1 text writer, which crashes writing back with `-out_pssm` the nests it read; the refusals of
   the annotation's text after `Failed to parse location of` (1204.6) and of the PSSM members that
@@ -1028,9 +1035,13 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
   name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
   DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
-  `Unknown` for such a hit, and then outfmt 0 to 4, 13, 14 and 17 stop with that error, outfmt 6
-  crashes (`CCoreException`, exit 255), the JSON and XML2 documents 15 and 16 end with its trace
-  (exit 0), and 5, 7, 10 and 18 go on (exit 0).
+  `Unknown` for such a hit, and then outfmt 0 to 4 and 17 stop with that error, outfmt 6
+  crashes (`CCoreException`, exit 255), and 5, 7, 10 and 18 go on (exit 0). The JSON and XML2
+  reports throw at that `Hit` (`s_SeqAlignToXMLHit`: `GetBioseqHandle`, then `GetLength` outside
+  its catch): 15 and 16 catch it for the query (`BlastJSON_FormatReport`,
+  `BlastXML2_FormatReport`), post `Error: [<program>] ` with the exception's text and trace, leave
+  the query's report out (its `,` separator stays) and go on with the next query (exit 0); 13 and
+  14 leave the query's file empty and stop with that error (exit 2).
   Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
   with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
   NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
@@ -1050,7 +1061,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   their number and the others after them, and ends at the first lookup that fails. It refuses a
   run where the reports read such a Seq-id with the prefetch off (`... whose lookup in the
   database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
-  BLAST Database error, and where the prefetch is off its formatters fail to read it)`), a
+  BLAST Database error, and where the prefetch is off its formatters fail to read it)`) but
+  writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.47,
+  line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
+  `Hit`s after it in that report, and a text that NCBI writes once at its next load, a later `Hit` or
+  a later batch's prefetch), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

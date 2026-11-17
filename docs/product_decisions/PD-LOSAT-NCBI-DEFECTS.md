@@ -1021,10 +1021,11 @@ masked). Line NP item M4a-2c.
   is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses. NCBI's
   lookup (`SeqidToOid`, `SeqidToOids` without `multi`) returns at the first OID it finds, in the
   order of the volumes, so an ISAM file of a later volume that does not open (a regular file of
-  mode 000) stops a lookup only of an id that no volume before it holds (review 3 of item
-  loadord, H3, and item v4late: NCBI exit 0 where LOSAT stopped with `Error: Could not open input
-  file`); LOSAT, which also lists the other sequences that hold the id, refuses where that list
-  fails on such a file (`PD-LOSAT-DATABASE-SEARCH`).
+  mode 000) stops a lookup only of an id that no volume before it holds in the search's list
+  (review 3 of item loadord, H3, and item v4late: NCBI exit 0 where LOSAT stopped with `Error:
+  Could not open input file`); LOSAT, which also lists the other sequences that hold the id,
+  refuses where that list fails on such a file and a report shows what it can change
+  (`PD-LOSAT-DATABASE-SEARCH`).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

@@ -118,8 +118,11 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   each, beside `l5c` in a list whose later volume's string ISAM a test makes unreadable (mode 000, which git does not
   keep): `l6o` holds `l5c`'s `ref|NP_000002.1|` with other letters (qp1 of ../ids/ids_q.faa), so NCBI's lookup of its
   Seq-align id gives `l5c`'s record first and never opens `l6o`'s ISAM; `l6u` holds `ref|NP_000004.1|`, which only its
-  ISAM can hold, so NCBI's lookup opens it. `make_multidb.py --v4late-only MAKEBLASTDB` builds only these (the
-  databases before keep their dates).
+  ISAM can hold, so NCBI's lookup opens it; `l5b` (a name before `l5c`'s) holds `ref|NP_000999.1|ref|NP_000002.1|`
+  with qp1's letters, so that NCBI's lookup of `l5e`'s id gives it first, whose definition line `GetBioseq` rejects
+  for that id (`s_SeqDB_SeqIdIn` stops at the first id, `oid headers do not contain target gi/seq_id`; review 1 of
+  the item, H1). `make_multidb.py --v4late-only MAKEBLASTDB` builds only these (the databases before keep their
+  dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -540,11 +543,13 @@ def make_loadord7(binary):
 
 
 def make_v4late(binary):
-    """Builds l6o and l6u (line DBID v4late)."""
+    """Builds l6o, l6u and l5b (line DBID v4late)."""
     qp1 = next("".join(line.strip() for line in lines)
                for header, lines in read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")))
     for name, header in (("l6o", ">ref|NP_000002.1| v4late the accession of l5c with other letters, version 4"),
-                         ("l6u", ">ref|NP_000004.1| v4late an accession that only this volume holds, version 4")):
+                         ("l6u", ">ref|NP_000004.1| v4late an accession that only this volume holds, version 4"),
+                         ("l5b", ">ref|NP_000999.1|ref|NP_000002.1| v4late the accession of l5c behind another one, "
+                                 "version 4")):
         with open(os.path.join(HERE, name + ".fa"), "w") as f:
             f.write(header + "\n" + "\n".join(qp1[at:at + 60] for at in range(0, len(qp1), 60)) + "\n")
         makeblastdb(binary, "-in", name + ".fa", "-dbtype", "prot", "-out", name, "-parse_seqids", "-blastdb_version",

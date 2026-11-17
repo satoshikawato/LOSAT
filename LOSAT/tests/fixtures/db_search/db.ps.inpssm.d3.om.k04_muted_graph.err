@@ -1,0 +1,17 @@
+Error: (1204.6) [psiblast] Failed to parse location of 
+Error: (1204.2) [psiblast] Seq-graph ::= {
+  loc int {
+    from 10,
+    to 5,
+    id local str "Query_1"
+  },
+  numval 1,
+  graph int {
+    max 1,
+    min 0,
+    axis 0,
+    values {
+      1
+    }
+  }
+}

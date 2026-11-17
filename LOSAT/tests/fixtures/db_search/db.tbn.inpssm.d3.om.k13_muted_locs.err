@@ -1,0 +1,6 @@
+Error: (1204.6) [tblastn] Failed to parse location of 
+Error: (1204.4) [tblastn] Seq-loc ::= int {
+  from 0,
+  to 4,
+  id local str "Query_1"
+}

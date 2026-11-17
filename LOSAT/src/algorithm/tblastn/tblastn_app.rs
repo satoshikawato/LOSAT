@@ -79,14 +79,21 @@ impl TblastnArgs {
         subject: &[u8],
     ) -> Result<Vec<u8>> {
         let report = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        self.run_io(
+        let ran = self.run_io(
             settings,
             RunIo::Memory {
                 query,
                 subject,
                 report: report.clone(),
             },
-        )?;
+        );
+        // `CATCH_ALL`'s silent end returns 0 with what the run wrote (the error archive of the
+        // saved messages), as the library's call does (`api::run::run_local`).
+        if let Err(error) = ran {
+            if !crate::cli::is_silent_end(&error) {
+                return Err(error);
+            }
+        }
         let bytes = std::mem::take(&mut *report.lock().expect("report mutex poisoned"));
         Ok(bytes)
     }
@@ -427,6 +434,16 @@ impl TblastnArgs {
                     let in_run = super::in_pssm::file_error_in_run(error);
                     if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
+                    } else if let Some(lines) =
+                        crate::report::archive::silent_end_lines(handle, error)
+                    {
+                        // An exception that `CATCH_ALL` ends without a post: the archive of the
+                        // messages saved before it, with no text before it.
+                        let _ = crate::report::archive::write_error_archive(
+                            handle,
+                            &lines,
+                            &mut stream,
+                        );
                     }
                 }
                 Ok(()) => {
@@ -965,7 +982,6 @@ fn search_pssm_query(
     database: Option<&TblastnDatabase>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    psi.refuse_request_members("TBLASTN")?;
     for &outfmt in outfmts {
         super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
     }

@@ -97,6 +97,12 @@ enum InputHandle {
 }
 
 impl InputFile {
+    /// `file` read in place and never closed: the standard input (`standard_input`).
+    fn in_place(file: std::fs::File) -> Self {
+        let file = std::mem::ManuallyDrop::new(file);
+        Self(InputHandle::StandardInput(file))
+    }
+
     /// The file to read, seek and ask about.
     fn file(&self) -> &std::fs::File {
         match &self.0 {
@@ -352,11 +358,10 @@ fn standard_input() -> std::io::Result<InputFile> {
         // SAFETY: descriptor 0 is open for the whole process (on Unix the Rust runtime opens
         // `/dev/null` there before `main` when it was closed; on WASI it is the host's standard
         // input) and LOSAT never closes it. The `File` is held in a `ManuallyDrop` that is never
-        // dropped, so it only borrows the descriptor: it is never closed through this `File`.
+        // dropped (`InputFile::in_place`), so it only borrows the descriptor: it is never closed
+        // through this `File`.
         let file = unsafe { std::fs::File::from_raw_fd(std::io::stdin().as_raw_fd()) };
-        Ok(InputFile(InputHandle::StandardInput(
-            std::mem::ManuallyDrop::new(file),
-        )))
+        Ok(InputFile::in_place(file))
     }
     #[cfg(windows)]
     {
@@ -368,12 +373,11 @@ fn standard_input() -> std::io::Result<InputFile> {
             return Err(std::io::ErrorKind::NotFound.into());
         }
         // SAFETY: the standard input handle is open for the whole process and LOSAT never
-        // closes it. The `File` is held in a `ManuallyDrop` that is never dropped, so it only
-        // borrows the handle: it is never closed through this `File`.
+        // closes it. The `File` is held in a `ManuallyDrop` that is never dropped
+        // (`InputFile::in_place`), so it only borrows the handle: it is never closed through
+        // this `File`.
         let file = unsafe { std::fs::File::from_raw_handle(handle) };
-        Ok(InputFile(InputHandle::StandardInput(
-            std::mem::ManuallyDrop::new(file),
-        )))
+        Ok(InputFile::in_place(file))
     }
     #[cfg(not(any(unix, windows, target_os = "wasi")))]
     {
@@ -744,6 +748,66 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
+    // ```c++
+    //     m_DeleteFlag = false;
+    //
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios  = &cin;
+    // ```
+    // Every `-` is the process's descriptor 0 itself (not a copy, which the WASI targets cannot
+    // make), and dropping the input leaves it open (`m_DeleteFlag` false: `cin` is never deleted).
+    #[cfg(unix)]
+    #[test]
+    fn standard_input_is_descriptor_0_itself_and_stays_open() {
+        use std::os::fd::{AsFd, AsRawFd};
+        for _ in 0..2 {
+            let input = super::open_input(std::path::Path::new("-"), "query", "BLASTN").unwrap();
+            assert_eq!(input.as_raw_fd(), 0);
+            drop(input);
+            assert!(std::io::stdin().as_fd().try_clone_to_owned().is_ok());
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:609-613
+    // ```c++
+    // CArg_Ios::~CArg_Ios(void)
+    // {
+    //     if (m_Ios  &&  m_DeleteFlag)
+    //         delete m_Ios;
+    // }
+    // ```
+    // Two inputs read in place (`InputFile::in_place`, as two `-` arguments read `cin`) share one
+    // position, and dropping one leaves the descriptor open for the other: here a pipe, whose
+    // bytes the first takes in part and the second reads on from there.
+    #[cfg(unix)]
+    #[test]
+    fn inputs_read_in_place_share_the_position_and_leave_the_descriptor_open() {
+        use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        std::io::Write::write_all(&mut writer, b"abcdef").unwrap();
+        drop(writer);
+        let raw = owned(reader).into_raw_fd();
+        // SAFETY: `raw` is the open read end of the pipe, which this test owns; the two inputs
+        // only borrow it (`in_place` never closes), and it is closed once, by the `OwnedFd`
+        // made of it at the end.
+        let view = || super::InputFile::in_place(unsafe { std::fs::File::from_raw_fd(raw) });
+        let (mut first, mut second) = (view(), view());
+        let mut head = [0u8; 3];
+        first.read_exact(&mut head).unwrap();
+        assert_eq!(&head, b"abc");
+        drop(first);
+        let mut rest = Vec::new();
+        second.read_to_end(&mut rest).unwrap();
+        assert_eq!(rest, b"def");
+        drop(second);
+        // SAFETY: `raw` is still open (neither input closed it) and nothing else owns it.
+        drop(unsafe { OwnedFd::from_raw_fd(raw) });
     }
 
     // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped

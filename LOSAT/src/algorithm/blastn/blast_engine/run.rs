@@ -11254,6 +11254,15 @@ fn run_in_pool(
             // after those messages (`BlastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
+            // Which rows of the first format read the subjects' Bioseqs where a batch's prefetch
+            // is off (`TabularSpec::subject_fetch`; every row of a format that is not a field
+            // list): what the reports of such a batch load (`shared::batch_loads`).
+            let first_rows = match output_formats.first() {
+                Some(BlastnOutputFormat::CustomTabular(spec)) => {
+                    spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+                }
+                _ => crate::report::tabular::SubjectFetch::Every,
+            };
             let prefetch = if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
@@ -11309,6 +11318,24 @@ fn run_in_pool(
                     Ok(Vec::new())
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
+                // NCBI's scope at the batch's prefetch (`shared::PrefetchQueries`), made only where it
+                // stops: the batch's input records (those that `-query_loc` drops included, each with
+                // its `Query_N` of the run, `FastaRecord::local_id`), in outfmt 5, whose scope the
+                // formatter keeps, those of the batches before too (outfmt 5 keeps the records read
+                // before the search, as `query_scopes` above).
+                let scope = || {
+                    crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                        x_query_stream::Queries::Records { input, .. } if xml => {
+                            &input[..input_end]
+                        }
+                        _ => batch_records.input(),
+                    })
+                };
+                // A call of the library's batches after the first (`api::run_batches`) searched
+                // the batches before with a database of its own, whose loads nothing here records.
+                let prefetch_queries =
+                    crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                        .after_unrecorded_calls(args.first_query_ordinal > 0);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
@@ -11327,13 +11354,7 @@ fn run_in_pool(
                         // No prefetch, and the reports' fetches look nothing up.
                         Ok(Posts::new())
                     } else {
-                        let fetches = match output_formats.first() {
-                            Some(BlastnOutputFormat::CustomTabular(spec)) => {
-                                spec.subject_fetch(crate::blastinput::app::Program::Blastn)
-                                    != crate::report::tabular::SubjectFetch::Never
-                            }
-                            _ => true,
-                        };
+                        let fetches = first_rows != crate::report::tabular::SubjectFetch::Never;
                         batch_hit_lists
                             .iter()
                             .enumerate()
@@ -11365,8 +11386,10 @@ fn run_in_pool(
                     // A batch without Seq-aligns prefetches no sequence.
                     rows_open(&batch_hit_lists).map(|()| Posts::new())
                 } else {
-                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
-                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
+                    // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
+                    // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
+                    // the texts that the cut reports left (`shared::XmlReportsBefore`).
                     let xml_cut = |query: usize| {
                         queries
                             .before(&kept, start)
@@ -11381,20 +11404,26 @@ fn run_in_pool(
                                 )
                             })
                     };
-                    let xml_before =
-                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)).then(
-                            || crate::algorithm::common::database::XmlReportsBefore {
-                                reads: &query_reads,
-                                cut: &xml_cut,
-                            },
-                        );
+                    // The posts before each query's report: those of the prefetch of the
+                    // batch it begins (`warnings`, the batches before this one).
+                    let prefetched = |query: usize| warnings.get(query);
+                    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
+                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)),
+                        &xml_cut,
+                    );
+                    let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
                     database
                         .batch_prefetch(
                             &titles,
+                            database::LoadedBefore {
+                                hits: &hit_lists,
+                                spans: &batch_spans,
+                                rows: first_rows,
+                                cuts: xml_cuts,
+                            },
                             &batch_hit_lists,
                             !args.ungapped,
-                            start,
-                            xml_before.as_ref(),
+                            &prefetch_queries.after_xml_reports(xml_before.as_ref()),
                         )
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
@@ -11411,6 +11440,15 @@ fn run_in_pool(
                 // batch's prefetch (where it is on and loads a sequence) only its stop
                 // (`BlastnDatabase::batch_prefetch_stop`).
                 let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
+                // NCBI's scope at the batch's prefetch, as above.
+                let scope = || {
+                    crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                        x_query_stream::Queries::Records { input, .. } if xml => {
+                            &input[..input_end]
+                        }
+                        _ => batch_records.input(),
+                    })
+                };
                 (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
                     .then(|| {
                         database
@@ -11419,7 +11457,10 @@ fn run_in_pool(
                                 &hit_lists,
                                 &batch_hit_lists,
                                 !args.ungapped,
-                                start,
+                                &crate::algorithm::common::database::PrefetchQueries::new(
+                                    start, &scope,
+                                )
+                                .after_unrecorded_calls(args.first_query_ordinal > 0),
                             )
                             .map(|()| Posts::new())
                     })
@@ -11442,6 +11483,13 @@ fn run_in_pool(
                     }
                     return Err(error);
                 }
+            }
+            // EXPERIMENT (LOSAT_X_RPTSTREAM): the loop writes the batch's reports below and drops
+            // its lists, so a later batch's stop does not find them among those it holds (the
+            // prefetches' `before`): the run's record of what NCBI's data loader loaded for the
+            // batch (`BlastnDatabase::note_loaded`; nothing for a database that cannot stop).
+            if stream.acting() {
+                database.note_loaded(&titles, &batch_hit_lists, !args.ungapped, first_rows);
             }
         }
         // The batch numbers its queries from 0.

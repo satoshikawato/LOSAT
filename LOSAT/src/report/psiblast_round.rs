@@ -218,7 +218,7 @@ impl RoundSections<'_> {
     /// `Results from round N`, `\n\n`, the query's header, then "No hits found" and the footer,
     /// or the description table (in two parts after a round whose inclusion set is not empty)
     /// and the blank line after it.
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -239,7 +239,8 @@ impl RoundSections<'_> {
             if query.batch_skipped {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !query.valid {
-                writeln!(writer)?;
+                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+                crate::report::ostream::ncbi_endl(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
@@ -484,7 +485,7 @@ impl RoundSections<'_> {
     }
 
     /// The alignments of the subject `s_idx` (`BlastpSections::subject`, all its HSPs).
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -534,7 +535,11 @@ impl RoundSections<'_> {
     }
 
     /// The footer of a query with hits (`BlastpSections::foot`).
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         write_blastp_query_footer_spacing(
             writer,
@@ -561,8 +566,9 @@ pub(crate) fn write_psiblast_epilog(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    // The blank lines before the epilog (blast_format.cpp:2249), each a flush.
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     super::write_blastp_final_footer(writer, report, database)?;
     writer.flush()
 }

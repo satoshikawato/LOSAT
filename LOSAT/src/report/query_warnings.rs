@@ -563,36 +563,43 @@ pub fn write_marked(
     report: &[u8],
     reads: &[(usize, u32)],
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> io::Result<()> {
-    let posts = HitPosts {
-        every: true,
-        marks: reads.to_vec(),
-        ends: vec![0; reads.len()],
-        ..HitPosts::default()
-    };
-    match warnings {
-        Some(warnings) => {
-            let QueryWarnings { reads, sink, .. } = warnings;
-            write_reads(
-                report,
-                &posts,
-                query,
-                &mut unregioned(writer),
-                &mut **sink,
-                reads.as_mut(),
-            )
-        }
-        // Marks alone post nothing of their own.
-        None => writer.write_all(report),
-    }
+    write_marked_cuts(
+        report,
+        &crate::report::ostream::Cuts::default(),
+        reads,
+        query,
+        writer,
+        warnings,
+    )
 }
 
-/// Writes `report` to `writer` (each write one insertion of NCBI's; a part of a report that
-/// declares no `Cuts`).
-fn unregioned(writer: &mut dyn Write) -> crate::report::ostream::Unregioned<'_> {
-    crate::report::ostream::Unregioned(writer)
+/// `write_marked` of a part with NCBI's regions and flushes `cuts`.
+pub fn write_marked_cuts(
+    report: &[u8],
+    cuts: &crate::report::ostream::Cuts,
+    reads: &[(usize, u32)],
+    query: usize,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<()> {
+    match warnings {
+        Some(warnings) => {
+            let posts = HitPosts {
+                every: true,
+                marks: reads.to_vec(),
+                ends: vec![0; reads.len()],
+                cuts: cuts.clone(),
+                ..HitPosts::default()
+            };
+            let QueryWarnings { reads, sink, .. } = warnings;
+            write_reads(report, &posts, query, writer, &mut **sink, reads.as_mut())
+        }
+        // Marks alone post nothing of their own.
+        None => cuts.cursor().write(writer, report, 0, report.len()),
+    }
 }
 
 /// The places in a query's report, formatted into a buffer, where NCBI loads a subject and posts

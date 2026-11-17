@@ -2650,11 +2650,12 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
 // ```c++
 //     m_Outfile << "\n\n";
 // ```
-fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
+fn write_tblastn_unsearched_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     trailing: bool,
 ) -> io::Result<()> {
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     writeln!(writer, "Lambda      K        H")?;
     for _ in 0..3 {
         write_ncbi_ka_field(writer, -1.0)?;
@@ -2689,7 +2690,7 @@ fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
 // ```c++
 //     m_Outfile << "\n\n";
 // ```
-fn write_blastp_query_footer_spacing<W: Write>(
+fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
@@ -2706,7 +2707,8 @@ fn write_blastp_query_footer_spacing<W: Write>(
             trailing,
         );
     };
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
     write_ncbi_ka_field(writer, ungapped_karlin.k)?;
@@ -2987,12 +2989,10 @@ pub fn write_blastp_pairwise_window<W: crate::report::ostream::ReportWrite>(
         return writer.flush();
     }
 
-    // The blank lines before the epilog (blast_format.cpp:2249).
-
-    writeln!(writer)?;
-
-    writeln!(writer)?;
-
+    // The blank lines before the epilog (blast_format.cpp:2249): `NcbiEndl << NcbiEndl`, each
+    // a flush.
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     write_blastp_final_footer(writer, report, database)?;
     writer.flush()
 }
@@ -3372,7 +3372,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -3413,7 +3413,8 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             if query.batch_skipped {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !query.valid {
-                writeln!(writer)?;
+                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+                crate::report::ostream::ncbi_endl(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
@@ -3464,7 +3465,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         writeln!(writer)
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -3523,7 +3524,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
     //     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
     // ```
     /// The query-anchored section of the query's aligned subjects (`blastp_section_hsps`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -3536,7 +3537,11 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         write_blastp_query_footer_spacing(
             writer,
@@ -4297,14 +4302,15 @@ fn write_megablast_pairwise_intro(writer: &mut impl ReportWrite, version: &str) 
 // `None`) and a search space of 0.
 /// The footer of a nucleotide query, with the two blank lines that follow it (the next
 /// query's preamble or the epilog) when `trailing`.
-fn write_nucleotide_query_footer_spacing<W: Write>(
+fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     karlin: Option<(KarlinParams, KarlinParams)>,
     gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     if let Some((ungapped, _)) = karlin {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, ungapped.lambda)?;
@@ -4556,7 +4562,8 @@ pub fn write_blastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
     if report.epilog && query_range.end == queries.len() {
-        writer.write_all(b"\n\n")?;
+        crate::report::ostream::ncbi_endl(writer)?;
+        crate::report::ostream::ncbi_endl(writer)?;
         write_blastn_final_footer(writer, report)?;
     }
     writer.flush()
@@ -4590,7 +4597,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -4644,7 +4651,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         writeln!(writer)
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -4708,7 +4715,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
     //     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
     // ```
     /// The query-anchored section of the query's aligned subjects (`blastn_section_hsps`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -4721,7 +4728,11 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         write_nucleotide_query_footer_spacing(
             writer,
@@ -5086,11 +5097,12 @@ fn write_tblastx_alignment<W: Write>(
 // TBLASTX is ungapped and has no Gumbel block: only the ungapped Karlin block of the
 // query's first valid context is printed. A query without a valid context in a searched
 // batch prints neither block and a search space of 0 (blast_results.cpp:92-94).
-fn write_tblastx_query_footer<W: Write>(
+fn write_tblastx_query_footer<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     query: &TblastxPairwiseQuery,
 ) -> io::Result<()> {
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     if let Some(karlin) = query.karlin {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, karlin.lambda)?;
@@ -5138,12 +5150,14 @@ fn write_tblastx_query_footer<W: Write>(
 //     }
 // ```
 // TBLASTX is ungapped, so the gap penalties are not printed.
-fn write_tblastx_epilog<W: Write>(
+fn write_tblastx_epilog<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    writer.write_all(b"\n\n")?;
+    // `NcbiEndl << NcbiEndl`, each a flush.
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     match database {
         Some(database) => write_final_database_block(writer, database)?,
         None => write_final_database_report(
@@ -5335,7 +5349,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -5391,7 +5405,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         writeln!(writer)
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -5461,7 +5475,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
     /// nucleotide rows in their frames of their records (`seqalign::translated_row_segments`),
     /// grouped by the query's frame and added with `fForceTranslation`
     /// (`eTranslateNucToNucAlignment`, `Hsps::of_translated_nucleotides`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -5490,7 +5504,11 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         write_tblastx_query_footer(writer, &self.queries[q_idx])
     }
 }
@@ -6582,9 +6600,9 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     if !epilog {
         return writer.flush();
     }
-    // The blank lines before the epilog (blast_format.cpp:2249).
-    writeln!(&mut writer)?;
-    writeln!(&mut writer)?;
+    // The blank lines before the epilog (blast_format.cpp:2249), each a flush.
+    crate::report::ostream::ncbi_endl(&mut writer)?;
+    crate::report::ostream::ncbi_endl(&mut writer)?;
     write_blastp_final_footer(&mut writer, report, database)?;
     writer.flush()
 }
@@ -6633,7 +6651,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -6658,7 +6676,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             if self.query_batch_skipped[q_idx] {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !self.query_validity[q_idx] {
-                writeln!(writer)?;
+                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+                crate::report::ostream::ncbi_endl(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
@@ -6705,7 +6724,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
 
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -6769,7 +6788,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
     // ```
     /// The query-anchored section of the query's aligned subjects: Dense-segs of a protein query
     /// row and a translated nucleotide subject row (`seqalign::translated_row_segments`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -6796,7 +6815,11 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         write_blastp_query_footer_spacing(
             writer,
@@ -7496,7 +7519,7 @@ pub fn write_blastx_prolog(
 //     }
 // ```
 pub fn write_blastx_epilog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<&PairwiseDatabase>,
@@ -7533,8 +7556,8 @@ pub fn write_blastx_epilog(
     // ```c++
     //     m_Outfile << NcbiEndl << NcbiEndl;
     // ```
-    writeln!(writer)?;
-    writeln!(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     if let Some(database) = database {
         write_final_database_block(writer, database)?;
     } else {
@@ -7652,7 +7675,7 @@ pub fn write_blastx_epilog(
 //             out << buffer;
 // ```
 fn write_blastx_query_footer(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,
     valid: bool,
@@ -7672,7 +7695,8 @@ fn write_blastx_query_footer(
             false,
         );
     }
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     if valid {
         writeln!(writer, "Lambda      K        H")?;
         for v in [

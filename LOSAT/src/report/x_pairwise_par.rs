@@ -63,7 +63,7 @@
 //! `algorithm::tblastx::blast_engine::run_impl::rows_up_front`).
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io;
 use std::sync::{Arc, OnceLock};
 
 use super::pairwise::PairwiseHit;
@@ -437,7 +437,7 @@ pub(crate) trait QuerySections: Sync {
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
     /// `None`), or the description table and the blank line after it; `read` before each
     /// description line, where NCBI loads its subject (`QueryWarnings::subject_read`).
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -448,7 +448,7 @@ pub(crate) trait QuerySections: Sync {
     /// The alignments of the HSPs `part` of subject `s_idx` of the query (`group`), the
     /// subject's heading with its first HSP: the parts of `0..` its HSPs in order write the
     /// subject's alignments.
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -465,7 +465,7 @@ pub(crate) trait QuerySections: Sync {
 
     /// The one section of the alignments of the query's aligned subjects (`group`), where
     /// `merges_alignments`.
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         _writer: &mut W,
         _q_idx: usize,
@@ -477,7 +477,11 @@ pub(crate) trait QuerySections: Sync {
     }
 
     /// The footer of a query with hits.
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()>;
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()>;
 }
 
 /// Writes the per-query reports of `hits_by_query` (each query's hits with their indices in
@@ -747,11 +751,11 @@ fn format_piece<S: QuerySections>(
     piece: Piece,
     marks: bool,
 ) -> Formatted {
-    let mut buffer = Vec::new();
+    let mut buffer = crate::report::ostream::CutBuffer::default();
     let mut reads: Vec<(usize, u32)> = Vec::new();
-    let mut mark = |s_idx: u32, buffer: &mut Vec<u8>| {
+    let mut mark = |s_idx: u32, buffer: &mut crate::report::ostream::CutBuffer| {
         if marks {
-            reads.push((buffer.len(), s_idx));
+            reads.push((buffer.bytes.len(), s_idx));
         }
         Ok(())
     };
@@ -792,9 +796,10 @@ fn format_piece<S: QuerySections>(
     }
 }
 
-/// A piece formatted into its own buffer (`format_piece`).
+/// A piece formatted into its own buffer (`format_piece`), with NCBI's flushes made in it (a
+/// query footer's).
 struct Formatted {
-    buffer: Vec<u8>,
+    buffer: crate::report::ostream::CutBuffer,
     /// Where the serial writer reads a subject: the buffer's length then and the subject.
     reads: Vec<(usize, u32)>,
     result: io::Result<()>,
@@ -911,8 +916,9 @@ fn write_parallel_with<S: QuerySections, W: ReportWrite>(
                         warnings.before_query(piece.query, &mut *writer)?;
                     }
                 }
-                super::query_warnings::write_marked(
-                    &formatted.buffer,
+                super::query_warnings::write_marked_cuts(
+                    &formatted.buffer.bytes,
+                    &formatted.buffer.cuts,
                     &formatted.reads,
                     piece.query,
                     &mut *writer,
@@ -932,6 +938,7 @@ fn write_parallel_with<S: QuerySections, W: ReportWrite>(
 mod tests {
     use super::*;
     use crate::common::Hit;
+    use std::io::Write;
 
     fn hit(q_idx: u32, s_idx: u32, length: usize) -> PairwiseHit {
         PairwiseHit::from(Hit {
@@ -981,7 +988,7 @@ mod tests {
             self.joined == Some((previous, s_idx))
         }
 
-        fn head<W: Write>(
+        fn head<W: crate::report::ostream::ReportWrite>(
             &self,
             writer: &mut W,
             q_idx: usize,
@@ -998,7 +1005,7 @@ mod tests {
             Ok(())
         }
 
-        fn subject<W: Write>(
+        fn subject<W: crate::report::ostream::ReportWrite>(
             &self,
             writer: &mut W,
             _probe: Option<&mut FormatProbe<'_>>,
@@ -1024,7 +1031,7 @@ mod tests {
             self.merged
         }
 
-        fn alignments<W: Write>(
+        fn alignments<W: crate::report::ostream::ReportWrite>(
             &self,
             writer: &mut W,
             q_idx: usize,
@@ -1039,7 +1046,11 @@ mod tests {
             Ok(())
         }
 
-        fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+        fn foot<W: crate::report::ostream::ReportWrite>(
+            &self,
+            writer: &mut W,
+            q_idx: usize,
+        ) -> io::Result<()> {
             writeln!(writer, "foot {q_idx}")
         }
     }
@@ -1098,7 +1109,7 @@ mod tests {
                         format_piece(&marks, groups[piece.query].as_ref(), piece, false);
                     formatted.result.unwrap();
                     assert!(formatted.reads.is_empty());
-                    joined.extend_from_slice(&formatted.buffer);
+                    joined.extend_from_slice(&formatted.buffer.bytes);
                 }
                 assert_eq!(
                     String::from_utf8(joined).unwrap(),

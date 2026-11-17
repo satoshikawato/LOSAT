@@ -260,7 +260,17 @@ impl SubjectNames {
     /// about its taxid (`taxonomy[i]` for definition line `i`; empty where nothing was asked).
     /// `GetTaxInfo` throws for a taxid that the taxonomy database does not know: the
     /// descriptions before that definition line stay, and the Seq-align id alone follows them.
-    pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Self {
+    /// Where NCBI's lookup of the Seq-align id throws when the `Hit` loads the subject
+    /// (`ParsedSubject::lookup_throws`: a lookup that fails on a file in a batch whose prefetch is
+    /// off), the `Hit` has no names: the exception, which the `catch` of the hit throws again, is
+    /// the error (`CaughtException`), with which the report of the XML2 and JSON documents fails
+    /// (`blast_xml2::Xml2Document::report`). Only outfmt 13 to 16 reach it: every other format
+    /// refuses such a subject before any byte is written (outfmt 5, whose `catch` of the hit
+    /// writes `Unknown`, among them; `ParsedSubject::fetched`).
+    pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Result<Self> {
+        if let Some(exception) = subject.lookup_throws() {
+            return Err(super::CaughtException(exception).into());
+        }
         let (id, title, accession) = subject.xml_hit();
         let mut descriptions = subject.hit_descriptions();
         for (at, answer) in taxonomy.iter().enumerate().take(descriptions.len()) {
@@ -277,7 +287,7 @@ impl SubjectNames {
             }
             descriptions[at].taxonomy = answer.clone();
         }
-        SubjectNames {
+        Ok(SubjectNames {
             id,
             title,
             accession,
@@ -286,13 +296,51 @@ impl SubjectNames {
             descriptions,
             volume_taxids: subject.volume_taxids(),
             defline_thrown: false,
+        })
+    }
+}
+
+/// What a `Hit` shows of its subject, made before the report (`SubjectNameCache`, and TBLASTN's
+/// and BLASTX's names of the subjects with hits): the subject's names, or the exception that
+/// NCBI's lookup of its Seq-align id throws where the `Hit` loads it (`SubjectNames::of_parsed`),
+/// which the `Hit` raises (`names`) and no earlier step.
+pub enum HitNames {
+    Names(SubjectNames),
+    Throws(crate::ncbi_exception::NcbiException),
+}
+
+impl HitNames {
+    /// The names `made` as a `Hit` shows them: the lookup's exception (`CaughtException`) is kept
+    /// for the `Hit`; any other error (LOSAT's refusal of a title) is returned.
+    pub fn of(made: Result<SubjectNames>) -> Result<Self> {
+        match made {
+            Ok(names) => Ok(HitNames::Names(names)),
+            Err(error) => match error.downcast::<super::CaughtException>() {
+                Ok(super::CaughtException(exception)) => Ok(HitNames::Throws(exception)),
+                Err(error) => Err(error),
+            },
+        }
+    }
+
+    /// The names that the `Hit` shows, or the exception of its subject's lookup
+    /// (`CaughtException`), which the program's hit loop passes up to the report
+    /// (`blast_xml2::Xml2Document::report`) before it marks the `Hit`'s load
+    /// (`query_warnings::HitPosts::hit`: NCBI loads nothing for it).
+    pub fn names(&self) -> Result<&SubjectNames> {
+        match self {
+            HitNames::Names(names) => Ok(names),
+            HitNames::Throws(exception) => {
+                Err(super::CaughtException(exception.clone()).into())
+            }
         }
     }
 }
 
 impl XmlSubjects<'_> {
     /// The names of subject `s_idx`; `program` (`BLASTP`) names the program in the refusal of
-    /// a title that NCBI crashes on (`Refusal`).
+    /// a title that NCBI crashes on (`Refusal`). A database sequence whose lookup throws where
+    /// the `Hit` loads it is the error `CaughtException` (`SubjectNames::of_parsed`; outfmt 13 to
+    /// 16 only).
     pub fn names(&self, s_idx: usize, program: &str) -> Result<SubjectNames> {
         match self {
             XmlSubjects::Records {
@@ -319,7 +367,7 @@ impl XmlSubjects<'_> {
             } => {
                 if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
                     let answers = parsed_taxonomy.get(s_idx).map_or(&[][..], Vec::as_slice);
-                    return Ok(SubjectNames::of_parsed(subject, answers));
+                    return SubjectNames::of_parsed(subject, answers);
                 }
                 let ordinal = *ordinals
                     .get(s_idx)
@@ -428,7 +476,7 @@ pub fn hit_ranges<T>(
 /// it).
 pub struct SubjectNameCache<'s, 'a> {
     subjects: &'s XmlSubjects<'a>,
-    names: Vec<Option<SubjectNames>>,
+    names: Vec<Option<HitNames>>,
 }
 
 impl<'s, 'a> SubjectNameCache<'s, 'a> {
@@ -438,10 +486,11 @@ impl<'s, 'a> SubjectNameCache<'s, 'a> {
         Self { subjects, names }
     }
 
-    /// `XmlSubjects::names` of subject `s_idx`, made on first use.
-    pub fn get(&mut self, s_idx: usize, program: &str) -> Result<&SubjectNames> {
+    /// `XmlSubjects::names` of subject `s_idx`, made on first use (`HitNames::of`: a refusal is
+    /// the error; the exception of a lookup is kept for the `Hit`, `HitNames::names`).
+    pub fn get(&mut self, s_idx: usize, program: &str) -> Result<&HitNames> {
         if self.names.get(s_idx).is_none_or(Option::is_none) {
-            let made = self.subjects.names(s_idx, program)?;
+            let made = HitNames::of(self.subjects.names(s_idx, program))?;
             *self
                 .names
                 .get_mut(s_idx)

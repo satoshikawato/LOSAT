@@ -290,6 +290,18 @@ impl LookupFailure {
         (self.ncbi == NcbiFailure::Message).then_some(self.message.as_str())
     }
 
+    /// The `CSeqDBException` that NCBI's lookup throws, where the message is NCBI's own
+    /// (`ncbi_message`) and LOSAT knows the place that throws it (`seqdb::throw_site`: "DB
+    /// contains no accession info." of `CBlastLMDBManager::CBlastEnv::GetDbi`, at a list that
+    /// puts version 5 databases with and without the accession table side by side); `None`
+    /// otherwise, where only the prefetch's report of it (`BLAST Database error: <message>`) is
+    /// known.
+    pub fn exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
+        let message = self.ncbi_message()?;
+        let site = crate::seqdb::throw_site(message)?;
+        Some(crate::ncbi_exception::NcbiException::new(site, message))
+    }
+
     /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
     /// [`LookupFailure::NCBI_CRASHES`]), for the reason of LOSAT's refusal.
     pub fn what_ncbi_does(&self) -> &'static str {
@@ -683,9 +695,50 @@ impl ParsedSubject {
     /// formatters may read the subject one by one (a batch that reports it has its prefetch
     /// off, `common::database::ParsedShown::one_by_one`), which alone refuses a sequence that
     /// another can stand for by a weak match (`WeakMatch`), after what the lookup finds.
-    pub fn fetched(&self, taxonomy: bool, one_by_one: bool) -> Result<(), String> {
-        self.found_fetched(taxonomy)?;
+    /// `writes_thrown`: whether every report that reads the subject writes a lookup that throws
+    /// as NCBI's formatters do (the XML2 and JSON documents of outfmt 13 to 16, which leave the
+    /// query's report out with the exception: `lookup_throws`, `blast_xml::XmlSubjects::names`);
+    /// with `one_by_one` they then write a lookup that fails on a file with NCBI's exception
+    /// (`FoundInstead::Failed`), which every other format refuses (outfmt 5 here, before any
+    /// byte is written).
+    pub fn fetched(
+        &self,
+        taxonomy: bool,
+        one_by_one: bool,
+        writes_thrown: bool,
+    ) -> Result<(), String> {
+        self.found_fetched(taxonomy, one_by_one && writes_thrown)?;
         self.weakly_fetched(one_by_one)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360, 412-417
+    // ```c++
+    //     const CSeq_id& kSeqId = kAlignSet.Get().front()->GetSeq_id(1);
+    //
+    //     try {
+    //         const CBioseq_Handle& subj_handle = scope->GetBioseqHandle(kSeqId);
+    //     ...
+    //     } catch (const CException&) {
+    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
+    //     	hit_exp->SetId(kSeqId.AsFastaString());
+    //         hit->SetDescription().push_back(hit_exp);
+    //         hit->SetLen(sequence::GetLength(kSeqId, scope));
+    //     };
+    // ```
+    // Where the batch's prefetch is off, the `Hit` loads its subject by the Seq-align id: the
+    // lookup throws on the file there, and again in the `catch` (`GetLength` loads by the same id),
+    // outside any `catch` of the hit; the report function of outfmt 15 and 16 catches it, 13 and 14
+    // end the program with it (probe of line DBID mixdb, `PU.off`; DECISIONS 62 (2)).
+    /// The exception that NCBI's lookup of the Seq-align id throws where a formatter loads the
+    /// subject one by one (a batch whose prefetch is off): a lookup that fails on a file with
+    /// NCBI's `CSeqDBException` whose place LOSAT knows (`FoundInstead::Failed`,
+    /// `LookupFailure::exception`). Where the batch prefetches, its prefetch throws first and
+    /// stops the run (`prefetch_stops`).
+    pub fn lookup_throws(&self) -> Option<crate::ncbi_exception::NcbiException> {
+        match &self.found_instead {
+            Some(FoundInstead::Failed(failure)) => failure.exception(),
+            _ => None,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
@@ -778,8 +831,13 @@ impl ParsedSubject {
     }
 
     /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
-    /// (`found_instead`), whatever the batch's prefetch.
-    fn found_fetched(&self, taxonomy: bool) -> Result<(), String> {
+    /// (`found_instead`), whatever the batch's prefetch; `thrown_written`: the reports write the
+    /// lookup that throws (`lookup_throws`) as NCBI's formatters do, which throws before they read
+    /// a definition line (also of an `unfetchable` subject).
+    fn found_fetched(&self, taxonomy: bool, thrown_written: bool) -> Result<(), String> {
+        if thrown_written && self.lookup_throws().is_some() {
+            return Ok(());
+        }
         if self.unfetchable {
             return Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
@@ -2588,7 +2646,7 @@ mod tests {
         ] {
             let subject = ParsedSubject::new(one_defline(vec![id])).unwrap();
             assert!(!subject.unfetchable(), "{subject:?}");
-            assert!(subject.fetched(false, true).is_ok());
+            assert!(subject.fetched(false, true, false).is_ok());
         }
         // A local id that alone decides the definition line of the Bioseq: no lookup finds it.
         let shown = lines(vec![
@@ -2596,7 +2654,7 @@ mod tests {
             vec![ParsedSeqId::Gi(777)],
         ]);
         assert!(shown.unfetchable());
-        let error = shown.fetched(false, true).unwrap_err();
+        let error = shown.fetched(false, true, false).unwrap_err();
         assert!(
             error.contains("Seq-align id gi|777, by which NCBI BLAST+'s formatters do not find"),
             "{error}"
@@ -2605,7 +2663,7 @@ mod tests {
         let with_gi = one_defline(vec![ParsedSeqId::Gibbsq(123), ParsedSeqId::Gi(7)]);
         assert!(ParsedSubject::new(with_gi)
             .unwrap()
-            .fetched(false, true)
+            .fetched(false, true, false)
             .is_ok());
         let replaced = DeflineSet {
             deflines: vec![BlastDefline {
@@ -2624,12 +2682,12 @@ mod tests {
         assert!(subject
             .clone()
             .found_instead(None)
-            .fetched(false, true)
+            .fetched(false, true, false)
             .is_ok());
         let error = subject
             .clone()
             .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4))))
-            .fetched(false, true)
+            .fetched(false, true, false)
             .unwrap_err();
         assert!(
             error.contains("lookup gives database sequence 4 first"),
@@ -2638,14 +2696,14 @@ mod tests {
         let error = subject
             .clone()
             .found_instead(Some(FoundInstead::Nothing))
-            .fetched(false, true)
+            .fetched(false, true, false)
             .unwrap_err();
         assert!(error.contains("do not find the sequence"), "{error}");
         let error = subject
             .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
                 "DB contains no accession info.",
             ))))
-            .fetched(false, true)
+            .fetched(false, true, false)
             .unwrap_err();
         assert!(
             error.contains("whose lookup in the database fails (DB contains no accession info.;"),
@@ -2739,8 +2797,8 @@ mod tests {
             WeakMatch::Failed("no accession info".into()),
         ] {
             let subject = subject.clone().weak_match(Some(weak.clone()));
-            assert!(subject.fetched(true, false).is_ok(), "{weak:?}");
-            let error = subject.fetched(false, true).unwrap_err();
+            assert!(subject.fetched(true, false, false).is_ok(), "{weak:?}");
+            let error = subject.fetched(false, true, false).unwrap_err();
             assert!(
                 error.contains("in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off"),
                 "{error}"
@@ -2751,16 +2809,16 @@ mod tests {
             let copy = subject.found_instead(Some(FoundInstead::OtherTaxids(
                 DbSequence::of_unrestricted(2),
             )));
-            assert!(copy.fetched(false, false).is_ok());
+            assert!(copy.fetched(false, false, false).is_ok());
             assert!(copy
-                .fetched(true, false)
+                .fetched(true, false, false)
                 .unwrap_err()
                 .contains("other taxids"));
-            assert!(copy.fetched(false, true).unwrap_err().contains("weakly"));
+            assert!(copy.fetched(false, true, false).unwrap_err().contains("weakly"));
         }
         let other =
             subject.found_instead(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4))));
-        assert!(other.fetched(false, false).is_err());
+        assert!(other.fetched(false, false, false).is_err());
     }
 
     // Line DBID P1: what NCBI's prefetch reads for a subject that no report shows (psiblast's
@@ -2875,8 +2933,8 @@ mod tests {
         let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
             .unwrap()
             .found_instead(title_apart.clone());
-        assert!(subject.fetched(false, true).is_ok());
-        let error = subject.fetched(true, true).unwrap_err();
+        assert!(subject.fetched(false, true, false).is_ok());
+        let error = subject.fetched(true, true, false).unwrap_err();
         assert!(error.contains("database sequence 3 also holds"), "{error}");
         assert!(error.contains("taxids and their names for it"), "{error}");
         assert!(subject.check_tabular_ids(true).is_ok());
@@ -3005,14 +3063,14 @@ mod tests {
                 DbSequence::of_unrestricted(3),
                 CopyApart::TaxonomyTexts,
             )));
-        assert!(texts.fetched(false, true).is_err());
+        assert!(texts.fetched(false, true, false).is_err());
         assert!(texts.generated_title_fetched().is_ok());
         let taxids = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
             .unwrap()
             .found_instead(Some(FoundInstead::OtherTaxids(
                 DbSequence::of_unrestricted(3),
             )));
-        assert!(taxids.fetched(false, true).is_ok());
+        assert!(taxids.fetched(false, true, false).is_ok());
         assert!(taxids.generated_title_fetched().is_ok());
     }
 

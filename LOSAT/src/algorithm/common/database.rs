@@ -3037,6 +3037,11 @@ pub(crate) struct ParsedShown {
     /// (`ParsedSubject::fetched`, `WeakMatch`): the prefetch looks for the ids
     /// it has resolved, then loads the others by their own ids.
     pub(crate) one_by_one: bool,
+    /// Whether every format is outfmt 13 to 16, whose XML2 and JSON documents write a lookup that
+    /// throws where the subject is read one by one as NCBI does (they leave the query's report
+    /// out with the exception, `ParsedSubject::fetched`, `lookup_throws`); every other format
+    /// refuses it.
+    pub(crate) writes_thrown: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1773-1783
@@ -3120,7 +3125,7 @@ pub(crate) fn check_reported_parsed(
 ) -> Result<()> {
     if shown.reads_bioseq() {
         subject
-            .fetched(shown.taxonomy, shown.one_by_one)
+            .fetched(shown.taxonomy, shown.one_by_one, shown.writes_thrown)
             .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {
         check_prefetched_parsed(db, subject, ordinal, program)?;
@@ -8038,7 +8043,7 @@ mod taxdb_prepass_tests {
             else {
                 panic!("{name}: a sequence with parsed Seq-ids");
             };
-            match (subject.fetched(false, true), want) {
+            match (subject.fetched(false, true, false), want) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
@@ -8141,7 +8146,7 @@ mod taxdb_prepass_tests {
                 ),
                 got => panic!("{list} {ordinal}: {got:?}"),
             }
-            let refusal = subject.fetched(false, false).unwrap_err();
+            let refusal = subject.fetched(false, false, false).unwrap_err();
             assert!(refusal.contains(unknown), "{list} {ordinal}: {refusal}");
             assert_eq!(
                 refusal.contains("lookup gives database sequence 0 first"),
@@ -8272,7 +8277,7 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             for (taxonomy, want) in [(false, &without), (true, &with)] {
-                match (subject.fetched(taxonomy, true), want) {
+                match (subject.fetched(taxonomy, true, false), want) {
                     (Ok(()), None) => {}
                     (Err(error), Some(text)) => {
                         assert!(error.contains(text.as_str()), "{name} {ordinal}: {error}")
@@ -8353,7 +8358,7 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             assert!(!subject.unfetchable(), "{name} {ordinal}");
-            match (subject.fetched(false, true), want) {
+            match (subject.fetched(false, true, false), want) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => {
                     assert!(error.contains(&text), "{name} {ordinal}: {error}")
@@ -10037,8 +10042,8 @@ mod taxdb_prepass_tests {
                     panic!("{name} {ordinal}: no parsed Seq-ids");
                 };
                 // A batch whose prefetch is on loads the subject by its own id.
-                assert!(subject.fetched(false, false).is_ok(), "{name} {ordinal}");
-                match (subject.fetched(false, true), want.filter(|_| prefetch_off)) {
+                assert!(subject.fetched(false, false, false).is_ok(), "{name} {ordinal}");
+                match (subject.fetched(false, true, false), want.filter(|_| prefetch_off)) {
                     (Ok(()), None) => {}
                     (Err(error), Some(Some(other))) => assert!(
                         error.contains(&format!("match an id of database sequence {other} weakly")),
@@ -10084,10 +10089,10 @@ mod taxdb_prepass_tests {
             match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
                 (ReportedHeader::Stored(_), Ok(true)) => {}
                 (ReportedHeader::Parsed(subject), Ok(false)) => {
-                    assert!(subject.fetched(false, true).is_ok(), "{name} {ordinal}")
+                    assert!(subject.fetched(false, true, false).is_ok(), "{name} {ordinal}")
                 }
                 (ReportedHeader::Parsed(subject), Err(id)) => {
-                    let error = subject.fetched(false, true).unwrap_err();
+                    let error = subject.fetched(false, true, false).unwrap_err();
                     assert!(
                         error.contains(&format!("the Seq-align id {id},")),
                         "{name} {ordinal}: {error}"

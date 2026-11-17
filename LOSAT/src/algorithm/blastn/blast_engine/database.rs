@@ -1899,6 +1899,9 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(),
         one_by_one: shared::prefetch_may_be_off(),
+        writes_thrown: output_formats
+            .iter()
+            .all(|format| format.xml2_kind().is_some()),
     }
 }
 

@@ -2115,7 +2115,10 @@ impl ListedTitles<'_> {
     /// writes the subjects' taxids or their names (13 to 16, a table of taxonomy fields).
     /// `hit_lists` are in the order of the reports; `prefetch` tells by query whether its
     /// batch prefetches, else its reports read the subjects one by one
-    /// (`ParsedSubject::fetched`'s `one_by_one`).
+    /// (`ParsedSubject::fetched`'s `one_by_one`). `writes_thrown`: every format is outfmt 13 to
+    /// 16, which write a lookup that throws where a batch's prefetch is off as NCBI does
+    /// (`ParsedSubject::fetched`).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn check_parsed_reports(
         &self,
         hit_lists: &[Option<BlastpHitList>],
@@ -2123,6 +2126,7 @@ impl ListedTitles<'_> {
         fetched: bool,
         joined: bool,
         taxonomy: bool,
+        writes_thrown: bool,
         words: crate::report::tabular::PrintedIds,
     ) -> Result<()> {
         if self.parsed.is_empty() {
@@ -2133,7 +2137,7 @@ impl ListedTitles<'_> {
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
                     subject
-                        .fetched(taxonomy, reads.one_by_one(rank as u32))
+                        .fetched(taxonomy, reads.one_by_one(rank as u32), writes_thrown)
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 self.oids.oid(self.listed.ordinals[rank]),

@@ -502,7 +502,8 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`).
+    /// one by one (`shared::ParsedShown::one_by_one`). `writes_thrown`: every report is outfmt 13
+    /// to 16, which write a lookup that throws there as NCBI does (`ParsedSubject::fetched`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -521,6 +522,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
+        writes_thrown: bool,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -571,7 +573,7 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
-                    subject.fetched(taxonomy, one_by_one).map_err(|reason| {
+                    subject.fetched(taxonomy, one_by_one, writes_thrown).map_err(|reason| {
                         shared::parsed_refusal(database.db.oid(ordinal), &reason, database.program)
                     })?;
                 } else if reports && prefetched {
@@ -1389,6 +1391,7 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
             )
             .unwrap();
             let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -1460,6 +1463,7 @@ mod tests {
                 false,
                 false,
                 crate::report::tabular::PrintedIds::default(),
+                false,
                 false,
                 false,
                 false,

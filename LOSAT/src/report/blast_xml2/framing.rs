@@ -472,7 +472,8 @@ impl<F: SideFiles> Xml2Document<F> {
     /// separator before it stays, so a JSON document can hold `,\n,\n`); the stream forms catch
     /// the exception (`CaughtException`, the program posts its message and goes on), the file
     /// forms (outfmt 13 and 14) have opened the report's file, which stays empty, and end the
-    /// program with it (`CATCH_ALL`, exit status 255; the master file stays empty: no epilog)
+    /// program with it (`CATCH_ALL`, exit status 255, 2 for a `CSeqDBException` of a subject's
+    /// lookup, `cli::NativeError::exception`; the master file stays empty: no epilog)
     /// after what the making posted (the loads of its subjects): the exception is handed back
     /// after the posts (`DocumentPosts::ends_run`, by `query_warnings::write_hit_posts`).
     fn failed(&mut self, exception: crate::ncbi_exception::NcbiException) -> Result<()> {

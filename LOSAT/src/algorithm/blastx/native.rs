@@ -1254,6 +1254,9 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
+    /// Whether every report is outfmt 13 to 16, which write a lookup that throws where a batch's
+    /// prefetch is off as NCBI does (`ParsedSubject::fetched`, `lookup_throws`).
+    writes_thrown: bool,
 }
 
 impl ReportedAsks {
@@ -1293,6 +1296,7 @@ impl ReportedAsks {
                 outfmt => i32::from(outfmt),
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
+            writes_thrown: matches!(options.outfmt, 13..=16),
         }
     }
 
@@ -1309,6 +1313,7 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
+        asks.writes_thrown = options.iter().all(|options| Self::of(options).writes_thrown);
         asks
     }
 
@@ -1325,6 +1330,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            writes_thrown: self.writes_thrown && other.writes_thrown,
         }
     }
 }
@@ -1550,6 +1556,7 @@ pub(super) fn reported_batch(
         asks.prefetched && !unfetched,
         asks.prefetch_runs && !unfetched,
         unfetched,
+        asks.writes_thrown,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;

@@ -1544,11 +1544,44 @@ impl NativeError {
     //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+    // ```c++
+    //     catch (const CSeqDBException& e) {                                      \
+    // 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {         \
+    // 			string err_msg =                                                \
+    //                 "Too many open files, please raise the open file limit";    \
+    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
+    //             exit_code = BLAST_DATABASE_ERROR;                               \
+    // 		}                                                                   \
+    // 		else if (e.GetErrCode() == CSeqDBException::eMemoryMappingFailure){ \
+    // 			string err_msg = "Database memory map file error";              \
+    //             if (!e.GetMsg().empty())                                        \
+    //                 err_msg += " - " + e.GetMsg();                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
+    //             exit_code = BLAST_DATABASE_ERROR;                               \
+    // 		}                                                                   \
+    //         else {                                                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+    //         	exit_code = BLAST_DATABASE_ERROR;                               \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
     /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
-    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
-    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
+    /// `CATCH_ALL` catches before (its branch comes first), `BLAST Database error: ` and its
+    /// message, exit status 2 (`BLAST_DATABASE_ERROR`). Every place of a `CSeqDBException` that
+    /// LOSAT raises reports the code `eInvalid` (`seqdb::throw_site`), so the texts of that
+    /// branch for `eTooManyOpenFiles` and `eMemoryMappingFailure` do not arise here (the reader's
+    /// errors of those codes are `common::database::database_error`'s). The one producer of these
+    /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        if e.kind().starts_with("CSeqDBException::") {
+            return NativeError {
+                exit: 2,
+                message: format!("BLAST Database error: {}\n", e.get_msg()),
+            };
+        }
         NativeError {
             exit: 255,
             message: format!("Error: {}\n", e.what()),

@@ -606,6 +606,9 @@ pub struct HitPosts {
     document: Vec<crate::report::blast_xml::writer::DocumentPost>,
     /// The report made no read after its last marked `Hit` (`DocumentPosts::cut`).
     cut: bool,
+    /// The program's post of an exception that the report raised and NCBI's report function
+    /// caught (`blast_xml::writer::caught_post`), after every other post of the report.
+    caught: Vec<u8>,
     /// The exception that ends the run after these posts (`DocumentPosts::ends_run`).
     ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
 }
@@ -654,9 +657,23 @@ impl HitPosts {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:757-760
+    // ```c++
+    // 	catch(CException &e){
+    // 	    ERR_POST(Error << e.GetMsg() << e.what() );
+    // 	    return;
+    // 	}
+    // ```
+    /// The report raised an exception that NCBI's report function catches: its post `post`
+    /// (`blast_xml::writer::caught_post`) comes after the texts of the loads that the report made
+    /// before it and the document's posts (`write_posts_to`).
+    pub fn caught(&mut self, post: Vec<u8>) {
+        self.caught = post;
+    }
+
     /// Whether nothing of these posts goes to the diagnostics (no text, no document post).
     fn posts_nothing(&self) -> bool {
-        self.texts.is_empty() && self.document.is_empty()
+        self.texts.is_empty() && self.document.is_empty() && self.caught.is_empty()
     }
 
     /// Writes `report`, the query's output, to `writer`, and at each marked `Hit`, after the
@@ -754,8 +771,10 @@ pub fn write_hit_posts(
 /// their own cursor, calls it with that): `report` to `writer` with the posts of its `Hit`s and of
 /// its document (`HitPosts::write`) to `sink`, the reads' texts through `reads`. A report that made
 /// no read after its last `Hit` (`DocumentPosts::cut`) moves the texts of the later reads
-/// (`ReadCursor::cut`); an exception of NCBI's XML stream that ends the run is returned after the
-/// posts (`blast_xml::writer::run_ending_exception`), and no text of a read is written after it.
+/// (`ReadCursor::cut`); the post of an exception that the report function caught
+/// (`HitPosts::caught`) comes after them; an exception of NCBI's XML stream that ends the run is
+/// returned after the posts (`blast_xml::writer::run_ending_exception`), and no text of a read is
+/// written after it.
 pub fn write_posts_to(
     report: &[u8],
     hits: &HitPosts,
@@ -776,9 +795,10 @@ pub fn write_posts_to(
         if hits.ends_run.is_some() {
             cursor.end_run();
         } else if hits.cut {
-            cursor.cut(query, writer, sink)?;
+            cursor.cut(query, writer, &mut *sink)?;
         }
     }
+    write_after(writer, sink, &hits.caught)?;
     match &hits.ends_run {
         Some(thrown) => Err(crate::report::blast_xml::writer::run_ending_exception(
             thrown,

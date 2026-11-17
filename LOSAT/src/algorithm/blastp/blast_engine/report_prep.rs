@@ -291,6 +291,12 @@ pub(super) fn prefetch_reported_subjects(
                 BlastpReport::CustomTabular(spec) => spec.needs().taxonomy,
                 _ => false,
             }),
+            // NCBI's XML2 and JSON documents leave the report of a query out where the `Hit` of a
+            // subject whose lookup throws loads it (`ParsedSubject::lookup_throws`; psiblast
+            // writes none of them, `psiblast::args::PsiblastArgs::check_outfmt`).
+            format_plans
+                .iter()
+                .all(|outfmt| matches!(outfmt, BlastpReport::Xml2(_))),
             format_plans.iter().fold(
                 crate::report::tabular::PrintedIds::default(),
                 |words, outfmt| words.or(outfmt.printed_ids()),

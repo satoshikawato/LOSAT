@@ -42,7 +42,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   `-out /dev/full`; `fsize=N`: `-out` a file of a temporary directory under `RLIMIT_FSIZE` N with SIGXFSZ ignored
   (the write past N bytes fails with EFBIG, as `prlimit --fsize`), whose bytes are frozen. Standard output must be
   empty in the last two (`run_on_device`). `check --library` skips these rows (`library-skip`): the library's
-  writers have no NCBI stream.
+  writers have no NCBI stream; outside Linux they are `device-skip`.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -579,6 +579,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if library and (row["program"] in ("rpsblast", "rpstblastn")
                     or ("-query" in argv and "-in_pssm" in argv) or device_mode(row)):
         return "library-skip", ""
+    # The failing devices (/dev/full, RLIMIT_FSIZE with SIGXFSZ ignored) are Linux's.
+    if device_mode(row) and not sys.platform.startswith("linux"):
+        return "device-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
     if db_dir is not None:

@@ -42,6 +42,9 @@ pub use run_impl::x_seed_release_print_summary;
 // What every report of a run needs (`blast_xml`).
 pub(crate) use run_impl::ReportDatabase;
 pub(crate) use run_impl::TblastxReportRun;
+// The error of a query batch's search that comes after the reports of the batches before (the
+// refusals of `extension::query_batch`).
+pub(crate) use run_impl::ErrorAfterBatchReports;
 
 // Imports used by submodules
 pub(crate) use anyhow::{Context, Result};
@@ -88,7 +91,7 @@ pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 pub(crate) use super::extension::{
-    convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with,
+    convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with, QueryBatch,
 };
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
 pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};

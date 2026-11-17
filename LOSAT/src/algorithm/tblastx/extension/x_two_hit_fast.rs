@@ -35,7 +35,10 @@
 //!
 //! Why the result is the same.
 //! * Bounds. The reference reads `q_seq[q_r - 1 - i]` for `i < min(q_r, s_r)` on the left and
-//!   `q_seq[q_r + j]` while both `q_r + j < q_seq.len()` and `s_r + j < s_seq.len()` on the right.
+//!   `q_seq[q_r + j]` while both `q_r + j < q_seq.len()` and `s_r + j < s_seq.len()` on the right
+//!   (NCBI's walks run on the query batch and read the NULLB past the context's ends, which ends a
+//!   walk of an X-drop of 127 or less there: the reference's continuation into the batch,
+//!   query_batch.rs, changes nothing for these X-drops).
 //!   The walks here take the same counts and read the same positions, so every position is inside
 //!   both slices; the word loop reads the word's positions (3 for BLOSUM62's `two_hit`, `W` for
 //!   `two_hit_in_word::<W>`) after a test that they fit (the reference reads them unchecked; a
@@ -993,6 +996,7 @@ unsafe fn two_hit_sent_on<const SHIFT: u32, const W: usize>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::query_batch::InBatch;
     use super::*;
     use crate::algorithm::tblastx::scoring::{Blosum62Score, MatrixScores, TbxScore};
 
@@ -1031,7 +1035,8 @@ mod tests {
 
     /// One call both ways; the fast path must handle it.
     fn check_call(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
-        let expect = extend_hit_two_hit_reference(Blosum62Score, q, s, sl, sr, qr, d, false);
+        let expect =
+            extend_hit_two_hit_reference(Blosum62Score, q, InBatch::ALONE, s, sl, sr, qr, d, false);
         let got = two_hit(q, s, sl, sr, qr, d).expect("the fast path handles the call");
         assert_eq!(got, expect, "sl={sl} sr={sr} qr={qr} d={d}");
     }
@@ -1233,7 +1238,7 @@ mod tests {
         d: i32,
     ) -> TwoHit {
         assert_eq!(sc.word(), W);
-        let expect = extend_hit_two_hit_reference(sc, q, s, sl, sr, qr, d, false);
+        let expect = extend_hit_two_hit_reference(sc, q, InBatch::ALONE, s, sl, sr, qr, d, false);
         let got =
             two_hit_in_word::<W>(t, q, s, sl, sr, qr, d).expect("the table walks handle the call");
         assert_eq!(got, expect, "W={W} sl={sl} sr={sr} qr={qr} d={d}");
@@ -1400,10 +1405,10 @@ mod tests {
             let (sb, sb_range) = with_sentinels(s);
             // SAFETY: both buffers are [0, residues.., 0] and short; `x_sent_walks` holds.
             let (qf, sf) = (&qb[qb_range], &sb[sb_range]);
-            let sent = unsafe { sc.sent_two_hit(qf, sf, sl, sr, qr, d) };
+            let sent = unsafe { sc.sent_two_hit(qf, InBatch::ALONE, sf, sl, sr, qr, d) };
             assert_eq!(sent, expect, "sent {what}");
             // SAFETY: as above, and the words have `W` letters (the unit path's walks).
-            let sent = unsafe { sc.sent_two_hit_of::<W>(qf, sf, sl, sr, qr, d) };
+            let sent = unsafe { sc.sent_two_hit_of::<W>(qf, InBatch::ALONE, sf, sl, sr, qr, d) };
             assert_eq!(sent, expect, "sent_two_hit_of {what}");
         };
         let ties = [(1u8, 2u8), (4, 5), (19, 25), (5, 31), (27, 29)];
@@ -1430,15 +1435,26 @@ mod tests {
             assert!(unsafe { two_hit_sent_in::<W>(t, q_full, q_full, 10, sr, qr, d) }.is_none());
         }
         for (sr, qr, d) in [(20, 20, 0), (20, 20, 128), (50 - W, 50 - W, 16)] {
-            let expect = extend_hit_two_hit_reference(sc, q, q, 10, sr, qr, d, false);
-            let with =
-                super::super::two_hit::extend_hit_two_hit_with(sc, q, q, 10, sr, qr, d, false);
+            let expect =
+                extend_hit_two_hit_reference(sc, q, InBatch::ALONE, q, 10, sr, qr, d, false);
+            let with = super::super::two_hit::extend_hit_two_hit_with(
+                sc,
+                q,
+                InBatch::ALONE,
+                q,
+                10,
+                sr,
+                qr,
+                d,
+                false,
+            );
             assert_eq!(with, expect, "{matrix:?} W={W} sr={sr} qr={qr} d={d}");
             // SAFETY: the buffer is [0, residues.., 0]; `x_sent_walks` holds.
-            let sent = unsafe { sc.sent_two_hit(q_full, q_full, 10, sr, qr, d) };
+            let sent = unsafe { sc.sent_two_hit(q_full, InBatch::ALONE, q_full, 10, sr, qr, d) };
             assert_eq!(sent, expect, "sent {matrix:?} W={W} sr={sr} qr={qr} d={d}");
             // SAFETY: as above, and the words have `W` letters.
-            let sent = unsafe { sc.sent_two_hit_of::<W>(q_full, q_full, 10, sr, qr, d) };
+            let sent =
+                unsafe { sc.sent_two_hit_of::<W>(q_full, InBatch::ALONE, q_full, 10, sr, qr, d) };
             assert_eq!(
                 sent, expect,
                 "sent_two_hit_of {matrix:?} W={W} sr={sr} qr={qr} d={d}"
@@ -1564,7 +1580,8 @@ mod tests {
     fn check_sent(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
         let (qb, qr_range) = with_sentinels(q);
         let (sb, sr_range) = with_sentinels(s);
-        let expect = extend_hit_two_hit_reference(Blosum62Score, q, s, sl, sr, qr, d, false);
+        let expect =
+            extend_hit_two_hit_reference(Blosum62Score, q, InBatch::ALONE, s, sl, sr, qr, d, false);
         // SAFETY: both buffers are [0, residues.., 0] and short.
         let got = unsafe { two_hit_sent(&qb[qr_range], &sb[sr_range], sl, sr, qr, d) }
             .expect("the sentinel walks handle the call");
@@ -1710,11 +1727,29 @@ mod tests {
         // `extend_hit_two_hit_sent` runs the reference for the X-drops (the callers' words fit).
         let (qv, sv) = (&qb[qr.start + 1..qr.end - 1], &sb[sr.start + 1..sr.end - 1]);
         for (sl, srr, qrr, d) in [(10, 20, 20, 0), (10, 20, 20, 128), (10, 47, 47, 0)] {
-            let expect =
-                extend_hit_two_hit_reference(Blosum62Score, qv, sv, sl, srr, qrr, d, false);
+            let expect = extend_hit_two_hit_reference(
+                Blosum62Score,
+                qv,
+                InBatch::ALONE,
+                sv,
+                sl,
+                srr,
+                qrr,
+                d,
+                false,
+            );
             // SAFETY: both buffers are [0, residues.., 0].
-            let got =
-                unsafe { super::super::two_hit::extend_hit_two_hit_sent(q, s, sl, srr, qrr, d) };
+            let got = unsafe {
+                super::super::two_hit::extend_hit_two_hit_sent(
+                    q,
+                    InBatch::ALONE,
+                    s,
+                    sl,
+                    srr,
+                    qrr,
+                    d,
+                )
+            };
             assert_eq!(got, expect, "sl={sl} sr={srr} qr={qrr} d={d}");
         }
     }

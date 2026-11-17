@@ -8,3 +8,8 @@
   also outfmt 1 to 4) end as NCBI BLAST+ 2.17.0 does: the report stops after `Matrix: `, followed
   by "BLAST failed to write output" and exit status 6. Before, LOSAT wrote the matrix and gap
   costs and exited with status 0.
+- blastx reads `-subject -` from standard input as NCBI BLAST+ reads it, from a pipe or a
+  redirected file. With `-query -` (or no `-query`) as well, the subjects take all of standard
+  input and no query is read, as in NCBI BLAST+: outfmt 7 writes `# BLAST processed 0 queries`.
+  An empty standard input ends with "BLAST engine error: Empty CBlastQueryVector" and exit status
+  3. Before, LOSAT refused `-subject -`.

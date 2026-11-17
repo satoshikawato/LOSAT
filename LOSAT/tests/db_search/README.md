@@ -1470,7 +1470,10 @@ most 9 in BLOSUM62).
   D1a-4: `q649.faa` is record YP_009220649.1 of `tests/fasta/WSSV.faa` (its residues 1101-1290 are `gnl|CDD|103`'s
   fragment), `n103.fna` those 190 residues back-translated with the first codon of each amino acid (A GCT, R CGT, N AAC, D
   GAC, C TGC, Q CAG, E GAA, G GGT, H CAC, I ATC, L CTG, K AAA, M ATG, F TTC, P CCG, S TCT, T ACC, W TGG, Y TAC, V GTT), and
-  `nolet.fa` two records without letters (`>a`, `>b`);
+  `nolet.fa` two records without letters (`>a`, `>b`); fix round 3 of D1a-4: `tests/fasta/rps/alln.fna` (`n1`, 60 N,
+  and `n2`, 40 N; 110 bytes), a nucleotide run without a valid frame, and `allx.faa` give the rows
+  `db.{rps,rpstbn}.1v.{l563n0,l2p31}.*` (with `OLD_FSC=1` or a count past `Int4`, a run without a valid query is
+  reported as NCBI reports it) and `db.ak.bp.nseq0.oldfsc.allx.7` (BLASTP over `aliaskeys/p_nseq0`);
   `tests/fixtures/strategy/cases.tsv` copies some of them (`rpsblast.{3v,2v}.*.q40`, `rpstblastn.3v.*.nq.b2000`).
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt

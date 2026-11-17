@@ -1369,8 +1369,9 @@ masked). Line NP item M4a-2c.
   a reported profile up by its Seq-id among the profiles the range includes: where an included copy
   of its record holds it (a volume given twice under two paths, one past the range), NCBI shows that
   copy and exits 0, and LOSAT writes the same (probe dup6 of D1a-4 fix round 2); an included profile
-  of another record that holds it is refused too ("... whose Seq-id NCBI BLAST+ 2.17.0's report
-  finds in another record ..."). RPSBLAST refuses before any output (its search of every query batch
+  of another record or of other letters that holds it is refused too ("... whose Seq-id NCBI BLAST+
+  2.17.0's report finds in another record or other letters ...": NCBI shows that profile's letters
+  and length with the HSPs of the one out of the range; fix round 3, review C N4). RPSBLAST refuses before any output (its search of every query batch
   comes before the reports); RPSTBLASTN after the reports of the query batches before. With several
   volumes a profile outside the range past that cut of the merged lists, which no report of NCBI's
   looks up, is NCBI's run: its HSPs count in outfmt 7's `# N hits found` (and in

@@ -9049,6 +9049,53 @@ fn context0_searched(
     }
 }
 
+/// The searched space of each batch of `call` (`CallRequests::set_searched`): its context 0
+/// (`context0_searched`) where NCBI searches the batch (not `query_batch_skipped`), with
+/// rpsblast's the space its last search unit leaves in the options handle
+/// (`rps_hooks::request_space`).
+fn set_call_searched(
+    call: &CallRequests<'_>,
+    args: &ResolvedBlastpArgs,
+    rps_units: Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+    contexts: &[QueryContext],
+    gapped_params: &KarlinParams,
+    (query_valid, query_batch_skipped): (&[bool], &[bool]),
+    (exact_search_spaces, search_spaces): (&[Option<i64>], &[SearchSpace]),
+) -> Result<()> {
+    let rps_request_spaces = match rps_units {
+        Some(units) => {
+            let mut spaces = vec![None; contexts.len()];
+            for first in call.batch_firsts() {
+                spaces[first] = Some(rps_hooks::request_space(
+                    units,
+                    args,
+                    &contexts[first],
+                    gapped_params,
+                )?);
+            }
+            Some(spaces)
+        }
+        None => None,
+    };
+    call.set_searched(|first| {
+        (!query_batch_skipped[first]).then(|| {
+            let mut context0 = context0_searched(
+                contexts,
+                query_valid,
+                args.searchsp,
+                exact_search_spaces,
+                search_spaces,
+                first,
+            );
+            if let Some(space) = rps_request_spaces.as_ref().and_then(|spaces| spaces[first]) {
+                context0.space = space;
+            }
+            context0
+        })
+    });
+    Ok(())
+}
+
 /// The batch whose search strategy request the run writes right after a call's batches are
 /// reported (`BlastpReports::strategy_next`): the batch that stops the run (every query without
 /// letters) after the searched batches, or the batch that fails with a header file NCBI cannot read
@@ -10604,55 +10651,15 @@ fn run_call(
         ));
     }
 
-    // The database's extent (`call_setup::db_extent`).
-    let call_setup::BlastpDbExtent {
-        total_db_len,
-        sorts_results,
-        gapped_gumbel,
-        num_subjects,
-        eff_db_length,
-        cutoff_subject_length,
-        setup_numbers: (setup_total, setup_count),
-        rps_units,
-    } = call_setup::db_extent(&args, database, subjects)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // ```c
-    //    if (sbp->gbp) {
-    //    ...
-    //    } else {
-    //        min_subject_length = (Int4) (total_length/num_seqs);
-    //    }
-    //
-    //    if(min_subject_length <=0) {
-    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-    //    }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-    // ```c
-    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
-    //         new_msg->message = strdup("The average subject length is too short");
-    //         new_msg->severity = eBlastSevFatal;
-    // ```
+    // The database's extent (`call_setup::db_extent`) and NCBI's error of its setup's average
+    // subject length (`call_setup::setup_fails`, after LOSAT's refusal of a count of 0).
+    let extent = call_setup::db_extent(&args, database, subjects)?;
     // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
     // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    // rpsblast: every unit's setup (`RpsUnit::setup_subject_length`, one owner with rpstblastn's;
-    // the first unit's numbers are the set-up's).
-    if contexts.iter().any(|ctx| ctx.is_valid)
-        && rps_units.map_or_else(
-            || {
-                crate::stats::setup::setup_subject_length(
-                    setup_total,
-                    setup_count,
-                    (!args.old_fsc).then_some((cutoff_subject_length, false)),
-                )
-                .is_none()
-            },
-            |units| units.subject_length_too_short(!args.old_fsc),
-        )
-    {
+    if call_setup::setup_fails(&args, database, &extent, &contexts)? {
         return Err(preliminary_search_error(
             &args,
             query_records,
@@ -10666,9 +10673,19 @@ fn run_call(
             &query_batch_skipped,
             query_chunk,
             "",
-            "The average subject length is too short",
+            crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
         ));
     }
+    let call_setup::BlastpDbExtent {
+        total_db_len,
+        sorts_results,
+        gapped_gumbel,
+        num_subjects,
+        eff_db_length,
+        cutoff_subject_length,
+        rps_units,
+        ..
+    } = extent;
     let call_statistics = call_setup::CallStatistics {
         args: &args,
         database,
@@ -10971,39 +10988,15 @@ fn run_call(
     // The search strategy's requests carry each batch's `EffectiveSearchSpace` option, the
     // archive's (`FirstContext::context0_space`), now that the call's set-up has computed them.
     if let Some(call) = reports.call_requests {
-        // rpsblast: the space its last search unit leaves in the options handle
-        // (`rps_hooks::request_space`).
-        let rps_request_spaces = match &rps_units {
-            Some(units) => {
-                let mut spaces = vec![None; contexts.len()];
-                for first in call.batch_firsts() {
-                    spaces[first] = Some(rps_hooks::request_space(
-                        units,
-                        &args,
-                        &contexts[first],
-                        &gapped_params,
-                    )?);
-                }
-                Some(spaces)
-            }
-            None => None,
-        };
-        call.set_searched(|first| {
-            (!query_batch_skipped[first]).then(|| {
-                let mut context0 = context0_searched(
-                    &contexts,
-                    &query_valid,
-                    args.searchsp,
-                    &exact_search_spaces,
-                    &search_spaces,
-                    first,
-                );
-                if let Some(space) = rps_request_spaces.as_ref().and_then(|spaces| spaces[first]) {
-                    context0.space = space;
-                }
-                context0
-            })
-        });
+        set_call_searched(
+            call,
+            &args,
+            rps_units,
+            &contexts,
+            &gapped_params,
+            (&query_valid, &query_batch_skipped),
+            (&exact_search_spaces, &search_spaces),
+        )?;
     }
     search_split_query_batches(
         &args,
@@ -11070,10 +11063,8 @@ fn run_call(
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
-    // (rpsblast: the RPS engine's lists are its traceback's, which sorted them before its filters
-    // and after them where the unit's total length is above 0, blast_traceback.c:1306, 1768-1771;
-    // over several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts
-    // nowhere after.)
+    // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
+    // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
     if args.rps_search.is_none() {
         for hit_list_opt in &mut preliminary_hit_lists {
             if let Some(hit_list) = hit_list_opt.as_mut() {
@@ -11375,10 +11366,8 @@ fn run_call(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
                 // (quoted at `DbStatistics::sorts_results`): not for a database length of 0 or of
                 // 2^63 or more, whose lists keep the traceback's order (by OID with
-                // `-comp_based_stats 0`, the composition heap's otherwise). rpsblast over one
-                // volume: the engine sorted its lists after the filters by the same gate of the
-                // `-db` name's length (`RpsUnit::sorts_results`), so this sort finds them sorted
-                // where it runs.
+                // `-comp_based_stats 0`, the composition heap's otherwise; rpsblast's engine
+                // sorted by the same gate, `RpsUnit::sorts_results`).
                 if sorts_results {
                     hit_list.sort_by_evalue();
                 }

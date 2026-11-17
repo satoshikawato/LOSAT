@@ -189,8 +189,9 @@ pub(super) fn note_strategy_sets(
 /// `database` with the search units of rpsblast's search of it and their statistics
 /// (`rps_search::volumes::RpsUnits`, one owner with rpstblastn's, built once per run here, where
 /// the database opens: `open_search_database`), with the run's `-searchsp` and `-dbsize`. Their
-/// refusals come where NCBI meets them: the setup's counts in `call_setup::db_extent`, the
-/// concatenated lengths at each unit's search (`rps_search`, `RpsUnit::check_engine_length`).
+/// refusals come where NCBI meets them: the setup's counts in `run_call` where a query of the run
+/// is valid (`call_setup::setup_fails`), the concatenated lengths at each unit's search
+/// (`rps_search`, `RpsUnit::check_engine_length`).
 #[cold]
 #[inline(never)]
 pub(super) fn with_units(

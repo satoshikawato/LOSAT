@@ -646,6 +646,36 @@ fn one_hsp_named(
     String::from_utf8(out).unwrap()
 }
 
+// PD-LOSAT-NCBI-DEFECTS approved exception 15 (review C of line RG D1a-4, SF1): XML2's
+// `db-len` of exactly -2^63, NCBI's `-0` in its serial XML (outfmt 14, 16; probe q17b of review
+// C), is written as its digits, as NCBI's JSON writes it (outfmt 13, 15).
+#[test]
+fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let mut run = run(Some(&matrix), "db/sprot");
+    run.db_len = i64::MIN;
+    for (kind, written) in [
+        (Xml2Kind::Single16, "<db-len>-9223372036854775808</db-len>"),
+        (Xml2Kind::Single15, "\"db_len\": -9223372036854775808"),
+    ] {
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let query = XmlQuery {
+            id: b"Query_1",
+            title: b"",
+            len: 12,
+            stats: XmlStats::NONE,
+            message: None,
+            searched: true,
+            masks: &[],
+        };
+        let mut out = Vec::new();
+        writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(written), "{kind:?}: {text}");
+    }
+}
+
 #[test]
 fn hit_descriptions_follow_the_database_and_subject_rules() {
     // -db: the accession (the ordinal id), the stored title (empty: `<title></title>`), the taxid

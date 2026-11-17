@@ -447,7 +447,8 @@ impl RpsUnits {
     // `stats::setup::setup_subject_length`)
     /// LOSAT's refusal of a unit whose setup counts 0 sequences of a positive total in a search
     /// without the Gumbel block (`gumbel` false: `-searchsp`, `OLD_FSC`), for every unit
-    /// (`RpsUnit::check_setup_count`): rpsblast's set-up of the search (`call_setup::db_extent`).
+    /// (`RpsUnit::check_setup_count`): rpsblast's, before any output where a query of the run is
+    /// valid (`blastp::blast_engine::call_setup::setup_fails`).
     pub(crate) fn check_setup_counts(&self, gumbel: bool, program: &str) -> Result<()> {
         self.units
             .iter()
@@ -463,15 +464,6 @@ impl RpsUnits {
     }
 }
 
-/// NCBI's error of a unit's setup whose `min_subject_length` is 0 (`RpsUnit::setup_subject_length`).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-/// ```c
-///     case BLASTERR_SUBJECT_LENGTH_INVALID:
-///         new_msg->message = strdup("The average subject length is too short");
-/// ```
-pub(crate) const SUBJECT_LENGTH_TOO_SHORT: &str = "The average subject length is too short";
-
 impl RpsUnit {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (quoted at
     // `stats::setup::setup_subject_length`)
@@ -480,7 +472,11 @@ impl RpsUnit {
     /// total by that count (`min_subject_length`) and crashes (SIGFPE, DECISIONS 14 of line RG).
     /// Only the unit of one volume can (an alias file's `NSEQ 0`): a bare volume counts its
     /// profiles, and `DbSeqNum` does not reach the division (D1a4-7). The division is the one of
-    /// `setup_subject_length`, in the unit's setup at the first query batch that NCBI searches.
+    /// `setup_subject_length`, which NCBI's setup of the unit makes only for a batch with a valid
+    /// query (`CLocalBlast::Run`'s `CheckInternalData` before it): rpstblastn checks it at the
+    /// first such batch that searches the unit (`search_window`), rpsblast once before any
+    /// output where a query of the run is valid (`RpsUnits::check_setup_counts`; review C of
+    /// D1a-4, MF1 and N2).
     pub(crate) fn check_setup_count(&self, gumbel: bool, program: &str) -> Result<()> {
         if !gumbel && self.setup_total > 0 && self.setup_count == 0 {
             return Err(crate::algorithm::common::database::refusal(
@@ -495,8 +491,9 @@ impl RpsUnit {
     /// (`stats::setup::setup_subject_length`: the unit's shortest length with the Gumbel block,
     /// `gumbel`, else its total over its count as NCBI's `Int4`), the one owner of both programs'
     /// check (review A of D1a-4, MF5); `None` where NCBI's setup fails with
-    /// `SUBJECT_LENGTH_TOO_SHORT` (an alias file's `NSEQ` above the `LENGTH` over one volume),
-    /// after its effective lengths and before the RPS engine runs (`check_engine_length`). A
+    /// `stats::setup::SUBJECT_LENGTH_TOO_SHORT` (an alias file's `NSEQ` above the `LENGTH` over
+    /// one volume), after its effective lengths and before the RPS engine runs
+    /// (`check_engine_length`). A
     /// count of 0 of a positive total is LOSAT's refusal before (`check_setup_count`).
     pub(crate) fn setup_subject_length(&self, gumbel: bool) -> Option<i32> {
         crate::stats::setup::setup_subject_length(
@@ -724,7 +721,7 @@ pub(crate) fn report_ordinal_ids(
                     }
                     Ok(Found::Other(other)) => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record (the profile of OID {other}), is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {other}), is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;
@@ -778,7 +775,8 @@ enum Found {
     /// No included profile holds its Seq-align id: NCBI writes `Unknown` or stops with a null
     /// pointer exception.
     Nothing,
-    /// An included profile of another record holds its Seq-align id (this OID).
+    /// An included profile of another record, or of other letters, holds its Seq-align id (this
+    /// OID).
     Other(u32),
 }
 
@@ -788,9 +786,14 @@ enum Found {
 /// What NCBI's reports find of the profile of OID `oid`, which the alias files' ranges leave out:
 /// the first included profile that holds its Seq-align id (`SeqidLookup::seqid_to_oids`), shown
 /// in its place; LOSAT writes it where that profile is a copy of its record (the same definition
-/// lines but for their taxids, the rule of `report::db_subject::joins_as_copy`): a volume given
-/// twice under two paths, one of them past the range (probe dup6 of line RG D1a-4 fix round 2:
-/// NCBI's rows of both copies, exit 0).
+/// lines but for their taxids, the rule of `report::db_subject::joins_as_copy`, and the same
+/// letters): a volume given twice under two paths, one of them past the range (probe dup6 of line
+/// RG D1a-4 fix round 2: NCBI's rows of both copies, exit 0). The letters: NCBI's reports show the
+/// found profile's length and letters (its scope's Bioseq for the Seq-align id) with this
+/// profile's HSPs, whose identities LOSAT counts on this profile's consensus
+/// (`traceback::formatter_identities`), so a profile of the same definition lines and other
+/// letters is refused as another record is (`report::db_subject`'s `fetched` refuses such a
+/// subject in blastp's reports; review C of D1a-4, N4).
 fn found_as_copy(db: &SeqDb, oid: u32) -> Result<Found, crate::seqdb::SeqDbError> {
     use crate::seqdb::SequenceHeader;
     let SequenceHeader::Parsed(set) = db.read_header_of_oid(oid)? else {
@@ -811,8 +814,16 @@ fn found_as_copy(db: &SeqDb, oid: u32) -> Result<Found, crate::seqdb::SeqDbError
             })
             .collect()
     };
+    let letters = |oid: u32| -> Result<Vec<u8>, crate::seqdb::SeqDbError> {
+        Ok(db
+            .read_sequence_at(db.locate_oid(oid)?)?
+            .protein(0)
+            .to_vec())
+    };
     let copy = match db.read_header_of_oid(found)? {
-        SequenceHeader::Parsed(other) => record(&set) == record(&other),
+        SequenceHeader::Parsed(other) => {
+            record(&set) == record(&other) && letters(oid)? == letters(found)?
+        }
         SequenceHeader::Ordinal(_) => false,
     };
     Ok(match db.included_ordinal(found) {
@@ -1462,12 +1473,12 @@ mod tests {
     }
 
     /// The strategy's `DbLength`: `D` of any sign where `x_AdjustDbSize` runs, -2^63 too, which the
-    /// ASN.1 text writer of the requests writes as its digits where NCBI writes `-0`
-    /// (PD-LOSAT-NCBI-DEFECTS approved exception 15; NCBI's `big-integer -0` of probe r2_3v_l2p63#2
-    /// of line RG D1a-4's review A).
+    /// requests write as its digits where NCBI writes `-0` (PD-LOSAT-NCBI-DEFECTS approved
+    /// exception 15; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
+    /// the request's bytes: `report::archive::strategy`'s test
+    /// `a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits`).
     #[test]
-    fn the_strategy_db_length_is_d_and_minus_two_to_the_63_is_written_as_its_digits() {
-        use crate::report::serial::encoder::Encoder;
+    fn the_strategy_db_length_is_d_of_any_sign() {
         let volume = unit(190, (190, 1), 1, 191);
         for length in [0, -1, 5000, -9_223_372_036_854_775_807, i64::MIN] {
             assert_eq!(
@@ -1476,9 +1487,6 @@ mod tests {
             );
         }
         assert_eq!(units(vec![volume], None, 0).strategy_db_length(), None);
-        let mut out = Vec::new();
-        crate::report::serial::asn_text::AsnTextEncoder::new(&mut out).big_int(i64::MIN);
-        assert_eq!(out, b"-9223372036854775808");
     }
 
     /// The setup's division by 0 without the Gumbel block, and the concatenated lengths.

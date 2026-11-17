@@ -516,7 +516,7 @@ impl TranslatedRpsSearch {
                     .and_then(|()| match unit.setup_subject_length(gumbel_block) {
                         Some(_) => Ok(()),
                         None => Err(RpsBatchError::Setup(anyhow::anyhow!(
-                            crate::algorithm::rps_search::volumes::SUBJECT_LENGTH_TOO_SHORT
+                            crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
                         ))
                         .into()),
                     })
@@ -1617,7 +1617,7 @@ mod tests {
                 std::fs::copy(dir.join(&name), dir.join("dup").join(&name)).unwrap();
             }
         }
-        let open = |last_oid: u32| {
+        let open = |last_oid: u32, copy_dir: &str| {
             std::fs::write(
                 dir.join(format!("ex{last_oid}.pal")),
                 format!("TITLE t\nDBLIST rps_mini3v.00 rps_mini3v.01\nLAST_OID {last_oid}\n"),
@@ -1626,7 +1626,7 @@ mod tests {
             let name = format!(
                 "{} {}",
                 dir.join(format!("ex{last_oid}")).display(),
-                dir.join("dup/rps_mini3v.01").display()
+                dir.join(copy_dir).join("rps_mini3v.01").display()
             );
             BlastxDatabase::open(
                 &name,
@@ -1661,7 +1661,7 @@ mod tests {
         };
         // The OIDs: the -db names in order, rps_mini3v.00, .01 and the copy.
         let (other, twin, copy) = (0, 1, 2);
-        let database = open(2);
+        let database = open(2, "dup");
         let db = database.x_seqdb();
         assert_eq!(
             (0..3)
@@ -1681,7 +1681,7 @@ mod tests {
             Some(vec![1])
         );
         assert_eq!(oids(&apart), [1, 0]);
-        let database = open(1);
+        let database = open(1, "dup");
         let db = database.x_seqdb();
         let mut unfound = vec![Some(hit_list(&[twin, copy, other]))];
         let error = report_ordinal_ids(db, &mut unfound, 1, PROGRAM).unwrap_err();
@@ -1692,6 +1692,35 @@ mod tests {
             "{error}"
         );
         drop(database);
+        // Review C of D1a-4 (SF2 d, N4): where the included profile of the Seq-id is another
+        // record (another title: `duph`) or holds other letters (`dupl`), NCBI shows that
+        // profile's names or letters with the HSPs of the one out of the range: LOSAT's refusal
+        // (`Found::Other`), not the copy's rows.
+        for (copy_dir, file, at, byte) in [
+            ("dupl", "rps_mini3v.01.psq", 1, 0x0a),
+            ("duph", "rps_mini3v.01.phr", 0x0f, b'R'),
+        ] {
+            std::fs::create_dir_all(dir.join(copy_dir)).unwrap();
+            for entry in std::fs::read_dir(dir.join("dup")).unwrap() {
+                let name = entry.unwrap().file_name();
+                std::fs::copy(dir.join("dup").join(&name), dir.join(copy_dir).join(&name)).unwrap();
+            }
+            let path = dir.join(copy_dir).join(file);
+            let mut bytes = std::fs::read(&path).unwrap();
+            assert_ne!(bytes[at], byte, "{copy_dir}");
+            bytes[at] = byte;
+            std::fs::write(&path, bytes).unwrap();
+            let database = open(2, copy_dir);
+            let db = database.x_seqdb();
+            let mut found_other = vec![Some(hit_list(&[twin, copy, other]))];
+            let error = report_ordinal_ids(db, &mut found_other, 1, PROGRAM).unwrap_err();
+            assert!(
+                error.to_string().contains(&format!(
+                    "a hit of the profile of OID {copy} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {twin})"
+                )),
+                "{copy_dir}: {error}"
+            );
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

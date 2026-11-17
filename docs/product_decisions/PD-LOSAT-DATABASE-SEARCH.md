@@ -308,8 +308,9 @@ batch where two gapped alignments of one tree start past `Lc + 1` (NCBI's interv
 without end) and one where `Lc` is above the rows and an ungapped extension reads the row after the
 profiles past the `.rps` file's last page or goes on past that row (NCBI reads past its score
 matrix), RPSBLAST before any output and RPSTBLASTN after the reports of the query batches before, a
-setup count of 0 without the Gumbel block (`NSEQ 0` over one volume with `-searchsp` or `OLD_FSC`:
-SIGFPE; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
+setup count of 0 without the Gumbel block (`NSEQ 0` over one volume with `-searchsp` or `OLD_FSC`
+where a query is searched: SIGFPE; a run without a valid query is reported as NCBI reports it, fix
+round 3, review C MF1; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
 first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
 `STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
 `-9223372036854775808` (approved exception 15; with one query batch NCBI's only request holds no
@@ -317,7 +318,11 @@ first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LEN
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
-also with `-ungapped`), where NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+also with `-ungapped`), where NCBI divides by zero (SIGFPE) as a query is searched. A run of
+queries without a valid one, which NCBI reports without dividing, is reported as NCBI's by
+BLASTP, BLASTX and PSI-BLAST (fix round 3 of D1a-4, rows `db.ak.bp.nseq0.oldfsc.allx.7`); BLASTN,
+TBLASTN and TBLASTX still refuse it (their check runs at the database's open, before the
+queries; open, probe e8 of fix round 3). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 

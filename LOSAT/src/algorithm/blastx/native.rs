@@ -132,7 +132,11 @@ pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
 //         exit_code = BLAST_OUTPUT_ERROR;                                     \
 //     }                                                                       \
 // ```
-pub(super) fn output_error(_: io::Error) -> anyhow::Error {
+pub(super) fn output_error(error: io::Error) -> anyhow::Error {
+    // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
+    if crate::report::ostream::is_report_write_failure(&error) {
+        return error.into();
+    }
     NativeError {
         exit: 6,
         message: "BLAST failed to write output\n".into(),
@@ -224,17 +228,10 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
-    } else if let Some(e) = error
-        .downcast_ref::<io::Error>()
-        .filter(|e| e.kind() == io::ErrorKind::BrokenPipe)
-    {
-        // A write to a closed pipe, which NCBI's SIGPIPE ends: reported as before the report
-        // stream until line RG's question T6-Q1 (`ostream::ClosedPipe`).
-        output_error(io::Error::new(e.kind(), e.to_string()))
     } else if error.downcast_ref::<io::Error>().is_some() {
         // Any other error carried as an `io::Error` is LOSAT's own (an internal error of a
-        // formatter, `report::query_anchored::internal`): only the report stream's failure is
-        // NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
+        // formatter, `report::query_anchored::internal`): only the report stream's failure (a
+        // closed pipe's too) is NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
         error
     } else {
         engine(error)
@@ -3176,7 +3173,7 @@ mod archive_error_tests {
     /// Line RG T3c review 3 N4: an internal error of a formatter carried as an `io::Error`
     /// (`report::query_anchored::internal`) is LOSAT's own error, not NCBI's "BLAST failed to
     /// write output" (exit status 6): that is the report stream's failure alone
-    /// (`ReportStream::finish`), and a closed pipe until line RG's T6-Q1.
+    /// (`ReportStream::finish`), which passes through.
     #[test]
     fn only_the_report_streams_failure_is_the_output_error() {
         let internal = report_error(
@@ -3184,8 +3181,12 @@ mod archive_error_tests {
         );
         assert!(internal.downcast_ref::<NativeError>().is_none());
         assert!(internal.downcast_ref::<io::Error>().is_some());
-        let pipe = report_error(io::Error::from(io::ErrorKind::BrokenPipe).into());
-        assert_eq!(pipe.downcast_ref::<NativeError>().map(|e| e.exit), Some(6));
+        let stream = report_error(
+            io::Error::other(crate::report::ostream::ReportWriteFailure::thrown()).into(),
+        );
+        assert!(stream
+            .downcast_ref::<io::Error>()
+            .is_some_and(crate::report::ostream::is_report_write_failure));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the

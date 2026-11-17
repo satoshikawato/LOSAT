@@ -39,8 +39,9 @@
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
   E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-17 (exception 3
   narrowed to a closed pipe: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; exception 7
-  withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; line RG item T6a,
-  RG DECISIONS T6-1 and T6-2, Owner-delegated, the same standing instruction)
+  withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; exception 5 for every
+  format of the search programs, the Owner's answer A to line RG's T6-Q1 of 2026-11-17; line RG item
+  T6a, RG DECISIONS T6-1, T6-2 and T6-3, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -85,18 +86,16 @@ BLAST+.
    exits with a non-zero code. For outfmt 0 LOSAT must follow NCBI
    (`BLAST failed to write output: <msg>`, exit code 6 `BLAST_OUTPUT_ERROR`,
    `blast_app_util.hpp:242-254`); this is ported program by program (BLASTN in S07+++b).
-   Version 1.22: withdrawn but for a closed pipe. Every program's report stream fails where
-   NCBI's does (`report::ostream::ReportStream`, line RG item T6a): a failed write of outfmt 6,
-   7 or 10 aborts with libstdc++'s `terminate called after throwing an instance of
+   Version 1.22: withdrawn. Every program's report stream fails where NCBI's does
+   (`report::ostream::ReportStream`, line RG item T6a): a failed write of outfmt 6, 7 or 10
+   aborts with libstdc++'s `terminate called after throwing an instance of
    'std::__ios_failure'` text, as NCBI's (the destructor of `CBlastTabularInfo` flushes the failed
-   stream, `tabular.cpp:160-163`). A closed pipe, where NCBI is ended by SIGPIPE in every
-   format (exception 5), is reported as before (the write's error and exit code 1; BLASTX and
-   RPSTBLASTN abort as above) until the Owner decides line RG's question T6-Q1.
+   stream, `tabular.cpp:160-163`). A closed pipe is exception 5.
 4. **Memory exhaustion.** LOSAT aborts when an allocation fails. NCBI catches the
    allocation failure and prints `BLAST ran out of memory`, exit code 4
    (`BLAST_OUT_OF_MEMORY`, `blast_app_util.hpp:216-235,255-258`).
-5. **Closed pipe in outfmt 0** (version 1.1, accepted by the maintainer on 2026-10-02 in
-   Session S07+++b). NCBI keeps the C runtime's default action for SIGPIPE, so a write to
+5. **Closed pipe** (outfmt 0 in version 1.1, accepted by the maintainer on 2026-10-02 in
+   Session S07+++b; every format in version 1.22). NCBI keeps the C runtime's default action for SIGPIPE, so a write to
    a pipe whose reader has closed ends it by the signal (exit status 141 from the shell,
    no message), in every format. The Rust runtime ignores SIGPIPE; restoring it needs a
    native `signal` call that the project's pure-Rust runtime boundary check rejects. LOSAT
@@ -107,6 +106,15 @@ BLAST+.
    7 report read by `head -c 100`), LOSAT exits with code 0, where NCBI, which writes later
    (at its flushes), is ended by SIGPIPE (141). This timing is part of exceptions 3 and 5
    (round-3 audit of Session S07+++b).
+   Version 1.22: every format of the search programs (the Owner's answer A to line RG's
+   question T6-Q1, 2026-11-17: no crate and no native call; RG DECISIONS T6-3). A write to a
+   closed pipe (`EPIPE`; the Rust runtime ignores SIGPIPE) is a failed write of the report's
+   stream like any other (`report::ostream::ReportStream`, line RG item T6a), and the run ends as
+   NCBI ends that format's failed write: outfmt 0 to 4, 5, 8, 9, 11, 12, 15, 16 and 18 with their
+   posts and `BLAST failed to write output`, exit code 6; outfmt 6, 7 and 10 with libstdc++'s
+   `terminate` text and an abort (exit status 134); SAM (17) with exit code 0; where NCBI is
+   ended by SIGPIPE (141, no text). The timing of version 1.2 stays: a pipe that only the
+   writes after the formatter reach is not reported (exit code 0).
 6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
    2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
    closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to

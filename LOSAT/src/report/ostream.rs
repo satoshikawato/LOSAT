@@ -474,6 +474,16 @@ pub struct ReportWriteFailure {
     kind: FailureKind,
 }
 
+impl ReportWriteFailure {
+    /// The failure of an exception that unwinds (for the tests of the programs' error maps).
+    #[cfg(test)]
+    pub(crate) fn thrown() -> Self {
+        ReportWriteFailure {
+            kind: FailureKind::Thrown,
+        }
+    }
+}
+
 /// What the formatter does with a `ReportWriteFailure`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FailureKind {
@@ -606,12 +616,8 @@ struct Core {
     failure: Option<Failure>,
     /// Whether the stream is `cout` (tied to `cerr`).
     standard_output: bool,
-    /// Whether the format is 0-4 or 18 (`ClosedPipe::reported`).
-    pipe_reported: bool,
     /// The application's name in NCBI's posts.
     program: &'static str,
-    /// A write to a closed pipe failed (`ClosedPipe`).
-    pipe: Option<ClosedPipe>,
     /// Whether the failure of the caught region being written was posted (`Site::XmlIteration`:
     /// one post per `Iteration`).
     region_posted: bool,
@@ -652,38 +658,6 @@ fn write_device(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (NCBI keeps the default action
-// of SIGPIPE unless SOCK starts, which only the usage report does, after the run)
-// ```c
-// #ifdef NCBI_OS_UNIX
-//         if (s_SigPipeIgnored == eOff) {
-//             ...
-//                 signal(SIGPIPE, SIG_IGN);
-// ```
-/// A write of the report to a pipe whose reader closed it, where NCBI is ended by SIGPIPE (exit
-/// status 141, no text, every format) and LOSAT cannot be (the Rust runtime ignores SIGPIPE;
-/// approved exceptions 3 and 5 of `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`). Until the Owner's answer
-/// to line RG's question T6-Q1 the run ends as before this stream (item T6c): the formats 0-4 and
-/// 18 with "BLAST failed to write output" (exit 6), every other format with the error of the
-/// write (`Broken pipe`, exit 1), BLASTX's and RPSTBLASTN's with their own (outfmt 6, 7, 10 and 20
-/// `std::terminate`'s text and an abort, every other format "BLAST failed to write output").
-#[derive(Clone, Copy, Debug)]
-struct ClosedPipe {
-    /// Whether the format is 0-4 or 18.
-    reported: bool,
-    /// The error of the failed write (`EPIPE`).
-    raw: Option<i32>,
-}
-
-impl ClosedPipe {
-    fn error(self) -> std::io::Error {
-        self.raw.map_or_else(
-            || std::io::ErrorKind::BrokenPipe.into(),
-            std::io::Error::from_raw_os_error,
-        )
-    }
-}
-
 impl Core {
     /// One insertion (`NcbiBuffer::sputn`): what NCBI's buffer writes of the bytes held and
     /// `buf` is written, the first of them, and it holds the rest (at most a buffer's bytes: the
@@ -698,7 +672,6 @@ impl Core {
             // `PrintErrorArchive`): its buffer's first write fails without an exception mask, a
             // write fault at the buffer's position then (`write_fault`).
             if !self.throws
-                && self.pipe.is_none()
                 && self.site == (Site::Serial { whole: true })
                 && self.undecided.is_none()
             {
@@ -747,7 +720,6 @@ impl Core {
                     Site::Serial { whole: true } | Site::Xml2Report { .. }
                 ) && !self.standard_output
                     && self.throws
-                    && error.kind() != std::io::ErrorKind::BrokenPipe
                 {
                     if let Some(before) = before {
                         self.bad = true;
@@ -840,32 +812,26 @@ impl Core {
         self.post(&cannot_close_post(self.program))
     }
 
-    /// A write of the device that failed with `error`, for an insertion or for a flush
-    /// (`flushing`): the stream is bad, and NCBI's end is the region's (`Site`).
-    fn failed_write(&mut self, error: std::io::Error, flushing: bool) -> std::io::Result<()> {
-        match error {
-            // A closed pipe that only the writes after the formatter reach (`finish`) ends the
-            // run as it would have (exception 5: LOSAT's completed writes did not reach it).
-            error if error.kind() == std::io::ErrorKind::BrokenPipe && !self.throws => {
-                self.bad = true;
-                Ok(())
-            }
-            error if error.kind() == std::io::ErrorKind::BrokenPipe => {
-                self.bad = true;
-                self.pipe = Some(ClosedPipe {
-                    reported: self.pipe_reported,
-                    raw: error.raw_os_error(),
-                });
-                Err(error)
-            }
-            _ => {
-                self.bad = true;
-                if !self.throws {
-                    return Ok(());
-                }
-                self.thrown(flushing)
-            }
+    // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (NCBI keeps the default
+    // action of SIGPIPE unless SOCK starts, which only the usage report does, after the run)
+    // ```c
+    // #ifdef NCBI_OS_UNIX
+    //         if (s_SigPipeIgnored == eOff) {
+    //             ...
+    //                 signal(SIGPIPE, SIG_IGN);
+    // ```
+    /// A write of the device that failed, for an insertion or for a flush (`flushing`): the
+    /// stream is bad, and NCBI's end is the region's (`Site`). A pipe whose reader closed it is
+    /// such a write too (`EPIPE`: Rust's runtime ignores SIGPIPE). NCBI, whose SIGPIPE keeps its
+    /// default action, is ended by it (exit status 141, no text) in every format, which LOSAT
+    /// cannot be without a native call: it ends as a failed write of the format ends (approved
+    /// exception 5 of `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`; line RG's T6-Q1 = A, 2026-11-17).
+    fn failed_write(&mut self, _error: std::io::Error, flushing: bool) -> std::io::Result<()> {
+        self.bad = true;
+        if !self.throws {
+            return Ok(());
         }
+        self.thrown(flushing)
     }
 
     /// The exception of a bad stream at an insertion (or a flush, `flushing`) while the formatter
@@ -948,9 +914,7 @@ impl Core {
     /// end, `thrown`: the first insertion of a query's `Iteration` after a caught failure throws
     /// again).
     fn after_failure(&mut self) -> std::io::Result<()> {
-        if let Some(pipe) = self.pipe {
-            Err(pipe.error())
-        } else if self.throws {
+        if self.throws {
             self.thrown(false)
         } else {
             Ok(())
@@ -996,7 +960,7 @@ impl Core {
     /// failed `cout` while the formatter lives throws there, inside the post's destructor
     /// (`std::terminate`); the text is not written.
     fn tie(&mut self) -> std::io::Result<()> {
-        if self.bad && self.pipe.is_none() {
+        if self.bad {
             // `cout.flush()` of a bad stream: its sentry throws while the formatter lives.
             if self.throws {
                 self.failure = Some(Failure::Terminate);
@@ -1005,9 +969,6 @@ impl Core {
             return Ok(());
         }
         let tied = self.flush();
-        if self.pipe.is_some() {
-            return tied;
-        }
         if tied.is_err() {
             self.failure = Some(Failure::Terminate);
             return Err(write_failure());
@@ -1026,25 +987,6 @@ impl Core {
         }
         self.throws = false;
         let _ = self.flush();
-        if let Some(pipe) = self.pipe {
-            let blastx = matches!(self.program, "blastx" | "rpstblastn");
-            let failed = |exit: i32, message: &str| {
-                Err(crate::cli::NativeError {
-                    exit,
-                    message: message.to_string(),
-                }
-                .into())
-            };
-            return match (pipe.reported, result) {
-                (true, _) => failed(6, "BLAST failed to write output\n"),
-                (false, Err(error)) => Err(error),
-                (false, Ok(())) if blastx && self.site == Site::Tabular => {
-                    failed(-6, TERMINATE_TEXT)
-                }
-                (false, Ok(())) if blastx => failed(6, "BLAST failed to write output\n"),
-                (false, Ok(())) => Err(pipe.error().into()),
-            };
-        }
         match self.failure.take() {
             None => result,
             Some(Failure::Thrown { posts }) => Err(crate::cli::NativeError {
@@ -1103,8 +1045,6 @@ impl ReportStream {
             failure: None,
             standard_output,
             program,
-            pipe_reported: false,
-            pipe: None,
             region_posted: false,
             diagnostics: None,
             inserted: 0,
@@ -1130,7 +1070,6 @@ impl ReportStream {
                 Site::of_format(number),
             ),
         };
-        lock(&stream.0).pipe_reported = matches!(number, 0..=4 | 18);
         *lock(&RUN_PROGRAM) = Some(program);
         stream
     }

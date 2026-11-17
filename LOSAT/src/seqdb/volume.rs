@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::column::{self, Column, MASK_DATA_TITLE};
-use super::file::{DbFile, MAP_PAGE};
+use super::file::DbFile;
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
@@ -301,9 +301,7 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let next = self.index.sequence_start(oid + 1)?;
         let length = self.seq_file()?.len();
-        length
-            .div_ceil(MAP_PAGE)
-            .saturating_mul(MAP_PAGE)
+        super::file::mapped_length(length)
             .checked_sub(next)
             .filter(|_| next <= length)
             .ok_or_else(|| self.index.sequence_changed(oid, 2))

@@ -5736,12 +5736,15 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis);
             let rps = resolved.rps_search.is_some();
-            if rps {
-                rps_hooks::check_units(resolved, &database)?;
-            }
+            let database = if rps {
+                rps_hooks::with_units(resolved, database)?
+            } else {
+                database
+            };
             // rpsblast: each batch's `EffectiveSearchSpace` option is its last search unit's own
-            // (`rps_hooks::RpsSearched::request_spaces`), and its units read `-dbsize` themselves
-            // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
+            // (`rps_hooks::request_space`, `run_call`'s `rps_request_spaces`), and its units read
+            // `-dbsize` themselves (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes
+            // a list.
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -10583,13 +10586,20 @@ fn run_call(
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
+    // rpsblast: every unit's setup (`RpsUnit::setup_subject_length`, one owner with rpstblastn's;
+    // the first unit's numbers are the set-up's).
     if contexts.iter().any(|ctx| ctx.is_valid)
-        && crate::stats::setup::setup_subject_length(
-            setup_total,
-            setup_count,
-            (!args.old_fsc).then_some((cutoff_subject_length, false)),
+        && rps_units.map_or_else(
+            || {
+                crate::stats::setup::setup_subject_length(
+                    setup_total,
+                    setup_count,
+                    (!args.old_fsc).then_some((cutoff_subject_length, false)),
+                )
+                .is_none()
+            },
+            |units| units.subject_length_too_short(!args.old_fsc),
         )
-        .is_none()
     {
         return Err(preliminary_search_error(
             &args,
@@ -10796,6 +10806,7 @@ fn run_call(
     let prelim_run::PrelimOutcome {
         rps_gapped_k,
         rps_multi_volume,
+        rps_unlisted,
     } = prelim_run::run_preliminary(
         &prelim_run::PrelimRun {
             args: &args,
@@ -10825,7 +10836,7 @@ fn run_call(
             per_subject,
             num_subjects,
             cutoff_subject_length,
-            rps_units: rps_units.as_ref(),
+            rps_units,
             prelim_hitlist_size,
             prelim_evalue,
             subject_space_overflow: &subject_space_overflow,
@@ -11312,7 +11323,10 @@ fn run_call(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
                 // (quoted at `DbStatistics::sorts_results`): not for a database length of 0 or of
                 // 2^63 or more, whose lists keep the traceback's order (by OID with
-                // `-comp_based_stats 0`, the composition heap's otherwise).
+                // `-comp_based_stats 0`, the composition heap's otherwise). rpsblast over one
+                // volume: the engine sorted its lists after the filters by the same gate of the
+                // `-db` name's length (`RpsUnit::sorts_results`), so this sort finds them sorted
+                // where it runs.
                 if sorts_results {
                     hit_list.sort_by_evalue();
                 }
@@ -11362,6 +11376,7 @@ fn run_call(
         subject_source,
         subject_label,
         total_db_len,
+        unlisted: &rps_unlisted,
     };
     report_prep::read_shown_residues(
         &setup,

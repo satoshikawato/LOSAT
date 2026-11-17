@@ -103,24 +103,23 @@ impl RpsDiagTable {
     ///                 diag_table->offset = window_size;
     ///                 diag_table->window = window_size;
     /// ```
-    pub(crate) fn reset_for(&mut self, concat_length: i32, window: i32) {
-        let length = diag_array_length(concat_length, window);
+    /// The table has `length` entries (`diag_table_length`).
+    pub(crate) fn reset_for(&mut self, length: i32, window: i32) {
         self.array = vec![0u32; length as usize];
         self.mask = length - 1;
         self.offset = window;
         self.window = window;
     }
 
-    /// The table of a volume of `concat_length` rows: the table as it is when it has that
-    /// volume's length and the window already (series PR, item PS12s, D3: a worker keeps its
+    /// The table of a search of `length` entries (`diag_table_length`): the table as it is when
+    /// it has that length and the window already (series PR, item PS12s, D3: a worker keeps its
     /// table from volume to volume), else a zeroed one (`reset_for`). The entries an earlier
     /// volume's queries wrote read as "no hit on this diagonal yet", as those of an earlier query
     /// of the same volume do (the offset rule of `exit`, which keeps NCBI's clear at
     /// `INT4_MAX / 4`): a query's hits do not depend on what the table held.
-    pub(crate) fn prepare_for(&mut self, concat_length: i32, window: i32) {
-        let length = diag_array_length(concat_length, window);
+    pub(crate) fn prepare_for(&mut self, length: i32, window: i32) {
         if self.array.len() != length as usize || self.window != window {
-            self.reset_for(concat_length, window);
+            self.reset_for(length, window);
         }
     }
 
@@ -156,14 +155,43 @@ impl RpsDiagTable {
     }
 }
 
-/// The length of the diagonal table of a concatenated length `concat_length` (`Lc`, also 0 or
-/// negative: a table of 1 entry; `Lc + window` is at most 2^30, `RpsUnits::check_engine_lengths`).
+/// NCBI's length of the diagonal table of a concatenated length `concat_length` (`Lc`, also 0
+/// or negative) and the word window `window` (`s_BlastDiagTableNew`, quoted at
+/// `RpsDiagTable::reset_for`): the power of 2 from 1 up that is at least their sum (1 entry where
+/// the sum is 1 or less; the sum is at most 2^30, `RpsUnit::check_engine_length`).
 pub(crate) fn diag_array_length(concat_length: i32, window: i32) -> i32 {
     let mut length = 1i32;
     while length < concat_length + window {
         length <<= 1;
     }
     length
+}
+
+/// The entries of the diagonal table of a search of `rows` concatenated rows and queries (frames)
+/// of at most `longest` letters with NCBI's length `diag_array_length(concat_length, window)`:
+/// that length, or the power of 2 from 1 up that is at least `rows + longest` where that is
+/// smaller (review B of D1a-4, SF2). The word finders' diagonal of a hit is `(q - s) & mask` with
+/// `q` within the rows and `s` within the query: the `rows + longest - 1` diagonals of a query are
+/// apart in a table of either length, so no two share an entry in NCBI's table where it is the
+/// longer one, nor in this one, and each entry reads and writes as NCBI's (the offset of `exit`
+/// and its clear are the same for every entry). Where NCBI's table is the shorter one (an `Lc`
+/// below the rows) its diagonals share entries as NCBI's do. One worker's table of NCBI's length
+/// is 4 GiB at `Lc + window` of 2^30, where NCBI searches the volume with one table.
+pub(crate) fn diag_table_length(
+    concat_length: i32,
+    window: i32,
+    rows: usize,
+    longest: usize,
+) -> i32 {
+    let ncbi = diag_array_length(concat_length, window);
+    let apart = (rows as u64)
+        .saturating_add(longest as u64)
+        .next_power_of_two();
+    if apart < ncbi as u64 {
+        apart as i32
+    } else {
+        ncbi
+    }
 }
 
 /// NCBI's `BlastInitHSP` with its `BlastUngappedData` (`BlastSaveInitHsp`).
@@ -203,11 +231,21 @@ impl RpsWordScratch {
     }
 
     /// The table of a search of the concatenated length `concat_length` (`Lc`,
-    /// `RpsRun::concat_length`: `BlastExtendWordNew(concat_db.length, ...)`) and the buckets of a
-    /// volume of `num_rows` concatenated rows (`RpsDiagTable::prepare_for`,
-    /// `RpsBuckets::reset_for`): what the scratch kept stays.
-    pub(crate) fn prepare_for(&mut self, num_rows: usize, concat_length: i32, window: i32) {
-        self.diag.prepare_for(concat_length, window);
+    /// `RpsRun::concat_length`: `BlastExtendWordNew(concat_db.length, ...)`) whose queries (frames)
+    /// have at most `longest` letters (`diag_table_length`) and the buckets of a volume of
+    /// `num_rows` concatenated rows (`RpsDiagTable::prepare_for`, `RpsBuckets::reset_for`): what
+    /// the scratch kept stays.
+    pub(crate) fn prepare_for(
+        &mut self,
+        num_rows: usize,
+        concat_length: i32,
+        window: i32,
+        longest: usize,
+    ) {
+        self.diag.prepare_for(
+            diag_table_length(concat_length, window, num_rows, longest),
+            window,
+        );
         self.buckets.reset_for(num_rows);
     }
 }
@@ -558,6 +596,27 @@ mod tests {
         assert_eq!(diag_array_length(984, 40), 1024);
         assert_eq!(diag_array_length(985, 40), 2048);
         assert_eq!(diag_array_length(1024, 0), 1024);
+        // `Lc` 0 and below: 1 entry where the sum with the window is 1 or less, else the power
+        // of 2 past the sum (`Lc` -2 and the window 40: 64).
+        assert_eq!(diag_array_length(-2, 40), 64);
+        assert_eq!(diag_array_length(-2, 0), 1);
+        assert_eq!(diag_array_length(1, 0), 1);
+    }
+
+    // Review B of D1a-4, SF2: NCBI's length, or the power of 2 past the rows and the longest
+    // query where that is shorter.
+    #[test]
+    fn the_table_is_ncbis_or_one_whose_diagonals_are_apart() {
+        // `Lc` 2^30 - 40 (an alias file's LENGTH over the 563 rows of rps_mini) and q40.faa's
+        // longest query of 2,351 letters: 4,096 entries in place of 2^30.
+        assert_eq!(diag_table_length((1 << 30) - 40, 40, 563, 2351), 4096);
+        // NCBI's is shorter (the diagonals 4,096 apart share its entries): kept.
+        assert_eq!(diag_table_length(2100, 40, 2100, 4200), 4096);
+        // `Lc` below the rows (LENGTH 400 over 563 rows): NCBI's 512.
+        assert_eq!(diag_table_length(403, 40, 563, 2351), 512);
+        // Queries shorter than the window: the rows and the query need 1,024 of NCBI's 2,048.
+        assert_eq!(diag_table_length(1000, 40, 1000, 20), 1024);
+        assert_eq!(diag_table_length(1000, 40, 1000, 60), 2048);
     }
 
     #[test]
@@ -596,7 +655,7 @@ mod tests {
             rows: RpsRows {
                 rows: &rows,
                 length: rows.len(),
-                overran: None,
+                past: None,
             },
             table: RpsTable {
                 cells: &cells,
@@ -612,7 +671,7 @@ mod tests {
                 diag: RpsDiagTable::new(),
                 buckets: RpsBuckets::new(concat, Default::default()),
             };
-            scratch.diag.reset_for(length, 40);
+            scratch.diag.reset_for(diag_array_length(length, 40), 40);
             let mut hits = Vec::new();
             word_finder(&params, &mut scratch, &query, &mut hits);
             (scratch.diag.mask, hits)
@@ -648,7 +707,7 @@ mod tests {
             rows: RpsRows {
                 rows: &rows,
                 length: rows.len(),
-                overran: None,
+                past: None,
             },
             table: RpsTable {
                 cells: &cells,
@@ -666,7 +725,9 @@ mod tests {
                 diag: RpsDiagTable::new(),
                 buckets: RpsBuckets::new(rows.len(), Default::default()),
             };
-            scratch.diag.reset_for(rows.len() as i32, 40);
+            scratch
+                .diag
+                .reset_for(diag_array_length(rows.len() as i32, 40), 40);
             let mut ignored = Vec::new();
             for q in before {
                 word_finder(&params, &mut scratch, q, &mut ignored);
@@ -688,7 +749,9 @@ mod tests {
             diag: RpsDiagTable::new(),
             buckets: RpsBuckets::new(rows.len(), Default::default()),
         };
-        scratch.diag.reset_for(rows.len() as i32, 40);
+        scratch
+            .diag
+            .reset_for(diag_array_length(rows.len() as i32, 40), 40);
         scratch.diag.offset = i32::MAX / 4 - 5;
         let mut ignored = Vec::new();
         word_finder(&params, &mut scratch, &other, &mut ignored);
@@ -740,7 +803,7 @@ mod tests {
             rows: RpsRows {
                 rows: &rows_a,
                 length: rows_a.len(),
-                overran: None,
+                past: None,
             },
             table: RpsTable {
                 cells: &cells_a,
@@ -755,7 +818,7 @@ mod tests {
             rows: RpsRows {
                 rows: &rows_b,
                 length: rows_b.len(),
-                overran: None,
+                past: None,
             },
             table: RpsTable {
                 cells: &cells_b,
@@ -768,7 +831,7 @@ mod tests {
         let query_b: Vec<u8> = (0..60).map(|i| if i % 7 == 6 { 20 } else { 3 }).collect();
         let hits =
             |scratch: &mut RpsWordScratch, params: &RpsWordParams<'_>, rows: usize, q: &[u8]| {
-                scratch.prepare_for(rows, rows as i32, 40);
+                scratch.prepare_for(rows, rows as i32, 40, q.len());
                 let mut hits = Vec::new();
                 word_finder(params, scratch, q, &mut hits);
                 hits
@@ -787,7 +850,7 @@ mod tests {
         assert_eq!(hits(&mut scratch, &b, 900, &query_b), fresh_b);
         assert_eq!(scratch.diag.array.as_ptr(), kept, "the table is kept");
         // A volume whose table has another length gets a table of its own.
-        scratch.prepare_for(5035, 5035, 40);
+        scratch.prepare_for(5035, 5035, 40, 60);
         assert_eq!(scratch.diag.array.len(), 8192);
         assert_eq!(scratch.diag.offset, 40);
         assert!(scratch.diag.array.iter().all(|&entry| entry == 0));

@@ -177,7 +177,7 @@ pub(super) fn note_strategy_sets(
         .collect();
     // The volumes' matrix and gap costs as the first volume's files read them (the search sets the
     // volumes up again, `rps_search`), after `x_AdjustDbSize`'s length (`RpsUnits`).
-    let db_length = units(args, database)?.strategy_db_length("RPSBLAST")?;
+    let db_length = database.rps_units().and_then(RpsUnits::strategy_db_length);
     let volumes = RpsVolumeSet::of(database.seqdb());
     let costs = RpsVolumeSetup::new("RPSBLAST").costs(volumes.first());
     strategy.options().set_search_sets(
@@ -186,21 +186,24 @@ pub(super) fn note_strategy_sets(
     )
 }
 
-/// The search units of rpsblast's search of `database` and their statistics
-/// (`rps_search::volumes::RpsUnits`, one owner with rpstblastn's), with the run's `-searchsp` and
-/// `-dbsize`.
+/// `database` with the search units of rpsblast's search of it and their statistics
+/// (`rps_search::volumes::RpsUnits`, one owner with rpstblastn's, built once per run here, where
+/// the database opens: `open_search_database`), with the run's `-searchsp` and `-dbsize`. Their
+/// refusals come where NCBI meets them: the setup's counts in `call_setup::db_extent`, the
+/// concatenated lengths at each unit's search (`rps_search`, `RpsUnit::check_engine_length`).
 #[cold]
 #[inline(never)]
-pub(super) fn units(
+pub(super) fn with_units(
     args: &ResolvedBlastpArgs,
-    database: &database::BlastpDatabase,
-) -> Result<RpsUnits> {
-    RpsUnits::of(
+    database: database::BlastpDatabase,
+) -> Result<database::BlastpDatabase> {
+    let units = RpsUnits::of(
         database.seqdb(),
         args.searchsp.unwrap_or(0),
         args.dbsize,
         "RPSBLAST",
-    )
+    )?;
+    Ok(database.with_rps_units(units))
 }
 
 /// The queries' contexts (their letters and `kbp_std`, the composition with BLOSUM62, and
@@ -278,18 +281,6 @@ impl RpsSetup {
     }
 }
 
-/// LOSAT's refusals of the search units' concatenated lengths (`RpsUnits::check_engine_lengths`),
-/// where the database opens (`open_search_database`), as rpstblastn's
-/// (`rpstblastn::search::TranslatedRpsSearch::for_database`).
-#[cold]
-#[inline(never)]
-pub(super) fn check_units(
-    args: &ResolvedBlastpArgs,
-    database: &database::BlastpDatabase,
-) -> Result<()> {
-    units(args, database)?.check_engine_lengths(args.window_size as i32, "RPSBLAST")
-}
-
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
 /// for each: NCBI's "auto"). A volume that the alias files reach twice is one volume of the
 /// database's set (`SeqDb`).
@@ -315,6 +306,10 @@ pub(super) struct RpsSearched {
     pub(super) gapped_k: Vec<f64>,
     /// The number of volumes searched.
     pub(super) volumes: usize,
+    /// The HSPs of each query's profiles that the alias files' OID range leaves out past the
+    /// formatter's cut (`report_ordinal_ids`), which left the hit lists: outfmt 7's count and the
+    /// prefetch's limit count them (`report_prep::report_values`). Empty where none left.
+    pub(super) unlisted: Vec<usize>,
 }
 
 /// The RPS search of every query of the run against each volume of the database in turn: the
@@ -449,6 +444,11 @@ pub(super) fn rps_search(
     // The first failing batch (its number and error) of the volumes searched so far.
     let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
     let mut failed: Option<(usize, anyhow::Error)> = None;
+    // Whether a query of the run is searched (NCBI's engine runs for a batch with a valid query).
+    let searches = run
+        .contexts
+        .iter()
+        .any(|ctx| ctx.is_valid && ctx.aa_len > 0);
     for ((position, &index), unit) in order.iter().enumerate().zip(units.units()) {
         let volume = &db_volumes[index];
         // The unit's Gumbel block (none with `-searchsp`, at any value, or `OLD_FSC`), from its
@@ -475,6 +475,13 @@ pub(super) fn rps_search(
                 return Err(RpsEngineError("Error: Unknown error code -1 ".repeat(queries)).into());
             }
         };
+        // The unit's concatenated length where NCBI's engine meets it, in the unit's search of the
+        // first batch with a valid query (after the queries' set-up and the unit's setup, which
+        // `run_call` checked): LOSAT's refusal (`RpsUnit::check_engine_length`; none where no
+        // query is searched).
+        if searches {
+            unit.check_engine_length(args.window_size as i32, "RPSBLAST")?;
+        }
         let masked: Vec<Option<Vec<u8>>> = run
             .contexts
             .iter()
@@ -698,15 +705,32 @@ pub(super) fn rps_search(
         }
     }
     // The reports look the profiles up by ordinal id (`report_ordinal_ids`), batch after batch as
-    // NCBI's loop reports them, up to a batch whose search failed: a profile they would not find
-    // ends the run at its batch.
+    // NCBI's loop reports them, up to a batch whose search failed: a profile that they would not
+    // find among those they report (the first `-max_target_seqs` of each query's merged list)
+    // ends the run at its batch; one past that cut leaves the list, its HSPs counted
+    // (`RpsSearched::unlisted`).
     let live = failed
         .as_ref()
         .map_or(run.batches.len(), |(batch, _)| *batch);
+    let mut unlisted: Vec<usize> = Vec::new();
     for (number, batch) in run.batches.iter().enumerate().take(live) {
-        if let Err(refusal) = report_ordinal_ids(db, &mut hit_lists[batch.clone()], "RPSBLAST") {
-            failed = Some((number, refusal));
-            break;
+        match report_ordinal_ids(
+            db,
+            &mut hit_lists[batch.clone()],
+            args.max_target_seqs,
+            "RPSBLAST",
+        ) {
+            Ok(None) => {}
+            Ok(Some(counts)) => {
+                if unlisted.is_empty() {
+                    unlisted = vec![0; hit_lists.len()];
+                }
+                unlisted[batch.clone()].copy_from_slice(&counts);
+            }
+            Err(refusal) => {
+                failed = Some((number, refusal));
+                break;
+            }
         }
     }
     if let Some((batch, error)) = failed {
@@ -715,6 +739,7 @@ pub(super) fn rps_search(
     Ok(RpsSearched {
         gapped_k,
         volumes: order.len(),
+        unlisted,
     })
 }
 

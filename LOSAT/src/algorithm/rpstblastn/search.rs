@@ -47,8 +47,8 @@ use crate::algorithm::rps_search::engine::{
     RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
 };
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
-    RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
+    later_requests_refusal, mask_unsupported_letters, merge_volume, report_ordinal_ids,
+    shift_ordinal_ids, Consensus, RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::core::blast_util::frame_to_context;
 use crate::stats::KarlinParams;
@@ -98,22 +98,15 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
-        // The search units and their statistics (one owner with rpsblast's, line RG D1a-4):
-        // LOSAT's refusals of their concatenated lengths and of a setup count of 0 without the
-        // Gumbel block, as rpsblast's (`blastp::blast_engine::rps_hooks::check_units`).
+        // The search units and their statistics (one owner with rpsblast's, line RG D1a-4),
+        // whose refusals come at each unit's search of a batch (`search_window`).
         let units = RpsUnits::of(
             database.x_seqdb(),
             options.effective_search_space,
             options.db_length,
             PROGRAM,
         )?;
-        units.check_engine_lengths(options.window_size, PROGRAM)?;
-        units.check_setup_counts(options.has_gumbel_block(), PROGRAM)?;
-        let strategy_db_length = if strategy {
-            units.strategy_db_length(PROGRAM)?
-        } else {
-            None
-        };
+        let strategy_db_length = strategy.then(|| units.strategy_db_length()).flatten();
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
@@ -202,6 +195,18 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                         RpsEvent::Warn(_) => None,
                     })
                     .collect();
+                // The search strategy's requests after the run's first hold the `DbLength` that the
+                // batches before set (`handle_sets`): one that NCBI writes as `-0` is LOSAT's refusal
+                // (`rps_search::volumes::later_requests_refusal`, as the writer of the requests refuses
+                // it), before the output of the window that holds such a request.
+                if self.strategy
+                    && !batches.is_empty()
+                    && (processed.get() > 0 || batches.len() > 1)
+                {
+                    if let Some(refusal) = later_requests_refusal(&self.handle_sets(), PROGRAM) {
+                        return Err(refusal);
+                    }
+                }
                 let searched = self.search_window(
                     &batches, options, database, &volumes, units, &setup, pool, &workers,
                 );
@@ -511,6 +516,27 @@ impl TranslatedRpsSearch {
                     }
                     spaces.extend(prelim.iter().map(|context| context.search_space));
                 }
+                // The rest of the unit's setup (`BLAST_GapAlignSetUp` after its effective lengths)
+                // and its engine's start, the same for every batch: the first batch that searches
+                // the unit meets them. A count of 0 without the Gumbel block and a concatenated
+                // length NCBI cannot search are LOSAT's refusals (`RpsUnit::check_setup_count`,
+                // `check_engine_length`), an average below one letter NCBI's error (review A of
+                // D1a-4, MF5; review B, MF1: after the batch's query set-up).
+                let gumbel_block = options.has_gumbel_block();
+                let unit_checked = unit
+                    .check_setup_count(gumbel_block, PROGRAM)
+                    .and_then(|()| match unit.setup_subject_length(gumbel_block) {
+                        Some(_) => Ok(()),
+                        None => Err(RpsBatchError::Setup(anyhow::anyhow!(
+                            crate::algorithm::rps_search::volumes::SUBJECT_LENGTH_TOO_SHORT
+                        ))
+                        .into()),
+                    })
+                    .and_then(|()| unit.check_engine_length(options.window_size, PROGRAM));
+                if let Err(error) = unit_checked {
+                    fail(&mut states, &mut outcome, batch, error);
+                    break;
+                }
                 // `Blast_MaskUnsupportedAA` of a 26-column database, per frame.
                 masks.push(
                     prepared
@@ -623,19 +649,24 @@ impl TranslatedRpsSearch {
             }
         }
         // The reports look the profiles up by ordinal id (`report_ordinal_ids`), batch after batch
-        // as NCBI's loop reports them: a profile they would not find ends the run at its batch.
-        // Then each batch's `EffectiveSearchSpace` option that its search leaves in the options
-        // handle (`WindowBatch::request_space`).
+        // as NCBI's loop reports them: a profile that they would not find among those they report
+        // (the first `-max_target_seqs` of each query's merged list, `ResolvedOptions::
+        // shown_lists`) ends the run at its batch; one past that cut leaves the list, its HSPs
+        // counted (`BatchResults::unlisted`). Then each batch's `EffectiveSearchSpace` option that
+        // its search leaves in the options handle (`WindowBatch::request_space`).
         let db = database.x_seqdb();
         for batch in 0..states.len() {
             let state = &mut states[batch];
-            let checked = report_ordinal_ids(db, &mut state.hit_lists, PROGRAM).and_then(|()| {
-                if self.strategy {
-                    state.request_space(units, options, &gapped)
-                } else {
-                    Ok(None)
-                }
-            });
+            let checked =
+                report_ordinal_ids(db, &mut state.hit_lists, options.shown_lists(), PROGRAM)
+                    .and_then(|unlisted| {
+                        state.unlisted = unlisted.unwrap_or_default();
+                        if self.strategy {
+                            state.request_space(units, options, &gapped)
+                        } else {
+                            Ok(None)
+                        }
+                    });
             match checked {
                 Ok(request_space) => state.request_space = request_space,
                 Err(error) => {
@@ -754,6 +785,9 @@ struct WindowBatch {
     /// The effective lengths (`RpsUnits::eff_lengths`) that `parameters`' search spaces were
     /// computed with.
     lengths: Option<(i64, i32)>,
+    /// The HSPs of each query's profiles that left its merged list past the formatter's cut
+    /// (`report_ordinal_ids`; `BatchResults::unlisted`).
+    unlisted: Vec<usize>,
 }
 
 impl WindowBatch {
@@ -766,6 +800,7 @@ impl WindowBatch {
             hit_lists: vec![None; queries],
             request_space: None,
             lengths: None,
+            unlisted: Vec::new(),
         }
     }
 
@@ -823,6 +858,7 @@ impl WindowBatch {
             parameters,
             search_skipped: false,
             request_space: self.request_space,
+            unlisted: self.unlisted,
         }
     }
 }
@@ -888,6 +924,7 @@ fn unsearched_batch(
         parameters,
         search_skipped: true,
         request_space: None,
+        unlisted: Vec::new(),
     }
 }
 

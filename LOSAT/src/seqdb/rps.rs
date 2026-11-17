@@ -758,6 +758,39 @@ impl RpsVolumeFiles {
         8 + 4 * (self.num_profiles + 1)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:184-190 (quoted at
+    // `rps_search::RpsRows`)
+    // ```c
+    //     lookup->rps_pssm = (Int4 **) malloc((num_pssm_rows + 1) * sizeof(Int4 *));
+    //     ...
+    //     for (i = 0; i < num_pssm_rows + 1; i++) {
+    //         lookup->rps_pssm[i] = pssm_start;
+    //         pssm_start += lookup->alphabet_size;
+    // ```
+    /// NCBI's row after the concatenated rows (`rps_pssm[num_pssm_rows]`, a pointer to the bytes
+    /// that follow the last row in the mapped `.rps` file, at the row stride of the alphabet) as
+    /// each letter reads it: the file's own bytes there, then the zeros of its last memory page
+    /// (`file::mapped_length`), `None` for a letter whose four bytes lie past that page (NCBI's
+    /// read of them faults, SIGBUS: the file ends on a page boundary). The ungapped extensions
+    /// read it where the unit's concatenated length `Lc` is above the rows
+    /// (`rps_search::RpsPastRows`).
+    pub(crate) fn row_after_rows(&self) -> [Option<i32>; 28] {
+        let bytes = self.rps.bytes();
+        let mapped = super::file::mapped_length(bytes.len() as u64);
+        let num_rows = self.offsets()[self.num_profiles] as usize;
+        let start = (self.rows_start() + num_rows * self.alphabet * 4) as u64;
+        std::array::from_fn(|letter| {
+            let at = start + 4 * letter as u64;
+            (at + 4 <= mapped).then(|| {
+                let mut word = [0u8; 4];
+                for (k, byte) in word.iter_mut().enumerate() {
+                    *byte = bytes.get((at as usize) + k).copied().unwrap_or(0);
+                }
+                i32::from_ne_bytes(word)
+            })
+        })
+    }
+
     /// The `num_profiles + 1` row offsets of the profiles (`start_offsets`).
     pub(crate) fn offsets(&self) -> &[i32] {
         self.rps

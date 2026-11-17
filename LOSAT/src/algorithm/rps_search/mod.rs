@@ -72,16 +72,29 @@ use crate::core::blast_util::BLASTAA_SIZE;
 /// at 0 or below none runs to the right of a position, as NCBI's negative bound), one above them
 /// reads NCBI's rows up to the last profile's sentinel row, which ends an extension unless the
 /// X-drop is above its scores (`makeprofiledb` writes `-BLAST_SCORE_MAX`). An extension that
-/// scores that row and goes on reads in NCBI past its rows (the pointer after the last row
-/// points past them in the `.rps` file's mapping, the next ones past `rps_pssm`): with
-/// `overran` (where `Lc` is above the rows) such an extension, one that runs to `length` with
-/// letters of the query left, sets the flag, LOSAT's refusal of its query batch
-/// (`prelim::RpsPrelim::search_frame`).
+/// scores that row and goes on reads in NCBI the row after the rows (`rps_pssm[rows]`, the bytes
+/// after the last row in the `.rps` file's mapping), and then past the pointer array: `past`
+/// (where `Lc` is above the rows) holds that row as NCBI reads it, which the extension scores
+/// (`PssmRows::past_end`; DECISIONS D1a4-9 of line RG), and the flag of LOSAT's refusal of the
+/// query batch (`prelim::RpsPrelim::search_frame`) where NCBI's read faults: a letter whose bytes
+/// lie past the file's last page, or a step after that row (`Lc` of the rows plus 2 or more).
 #[derive(Clone, Copy)]
 pub(crate) struct RpsRows<'a> {
     pub(crate) rows: &'a [[i32; BLASTAA_SIZE]],
     pub(crate) length: usize,
-    pub(crate) overran: Option<&'a std::sync::atomic::AtomicBool>,
+    pub(crate) past: Option<RpsPastRows<'a>>,
+}
+
+/// What NCBI's extensions read past the rows where `Lc` is above them (`RpsRows::past`).
+#[derive(Clone, Copy)]
+pub(crate) struct RpsPastRows<'a> {
+    /// NCBI's row after the rows for each letter (`seqdb::rps::RpsVolumeFiles::row_after_rows`;
+    /// `None` where its read faults).
+    pub(crate) row: &'a [Option<i32>; BLASTAA_SIZE],
+    /// `Lc`, NCBI's bound of the extensions to the right.
+    pub(crate) concat_length: i32,
+    /// Set where an extension reads what NCBI cannot (LOSAT's refusal of the batch).
+    pub(crate) overran: &'a std::sync::atomic::AtomicBool,
 }
 
 impl PssmRows for RpsRows<'_> {
@@ -96,10 +109,26 @@ impl PssmRows for RpsRows<'_> {
     }
 
     #[inline(always)]
-    fn ran_to_end(&self, end: i32, subject_left: bool) {
-        if let Some(overran) = self.overran {
-            if subject_left && end as usize == self.length {
-                overran.store(true, std::sync::atomic::Ordering::Relaxed);
+    fn past_end(&self, end: i32, letter: Option<u8>) -> Option<i32> {
+        let past = self.past?;
+        let letter = letter?;
+        if end as usize != self.length {
+            return None;
+        }
+        let score = past.row[usize::from(letter)];
+        if score.is_none() {
+            past.overran
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        score
+    }
+
+    #[inline(always)]
+    fn past_end_continues(&self, end: i32, subject_left: bool) {
+        if let Some(past) = self.past {
+            if subject_left && end < past.concat_length {
+                past.overran
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
@@ -160,16 +189,17 @@ pub(crate) fn blast_nint(x: f64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::RpsRows;
+    use super::{RpsPastRows, RpsRows};
     use crate::algorithm::pssm_search::ungapped::pssm_extend_one_hit;
     use crate::core::blast_util::BLASTAA_SIZE;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:938-975, 1036-1083 (quoted
     // at `pssm_search::ungapped`): the extension to the right reads up to `query->length`, the
-    // concatenated length `Lc`, which `RpsRows::length` holds within the rows. Nine rows that score
-    // letter 1 (A) 5,000 and one sentinel row of -32,767 (`-BLAST_SCORE_MAX`); a word of three
-    // letters at 0 against a query of A.
+    // concatenated length `Lc`, which `RpsRows::length` holds within the rows, and past them the
+    // row after the rows (`RpsRows::past`). Nine rows that score letter 1 (A) 5,000 and one
+    // sentinel row of -32,767 (`-BLAST_SCORE_MAX`); a word of three letters at 0 against a query
+    // of A.
     #[test]
     fn the_extension_to_the_right_stops_at_the_concatenated_length() {
         let mut row = [-4i32; BLASTAA_SIZE];
@@ -178,11 +208,20 @@ mod tests {
         rows.push([-32_767; BLASTAA_SIZE]);
         let query = [1u8; 20];
         let flag = AtomicBool::new(false);
-        let extend = |length: usize, overran: Option<&AtomicBool>, subject: &[u8], dropoff: i32| {
+        let zeros = [Some(0i32); BLASTAA_SIZE];
+        let faults = [None; BLASTAA_SIZE];
+        let extend = |length: usize,
+                      past: Option<(&[Option<i32>; BLASTAA_SIZE], i32)>,
+                      subject: &[u8],
+                      dropoff: i32| {
             let rows = RpsRows {
                 rows: &rows,
                 length,
-                overran,
+                past: past.map(|(row, concat_length)| RpsPastRows {
+                    row,
+                    concat_length,
+                    overran: &flag,
+                }),
             };
             pssm_extend_one_hit(&rows, subject, 0, 0, dropoff, 3)
         };
@@ -193,24 +232,38 @@ mod tests {
             (6, 30_000)
         );
         assert_eq!(short.s_last_off, 6);
-        // The rows: the sentinel row stops an X-drop of 20.
-        let stopped = extend(10, Some(&flag), &query, 20);
+        // `Lc` 11: the sentinel row stops an X-drop of 20.
+        let stopped = extend(10, Some((&zeros, 11)), &query, 20);
         assert_eq!(
             (stopped.ungapped_data.length, stopped.ungapped_data.score),
             (9, 45_000)
         );
         assert_eq!(stopped.s_last_off, 9);
         assert!(!flag.load(Ordering::Relaxed));
-        // An X-drop above the sentinel's scores: the walk scores the sentinel row and runs to the
-        // rows' end with letters of the query left, where NCBI's bound `Lc` lies past them and
-        // NCBI reads past its rows: the flag of an `Lc` above the rows.
-        let through = extend(10, Some(&flag), &query, 40_000);
-        assert_eq!(through.s_last_off, 10);
-        assert!(flag.swap(false, Ordering::Relaxed));
-        let _ = extend(10, None, &query, 40_000);
+        // An X-drop above the sentinel's scores: the walk scores the sentinel row, then NCBI's row
+        // after the rows (zeros of the `.rps` file's last page) and ends at `Lc` 11.
+        let through = extend(10, Some((&zeros, 11)), &query, 40_000);
+        assert_eq!(through.s_last_off, 11);
+        assert_eq!(through.ungapped_data.length, 9);
         assert!(!flag.load(Ordering::Relaxed));
+        // `Lc` 10 (the rows): NCBI's bound is the rows' end.
+        let at_rows = extend(10, None, &query, 40_000);
+        assert_eq!(at_rows.s_last_off, 10);
+        // The row after the rows past the file's last page: NCBI's read faults.
+        let _ = extend(10, Some((&faults, 11)), &query, 40_000);
+        assert!(flag.swap(false, Ordering::Relaxed));
+        // `Lc` 12: NCBI reads past the pointer array after that row.
+        let _ = extend(10, Some((&zeros, 12)), &query, 40_000);
+        assert!(flag.swap(false, Ordering::Relaxed));
         // The query ends with the rows: NCBI's bound is the query's end too.
-        let _ = extend(10, Some(&flag), &query[..10], 40_000);
+        let _ = extend(10, Some((&faults, 12)), &query[..10], 40_000);
+        assert!(!flag.load(Ordering::Relaxed));
+        // A row after the rows of other bytes (a `.rps` file with bytes after its rows) scores
+        // them: 40,000 for A, above the sentinel's -32,767, takes the best score to that row.
+        let mut high = zeros;
+        high[1] = Some(40_000);
+        let scored = extend(10, Some((&high, 11)), &query, 1_000_000);
+        assert_eq!(scored.ungapped_data.length, 11);
         assert!(!flag.load(Ordering::Relaxed));
     }
 }

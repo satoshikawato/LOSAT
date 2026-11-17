@@ -433,6 +433,18 @@ impl StrategyExport {
             let mut made_one = false;
             let made = make(&mut |request| {
                 let sets = shared.options.request_sets(&state.carry);
+                // A big integer of -2^63 (RPS-BLAST's `DbLength` that a batch before set,
+                // `-dbsize`), which NCBI writes as `-0`, is LOSAT's refusal before the request is
+                // written.
+                if let Some(refusal) =
+                    crate::algorithm::common::database::request_minus_zero_refusal(
+                        &shared.request.algorithm,
+                        &sets,
+                        &shared.request.application.to_ascii_uppercase(),
+                    )
+                {
+                    return Err(refusal);
+                }
                 // A sink that cannot be cut gets the request where the run reaches its batch.
                 let mut held = Vec::new();
                 let mut counted = Counted {

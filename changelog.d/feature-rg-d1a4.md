@@ -8,14 +8,20 @@
   search covers (their sum): the diagonal table, the ungapped extensions to the right and the gapped
   stage's interval tree follow it, shorter or longer than the profiles. The preliminary hit cutoff
   without the Gumbel block reads NCBI's preliminary search space (it differs from the traceback's
-  over one volume of a `LENGTH` of 2^63 or more), and a total length of 0 or less keeps the order of
+  over one volume of a `LENGTH` of 2^63 or more, and with `-dbsize` over one volume of a total of 0 or less), and a total length of 0 or less keeps the order of
   the hits after `-max_hsps` and `-qcov_hsp_perc`, as NCBI's traceback does. `rpstblastn` now reads
   `STATS_NSEQ` and `STATS_TOTLEN` and each volume's shortest length, and refuses `NSEQ 0` over one
   volume with `-searchsp` or `OLD_FSC`, where NCBI BLAST+ crashes; `rpsblast` searches that `NSEQ 0`
-  over several volumes, where NCBI does. Refused: a hit of a profile that `FIRST_OID` and
-  `LAST_OID` leave out (NCBI's report does not find it), a concatenated length above 2,147,483,647
-  (NCBI frees the profiles twice) or whose diagonal table passes 2^30 entries (NCBI's loop never
-  ends), a query whose two gapped alignments start past a concatenated length shorter than the
-  profiles (NCBI's interval tree splits without end), an ungapped extension past the last profile of
-  a concatenated length longer than them (NCBI reads past its score matrix), and with
-  `-export_search_strategy` a database length of exactly 2^63 over several volumes.
+  over several volumes, where NCBI does; both fail as NCBI where the average subject length of one
+  volume is below one letter without the Gumbel block. Refused: a reported hit (within
+  `-max_target_seqs`) of a profile that `FIRST_OID` and `LAST_OID` leave out (NCBI's report does
+  not find it; one past that cut of several volumes is searched and counted as NCBI's), a
+  concatenated length above 2,147,483,647 (NCBI frees the profiles twice) or whose diagonal table
+  passes 2^30 entries (NCBI's loop never ends), both where NCBI's search meets them (an empty query
+  file still ends as NCBI's), a query whose two gapped alignments start past a concatenated length
+  shorter than the profiles plus one (NCBI's interval tree splits without end), an ungapped
+  extension past the row after the last profile of a concatenated length longer than them (NCBI
+  reads past its score matrix; the profiles plus one is searched as NCBI), and with
+  `-export_search_strategy` and two query batches or more a database length of exactly 2^63 over
+  several volumes. Each search's diagonal tables are no longer than its profiles and longest query
+  need (NCBI's length or less, the same hits): no table of 4 GiB per thread near 2^30.

@@ -1290,6 +1290,7 @@ mod tests {
             parameters: Vec::new(),
             search_skipped: false,
             request_space: None,
+            unlisted: Vec::new(),
         }]
     }
 

@@ -55,7 +55,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use super::file::{DbFile, MAP_PAGE};
+use super::file::DbFile;
 use super::{SearchPath, SeqDbError};
 
 /// Header of `taxdb.bti`: magic, count, four reserved words (seqdbtax.cpp,
@@ -408,7 +408,7 @@ impl TaxDb {
         let len = files.data.len();
         // NCBI maps the file; the last page is padded with zero bytes. Past that page
         // it reads unmapped memory (a crash on the oracle platform).
-        let mapped = len.div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = super::file::mapped_length(len);
         if end > mapped {
             return Err(SeqDbError::Unsupported {
                 path: files.data.path().to_path_buf(),
@@ -468,7 +468,7 @@ impl TaxDb {
         let Some(files) = &self.files else {
             return Ok(false);
         };
-        let mapped = files.data.len().div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = super::file::mapped_length(files.data.len());
         let count = files.count as u64;
         let mut previous: Option<u32> = None;
         let mut block: Vec<u8> = Vec::new();
@@ -773,6 +773,7 @@ mod tests {
     //! for them in `tests/seqdb/taxdb/expected.tsv`) and against files built
     //! here for the cases NCBI cannot be asked about.
 
+    use super::super::file::MAP_PAGE;
     use super::*;
     use std::path::Path;
 

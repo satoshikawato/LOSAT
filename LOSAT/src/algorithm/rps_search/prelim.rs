@@ -172,11 +172,15 @@ impl RpsPrelim<'_> {
         } = scratch;
         init_hsps.clear();
         word_finder(&self.word, word, subject, init_hsps);
-        // An extension that NCBI runs past its rows (`RpsRows`; only where `Lc` is above them).
-        if let Some(overran) = self.word.rows.overran {
-            if overran.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        // An extension that reads past the rows what NCBI cannot (`RpsRows::past`; only where
+        // `Lc` is above them).
+        if let Some(past) = self.word.rows.past {
+            if past
+                .overran
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
+            {
                 bail!(
-                    "an RPS-BLAST volume searched as {} concatenated positions, above the {} rows of its profiles (an alias file's LENGTH and NSEQ over one volume, or a volume reached twice), whose ungapped extension of a query runs past the last profile (NCBI BLAST+ 2.17.0 then reads past its score matrix), is not supported by LOSAT's {}",
+                    "an RPS-BLAST volume searched as {} concatenated positions, above the {} rows of its profiles (an alias file's LENGTH and NSEQ over one volume, or a volume reached twice), whose ungapped extension of a query runs past the row after the last profile, or reads that row past the .rps file's last memory page (NCBI BLAST+ 2.17.0 then reads past its score matrix), is not supported by LOSAT's {}",
                     self.concat_length,
                     self.rows.len(),
                     self.program
@@ -447,7 +451,7 @@ impl RpsPrelim<'_> {
         subject_seq: &[u8],
         subject_len: usize,
     ) -> Result<()> {
-        // `Lc + 1` is at most 2^30 + 1 (`RpsUnits::check_engine_lengths`); an `Lc` below the
+        // `Lc + 1` is at most 2^30 + 1 (`RpsUnit::check_engine_length`); an `Lc` below the
         // rows leaves the regions of later profiles past the tree's end.
         tree.reset_with_bounds(0, self.concat_length + 1, 0, subject_len as i32 + 1);
         for init in init_hsps {

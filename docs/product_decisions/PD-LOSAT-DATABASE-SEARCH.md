@@ -255,22 +255,37 @@ results before its filters whatever the total length and after them (`-max_hsps`
 only where the unit's `GetTotalLength` is above 0 (blast_traceback.c:1306, 1768-1771; part B, review A
 MF2). The preliminary stage's hit cutoff without the Gumbel block reads the space that
 `SplitQuery_SetEffectiveSearchSpace` sets (prelim_stage.cpp:219-221: the unit's total before the
-fallback to OID 0), the traceback the setup's: they differ only over one volume whose total is
-negative (part B, review A MF1). The search ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table
-holds every profile of a volume); a hit of a profile that they leave out is refused at its query
-batch, where NCBI's report does not find it (`Unknown`, or a null pointer exception:
-PD-LOSAT-NCBI-DEFECTS 1.40). A unit's concatenated length `Lc` (`LENGTH` plus `NSEQ` over one volume,
-NCBI's `Int4` of the `Int8` sum; a bare volume's rows) sizes the diagonal table, bounds the ungapped
-extensions to the right and ends the gapped stage's interval tree, below the profiles, above them or
-negative, as in NCBI (blast_engine.c:1129-1149; part B). Refused (PD-LOSAT-NCBI-DEFECTS 1.40, rule
-3): an `Lc` above 2,147,483,647 (NCBI frees the profiles twice and aborts), one whose diagonal table
-passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), a query batch where two
-gapped alignments of one tree start past `Lc + 1` (NCBI's interval tree splits without end) and one
-where `Lc` is above the rows and an ungapped extension runs past the last profile (NCBI reads past its
-score matrix), a setup count of 0 without the Gumbel block (`NSEQ 0` over one
-volume with `-searchsp` or `OLD_FSC`: SIGFPE; a bare volume counts its profiles), and with
-`-export_search_strategy` a `DbLength` of exactly -2^63 (`LENGTH` or `STATS_TOTLEN` 2^63, which NCBI
-writes as `-0`, until the Owner answers D1a-3's Q1). Refused for
+fallback to OID 0, its count without it), the traceback the setup's: they differ over one volume
+whose total is negative, and with `-dbsize` over one volume whose total is 0 or negative
+(SplitQuery's count is the unit's, the setup's 1; part B, review A MF1, review B N2). The setup of
+every unit fails as NCBI's where its average subject length is below one letter without the Gumbel
+block (an alias file's `NSEQ` above its `LENGTH` over one volume: `BLAST engine error: The average
+subject length is too short`, exit status 3, both programs; fix round 1, review A MF5). The search
+ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table holds every profile of a volume); a hit of a
+profile that they leave out among the profiles the reports show (the first `-max_target_seqs` of a
+query's hit list) is refused where NCBI's report does not find it (`Unknown`, or a null pointer
+exception: PD-LOSAT-NCBI-DEFECTS 1.40), RPSBLAST before any output and RPSTBLASTN after the reports of
+the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
+HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
+plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's rows) sizes the
+diagonal table, bounds the ungapped extensions to the right and ends the gapped stage's interval
+tree, below the profiles, above them or negative, as in NCBI (blast_engine.c:1129-1149; part B); at
+the rows plus 1 the extensions read the row after the profiles as NCBI does (the zeros of the
+`.rps` file's last memory page: DECISIONS D1a4-9). Refused (PD-LOSAT-NCBI-DEFECTS 1.40, rule 3): a
+sum `LENGTH` plus `NSEQ` above 2,147,483,647 (NCBI frees the profiles twice and aborts), an `Lc` whose
+diagonal table passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), both
+where NCBI's engine meets them (the unit's search of the first query batch NCBI searches: an empty
+query file or a first batch without letters ends as NCBI's; fix round 1, review B MF1), a query
+batch where two gapped alignments of one tree start past `Lc + 1` (NCBI's interval tree splits
+without end) and one where `Lc` is above the rows and an ungapped extension reads the row after the
+profiles past the `.rps` file's last page or goes on past that row (NCBI reads past its score
+matrix), RPSBLAST before any output and RPSTBLASTN after the reports of the query batches before, a
+setup count of 0 without the Gumbel block (`NSEQ 0` over one volume with `-searchsp` or `OLD_FSC`:
+SIGFPE; a bare volume counts its profiles), and with `-export_search_strategy` a request after the
+first (a run of two query batches or more) whose `DbLength` is exactly -2^63 (`LENGTH` or
+`STATS_TOTLEN` 2^63 over several volumes, which NCBI writes as `-0`, until the Owner answers D1a-3's
+Q1; with one query batch NCBI's only request holds no `DbLength`, and the run is NCBI's: fix round
+1, review A MF4). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX

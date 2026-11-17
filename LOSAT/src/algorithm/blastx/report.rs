@@ -1631,6 +1631,8 @@ pub(super) fn render_queries_with(
                 //     if (align_set) {
                 //        int num_hits = align_set->Get().size();
                 // ```
+                // (RPSTBLASTN: with the HSPs of the profiles that left the merged lists past the
+                // formatter's cut, `BatchResults::unlisted_hsps`.)
                 let count: usize = lists
                     .iter()
                     .map(|l| {
@@ -1639,7 +1641,8 @@ pub(super) fn render_queries_with(
                             .filter(|h| has_seqalign(h, options.gapped))
                             .count()
                     })
-                    .sum();
+                    .sum::<usize>()
+                    + batch.unlisted_hsps(qidx);
                 if comments {
                     writeln!(
                         writer,

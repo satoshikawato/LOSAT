@@ -2289,6 +2289,15 @@ impl SeqDb {
         )
     }
 
+    /// The header of the OID `oid` (`locate_oid`), whether the alias files' ranges and a list
+    /// include it or not, as NCBI's `GetSeqIDs` reads it (seqdbimpl.cpp:793-813, quoted at
+    /// `rps_search::volumes::report_ordinal_ids`): RPS-BLAST's Seq-aligns name every profile of a
+    /// volume's results by it.
+    pub fn read_header_of_oid(&self, oid: u32) -> Result<SequenceHeader, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.sequence_header(at.volume, oid, self.volumes[at.volume].header(at.vol_oid))
+    }
+
     /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the
     /// messages name) in `volume`.
     fn sequence_header(

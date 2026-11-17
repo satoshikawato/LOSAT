@@ -730,11 +730,22 @@ pub fn write_archive<A: AlignSource>(
     sink: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    let messages = handle.take_messages();
     let sets = handle.request_sets(batch.searched_space);
-    let params = handle.options().database_params();
     let request = handle.request();
     let encoding = handle.encoding();
+    // A big integer of -2^63 (`-dbsize`), which NCBI's ASN.1 text and XML writers print as `-0`, is
+    // LOSAT's refusal before the archive (the binary writer writes the value).
+    if matches!(encoding, ArchiveEncoding::Text | ArchiveEncoding::Xml) {
+        if let Some(refusal) = crate::algorithm::common::database::request_minus_zero_refusal(
+            &request.algorithm,
+            &sets,
+            &request.application.to_ascii_uppercase(),
+        ) {
+            return Err(refusal);
+        }
+    }
+    let messages = handle.take_messages();
+    let params = handle.options().database_params();
     let as_is = request_written_as_is(encoding, request, &batch.request, &sets, &params);
     let post = |replaced: &ReplacedChar| {
         super::post_replaced(

@@ -522,6 +522,8 @@ pub(super) fn write_blastx_tabular(
                 //        int num_hits = align_set->Get().size();
                 // ```
                 // A query of a batch that NCBI did not search has no Seq-align set: no count.
+                // (RPSTBLASTN: also the HSPs of the profiles that left the merged lists past the
+                // formatter's cut, `BatchResults::unlisted_hsps`.)
                 let count: usize = lists
                     .iter()
                     .map(|list| {
@@ -530,7 +532,8 @@ pub(super) fn write_blastx_tabular(
                             .filter(|hsp| has_seqalign(hsp, options.gapped))
                             .count()
                     })
-                    .sum();
+                    .sum::<usize>()
+                    + batch.unlisted_hsps(qidx);
                 let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,

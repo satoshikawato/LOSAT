@@ -107,9 +107,26 @@ pub(super) struct BlastpDatabase {
     taxdb: shared::TaxdbRun,
     /// The program that LOSAT's refusals name: BLASTP or PSIBLAST (`BlastpApp::name`).
     program: &'static str,
+    /// rpsblast: the search units of the database and their statistics, built once per run where
+    /// the database opens (`rps_hooks::with_units`); `None` for every other search.
+    rps_units: Option<crate::algorithm::rps_search::volumes::RpsUnits>,
 }
 
 impl BlastpDatabase {
+    /// The database with rpsblast's search units `units` (`rps_hooks::with_units`).
+    pub(super) fn with_rps_units(
+        mut self,
+        units: crate::algorithm::rps_search::volumes::RpsUnits,
+    ) -> Self {
+        self.rps_units = Some(units);
+        self
+    }
+
+    /// rpsblast's search units (`with_rps_units`), `None` for every other search.
+    pub(super) fn rps_units(&self) -> Option<&crate::algorithm::rps_search::volumes::RpsUnits> {
+        self.rps_units.as_ref()
+    }
+
     /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), for
     /// the search again of the batches before a failed one.
     pub(super) fn restart_taxonomy(&self) {
@@ -156,6 +173,7 @@ impl BlastpDatabase {
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
             program,
+            rps_units: None,
         })
     }
 
@@ -4502,6 +4520,7 @@ mod tests {
                 name: "sprot_tax".to_string(),
                 taxdb: shared::TaxdbRun::default(),
                 program: "BLASTP",
+                rps_units: None,
             };
             assert_eq!(database.taxdb_found(), taxdb.is_some());
             for threads in [1, 4, 8, 16] {

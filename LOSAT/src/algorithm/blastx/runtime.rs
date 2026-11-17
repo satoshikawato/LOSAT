@@ -109,6 +109,19 @@ pub struct BatchResults {
     /// last search unit's (`rps_search::volumes::RpsUnits::request_space`). `None`: the search
     /// space of context 0.
     pub request_space: Option<i64>,
+    /// RPSTBLASTN: the HSPs of each query's profiles that the alias files' OID range leaves out
+    /// past the formatter's cut, which left the query's merged lists
+    /// (`rps_search::volumes::report_ordinal_ids`): outfmt 7's count and the prefetch's limit
+    /// still count them (`BatchResults::unlisted_hsps`). Empty where none left.
+    pub unlisted: Vec<usize>,
+}
+
+impl BatchResults {
+    /// The HSPs of the query `query` of the batch whose profiles left its merged lists past the
+    /// formatter's cut (`unlisted`), 0 for every other search.
+    pub fn unlisted_hsps(&self, query: usize) -> usize {
+        self.unlisted.get(query).copied().unwrap_or(0)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1539-1554
@@ -1290,6 +1303,7 @@ impl PreliminarySink for Runtime<'_> {
             parameters: params.to_vec(),
             search_skipped: true,
             request_space: None,
+            unlisted: Vec::new(),
         });
         Ok(())
     }
@@ -2225,6 +2239,7 @@ impl PreliminarySink for Runtime<'_> {
             parameters: full,
             search_skipped: false,
             request_space: None,
+            unlisted: Vec::new(),
         });
         super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())

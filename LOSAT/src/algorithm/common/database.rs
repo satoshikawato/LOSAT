@@ -895,6 +895,50 @@ pub(crate) fn report_sum_refusal(
 /// refused with it until the Owner answers DECISIONS D1a3-2's Q1 (D1a4-6 of line RG).
 pub(crate) const STRATEGY_MINUS_ZERO_LENGTH: &str = "a total length of 9223372036854775808 letters (an alias file's LENGTH or STATS_TOTLEN over several RPS-BLAST volumes), which NCBI BLAST+'s serial writer prints as -0 (a signed overflow), in the search strategy's DbLength";
 
+/// LOSAT's reason for a `-dbsize` of exactly -2^63, which every request of the search strategy
+/// and of a BLAST archive of ASN.1 text or XML holds as the `DbLength` option, and which NCBI's
+/// serial writer prints as `-0` (`request_minus_zero_refusal`): the same signed overflow as
+/// `STRATEGY_MINUS_ZERO_LENGTH`'s (found by fix round 1 of D1a-4; dev wrote the value).
+pub(crate) const DBSIZE_MINUS_ZERO: &str = "a -dbsize of -9223372036854775808, which NCBI BLAST+'s serial writer prints as -0 (a signed overflow) in the search strategy and in a BLAST archive of ASN.1 text or XML,";
+
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213 (quoted at
+// `blastp::blast_engine::rps_hooks::failed_batch_error`) and
+// c++/src/algo/blast/api/rpsblast_local.cpp:349-371 (quoted at `rps_search::volumes::search_sets`):
+// `SaveSearchStrategy` writes a batch's request before its search, whose `x_AdjustDbSize` then
+// sets `DbLength` in the options handle: the first request holds none, every later one the
+// value of the batch before (D1a4-6 of line RG, corrected in fix 1 of D1a-4).
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010 (quoted at
+// `report_sum_refusal`): `PutInt8`'s `-n` of INT64_MIN, which the ASN.1 text and XML writers share
+// (the binary writer writes the value's bytes).
+/// LOSAT's refusal of a request of the search strategy or of a BLAST archive of ASN.1 text or XML
+/// (`report::archive::strategy::StrategyExport::write_with` and `report::archive::writer::
+/// write_archive`, the writers of every program's requests: the one owner of the serial `-0`
+/// besides `report_sum_refusal`'s of the XML reports) whose options hold a big integer of
+/// exactly -2^63, which NCBI's serial writer prints as `-0`: in the parameters that the batches
+/// before set in NCBI's options handle (`sets`), RPS-BLAST's `DbLength` of `x_AdjustDbSize`
+/// (`STRATEGY_MINUS_ZERO_LENGTH`; the requests after the first), and in the command line's
+/// (`algorithm`), `-dbsize` (`DBSIZE_MINUS_ZERO`; every request). `None` for every other request.
+/// `program` names the refusal (`ArchiveRequest::application` in capitals).
+pub(crate) fn request_minus_zero_refusal(
+    algorithm: &[crate::report::archive::options::Param],
+    sets: &[crate::report::archive::options::Param],
+    program: &str,
+) -> Option<anyhow::Error> {
+    let minus_zero = |params: &[crate::report::archive::options::Param]| {
+        params.iter().any(|param| {
+            matches!(
+                param.value,
+                crate::report::archive::options::ParamValue::BigInteger(i64::MIN)
+            )
+        })
+    };
+    if minus_zero(sets) {
+        return Some(refusal(STRATEGY_MINUS_ZERO_LENGTH, program));
+    }
+    minus_zero(algorithm)
+        .then(|| anyhow::anyhow!("{DBSIZE_MINUS_ZERO} is not supported by LOSAT's {program}"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-747
 // ```c++
 //     } else if (m_FormatType == CFormattingArgs::eXml) {

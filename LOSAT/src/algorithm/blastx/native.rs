@@ -1368,6 +1368,8 @@ pub(super) fn batch_prefetch(
     options: &super::args::ResolvedOptions,
     loc: super::empty_rows::SubjectLoc,
 ) -> BatchPrefetch {
+    // (RPSTBLASTN: with the HSPs of the profiles that left the merged lists past the formatter's
+    // cut, `BatchResults::unlisted_hsps`; its search is gapped.)
     let seq_aligns: usize = results
         .iter()
         .flat_map(|batch| batch.queries.iter().flatten())
@@ -1380,7 +1382,11 @@ pub(super) fn batch_prefetch(
                 options.gapped,
             )
         })
-        .sum();
+        .sum::<usize>()
+        + results
+            .iter()
+            .map(|batch| batch.unlisted.iter().sum::<usize>())
+            .sum::<usize>();
     let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
     let fails = !off
         && !options.gapped
@@ -3202,6 +3208,7 @@ mod reader_batch_tests {
             parameters: Vec::new(),
             search_skipped: skipped,
             request_space: None,
+            unlisted: Vec::new(),
         }]
     }
 

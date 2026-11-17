@@ -713,7 +713,7 @@ pub(super) fn call_lookup(
 ///    Int8 total_length = -1;
 ///    Int4 num_seqs = -1;
 /// ```
-pub(super) struct BlastpDbExtent {
+pub(super) struct BlastpDbExtent<'a> {
     pub(super) total_db_len: usize,
     pub(super) sorts_results: bool,
     pub(super) gapped_gumbel: Option<BlastGumbelBlk>,
@@ -724,9 +724,9 @@ pub(super) struct BlastpDbExtent {
     /// (`BLAST_GapAlignSetUp`): `total_db_len` and `num_subjects`, or an RPS search's first unit's
     /// without `x_AdjustDbSize`'s `DbSeqNum`.
     pub(super) setup_numbers: (i64, i32),
-    /// rpsblast: the search units of the database (`rps_hooks::units`, line RG D1a-4), whose first
-    /// unit's numbers these are (`rps_hooks::RpsSetup`) and whose search reads each unit's.
-    pub(super) rps_units: Option<crate::algorithm::rps_search::volumes::RpsUnits>,
+    /// rpsblast: the search units of the database (`rps_hooks::with_units`, line RG D1a-4), whose
+    /// first unit's numbers these are (`rps_hooks::RpsSetup`) and whose search reads each unit's.
+    pub(super) rps_units: Option<&'a crate::algorithm::rps_search::volumes::RpsUnits>,
 }
 
 /// The call's `BlastpDbExtent` (`database` none: the FASTA subject set `subjects`), with the
@@ -738,11 +738,11 @@ pub(super) struct BlastpDbExtent {
 /// BLAST_GapAlignSetUp(EBlastProgramType program_number,
 ///     const BlastSeqSrc* seq_src,
 /// ```
-pub(super) fn db_extent(
+pub(super) fn db_extent<'a>(
     args: &ResolvedBlastpArgs,
-    database: Option<&BlastpDatabase>,
+    database: Option<&'a BlastpDatabase>,
     subjects: &[EncodedProtein],
-) -> Result<BlastpDbExtent> {
+) -> Result<BlastpDbExtent<'a>> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:766-769
     // ```c
     // kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
@@ -762,13 +762,12 @@ pub(super) fn db_extent(
         None => subjects.iter().map(|subject| subject.aa_len).sum::<usize>(),
         Some(database) => database.total_letters_usize()?,
     };
-    // rpsblast: the search units of the database (`rps_hooks::units`, line RG D1a-4), whose first
-    // unit's numbers the set-up reads in place of the database's (`rps_hooks::RpsSetup`).
-    let rps_units = match database.filter(|_| args.rps_search.is_some()) {
-        Some(database) => Some(rps_hooks::units(args, database)?),
-        None => None,
-    };
-    let rps_setup = rps_units.as_ref().map(rps_hooks::RpsSetup::of);
+    // rpsblast: the search units of the database (`rps_hooks::with_units`, line RG D1a-4), whose
+    // first unit's numbers the set-up reads in place of the database's (`rps_hooks::RpsSetup`).
+    let rps_units = database
+        .filter(|_| args.rps_search.is_some())
+        .and_then(BlastpDatabase::rps_units);
+    let rps_setup = rps_units.map(rps_hooks::RpsSetup::of);
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
     // ```c
     // /* Set the database length for new FSC */
@@ -869,7 +868,8 @@ pub(super) fn db_extent(
             None => database.check_statistics_count(args.app.name())?,
         }
         // A database whose setup counts no sequence of no letters gives the same division by 0:
-        // the same refusal (DECISIONS 14 of line RG), not a panic.
+        // the same refusal (DECISIONS 14 of line RG), not a panic. (Only a FASTA subject set or
+        // a database without OIDs: an RPS unit of a total of 0 or below counts OID 0, 1.)
         if setup_count == 0 {
             return Err(crate::algorithm::common::database::refusal(
                 crate::algorithm::common::database::STATISTICS_COUNT_ZERO,

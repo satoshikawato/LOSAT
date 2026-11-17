@@ -1431,14 +1431,19 @@ most 9 in BLOSUM62).
   `l0rps2v.pal`) with one or two keys, as named: `l0` `LENGTH 0`, `l0n0` `LENGTH 0` and `NSEQ 0`, `n0` `NSEQ 0`, `nm5`
   `NSEQ -5`, `sn7` `STATS_NSEQ 7`, `snm5` `STATS_NSEQ -5`, `st5k` `STATS_TOTLEN 5000`, `st63` `STATS_TOTLEN
   9223372036854775809`, `min1` and `min100` `MIN_SEQ_LENGTH 1` and `100`, `l563n0` `LENGTH 563` and `NSEQ 0`, `fo11` and `fo22` `FIRST_OID` and `LAST_OID` 1
-  and 2, `l400`, `l1000`, `l2p30`, `l2p31`, `l2p63` and `l2p63p1` `LENGTH` 400, 1000, 2^30, 2^31, 2^63 and 2^63 + 1 (the last
+  and 2 (`fo11rps3v` over the three volumes), `fo3` `FIRST_OID 3` (`fo3rps`, `fo3rps3v`), `n1000`, `n4` and `n5` `NSEQ` 1000, 4
+  and 5, `l400`, `l1000`, `l2p30`, `l2p31`, `l2p63` and `l2p63p1` `LENGTH` 400, 1000, 2^30, 2^31, 2^63 and 2^63 + 1 (the last
   two 0 and negative as NCBI's `Int8`), `nm300` and `nm562` `NSEQ` -300 and -562, `l400n200`, `l0n600` and `l2p63p1n600`
   `LENGTH` 400, 0 and 2^63 + 1 with `NSEQ` 200, 600 and 600. The rows `db.rps.{1v,2v,3v}.*`, `db.rpstbn.{1v,3v}.*`,
-  `db.rpstbn.fo11.e5.6` and the rejection rows `db.rps.rej.{l0,nm300,l2p30,l2p31,over,fo22,l563n0.oldfsc}`,
+  `db.rpstbn.fo11.e5.6`, `db.{rps,rpstbn}.{empty,nolet}.*` and the rejection rows `db.rps.rej.{l0,nm300,l2p30,l2p31,over,n5.over,fo22,l563n0.oldfsc}`,
   `db.rpstbn.rej.{l0,nm300,fo22,l563n0.oldfsc}` search them (NCBI's search units of item D1a-4: one volume is searched with
   all its keys, its `LENGTH` plus `NSEQ` the concatenated length of the search, several volumes each bare under the
   database's length and count; the queries `tests/fasta/rps/lc403.faa`, `lcm2.faa`, `lc403.fna` and `over.faa` are records
-  of `q40.faa` and `nq.fna` whose trees end below the rows, or whose extension runs past the last profile);
+  of `q40.faa` and `nq.fna` whose trees end below the rows, or whose extension runs past the last profile; fix round 1 of
+  D1a-4: `q649.faa` is record YP_009220649.1 of `tests/fasta/WSSV.faa` (its residues 1101-1290 are `gnl|CDD|103`'s
+  fragment), `n103.fna` those 190 residues back-translated with the first codon of each amino acid (A GCT, R CGT, N AAC, D
+  GAC, C TGC, Q CAG, E GAA, G GGT, H CAC, I ATC, L CTG, K AAA, M ATG, F TTC, P CCG, S TCT, T ACC, W TGG, Y TAC, V GTT), and
+  `nolet.fa` two records without letters (`>a`, `>b`);
   `tests/fixtures/strategy/cases.tsv` copies some of them (`rpsblast.{3v,2v}.*.q40`, `rpstblastn.3v.*.nq.b2000`).
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt

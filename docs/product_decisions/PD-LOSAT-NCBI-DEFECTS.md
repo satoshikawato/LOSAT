@@ -112,14 +112,17 @@
   rule 3 (2026-11-16: the split of T3c after X2g, and `FillUnalignedRegions`'s free of T3c fix 3);
   Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10);
-  1.40 2026-11-17 (RPSBLAST and RPSTBLASTN: a hit of a profile that an alias file's `FIRST_OID` and
-  `LAST_OID` leave out, which NCBI's report does not find, refused at its query batch in every
-  format, within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37,
-  rule 3, where it stops with a null pointer exception; and the explicit rejections, rule 3, of the
-  concatenated length of an RPS search unit at which NCBI's interval tree splits a node without
-  end, its diagonal table never stops growing, it frees the profiles twice, or an ungapped
-  extension reads past its score matrix, precedent 1.30; line RG item D1a-4, Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07)
+  1.40 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
+  `FIRST_OID` and `LAST_OID` leave out, which NCBI's report does not find, refused in every format,
+  within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37, rule 3,
+  where it stops with a null pointer exception: reported sequences only; and the explicit
+  rejections, rule 3, of the concatenated length of an RPS search unit at which NCBI's interval tree
+  splits a node without end, its diagonal table never stops growing, it frees the profiles twice,
+  or an ungapped extension reads past the row after the profiles or that row past the `.rps`
+  file's last memory page, precedent 1.30; line RG item D1a-4, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; fix round 1 of D1a-4: the reported profiles only,
+  the refusals at the batch where NCBI's engine meets them, the row after the profiles read as
+  NCBI reads it, DECISIONS D1a4-9)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1221,10 +1224,17 @@ masked). Line NP item M4a-2c.
   fields of outfmt 6, 7 and 10 stop with a null pointer exception, exit status 255 (the class of
   1.37; probes p6_1v_fo22 and p6b_fo22 of line RG D1a-4). LOSAT refuses (exit 1, "a hit of the
   profile of OID N outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID ... is not
-  supported by LOSAT's RPSBLAST", one text for both programs) at the query batch whose final hit
-  lists hold such a profile; with several volumes also where it lies past the `-max_target_seqs` cut
-  of the merged lists, which no report of NCBI's reads. A run whose hits are all in the range is
-  NCBI's (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`).
+  supported by LOSAT's RPSBLAST", one text for both programs) where a query's reported profiles
+  hold such a profile: the first `-max_target_seqs` profiles of its hit list (the hit list size,
+  `PruneSeqalign` with `m_HitlistSize`, `blast_format.cpp:810-813`; outfmt 0's descriptions and
+  alignments lie within it). RPSBLAST refuses before any output (its search of every query batch
+  comes before the reports); RPSTBLASTN after the reports of the query batches before. With several
+  volumes a profile outside the range past that cut of the merged lists, which no report of NCBI's
+  looks up, is NCBI's run: its HSPs count in outfmt 7's `# N hits found` (and in
+  `PRE_FETCH_SEQS_LIMIT`'s count), as NCBI counts the whole merged set (probes r1_3v_fo3 and
+  r1_3v_fo11 of review A of D1a-4). A run whose reported hits are all in the range is NCBI's
+  (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`, `db.rps.1v.fo3.*`,
+  `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`).
 
 - RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
   concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (version 1.40,
@@ -1239,9 +1249,10 @@ masked). Line NP item M4a-2c.
   0's prolog; the OOM killer without it). A region that crosses `R` straddles a middle of the spine
   and ends in a subject tree; below `R = 0` every middle of the spine is below the regions' starts.
   LOSAT refuses (exit 1, "... where two gapped alignments of a query start past position ... is not
-  supported by LOSAT's RPSBLAST") the query batch at the insertion that would make the node, after
-  NCBI's end-point checks (which may drop the HSP or the leaf it meets): `BlastIntervalTree::
-  try_add_hsp`, the stop of TBLASTN's endless split of 1.18). With at most one such
+  supported by LOSAT's RPSBLAST") at the insertion that would make the node, after NCBI's end-point
+  checks (which may drop the HSP or the leaf it meets): `BlastIntervalTree::try_add_hsp`, the stop
+  of TBLASTN's endless split of 1.18; RPSBLAST before any output, RPSTBLASTN after the reports of the
+  query batches before (NCBI writes the batches before, then fails). With at most one such
   region in each tree NCBI ends, and LOSAT gives its bytes: the truncated extensions to the right
   and the diagonal table of `Lc` (fixture rows `db.rps.rej.l0`, `db.rpstbn.rej.l0`,
   `db.rps.rej.nm300`, `db.rpstbn.rej.nm300`, and the one-volume rows that end).
@@ -1252,30 +1263,43 @@ masked). Line NP item M4a-2c.
   extension to the right runs to `MIN(subject->length - s_off, Lc - q_off)` (`aa_ungapped.c:948`),
   past the rows. The last profile's sentinel row (`-BLAST_SCORE_MAX`, `makeprofiledb.cpp:1166-1167`)
   stops it unless the X-drop is above that score; past it NCBI reads the row pointer after the last
-  row, which points past the rows in the `.rps` file's mapping, and then past its pointer array
-  (`blast_aalookup.c:185-190`): with `-xdrop_ungap 100000` and a query that matches the profiles to
-  their end NCBI crashes (SIGSEGV, exit status -11; probe p9_over of line RG D1a-4). LOSAT reads the
-  rows up to `MIN(Lc, rows)` and refuses (exit 1, "... whose ungapped extension of a query runs past
-  the last profile ... is not supported by LOSAT's RPSBLAST") the query batch of an extension that runs
-  through the rows to their end with letters of the query left, where `Lc` is above them; elsewhere
-  `Lc` above the rows is NCBI's search (its diagonal table of `Lc`; fixture row `db.rps.rej.over`).
+  row (`rps_pssm[rows]`, the last of the `rows + 1` pointers, `blast_aalookup.c:185-190`), which
+  points to the bytes after the rows in the `.rps` file's mapping, and then past its pointer array.
+  At `Lc = rows + 1` the extension reads that one row: the file ends there (makeprofiledb writes no
+  byte after the rows), so NCBI reads the zeros of the file's last memory page, the row scores 0
+  and the extension ends at its bound (`NSEQ 4` over the 563 rows of `rps_mini`, whose `.rps` of
+  63,080 bytes leaves 2,456 zero bytes in its last 4 KiB page: NCBI exit 0, 431 bytes, probe g9#0 of
+  review B of D1a-4); where the file ends on a page boundary that read faults (SIGBUS). LOSAT reads
+  that row as NCBI does (the file's bytes after the rows, then the page's zeros: DECISIONS D1a4-9,
+  rule 2, the precedent of DECISIONS X2f-4 for `.psq`) and refuses (exit 1, "... whose ungapped
+  extension of a query runs past the row after the last profile, or reads that row past the .rps
+  file's last memory page ... is not supported by LOSAT's RPSBLAST") an extension that reads its
+  bytes past the last page (rule 3) or goes on past it, where `Lc` is the rows plus 2 or more: with
+  `-xdrop_ungap 100000` and a query that matches the profiles to their end NCBI crashes (SIGSEGV,
+  exit status -11; probes p9_over of line RG D1a-4 and g9#1, `NSEQ 5`); RPSBLAST before any output,
+  RPSTBLASTN after the reports of the query batches before. Elsewhere `Lc` above the rows is NCBI's
+  search (its diagonal table of `Lc`; fixture rows `db.rps.rej.over`, `db.rps.rej.n5.over`,
+  `db.rps.1v.n4.over.6`).
 
 - RPSBLAST and RPSTBLASTN with a concatenated length `Lc` whose diagonal table never stops growing
   (version 1.40, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_BlastDiagTableNew`
   (`blast_extend.c:52-57`) doubles an `Int4` from 1 while it is below `Lc` plus the word window; past
   a sum of 2^30 it doubles to 2^31 (`INT_MIN`) and then to 0 and stays there (an alias file's
   `LENGTH` 2^30 over one volume: no end, timeout); a sum above `INT4_MAX` (`LENGTH` 2^31 - 4 and
-  `NSEQ` 3) overflows NCBI's `Int4` addition. LOSAT refuses (exit 1, before the first byte) a unit
-  whose `Lc` plus the window is above 2^30, for every unit (also a bare volume of that many rows;
-  the volume test of earlier versions refused a sum of exactly 2^30, where NCBI's loop ends; fixture
-  row `db.rps.rej.l2p30`).
+  `NSEQ` 3) overflows NCBI's `Int4` addition. LOSAT refuses (exit 1) a unit whose `Lc` plus the
+  window is above 2^30, for every unit (also a bare volume of that many rows; the volume test of
+  earlier versions refused a sum of exactly 2^30, where NCBI's loop ends; fixture row
+  `db.rps.rej.l2p30`), where NCBI's engine meets it: in the unit's search of the first query batch
+  that NCBI searches, after the batch's query set-up (an empty query file ends with NCBI's `Query is
+  Empty!` and exit 0, a first batch without letters with NCBI's engine error and exit 3: rows
+  `db.rps.empty.l2p31`, `db.rps.nolet.l2p30`, `db.rpstbn.nolet.l2p30`; review B of D1a-4, MF1).
 
 - RPSBLAST and RPSTBLASTN over one volume whose `LENGTH` and `NSEQ` sum above `INT4_MAX` (version
   1.40, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_RPSPreliminarySearchEngine`
   returns -3 (`blast_engine.c:1131-1135`) after `RPSPsiMatrixAttach` gave the score block the
   lookup table's profiles, and the score block's free frees them again (`double free or corruption`,
-  SIGABRT, exit status -6 after outfmt 0's prolog; `LENGTH` 2^31). LOSAT refuses (exit 1, before the
-  first byte; fixture row `db.rps.rej.l2p31`).
+  SIGABRT, exit status -6 after outfmt 0's prolog; `LENGTH` 2^31). LOSAT refuses (exit 1; fixture row
+  `db.rps.rej.l2p31`) where NCBI's engine meets it, as the diagonal table's refusal above.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

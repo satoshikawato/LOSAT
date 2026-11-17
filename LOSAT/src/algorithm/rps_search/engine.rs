@@ -44,7 +44,7 @@ use super::traceback::{
     filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
 };
 use super::wordfinder::{RpsWordParams, RpsWordScratch};
-use super::{RpsRows, RPS_K_MULT};
+use super::{RpsPastRows, RpsRows, RPS_K_MULT};
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
@@ -688,20 +688,22 @@ impl RpsRun<'_> {
         // The concatenated length `Lc` of the volume's unit, NCBI's `query->length` of the
         // search: the length of the diagonal table (`RpsWordScratch::prepare_for`), the bound of
         // the extensions to the right (`RpsRows`, within 0 and the rows) and the end of the
-        // interval tree (`RpsPrelim::concat_length`). Where `Lc` is above the rows an extension
-        // past the last profile is LOSAT's refusal (`RpsRows::overran`).
+        // interval tree (`RpsPrelim::concat_length`). Where `Lc` is above the rows the extensions
+        // read NCBI's row after the rows (`RpsRows::past`, `RpsVolumeFiles::row_after_rows`), and
+        // one that reads what NCBI cannot is LOSAT's refusal (`RpsPastRows::overran`).
         let concat_length = self.concat_length;
         let extension_length = concat_length.clamp(0, rows.len() as i32) as usize;
-        // One flag for each context of each query (query after query, the same number of contexts
-        // each), only where `Lc` is above the rows.
-        let overrun_flags: Option<Vec<std::sync::atomic::AtomicBool>> =
-            (i64::from(concat_length) > rows.len() as i64).then(|| {
-                self.queries
-                    .iter()
-                    .flat_map(|query| &query.frames)
-                    .map(|_| std::sync::atomic::AtomicBool::new(false))
-                    .collect()
-            });
+        let past_rows = (i64::from(concat_length) > rows.len() as i64).then(|| {
+            // One flag for each context of each query (query after query, the same number of
+            // contexts each).
+            let flags: Vec<std::sync::atomic::AtomicBool> = self
+                .queries
+                .iter()
+                .flat_map(|query| &query.frames)
+                .map(|_| std::sync::atomic::AtomicBool::new(false))
+                .collect();
+            (files.row_after_rows(), flags)
+        });
         // The preliminary stage of one context of a query (NCBI's frame loop: each context
         // scanned as a subject with its own cutoffs).
         let prelim_of = |q_idx: usize, context: usize| -> RpsPrelim<'_> {
@@ -712,8 +714,10 @@ impl RpsRun<'_> {
                     rows: RpsRows {
                         rows,
                         length: extension_length,
-                        overran: overrun_flags.as_deref().map(|flags| {
-                            &flags[q_idx * self.queries[q_idx].frames.len() + context]
+                        past: past_rows.as_ref().map(|(row, flags)| RpsPastRows {
+                            row,
+                            concat_length,
+                            overran: &flags[q_idx * self.queries[q_idx].frames.len() + context],
                         }),
                     },
                     table,
@@ -742,20 +746,21 @@ impl RpsRun<'_> {
         // another context writes: the diagonal table's entries of earlier contexts read as empty
         // (`wordfinder.rs`) and each context's scan starts its own runs of hits.
         let mut units: Vec<(usize, usize)> = Vec::new();
+        // The longest context searched, which bounds the diagonals of the workers' tables
+        // (`wordfinder::diag_table_length`).
+        let mut longest = 0usize;
         let mut first_unit = Vec::with_capacity(self.queries.len());
         let mut remaining = Vec::with_capacity(self.queries.len());
         for (q_idx, query) in self.queries.iter().enumerate() {
             first_unit.push(units.len());
             let searched = refused[q_idx].is_none();
             if searched {
-                units.extend(
-                    query
-                        .frames
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, frame)| frame.valid)
-                        .map(|(context, _)| (q_idx, context)),
-                );
+                for (context, frame) in query.frames.iter().enumerate() {
+                    if frame.valid {
+                        units.push((q_idx, context));
+                        longest = longest.max(frame.length());
+                    }
+                }
             }
             let count = units.len() - first_unit[q_idx];
             if searched && count == 0 {
@@ -850,7 +855,7 @@ impl RpsRun<'_> {
             scratch
                 .prelim
                 .word
-                .prepare_for(rows.len(), concat_length, self.window);
+                .prepare_for(rows.len(), concat_length, self.window, longest);
             let mut hsps = Vec::new();
             let searched = prelim_of(q_idx, context)
                 .search_frame(

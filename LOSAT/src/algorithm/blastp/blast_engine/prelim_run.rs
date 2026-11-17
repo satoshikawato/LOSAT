@@ -129,10 +129,12 @@ pub(super) struct PrelimRun<'a> {
 /// What `run_call` reads of the preliminary stage after it (`run_preliminary`): RPS-BLAST's gapped
 /// K of each query, for outfmt 0 (`rps_hooks::rps_search`; `None` for the other searches), and
 /// whether the call's lists are the merged lists of several volumes of an RPS-BLAST database,
-/// which are not sorted or cut and print no query warnings.
+/// which are not sorted or cut and print no query warnings, and the HSPs of the profiles that
+/// left those lists past the formatter's cut (`rps_hooks::RpsSearched::unlisted`).
 pub(super) struct PrelimOutcome {
     pub(super) rps_gapped_k: Option<Vec<f64>>,
     pub(super) rps_multi_volume: bool,
+    pub(super) rps_unlisted: Vec<usize>,
 }
 
 /// The preliminary stage of the call (module header): the statements of `run_call` from the choice
@@ -263,6 +265,7 @@ where
     // which the ordinary traceback in `run_call` after this stage hands on, and each query's
     // outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
+    let mut rps_unlisted: Vec<usize> = Vec::new();
     // A database of several volumes: its merged lists are not sorted or cut in `run_call` after
     // this stage, and it prints no query warnings; so even when no batch is searched (every query
     // invalid), as NCBI merges the volumes' empty results (review A of PS12a, S2's rpsblast half).
@@ -314,6 +317,7 @@ where
         })?;
         rps_gapped_k = Some(searched.gapped_k);
         rps_multi_volume = searched.volumes > 1;
+        rps_unlisted = searched.unlisted;
     } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
             psi,
@@ -685,5 +689,6 @@ where
     Ok(PrelimOutcome {
         rps_gapped_k,
         rps_multi_volume,
+        rps_unlisted,
     })
 }

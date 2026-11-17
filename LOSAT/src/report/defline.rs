@@ -300,8 +300,9 @@ pub enum SourceTaxname {
     /// runs for any source: it then drops a ` [ ]` end. Elsewhere it reads as `Unnamed`.
     Nameless,
     /// LOSAT's refusal where a report shows the title, with what the sequence has (after
-    /// "database sequence N has"): a lookup of the taxid that reads past the mapped end of
-    /// `taxdb.btd` (NCBI BLAST+ reads unmapped memory), or a definition line whose taxid does not
+    /// "database sequence N has"): a lookup of the taxid whose scientific name NCBI BLAST+ reads
+    /// past its mapping of `taxdb.btd` (an empty file: NCBI faults; otherwise its bytes, or
+    /// whether NCBI faults, depend on its memory map), or a definition line whose taxid does not
     /// read.
     Refused(&'static str),
 }

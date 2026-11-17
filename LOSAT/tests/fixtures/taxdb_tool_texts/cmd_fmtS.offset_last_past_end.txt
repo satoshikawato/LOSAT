@@ -1,0 +1,16 @@
+AB410000.1 0 N/A
+AB410001.1 0 N/A
+AB410002.1 9606 Homo sapiens
+AB410003.1 9606 Homo sapiens
+Error: [blastdbcmd] Error: Offset error at end of taxdb file.
+AB410004.1 99990 N/A
+AB410005.1 150 N/A
+Error: [blastdbcmd] Error: Offset error at end of taxdb file.
+AB410006.1 99990 N/A
+Error: [blastdbcmd] Error: Offset error at end of taxdb file.
+AB410007.1 99990 N/A
+AB410008.1 150 N/A
+AB410009.1 77777 N/A
+Error: [blastdbcmd] Error: Offset error at end of taxdb file.
+AB410010.1 99990 N/A
+AB410011.1 9606 Homo sapiens

@@ -75,8 +75,9 @@ impl RpsTraceScratch {
     }
 }
 
-/// The final hit list of a query and the highest profile whose rescaled PSSM it wrote the K of
-/// (the K the query's batch may print, `engine.rs`).
+/// The final hit list of a query and the profile of the last list, in the stream's order
+/// (`stream_lists`), that wrote its K (without composition-based statistics, the highest profile
+/// whose rescaled PSSM exists): the K the query's batch may print (`batch_gapped_k`).
 pub(crate) struct RpsTraced {
     pub(crate) hit_list: Option<BlastpHitList>,
     pub(crate) k_mark: Option<u32>,
@@ -269,6 +270,52 @@ pub(super) fn formatter_identities(
     }
 }
 
+/// A query's preliminary lists in the order the traceback reads them from NCBI's HSP stream:
+/// sorted by E-value (`BlastpHitList::sort_by_evalue`, the lists without HSPs dropped) where the
+/// stream sorts by score (`by_score`: a protein query with composition-based statistics, so
+/// rpsblast's redo), else by ordinal id, up (the stream of the batch's queries sorts them down
+/// and reads from the end; a query has one list per profile).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:676-686
+/// ```c
+///     /* This is needed to meet a pre-condition of the composition-based
+///      * statistics code */
+///     if ((Blast_QueryIsProtein(program) || Blast_QueryIsPssm(program)) &&
+///         extn_opts->compositionBasedStats != 0) {
+///         hsp_stream->sort_by_score =
+///             (SSortByScoreStruct*)calloc(1, sizeof(SSortByScoreStruct));
+///         ...
+///     } else {
+///         hsp_stream->sort_by_score = NULL;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:196-203
+/// ```c
+///    /* sort in order of decreasing subject OID. HSPLists will be
+///       read out from the end of hsplist_array later */
+///
+///    hsp_stream->num_hsplists = num_hsplists;
+///    if (num_hsplists > 1) {
+///       qsort(hsp_stream->sorted_hsplists, num_hsplists,
+///                     sizeof(BlastHSPList *), s_SortHSPListByOid);
+///    }
+/// ```
+fn stream_lists(
+    mut prelim: BlastpHitList<XPrelimHsp>,
+    by_score: bool,
+) -> Vec<BlastpHspList<XPrelimHsp>> {
+    if by_score {
+        prelim.sort_by_evalue();
+    }
+    let count = prelim.hsplist_count;
+    let mut lists: Vec<BlastpHspList<XPrelimHsp>> =
+        prelim.hsplist_array.into_iter().take(count).collect();
+    if !by_score {
+        lists.sort_by_key(|list| list.oid);
+    }
+    lists
+}
+
 impl RpsTraceback<'_> {
     /// The traceback of the query of letters `query` (without sentinels) and index `q_idx` from
     /// its preliminary hit list.
@@ -315,9 +362,9 @@ impl RpsTraceback<'_> {
     ///    ...
     ///    Blast_HSPResultsSortByEvalue(results);
     /// ```
-    /// The lists are read by ordinal id (the stream of a batch without composition-based
-    /// statistics sorts them so); a list's traceback reads nothing another writes, and the hit
-    /// list's order is total, so the read order does not change the hit list.
+    /// The lists are read in the stream's order (`stream_lists`); a list's traceback reads
+    /// nothing another writes, and the hit list's order is total, so the read order changes only
+    /// the K that the last list leaves (`RpsTraced::k_mark`).
     pub(crate) fn trace_query(
         &self,
         prelim: BlastpHitList<XPrelimHsp>,
@@ -335,6 +382,9 @@ impl RpsTraceback<'_> {
         } else {
             &[]
         };
+        // NCBI's stream sorts by score a protein query's lists with composition-based statistics
+        // (the redo); it reads every other query's by ordinal id.
+        let lists = stream_lists(prelim, self.redo.is_some() && !translated);
         if let Some(redo) = self.redo.as_ref() {
             // Without the Gumbel block the redo reads context 0's search space (the redo's copy
             // of the query information keeps it, blast_traceback.c:1238-1245).
@@ -347,7 +397,7 @@ impl RpsTraceback<'_> {
                 let buffer = translation_buffer(query);
                 self.trace_query_redo(
                     redo,
-                    prelim,
+                    lists,
                     &buffer,
                     FrameSubject { frames: &frames },
                     q_idx,
@@ -357,7 +407,7 @@ impl RpsTraceback<'_> {
             } else {
                 self.trace_query_redo(
                     redo,
-                    prelim,
+                    lists,
                     letters,
                     ProteinSubject,
                     q_idx,
@@ -368,12 +418,6 @@ impl RpsTraceback<'_> {
         }
         let probabilities = residue_probabilities(letters);
         let frames = frame_letters(query);
-        let mut lists: Vec<BlastpHspList<XPrelimHsp>> = prelim
-            .hsplist_array
-            .into_iter()
-            .take(prelim.hsplist_count)
-            .collect();
-        lists.sort_by_key(|list| list.oid);
         let mut hit_list: Option<BlastpHitList> = None;
         let mut k_mark: Option<u32> = None;
         for list in lists {
@@ -712,6 +756,50 @@ pub(crate) fn filter_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn prelim_list(oid: u32, score: i32) -> BlastpHspList<XPrelimHsp> {
+        let hsp = crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp {
+            query_start: 0,
+            query_end: 10,
+            subject_start: 0,
+            subject_end: 10,
+            gapped_query_start: 0,
+            gapped_subject_start: 0,
+            raw_score: score,
+            query_context: 0,
+            query_frame: 0,
+            subject_frame: 0,
+            query_length: 100,
+            q_idx: 0,
+            s_idx: oid,
+        };
+        BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![XPrelimHsp { hsp, e_value: 0.0 }],
+            best_evalue: 0.0,
+        }
+    }
+
+    // blast_hspstream.c:676-686 and 196-203 (quoted at `stream_lists`): only rpsblast's redo
+    // reads a query's lists by score; rpstblastn's redo and every traceback without
+    // composition-based statistics read them by ordinal id, so the last list, whose K the
+    // batch's first footer may print, is the highest profile.
+    #[test]
+    fn the_stream_reads_by_score_only_for_a_protein_querys_redo() {
+        let mut prelim = BlastpHitList::new(10);
+        for (oid, score) in [(0, 50), (3, 80), (1, 80), (2, 65)] {
+            prelim.update(prelim_list(oid, score));
+        }
+        let oids = |by_score| -> Vec<u32> {
+            stream_lists(prelim.clone(), by_score)
+                .iter()
+                .map(|list| list.oid)
+                .collect()
+        };
+        assert_eq!(oids(true), [3, 1, 2, 0]);
+        assert_eq!(oids(false), [0, 1, 2, 3]);
+    }
 
     // blast_traceback.c:346-354 (quoted at `evalue_lengths`, DECISIONS 46): with `isRPS`, `m` is
     // the traceback's `stat_length` and `n` the HSP's context of the user query, which the

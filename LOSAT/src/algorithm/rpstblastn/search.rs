@@ -791,10 +791,11 @@ impl WindowBatch {
 }
 
 /// The gapped K of the footers of a batch's queries with composition-based statistics: the
-/// redo of each list writes `kbp_gap[0]` (`RpsTraced::k_mark`, `batch_gapped_k` of the batch),
-/// and only a footer that reads `kbp_gap[0]` shows it: the first query's, where its first valid
-/// context is 0 (frame +1, `first_frame_valid`); every other footer shows the table's K
-/// `table_k`.
+/// redo of each list writes `kbp_gap[0]`, and the stream of a translated query's lists reads
+/// them by ordinal id (`stream_lists`), so the batch's highest mark leaves it
+/// (`RpsTraced::k_mark`, `batch_gapped_k` of the batch). Only a footer that reads `kbp_gap[0]`
+/// shows it: the first query's, where its first valid context is 0 (frame +1,
+/// `first_frame_valid`); every other footer shows the table's K `table_k`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
 /// ```c++
@@ -819,7 +820,7 @@ fn footer_gapped_k(
     if !first_frame_valid {
         return vec![table_k; k_marks.len()];
     }
-    batch_gapped_k(&[0..k_marks.len()], k_marks, karlin_k, table_k, true)
+    batch_gapped_k(&[0..k_marks.len()], k_marks, karlin_k, table_k, false)
 }
 
 /// Each batch of a window prepared (`prepare_batch`), the batches at the same time on the run's
@@ -1597,13 +1598,14 @@ mod tests {
     }
 
     // blast_results.cpp:82-104 (quoted at `footer_gapped_k`): only the first query's footer reads
-    // `kbp_gap[0]`, which the batch's last redo wrote, and only where frame +1 is valid.
+    // `kbp_gap[0]`, which the batch's last redo wrote (the highest profile: the stream reads the
+    // lists by ordinal id), and only where frame +1 is valid.
     #[test]
     fn only_the_first_footer_shows_the_redos_k() {
         let marks = [Some(2), None, Some(0)];
         let karlin_k = [0.1, 0.2, 0.3];
         let k = footer_gapped_k(&marks, &karlin_k, 0.041, true);
-        assert_eq!(k, [1.2 * 0.1, 0.041, 0.041]);
+        assert_eq!(k, [1.2 * 0.3, 0.041, 0.041]);
         assert_eq!(footer_gapped_k(&marks, &karlin_k, 0.041, false), [0.041; 3]);
         assert_eq!(
             footer_gapped_k(&[None, None], &karlin_k, 0.041, true),

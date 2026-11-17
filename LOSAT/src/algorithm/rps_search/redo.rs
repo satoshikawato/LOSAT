@@ -42,7 +42,7 @@ use anyhow::Result;
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
-use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHitList};
+use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHitList, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
@@ -115,12 +115,13 @@ pub(super) struct RpsQueryStats<'a> {
 
 impl RpsTraceback<'_> {
     /// The redo of the query `query` (a protein query's letters without sentinels, or a
-    /// translated query's translation buffer with its frames in `kind`) from its preliminary hit
-    /// list. NCBI reads the lists in the order of the stream: sorted by best E-value, then the
-    /// first HSP's score (down), then the ordinal id (down) (`Blast_HSPResultsReverseSort`
-    /// reads from the end, `s_EvalueCompareHSPLists`); each list writes the profile's K
-    /// (`RPS_K_MULT` times the `.aux` K) before its redo, so the last list read leaves the K
-    /// that the query's batch may print (`k_mark`).
+    /// translated query's translation buffer with its frames in `kind`) from its preliminary
+    /// lists `lists`, in the order NCBI's stream reads them (`stream_lists`): a protein query's
+    /// sorted by best E-value, then the first HSP's score (down), then the ordinal id (down)
+    /// (`Blast_HSPResultsReverseSort` reads from the end, `s_EvalueCompareHSPLists`), a
+    /// translated query's by ordinal id. Each list writes the profile's K (`RPS_K_MULT` times
+    /// the `.aux` K) before its redo, so the last list read leaves the K that the query's batch
+    /// may print (`k_mark`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1203-1208
     /// ```c
@@ -139,7 +140,7 @@ impl RpsTraceback<'_> {
     pub(super) fn trace_query_redo<'q, S: RedoSubject<'q>>(
         &self,
         redo: &RpsRedoParams<'_>,
-        mut prelim: BlastpHitList<XPrelimHsp>,
+        lists: Vec<BlastpHspList<XPrelimHsp>>,
         query: &'q [u8],
         kind: S,
         q_idx: u32,
@@ -148,8 +149,6 @@ impl RpsTraceback<'_> {
     ) -> Result<RpsTraced> {
         let RpsQueryStats { batch_kbp, stats } = statistics;
         let program = redo.program;
-        prelim.sort_by_evalue();
-        let count = prelim.hsplist_count;
         let mut hit_list: Option<BlastpHitList> = None;
         let mut k_mark: Option<u32> = None;
         // The heap of redone matches that the Smith-Waterman redo's first alignment asks
@@ -183,7 +182,7 @@ impl RpsTraceback<'_> {
             k: batch_kbp.k,
             h: batch_kbp.h,
         };
-        for list in prelim.hsplist_array.into_iter().take(count) {
+        for list in lists {
             let oid = list.oid as usize;
             let start = self.offsets[oid] as usize;
             let length = (self.offsets[oid + 1] - self.offsets[oid] - 1) as usize;

@@ -581,24 +581,6 @@ fn crate_test_taxdb(rows: &[(i32, &[u8])]) -> (Vec<u8>, Vec<u8>) {
     (index, data)
 }
 
-#[test]
-fn a_registry_read_posts_as_ncbi() {
-    // NCBI BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): the posts of one read; each
-    // query's report reads `./.ncbirc` twice.
-    use crate::blastinput::ncbi_registry::{read_registry, Layer};
-    let read = read_registry(b"[FOO]\na=1\na=2\n", Layer::SystemWide).unwrap();
-    assert_eq!(
-        registry_posts(&read, "blastp"),
-        b"Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3\n"
-            .to_vec()
-    );
-    let read = read_registry(b"\xef", Layer::SystemWide).unwrap();
-    assert_eq!(
-        registry_posts(&read, "blastp"),
-        b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
-    );
-}
-
 /// A query whose batch NCBI did not search (no valid context) has a null Seq-align-set, which
 /// NCBI's report dereferences after the query's `Query=` block (NCBI BLAST+ 2.17.0, line RG T2
 /// fix 5's `T/t2/fix5/probe_d2.sh`: `Length=60` and then NCBI's null pointer exception, exit

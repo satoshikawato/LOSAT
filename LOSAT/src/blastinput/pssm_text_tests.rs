@@ -344,18 +344,18 @@ fn errors_are_ncbis_classes_and_what_the_search_does_not_take_is_kept() {
     ));
 }
 
-// The members the PSSM writer does not write yet are kept and named (NCBI's object keeps them and
-// writes them back: psiblast `-in_pssm` with `-out_pssm`, NCBI 2.17.0 probes of PS5b), and an
-// empty `descr` is NCBI's error (`CSeq_descr::PostRead`, `asn_types::hooks`; NCBI: "Unrecognized
-// format for PSSM").
+// Every member NCBI's object keeps is kept and written back (psiblast `-in_pssm` with
+// `-out_pssm` writes the object it read: NCBI 2.17.0 probes of PS5b and SURVEY_D3 c01-c19 of line
+// RG series F; the generic writer, line RG item D3-2), and an empty `descr` is NCBI's error
+// (`CSeq_descr::PostRead`, `asn_types::hooks`; NCBI: "Unrecognized format for PSSM").
 #[test]
-fn kept_members_are_named_and_an_empty_descr_is_an_error() {
-    let unwritten = |text: &str| {
-        read_pssm_with_parameters(text.as_bytes())
-            .unwrap()
-            .unwritten_members()
+fn kept_members_are_written_back_and_an_empty_descr_is_an_error() {
+    let round_trip = |text: &str| {
+        let value = read_pssm_with_parameters(text.as_bytes()).unwrap();
+        assert_eq!(String::from_utf8(asn_text(&value).unwrap()).unwrap(), text);
+        value
     };
-    assert!(unwritten(SMALL_PSSM).is_empty());
+    round_trip(SMALL_PSSM);
     let edited = SMALL_PSSM
         .replace(
             "title \"a \"\"quoted\"\" title\"",
@@ -366,11 +366,7 @@ fn kept_members_are_named_and_an_empty_descr_is_an_error() {
             "      gapExtend 1\n    }\n  }",
             "      gapExtend 1\n    },\n    constraints {\n      nblocks 0,\n      blocks {\n      },\n      loops {\n      }\n    }\n  }",
         );
-    let value = read_pssm_with_parameters(edited.as_bytes()).unwrap();
-    assert_eq!(
-        value.unwritten_members(),
-        ["Seqdesc", "topology", "constraints"]
-    );
+    let value = round_trip(&edited);
     let query = value.pssm.query.as_ref().and_then(SeqEntry::seq).unwrap();
     assert_eq!(query.titles(), [&b"a \"quoted\" title"[..]]);
     assert_eq!(query.inst.topology, Some(1));
@@ -378,14 +374,18 @@ fn kept_members_are_named_and_an_empty_descr_is_an_error() {
         "        seq-data ncbistdaa '0C'H\n      }\n",
         "        seq-data ncbistdaa '0C'H\n      },\n      annot {\n        {\n          data ftable {\n          }\n        }\n      }\n",
     );
-    assert_eq!(unwritten(&annot), ["annot"]);
+    assert!(round_trip(&annot)
+        .pssm
+        .query
+        .and_then(SeqEntry::into_seq)
+        .unwrap()
+        .annot
+        .is_some());
     let molinfo = SMALL_PSSM.replace(
         "title \"a \"\"quoted\"\" title\"",
         "molinfo {\n          biomol peptide\n        },\n        title \"a \"\"quoted\"\" title\"",
     );
-    assert_eq!(unwritten(&molinfo), ["molinfo"]);
-    assert!(read_pssm_with_parameters(molinfo.as_bytes())
-        .unwrap()
+    assert!(round_trip(&molinfo)
         .pssm
         .query
         .and_then(SeqEntry::into_seq)

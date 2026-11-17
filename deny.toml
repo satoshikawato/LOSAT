@@ -19,11 +19,17 @@ all-features = true
 
 [advisories]
 # As cargo audit --deny warnings did: vulnerabilities (always errors), unmaintained and unsound
-# crates anywhere in the graph, and yanked versions all fail. No advisory is ignored.
+# crates anywhere in the graph, and yanked versions all fail. An advisory is ignored only by its id,
+# with the reason and the condition that removes the entry (a new advisory on the same crate fails).
 unmaintained = "all"
 unsound = "all"
 yanked = "deny"
-ignore = []
+ignore = [
+    # chrono is unmaintained (no vulnerability; RustSec names jiff and time). It is in
+    # python/Cargo.lock only, through arrow-array (Apache Arrow, pylosat's Arrow tables), which
+    # needs it in every release up to 60.1.0 (2026-11-17). Remove when arrow-array drops chrono.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; only through arrow-array (pylosat), which requires it" },
+]
 
 [licenses]
 # The licenses the three graphs need, each one satisfying at least one crate's expression

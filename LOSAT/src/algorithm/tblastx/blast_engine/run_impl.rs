@@ -2908,8 +2908,12 @@ fn write_tblastx_outputs(
                             // and the batches follow each other (`run_batch_loop`); `-db` renumbers
                             // the subjects only (`reported_subjects`).
                             debug_assert!(hits.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                            let windows =
-                                report::pairwise_windows(&hits, queries.len(), run.x_pairwise_pool);
+                            let windows = report::pairwise_windows(
+                                &hits,
+                                queries.len(),
+                                run.x_pairwise_pool,
+                                config.line_length,
+                            );
                             if windows.is_empty() {
                                 // No query: the prolog and the epilog alone.
                                 write(&[], 0..0)?;

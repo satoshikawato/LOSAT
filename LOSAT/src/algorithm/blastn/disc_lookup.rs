@@ -777,11 +777,29 @@ fn mb_disc_word_scan_subject_1(
         }
         _ => 0,
     };
+    let mut rounds_done = false;
     loop {
         match phase {
             0 => {
                 if scan_range[0] > scan_range[1] {
                     break;
+                }
+                if !rounds_done {
+                    rounds_done = true;
+                    let go = x_disc_rounds(
+                        packed,
+                        (&mut s, &mut accum, &mut scan_range),
+                        on_word,
+                        |accum, b| (accum << 8) | u64::from(b),
+                        |accum, k| {
+                            let shifted = accum >> X_DISC_PLACE_SHIFT[k];
+                            (compute_discontiguous_index(shifted, template_type), None)
+                        },
+                    );
+                    if !go {
+                        return;
+                    }
+                    continue;
                 }
                 if !on_word(
                     scan_range[0],
@@ -933,20 +951,45 @@ fn mb_disc_word_scan_subject_two_templates_1(
         }
         _ => 0,
     };
-    let mut word = |s_off: i32, shifted: u64| {
-        on_word(
-            s_off,
-            compute_discontiguous_index(shifted, template_type),
-            Some(compute_discontiguous_index(shifted, second_template_type)),
-        )
-    };
+    // (a macro, not a closure: the rounds below hand `on_word` on as well)
+    macro_rules! word {
+        ($s_off:expr, $shifted:expr) => {{
+            let shifted: u64 = $shifted;
+            on_word(
+                $s_off,
+                compute_discontiguous_index(shifted, template_type),
+                Some(compute_discontiguous_index(shifted, second_template_type)),
+            )
+        }};
+    }
+    let mut rounds_done = false;
     loop {
         match phase {
             0 => {
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                if !word(scan_range[0], accum) {
+                if !rounds_done {
+                    rounds_done = true;
+                    let go = x_disc_rounds(
+                        packed,
+                        (&mut s, &mut accum, &mut scan_range),
+                        on_word,
+                        |accum, b| (accum << 8) | u64::from(b),
+                        |accum, k| {
+                            let shifted = accum >> X_DISC_PLACE_SHIFT[k];
+                            (
+                                compute_discontiguous_index(shifted, template_type),
+                                Some(compute_discontiguous_index(shifted, second_template_type)),
+                            )
+                        },
+                    );
+                    if !go {
+                        return;
+                    }
+                    continue;
+                }
+                if !word!(scan_range[0], accum) {
                     return;
                 }
                 scan_range[0] += 1;
@@ -958,7 +1001,7 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 }
                 accum = (accum << 8) | packed[s] as u64;
                 s += 1;
-                if !word(scan_range[0], accum >> 6) {
+                if !word!(scan_range[0], accum >> 6) {
                     return;
                 }
                 scan_range[0] += 1;
@@ -968,7 +1011,7 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                if !word(scan_range[0], accum >> 4) {
+                if !word!(scan_range[0], accum >> 4) {
                     return;
                 }
                 scan_range[0] += 1;
@@ -978,7 +1021,7 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                if !word(scan_range[0], accum >> 2) {
+                if !word!(scan_range[0], accum >> 2) {
                     return;
                 }
                 scan_range[0] += 1;
@@ -986,6 +1029,98 @@ fn mb_disc_word_scan_subject_two_templates_1(
             }
         }
     }
+}
+
+/// No NCBI counterpart (bounds checks only): the whole rounds of a discontiguous scan from its
+/// first place (`phase` 0): four words per round, the first from the accumulator `acc`, then the
+/// next byte shifted in (`shift_in`) and the other three (`word(acc, k)`: the word or words at the
+/// round's place `k`, as the scan's phases compute them). The rounds are counted once, those whose
+/// four positions are at most `scan_range[1]` and whose byte is in `packed`, and read with no test
+/// of the length or the range per word, as NCBI's loop body (whose subject has a sentinel byte);
+/// the scan's own loop takes the words after them. Returns `false` when `on_word` stopped the scan.
+#[inline(always)]
+fn x_disc_rounds<A: Copy>(
+    packed: &[u8],
+    (s, acc, scan_range): (&mut usize, &mut A, &mut [i32; 2]),
+    on_word: &mut impl FnMut(i32, u32, Option<u32>) -> bool,
+    shift_in: impl Fn(A, u8) -> A,
+    word: impl Fn(A, usize) -> (u32, Option<u32>),
+) -> bool {
+    let by_pos = match scan_range[1].checked_sub(scan_range[0] + 3) {
+        Some(d) if d >= 0 => d as usize / 4 + 1,
+        _ => 0,
+    };
+    let rounds = by_pos.min(packed.len().saturating_sub(*s));
+    for _ in 0..rounds {
+        let pos = scan_range[0];
+        let (index, index2) = word(*acc, 0);
+        if !on_word(pos, index, index2) {
+            return false;
+        }
+        // SAFETY: `rounds` is at most `packed.len() - s` at the first round, and `s` moves one
+        // byte per round, so `s < packed.len()` here.
+        *acc = shift_in(*acc, unsafe { *packed.get_unchecked(*s) });
+        *s += 1;
+        for k in 1..4 {
+            let (index, index2) = word(*acc, k);
+            if !on_word(pos + k as i32, index, index2) {
+                return false;
+            }
+        }
+        scan_range[0] = pos + 4;
+    }
+    true
+}
+
+/// The shifts of a discontiguous scan's 64-bit accumulator at the four places of a byte
+/// (`mb_disc_word_scan_subject_1`'s phases 0 to 3).
+const X_DISC_PLACE_SHIFT: [u32; 4] = [0, 6, 4, 2];
+
+/// The words of template 11 of 18 (coding) at the four places of a byte, in the scan's order:
+/// the extractions of `mb_disc_word_scan_subject_11_18_1` below (NCBI's, in its reference).
+#[inline(always)]
+fn x_index_11_18_0(lo: u32, hi: u32) -> u32 {
+    (lo & 0x00000003)
+        | ((lo & 0x000000f0) >> 2)
+        | ((lo & 0x00003c00) >> 4)
+        | ((lo & 0x00030000) >> 6)
+        | ((lo & 0x03c00000) >> 10)
+        | ((lo & 0xf0000000) >> 12)
+        | ((hi & 0x0000000c) << 18)
+}
+
+#[inline(always)]
+fn x_index_11_18_1(lo: u32, hi: u32) -> u32 {
+    ((lo & 0x000000c0) >> 6)
+        | ((lo & 0x00003c00) >> 8)
+        | ((lo & 0x000f0000) >> 10)
+        | ((lo & 0x00c00000) >> 12)
+        | ((lo & 0xf0000000) >> 16)
+        | ((hi & 0x0000003c) << 14)
+        | ((hi & 0x00000300) << 12)
+}
+
+#[inline(always)]
+fn x_index_11_18_2(lo: u32, hi: u32) -> u32 {
+    ((lo & 0x00000030) >> 4)
+        | ((lo & 0x00000f00) >> 6)
+        | ((lo & 0x0003c000) >> 8)
+        | ((lo & 0x00300000) >> 10)
+        | ((lo & 0x3c000000) >> 14)
+        | ((hi & 0x0000000f) << 16)
+        | ((hi & 0x000000c0) << 14)
+}
+
+#[inline(always)]
+fn x_index_11_18_3(lo: u32, hi: u32) -> u32 {
+    ((lo & 0x0000000c) >> 2)
+        | ((lo & 0x000003c0) >> 4)
+        | ((lo & 0x0000f000) >> 6)
+        | ((lo & 0x000c0000) >> 8)
+        | ((lo & 0x0f000000) >> 12)
+        | ((lo & 0xc0000000) >> 14)
+        | ((hi & 0x00000003) << 18)
+        | ((hi & 0x00000030) << 16)
 }
 
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2366-2479
@@ -1112,19 +1247,38 @@ fn mb_disc_word_scan_subject_11_18_1(
         }
         _ => 0,
     };
+    let mut rounds_done = false;
     loop {
         match phase {
             0 => {
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                let index = (lo & 0x00000003)
-                    | ((lo & 0x000000f0) >> 2)
-                    | ((lo & 0x00003c00) >> 4)
-                    | ((lo & 0x00030000) >> 6)
-                    | ((lo & 0x03c00000) >> 10)
-                    | ((lo & 0xf0000000) >> 12)
-                    | ((hi & 0x0000000c) << 18);
+                if !rounds_done {
+                    rounds_done = true;
+                    let mut acc = (lo, hi);
+                    let go = x_disc_rounds(
+                        packed,
+                        (&mut s, &mut acc, &mut scan_range),
+                        on_word,
+                        |(lo, hi), b| ((lo << 8) | u32::from(b), (hi << 8) | (lo >> 24)),
+                        |(lo, hi), k| {
+                            let index = match k {
+                                0 => x_index_11_18_0(lo, hi),
+                                1 => x_index_11_18_1(lo, hi),
+                                2 => x_index_11_18_2(lo, hi),
+                                _ => x_index_11_18_3(lo, hi),
+                            };
+                            (index, None)
+                        },
+                    );
+                    (lo, hi) = acc;
+                    if !go {
+                        return;
+                    }
+                    continue;
+                }
+                let index = x_index_11_18_0(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1138,13 +1292,7 @@ fn mb_disc_word_scan_subject_11_18_1(
                 hi = (hi << 8) | (lo >> 24);
                 lo = (lo << 8) | packed[s] as u32;
                 s += 1;
-                let index = ((lo & 0x000000c0) >> 6)
-                    | ((lo & 0x00003c00) >> 8)
-                    | ((lo & 0x000f0000) >> 10)
-                    | ((lo & 0x00c00000) >> 12)
-                    | ((lo & 0xf0000000) >> 16)
-                    | ((hi & 0x0000003c) << 14)
-                    | ((hi & 0x00000300) << 12);
+                let index = x_index_11_18_1(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1155,13 +1303,7 @@ fn mb_disc_word_scan_subject_11_18_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                let index = ((lo & 0x00000030) >> 4)
-                    | ((lo & 0x00000f00) >> 6)
-                    | ((lo & 0x0003c000) >> 8)
-                    | ((lo & 0x00300000) >> 10)
-                    | ((lo & 0x3c000000) >> 14)
-                    | ((hi & 0x0000000f) << 16)
-                    | ((hi & 0x000000c0) << 14);
+                let index = x_index_11_18_2(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1172,14 +1314,7 @@ fn mb_disc_word_scan_subject_11_18_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                let index = ((lo & 0x0000000c) >> 2)
-                    | ((lo & 0x000003c0) >> 4)
-                    | ((lo & 0x0000f000) >> 6)
-                    | ((lo & 0x000c0000) >> 8)
-                    | ((lo & 0x0f000000) >> 12)
-                    | ((lo & 0xc0000000) >> 14)
-                    | ((hi & 0x00000003) << 18)
-                    | ((hi & 0x00000030) << 16);
+                let index = x_index_11_18_3(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1188,6 +1323,57 @@ fn mb_disc_word_scan_subject_11_18_1(
             }
         }
     }
+}
+
+/// The words of template 11 of 21 (coding) at the four places of a byte, in the scan's order:
+/// the extractions of `mb_disc_word_scan_subject_11_21_1` below (NCBI's, in its reference).
+#[inline(always)]
+fn x_index_11_21_0(lo: u32, hi: u32) -> u32 {
+    (lo & 0x00000003)
+        | ((lo & 0x000000f0) >> 2)
+        | ((lo & 0x00000c00) >> 4)
+        | ((lo & 0x000f0000) >> 8)
+        | ((lo & 0x00c00000) >> 10)
+        | ((lo & 0xf0000000) >> 14)
+        | ((hi & 0x0000000c) << 16)
+        | ((hi & 0x00000300) << 12)
+}
+
+#[inline(always)]
+fn x_index_11_21_1(lo: u32, hi: u32) -> u32 {
+    ((lo & 0x000000c0) >> 6)
+        | ((lo & 0x00003c00) >> 8)
+        | ((lo & 0x00030000) >> 10)
+        | ((lo & 0x03c00000) >> 14)
+        | ((lo & 0x30000000) >> 16)
+        | ((hi & 0x0000003c) << 12)
+        | ((hi & 0x00000300) << 10)
+        | ((hi & 0x0000c000) << 6)
+}
+
+#[inline(always)]
+fn x_index_11_21_2(lo: u32, hi: u32) -> u32 {
+    ((lo & 0x00000030) >> 4)
+        | ((lo & 0x00000f00) >> 6)
+        | ((lo & 0x0000c000) >> 8)
+        | ((lo & 0x00f00000) >> 12)
+        | ((lo & 0x0c000000) >> 14)
+        | ((hi & 0x0000000f) << 14)
+        | ((hi & 0x000000c0) << 12)
+        | ((hi & 0x00003000) << 8)
+}
+
+#[inline(always)]
+fn x_index_11_21_3(lo: u32, hi: u32) -> u32 {
+    ((lo & 0x0000000c) >> 2)
+        | ((lo & 0x000003c0) >> 4)
+        | ((lo & 0x00003000) >> 6)
+        | ((lo & 0x003c0000) >> 10)
+        | ((lo & 0x03000000) >> 12)
+        | ((lo & 0xc0000000) >> 16)
+        | ((hi & 0x00000003) << 16)
+        | ((hi & 0x00000030) << 14)
+        | ((hi & 0x00000c00) << 10)
 }
 
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2481-2598
@@ -1314,20 +1500,38 @@ fn mb_disc_word_scan_subject_11_21_1(
         }
         _ => 0,
     };
+    let mut rounds_done = false;
     loop {
         match phase {
             0 => {
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                let index = (lo & 0x00000003)
-                    | ((lo & 0x000000f0) >> 2)
-                    | ((lo & 0x00000c00) >> 4)
-                    | ((lo & 0x000f0000) >> 8)
-                    | ((lo & 0x00c00000) >> 10)
-                    | ((lo & 0xf0000000) >> 14)
-                    | ((hi & 0x0000000c) << 16)
-                    | ((hi & 0x00000300) << 12);
+                if !rounds_done {
+                    rounds_done = true;
+                    let mut acc = (lo, hi);
+                    let go = x_disc_rounds(
+                        packed,
+                        (&mut s, &mut acc, &mut scan_range),
+                        on_word,
+                        |(lo, hi), b| ((lo << 8) | u32::from(b), (hi << 8) | (lo >> 24)),
+                        |(lo, hi), k| {
+                            let index = match k {
+                                0 => x_index_11_21_0(lo, hi),
+                                1 => x_index_11_21_1(lo, hi),
+                                2 => x_index_11_21_2(lo, hi),
+                                _ => x_index_11_21_3(lo, hi),
+                            };
+                            (index, None)
+                        },
+                    );
+                    (lo, hi) = acc;
+                    if !go {
+                        return;
+                    }
+                    continue;
+                }
+                let index = x_index_11_21_0(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1341,14 +1545,7 @@ fn mb_disc_word_scan_subject_11_21_1(
                 hi = (hi << 8) | (lo >> 24);
                 lo = (lo << 8) | packed[s] as u32;
                 s += 1;
-                let index = ((lo & 0x000000c0) >> 6)
-                    | ((lo & 0x00003c00) >> 8)
-                    | ((lo & 0x00030000) >> 10)
-                    | ((lo & 0x03c00000) >> 14)
-                    | ((lo & 0x30000000) >> 16)
-                    | ((hi & 0x0000003c) << 12)
-                    | ((hi & 0x00000300) << 10)
-                    | ((hi & 0x0000c000) << 6);
+                let index = x_index_11_21_1(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1359,14 +1556,7 @@ fn mb_disc_word_scan_subject_11_21_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                let index = ((lo & 0x00000030) >> 4)
-                    | ((lo & 0x00000f00) >> 6)
-                    | ((lo & 0x0000c000) >> 8)
-                    | ((lo & 0x00f00000) >> 12)
-                    | ((lo & 0x0c000000) >> 14)
-                    | ((hi & 0x0000000f) << 14)
-                    | ((hi & 0x000000c0) << 12)
-                    | ((hi & 0x00003000) << 8);
+                let index = x_index_11_21_2(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1377,15 +1567,7 @@ fn mb_disc_word_scan_subject_11_21_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                let index = ((lo & 0x0000000c) >> 2)
-                    | ((lo & 0x000003c0) >> 4)
-                    | ((lo & 0x00003000) >> 6)
-                    | ((lo & 0x003c0000) >> 10)
-                    | ((lo & 0x03000000) >> 12)
-                    | ((lo & 0xc0000000) >> 16)
-                    | ((hi & 0x00000003) << 16)
-                    | ((hi & 0x00000030) << 14)
-                    | ((hi & 0x00000c00) << 10);
+                let index = x_index_11_21_3(lo, hi);
                 if !on_word(scan_range[0], index, None) {
                     return;
                 }
@@ -1550,6 +1732,76 @@ mod tests {
                             );
                         } else {
                             assert_eq!(index2, None);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // No NCBI counterpart (a check of the scans' rounds, `x_disc_rounds`): every scan (two
+    // templates' too) gives the index of every word of its range for subjects of every length near
+    // a template's, ranges
+    // ending at each of the last positions and from each place of a byte, and a scan that its
+    // callback stops (`disc_word_scan_subject_until`) gives exactly the words up to that one.
+    #[test]
+    fn scans_give_every_word_of_any_range_and_stop_where_told() {
+        for t in ALL_TEMPLATES {
+            let tl = template_length(t);
+            for kind in [
+                DiscScanSubjectKind::General,
+                DiscScanSubjectKind::TwoTemplates,
+                DiscScanSubjectKind::Scan11_18,
+                DiscScanSubjectKind::Scan11_21,
+            ] {
+                if (kind == DiscScanSubjectKind::Scan11_18 && t != DiscTemplateType::T11_18Coding)
+                    || (kind == DiscScanSubjectKind::Scan11_21
+                        && t != DiscTemplateType::T11_21Coding)
+                {
+                    continue;
+                }
+                let second = if kind == DiscScanSubjectKind::TwoTemplates {
+                    if t as i32 % 2 == 0 {
+                        continue;
+                    }
+                    Some(t.next())
+                } else {
+                    None
+                };
+                for len in (tl..tl + 41).chain([257, 258, 259, 260]) {
+                    let seq = bases(len, len as u64 + 11);
+                    let packed = pack(&seq);
+                    let last = (len - tl) as i32;
+                    for start in 0..8.min(last + 1) {
+                        for end in (start..=last).rev().take(6) {
+                            let words = |stop_after: usize| {
+                                let mut seen = Vec::new();
+                                disc_word_scan_subject_until(
+                                    kind,
+                                    &packed,
+                                    t,
+                                    second.unwrap_or(DiscTemplateType::Contiguous),
+                                    tl as i32,
+                                    [start, end],
+                                    &mut |s_off, index, index2| {
+                                        seen.push((s_off, index, index2));
+                                        seen.len() < stop_after
+                                    },
+                                );
+                                seen
+                            };
+                            let all = words(usize::MAX);
+                            let want: Vec<_> = (start..=end)
+                                .map(|s| {
+                                    let at = |t| index_from_bases(&seq, s as usize, t);
+                                    (s, at(t), second.map(at))
+                                })
+                                .collect();
+                            assert_eq!(all, want, "{t:?} {kind:?} len {len} [{start}, {end}]");
+                            for stop_after in [1, 2, 3, 4, 5, 7, 9] {
+                                let n = stop_after.min(want.len());
+                                assert_eq!(words(stop_after), want[..n], "stop after {stop_after}");
+                            }
                         }
                     }
                 }

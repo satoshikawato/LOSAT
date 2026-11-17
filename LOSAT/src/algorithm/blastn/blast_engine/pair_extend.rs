@@ -51,6 +51,10 @@ use super::{
     DiagHashTable, DiagStruct, OffsetPair, SmallNaWord, SubjectChunk, UngappedHit,
     COMPRESSION_RATIO, X_HIT_AHEAD,
 };
+/// The hits whose query letters the Wasm build loads together (LOSAT_X_MBHITPF; see the loop of
+/// `extend_offset_pairs`).
+#[cfg(target_arch = "wasm32")]
+const X_HIT_GROUP: usize = 8;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
 /// What the steps of the offset pairs of one subject chunk read that is the same for every pair,
@@ -342,14 +346,28 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
     // ```
     for idx in 0..hitsfound {
         // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
-        // `X_HIT_AHEAD` places on: a prefetch on x86_64, a load of the letter on wasm32, which has
-        // no prefetch instruction (`x_dc_csr::x_ahead`; the ungapped extension of each hit
-        // waited there for its query line, a quarter of its cycles in V8).
+        // `X_HIT_AHEAD` places on, prefetched on x86_64. On wasm32, which has no prefetch
+        // instruction, the letters of the `X_HIT_GROUP` hits from `X_HIT_AHEAD` on are loaded
+        // together once every `X_HIT_GROUP` hits (`x_dc_csr::x_ahead`), so that their lines come
+        // from memory at once (the ungapped extension of each hit waited for its query line, a
+        // quarter of its cycles in V8; a load per hit only moved the wait to the load).
+        #[cfg(not(target_arch = "wasm32"))]
         if x_hit_prefetch && idx + X_HIT_AHEAD < hitsfound {
-            x_dc_csr::x_ahead(
-                encoded_query_concat_blastna_with_sentinels,
-                offset_pairs[idx + X_HIT_AHEAD].q_off,
+            x_dc_csr::prefetch(
+                encoded_query_concat_blastna_with_sentinels
+                    .as_ptr()
+                    .wrapping_add(offset_pairs[idx + X_HIT_AHEAD].q_off),
             );
+        }
+        #[cfg(target_arch = "wasm32")]
+        if x_hit_prefetch && idx % X_HIT_GROUP == 0 {
+            for pair in offset_pairs
+                .iter()
+                .skip(idx + X_HIT_AHEAD)
+                .take(X_HIT_GROUP)
+            {
+                x_dc_csr::x_ahead(encoded_query_concat_blastna_with_sentinels, pair.q_off);
+            }
         }
         let pair = offset_pairs[idx];
         let q_off0 = pair.q_off;

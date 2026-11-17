@@ -31,7 +31,9 @@
 //! that uses them (a search that ends with probe batches never zeroes them; megablast of 1,775
 //! cDNAs builds tables of 4^11, 4^8 and 4^12 cells). A build whose table is longer than the kept
 //! one frees the kept one first and allocates a fresh table, which the keep takes back instead.
-//! The loop frees the `Keep` and its table when it ends.
+//! No build follows the preliminary stage of the loop's last batch, so the keep frees its table
+//! there (`Keep::release`, called by `x_lut_drop::after_prelim` when the batch's tables drop); the
+//! loop frees the `Keep` when it ends.
 //!
 //! A table laid out as CSR has no hashtable; its `offsets` (a cell's first position, one element
 //! per cell and one or two more) is built in the kept table instead (`take_buffer`: the build
@@ -87,13 +89,18 @@
 //! batch's (the same table, a full batch's `next_pos` and the rest), so the search's peak is the
 //! full batch's as before. With LOSAT_X_BNLUTDROP a batch drops its tables before its traceback,
 //! and the kept table stays resident through it (16 MiB of 4^11 cells, 64 MiB of 4^12; what a
-//! packed CSR wrote, less); the
-//! peaks above are measured with it.
+//! packed CSR wrote, less), except in the loop's last batch, whose traceback runs without it (no
+//! build is left to take it: the traceback of NCBI's last batch holds no table either); the
+//! peaks above are measured with the kept table resident. A search of one batch (a `-subject`
+//! search of one genome) has the table only in its preliminary stage: blastn of E. coli EDL933 x
+//! Sakai `-subject`, whose peak at 16 to 64 threads is at the end of its traceback, no longer
+//! holds the 16 MiB of 4^11 cells there (2026-11-17, line EB s29).
 //!
-//! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= csr= zero=` gives the loop's
-//! builds of a hashtable or chain heads on the kept table, its builds on a fresh one (of either
-//! layout), its CSR builds whose `offsets` is the kept table, and the time spent zeroing (also
-//! inside `x_mb_lookup_split`'s `alloc=`).
+//! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= csr= zero= released=` gives the
+//! loop's builds of a hashtable or chain heads on the kept table, its builds on a fresh one (of
+//! either layout), its CSR builds whose `offsets` is the kept table, the time spent zeroing (also
+//! inside `x_mb_lookup_split`'s `alloc=`) and the kept tables freed after a loop's last
+//! preliminary stage (`Keep::release`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -112,6 +119,7 @@ static KEPT: AtomicU64 = AtomicU64::new(0);
 static FRESH: AtomicU64 = AtomicU64::new(0);
 static CSR: AtomicU64 = AtomicU64::new(0);
 static ZERO_NANOS: AtomicU64 = AtomicU64::new(0);
+static RELEASED: AtomicU64 = AtomicU64::new(0);
 
 /// The kept table: as long as the largest table built so far; its first `dirty` elements may
 /// hold values of earlier fills (the longest start that builds wrote since it was last zeroed),
@@ -225,6 +233,19 @@ impl Keep {
             drop(old);
         }
     }
+
+    /// Frees the kept table, when the loop has no batch left to build one on it: after the
+    /// preliminary stage of its last batch (`x_lut_drop::after_prelim`), where NCBI's traceback
+    /// stage frees the batch's table, instead of when the loop ends. Whether a table was kept.
+    pub(crate) fn release(&self) -> bool {
+        let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let released = kept.is_some();
+        if released {
+            RELEASED.fetch_add(1, Ordering::Relaxed);
+        }
+        drop(kept);
+        released
+    }
 }
 
 /// Writes 0 to every element, with the pool's threads when `on_pool`.
@@ -251,11 +272,12 @@ pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     if super::x_mb_lookup_par::timing_on() && load(&KEPT) + load(&FRESH) + load(&CSR) > 0 {
         eprintln!(
-            "[TIMING] x_mb_lut_keep: kept={} fresh={} csr={} zero={:.4}s",
+            "[TIMING] x_mb_lut_keep: kept={} fresh={} csr={} zero={:.4}s released={}",
             load(&KEPT),
             load(&FRESH),
             load(&CSR),
-            load(&ZERO_NANOS) as f64 * 1e-9
+            load(&ZERO_NANOS) as f64 * 1e-9,
+            load(&RELEASED)
         );
     }
 }
@@ -356,6 +378,27 @@ mod tests {
                 "past the build's cells"
             );
         }
+    }
+
+    // After the loop's last preliminary stage the keep frees its table (`release`); a release
+    // of an empty keep frees nothing, and a later build allocates its table as the first build.
+    #[test]
+    fn a_release_frees_the_kept_table() {
+        let keep = Keep::default();
+        assert!(!keep.release(), "nothing kept");
+        let (table, from_keep, dirty) = keep.take(8, false);
+        assert!(!from_keep);
+        keep.give_back(table, dirty);
+        assert_eq!(kept(&keep), Some((8, 8)));
+        assert!(keep.release(), "the kept table is freed");
+        assert_eq!(kept(&keep), None);
+        let (table, from_keep, dirty) = keep.take(8, false);
+        assert_eq!(
+            (from_keep, dirty),
+            (false, 8),
+            "a fresh table after a release"
+        );
+        assert_eq!(table, vec![0; 8]);
     }
 
     // LOSAT_X_MBCSR: the batches of a search can take either side of its size rule at 4^12 cells, so

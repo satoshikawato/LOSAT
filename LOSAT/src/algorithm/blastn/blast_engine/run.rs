@@ -7498,8 +7498,12 @@ fn post_process_hits_and_write(
                     Some(hits) => write(hits, 0..queries.len())?,
                     None => {
                         // The windows of the parallel writer (`x_pairwise_par`).
-                        let windows =
-                            pairwise_windows(&hit_lists, queries.len(), report.x_pairwise_pool);
+                        let windows = pairwise_windows(
+                            &hit_lists,
+                            queries.len(),
+                            report.x_pairwise_pool,
+                            config.line_length,
+                        );
                         if windows.is_empty() {
                             // No query: the prolog and the epilog alone.
                             write(&[], 0..0)?;

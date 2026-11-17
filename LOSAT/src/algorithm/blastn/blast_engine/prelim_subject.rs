@@ -251,14 +251,13 @@ pub(super) struct ScanBatch<'a> {
     pub(super) pv_direct_lookup_ref: Option<&'a PvDirectLookup>,
     pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
     /// The query block (`PrelimBatch`'s): the context of a query offset, the contexts, the
-    /// concatenated query with and without its sentinels, each context's letters, each context's
-    /// cutoff, X-dropoff and reduced cutoff, the score matrix and the score table of the
-    /// approximate extension.
+    /// concatenated query with and without its sentinels (the scans read the concatenated query,
+    /// as NCBI's), each context's cutoff, X-dropoff and reduced cutoff, the score matrix and the
+    /// score table of the approximate extension.
     pub(super) query_context_index: &'a QueryContextIndex,
     pub(super) query_contexts: &'a [QueryContext],
     pub(super) encoded_query_concat_blastna: &'a [u8],
     pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
-    pub(super) encoded_queries_blastna: &'a [&'a [u8]],
     pub(super) cutoff_scores: &'a [i32],
     pub(super) x_dropoff_scores: &'a [i32],
     pub(super) reduced_cutoff_scores: &'a [i32],
@@ -366,7 +365,6 @@ impl<'a> ScanBatch<'a> {
             encoded_query_concat_blastna: batch.encoded_query_concat_blastna,
             encoded_query_concat_blastna_with_sentinels: batch
                 .encoded_query_concat_blastna_with_sentinels,
-            encoded_queries_blastna: batch.encoded_queries_blastna,
             cutoff_scores: batch.cutoff_scores,
             x_dropoff_scores: batch.x_dropoff_scores,
             reduced_cutoff_scores: batch.reduced_cutoff_scores,
@@ -969,7 +967,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     scan_step: scan.scan_step,
                     query_context_index: scan.query_context_index,
                     query_contexts: scan.query_contexts,
-                    encoded_queries_blastna: scan.encoded_queries_blastna,
+                    encoded_query_concat_blastna: scan.encoded_query_concat_blastna,
                     cutoff_scores: scan.cutoff_scores,
                     x_dropoff_scores: scan.x_dropoff_scores,
                     reduced_cutoff_scores: scan.reduced_cutoff_scores,

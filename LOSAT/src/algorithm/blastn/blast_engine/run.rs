@@ -46,7 +46,7 @@ use super::super::coordination::{
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
     build_compressed_query, build_nucl_score_table, extend_hit_ungapped_approx_ncbi,
-    extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
+    extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord, UngappedData,
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
@@ -3755,12 +3755,112 @@ struct UngappedHit {
     // another, about a million hits per chunk: 69 MiB each).
     seed_q_off: u32,
     seed_s_off: u32,
-    // Ungapped extension results (0-based coordinates)
-    qs: u32,    // query start
-    qe: u32,    // query end (exclusive)
+    // Ungapped extension results (0-based coordinates).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3901-3904
+    // ```c
+    //          q_start = init_hsp->ungapped_data->q_start;
+    //          q_end = q_start + init_hsp->ungapped_data->length;
+    //          s_start = init_hsp->ungapped_data->s_start;
+    //          s_end = s_start + init_hsp->ungapped_data->length;
+    // ```
+    // `qs` is NCBI's context-relative `Int4` `q_start` (`UngappedHit::saved`), which is negative
+    // for a hit that starts left of its context, and `qe` its `q_end`; `qe - qs` is NCBI's
+    // `length`. The subject offsets are never negative (the left walks stop at the subject's
+    // first base).
+    qs: i32,    // query start
+    qe: i32,    // query end (exclusive)
     ss: u32,    // subject start in search_seq coordinates
     se: u32,    // subject end in search_seq coordinates
     score: i32, // ungapped score
+}
+
+impl UngappedHit {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:757-761 (the same at
+    // 923-927)
+    // ```c
+    //             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+    //                 BlastUngappedData *final_data =
+    //                     (BlastUngappedData *) malloc(sizeof(BlastUngappedData));
+    //                 *final_data = *ungapped_data;
+    //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
+    // ```c
+    //     init_hsp->offsets.qs_offsets.q_off -= query_start;
+    //     if (init_hsp->ungapped_data) {
+    //         init_hsp->ungapped_data->q_start -= query_start;
+    //     }
+    //     ASSERT(init_hsp->ungapped_data == NULL ||
+    //            init_hsp->ungapped_data->q_start >= 0);
+    // ```
+    /// The initial hit that NCBI saves for the word hit at `q_off` (an offset in the concatenated
+    /// query) and `s_off` of context `context_idx` (`ctx`), with the ungapped extension
+    /// `ungapped` (offsets in the concatenated query), and whose offsets
+    /// `s_AdjustInitialHSPOffsets` makes context-relative. NCBI's extensions run on the
+    /// concatenated query (na_ungapped.c:164-206 and 284-310), so a saved hit can start left of
+    /// its context: where the exact walk passes two sentinels (`INT4_MIN / 2` each,
+    /// blast_stat.c:1124-1127) and its `Int4` sum wraps above 0 (a raw X-drop of 2^30 or more,
+    /// such as the `INT_MIN` of `-xdrop_ungap 1e10`, does not stop the walk at the first one),
+    /// or where the approximate walk, which reads the sentinel as bases, keeps a hit below the
+    /// cutoff (`off_found`). Its `q_start` is then a negative `Int4` (the `ASSERT` above is not
+    /// compiled into NCBI's release), and `qs` here is that value.
+    #[inline(always)]
+    fn saved(
+        context_idx: u32,
+        ctx: &QueryContext,
+        q_off: usize,
+        s_off: usize,
+        ungapped: &UngappedData,
+    ) -> Self {
+        let qs = ungapped.q_start as i32 - ctx.query_offset;
+        UngappedHit {
+            context_idx,
+            query_idx: ctx.query_idx,
+            query_frame: ctx.frame,
+            query_context_offset: ctx.query_offset,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+            // ```c
+            // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+            // ```
+            // The word hit lies in its context, so its offset is not negative.
+            seed_q_off: (q_off - ctx.query_offset as usize) as u32,
+            seed_s_off: s_off as u32,
+            qs,
+            qe: qs + ungapped.length as i32,
+            ss: ungapped.s_start as u32,
+            se: (ungapped.s_start + ungapped.length) as u32,
+            score: ungapped.score,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-147
+    // ```c
+    //    Int4 length;  /**< Length of the ungapped alignment */
+    // ```
+    /// NCBI's `ungapped_data->length`.
+    #[inline(always)]
+    fn length(&self) -> i32 {
+        self.qe - self.qs
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4017
+    // ```c
+    //          } else if (is_greedy) {
+    //             if (init_hsp->ungapped_data) {
+    //                 init_hsp->offsets.qs_offsets.q_off =
+    //                     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
+    //                 init_hsp->offsets.qs_offsets.s_off =
+    //                     init_hsp->ungapped_data->s_start + init_hsp->ungapped_data->length/2;
+    //             }
+    // ```
+    /// The seed of the greedy alignment, in NCBI's `Int4` (its `Uint4` fields hold these
+    /// values, which `BLAST_GreedyGappedAlignment` takes as `Int4`): the middle of the hit.
+    /// The query offset is negative where more of the hit lies left of its context than in it.
+    #[inline(always)]
+    fn greedy_seed(&self) -> (i32, i32) {
+        let half = self.length() / 2;
+        (self.qs + half, self.ss as i32 + half)
+    }
 }
 
 // No NCBI counterpart: only where LOSAT keeps its buffers (no value changes).
@@ -3938,19 +4038,21 @@ fn x_grow_ungapped(hits: &mut Vec<UngappedHit>) {
 // }
 // ```
 // NCBI's `ungapped_data->q_start` is an offset in the concatenated query (the
-// scan and the ungapped extension run on the whole query block), so hits of
-// different contexts never tie on it; `qs` here is context-local, and the
-// context offset is added back for the comparison.
+// scan and the ungapped extension run on the whole query block, and the sort
+// comes before `s_AdjustInitialHSPOffsets`), so hits of different contexts
+// never tie on it; `qs` here is NCBI's context-relative value (negative for a
+// hit that starts left of its context), and the context offset is added back:
+// the `Int4` of the concatenated query, at least 0.
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:206-207
 // ```c
 // ungapped_data->q_start = (Int4)(q_beg - query->sequence);
 // ungapped_data->s_start = s_off - (q_off - ungapped_data->q_start);
 // ```
 fn score_compare_ungapped_hits(a: &UngappedHit, b: &UngappedHit) -> std::cmp::Ordering {
-    let a_len = a.qe.saturating_sub(a.qs);
-    let b_len = b.qe.saturating_sub(b.qs);
-    let a_q_start = i64::from(a.query_context_offset) + a.qs as i64;
-    let b_q_start = i64::from(b.query_context_offset) + b.qs as i64;
+    let a_len = a.length();
+    let b_len = b.length();
+    let a_q_start = a.query_context_offset + a.qs;
+    let b_q_start = b.query_context_offset + b.qs;
 
     b.score
         .cmp(&a.score)
@@ -15936,6 +16038,79 @@ mod tests {
                 && counts[4] > 1000
                 && counts[5] > 100,
             "{counts:?}"
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2387
+    // ```c
+    //     init_hsp->offsets.qs_offsets.q_off -= query_start;
+    //     if (init_hsp->ungapped_data) {
+    //         init_hsp->ungapped_data->q_start -= query_start;
+    //     }
+    // ```
+    // A saved hit of context 2 (offset 1302 of the concatenated query) whose walk took 1082 letters
+    // of the contexts before it keeps NCBI's context-relative `Int4` start, -1082, its length, and
+    // the greedy seed `q_start + length/2` (blast_gapalign.c:4012-4017), negative here; the sort
+    // compares the concatenated query's start (`score_compare_match`, blast_extend.c:271-304),
+    // which no hit of the context before it (offset 1001) shares.
+    #[test]
+    fn a_hit_that_starts_left_of_its_context_keeps_ncbis_signed_start() {
+        let ctx = QueryContext {
+            query_idx: 1,
+            frame: 1,
+            query_offset: 1302,
+            len: 300,
+            masks: Vec::new(),
+        };
+        let ungapped = UngappedData {
+            q_start: 220,
+            s_start: 0,
+            length: 1382,
+            score: i32::MAX - 40,
+        };
+        let hit = UngappedHit::saved(2, &ctx, 1302 + 250, 1332, &ungapped);
+        assert_eq!((hit.qs, hit.qe, hit.length()), (-1082, 300, 1382));
+        assert_eq!((hit.seed_q_off, hit.seed_s_off), (250, 1332));
+        assert_eq!(hit.greedy_seed(), (-391, 691));
+        let in_context = UngappedHit::saved(
+            2,
+            &ctx,
+            1302 + 250,
+            1332,
+            &UngappedData {
+                q_start: 1302 + 200,
+                s_start: 1232,
+                length: 100,
+                score: 90,
+            },
+        );
+        assert_eq!((in_context.qs, in_context.qe), (200, 300));
+        assert_eq!(in_context.greedy_seed(), (250, 1282));
+        let ctx1 = QueryContext {
+            query_idx: 0,
+            frame: -1,
+            query_offset: 1001,
+            len: 300,
+            masks: Vec::new(),
+        };
+        let before = UngappedHit::saved(
+            1,
+            &ctx1,
+            1001 + 10,
+            1332,
+            &UngappedData {
+                q_start: 221,
+                ..ungapped
+            },
+        );
+        // The same score, subject start and length: the concatenated query's start decides.
+        assert_eq!(
+            score_compare_ungapped_hits(&hit, &before),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            score_compare_ungapped_hits(&before, &hit),
+            std::cmp::Ordering::Greater
         );
     }
 }

@@ -119,7 +119,7 @@ pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) scan_step: usize,
     pub(in super::super) query_context_index: &'a QueryContextIndex,
     pub(in super::super) query_contexts: &'a [QueryContext],
-    pub(in super::super) encoded_queries_blastna: &'a [&'a [u8]],
+    pub(in super::super) encoded_query_concat_blastna: &'a [u8],
     pub(in super::super) cutoff_scores: &'a [i32],
     pub(in super::super) x_dropoff_scores: &'a [i32],
     pub(in super::super) reduced_cutoff_scores: &'a [i32],
@@ -442,11 +442,6 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
-        // ```c
-        // Uint1 *q_start = query->sequence;
-        // ```
-        let q_seq_blastna = x.encoded_queries_blastna[context_idx];
         let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
         // Use pre-computed cutoff score (computed once per query-subject pair)
@@ -565,6 +560,14 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         //             /* perform ungapped extension */
         //             s_NuclUngappedExtend(query, subject, matrix, q_off, s_off, ...
         // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+        // ```c
+        // Uint1 *q_start = query->sequence;
+        // ```
+        // NCBI's `query` is the concatenated query and `q_off` an offset in it
+        // (na_ungapped.c:164-206 too): a walk that does not stop at the context's sentinel (a
+        // raw X-drop of 2^30 or more) reads the contexts before it.
+        let q_off_concat = ctx.query_offset as usize + q_off;
         let x_dropoff = x.x_dropoff_scores[context_idx];
         let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
         let ungapped_start = if timing_enabled {
@@ -574,9 +577,9 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         };
         let ungapped = if safe_k < 11 {
             extend_hit_ungapped_exact_ncbi(
-                q_seq_blastna,
+                x.encoded_query_concat_blastna,
                 search_seq_packed,
-                q_off,
+                q_off_concat,
                 s_off,
                 s_len,
                 x_dropoff,
@@ -584,9 +587,9 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             )
         } else {
             extend_hit_ungapped_approx_ncbi(
-                q_seq_blastna,
+                x.encoded_query_concat_blastna,
                 search_seq_packed,
-                q_off,
+                q_off_concat,
                 s_off,
                 s_end,
                 s_len,
@@ -607,9 +610,6 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             }
             *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
         }
-        let qs = ungapped.q_start;
-        let qe = ungapped.q_start + ungapped.length;
-        let ss = ungapped.s_start;
         let ungapped_se = ungapped.s_start + ungapped.length;
         let ungapped_score = ungapped.score;
 
@@ -655,21 +655,12 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         }
 
         // NCBI architecture: Collect ungapped hit for batch processing
+        // `UngappedHit::saved` holds NCBI's saving of the hit (`BLAST_SaveInitialHit`) and its
+        // offsets in the context (`s_AdjustInitialHSPOffsets`, a negative `Int4` start for a hit
+        // that starts left of its context).
         super::super::x_push_ungapped(
             ungapped_hits,
-            UngappedHit {
-                context_idx: q_idx,
-                query_idx: ctx.query_idx,
-                query_frame: ctx.frame,
-                query_context_offset: ctx.query_offset,
-                seed_q_off: q_off as u32,
-                seed_s_off: s_off as u32,
-                qs: qs as u32,
-                qe: qe as u32,
-                ss: ss as u32,
-                se: ungapped_se as u32,
-                score: ungapped_score,
-            },
+            UngappedHit::saved(q_idx, ctx, q_off_concat, s_off, &ungapped),
         );
         if PT {
             out.hit_keys.push(x_key);
@@ -1096,6 +1087,8 @@ mod tests {
                 Vec::new(),
             ];
             let ctx_refs: Vec<&[u8]> = ctx_seqs.iter().map(Vec::as_slice).collect();
+            // The concatenated query (the contexts at `offsets`, a sentinel between them).
+            let concat: Vec<u8> = [ctx_seqs[0].as_slice(), &[15], ctx_seqs[1].as_slice()].concat();
             let lookup = build_pv_direct_lookup(
                 &ctx_refs,
                 &offsets,
@@ -1133,7 +1126,7 @@ mod tests {
                 scan_step: 1,
                 query_context_index: &index,
                 query_contexts: &contexts,
-                encoded_queries_blastna: &ctx_refs,
+                encoded_query_concat_blastna: &concat,
                 cutoff_scores: &[16, 16],
                 x_dropoff_scores: &[20, 20],
                 reduced_cutoff_scores: &[16, 16],

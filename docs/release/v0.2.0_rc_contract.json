@@ -206,7 +206,7 @@
     {
       "id": "F",
       "title": "Full regression set",
-      "cases": "ci_fast_regressions.py --programs all --all-cases (S02 baseline 236, Gate A and Stage G frozen hashes, D and E rows at 1 and 4 threads, blastn_regression 350, tblastx_regression 85, fasta_input 4,140, drop-in corpus 210) plus the promotion PR's regressions job (switch_reach_check.py, library example); range_regression (75 rows) runs locally with set D",
+      "cases": "ci_fast_regressions.py --programs all --all-cases (S02 baseline 236, Gate A and Stage G frozen hashes, D and E rows at 1 and 4 threads, blastn_regression 350, tblastx_regression 85, range_regression 75, fasta_input 4,140, drop-in corpus 210) plus the promotion PR's regressions job (switch_reach_check.py, library example)",
       "comparator": "ncbi_frozen",
       "comparator_note": "NCBI frozen + LOSAT frozen. Evidence: the nightly run (runs.F) and the promotion PR's ci.yml run (runs.H, which holds the regressions job)",
       "tool": "nightly.yml (job full-regressions) dispatched on cert/<9 hex of C>, and the regressions job of the promotion PR's ci.yml run",

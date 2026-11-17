@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { performance } = require("node:perf_hooks");
 const { WASI } = require("node:wasi");
-const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 const { prepareThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -61,7 +61,12 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
   async function create(job) {
     if (prepared) return prepared.create(job.argv || []);
     const wasi = new WASI({version:"preview1", args:[artifact,...(job.argv||[])], env:process.env, preopens:{"/":"/"}, returnOnExit:true});
-    const instance = await WebAssembly.instantiate(module, {wasi_snapshot_preview1:unsignedWasiImports(wasi.wasiImport)});
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+    // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+    // Standard output and error wait for a full pipe as the native write blocks
+    // (blockingStdioWrite, wasi_artifact.js).
+    const local = unsignedWasiImports(wasi.wasiImport);
+    const instance = await WebAssembly.instantiate(module, {wasi_snapshot_preview1:{...local, fd_write:blockingStdioWrite(local.fd_write)}});
     if (kind.endsWith("reactor")) wasi.initialize(instance);
     return {instance, memory:instance.exports.memory, events:[], start:()=>wasi.start(instance), waitForWorkers:async()=>{}, close:async()=>{}};
   }

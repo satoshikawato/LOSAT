@@ -2,7 +2,7 @@
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 const { WASI } = require("node:wasi");
-const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 const { createThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 
@@ -19,7 +19,12 @@ const { runPair } = require("./check_wasi_reactor");
     // Reuse the validated module; reactor initialization and ownership are unchanged.
     const bytes=fs.readFileSync(artifact), {module}=prepareArtifact(bytes,kind);
     const wasi=new WASI({version:"preview1",env:process.env,preopens:{"/":"/"},returnOnExit:true});
-    const instance=await WebAssembly.instantiate(module,{wasi_snapshot_preview1:unsignedWasiImports(wasi.wasiImport)});
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+    // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+    // Standard output and error wait for a full pipe as the native write blocks
+    // (blockingStdioWrite, wasi_artifact.js).
+    const local=unsignedWasiImports(wasi.wasiImport);
+    const instance=await WebAssembly.instantiate(module,{wasi_snapshot_preview1:{...local,fd_write:blockingStdioWrite(local.fd_write)}});
     wasi.initialize(instance);
     host={instance,memory:instance.exports.memory,events:[],waitForWorkers:async()=>{},close:async()=>{}};
   } else host=await createThreadHost(artifact,kind);

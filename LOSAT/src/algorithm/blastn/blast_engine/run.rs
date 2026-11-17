@@ -63,9 +63,7 @@ use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
 use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
-use super::super::pairwise::{
-    pairwise_hits, pairwise_windows, shown_query_masks, DisplayMasks, Rows as PairwiseRows,
-};
+use super::super::pairwise::{pairwise_hits, pairwise_windows, DisplayMasks, Rows as PairwiseRows};
 use super::super::query_split::{
     restrict_masks, restrict_masks_with_letter_before, split_query_batch, splits, QueryChunk,
     SplitSizes,
@@ -341,12 +339,12 @@ mod context_statistics;
 #[path = "subject_env.rs"]
 mod subject_env;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755 (the SAM branch of
-// `CBlastFormat::x_PrintStructuredReport`); the refusals of the query-anchored reports have no NCBI
-// counterpart.
-// Two parts of `post_process_hits_and_write`, the refusals of outfmt 1 to 4 and the SAM writer, and the
-// subjects' names that the Seq-align, archive and SAM writers take (a child module, so that it uses
-// the private types of this file).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-755 (the XML, XML2 and SAM
+// branches of `CBlastFormat::x_PrintStructuredReport`); the refusals of the query-anchored reports have
+// no NCBI counterpart.
+// Parts of `post_process_hits_and_write`, the refusals of outfmt 1 to 4, the SAM writer and the
+// structured documents (outfmt 5, 13 to 16), and the subjects' names that the Seq-align, archive and
+// SAM writers take (a child module, so that it uses the private types of this file).
 #[path = "report_write.rs"]
 mod report_write;
 
@@ -7546,208 +7544,20 @@ fn post_process_hits_and_write(
                     &mut writer,
                 )?;
             } else if output_format.is_structured_xml() {
-                // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
-                // per-query records, written by another writer.
-                let xml2_kind = output_format.xml2_kind();
-                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
-                // ```c++
-                //     if (m_FormatType == CFormattingArgs::eAsnText
-                //       || m_FormatType == CFormattingArgs::eAsnBinary
-                //       || m_FormatType == CFormattingArgs::eXml
-                //       ...
-                //     {
-                //         x_PrintStructuredReport(results, queries);
-                //         return;
-                //     }
-                // ```
-                // The CBlastOutput document of the queries (`blast_xml`).
-                let is_database = report.database.is_some();
-                let xml_stats = blastn_xml_stats(report, query_lengths)?;
-                let xml_messages: Vec<Vec<String>> = report
-                    .queries
-                    .iter()
-                    .enumerate()
-                    .map(|(q_idx, query)| {
-                        let mut messages = Vec::new();
-                        if report.context_karlin[2 * q_idx + report.first_context].is_none() {
-                            messages.push(if query.seq().is_empty() {
-                                NO_DATA_MESSAGE.to_string()
-                            } else {
-                                crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
-                            });
-                        }
-                        if !unsearched[q_idx]
-                            && report
-                                .database_reader
-                                .is_some_and(|database| database.filtered_empty())
-                        {
-                            messages.push(
-                                crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string(),
-                            );
-                        }
-                        messages
-                    })
-                    .collect();
-                let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
-                let filter = crate::report::blast_xml::filter::filter_string(
-                    report.dust,
-                    None,
-                    report.window_masker,
-                    report.soft_masking,
-                );
-                let subject_records = report.subjects.records();
-                let database_length = |rank: usize| report.subjects.len(rank);
-                let record_length = |s_idx: usize| {
-                    report
-                        .ranges
-                        .subjects
-                        .placements
-                        .length(s_idx, report.subjects.len(s_idx))
-                };
-                // The taxids of the reported sequences and the taxonomy database's names, read for
-                // the XML2 and JSON formats only.
-                let (xml_taxids, xml_taxonomy, xml_parsed_taxonomy, xml_taxdb_notes): (
-                    Vec<i32>,
-                    Vec<crate::report::blast_xml::HitTaxonomy>,
-                    Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
-                    crate::algorithm::common::database::TaxdbNotes,
-                ) = match (xml2_kind, report.database_ordinals, report.database_reader) {
-                    (Some(_), Some(ordinals), Some(database)) if is_database => {
-                        database.read_taxids(ordinals, report.database_parsed, &hit_lists)?
-                    }
-                    _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
-                };
-                // The masked regions of the queries in record coordinates and the queries of the
-                // batches that were not searched, which only XML2 shows (outfmt 5 shows neither).
-                let (xml_masks, xml_searched): (
-                    Vec<Vec<crate::report::blast_xml::QueryMask>>,
-                    Vec<bool>,
-                ) = if xml2_kind.is_some() {
-                    (
-                        (0..report.queries.len())
-                            .map(|q_idx| {
-                                shown_query_masks(
-                                    &report.query_masks[q_idx],
-                                    query_lengths[q_idx],
-                                    report.ranges.queries.placements.offset(q_idx),
-                                )
-                                .iter()
-                                .map(|mask| crate::report::blast_xml::QueryMask {
-                                    from: mask.start as i32,
-                                    to: mask.end as i32 - 1,
-                                    frame: 0,
-                                })
-                                .collect()
-                            })
-                            .collect(),
-                        unsearched.iter().map(|&skipped| !skipped).collect(),
-                    )
-                } else {
-                    (Vec::new(), Vec::new())
-                };
-                let xml_subjects = match (report.database_ordinals, report.database_reader) {
-                    (Some(ordinals), Some(reader)) if is_database => {
-                        crate::report::blast_xml::XmlSubjects::Database {
-                            ordinals,
-                            oids: reader.oid_map(),
-                            titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
-                            // Only XML2 shows the taxid.
-                            taxids: &xml_taxids,
-                            taxonomy: &xml_taxonomy,
-                            length: &database_length,
-                            parsed: report.database_parsed,
-                            parsed_taxonomy: &xml_parsed_taxonomy,
-                        }
-                    }
-                    _ => crate::report::blast_xml::XmlSubjects::Records {
-                        records: subject_records,
-                        length: &record_length,
-                        protein: false,
+                report_write::write_structured_xml(
+                    report_write::XmlDocument {
+                        kind: output_format.xml2_kind(),
+                        only_xml2: xml_only_xml2,
+                        side_sink: side_sink.as_ref(),
                     },
-                };
-                let xml = super::super::blast_xml::BlastnXml {
-                    run: crate::report::blast_xml::XmlRun {
-                        program: "blastn",
-                        version: &version,
-                        reference: if report.megablast {
-                            crate::report::blast_xml::REFERENCE_MEGABLAST
-                        } else {
-                            crate::report::blast_xml::REFERENCE_GAPPED_BLAST
-                        },
-                        db_name: if is_database { subject_title } else { "" },
-                        matrix: None,
-                        expect: report.expect,
-                        gap_open: report.gap_open,
-                        gap_extend: report.gap_extend,
-                        reward_penalty: Some((report.reward, report.penalty)),
-                        filter: &filter,
-                        db_num: report.database.map_or(0, |database| database.num_sequences),
-                        db_len: report.database.map_or(0, |database| database.total_letters),
-                        db_len_overflow: report
-                            .database
-                            .is_some_and(|database| database.total_letters_overflow),
-                        positives: None,
-                        mask_char: b'N',
-                    },
-                    queries: report.queries,
-                    searched_lengths: query_lengths,
-                    stats: xml_stats,
-                    messages: xml_messages,
-                    masks: xml_masks,
-                    searched: xml_searched,
-                    subjects: xml_subjects,
-                    taxdb_notes: xml_taxdb_notes,
-                    letters: report.subjects,
-                    epilog: report.epilog,
-                    only_xml2: xml_only_xml2,
-                };
-                match xml2_kind {
-                    None => super::super::blast_xml::write_blastn_xml(
-                        &xml,
-                        &mut crate::report::blast_xml::BlastXmlWriter::new(report.queries_before),
-                        &hit_lists,
-                        &mut writer,
-                        format_warnings.as_mut(),
-                    )?,
-                    Some(kind) => {
-                        // The gap costs are written for a gapped search (NCBI reads them from
-                        // the options when `GetGappedMode()`); `cbs` and the genetic codes
-                        // are not those of a nucleotide search (blastxml2_format.cpp:531-546).
-                        let params = crate::report::blast_xml2::Xml2Run {
-                            target: if is_database {
-                                crate::report::blast_xml2::Xml2Target::Database
-                            } else {
-                                crate::report::blast_xml2::Xml2Target::Subjects(
-                                    subject_records.len(),
-                                )
-                            },
-                            subject_names: if is_database {
-                                None
-                            } else {
-                                crate::report::blast_xml2::subject_names(
-                                    subject_records.iter().map(FastaRecord::believed),
-                                )
-                            },
-                            gapped: !report.ungapped,
-                            cbs: 0,
-                            query_gencode: None,
-                            db_gencode: None,
-                        };
-                        let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
-                            kind,
-                            params,
-                            report.out,
-                            side_sink.as_ref(),
-                        );
-                        super::super::blast_xml::write_blastn_xml(
-                            &xml,
-                            &mut document,
-                            &hit_lists,
-                            &mut writer,
-                            format_warnings.as_mut(),
-                        )?;
-                    }
-                }
+                    report,
+                    &hit_lists,
+                    query_lengths,
+                    &unsearched,
+                    subject_title,
+                    &mut writer,
+                    format_warnings.as_mut(),
+                )?;
             } else if let Some(spec) = output_format.tabular_spec() {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
                 // (`algorithm::blastn::tabular`); never the default 6 and 7 below.
@@ -10166,10 +9976,15 @@ enum BatchStage<'a> {
     /// `lower_case_before`: whether the letter before each query's interval is lower case, which
     /// the chunks restrict too (empty without a range, without `-lcase_masking` and with
     /// `-window_masker_db`).
+    ///
+    /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
+    /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
+    /// (`x_lut_drop::after_prelim`).
     Search {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
         lower_case_before: &'a [bool],
+        last: bool,
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -10178,6 +9993,23 @@ enum BatchStage<'a> {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
     },
+}
+
+/// Whether `run_in_pool`'s batch loop reads a batch from input record `input_start` of
+/// `records`: records are left, or what ends the reading after them (`reading`: blank lines or
+/// an error, `QueryReading::reads_past_records`) has not come yet (`reading_ended`).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277
+/// ```c
+///         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+/// ```
+fn batches_follow(
+    input_start: usize,
+    records: usize,
+    reading: &QueryReading,
+    reading_ended: bool,
+) -> bool {
+    input_start < records || (reading.reads_past_records() && !reading_ended)
 }
 
 /// Searches the queries in NCBI's query batches and writes the results of all of them.
@@ -10411,7 +10243,7 @@ fn run_in_pool(
         batching,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
-    // (`lookup::x_mb_lut_keep`), freed when the loop ends.
+    // (`lookup::x_mb_lut_keep`), whose table is freed after the last batch's preliminary stage.
     let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
     // No NCBI counterpart (memory placement only; NCBI allocates the buffer of each batch,
     // `x_query_sentinels`): the query buffer this loop keeps between its batches, freed when the
@@ -10468,9 +10300,12 @@ fn run_in_pool(
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
     // run out before the batch reaches its size, and otherwise in a batch of its own.
-    while input_start < query_input.input_lengths.len()
-        || (reading.reads_past_records() && !reading_ended)
-    {
+    while batches_follow(
+        input_start,
+        query_input.input_lengths.len(),
+        &reading,
+        reading_ended,
+    ) {
         let (input_end, reached_size) = next_ranged_batch(
             &query_input.input_lengths,
             &query_input.skipped,
@@ -10873,6 +10708,14 @@ fn run_in_pool(
         } else {
             Vec::new()
         };
+        // Whether the loop reads no batch after this one: its keep then frees the table after the
+        // batch's preliminary stage (`BatchStage::Search`'s `last`).
+        let last = !batches_follow(
+            input_end,
+            query_input.input_lengths.len(),
+            &reading,
+            reading_ended,
+        );
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
@@ -10893,6 +10736,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    last,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -10911,6 +10755,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    last,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -12899,65 +12744,21 @@ fn search_query_batch<const UNGAPPED: bool>(
         },
         reborrow_outputs(&mut outputs),
     )?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
-    // `stats::setup::preliminary_option_space`): the preliminary stage's option spaces of the
-    // batch's contexts, which its setup reads in place of its own where the statistics' total
-    // before the fallback to OID 0 is not positive, and which the statistics of each subject read
-    // (`DbStatistics::per_subject`, blast_engine.c:1434-1443). A query chunk has the batch's
-    // (`BatchStage::ChunkPrelim`): its own setup's spaces are already them.
-    let x_statistics = match subjects {
-        SubjectSource::Database(database) => Some(database.statistics()),
-        SubjectSource::Prepared(_) => None,
-    };
-    let per_subject = x_statistics.is_some_and(|statistics| statistics.per_subject());
-    let option_spaces: Option<Vec<i64>> = match (stage, x_statistics) {
-        (BatchStage::Search { .. }, Some(statistics))
-            if statistics.gumbel_db_length <= 0 || per_subject =>
-        {
-            Some(
-                query_contexts
-                    .iter()
-                    .zip(&search_karlin)
-                    .zip(&context_valid)
-                    .map(|((ctx, blocks), &valid)| {
-                        crate::stats::setup::preliminary_option_space(
-                            if valid { ctx.len as i64 } else { 0 },
-                            statistics.gumbel_db_length,
-                            statistics.request_count,
-                            args.db_length(),
-                            args.options_searchsp(),
-                            false,
-                            &blocks.gapped,
-                            "BLASTN",
-                        )
-                    })
-                    .collect::<Result<_, _>>()?,
-            )
-        }
-        (
-            BatchStage::ChunkPrelim {
-                batch_eff_searchsp, ..
-            },
-            _,
-        ) if per_subject => Some(batch_eff_searchsp.to_vec()),
-        _ => None,
-    };
-    // The preliminary stage's spaces where they differ from the setup's (`query_eff_searchsp`,
-    // which the traceback and the reports read): a context's option space when it is not 0.
-    let prelim_eff_searchsp: Option<Vec<i64>> = match (stage, &option_spaces, x_statistics) {
-        (BatchStage::Search { .. }, Some(spaces), Some(statistics))
-            if statistics.gumbel_db_length <= 0 =>
-        {
-            Some(
-                query_eff_searchsp
-                    .iter()
-                    .zip(spaces)
-                    .map(|(&setup, &option)| if option != 0 { option } else { setup })
-                    .collect(),
-            )
-        }
-        _ => None,
-    };
+    // The preliminary stage's option spaces and its own spaces where they differ from the setup's
+    // (`batch_setup::batch_spaces`).
+    let batch_setup::BatchSpaces {
+        per_subject,
+        option_spaces,
+        prelim_eff_searchsp,
+    } = batch_setup::batch_spaces(&batch_setup::SpaceInputs {
+        args,
+        stage,
+        subjects,
+        query_contexts: &query_contexts,
+        context_valid: &context_valid,
+        search_karlin: &search_karlin,
+        query_eff_searchsp: &query_eff_searchsp,
+    })?;
 
     // NCBI searches a batch of at least two query chunks chunk by chunk in its preliminary
     // stage, after it has set up the whole batch (the errors and warnings above are the
@@ -13142,124 +12943,33 @@ fn search_query_batch<const UNGAPPED: bool>(
     // } BlastHSPList;
     // ```
     let search_karlin_ref = &search_karlin;
-    let context_valid_ref = &context_valid;
-    let x_dropoff_init_ref = &x_dropoff_init;
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
-    // ```c
-    // if (!gapped_calculation || sbp->matrix_only_scoring) {
-    //    double cutoff_e = s_GetCutoffEvalue(program_number);
-    //    Int4 query_length = query_info->contexts[context].query_length;
-    //
-    // ...
-    //       query_length *= 2;
-    // ...
-    //    kbp = kbp_array[context];
-    // ...
-    //    BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-    //                  MIN((Uint8)subj_length,
-    //                      (Uint8)query_length)*((Uint8)subj_length),
-    //                  TRUE, gap_decay_rate);
-    // ...
-    // } else {
-    //    new_cutoff = gap_trigger;
-    // }
-    // new_cutoff *= (Int4)sbp->scale_factor;
-    // new_cutoff = MIN(new_cutoff,
-    // ...
-    // curr_cutoffs->cutoff_score = new_cutoff;
-    // ```
-    // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
-    // and GAPPED params (kbp_gap) for cutoff_score_max calculation
-    // The cutoffs of every context of the batch (`batch_setup::batch_cutoffs`): they depend on
-    // the context only (the gapped calculation's branch above: gap_trigger capped by
-    // cutoff_score_max), so the batch computes them once, and both stages read them from their
-    // batch (`PrelimBatch`, `TraceBatch`).
-    let x_batch_cutoffs = batch_setup::batch_cutoffs::<UNGAPPED>(&batch_setup::CutoffInputs {
+    // The cutoffs of every context of the batch, those of the preliminary stage's own spaces where
+    // they differ (`prelim_eff_searchsp`), and the statistics of one subject
+    // (`batch_setup::batch_cutoff_set`, `batch_setup::subject_statistics`).
+    let cutoff_inputs = batch_setup::CutoffInputs {
         subjects,
         db_len_total: seq_data.db_len_total,
         db_num_seqs: seq_data.db_num_seqs,
         query_contexts: &query_contexts,
-        context_valid: context_valid_ref,
+        context_valid: &context_valid,
         query_eff_searchsp: &query_eff_searchsp,
         search_karlin: search_karlin_ref,
-        x_dropoff_init: x_dropoff_init_ref,
+        x_dropoff_init: &x_dropoff_init,
         min_raw_gapped_score: config.min_raw_gapped_score,
         evalue_threshold,
         subject_length: None,
-    })?;
-    // The preliminary stage's cutoffs, of its own spaces where they differ (`prelim_eff_searchsp`).
+    };
+    let batch_setup::BatchCutoffSet {
+        batch: x_batch_cutoffs,
+        prelim: x_prelim_cutoffs_owned,
+    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())?;
     let prelim_eff_searchsp_ref: &Vec<i64> =
         prelim_eff_searchsp.as_ref().unwrap_or(&query_eff_searchsp);
-    let x_prelim_cutoffs_owned = match &prelim_eff_searchsp {
-        Some(spaces) => Some(batch_setup::batch_cutoffs::<UNGAPPED>(
-            &batch_setup::CutoffInputs {
-                subjects,
-                db_len_total: seq_data.db_len_total,
-                db_num_seqs: seq_data.db_num_seqs,
-                query_contexts: &query_contexts,
-                context_valid: context_valid_ref,
-                query_eff_searchsp: spaces,
-                search_karlin: search_karlin_ref,
-                x_dropoff_init: x_dropoff_init_ref,
-                min_raw_gapped_score: config.min_raw_gapped_score,
-                evalue_threshold,
-                subject_length: None,
-            },
-        )?),
-        None => None,
-    };
     let x_prelim_cutoffs = x_prelim_cutoffs_owned.as_ref().unwrap_or(&x_batch_cutoffs);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (quoted at
-    // `stats::setup::subject_eff_lengths`)
-    // The statistics of one subject (`per_subject`): each context's effective search space for the
-    // subject's length with the option spaces `spaces` (the preliminary stage's, or the
-    // traceback's own: `-searchsp`, which the memento gives it back, prelim_stage.cpp:219), and
-    // the cutoffs of `BlastHitSavingParametersUpdate` and `BlastInitialWordParametersUpdate` (the
-    // X-drops keep their initial values). The traceback of a list reads the subject's hit-saving
-    // cutoffs (`Blast_HSPReevaluateWithAmbiguitiesGapped`, its `hit_params` being thread 0's in
-    // NCBI's one thread, blast_traceback.c:1598-1650) and the e-values of the setup's spaces.
     let traceback_option_spaces = vec![args.options_searchsp(); query_contexts.len()];
     let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
     let subject_statistics =
-        |subject_length: usize, spaces: &[i64]| -> Result<(batch_setup::BatchCutoffs, Vec<i64>)> {
-            let subject_spaces: Vec<i64> = query_contexts
-                .iter()
-                .zip(search_karlin_ref)
-                .zip(context_valid_ref)
-                .zip(spaces)
-                .map(|(((ctx, blocks), &valid), &space)| {
-                    if !valid {
-                        return Ok(space);
-                    }
-                    Ok(crate::stats::setup::subject_eff_lengths(
-                        ctx.len as i64,
-                        subject_length as i64,
-                        seq_data.db_num_seqs,
-                        args.db_length(),
-                        space,
-                        false,
-                        &blocks.gapped,
-                        "BLASTN",
-                    )?
-                    .eff_searchsp)
-                })
-                .collect::<Result<_, crate::stats::setup::SearchSpaceOverflow>>()?;
-            let cutoffs = batch_setup::batch_cutoffs::<UNGAPPED>(&batch_setup::CutoffInputs {
-                subjects,
-                db_len_total: seq_data.db_len_total,
-                db_num_seqs: seq_data.db_num_seqs,
-                query_contexts: query_contexts_ref,
-                context_valid: context_valid_ref,
-                query_eff_searchsp: &subject_spaces,
-                search_karlin: search_karlin_ref,
-                x_dropoff_init: x_dropoff_init_ref,
-                min_raw_gapped_score: config.min_raw_gapped_score,
-                evalue_threshold,
-                subject_length: Some(subject_length as u64),
-            })?;
-            Ok((cutoffs, subject_spaces))
-        };
+        batch_setup::subject_statistics::<UNGAPPED>(cutoff_inputs, args.db_length());
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
     // ```c
     // while (TRUE) {
@@ -13507,7 +13217,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
     // so the tables are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211)
     // (`x_lut_drop.rs`).
-    x_lut_drop::after_prelim(lookup_tables);
+    // The keep of LOSAT_X_MBLUTKEEP frees its table too when no later batch builds one on it.
+    x_lut_drop::after_prelim(
+        lookup_tables,
+        x_keep
+            .filter(|_| matches!(stage, BatchStage::Search { last: true, .. }))
+            .map(|keep| &**keep),
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
     // ```c
     // s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)

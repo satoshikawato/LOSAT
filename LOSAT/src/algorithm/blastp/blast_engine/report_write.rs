@@ -498,7 +498,7 @@ pub(super) fn write_xml(
     };
     let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref(), database) {
         // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
-        // (`subject_titles`, above).
+        // (`subject_titles`, from `report_prep::shown_of`).
         (Some(listed), Some(_), Some(database)) => {
             crate::report::blast_xml::XmlSubjects::Database {
                 ordinals: &listed.ordinals,
@@ -815,7 +815,7 @@ pub(super) fn write_pairwise(
         num_descriptions: args.num_descriptions,
         num_alignments: args.num_alignments,
     };
-    // The shown subjects, whose titles are checked above (`pairwise_shown`).
+    // The shown subjects, whose titles the loop over the formats checks (`pairwise_shown`).
     let shown = pairwise_shown
         .as_ref()
         .expect("made for every pairwise format");

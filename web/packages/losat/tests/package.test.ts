@@ -138,7 +138,7 @@ describe.skipIf(!built)('the built package', () => {
         '  abi.abi_version, typeof record.artifacts, ENGINE_ASSETS.serial.url === wasm]));',
       ].join('\n');
       const printed = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: consumer, encoding: 'utf8' });
-      expect(JSON.parse(printed)).toEqual(['function', 5, [0, 6, 7], 'function', 2, 'object', true]);
+      expect(JSON.parse(printed)).toEqual(['function', 5, [0, 6, 7], 'function', 3, 'object', true]);
     } finally {
       rmSync(consumer, { recursive: true, force: true });
     }

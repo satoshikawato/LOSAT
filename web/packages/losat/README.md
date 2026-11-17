@@ -81,11 +81,8 @@ The engine can tell the host to discard an output: it sends stream 9 (`DISCARD_S
 bytes are a stream number as a little-endian unsigned integer, and the host drops everything that
 arrived of that stream. It happens when one added output fails on its own after some of its chunks
 were sent, while the run goes on with the others. `RunOutputReceiver` reports it through `onDiscard`,
-which is required, and `RunOutputMessage` has a `discard` variant for it:
-
-```ts
-new RunOutputReceiver(port, onChunk, onDiscard); // onDiscard(stream) drops what arrived of that output
-```
+its required third argument (`new RunOutputReceiver(port, onChunk, onDiscard)`; `onDiscard(stream)` drops what
+arrived of that output), and `RunOutputMessage` has a `discard` variant for it.
 
 A host that keeps every chunk would keep output that the command line does not write.
 

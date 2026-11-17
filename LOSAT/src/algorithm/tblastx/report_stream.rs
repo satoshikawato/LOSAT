@@ -56,8 +56,10 @@
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
 //!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
-//!   extension that scores higher past the end of its query frame, `extension::query_batch`, and a
-//!   one-hit merge of lengths that add up to 0). Any other error that LOSAT raises where NCBI would
+//!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
+//!   one-hit merge of lengths that add up to 0, and the ungapped re-evaluation of HSPs on a subject
+//!   (or its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`).
+//!   Any other error that LOSAT raises where NCBI would
 //!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
 //!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
 //!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),

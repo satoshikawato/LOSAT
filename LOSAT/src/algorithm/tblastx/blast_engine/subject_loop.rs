@@ -1,8 +1,9 @@
 //! The subject loop of a TBLASTX query batch: the worker state of each thread, the writer thread
 //! that collects the subjects' hits (native builds with `parallel`), the loop that runs
 //! `process_subject` for every subject of the batch, on the search pool's threads or on the calling
-//! thread, and the end of each subject (`SubjectEmit::emit`: its final HSPs, after the negative
-//! seqid list's check, to the writer thread or to the collector the loop keeps).
+//! thread, the fetch at the start of each subject's re-evaluation, which the negative seqid list
+//! may exclude (`SubjectEmit::reevaluation_fetch_keeps`), and the end of each subject
+//! (`SubjectEmit::emit`: its final HSPs to the writer thread or to the collector the loop keeps).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1607
 //! (`BLAST_PreliminarySearchEngine`, whose subject loop is at :1411-1584), which every thread of
@@ -152,12 +153,12 @@ pub(super) fn spawn_writer(
 //       	}
 // ```
 // The re-evaluation's fetch of a subject with HSPs excludes one that the negative seqid
-// list keeps without a line (`FetchExcluded`): its HSPs are freed before the hit lists and
-// the culling writer (`SubjectEmit::emit`), one check for the batch.
-/// What the end of each subject reads of the batch (`emit`): the negative seqid list's check of the
-/// re-evaluation's fetch (`fetch_excluded`, `None` where the fetches exclude nothing), the batch's
-/// read failure, and the collector of the hit lists that a subject loop without a writer thread
-/// keeps (`local_collector`).
+// list keeps without a line (`FetchExcluded`): its HSPs are freed before anything else of the
+// re-evaluation reads it (`SubjectEmit::reevaluation_fetch_keeps`), one check for the batch.
+/// What the re-evaluation's fetch (`reevaluation_fetch_keeps`) and the end of each subject (`emit`)
+/// read of the batch: the negative seqid list's check of that fetch (`fetch_excluded`, `None` where
+/// the fetches exclude nothing), the batch's read failure, and the collector of the hit lists that
+/// a subject loop without a writer thread keeps (`local_collector`).
 pub(super) struct SubjectEmit<'a> {
     pub(super) fetch_excluded: Option<&'a FetchExcluded<'a>>,
     pub(super) x_read_failure: &'a XReadFailure,
@@ -175,30 +176,11 @@ impl SubjectEmit<'_> {
     /// One message per subject of the loop, with its final HSPs or none, so that the collector
     /// reaches every OID (`HitCollector::push`): `st.hits` holds the subject's HSPs until here.
     pub(super) fn emit<S>(&self, st: &mut WorkerState<S>, s_idx: usize) {
-        let &SubjectEmit {
-            fetch_excluded,
-            x_read_failure,
-            local_collector,
-        } = self;
-        let mut hits = std::mem::take(&mut st.hits);
-        if let (false, Some(excluded), Ok(ordinal)) =
-            (hits.is_empty(), fetch_excluded, u32::try_from(s_idx))
-        {
-            match excluded.excludes(ordinal) {
-                Ok(false) => {}
-                Ok(true) => hits.clear(),
-                Err(error) => {
-                    // A header that the fetch cannot read ends NCBI's search: the batch fails
-                    // with LOSAT's refusal, as a subject whose read failed fails it.
-                    hits.clear();
-                    x_read_failure.fail(s_idx, FetchExcluded::refusal((ordinal, error), "TBLASTX"));
-                }
-            }
-        }
+        let hits = std::mem::take(&mut st.hits);
         if let Some(tx) = &st.tx {
             tx.send((s_idx, hits)).unwrap();
         } else {
-            local_collector
+            self.local_collector
                 .lock()
                 .unwrap()
                 .as_mut()
@@ -207,10 +189,41 @@ impl SubjectEmit<'_> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2659-2662,2674-2677,2700
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2659-2665
     // ```c
     //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
     // ...
+    //       		return 0;
+    //       	}
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-311
+    // ```c
+    //     if (args->check_oid_exclusion) {
+    //         if (! seqdb.GetIdSet().Blank()) {
+    //             list< CRef<CSeq_id> > seqids = seqdb.GetSeqIDs(oid);
+    //
+    //             if (seqids.empty()) {
+    //                 return BLAST_SEQSRC_EXCLUDED;
+    // ```
+    // NCBI's re-evaluation (`Blast_HSPListReevaluateUngapped`, called for every subject that has
+    // HSPs after the first linking call and the preliminary E-value, blast_engine.c:1480-1497)
+    // fetches the subject first, reading its Seq-ids before its letters: one that the negative
+    // seqid list excludes loses its HSPs there, before its letters, its translation or anything
+    // else of the re-evaluation is read; one whose header cannot be read ends NCBI's search.
+    /// Whether the re-evaluation's fetch of subject `s_idx`, which still has HSPs, keeps it: not
+    /// when the negative seqid list excludes it (`FetchExcluded`), nor when its header cannot be
+    /// read, which fails the batch with LOSAT's refusal (`XReadFailure`, as a subject whose read
+    /// failed fails it).
+    #[inline]
+    pub(super) fn reevaluation_fetch_keeps(&self, s_idx: usize) -> bool {
+        match (self.fetch_excluded, u32::try_from(s_idx)) {
+            (Some(excluded), Ok(ordinal)) => x_fetch_keeps(excluded, self.x_read_failure, ordinal),
+            _ => true,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2672-2677,2700
+    // ```c
     //    if (kTranslateSubject) {
     // ...
     //       BlastTargetTranslationNew(subject_blk, gen_code_string, program,
@@ -218,11 +231,9 @@ impl SubjectEmit<'_> {
     // ...
     //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
     // ```
-    // NCBI's re-evaluation of a subject's HSPs fetches the subject first: one that the negative
-    // seqid list excludes there loses its HSPs and is not read (`FetchExcluded`; a header the
-    // fetch cannot read is its refusal, as in `emit`); a failed read does not stop it (its
-    // `status` is still 0). Then it reads the translation of the first HSP's frame, which it
-    // never makes for a subject (its `-subject_loc` range) of fewer than 12 bases
+    // After the fetch (`reevaluation_fetch_keeps`, then the subject's letters), NCBI's
+    // re-evaluation reads the translation of the first HSP's frame, which it never makes for a
+    // subject (its `-subject_loc` range) of fewer than 12 bases
     // (`core::blast_hits::target_translation_never_made`): NULL + 1, from which
     // `Blast_HSPReevaluateWithAmbiguitiesUngapped` reads the HSP's letters (blast_hits.c:692-700),
     // and NCBI BLAST+ 2.17.0 dies with SIGSEGV. Every HSP that reaches LOSAT's re-evaluation has a
@@ -231,34 +242,42 @@ impl SubjectEmit<'_> {
     // first HSP of every such list. The query batch fails with LOSAT's refusal
     // (PD-LOSAT-NCBI-DEFECTS 1.49, rule 3) after the reports of the batches before
     // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).
-    /// The end of subject `s_idx`, whose HSPs reach the re-evaluation on a subject of fewer than
-    /// 12 bases: refused unless the re-evaluation's fetch excludes it, then emitted without HSPs.
+    /// The end of subject `s_idx`, whose HSPs reach the re-evaluation's read of the translation of a
+    /// subject of fewer than 12 bases: refused, then emitted without HSPs.
     #[cold]
     #[inline(never)]
     pub(super) fn refuse_untranslated_frame<S>(&self, st: &mut WorkerState<S>, s_idx: usize) {
+        self.x_read_failure.fail(
+            s_idx,
+            anyhow::Error::new(super::ErrorAfterBatchReports(
+                crate::core::blast_hits::x_untranslated_frame_refusal(
+                    "TBLASTX",
+                    "the ungapped re-evaluation",
+                ),
+            )),
+        );
         st.hits.clear();
-        let excluded = match (self.fetch_excluded, u32::try_from(s_idx)) {
-            (Some(excluded), Ok(ordinal)) => {
-                excluded.excludes(ordinal).map_err(|error| (ordinal, error))
-            }
-            _ => Ok(false),
-        };
-        match excluded {
-            Ok(true) => {}
-            Ok(false) => self.x_read_failure.fail(
-                s_idx,
-                anyhow::Error::new(super::ErrorAfterBatchReports(
-                    crate::core::blast_hits::x_untranslated_frame_refusal(
-                        "TBLASTX",
-                        "the ungapped re-evaluation",
-                    ),
-                )),
-            ),
-            Err(read) => self
-                .x_read_failure
-                .fail(s_idx, FetchExcluded::refusal(read, "TBLASTX")),
-        }
         self.emit(st, s_idx);
+    }
+}
+
+/// The check of `reevaluation_fetch_keeps` under a negative seqid list with ids: whether the fetch
+/// of subject `ordinal` keeps it; a header that cannot be read is the batch's failure.
+#[inline(never)]
+fn x_fetch_keeps(
+    excluded: &FetchExcluded<'_>,
+    x_read_failure: &XReadFailure,
+    ordinal: u32,
+) -> bool {
+    match excluded.excludes(ordinal) {
+        Ok(excluded) => !excluded,
+        Err(error) => {
+            x_read_failure.fail(
+                ordinal as usize,
+                FetchExcluded::refusal((ordinal, error), "TBLASTX"),
+            );
+            false
+        }
     }
 }
 

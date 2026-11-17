@@ -2272,7 +2272,7 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
-// c++/src/algo/blast/core/blast_hits.c:1161-1163,1233-1234
+// c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
 // ```c
 //       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
 // ...
@@ -2455,7 +2455,7 @@ impl<'a> TargetTranslation<'a> {
                 };
             }
         } else if target.sequence.is_empty() {
-            // NCBI blast_hits.c:1161-1163,1233-1234: the frame never translated, NULL + 1
+            // NCBI blast_hits.c:1162-1164,1234-1235: the frame never translated, NULL + 1
             // (`x_traceback_of_an_untranslated_frame`). Only a subject of fewer than 12 bases skips
             // the first translation; every translation leaves at least its closing byte.
             debug_assert!(

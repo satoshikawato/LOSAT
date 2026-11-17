@@ -4920,9 +4920,11 @@ impl BatchReports<'_> {
 /// (`run_in_pool`), the average subject length (`context_cutoffs::context_cutoffs`); and LOSAT's
 /// refusals of what the search meets, an ungapped extension that scores higher past the end of its
 /// query frame (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's
-/// Q-X2c: "the results of the query batches before are written") and a one-hit merge of lengths
-/// that add up to 0 (`OneHitChunkMerge::refuse`). The run then writes the same bytes whether its
-/// reports are streamed or held (`report_stream`).
+/// Q-X2c: "the results of the query batches before are written"), a one-hit merge of lengths that
+/// add up to 0 (`OneHitChunkMerge::refuse`) and the ungapped re-evaluation of HSPs on a subject (or
+/// its `-subject_loc` range) of fewer than 12 bases
+/// (`subject_loop::SubjectEmit::refuse_untranslated_frame`, PD-LOSAT-NCBI-DEFECTS 1.49). The run
+/// then writes the same bytes whether its reports are streamed or held (`report_stream`).
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
 
@@ -5357,7 +5359,8 @@ fn search_query_batch<S: TbxScore>(
     };
 
     // The negative seqid list's check of the re-evaluation's fetch, one for the batch
-    // (`FetchExcluded`), which the end of each subject reads (`subject_loop::SubjectEmit`).
+    // (`FetchExcluded`), which each subject with HSPs left for the re-evaluation reads
+    // (`subject_loop::SubjectEmit::reevaluation_fetch_keeps`).
     let fetch_excluded = subjects
         .seqdb()
         .and_then(crate::algorithm::common::database::FetchExcluded::of);
@@ -5747,27 +5750,15 @@ fn search_query_batch<S: TbxScore>(
         x_lap.lap(XStage::Link1);
         // The sort after the first linking call and the reap by the preliminary E-value
         // (`subject_link::sort_and_reap_after_first_link`).
-        let prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
+        let mut prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
             prelinked_ungapped_hits,
             &stage_args,
             &mut x_lap,
         );
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
-        // ```c
-        //       if (kTranslateSubject)
-        //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
-        //       if (kNucleotideSubject) {
-        //          delete_hsp =
-        //              Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
-        //                 subject_start, word_params, sbp, kTranslateSubject);
-        // ```
-        // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
-        // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`).
-        if !prelinked_ungapped_hits.is_empty()
-            && crate::core::blast_hits::target_translation_never_made(s_len)
-        {
-            subject_emit.refuse_untranslated_frame(st, s_idx);
-            return;
+        // The re-evaluation's fetch of a subject with HSPs, which the negative seqid list may
+        // exclude before its letters are read (`subject_loop::SubjectEmit::reevaluation_fetch_keeps`).
+        if !prelinked_ungapped_hits.is_empty() && !subject_emit.reevaluation_fetch_keeps(s_idx) {
+            prelinked_ungapped_hits.clear();
         }
 
         // A subject with ambiguous bases gets the frames of its letters here, after its
@@ -5793,6 +5784,23 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
+        // ```c
+        //       if (kTranslateSubject)
+        //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+        //       if (kNucleotideSubject) {
+        //          delete_hsp =
+        //              Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+        //                 subject_start, word_params, sbp, kTranslateSubject);
+        // ```
+        // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
+        // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`).
+        if !prelinked_ungapped_hits.is_empty()
+            && crate::core::blast_hits::target_translation_never_made(s_len)
+        {
+            subject_emit.refuse_untranslated_frame(st, s_idx);
+            return;
+        }
         // The re-evaluation with the subject's letters (`subject_link::reevaluate_subject_hits`).
         let ungapped_hits = subject_link::reevaluate_subject_hits(
             sc,

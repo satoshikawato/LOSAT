@@ -178,7 +178,7 @@ pub fn trim_by_max_hsps<T>(hsps: &mut Vec<T>, max_hsps: usize) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
-// c++/src/algo/blast/core/blast_hits.c:1161-1163,1233-1234
+// c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
 // ```c
 //       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
 // ...

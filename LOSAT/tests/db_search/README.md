@@ -119,6 +119,10 @@ FASTA files:
   `x2d_b1_r0` (the word and one letter: the start one past the NULLB). Made by the line's `gen_x2d.py` (the
   PSSM's rows of -6 but row 9 at -61, W +60 at row 10, V -60, K +1, S +4 at row 14, the motif MHYFREDQILTA at
   +25; subjects of random codons without another TGG or any CCA, so that no other frame holds a W).
+  `x2d_m3_s.fna` there (rows `db.x2.tblastn.pssmpast.*`, line RG J2A, from its review 1) is the reverse complement of
+  `AA` and `x2d_b1_r0`: its frame -3, the last frame of NCBI's translation buffer, ends with the word and one letter.
+  `x2d_d50r.asn.gz` is `x2d_d50.asn.gz` with its `-` column at 50 on rows 16 to 20 too (title `x2d dash 50 rows
+  13-20`; `gzip -9n` of the text PSSM), so that the window's NULLBs past frame -3's NULLB sum above 0.
 
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
@@ -134,7 +138,7 @@ FASTA files:
   one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)
   or of the query batch. `x2f_in.faa` is `s1` (as `x2f_s1`) followed by a filler protein `x2f_f1`, and
   `x2f_last.faa` the same two in the other order, for the databases `x2f_in` and `x2f_last`.
-  `x2f_page.faa` is `x2f_f1` repeated to 4,075 letters, then `x2f_s1`, for the database `x2f_page`, whose
+  `x2f_page.faa` is a filler of 4,075 `X` (`x2f_f1`, no hits), then `x2f_s1`, for the database `x2f_page`, whose
   `.psq` file is exactly 4,096 bytes (1 + 4,076 + 19): a window past `s1`'s NULLB leaves the file's last
   memory page. `x2f_pagepad` (line RG J2A, row `db.x2f.bx.pagepad.6`, the expectation of `db.x2f.bx.page.6`) is
   `x2f_page` with 16 zero bytes after its `.psq` file (4,112 bytes; `.pin` and `.phr` copied unchanged), so that
@@ -149,6 +153,10 @@ FASTA files:
   `x2_negtail_s.fna`: the `-db` twins of the rows `db.x2.tblastn.qpast.6` (the query `x2_negpast_q.faa`, 15 letters,
   whose one-hit windows pass the query batch's buffer) and `db.x2.tblastn.frame.6` (windows past the subject's
   translation buffer).
+- `LOSAT/tests/fasta/outfmt0/j2a_bp_q.faa` / `j2a_bp_s.faa` (row `db.j2a.bp.past.6`, line RG J2A, from its review 1):
+  the round-2 audit's BLASTP case R2A2-2 (`docs/evidence/losat_web_e2e/audit/round2/a2_blastp.md`), a query of 37
+  letters and two subjects of 20 and 14, whose one-hit windows pass the query batch's buffer and a subject's,
+  where NCBI BLAST+ 2.17.0 reads past its buffers (natively it crashed in the audit's runs).
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:

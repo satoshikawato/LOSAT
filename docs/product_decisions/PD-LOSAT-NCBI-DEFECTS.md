@@ -274,27 +274,29 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    start is the HSP's whatever follows: BLASTX and TBLASTN's query side read NULLBs from there on,
    as BLASTP does. TBLASTN's subject side reads the bytes NCBI reads (the next frames' letters,
    which a hand-made PSSM's '-' column can score: the TBLASTN item of version 1.18 below). In 450
-   random TBLASTN searches with
-   this setting (300 with `-subject`, 150 with `-db`; one to three queries of 12 to 120 letters, one
-   to three subjects of 36 to 360 bases, word sizes 2 to 5, `-threshold` 1 to 4), 129 read past a
-   buffer (106 first past the query batch, 23 past the subject's translation); NCBI crashed
-   (SIGSEGV) in 23 of them, in each of three runs, and no output varied between runs. NCBI under
-   valgrind, which reports the invalid reads in `BlastGetStartForGappedAlignment`, finishes all
-   129 with LOSAT's output byte for byte; the 106 that NCBI finishes natively and the 321 searches
-   inside the buffers equal NCBI's native output. For BLASTX, in the 400 random searches of the
-   BLASTX item of version 1.22 below, LOSAT equals NCBI under valgrind in the 115 that read past a
-   buffer (6 of them crash natively) and NCBI's native output in the other 285; natively NCBI's
-   report differs from LOSAT's in 2 of the 109 past ones it finishes. LOSAT's output is the same
-   at 1 and 4 threads in all 850. Fixtures
-   `db.x2.tblastn.qpast.*`, `db.x2.tblastn.frame.*` and `db.x2f.bx.*` of
-   `LOSAT/tests/db_search_manifest/` (`-subject` and `-db`, the query and the subject side), frozen
-   from NCBI under valgrind where NCBI reads past its buffers. Not covered, and still refused: with
-   TBLASTN `-in_pssm`, a window past the PSSM's last position (`pssm->data` holds one row per
-   position and no sentinel row: the read is past a matrix, not past a sequence), and a gapped start
-   that a PSSM whose '-' column scores above `BLAST_SCORE_MIN` puts past the NULLB after frame -3,
-   the last byte the translation buffer sets, where NCBI's preliminary gapped alignment then reads
-   the byte after it, which the buffer allocates and never sets, or past it (the TBLASTN item of
-   version 1.18 below).
+   random TBLASTN searches with this setting (300 with `-subject`, 150 with `-db`; one to three
+   queries of 12 to 120 letters, one to three subjects of 36 to 360 bases, word sizes 2 to 5,
+   `-threshold` 1 to 4), 129 read past a buffer (106 first past the query batch, 23 past the
+   subject's translation); NCBI crashed (SIGSEGV) in 23 of them, in each of three runs, and no
+   output varied between runs. NCBI under valgrind, which reports the invalid reads in
+   `BlastGetStartForGappedAlignment`, finishes all 129 with LOSAT's output byte for byte; the 106
+   that NCBI finishes natively and the 321 searches inside the buffers equal NCBI's native output.
+   For BLASTX, in the 400 random searches of the BLASTX item of version 1.22 below, LOSAT equals
+   NCBI under valgrind in the 115 that read past a buffer (6 of them crash natively) and NCBI's
+   native output in the other 285; natively NCBI's report differs from LOSAT's in 2 of the 109 past
+   ones it finishes. LOSAT's output is the same at 1 and 4 threads in all 850. Fixtures
+   `db.x2.tblastn.qpast.*`, `db.x2.tblastn.frame.*`, `db.x2.tblastn.pssmpast.6` (`-in_pssm`: the
+   window reads the byte after the NULLB after frame -3, which NCBI's buffer never sets) and
+   `db.x2f.bx.*` of `LOSAT/tests/db_search_manifest/` (`-subject` and `-db`, the query and the
+   subject side), and BLASTP's `db.j2a.bp.past.6` (the round-2 audit's case R2A2-2, on which NCBI
+   crashed natively in the audit), frozen from NCBI under valgrind where NCBI reads past its
+   buffers. Not covered, and still refused: with TBLASTN `-in_pssm`, a window past the PSSM's last
+   position (`pssm->data` holds one row per position and no sentinel row: the read is past a
+   matrix, not past a sequence), and a gapped start that a PSSM whose '-' column scores above
+   `BLAST_SCORE_MIN` puts past the NULLB after frame -3, the last byte the translation buffer sets,
+   where NCBI's preliminary gapped alignment then reads the byte after it, which the buffer
+   allocates and never sets, or past it (the TBLASTN item of version 1.18 below; fixture
+   `db.x2.tblastn.pssmpast.rej`).
 
 Explicit rejections (rule 3):
 
@@ -1240,19 +1242,19 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   the subject's bytes as NCBI does (the next frames' letters, which a PSSM's '-' column can score)
   and the query's context followed by NULLBs: the matrix scores the context's NULLB
   `BLAST_SCORE_MIN`, so what follows it never changes the start, and a PSSM reads its rows, not the
-  query. Past the buffers
-  LOSAT reads NULLBs (approved exception 3, version 1.47; 1.18 refused these searches): past the
-  byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with `buflen` from
-  `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`, `blast_query_info.c:246-250`) and past
-  the NULLB after frame -3 of the subject's translation (`BLAST_GetAllTranslations` writes frames
-  1, 2, 3, -1, -2, -3 into `2*(nucl_length+1)+2` bytes and leaves the last one unset,
-  `blast_util.c:1058,1063,1098-1101`). LOSAT refuses (exit 1):
+  query. Past the buffers LOSAT reads NULLBs (approved exception 3, version 1.47; 1.18 refused
+  these searches): past the byte after the last context's NULLB of the query batch
+  (`calloc(buflen+1)` with `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
+  `blast_query_info.c:246-250`) and past the NULLB after frame -3 of the subject's translation
+  (`BLAST_GetAllTranslations` writes frames 1, 2, 3, -1, -2, -3 into `2*(nucl_length+1)+2` bytes
+  and leaves the last one unset, `blast_util.c:1058,1063,1098-1101`). LOSAT refuses (exit 1):
   - with `-in_pssm`, a window past the PSSM's last position (`pssm->data` holds one row per
     position and no sentinel row);
-  - with `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (below), a gapped start
-    that the window's sum puts past the NULLB after frame -3, where NCBI's preliminary gapped
-    alignment reads from past its translation buffer (version 1.47; exception 3 covers the window's
-    letters, not that alignment's).
+  - with `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (below), a gapped
+    start that the window's sum puts past the NULLB after frame -3, where NCBI's preliminary gapped
+    alignment reads the byte after that NULLB, which the buffer allocates and never sets, or past
+    the buffer (version 1.47; exception 3 covers the window's letters, not that alignment's;
+    fixture `db.x2.tblastn.pssmpast.rej`).
 
   It also refuses a result of such a gapped start that NCBI does not finish: two gapped starts
   past the end of their chunk of the frame (the window of a chunk that is not the frame's last),

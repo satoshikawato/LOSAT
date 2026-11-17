@@ -81,7 +81,8 @@
 //! of every lookup segment, in order: each call appends the offset to the cells of its words (the word
 //! itself, then its neighbors in the order of the `add_word_hits_core` recursion) with `add_word_hit`,
 //! which keeps a cell's first offsets in the backbone and the rest in a list of overflow cells. Here:
-//! - count pass: the same appends in the same order (`XWords::for_each_word`: the statements of
+//! - count pass: the same appends in the same order (with `LOSAT_X_CLUTPAIRS`, a query offset's
+//!   cells in another order, below) (`XWords::for_each_word`: the statements of
 //!   `add_word_hits` and `add_word_hits_core`, the index of a neighbor formed as its letters are
 //!   chosen, `sum c[i] * A^i` as `compute_encoded_compressed_index` forms it), recorded as the cell of
 //!   each append and the number of appends of each query offset; then each cell's count goes up by
@@ -123,6 +124,14 @@
 //! reference's o_0..o_{n-1}, `num_used` is n, and its slice holds o_k at the scan's position of o_k:
 //! the slice is the sequence the reference's scan copies for the cell. The PV bits, `pv_array_bts`
 //! and `longest_chain` are `finalize`'s functions of the counts, computed by its statements.
+//!
+//! `LOSAT_X_CLUTPAIRS` (a strict-set switch, on unless it is `0`) takes the cells of the two
+//! innermost positions of the recursion from a row per pair of query letters (`XPairRow`,
+//! `XWords::neighbors_paired`): the same cells of each query offset, those of the last two positions
+//! in the row's order instead of the loops'. A cell gets at most one append per query offset (its
+//! cells are distinct, `XWords::for_each_word_in`), so each cell still gets o_0..o_{n-1}, and every
+//! test of the passes (the count chunks, the refusal, the bucket and piece cuts) runs at the end of
+//! a query offset: the order within an offset changes no value.
 //!
 //! The refusal. The reference tests NCBI's tables (`tables`, ranges of the segments) while it adds the
 //! words: after each query offset of a table, while the table's appends have taken no more cells of the
@@ -791,27 +800,38 @@ impl XPairRow {
     #[inline(never)]
     fn new(table: &XPairTable, a: usize, b: usize) -> Box<Self> {
         let alphabet = table.alphabet;
-        let mut pairs = [(0i32, 0u8); X_PAIR_SLOTS];
         let used = alphabet * alphabet;
-        for (k, pair) in pairs[..used].iter_mut().enumerate() {
-            let (i, j) = (k / alphabet, k % alphabet);
-            *pair = (
-                table.matrix_sorted[a][i] + table.matrix_sorted[b][j],
-                table.matrix_sorted_char[a][i] + alphabet as u8 * table.matrix_sorted_char[b][j],
-            );
+        // Pair k = i * alphabet + j: its code, and the key `(i16::MAX - sum) << 8 | k`, whose
+        // ascending order is the sums' descending order, then k's ascending order (a stable sort
+        // by sum without its buffer).
+        let mut codes = [0u8; X_PAIR_SLOTS];
+        let mut keys = [0u32; X_PAIR_SLOTS];
+        let mut k = 0;
+        for i in 0..alphabet {
+            for j in 0..alphabet {
+                let sum = table.matrix_sorted[a][i] + table.matrix_sorted[b][j];
+                // `x_pair_table` checked the sums of the letters inside the compressed alphabet,
+                // the only rows `XWords` reads.
+                assert!(
+                    sum > i32::from(i16::MIN) && sum <= i32::from(i16::MAX),
+                    "a pair sum {sum} of letters ({a}, {b}) outside the pair table's i16"
+                );
+                codes[k] = table.matrix_sorted_char[a][i]
+                    + alphabet as u8 * table.matrix_sorted_char[b][j];
+                keys[k] = ((i32::from(i16::MAX) - sum) as u32) << 8 | k as u32;
+                k += 1;
+            }
         }
-        pairs[..used].sort_by(|x, y| y.0.cmp(&x.0));
+        keys[..used].sort_unstable();
         let mut row = Box::new(Self {
             sums: [i16::MIN; X_PAIR_SLOTS],
             codes: [0; X_PAIR_SLOTS],
         });
-        for (k, &(sum, code)) in pairs[..used].iter().enumerate() {
-            // The rows of the letters `XWords` reads hold sums in (i16::MIN, i16::MAX]
-            // (`x_pair_table`).
-            debug_assert!(sum > i32::from(i16::MIN) && sum <= i32::from(i16::MAX));
-            row.sums[k] = sum.clamp(i32::from(i16::MIN) + 1, i32::from(i16::MAX)) as i16;
-            row.codes[k] = code;
+        for (slot, &key) in keys[..used].iter().enumerate() {
+            row.sums[slot] = (i32::from(i16::MAX) - (key >> 8) as i32) as i16;
+            row.codes[slot] = codes[(key & 0xff) as usize];
         }
+        X_PAIR_ROWS.fetch_add(1, Ordering::Relaxed);
         row
     }
 
@@ -841,8 +861,9 @@ impl XPairRow {
 // for one compressed matrix; it changes no value NCBI computes.
 /// The rows (`XPairRow`) of every pair of query letters for a compressed matrix (`alphabet`,
 /// `matrix_sorted` and `matrix_sorted_char` of its `CompressedNeighborInfo`), each made when first
-/// read: a row holds 720 bytes, the 28 x 28 rows 0.55 MiB, and a search reads those of the letter
-/// pairs of its queries.
+/// read (`XPairTable::row`): a row holds 720 bytes, and a search reads the rows of the letter pairs
+/// of its query words, at most the 23 x 23 pairs of the letters inside the 15-letter alphabet
+/// (0.36 MiB) and 12.5 KiB for the table's `OnceLock`s.
 struct XPairTable {
     alphabet: usize,
     matrix_sorted: [[i32; BLASTAA_SIZE]; BLASTAA_SIZE],
@@ -858,26 +879,32 @@ impl XPairTable {
     }
 }
 
-/// The pair table of the compressed matrix of `info` for the alphabet of `header`, made once per
-/// process for each matrix (the builds of a process share it); `None` when a sum of two letters
-/// that `XWords` reads (letters inside the compressed alphabet) would leave (i16::MIN, i16::MAX],
-/// which no matrix of NCBI's has (test `pair_tables_hold_every_matrix`).
-fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> Option<&'static XPairTable> {
-    let alphabet = header.alphabet;
-    // A code is below alphabet^2 (one byte).
-    if alphabet * alphabet > X_PAIR_SLOTS {
-        return None;
-    }
-    let (mut high, mut low) = (i64::MIN, i64::MAX);
-    for (c, &compressed) in header.compress_table.iter().enumerate() {
-        if usize::from(compressed) < alphabet {
-            high = high.max(i64::from(info.matrix_sorted[c][0]));
-            low = low.min(i64::from(info.matrix_sorted[c][alphabet - 1]));
+// No NCBI counterpart: counters of the `[X_STATS] CLUTPAIRS` line at exit (LOSAT_X_STATS); they
+// do not change any value NCBI computes.
+static X_PAIR_TABLES: AtomicU64 = AtomicU64::new(0);
+static X_PAIR_ROWS: AtomicU64 = AtomicU64::new(0);
+
+/// EXPERIMENT (LOSAT_X_CLUTPAIRS): with `LOSAT_X_STATS`, the line at exit (printed by `main`) when
+/// `XWords` read a pair table: `tables` the pair tables made (one per compressed matrix and
+/// alphabet), `rows` their rows made (one per pair of query letters read).
+// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
+pub fn x_clutpairs_print_summary() {
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
+        let tables = X_PAIR_TABLES.load(Ordering::Relaxed);
+        let rows = X_PAIR_ROWS.load(Ordering::Relaxed);
+        if tables != 0 || rows != 0 {
+            eprintln!("[X_STATS] CLUTPAIRS tables={tables} rows={rows}");
         }
     }
-    if 2 * high > i64::from(i16::MAX) || 2 * low <= i64::from(i16::MIN) {
-        return None;
-    }
+}
+
+/// The pair table of the compressed matrix of `info` for the alphabet of `header`, made once per
+/// process for each matrix and alphabet (the builds of a process share it, at most the 8 matrices
+/// with a compressed matrix x the 2 alphabets). Every sum of two letters that `XWords` reads
+/// (letters inside the compressed alphabet) lies in (i16::MIN, i16::MAX] for every matrix of
+/// NCBI's (test `pair_tables_hold_every_matrix`): checked here, once per table.
+fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> &'static XPairTable {
+    let alphabet = header.alphabet;
     static TABLES: Mutex<Vec<&'static XPairTable>> = Mutex::new(Vec::new());
     let mut tables = TABLES.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(&table) = tables.iter().find(|table| {
@@ -885,8 +912,26 @@ fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> Option<&'sta
             && table.matrix_sorted == info.matrix_sorted
             && table.matrix_sorted_char == info.matrix_sorted_char
     }) {
-        return Some(table);
+        return table;
     }
+    // A code is below alphabet^2 (one byte, a row's slots).
+    assert!(
+        alphabet * alphabet <= X_PAIR_SLOTS,
+        "alphabet {alphabet} too large for the pair table"
+    );
+    let (mut high, mut low) = (i64::MIN, i64::MAX);
+    for (c, &compressed) in header.compress_table.iter().enumerate() {
+        if usize::from(compressed) < alphabet {
+            high = high.max(i64::from(info.matrix_sorted[c][0]));
+            low = low.min(i64::from(info.matrix_sorted[c][alphabet - 1]));
+        }
+    }
+    assert!(
+        2 * high <= i64::from(i16::MAX) && 2 * low > i64::from(i16::MIN),
+        "the compressed matrix's pair sums ({}..={}) leave the pair table's i16",
+        2 * low,
+        2 * high
+    );
     let table: &'static XPairTable = Box::leak(Box::new(XPairTable {
         alphabet,
         matrix_sorted: info.matrix_sorted,
@@ -896,7 +941,8 @@ fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> Option<&'sta
             .collect(),
     }));
     tables.push(table);
-    Some(table)
+    X_PAIR_TABLES.fetch_add(1, Ordering::Relaxed);
+    table
 }
 
 /// No NCBI counterpart: a query word as `XWords` reads it: a slice of the table's word length
@@ -1046,11 +1092,7 @@ impl<'a> XWords<'a> {
             power,
             last,
             below_last,
-            pairs: if pairs {
-                x_pair_table(header, info)
-            } else {
-                None
-            },
+            pairs: pairs.then(|| x_pair_table(header, info)),
         }
     }
 
@@ -1087,7 +1129,9 @@ impl<'a> XWords<'a> {
     //     if (skip == 0)
     //         s_CompressedLookupAddWordHit(lookup, index, query_offset);
     // ```
-    /// Gives `sink` every cell that `add_word_hits` appends the offset of `word` to, in its order.
+    /// Gives `sink` every cell that `add_word_hits` appends the offset of `word` to, in its order
+    /// (with `pairs`, the cells of the last two positions in their pair row's order: module
+    /// header).
     #[inline]
     fn for_each_word<Q: XQueryWord + ?Sized>(&self, query_word: &Q, sink: &mut impl XSink) {
         let word = query_word.letters();
@@ -1118,7 +1162,12 @@ impl<'a> XWords<'a> {
             score += self.info.row_max[residue as usize];
         }
         match self.pairs {
-            Some(pairs) => self.neighbors_paired(pairs, query_word, score, 0, 0, sink),
+            Some(pairs) => {
+                // The row of the query letters at the last two positions, read once for the word.
+                let last = self.length_of::<Q>() - 1;
+                let row = pairs.row(word[last - 1] as usize, word[last] as usize);
+                self.neighbors_paired(row, query_word, score, 0, 0, sink);
+            }
             None => self.neighbors(query_word, score, 0, 0, sink),
         }
     }
@@ -1360,15 +1409,21 @@ impl<'a> XWords<'a> {
             return;
         }
         let score = start.bound;
+        // EXPERIMENT (LOSAT_X_CLUTPAIRS): the row of the query letters at the two innermost
+        // positions of `neighbors_below_last` (w - 3, w - 2), read once for the word.
+        let row = self.pairs.map(|pairs| {
+            let word = query_word.letters();
+            pairs.row(word[last - 2] as usize, word[last - 1] as usize)
+        });
         for letter in letters.clone() {
             let letter_score = self.matrix[last_char][letter as usize];
             if score + letter_score < self.threshold {
                 continue;
             }
             let partial = (letter - letters.start) * self.power[last];
-            match self.pairs {
-                Some(pairs) => self.neighbors_below_last_paired(
-                    pairs,
+            match row {
+                Some(row) => self.neighbors_below_last_paired(
+                    row,
                     query_word,
                     score + letter_score,
                     0,
@@ -1471,7 +1526,8 @@ impl<'a> XWords<'a> {
     //     }
     // ```
     /// EXPERIMENT (LOSAT_X_CLUTPAIRS): `neighbors` with the cells of the last two positions (w - 2
-    /// and w - 1) from the row of their query letters (a, b) in `pairs`. `neighbors`' two loops
+    /// and w - 1) from `row`, the row of their query letters (a, b) (`XPairTable::row`, read by
+    /// `for_each_word` once for the word). `neighbors`' two loops
     /// there give, for the bound `score` (less `row_max[a]`), the letters i of a's sorted row with
     /// `score + row_a[i] >= threshold`, and for each the letters j of b's with `score + row_a[i] -
     /// row_max[b] + row_b[j] >= threshold`: the pairs with `row_a[i] + row_b[j] >= threshold -
@@ -1481,7 +1537,7 @@ impl<'a> XWords<'a> {
     /// not change the table (`for_each_word_in`).
     fn neighbors_paired<Q: XQueryWord + ?Sized>(
         &self,
-        pairs: &XPairTable,
+        row: &XPairRow,
         word: &Q,
         mut score: i32,
         current_pos: usize,
@@ -1497,7 +1553,6 @@ impl<'a> XWords<'a> {
         let scale = self.power[current_pos];
         if current_pos + 2 == self.length_of::<Q>() {
             let last_char = query_word[current_pos + 1] as usize;
-            let row = pairs.row(curr_query_char, last_char);
             let count = row.count(threshold.saturating_sub(score - self.info.row_max[last_char]));
             sink.many_coded(partial, scale, &row.codes[..count]);
             return;
@@ -1509,7 +1564,7 @@ impl<'a> XWords<'a> {
                 break;
             }
             self.neighbors_paired(
-                pairs,
+                row,
                 word,
                 score + letter_score,
                 current_pos + 1,
@@ -1531,8 +1586,9 @@ impl<'a> XWords<'a> {
     //     }
     // ```
     /// EXPERIMENT (LOSAT_X_CLUTPAIRS): `neighbors_below_last` with the cells of its two innermost
-    /// positions (w - 3 and w - 2) from the row of their query letters in `pairs`, as
-    /// `neighbors_paired` takes the last two: the cells `partial + code * A^(w-3)`.
+    /// positions (w - 3 and w - 2) from `row`, the row of their query letters (read by
+    /// `for_each_word_from` once for the word), as `neighbors_paired` takes the last two: the
+    /// cells `partial + code * A^(w-3)`.
     #[cfg_attr(
         not(all(
             feature = "parallel",
@@ -1542,7 +1598,7 @@ impl<'a> XWords<'a> {
     )]
     fn neighbors_below_last_paired<Q: XQueryWord + ?Sized>(
         &self,
-        pairs: &XPairTable,
+        row: &XPairRow,
         word: &Q,
         mut score: i32,
         pos: usize,
@@ -1559,7 +1615,6 @@ impl<'a> XWords<'a> {
         let scale = self.power[pos];
         if pos + 1 == below_last {
             let next_char = query_word[below_last] as usize;
-            let row = pairs.row(curr_query_char, next_char);
             let count = row.count(threshold.saturating_sub(score - self.info.row_max[next_char]));
             sink.many_coded(partial, scale, &row.codes[..count]);
             return;
@@ -1571,7 +1626,7 @@ impl<'a> XWords<'a> {
                 break;
             }
             self.neighbors_below_last_paired(
-                pairs,
+                row,
                 word,
                 score + letter_score,
                 pos + 1,
@@ -4805,10 +4860,8 @@ mod tests {
                     continue;
                 };
                 let info = CompressedNeighborInfo::new(&scores, header.alphabet);
-                let table = x_pair_table(&header, &info).unwrap_or_else(|| {
-                    panic!("{matrix:?} alphabet {}: no pair table", header.alphabet)
-                });
-                let again = x_pair_table(&header, &info).expect("pair table");
+                let table = x_pair_table(&header, &info);
+                let again = x_pair_table(&header, &info);
                 assert!(std::ptr::eq(table, again), "{matrix:?}: a second table");
                 if !tables.iter().any(|&t| std::ptr::eq(t, table)) {
                     tables.push(table);
@@ -4867,8 +4920,8 @@ mod tests {
                 }
             }
         }
-        // BLOSUM45 to PAM250 for the two alphabets (matrices may share their sorted rows).
-        assert!(tables.len() >= 8, "tables {}", tables.len());
+        // BLOSUM45 to PAM250 for the two alphabets, unless two matrices share their sorted rows.
+        assert!(tables.len() >= 14, "tables {}", tables.len());
     }
 
     // LOSAT_X_CLUTPAIRS: the cells of an offset with the pair table are those of the loops of
@@ -4926,13 +4979,23 @@ mod tests {
                             "{matrix:?} word {word_size} threshold {threshold} word {word:?}"
                         );
                         seen[usize::from(!want.is_empty())] += 1;
-                        if threshold <= 1 {
-                            continue;
+                        // BLASTX's words of a length fixed by the instance (`[u8; W]`).
+                        if word_size == 5 {
+                            let fixed: [u8; 5] = word[..].try_into().expect("5 letters");
+                            let mut fixed_got = Vec::new();
+                            paired.for_each_word(&fixed, &mut fixed_got);
+                            fixed_got.sort_unstable();
+                            assert_eq!(fixed_got, want, "[u8; 5] word {word:?}");
                         }
                         let a = rng.below(alphabet as usize + 1) as u32;
                         let b = rng.below(alphabet as usize + 1) as u32;
-                        let mut ranges = vec![0..alphabet, a..a, a.min(b)..a.max(b)];
-                        ranges.extend((0..alphabet).map(|letter| letter..letter + 1));
+                        // All words (threshold <= 1): the whole range and one letter's (keys
+                        // past i16 in `neighbors_below_last_paired`).
+                        let mut ranges = vec![0..alphabet, a..(a + 1).min(alphabet)];
+                        if threshold > 1 {
+                            ranges.extend([a..a, a.min(b)..a.max(b)]);
+                            ranges.extend((0..alphabet).map(|letter| letter..letter + 1));
+                        }
                         for range in ranges {
                             let mut want = Vec::new();
                             loops.for_each_word_in(&word[..], &range, &mut want);

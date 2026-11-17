@@ -612,6 +612,7 @@ fn run_main_entry() -> Result<()> {
     crate::algorithm::blastp::x_bp_hit_bf_print_summary();
     crate::algorithm::blastp::x_bp_flat_print_summary();
     crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
+    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_clutpairs_print_summary();
     crate::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     crate::algorithm::blastp::x_restricted_gap_print_summary();
     crate::algorithm::blastn::lookup::x_disc_lookup_par::print_summary();

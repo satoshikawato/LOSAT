@@ -20,7 +20,7 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `ncbi` row ROW_ID, NCBI's run of a near input (the mask one letter shorter), where NCBI's own run of the row reaches
   an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exception 13); `freeze` copies ROW_ID's columns and runs nothing.
 - `kind ncbi` with `ncbi-stack: unlimited` in covers: `freeze` runs NCBI with no stack limit, where its default 8 MiB
-  stack overflows on a PSSM's values nested thousands of levels deep (PD-LOSAT-NCBI-DEFECTS exception 14); `check`
+  stack overflows on a PSSM's values nested thousands of levels deep (PD-LOSAT-NCBI-DEFECTS exception 15); `check`
   runs LOSAT as for any row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
   (to a ` | ` or the end); the hash columns are empty.

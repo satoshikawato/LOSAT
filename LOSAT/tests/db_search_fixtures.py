@@ -35,7 +35,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (`RLIMIT_STACK` infinity). NCBI's reader of a PSSM recurses once per nested value on its main thread's stack,
   and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
   that the stack limit, the environment and the stack's random start move; its output with a stack large enough
-  is the expectation (PD-LOSAT-NCBI-DEFECTS exception 14). `check` runs LOSAT with the caller's limit.
+  is the expectation (PD-LOSAT-NCBI-DEFECTS exception 15). `check` runs LOSAT with the caller's limit.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also

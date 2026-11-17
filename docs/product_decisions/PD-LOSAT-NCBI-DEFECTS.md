@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.43
+- Version: 1.45
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -129,7 +129,15 @@
   an ISAM file of a later volume that does not open stops none of its lookups; refused, where
   LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07);
-  1.43 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-1: exception 14, a PSSM whose
+  1.43 2026-11-17 (the explicit rejections of a taxonomy record read past NCBI's mapping of
+  `taxdb.btd`, rule 3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, and
+  exception 14, LOSAT's output where NCBI may fault there, which the Owner decided on 2026-11-15;
+  line RG item T5b; written 2026-11-15 as 1.26 with exception 13);
+  1.44 2026-11-17 (TBLASTN `-in_pssm -window_size 0`, a one-hit gapped start on its frame's NULLB
+  or after it, which a PSSM whose '-' column scores above BLAST_SCORE_MIN allows: its preliminary
+  gapped score reproduced, rule 2, and the explicit rejection of its traceback after the NULLB,
+  rule 3; line RG item X2d, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  1.45 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-1: exception 15, a PSSM whose
   values nest deeper than NCBI's stack holds, read to any depth, rule 1, decided by the Owner on
   2026-11-17 (Q-DEPTH = B); the explicit rejections where NCBI's object
   manager or format guess prints addresses, reads outside its data, overflows a signed integer or
@@ -137,7 +145,7 @@
   duplicate-id message that may spell a subject's Seq-id, rule 2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the Owner decided D3-1's questions Q1 to Q3 and
   Q-BM on 2026-11-16 (「推奨通り」: Q1 to Q3 refused, Q-BM to port BitMagic); written 2026-11-15,
-  numbered after 1.42)
+  numbered after 1.44)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -709,16 +717,16 @@ masked). Line NP item M4a-2c.
     and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
-## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.43)
+## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.45)
 
-Version 1.43, line RG item D3-1. The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117,
+Version 1.45, line RG item D3-1. The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117,
 words 「B 深さに関係なく読む (推奨)」) question Q-DEPTH of D3-1 (PR #1262): option B, reading every depth and
 writing NCBI's output with a stack large enough. Not taken: option A, refusing the depths at which
 NCBI may crash, from NCBI's stack bytes per nested value computed for the run (D3-1 fix round 6):
 those bytes differ with the path of each recursion and with the types open together, so such a rule
 refuses depths that NCBI reads at every start and reads depths at which NCBI crashes at every start.
 
-14. **A PSSM whose values nest deeper than NCBI's stack holds.** NCBI's reader of the `-in_pssm`
+15. **A PSSM whose values nest deeper than NCBI's stack holds.** NCBI's reader of the `-in_pssm`
     ASN.1 text (`CObjectIStreamAsn`) reads a value whose type holds values of its own type by
     recursion: `ReadObject` and `SkipObject` of each value (`include/serial/impl/objistr.inl:93-96`,
     `:99`), entered from each member and variant (`src/serial/member.cpp:710`,
@@ -1207,6 +1215,24 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   where that first inverted node would be made; ranges in order inside the tree's bounds never
   make one, and only this word finder's HSPs are out of order or leave them.
 
+  With `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (a hand-made one: the
+  matrices score it BLAST_SCORE_MIN, `blast_stat.c:1559-1562`, and so does NCBI's PSSM engine, the
+  gap's background probability being 0, `blast_psi_priv.c:2435-2436`), the window can sum above 0
+  over the NULLB after a subject frame's last letter, and the gapped start then lies on that NULLB
+  or one or two letters after it (version 1.44, 2026-11-17, line RG item X2d, Owner-delegated).
+  NCBI's preliminary gapped alignment reads back from the start over the six frames' buffer (the
+  next frame's letters, the NULLB scored with the '-' column, the frame's letters; no right
+  extension, `blast_gapalign.c:4250-4347`), and LOSAT reads the same bytes; an HSP that NCBI drops
+  before its traceback leaves the search as NCBI's. LOSAT refuses where such an HSP reaches the
+  traceback with its start after the NULLB: `BLAST_GappedAlignmentWithTraceback` reads the subject
+  at the start first (`blast_gapalign.c:4609`, `:569-575`), a byte past the fence of the partial
+  translation (`blast_hits.c:1208,1225-1227`) and, on the retry after that fence, past the NULLB of
+  the whole frame's translation (`subject.offset` -1: `blast_traceback.c:424-428`,
+  `blast_hits.c:1175-1177,1189,1208`, no fence; the NULLB of `blast_util.c:453`) or past its
+  allocation. A start on the NULLB is defined there (the fence, then the whole frame's NULLB); LOSAT
+  does not reproduce the reports of that alignment's column of the NULLB yet and refuses it where
+  they would show it, as a gap of its own, not under this rule.
+
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.
 
@@ -1353,7 +1379,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows.
-- psiblast and tblastn `-in_pssm` (version 1.43, 2026-11-16, line RG item D3-1, Owner-delegated,
+- psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations
   as NCBI's object manager does when the PSSM's Bioseq joins the scope
@@ -1416,7 +1442,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   every two Seq-ids that NCBI's Seq-id handles take as one, with NCBI's spelling of each; with
   `-subject`, where a subject record's spelling may show in the message, a rule-2 rejection below)
   (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`, `db.tbn.inpssm.fg.*`).
-  Values nested deeper than NCBI's stack holds are read to any depth: exception 14 (rule 1, above).
+  Values nested deeper than NCBI's stack holds are read to any depth: exception 15 (rule 1, above).
 
 - TBLASTX, an ungapped extension that scores higher past the end of its query frame, in the frame
   next to it in the query batch (version 1.40, 2026-11-17, line RG item X2c; the Owner's decision
@@ -1443,6 +1469,49 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   finder, and a run of two query batches). It takes a raw X-drop above 32,768 (with BLOSUM62 about
   15,000 bits of `-xdrop_ungap` or more).
 
+## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
+
+`CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
+entry's (the last entry's: to the end of the file) without checking it against the file's size
+(`seqdbtax.cpp:258-298`). Past the end of the file NCBI reads the zero bytes of its mapping's last
+4,096-byte page, which LOSAT reproduces, and after that page memory that does not belong to the
+file. LOSAT refuses (exit 1, one line naming its program) only:
+
+- every lookup that reads a record of an empty `taxdb.btd`, which NCBI maps as a null pointer: it
+  faults for certain (SIGSEGV in every program; the loads of dustmasker, segmasker, blastdbcmd's
+  FASTA and the searches' prefetch included);
+- a name that the output writes and NCBI reads past the mapping: the super kingdom of a record
+  that reaches past it (`blastdbcmd -outfmt %K`, `-tax_info` with `%K`, `sskingdom` and
+  `sskingdoms`), and any name of a record whose third tab is past it (whether NCBI finds names at
+  all depends on that memory): a title made from the scientific name, `%S %L %B %C %N`, the
+  tabular name fields, the `sciname` of outfmt 13 to 16, outfmt 18. Line RG item T5b's review
+  measured NCBI 2.17.0 writing 4,835 bytes and more of other mappings as the kingdom of such a
+  record (`-tax_info -outfmt "%T|%K|%B"`), the same in two runs.
+
+## Approved exception (a taxonomy record past NCBI's mapping of `taxdb.btd`, version 1.43)
+
+Version 1.43. The Owner decided on 2026-11-15 (line RG `DECISIONS.md` T5b-6, Q1 = A, words
+「RG-T Q1=A」) the question of line RG item T5b's fix 2: LOSAT keeps writing NCBI's completed output
+here, as rule 1's approved exception, against rule 3's rejection of every lookup of such a record,
+which would also refuse runs that NCBI completes with the same bytes (44 runs of the item's probes).
+Numbered after exception 13 (version 1.35).
+
+14. **A record that NCBI reads past its mapping where the output writes nothing of the bytes
+    there.** Where NCBI reads such a record past its mapping and the output writes nothing of the
+    bytes there (the lookups of `GetBioseq`, whose names the maskers' and blastdbcmd's output do
+    not write, a stored title, the names before a third tab inside the mapping, the searches'
+    prefetch), LOSAT writes what NCBI writes when it completes, which is the result of the same run
+    with a `taxdb.btd` that holds those bytes (rule 1's valid result). Whether NCBI completes
+    depends on its memory map, not on the input: in the review of line RG item T5b, a record of a
+    266-byte `taxdb.btd` that ends at 5,000 bytes completed in `dustmasker`, `segmasker` and
+    `blastdbcmd`, one that ends at 9,000 or 20,000 bytes in `blastdbcmd -tax_info`, and one that
+    ends at 1 MiB faulted (SIGSEGV) in `dustmasker` and `blastdbcmd`. LOSAT writes the output in
+    all of them, as in the 20 of the item's 115 search runs and 2 of its 32 tool runs where NCBI
+    faulted.
+    This was LOSAT's behaviour for the maskers' and blastdbcmd's loads before line RG item T5b
+    (dev), and is now its behaviour in the searches as well. What the output writes from past the
+    mapping stays refused (the rejections above).
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -1450,7 +1519,7 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last two entries (version 1.43, line RG item D3-1) are not of these: they concern a
+would port. The last two entries (version 1.45, line RG item D3-1) are not of these: they concern a
 PSSM query's annotations and Seq-ids, not a database; they are Owner-delegated (standing instruction
 2026-09-29, restated 2026-10-07), not under the acceptance of 2026-11-02; they have no row in
 PD-LOSAT-DATABASE-SEARCH; and the first is a refusal until a port lands, which the Owner decided on
@@ -1476,14 +1545,14 @@ PD-LOSAT-DATABASE-SEARCH; and the first is a refusal until a port lands, which t
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- psiblast and tblastn `-in_pssm` (version 1.43, line RG item D3-1, Owner-delegated, standing
+- psiblast and tblastn `-in_pssm` (version 1.45, line RG item D3-1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): well-formed BitMagic data of a Seq-table of the
   PSSM query's annotations that NCBI's object manager decodes (`bit-bvector` values, a
   `bit-set-bvector`'s sparse index). NCBI's decode is deterministic; LOSAT refuses it ("a PSSM
   query whose annot has ... is not supported") until that port lands: the Owner decided on 2026-11-16 (「推奨通り」, Q-BM) to
   port BitMagic in a later item. Streams that NCBI reads past or crashes on are rule-3
   rejections (above).
-- psiblast and tblastn `-in_pssm` with `-subject` (version 1.43, line RG item D3-1,
+- psiblast and tblastn `-in_pssm` with `-subject` (version 1.45, line RG item D3-1,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): a Seq-id twice in the
   PSSM query's entry whose `duplicate Bioseq id` message may spell a subject record's Seq-id (NCBI
   reads the subjects into its scope first, so the handle's spelling can be the subject's: a

@@ -726,7 +726,7 @@ fn a_value_is_small() {
 
 /// Every recursive type of the PSSM, along each of its paths, nests to any depth (NCBI BLAST+
 /// 2.17.0 crashes from a few thousand levels with its default 8 MiB stack and reads them with a
-/// larger one: PD-LOSAT-NCBI-DEFECTS exception 14): 20,000 levels of each are read on a thread of
+/// larger one: PD-LOSAT-NCBI-DEFECTS exception 15): 20,000 levels of each are read on a thread of
 /// 256 KiB, with the hooks of their classes.
 #[test]
 fn every_recursive_type_nests_to_any_depth() {

@@ -425,7 +425,7 @@ pub(crate) fn read_in_pssm(
     // levels, by the stack limit, the command line, the environment and the stack's random start).
     // LOSAT's reader and the object manager's step keep the values they are in on the heap, so
     // every depth is read, and the output is NCBI's with a stack large enough
-    // (PD-LOSAT-NCBI-DEFECTS exception 14).
+    // (PD-LOSAT-NCBI-DEFECTS exception 15).
     let read = crate::blastinput::pssm_text::read_pssm(text);
     let program = reader.program.to_ascii_lowercase();
     let mut posts = crate::report::diag_log::Posts::new();

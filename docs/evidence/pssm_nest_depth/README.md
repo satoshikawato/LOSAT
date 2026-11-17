@@ -1,4 +1,4 @@
-# A PSSM whose values nest deeper than NCBI's stack holds (PD-LOSAT-NCBI-DEFECTS exception 14)
+# A PSSM whose values nest deeper than NCBI's stack holds (PD-LOSAT-NCBI-DEFECTS exception 15)
 
 Line RG item D3-1, fix round 7, 2026-11-17. NCBI BLAST+ 2.17.0 (the official Linux x86-64 build) and LOSAT,
 psiblast and tblastn `-in_pssm`.

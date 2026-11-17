@@ -840,7 +840,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 scan.scan_range,
                 !scan.small_na_compressed_query.is_empty(),
                 scan.diagnostics,
-                subject_masked,
                 !batch.use_parallel && reuse_prelim_hits,
             ) && x_pair_seed::run(
                 &x_pair_seed::Inputs {
@@ -953,7 +952,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 use_array_indexing,
                 scan.window_size,
                 scan.scan_range,
-                subject_masked,
                 scan.diagnostics,
                 !batch.use_parallel && reuse_prelim_hits,
             ) && x_pair_seed::run_na(
@@ -1474,14 +1472,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                 // batches do (strips for each chunk), with the one-thread loop's
                 // statements below.
                 let x_serial_chunks = !use_parallel
-                    && !subject_masked
                     && x_strips
                     && x_few_subj::serial_chunks(
                         chunk_batch.iter().map(|chunk| chunk.length),
                         num_threads,
                         x_kind,
                     );
-                if !use_parallel && !subject_masked && x_strips && chunk_batch.len() > 1 {
+                if !use_parallel && x_strips && chunk_batch.len() > 1 {
                     crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_chunks);
                 }
                 crate::utils::threading::report_stage(

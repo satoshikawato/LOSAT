@@ -60,8 +60,8 @@
 //!
 //! Scope (anything else returns `false`, and the reference code runs): the diagonal hash
 //! (query longer than 8000), `window_size == 0` (one hit), `scan_range == 0`, a contiguous
-//! megablast table, an unmasked subject, no small-query word extension, no debug, trace or
-//! window diagnostics, a subject searched by the owner of a pool of two threads or more by itself
+//! megablast table, no small-query word extension, no debug, trace or window diagnostics, a
+//! subject (masked or not: the strips cover its scan ranges, `plan_strips`) searched by the owner of a pool of two threads or more by itself
 //! (one subject, or several one at a time under LOSAT_X_BNFEWSUBJ).
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
@@ -400,8 +400,8 @@ fn chunk_free_scope(
 }
 
 /// No NCBI counterpart (scheduling only): the test of `run` for a chunk with a contiguous table
-/// (the names of `Inputs`): `chunk_free_scope`, an unmasked subject and a chunk the subject's
-/// owner searches by itself. `run` and `wants` read it.
+/// (the names of `Inputs`): `chunk_free_scope` and a chunk the subject's owner searches by
+/// itself. `run` and `wants` read it.
 #[inline(always)]
 fn owner_chunk(
     use_array_indexing: bool,
@@ -409,7 +409,6 @@ fn owner_chunk(
     scan_range: usize,
     small_na_word: bool,
     diagnostics: bool,
-    subject_masked: bool,
     one_subject_owner: bool,
 ) -> bool {
     chunk_free_scope(
@@ -419,8 +418,7 @@ fn owner_chunk(
         scan_range,
         small_na_word,
         diagnostics,
-    ) && !subject_masked
-        && one_subject_owner
+    ) && one_subject_owner
 }
 
 /// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
@@ -440,7 +438,6 @@ pub(super) fn wants(
     scan_range: usize,
     small_na_word: bool,
     diagnostics: bool,
-    subject_masked: bool,
     one_subject_owner: bool,
 ) -> bool {
     if disc {
@@ -452,7 +449,6 @@ pub(super) fn wants(
         scan_range,
         small_na_word,
         diagnostics,
-        subject_masked,
         one_subject_owner,
     ) && pool_threads().is_some();
     if !wanted {
@@ -461,8 +457,8 @@ pub(super) fn wants(
     wanted
 }
 
-/// No NCBI counterpart (scheduling only): whether the strips take an unmasked chunk that the owner
-/// of the pool this thread runs in (two threads or more) searches by itself, in a search with these
+/// No NCBI counterpart (scheduling only): whether the strips take a chunk that the owner of the
+/// pool this thread runs in (two threads or more) searches by itself, in a search with these
 /// inputs (the names of `Inputs`; `two_stage`: the search's two-stage table, without which the
 /// stage never runs): `chunk_free_scope` for a contiguous table, with LOSAT_X_PAIRPARDISC on for
 /// a discontiguous table, or for a discontiguous
@@ -593,8 +589,8 @@ fn plan_strips(
 ///                 index, offset_pairs + total_hits, s_off);
 /// ```
 /// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
-/// lookup width and step (unmasked subject), from `job.start` to `job.end`; every lookup
-/// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
+/// lookup width and step (`select_mb_scan_kind`: NCBI's Any scanner for a masked subject), from
+/// `job.start` to `job.end`; every lookup chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
 fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
     scan_strip_from::<O, false>(x, job, Resume::at(job.start), out);
 }
@@ -1909,7 +1905,7 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 /// ```
 /// Dispatch of `prelim_subject::prelim_chunk_hits`: the seed stage of this chunk (the loop above
 /// with its one-hit extension) when the chunk is in scope (`chunk_free_scope`, a pool of two
-/// threads or more, an unmasked subject, one subject owner); `true` means it has run and the
+/// threads or more, one subject owner); `true` means it has run and the
 /// reference scan is skipped. `fold_scratch` holds the allocations of
 /// LOSAT_X_PAIRPARFOLD's partition tables and buffers (`x_pair_seed_part.rs`; every
 /// partitioned stage copies `diag_hash` into them).
@@ -1931,7 +1927,6 @@ pub(super) fn run(
         x.scan_range,
         x.small_na_word,
         x.diagnostics,
-        x.subject_masked,
         x.one_subject_owner,
     ) {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
@@ -2342,14 +2337,35 @@ mod tests {
             let index = QueryContextIndex::new(&contexts, false);
             let score_matrix = build_blastna_matrix(1, -2);
             let nucl_score_table = build_nucl_score_table(1, -2);
-            let seq_ranges = [(0i32, s_len as i32)];
+            // every other case a masked subject: scan ranges (NCBI's `seq_ranges`, right end
+            // exclusive) over most of it with gaps of 1 to 120 bases, some shorter than a word
+            // (the scan skips them), the last perhaps at the subject's end
+            let masked = case % 2 == 1;
+            let seq_ranges = if masked {
+                let mut ranges = Vec::new();
+                let mut at = rng.below(30) as usize;
+                while at < s_len {
+                    let len = if rng.below(10) == 0 {
+                        1 + rng.below(20) as usize
+                    } else {
+                        30 + rng.below(2000) as usize
+                    };
+                    let end = (at + len).min(s_len);
+                    ranges.push((at as i32, end as i32));
+                    at = end + 1 + rng.below(120) as usize;
+                }
+                assert!(ranges.len() > 10);
+                ranges
+            } else {
+                vec![(0i32, s_len as i32)]
+            };
             let diag_offset = 37 + rng.below(1000) as isize;
             let x = Inputs {
                 two_stage: &lookup,
                 search_seq_packed: &packed,
                 s_len,
                 subject_seq_ranges: &seq_ranges,
-                subject_masked: false,
+                subject_masked: masked,
                 scan_step,
                 query_context_index: &index,
                 query_contexts: &contexts,
@@ -2377,7 +2393,7 @@ mod tests {
             };
             // the reference wrapper visits the pairs in one scan
             let mut seeds = Vec::new();
-            let kind = select_mb_scan_kind(lut_word_length, scan_step, false);
+            let kind = select_mb_scan_kind(lut_word_length, scan_step, masked);
             scan_subject_kmers_with_ranges(
                 &packed,
                 s_len,
@@ -2385,7 +2401,7 @@ mod tests {
                 lut_word_length,
                 scan_step,
                 &seq_ranges,
-                false,
+                masked,
                 kind,
                 |kmer_start, s_range, kmer| {
                     lookup.for_each_hit(kmer, |q_off_1| {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -56,6 +56,73 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   `pa`, the first batch of mix2_qc.faa / mix2_qcx.fna reports `alpha, ...`, whose end NCBI's
   `x_AdjustProteinTitleSuffix` rewrites in the tabular ids but not in the XML2 and JSON `Hit` titles (the definition
   line's), before the second batch's prefetch stops. `make_multidb.py --mixsfx-only MAKEBLASTDB` builds only `putb`.
+- `ldp` and `ldpn` (line DBID loadord): version 5, `-parse_seqids`, taxid 9606: `ref|NP_000002.1|` (`NM_`) with the letters
+  of ../taxfilter/q.faa (q.fna), then `ref|NP_000900.1|` (`NM_`) with random letters (seed 20261116). Beside a database
+  without the accession table, NCBI's prefetch loads the batch's Seq-align ids in the order of their Seq-id handles,
+  `gnl|BL_ORD_ID|n` by n (0 last of the numbers) and the accession by its number 2, and stops at the accession's lookup:
+  `lda` (`ldan`) holds `qp1` of ../ids/ids_q.faa (the glob1 record `FBtr0083245` of nnp.fa) alone, at OID 0 in a list with
+  `ldp` (`ldpn`), which loads after the stop; `ldb` (`ldbn`) a random sequence and then that one, at OID 1, which loads
+  before it; `ldu` (`ldun`) that one alone, sorted after `ldp` (`ldpn`), at OID 2: the same packed number 2, which NCBI
+  orders by the address of the handles. Without `-parse_seqids`, taxid 9606 (`-taxid`), so that their loads open the
+  taxonomy database. `ldg` (`ldgn`): `gi|1|ref|NP_000002.1|` (`NM_`), the letters of `ldp`'s first record under a gi whose
+  load (handle 1, before the accession's 2) registers the accession in NCBI's data loader, so that NCBI never looks it up
+  (review 1 of loadord, H1); `ldq` (`ldqn`): `lcl|Query_1` with those letters, which NCBI's scope finds among the queries
+  (H2); both `-parse_seqids`. `ldo_qc.faa`: one query, the letters of ../taxfilter/q.faa followed by `qp1`, which hits both
+  (psiblast's batch is one query). `make_multidb.py --loadord-only MAKEBLASTDB` builds only these.
+- `ldc` (`ldcn`) and `ldh` (`ldhn`) (line DBID loadord, DECISIONS 60 (6)): version 5, `-parse_seqids`, taxid 9606, the
+  letters of `ldp`'s first record: `ldc` a copy of it (`ref|NP_000002.1|`), the same Seq-align id, whose load is the
+  stopping lookup itself (beside `ldp`, NCBI stops in a later batch too); `ldh` `gi|9000|ref|NP_000002.1|`, which holds
+  the accession but whose gi (handle 9000) loads after it in one batch, so NCBI stops. `make_multidb.py
+  --loadord2-only MAKEBLASTDB` builds only these (the databases of `--loadord-only` keep their dates).
+- Review 2 of line DBID loadord (DECISIONS 60 (7), (8)): version 5, `-parse_seqids`, taxid 9606. `ldq2` (`ldq2n`):
+  `lcl|Query_2` with the letters of `ldp`'s first record, the generated id of a second query; `ldx` (`ldxn`):
+  `gi|9001|ref|NP_000002.1|` (`NM_`) with random letters (seed 20261116 + 3), a holder of the stopping accession that no
+  query hits; `ldd` (`lddn`): `gi|9000|ref|NP_000002.1|` (`NM_`) with the letters of `lda` (`ldan`), a holder that the
+  first query of mix2_q.faa (mix2_qx.fna, mix2_q.fna, mix2_qt.faa) hits in a batch before the stop; `ldmy`:
+  `lcl|myprot` with the letters of `ldp`'s first record. `ldo_short.faa`: the first 40 letters of `qp1`, then the
+  letters of ../taxfilter/q.faa, so that `-query_loc 50-140` drops the first record (which keeps `Query_1`);
+  `ldo_short.fna` and `ldo_shortx.fna`: the first 120 letters of glob1 (of qp1 back-translated), then
+  ../taxfilter/q.fna, for `-query_loc 150-420`. `ldo_my.asn`: ../../fixtures/pssm/q1_tfp.asn.gz with the query's
+  local id `Query_1` changed to `myprot` (the PSSM of the globin of ../taxfilter/q.faa). `make_multidb.py
+  --loadord3-only MAKEBLASTDB` builds only these (the databases before keep their dates).
+- Review 3 of line DBID loadord (DECISIONS 60 (10)): version 5, `-parse_seqids`, taxid 9606, the letters of `ldp`'s
+  first record, the stopping accessions beside it in one batch: `ldr` (`ldrn`) `ref|NP_000001.1|` (`NM_`, packed 1,
+  before `ldp`'s 2), `lds` (`ldsn`) `ref|NP_000003.1|` (packed 3, after it), and `ldi` (`ldin`)
+  `gi|1|ref|NP_000003.1|`, a holder of `lds`'s accession whose gi (handle 1) loads before both. `make_multidb.py
+  --loadord4-only MAKEBLASTDB` builds only these (the databases before keep their dates).
+- Review 4 of line DBID loadord (DECISIONS 60 (12)): version 4, `-parse_seqids`, taxid 9606, one record each,
+  `ref|NP_000002.1|` (`NM_`) with the letters of `ldp`'s first record (copies of one record): `l5c` (`l5cn`), `l5d`
+  (`l5dn`) and `l5e` (`l5en`); `l5d`'s string ISAM index (`.psi`, `.nsi`) is a directory holding a placeholder file,
+  which NCBI's `CSeqDBIsam::IndexExists` (`CFile::Exists`, a regular file) takes for no ISAM: its lookups find nothing
+  in that volume and go on to the next (H1). `make_multidb.py --loadord5-only MAKEBLASTDB` builds only these (the
+  databases before keep their dates).
+- Review 5 of line DBID loadord (DECISIONS 60 (15), line RG K4h's E2 in loadord's shapes): `ldl` (`ldln`), version 5
+  without `-parse_seqids`, taxid 99990 (the last entry of ../../seqdb/taxdb/offset_last_past_end, whose lookup writes
+  the offset error), two records of `lda`'s letters (`qp1`, glob1): beside `ldp`, OID 0 (`gnl|BL_ORD_ID|0`) loads after
+  the stop and OID 1 before it, in one volume. The queries `ldo_e2.faa` (BLASTP), `ldo_e2x.fna` (BLASTX), `ldo_e2.fna`
+  (BLASTN, TBLASTX) and `ldo_e2t.faa` (TBLASTN): `q0` without hits, `q1` titled `q1 a<U+00E9>b z` (in UTF-8, at which NCBI's
+  XML stream cuts its outfmt 5 `Iteration`, so its report makes none of its loads) with `lda`'s letters repeated (qp1
+  16 times, back-translated in `ldo_e2x.fna`; glob1 6 times in `ldo_e2.fna`; glob1's ORF 16 times in `ldo_e2t.faa`), so
+  that its HSPs turn its batch's prefetch off under `PRE_FETCH_SEQS_LIMIT`, and `q2` with the letters of
+  ../taxfilter/q.faa (q.fna) and then those of `lda` (`ldan`) once, which hits the stopping accession and the unparsed
+  record. TBLASTX counts a Seq-align per subject (an ungapped search), so its `q1` must hit more subjects than `q2`:
+  `ldyn`, version 5 without `-parse_seqids`, taxid 9606, four records of random letters (seed 20261116 + 5), and
+  `ldo_e2y.fna`, whose `q1` holds glob1 and then those letters. `make_multidb.py --loadord6-only MAKEBLASTDB` builds
+  only these (the databases before keep their dates).
+- Review 6 of line DBID loadord (DECISIONS 60 (17), H1): `ldv`, version 5, `-parse_seqids`, taxid 9606,
+  `gi|9002|ref|NP_000002.1|` (a holder of `ldp`'s stopping accession) with a variant of `lda`'s letters (qp1, one letter
+  in ten replaced, seed 20261116 + 7): the first query of mix2_q.faa hits it after `lda`'s exact copy, so psiblast's
+  traceback holds it beyond `-max_target_seqs 1`, which no report shows. `make_multidb.py --loadord7-only MAKEBLASTDB`
+  builds only it (the databases before keep their dates).
+- Line DBID v4late (review 3 of line DBID loadord, H3): version 4 protein, `-parse_seqids`, taxid 9606, one record
+  each, beside `l5c` in a list whose later volume's string ISAM a test makes unreadable (mode 000, which git does not
+  keep): `l6o` holds `l5c`'s `ref|NP_000002.1|` with other letters (qp1 of ../ids/ids_q.faa), so NCBI's lookup of its
+  Seq-align id gives `l5c`'s record first and never opens `l6o`'s ISAM; `l6u` holds `ref|NP_000004.1|`, which only its
+  ISAM can hold, so NCBI's lookup opens it; `l5b` (a name before `l5c`'s) holds `ref|NP_000999.1|ref|NP_000002.1|`
+  with qp1's letters, so that NCBI's lookup of `l5e`'s id gives it first, whose definition line `GetBioseq` rejects
+  for that id (`s_SeqDB_SeqIdIn` stops at the first id, `oid headers do not contain target gi/seq_id`; review 1 of
+  the item, H1). `make_multidb.py --v4late-only MAKEBLASTDB` builds only these (the databases before keep their
+  dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -258,6 +325,238 @@ def make_mixsfx(binary):
     os.remove(os.path.join(HERE, "putb.pjs"))
 
 
+def make_loadord(binary):
+    """Builds ldp, lda, ldb, ldu and their nucleotide counterparts ldpn, ldan, ldbn, ldun (line DBID loadord)."""
+    rng = random.Random(20261116)
+
+    def letters(path, pick=lambda header: True):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path) if pick(header))
+
+    def random_letters(alphabet, length):
+        return "".join(rng.choice(alphabet) for _ in range(length))
+
+    qp1 = letters(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    glob1 = letters(os.path.join(HERE, "nnp.fa"), lambda header: header.split()[0] == ">FBtr0083245")
+    for kind, suffix, prefix, globin, unparsed, alphabet, length in (
+            ("prot", "", "NP", letters(os.path.join(SRC, "q.faa")), qp1, "ACDEFGHIKLMNPQRSTVWY", 120),
+            ("nucl", "n", "NM", letters(os.path.join(SRC, "q.fna")), glob1, "ACGT", 360)):
+        sets = {
+            "ldp": [(f">ref|{prefix}_000002.1| loadord packed number 2", globin),
+                    (f">ref|{prefix}_000900.1| loadord random letters", random_letters(alphabet, length))],
+            "lda": [(">loadord the unparsed hit at OID 0", unparsed)],
+            "ldb": [(">loadord random letters", random_letters(alphabet, length)),
+                    (">loadord the unparsed hit at OID 1", unparsed)],
+            "ldu": [(">loadord the unparsed hit at OID 2", unparsed)],
+            "ldg": [(f">gi|1|ref|{prefix}_000002.1| loadord the accession of ldp under a gi", globin)],
+            "ldq": [(">lcl|Query_1 loadord a local id of the form of a generated query id", globin)],
+        }
+        for base, records in sets.items():
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                for header, seq in records:
+                    f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+            parse = ["-parse_seqids"] if base in ("ldp", "ldg", "ldq") else []
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, *parse, "-blastdb_version", "5",
+                        "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    globin = letters(os.path.join(SRC, "q.faa"))
+    with open(os.path.join(HERE, "ldo_qc.faa"), "w") as f:
+        seq = globin + qp1
+        f.write(">ldo_c the letters of taxfilter/q.faa, then qp1\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60))
+                + "\n")
+
+
+def make_loadord2(binary):
+    """Builds ldc, ldh and their nucleotide counterparts ldcn, ldhn (line DBID loadord, DECISIONS 60 (6))."""
+
+    def letters(path):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path))
+
+    for kind, suffix, prefix, globin in (("prot", "", "NP", letters(os.path.join(SRC, "q.faa"))),
+                                         ("nucl", "n", "NM", letters(os.path.join(SRC, "q.fna")))):
+        sets = {
+            "ldc": [(f">ref|{prefix}_000002.1| loadord a copy of ldp's first record", globin)],
+            "ldh": [(f">gi|9000|ref|{prefix}_000002.1| loadord the accession of ldp under a gi after it", globin)],
+        }
+        for base, records in sets.items():
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                for header, seq in records:
+                    f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "5", "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+
+
+def make_loadord3(binary):
+    """Builds ldq2, ldx, ldd, ldmy and the nucleotide ldq2n, ldxn, lddn, the queries ldo_short.faa, ldo_short.fna and
+    ldo_shortx.fna, and the PSSM ldo_my.asn (review 2 of line DBID loadord)."""
+    import gzip
+    rng = random.Random(20261116 + 3)
+
+    def letters(path, pick=lambda header: True):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path) if pick(header))
+
+    def write(name, records):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, seq in records:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+
+    qp1 = letters(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    glob1 = letters(os.path.join(HERE, "nnp.fa"), lambda header: header.split()[0] == ">FBtr0083245")
+    qp1_x = letters(os.path.join(HERE, "mix2_qx.fna"))
+    globin, globin_x = letters(os.path.join(SRC, "q.faa")), letters(os.path.join(SRC, "q.fna"))
+    for kind, suffix, prefix, own, unparsed, alphabet, length in (
+            ("prot", "", "NP", globin, qp1, "ACDEFGHIKLMNPQRSTVWY", 120),
+            ("nucl", "n", "NM", globin_x, glob1, "ACGT", 360)):
+        sets = {
+            "ldq2": [(">lcl|Query_2 loadord a local id of the form of a second generated query id", own)],
+            "ldx": [(f">gi|9001|ref|{prefix}_000002.1| loadord the accession of ldp under a gi, letters no query hits",
+                     "".join(rng.choice(alphabet) for _ in range(length)))],
+            "ldd": [(f">gi|9000|ref|{prefix}_000002.1| loadord the accession of ldp under a gi, the letters of lda", unparsed)],
+        }
+        if kind == "prot":
+            sets["ldmy"] = [(">lcl|myprot loadord the local id of the PSSM query of ldo_my.asn", own)]
+        for base, records in sets.items():
+            name = base + suffix
+            write(name + ".fa", records)
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "5", "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    write("ldo_short.faa", [(">ldo_s the first 40 letters of qp1", qp1[:40]),
+                            (">ldo_g the letters of taxfilter/q.faa", globin)])
+    write("ldo_short.fna", [(">ldo_s the first 120 letters of glob1", glob1[:120]),
+                            (">ldo_g the letters of taxfilter/q.fna", globin_x)])
+    write("ldo_shortx.fna", [(">ldo_s the first 120 letters of qp1 back-translated", qp1_x[:120]),
+                             (">ldo_g the letters of taxfilter/q.fna", globin_x)])
+    with gzip.open(os.path.join(os.path.dirname(os.path.dirname(HERE)), "fixtures", "pssm", "q1_tfp.asn.gz"), "rt") as f:
+        pssm = f.read()
+    assert pssm.count('local str "Query_1"') == 1
+    with open(os.path.join(HERE, "ldo_my.asn"), "w") as f:
+        f.write(pssm.replace('local str "Query_1"', 'local str "myprot"'))
+
+
+def make_loadord4(binary):
+    """Builds ldr, lds, ldi and their nucleotide counterparts ldrn, ldsn, ldin (review 3 of line DBID loadord)."""
+
+    def letters(path):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path))
+
+    for kind, suffix, prefix, globin in (("prot", "", "NP", letters(os.path.join(SRC, "q.faa"))),
+                                         ("nucl", "n", "NM", letters(os.path.join(SRC, "q.fna")))):
+        sets = {
+            "ldr": [(f">ref|{prefix}_000001.1| loadord an accession of packed number 1, before ldp's", globin)],
+            "lds": [(f">ref|{prefix}_000003.1| loadord an accession of packed number 3, after ldp's", globin)],
+            "ldi": [(f">gi|1|ref|{prefix}_000003.1| loadord the accession of lds under a gi that loads first", globin)],
+        }
+        for base, records in sets.items():
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                for header, seq in records:
+                    f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "5", "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+
+
+def make_loadord5(binary):
+    """Builds l5c, l5d, l5e and their nucleotide counterparts l5cn, l5dn, l5en (review 4 of line DBID loadord, H1)."""
+
+    def letters(path):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path))
+
+    for kind, suffix, prefix, letter, globin in (("prot", "", "NP", "p", letters(os.path.join(SRC, "q.faa"))),
+                                                 ("nucl", "n", "NM", "n", letters(os.path.join(SRC, "q.fna")))):
+        for base in ("l5c", "l5d", "l5e"):
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                f.write(f">ref|{prefix}_000002.1| loadord a copy of ldp's first record, version 4\n"
+                        + "\n".join(globin[at:at + 60] for at in range(0, len(globin), 60)) + "\n")
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "4", "-taxid", "9606", "-title", "multidb " + name)
+            for extra in (".pjs", ".njs"):
+                path = os.path.join(HERE, name + extra)
+                if os.path.exists(path):
+                    os.remove(path)
+        # l5d's string ISAM index: a directory, which CSeqDBIsam::IndexExists (CFile::Exists, a regular file) does not
+        # take for one, so that NCBI's lookups find nothing in that volume.
+        index = os.path.join(HERE, f"l5d{suffix}.{letter}si")
+        os.remove(index)
+        os.mkdir(index)
+        with open(os.path.join(index, "placeholder"), "w") as f:
+            f.write("A directory in place of the string ISAM index (make_multidb.py --loadord5-only).\n")
+
+
+def make_loadord6(binary):
+    """Builds ldl, ldln, ldyn and the queries ldo_e2.faa, ldo_e2x.fna, ldo_e2.fna, ldo_e2t.faa and ldo_e2y.fna (review 5
+    of line DBID loadord)."""
+
+    def letters(path, pick=lambda header: True):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path) if pick(header))
+
+    def write(name, records):
+        with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
+            for header, seq in records:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+
+    qp1 = letters(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    glob1 = letters(os.path.join(HERE, "nnp.fa"), lambda header: header.split()[0] == ">FBtr0083245")
+    qp1_x = letters(os.path.join(HERE, "mix2_qx.fna"))
+    orf = letters(os.path.join(HERE, "mix2_qt.faa"))
+    globin, globin_x = letters(os.path.join(SRC, "q.faa")), letters(os.path.join(SRC, "q.fna"))
+    for kind, suffix, unparsed in (("prot", "", qp1), ("nucl", "n", glob1)):
+        name = "ldl" + suffix
+        write(name + ".fa", [(">loadord the unparsed hit at OID 0, taxid 99990", unparsed),
+                             (">loadord the unparsed hit at OID 1, taxid 99990", unparsed)])
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-blastdb_version", "5", "-taxid",
+                    "99990", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    rng = random.Random(20261116 + 5)
+    other = "".join(rng.choice("ACGT") for _ in range(360))
+    write("ldyn.fa", [(f">loadord random letters that only q1 of ldo_e2y.fna hits, copy {n}", other) for n in range(4)])
+    makeblastdb(binary, "-in", "ldyn.fa", "-dbtype", "nucl", "-out", "ldyn", "-blastdb_version", "5", "-taxid", "9606",
+                "-title", "multidb ldyn")
+    os.remove(os.path.join(HERE, "ldyn.njs"))
+    none_p, none_n = "WWWWWWWWWWHHHHHHHHHHWWWWWWWWWW", "ACGTTGCAAGTCCTAGGATCCGTAGCATGCAATTGGCCAATCGATCGTTAACCGGTACG"
+    cut = ">q1 a\u00e9b z"
+    for name, nohit, repeated, two in (("ldo_e2.faa", none_p, qp1 * 16, globin + qp1),
+                                       ("ldo_e2x.fna", none_n, qp1_x * 16, globin_x + qp1_x),
+                                       ("ldo_e2.fna", none_n, glob1 * 6, globin_x + glob1),
+                                       ("ldo_e2t.faa", none_p, orf * 16, globin + orf),
+                                       ("ldo_e2y.fna", none_n, glob1 + other, globin_x + glob1)):
+        write(name, [(">q0 none", nohit), (cut, repeated), (">q2 two", two)])
+
+
+def make_loadord7(binary):
+    """Builds ldv (review 6 of line DBID loadord, H1)."""
+    qp1 = next("".join(line.strip() for line in lines)
+               for header, lines in read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")))
+    rng = random.Random(20261116 + 7)
+    alphabet = "ACDEFGHIKLMNPQRSTVWY"
+    variant = "".join(rng.choice(alphabet.replace(letter, "")) if rng.random() < 0.1 else letter for letter in qp1)
+    with open(os.path.join(HERE, "ldv.fa"), "w") as f:
+        f.write(">gi|9002|ref|NP_000002.1| loadord the accession of ldp under a gi, a variant of lda's letters\n"
+                + "\n".join(variant[at:at + 60] for at in range(0, len(variant), 60)) + "\n")
+    makeblastdb(binary, "-in", "ldv.fa", "-dbtype", "prot", "-out", "ldv", "-parse_seqids", "-blastdb_version", "5",
+                "-taxid", "9606", "-title", "multidb ldv")
+    os.remove(os.path.join(HERE, "ldv.pjs"))
+
+
+def make_v4late(binary):
+    """Builds l6o, l6u and l5b (line DBID v4late)."""
+    qp1 = next("".join(line.strip() for line in lines)
+               for header, lines in read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")))
+    for name, header in (("l6o", ">ref|NP_000002.1| v4late the accession of l5c with other letters, version 4"),
+                         ("l6u", ">ref|NP_000004.1| v4late an accession that only this volume holds, version 4"),
+                         ("l5b", ">ref|NP_000999.1|ref|NP_000002.1| v4late the accession of l5c behind another one, "
+                                 "version 4")):
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            f.write(header + "\n" + "\n".join(qp1[at:at + 60] for at in range(0, len(qp1), 60)) + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", "prot", "-out", name, "-parse_seqids", "-blastdb_version",
+                    "4", "-taxid", "9606", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + ".pjs"))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -313,9 +612,33 @@ if __name__ == "__main__":
         make_mixtax(sys.argv[2])
     elif sys.argv[1] == "--mixsfx-only":
         make_mixsfx(sys.argv[2])
+    elif sys.argv[1] == "--loadord-only":
+        make_loadord(sys.argv[2])
+    elif sys.argv[1] == "--loadord2-only":
+        make_loadord2(sys.argv[2])
+    elif sys.argv[1] == "--loadord3-only":
+        make_loadord3(sys.argv[2])
+    elif sys.argv[1] == "--loadord4-only":
+        make_loadord4(sys.argv[2])
+    elif sys.argv[1] == "--loadord5-only":
+        make_loadord5(sys.argv[2])
+    elif sys.argv[1] == "--loadord6-only":
+        make_loadord6(sys.argv[2])
+    elif sys.argv[1] == "--loadord7-only":
+        make_loadord7(sys.argv[2])
+    elif sys.argv[1] == "--v4late-only":
+        make_v4late(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
         make_mixdb2(sys.argv[1])
         make_mixtax(sys.argv[1])
         make_mixsfx(sys.argv[1])
+        make_loadord(sys.argv[1])
+        make_loadord2(sys.argv[1])
+        make_loadord3(sys.argv[1])
+        make_loadord4(sys.argv[1])
+        make_loadord5(sys.argv[1])
+        make_loadord6(sys.argv[1])
+        make_loadord7(sys.argv[1])
+        make_v4late(sys.argv[1])

@@ -444,6 +444,100 @@ struct Header {
     max_line_size: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1201-1209
+// ```c++
+// bool CSeqDBIsam::IndexExists(const string & dbname,
+//                              char           prot_nucl,
+//                              char           file_ext_char)
+// {
+//     string iname, dname;
+//     x_MakeFilenames(dbname, prot_nucl, file_ext_char, iname, dname);
+//
+//     return CFile(iname).Exists() && CFile(dname).Exists();
+// }
+// ```
+// NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:4038-4042 and 3941-3944
+// ```c++
+// inline
+// bool CFile::Exists(void) const
+// {
+//     return IsFile();
+// }
+// ...
+// bool CDirEntry::IsFile(EFollowLinks follow) const
+// {
+//     return GetType(follow) == eFile;
+// }
+// ```
+/// `CSeqDBIsam::IndexExists` of the index file `index` and the data file `data` of an ISAM (the
+/// string, PIG and trace-id ISAMs of a version 4 volume, `x_OpenStrFile`, `x_OpenPigFile`,
+/// `x_OpenTiFile`): both are regular files, or symbolic links to one (`CFile::Exists` is
+/// `IsFile`, [`super::alias::exists`]). A directory in their place is no ISAM: the volume then
+/// has none, and its lookups find nothing there (review 4 of line DBID loadord, H1).
+pub(super) fn index_exists(index: &Path, data: &Path) -> bool {
+    super::alias::exists(index) && super::alias::exists(data)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1150-1160
+// (quoted in full at `StringIsam::open`)
+// ```c++
+//     try {
+//         m_IndexLease.Init(m_IndexFname);
+//         m_DataLease.Init(m_DataFname);
+//     } catch (CException & e){
+//         m_IndexLease.Clear();
+//         m_DataLease.Clear();
+//         string msg("Error: Could not open input file (");
+//         msg += m_IndexFname + "/" + m_DataFname + ")";
+//         NCBI_THROW(CSeqDBException, eFileErr, msg);
+//
+//     }
+// ```
+/// The open of the two files of an ISAM by the `CSeqDBIsam` constructor: NCBI's `Error: Could
+/// not open input file (<index>/<data>)` where one of them does not open
+/// ([`DbFile::open`]: no regular file, or one that `open` refuses).
+pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), SeqDbError> {
+    let message = || {
+        SeqDbError::NotFound(format!(
+            "Error: Could not open input file ({}/{})",
+            index.display(),
+            data.display()
+        ))
+    };
+    let index_file = DbFile::open(index).map_err(|_| message())?;
+    let data_file = DbFile::open(data).map_err(|_| message())?;
+    Ok((index_file, data_file))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:190-198
+// ```c++
+// CSeqDBVol::x_OpenStrFile(void) const{
+//     CFastMutexGuard mtx_gurad(m_MtxStr);
+//     if (m_IsamStr.NotEmpty()) {
+//     	m_IsamStr->AddReference();
+//     }
+//     else if(CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 's') &&
+//             m_Idx->GetNumOIDs() != 0) {
+//         m_IsamStr = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 's', eStringId);
+//     }
+// }
+// ```
+/// The files of the ISAM of a volume with sequences as `x_OpenStrFile` and `x_OpenPigFile` make
+/// it (`index`, `data`): `None` where the volume has none ([`index_exists`]), the constructor's
+/// exception where one of them does not open ([`open_files`]), else both open. The one owner of
+/// "this volume has an ISAM and it opens", which the lookups (`StringIsam::open_existing`,
+/// `NumericIsam::open_pig_volume`) and the search's question whether a lookup can stop on it
+/// (`SeqDb::isams_may_fail_to_open`) both ask; neither reads a byte here.
+pub(super) fn open_if_exists(
+    index: &Path,
+    data: &Path,
+) -> Result<Option<(DbFile, DbFile)>, SeqDbError> {
+    if !index_exists(index, data) {
+        return Ok(None);
+    }
+    open_files(index, data).map(Some)
+}
+
 /// A string ISAM index of one volume (`CSeqDBIsam` of `eStringId`).
 #[derive(Debug)]
 pub struct StringIsam {
@@ -518,10 +612,10 @@ impl StringIsam {
         Ok((PathBuf::from(index), PathBuf::from(data)))
     }
 
-    /// `CSeqDBIsam::IndexExists` for the string index.
+    /// `CSeqDBIsam::IndexExists` for the string index ([`index_exists`]: two regular files).
     pub fn index_exists(dbname: &str, protein: bool) -> bool {
         match Self::file_names(dbname, protein) {
-            Ok((index, data)) => index.exists() && data.exists(),
+            Ok((index, data)) => index_exists(&index, &data),
             Err(_) => false,
         }
     }
@@ -530,6 +624,15 @@ impl StringIsam {
     pub fn open_volume(dbname: &str, protein: bool) -> Result<Self, SeqDbError> {
         let (index, data) = Self::file_names(dbname, protein)?;
         Self::open(&index, &data)
+    }
+
+    /// `x_OpenStrFile`: the string index of the volume `dbname` (its path without extension, a
+    /// volume with sequences), `None` where it has none ([`open_if_exists`]).
+    pub fn open_existing(dbname: &str, protein: bool) -> Result<Option<Self>, SeqDbError> {
+        let (index, data) = Self::file_names(dbname, protein)?;
+        open_if_exists(&index, &data)?
+            .map(|(index, data)| Self::from_files(index, data))
+            .transpose()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1102-1171
@@ -608,15 +711,7 @@ impl StringIsam {
     /// The constructor: opens the two files. A file that cannot be opened is NCBI's "Error: Could
     /// not open input file (`<index>/<data>`)".
     pub fn open(index_path: &Path, data_path: &Path) -> Result<Self, SeqDbError> {
-        let message = || {
-            SeqDbError::NotFound(format!(
-                "Error: Could not open input file ({}/{})",
-                index_path.display(),
-                data_path.display()
-            ))
-        };
-        let index = DbFile::open(index_path).map_err(|_| message())?;
-        let data = DbFile::open(data_path).map_err(|_| message())?;
+        let (index, data) = open_files(index_path, data_path)?;
         Self::from_files(index, data)
     }
 

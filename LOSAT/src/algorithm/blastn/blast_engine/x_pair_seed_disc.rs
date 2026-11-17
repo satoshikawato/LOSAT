@@ -77,7 +77,7 @@ use crate::algorithm::blastn::disc_lookup::{
     choose_disc_scan_subject, disc_word_scan_subject_until,
 };
 use crate::algorithm::blastn::lookup::x_dc_csr::{Csr, Ring};
-use crate::algorithm::blastn::lookup::DiscTemplates;
+use crate::algorithm::blastn::lookup::{DiscTemplates, XHeadFifo};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -257,6 +257,10 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     let cut = Cut::new(&from);
     let start = from.s;
+    let mut emit = |(s_off, index, index2): (i32, u32, Option<u32>)| {
+        x_disc_word_pairs::<O, PIECE>(x, &cut, s_range, s_off, index, index2, out);
+    };
+    let mut fifo: XHeadFifo<(i32, u32, Option<u32>)> = XHeadFifo::new();
     disc_word_scan_subject_until(
         kind,
         x.search_seq_packed,
@@ -267,18 +271,25 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
         &mut |s_off, index, index2| {
             // A word whose chains are both empty (the presence vector, which `for_each_hit` and
             // `for_each_hit2` test first) has no pair: tested here, so the scan inlines the test
-            // and such a word makes no call; a word with a chain goes to `x_disc_word_pairs`
-            // out of line. (A piece that stopped inside a word's chain resumes at that word,
-            // which has a chain, so `Cut::chain_start` still meets it first.)
+            // and such a word makes no call. A word with a chain has its chains' heads prefetched
+            // and goes through the FIFO (`lookup::XHeadFifo`) to `x_disc_word_pairs`, out of
+            // line, in the same order; a cut stops only there, which runs only in a push, and is
+            // seen after that push as before. (A piece that stopped inside a word's chain resumes
+            // at that word, which has a chain, so `Cut::chain_start` still meets it first.)
             if !pv_view.has_hits(u64::from(index))
                 && index2.is_none_or(|index2| !pv_view.has_hits(u64::from(index2)))
             {
                 return !PIECE || cut.go();
             }
-            x_disc_word_pairs::<O, PIECE>(x, &cut, s_range, s_off, index, index2, out);
-            !PIECE || cut.go()
+            two_stage.x_prefetch_heads(u64::from(index), index2.map(u64::from));
+            let left = fifo.push((s_off, index, index2), &mut emit);
+            !PIECE || !left || cut.go()
         },
     );
+    // (a stopped scan drops the words still in the FIFO: the next piece scans them again)
+    if !PIECE || cut.go() {
+        fifo.flush(&mut emit);
+    }
     cut.stop.get()
 }
 

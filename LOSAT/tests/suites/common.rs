@@ -36,6 +36,8 @@ mod default_bundle;
 mod entry_names;
 #[path = "../export_search_strategy.rs"]
 mod export_search_strategy;
+#[path = "../function_size_limit.rs"]
+mod function_size_limit;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]

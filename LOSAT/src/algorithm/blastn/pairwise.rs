@@ -391,14 +391,15 @@ fn context_rows_into(
     query_row.clear();
     subject_row.clear();
     // An HSP outside its query context (a negative `Int4` offset) never reaches a report
-    // (`run::hsp_outside_query_context`).
+    // (`run::hsp_outside_query_context`). The end is not below the offset, so neither cast
+    // wraps; the range test below would refuse one that did.
     ensure!(
         hsp.internal_q_offset_0 >= 0,
         "BLASTN HSP outside its sequences"
     );
     let (qs, qe) = (
         hsp.internal_q_offset_0 as usize,
-        hsp.internal_q_end_0.max(0) as usize,
+        hsp.internal_q_end_0 as usize,
     );
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
     ensure!(

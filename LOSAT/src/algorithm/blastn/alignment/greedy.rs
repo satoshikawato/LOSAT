@@ -31,7 +31,7 @@ use super::super::constants::{
 };
 use super::super::sequence_compare::{find_first_mismatch, find_first_mismatch_ex};
 use super::utilities::gdb3;
-use super::ContextQuery;
+use super::{AdjustedSubject, ContextQuery, SeqPointer};
 use crate::common::GapEditOp;
 
 /// Thread-local memory pool for non-affine greedy alignment.
@@ -780,7 +780,7 @@ fn format_gap_prelim_edit_block_for_trace(block: &GapPrelimEditBlock) -> String 
     out
 }
 
-fn debug_greedy_traceback_enabled(q_off: i32, s_off: usize) -> bool {
+fn debug_greedy_traceback_enabled(q_off: i32, s_off: i32) -> bool {
     // No NCBI counterpart: debug print switch (LOSAT_DEBUG_COORDS, read once); it does not change any value NCBI computes.
     let debug_all = crate::utils::xenv::debug_coords_is_some();
     let Some(filter) = crate::utils::xenv::debug_coords_start() else {
@@ -792,7 +792,7 @@ fn debug_greedy_traceback_enabled(q_off: i32, s_off: usize) -> bool {
     };
 
     q_filter.trim().parse::<i32>().ok() == Some(q_off)
-        && s_filter.trim().parse::<usize>().ok() == Some(s_off)
+        && s_filter.trim().parse::<i32>().ok() == Some(s_off)
 }
 
 /// Greedy alignment for high-identity nucleotide sequences.
@@ -4611,23 +4611,26 @@ pub(super) struct GreedyGappedCore {
 //
 // `subject` holds one base per byte: NCBI's `compressed_subject = FALSE` form, which LOSAT always
 // runs (the packed form is not ported). `max_dist_len` is the `subject_length` that sizes
-// `max_dist` (blast_gapalign.c:323-330): `subject_len` itself, except for a window, which reads
-// `subject_len` bases but sizes `max_dist` by its chunk.
+// `max_dist` (blast_gapalign.c:323-330): the chunk's length for the preliminary call, also on a
+// window, which reads fewer bases, and the whole subject's for the traceback.
 //
 // `query` is NCBI's `query` and `query_length` (the context's pointer into the concatenated
 // query, `ContextQuery`), and `q_off` NCBI's `Int4` seed, which lies outside the context for a hit
 // that passes an end of it (the middle of such a hit, blast_gapalign.c:4012-4017): before the
 // context the right extension starts in the concatenated query before it (`q = query + q_off`) and
 // reads up to the context's end, past the end the left extension reads back from the seed
-// through the sentinel into the context.
+// through the sentinel into the context. `subject` is NCBI's `subject` and `subject_length` in the
+// same way (`SeqPointer`) and `s_off` NCBI's `Int4` start in it: the traceback's range from
+// `AdjustSubjectRange`, whose length is below `s_off` for a start more than 3000 letters past the
+// end of its context and whose start in the range is negative for one more than 3000 letters
+// before it (blast_gapalign.c:4163-4191); the preliminary call's whole chunk or window, from 0.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn greedy_gapped_alignment_internal(
     query: ContextQuery<'_>,
-    subject: &[u8],
-    subject_len: usize,
+    subject: SeqPointer<'_>,
     max_dist_len: usize,
     q_off: i32,
-    s_off: usize,
+    s_off: i32,
     reward: i32,
     penalty: i32,
     gap_open: i32,
@@ -4643,7 +4646,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     //
     //    q = query + q_off;
     // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331,353,474-478
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331,353,471-472
     // ```c
     //             while (seq1_index < len1 && seq2_index < len2 &&
     // ...
@@ -4652,21 +4655,21 @@ pub(super) fn greedy_gapped_alignment_internal(
     //     if (index == len1 || index == len2) {
     //         /* Return the number of differences, which is zero here */
     // ```
-    // A length below 0 (`q_avail` for a seed past the context's end, the left extension's
-    // `q_off` for one before it) reads no letter: every offset into it is 0 or more, so no
-    // match, no `seq1_index == len1`, and the distances only fall until the X-drop ends the
-    // loop at distance 0, the alignment of length 0 that the early return for a length of 0
-    // gives (the same distance or score 0, extents 0 and seed). The extensions get that length
-    // here: `q_len_right` and `q_len_left`, each slice holding the letters it may read. (The
-    // only other effect of the loop, a fence test where a slide stops, concerns LOSAT's own
-    // fences, whose call is made again on the whole subject, and NCBI's partial fetch, whose
-    // traceback is redone on the whole sequence: neither changes a result.)
-    let q_avail = query.len as i32 - q_off;
-    let q_len_right = q_avail.max(0) as usize;
-    let q_len_left = q_off.max(0) as usize;
-    let query_right = &query.concat[query.at(q_off)..query.at(q_off) + q_len_right];
-    let query_left = &query.concat[query.start..query.start + q_len_left.max(query.len)];
-    let s_avail = subject_len.saturating_sub(s_off) as i32;
+    // A length below 0 (`q_avail` or `s_avail` for a start past an end of the context or of the
+    // subject range, the left extension's `q_off` or `s_off` for one before it) reads no letter:
+    // every offset into it is 0 or more, so no match, no `seq1_index == len1` or
+    // `seq2_index == len2`, and the distances only fall until the X-drop ends the loop at
+    // distance 0, the alignment of length 0 that the early return for a length of 0 gives (the
+    // same distance or score 0, extents 0 and seed). The extensions get that length here
+    // (`SeqPointer::right_of`, `left_of`), each slice holding the letters it may read, and the
+    // other extension still runs. (The only other effect of the loop, a fence test where a slide
+    // stops, concerns LOSAT's own fences, whose call is made again on the whole subject, and
+    // NCBI's partial fetch, whose traceback is redone on the whole sequence: neither changes a
+    // result.)
+    let (query_right, q_len_right) = query.right_of(q_off);
+    let (query_left, q_len_left) = query.left_of(q_off);
+    let (subject_right, s_len_right) = subject.right_of(s_off);
+    let (subject_left, s_len_left) = subject.left_of(s_off);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
     // ```c
     // if (!compressed_subject) {
@@ -4683,17 +4686,8 @@ pub(super) fn greedy_gapped_alignment_internal(
     //    rem = 0;
     // ```
     // LOSAT takes the `!compressed_subject` arm only: `subject + s_off` forward and `rem = 4` in
-    // both directions.
-    let subject_offset = s_off;
-    if subject_offset >= subject.len() {
-        return None;
-    }
-    let subject_full = subject;
-    let subject_forward = &subject_full[subject_offset..];
-
-    if s_avail <= 0 {
-        return None;
-    }
+    // both directions (`subject_right`, `subject_left`). NCBI has no early return here: a start
+    // past the end of the subject range (`s_avail <= 0`) still extends to the left.
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:323-330
     // ```c
@@ -4756,9 +4750,9 @@ pub(super) fn greedy_gapped_alignment_internal(
         // ```
         score = blast_affine_greedy_align(
             query_right,
-            q_len_right as i32,
-            subject_forward,
-            s_avail,
+            q_len_right,
+            subject_right,
+            s_len_right,
             false,
             x_drop,
             reward,
@@ -4809,9 +4803,9 @@ pub(super) fn greedy_gapped_alignment_internal(
         // ```
         let score_left = blast_affine_greedy_align(
             query_left,
-            q_len_left as i32,
-            subject_full,
-            s_off as i32,
+            q_len_left,
+            subject_left,
+            s_len_left,
             true,
             x_drop,
             reward,
@@ -4858,7 +4852,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     }
 
     let mut q_seed_start = q_off;
-    let mut s_seed_start = s_off as i32;
+    let mut s_seed_start = s_off;
     let mut edit_script = None;
 
     if do_traceback {
@@ -4867,9 +4861,9 @@ pub(super) fn greedy_gapped_alignment_internal(
         let recycled = std::mem::replace(&mut scratch.x_edit_script, GapEditScript::new(0));
         if let Some(mut esp) = prelim_edit_block_to_gap_edit_script(rev, fwd, recycled) {
             let q_start = q_off - q_ext_l;
-            let s_start = s_off as i32 - s_ext_l;
+            let s_start = s_off - s_ext_l;
             let q_end = q_off + q_ext_r;
-            let s_end = s_off as i32 + s_ext_r;
+            let s_end = s_off + s_ext_r;
             let debug_traceback = debug_greedy_traceback_enabled(q_off, s_off);
             if debug_traceback {
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2876-2882
@@ -4894,15 +4888,16 @@ pub(super) fn greedy_gapped_alignment_internal(
             }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2881 (s_ReduceGaps query+q_off-q_ext_l, subject+s_off-s_ext_l)
-            // The alignment's letters in the concatenated query (`ContextQuery::at`).
+            // The alignment's letters in the concatenated query and the whole subject
+            // (`SeqPointer::at`).
             reduce_gaps(
                 &mut esp,
-                query.concat,
-                subject,
+                query.buf,
+                subject.buf,
                 query.at(q_start),
                 query.at(q_end),
-                s_start as usize,
-                s_end as usize,
+                subject.at(s_start),
+                subject.at(s_end),
             );
             if debug_traceback {
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
@@ -4922,13 +4917,13 @@ pub(super) fn greedy_gapped_alignment_internal(
         }
     } else {
         let q_box_l = q_off - q_ext_l;
-        let s_box_l = s_off as i32 - s_ext_l;
+        let s_box_l = s_off - s_ext_l;
         let q_box_r = q_off + q_ext_r;
-        let s_box_r = s_off as i32 + s_ext_r;
+        let s_box_r = s_off + s_ext_r;
         let mut q_seed_start_l = q_off - rev_start_point.start_q;
-        let mut s_seed_start_l = s_off as i32 - rev_start_point.start_s;
+        let mut s_seed_start_l = s_off - rev_start_point.start_s;
         let mut q_seed_start_r = q_off + fwd_start_point.start_q;
-        let mut s_seed_start_r = s_off as i32 + fwd_start_point.start_s;
+        let mut s_seed_start_r = s_off + fwd_start_point.start_s;
         let mut valid_seed_len_l = 0;
         let mut valid_seed_len_r = 0;
 
@@ -4939,7 +4934,7 @@ pub(super) fn greedy_gapped_alignment_internal(
                 / 2;
         } else {
             q_seed_start_r = q_off;
-            s_seed_start_r = s_off as i32;
+            s_seed_start_r = s_off;
         }
 
         if q_seed_start_l > q_box_l && s_seed_start_l > s_box_l {
@@ -4949,7 +4944,7 @@ pub(super) fn greedy_gapped_alignment_internal(
                 / 2;
         } else {
             q_seed_start_l = q_off;
-            s_seed_start_l = s_off as i32;
+            s_seed_start_l = s_off;
         }
 
         if valid_seed_len_r > valid_seed_len_l {
@@ -4964,8 +4959,8 @@ pub(super) fn greedy_gapped_alignment_internal(
     Some(GreedyGappedCore {
         q_start: q_off - q_ext_l,
         q_end: q_off + q_ext_r,
-        s_start: s_off as i32 - s_ext_l,
-        s_end: s_off as i32 + s_ext_r,
+        s_start: s_off - s_ext_l,
+        s_end: s_off + s_ext_r,
         q_seed_start,
         s_seed_start,
         score,
@@ -4973,28 +4968,30 @@ pub(super) fn greedy_gapped_alignment_internal(
     })
 }
 
-/// Greedy gapped alignment with traceback, from NCBI's `Int4` seed `q_off` of the context `query`
-/// (`greedy_gapped_alignment_internal`); the query offsets of the result are NCBI's `Int4`
-/// offsets in the context, outside it where the alignment is.
+/// Greedy gapped alignment with traceback, from NCBI's `Int4` start `q_off` of the context `query`
+/// and `s_off` of the subject range `subject` (`greedy_gapped_alignment_internal`); the offsets of
+/// the result are NCBI's `Int4` offsets in the context and in the range, outside them where the
+/// alignment is (a subject start below 0 in the range lies at or after the range's shift in the
+/// whole subject).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
 pub fn greedy_gapped_alignment_with_traceback(
     query: ContextQuery<'_>,
-    subject: &[u8],
-    subject_len: usize,
+    subject: AdjustedSubject<'_>,
     q_off: i32,
-    s_off: usize,
+    s_off: i32,
     reward: i32,
     penalty: i32,
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GreedyAlignScratch,
-) -> Option<(i32, i32, usize, usize, i32, usize, Vec<GapEditOp>)> {
+) -> Option<(i32, i32, i32, i32, i32, usize, Vec<GapEditOp>)> {
+    // `max_dist` is sized by the whole subject, NCBI's `max_subject_length` of the traceback's
+    // `BlastGapAlignStruct` (blast_gapalign.c:323-330), not by the range of this call.
     let core = greedy_gapped_alignment_internal(
         query,
         subject,
-        subject_len,
-        subject_len,
+        subject.buf.len(),
         q_off,
         s_off,
         reward,
@@ -5033,8 +5030,8 @@ pub fn greedy_gapped_alignment_with_traceback(
     Some((
         core.q_start,
         core.q_end,
-        core.s_start as usize,
-        core.s_end as usize,
+        core.s_start,
+        core.s_end,
         core.score,
         align_length,
         edit_ops,
@@ -5082,15 +5079,18 @@ mod tests {
         )> {
             let core = greedy_gapped_alignment_internal(
                 ContextQuery {
-                    concat: query,
+                    buf: query,
                     start: 0,
-                    len: query.len(),
+                    len: query.len() as i32,
                 },
-                subject,
-                subject.len(),
+                SeqPointer {
+                    buf: subject,
+                    start: 0,
+                    len: subject.len() as i32,
+                },
                 subject.len(),
                 q_off as i32,
-                s_off,
+                s_off as i32,
                 scoring.0,
                 scoring.1,
                 scoring.2,
@@ -5288,7 +5288,7 @@ mod tests {
             i32,
             i32,
             i32,
-            (i32, i32, usize, usize, i32, usize),
+            (i32, i32, i32, i32, i32, usize),
             &[GapEditOp],
         )] = &[
             (
@@ -5381,14 +5381,17 @@ mod tests {
             for _ in 0..2 {
                 let result = greedy_gapped_alignment_with_traceback(
                     ContextQuery {
-                        concat: query,
+                        buf: query,
                         start: 0,
-                        len: query.len(),
+                        len: query.len() as i32,
                     },
-                    subject,
-                    subject.len(),
+                    AdjustedSubject {
+                        buf: subject,
+                        start: 0,
+                        len: subject.len() as i32,
+                    },
                     *q_off as i32,
-                    *s_off,
+                    *s_off as i32,
                     *reward,
                     *penalty,
                     *gap_open,
@@ -5430,27 +5433,18 @@ mod tests {
         );
         assert_eq!(reverse, (4, 4, 4, 4, 0, 0, 0));
 
-        // No NCBI counterpart: NCBI's seeds lie inside the subject (`s_avail > 0`); LOSAT makes no
-        // alignment from a seed at the subject's end (`greedy_gapped_alignment_internal`).
-        let mut scratch = GreedyAlignScratch::new();
-        assert!(greedy_gapped_alignment_with_traceback(
-            ContextQuery {
-                concat: &[],
-                start: 0,
-                len: 0,
-            },
-            &[],
-            0,
-            0,
-            0,
-            1,
-            -2,
-            5,
-            2,
-            54,
-            &mut scratch,
-        )
-        .is_none());
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:471-472
+        // ```c
+        //     if (index == len1 || index == len2) {
+        //         /* Return the number of differences, which is zero here */
+        // ```
+        // Empty sequences: the early return, an alignment of length 0, in both directions.
+        for reverse in [false, true] {
+            assert_eq!(
+                greedy_align_one_direction_ex(&[], &[], 0, 0, 1, -2, 0, 0, 54, reverse),
+                (0, 0, 0, 0, 0, 0, 0)
+            );
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2786,2836-2837
@@ -5483,12 +5477,15 @@ mod tests {
         subject.extend(ctx1.iter().map(|&b| (b + 1) % 4));
         let past_end = greedy_gapped_alignment_with_traceback(
             ContextQuery {
-                concat: &concat,
+                buf: &concat,
                 start: 0,
                 len: 30,
             },
-            &subject,
-            subject.len(),
+            AdjustedSubject {
+                buf: &subject,
+                start: 0,
+                len: subject.len() as i32,
+            },
             31,
             31,
             1,
@@ -5513,12 +5510,15 @@ mod tests {
         subject.extend_from_slice(&ctx1);
         let before_start = greedy_gapped_alignment_with_traceback(
             ContextQuery {
-                concat: &concat,
+                buf: &concat,
                 start: 11,
                 len: 30,
             },
-            &subject,
-            subject.len(),
+            AdjustedSubject {
+                buf: &subject,
+                start: 0,
+                len: subject.len() as i32,
+            },
             -1,
             1,
             1,
@@ -5540,6 +5540,79 @@ mod tests {
             (-1, 30, 1, 32, 28)
         );
         assert_eq!(before_start.6, vec![GapEditOp::Sub(31)]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2787,2836-2837
+    // ```c
+    //    q_avail = query_length - q_off;
+    //    s_avail = subject_length - s_off;
+    //
+    //    q = query + q_off;
+    //    if (!compressed_subject) {
+    //       s = subject + s_off;
+    // ...
+    //        score1 = BLAST_AffineGreedyAlign(query, q_off,
+    //                subject, s_off, TRUE, X,
+    // ```
+    // A start outside its subject range, which `AdjustSubjectRange` makes on a subject of 90000
+    // letters or more for a start more than 3000 letters outside its context (remaining-gaps
+    // X1b-o review 2 M1): with `s_avail` below 0 the right extension reads nothing and the left
+    // one reads `s_off` letters back from the start; with `s_off` below 0 the left extension
+    // reads nothing and the right one reads `s_avail` letters from the start, also when the
+    // range's pointer lies past the subject's end. The subject offsets are in the range.
+    #[test]
+    fn a_greedy_start_outside_its_subject_range_extends_to_the_other_side() {
+        let query: Vec<u8> = (0..40usize).map(|i| ((i * 7 + 1) % 4) as u8).collect();
+        let mut scratch = GreedyAlignScratch::new();
+        let mut run = |subject: &[u8], start: usize, len: i32, q_off: i32, s_off: i32| {
+            let r = greedy_gapped_alignment_with_traceback(
+                ContextQuery {
+                    buf: &query,
+                    start: 0,
+                    len: 40,
+                },
+                AdjustedSubject {
+                    buf: subject,
+                    start,
+                    len,
+                },
+                q_off,
+                s_off,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                &mut scratch,
+            )
+            .expect("NCBI aligns from a start outside its subject range");
+            assert_eq!(r.6.len(), 1);
+            (r.0, r.1, r.2, r.3, r.4, r.6[0])
+        };
+        // `s_avail` = 10 - 20: five other letters, then the query; the range is the 10 letters
+        // from the sixth, the start the query's 20th letter.
+        let subject: Vec<u8> = [&[(query[0] + 1) % 4; 5][..], &query].concat();
+        assert_eq!(
+            run(&subject, 5, 10, 20, 20),
+            (0, 20, 0, 20, 20, GapEditOp::Sub(20))
+        );
+        // The whole range from the same start aligns both ways.
+        assert_eq!(
+            run(&subject, 5, 40, 20, 20),
+            (0, 40, 0, 40, 40, GapEditOp::Sub(40))
+        );
+        // `s_off` = -10: the range starts 30 letters into the query's copy, the start 10 letters
+        // before it.
+        assert_eq!(
+            run(&query, 30, 10, 20, -10),
+            (20, 40, -10, 10, 20, GapEditOp::Sub(20))
+        );
+        // The range's pointer 10 letters past the subject's end (length -10), the start 20
+        // letters before it.
+        assert_eq!(
+            run(&query, 50, -10, 30, -20),
+            (30, 40, -20, -10, 10, GapEditOp::Sub(10))
+        );
     }
 
     /// A small xorshift generator for the random tests of this module.

@@ -68,7 +68,7 @@
 
 use super::greedy::{greedy_gapped_alignment_internal, GreedyAlignScratch, FENCE_SENTRY};
 use super::x_fence;
-use super::ContextQuery;
+use super::{ContextQuery, SeqPointer};
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -260,7 +260,8 @@ impl<'a> XPrelimSubject<'a> {
             "a score-only greedy call runs only in the preliminary stage of a greedy search"
         );
         if s_off >= subject_len {
-            // `greedy_gapped_alignment_internal` gives no result (no subject base to the right).
+            // Not reached: NCBI's seed is the middle of its ungapped hit, inside the subject
+            // (blast_gapalign.c:4012-4017). The window below holds `s_off` only inside the chunk.
             return None;
         }
         let from = hit.0.min(s_off).saturating_sub(X_WINDOW_MARGIN) & !(COMPRESSION_RATIO - 1);
@@ -277,11 +278,14 @@ impl<'a> XPrelimSubject<'a> {
         let fences = x_fence::x_fence_count();
         let core = greedy_gapped_alignment_internal(
             query,
-            &window.bytes[..window.len],
-            window.len,
+            SeqPointer {
+                buf: &window.bytes[..window.len],
+                start: 0,
+                len: window.len as i32,
+            },
             subject_len,
             q_off,
-            s_off - window.from + window.lead,
+            (s_off - window.from + window.lead) as i32,
             reward,
             penalty,
             gap_open,
@@ -346,11 +350,14 @@ pub fn x_greedy_gapped_alignment_score_only(
 ) -> Option<GreedyPrelim> {
     let core = greedy_gapped_alignment_internal(
         query,
-        subject_unpacked,
-        subject_len,
+        SeqPointer {
+            buf: subject_unpacked,
+            start: 0,
+            len: subject_len as i32,
+        },
         subject_len,
         q_off,
-        s_off,
+        s_off as i32,
         reward,
         penalty,
         gap_open,
@@ -527,9 +534,9 @@ mod tests {
                     );
                     let fences = x_fence::x_fence_count();
                     let context = ContextQuery {
-                        concat: &query,
+                        buf: &query,
                         start: 0,
-                        len: query.len(),
+                        len: query.len() as i32,
                     };
                     let got = subject.score_only(
                         chunk_offset,

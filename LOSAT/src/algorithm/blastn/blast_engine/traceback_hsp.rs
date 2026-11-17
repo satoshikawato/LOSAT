@@ -29,8 +29,9 @@ use super::{
     blast_get_start_for_gapped_alignment_nucl, blastn_trace, calculate_blastn_context_statistics,
     context_query, extend_gapped_heuristic_with_traceback_with_scratch,
     format_gap_edit_ops_for_trace, greedy_gapped_alignment_with_traceback, stats_from_edit_ops,
-    x_fence, BlastIntervalTree, BlastnHsp, BlastnTiming, GapAlignScratch, GreedyAlignScratch,
-    IndexMethod, PrelimHit, QueryContext, TreeHsp, XAheadScratch, XSpecTraceback,
+    x_fence, AdjustedSubject, BlastIntervalTree, BlastnHsp, BlastnTiming, GapAlignScratch,
+    GreedyAlignScratch, IndexMethod, PrelimHit, QueryContext, TreeHsp, XAheadScratch,
+    XSpecTraceback,
 };
 use crate::common::GapEditOp;
 #[cfg(all(
@@ -43,8 +44,12 @@ use {crate::utils::threading::SearchPool, rayon::prelude::*};
 /// adjusted_s_len, trace_s_start_adj)`, the start offsets on the query (NCBI's `Int4` one in the
 /// context, outside it for a greedy HSP from a hit that passes an end of its context) and on the
 /// subject, the subject range that `AdjustSubjectRange` keeps (its first letter and its length)
-/// and the subject start in that range.
-pub(super) type TraceStart = (i32, usize, usize, usize, usize);
+/// and the subject start in that range, NCBI's `Int4` values: on a subject of 90000 letters or
+/// more a start more than 3000 letters past the end of its context gives a length below the start
+/// in the range, and one more than 3000 letters before its context a start below 0 in the range
+/// and a shift that can pass the subject's end, with a length below 0 then
+/// (blast_gapalign.c:4163-4191).
+pub(super) type TraceStart = (i32, usize, i32, i32, i32);
 
 /// What the dynamic-programming traceback call returns
 /// (`extend_gapped_heuristic_with_traceback_with_scratch`).
@@ -61,9 +66,9 @@ pub(super) type DpTraceback = (
     Vec<GapEditOp>,
 );
 
-/// What the greedy traceback call returns (`greedy_gapped_alignment_with_traceback`; its query
-/// offsets are NCBI's `Int4` ones in the context).
-pub(super) type GreedyTraceback = Option<(i32, i32, usize, usize, i32, usize, Vec<GapEditOp>)>;
+/// What the greedy traceback call returns (`greedy_gapped_alignment_with_traceback`; its offsets
+/// are NCBI's `Int4` ones in the context and in the subject range).
+pub(super) type GreedyTraceback = Option<(i32, i32, i32, i32, i32, usize, Vec<GapEditOp>)>;
 
 /// The traceback of one HSP computed ahead of the ordered loop: where it starts and the value of
 /// its traceback call.
@@ -155,7 +160,7 @@ pub(super) fn prepare_traceback(
     // ```
     if trace_q_start == 0 && trace_s_start == 0 {
         let (q_start, s_start) = blast_get_offsets_for_gapped_alignment(
-            query.concat,
+            query.buf,
             s_seq_blastna,
             query.at(prelim.prelim_qs),
             query.at(prelim.prelim_qe),
@@ -187,18 +192,14 @@ pub(super) fn prepare_traceback(
     // adjusted_subject = subject + start_shift;
     // hsp->subject.gapped_start = s_start;
     // ```
-    let mut adjusted_s_len = s_seq_blastna.len();
-    let mut s_start_i32 = trace_s_start as i32;
-    let mut s_len_i32 = adjusted_s_len as i32;
-    let start_shift_i32 = adjust_subject_range(
-        &mut s_start_i32,
-        &mut s_len_i32,
+    let mut trace_s_start_adj = trace_s_start as i32;
+    let mut adjusted_s_len = s_seq_blastna.len() as i32;
+    let start_shift = adjust_subject_range(
+        &mut trace_s_start_adj,
+        &mut adjusted_s_len,
         trace_q_start,
-        query.len as i32,
+        query.len,
     );
-    let start_shift = start_shift_i32 as usize;
-    adjusted_s_len = s_len_i32 as usize;
-    let trace_s_start_adj = s_start_i32 as usize;
 
     Some((
         trace_q_start,
@@ -209,9 +210,32 @@ pub(super) fn prepare_traceback(
     ))
 }
 
+/// NCBI's `adjusted_subject` and `adjusted_s_length` of the traceback that starts at `start`, on
+/// the subject `s_seq` (`AdjustedSubject`): the whole subject, the pointer at `start_shift`, which
+/// is 0 or `s_offset - max_extension_left > 0` (never below 0, past the subject's end for a start
+/// far before its context), and the signed length.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-469
+/// ```c
+///              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+///                                 query_length, &start_shift);
+///              adjusted_subject = subject + start_shift;
+/// ```
+#[inline]
+pub(super) fn adjusted_subject<'a>(s_seq: &'a [u8], start: &TraceStart) -> AdjustedSubject<'a> {
+    let &(_, _, start_shift, adjusted_s_len, _) = start;
+    AdjustedSubject {
+        buf: s_seq,
+        start: start_shift as usize,
+        len: adjusted_s_len,
+    }
+}
+
 /// The greedy traceback call of `prelim` from where `prepare_traceback` starts it (`start`), on
 /// the scratch `scratch`: NCBI's `query` is the context in the concatenated query
-/// (`ContextQuery`), which the alignment reads outside the context from a start outside it.
+/// (`ContextQuery`), which the alignment reads outside the context from a start outside it, and
+/// NCBI's `adjusted_subject` the range of the whole subject (`adjusted_subject`), which it reads
+/// outside the range from a start outside it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
 /// ```c
@@ -239,14 +263,13 @@ pub(super) fn greedy_trace_call(
         x_drop_final,
         ..
     } = traceback_ctx;
-    let &(q_start, _, start_shift, adjusted_s_len, s_start) = start;
+    let &(q_start, _, _, _, s_start) = start;
     greedy_gapped_alignment_with_traceback(
         context_query(
             encoded_query_concat_blastna,
             &query_contexts[prelim.context_idx as usize],
         ),
-        &s_seq_blastna[start_shift..start_shift + adjusted_s_len],
-        adjusted_s_len,
+        adjusted_subject(s_seq_blastna, start),
         q_start,
         s_start,
         reward,
@@ -261,7 +284,9 @@ pub(super) fn greedy_trace_call(
 /// The dynamic-programming traceback call of `prelim` from where `prepare_traceback` starts it
 /// (`start`), on the scratch `scratch`, on the context's letters: a dynamic-programming HSP lies
 /// in its context (its preliminary alignment runs on `query_tmp` from a word hit in it), so the
-/// start is not negative.
+/// start is not negative, and neither is any value of its subject range: `max_extension_left`
+/// and `max_extension_right` are 3000 or more, so the range lies in the subject and holds the
+/// start (blast_gapalign.c:4163-4191).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:508-512
 /// ```c
@@ -290,10 +315,18 @@ pub(super) fn dp_trace_call(
         ..
     } = traceback_ctx;
     let &(q_start, _, start_shift, adjusted_s_len, s_start) = start;
+    let in_context =
+        |v: i32| usize::try_from(v).expect("a dynamic-programming traceback starts in its context");
+    let (q_start, start_shift, adjusted_s_len, s_start) = (
+        in_context(q_start),
+        in_context(start_shift),
+        in_context(adjusted_s_len),
+        in_context(s_start),
+    );
     extend_gapped_heuristic_with_traceback_with_scratch(
         encoded_queries_blastna[prelim.context_idx as usize],
         &s_seq_blastna[start_shift..start_shift + adjusted_s_len],
-        q_start as usize,
+        q_start,
         s_start,
         1,
         reward,
@@ -543,20 +576,21 @@ pub(super) struct TraceHsp<'h> {
     /// Where its traceback starts (`TraceStart`, as `prepare_traceback` gives it).
     pub(super) trace_q_start: i32,
     pub(super) trace_s_start: usize,
-    pub(super) start_shift: usize,
-    pub(super) adjusted_s_len: usize,
-    pub(super) trace_s_start_adj: usize,
+    pub(super) start_shift: i32,
+    pub(super) adjusted_s_len: i32,
+    pub(super) trace_s_start_adj: i32,
 }
 
 /// The alignment of one HSP (`trace_align_one`): its ends on the query (NCBI's `Int4` offsets in
-/// the context) and on the subject range of the alignment, its score, the identities,
+/// the context) and on the subject range of the alignment (NCBI's `Int4` offsets in the range,
+/// below 0 for a greedy alignment from a start before the range), its score, the identities,
 /// mismatches, gap opens and gap letters the traceback call counts (0 from the greedy call), its
 /// length and its edit script.
 pub(super) struct Aligned {
     pub(super) final_qs: i32,
     pub(super) final_qe: i32,
-    pub(super) final_ss: usize,
-    pub(super) final_se: usize,
+    pub(super) final_ss: i32,
+    pub(super) final_se: i32,
     pub(super) score: i32,
     pub(super) matches: usize,
     pub(super) mismatches: usize,
@@ -698,8 +732,8 @@ pub(super) fn trace_align_one(
         (
             final_qs as i32,
             final_qe as i32,
-            final_ss,
-            final_se,
+            final_ss as i32,
+            final_se as i32,
             score,
             matches,
             mismatches,
@@ -863,8 +897,8 @@ pub(super) fn trace_build_hsp(
     let Aligned {
         final_qs,
         final_qe,
-        mut final_ss,
-        mut final_se,
+        final_ss,
+        final_se,
         score,
         matches,
         mismatches,
@@ -888,10 +922,13 @@ pub(super) fn trace_build_hsp(
     } else {
         None
     };
-    if start_shift != 0 {
-        final_ss = final_ss.saturating_add(start_shift);
-        final_se = final_se.saturating_add(start_shift);
-    }
+    // The offsets in the whole subject are not negative: the alignment reads from the start's
+    // place in the subject at most `s_off` letters back and `s_avail` forward
+    // (`SeqPointer::left_of`, `right_of`).
+    let in_subject =
+        |v: i32| usize::try_from(v).expect("a traceback alignment lies in its subject");
+    let final_ss = in_subject(final_ss + start_shift);
+    let final_se = in_subject(final_se + start_shift);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
     // ```c

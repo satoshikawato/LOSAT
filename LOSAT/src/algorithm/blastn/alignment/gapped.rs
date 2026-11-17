@@ -629,7 +629,7 @@ pub fn blast_get_offsets_for_gapped_alignment(
 /// `ContextQuery`), and so is the query start returned: for an HSP outside its context the runs
 /// read the concatenated query there (`q = query + q_start`), and only the backward run stops at
 /// the context's first letter (`q-query >= 0`). The reads below are at places in
-/// `query.concat` (`q`), NCBI's offsets plus `base`.
+/// `query.buf` (`q`), NCBI's offsets plus `base`.
 #[allow(clippy::too_many_arguments)]
 pub fn blast_get_start_for_gapped_alignment_nucl(
     query: super::ContextQuery<'_>,
@@ -641,7 +641,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     q_gapped_start: i32,
     s_gapped_start: usize,
 ) -> (i32, usize) {
-    let q_seq = query.concat;
+    let q_seq = query.buf;
     let base = query.start as i32;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3323-3389
     // ```c
@@ -3302,9 +3302,9 @@ mod tests {
         let query = blastna("GGGGGACGT");
         let subject = blastna("ACGTCCCC");
         let query = crate::algorithm::blastn::alignment::ContextQuery {
-            concat: &query,
+            buf: &query,
             start: 0,
-            len: query.len(),
+            len: query.len() as i32,
         };
         let start = blast_get_start_for_gapped_alignment_nucl(query, &subject, 5, 9, 0, 4, 5, 0);
         assert_eq!(start, (7, 2));
@@ -3317,9 +3317,9 @@ mod tests {
         let query = blastna("ACGTACGTAA");
         let subject = blastna("ACGTACGT");
         let query = crate::algorithm::blastn::alignment::ContextQuery {
-            concat: &query,
+            buf: &query,
             start: 0,
-            len: query.len(),
+            len: query.len() as i32,
         };
         let start = blast_get_start_for_gapped_alignment_nucl(query, &subject, 0, 10, 0, 8, 0, 0);
         assert_eq!(start, (4, 4));

@@ -27,7 +27,9 @@ use super::super::alignment::{
     // (the score-only call goes through `x_greedy_prelim`, on the one-byte copy of the subject)
     greedy_gapped_alignment_with_traceback,
     stats_from_edit_ops,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+    // NCBI's `query` of a context and `adjusted_subject` of a traceback (blast_traceback.c:385-389,
+    // 466-469)
+    AdjustedSubject,
     ContextQuery,
     GapAlignScratch,
     GreedyAlignScratch,
@@ -5192,9 +5194,9 @@ struct QueryContext {
 #[inline(always)]
 fn context_query<'a>(concat: &'a [u8], ctx: &QueryContext) -> ContextQuery<'a> {
     ContextQuery {
-        concat,
+        buf: concat,
         start: ctx.query_offset.max(0) as usize,
-        len: ctx.len,
+        len: ctx.len as i32,
     }
 }
 
@@ -9967,7 +9969,7 @@ fn ungapped_subject_stage(
 #[inline(never)]
 fn hsp_outside_query_context(query_id: &[u8]) -> anyhow::Error {
     anyhow::anyhow!(
-        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past the context's end, such as with -xdrop_ungap 1e10) reaches the report, where NCBI BLAST+ stops with an exception or shows coordinates outside the query; LOSAT does not reproduce that yet",
+        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) reaches the report, where NCBI BLAST+ stops with an exception or shows coordinates outside the query; LOSAT does not reproduce that yet",
         String::from_utf8_lossy(query_id)
     )
 }
@@ -16060,6 +16062,107 @@ mod tests {
         assert_eq!(run(12, 30, 0.0), vec![(0, 30, 21, 51, 60, 30)]);
         // Ties keep the piece before the context (`sum > score`): 12 matches each side.
         assert_eq!(run(12, 12, 0.0), vec![(-13, -1, 8, 20, 24, 12)]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-469,503-507,598
+    // ```c
+    //              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+    //                                 query_length, &start_shift);
+    //              adjusted_subject = subject + start_shift;
+    // ...
+    //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+    //                 query_length, adjusted_s_length, gap_align,
+    //                 score_params, q_start, s_start, FALSE, TRUE,
+    //                 fence_hit);
+    // ...
+    //               Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+    // ```
+    // A megablast traceback start more than 3000 letters outside its 30-letter context on a
+    // subject of 100000 letters (remaining-gaps X1b-o review 2 M1). Past the context's end
+    // `AdjustSubjectRange` gives a range shorter than the start (`s_avail` -1001) and the greedy
+    // aligns to the left of the start only; before the context it gives a start of -1001 in the
+    // range and the greedy aligns to the right only, also when the shift passes the subject's end
+    // (range length -1). Each alignment is the run of letters set to match, and its subject
+    // offsets after the shift are those letters' (no HSP is dropped and no slice panics).
+    #[test]
+    fn a_traceback_start_far_outside_its_context_aligns_on_a_long_subject() {
+        // Contexts 0 (5000 letters), 1 (30 A) and 2 (5000), sentinels between them; contexts 0
+        // and 2 cycle through the four letters, so no gap meets a run of matches.
+        let cycle =
+            |n: usize, a: usize| (0..n).map(|i| ((i * 7 + a) % 4) as u8).collect::<Vec<_>>();
+        let concat = [
+            cycle(5000, 1),
+            vec![15],
+            vec![0; 30],
+            vec![15],
+            cycle(5000, 2),
+        ]
+        .concat();
+        let ctx = QueryContext {
+            query_idx: 0,
+            frame: 1,
+            query_offset: 5001,
+            len: 30,
+            masks: Vec::new(),
+        };
+        let query = context_query(&concat, &ctx);
+        // A subject of 100000 C (no match of the A context) with `run` (concatenated query
+        // places) copied at `at`; the traceback from NCBI's start `(q_start, s_start)`, its
+        // range, and the alignment's query offsets, subject offsets after the shift and score.
+        let trace = |q_start: i32, s_start: usize, run: std::ops::Range<usize>, at: usize| {
+            let mut subject = vec![1u8; 100_000];
+            subject[at..at + run.len()].copy_from_slice(&concat[run]);
+            let mut s_adj = s_start as i32;
+            let mut s_len = subject.len() as i32;
+            let shift = adjust_subject_range(&mut s_adj, &mut s_len, q_start, query.len);
+            let start: traceback_hsp::TraceStart = (q_start, s_start, shift, s_len, s_adj);
+            let (qs, qe, ss, se, score, _, ops) = greedy_gapped_alignment_with_traceback(
+                query,
+                traceback_hsp::adjusted_subject(&subject, &start),
+                q_start,
+                s_adj,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                &mut GreedyAlignScratch::new(),
+            )
+            .expect("NCBI aligns from a start outside its context");
+            (
+                (shift, s_len, s_adj),
+                (qs, qe, ss + shift, se + shift, score),
+                ops,
+            )
+        };
+        // Past the end: context 2's first 4000 letters end at offset 4031, copied to end at 4093.
+        assert_eq!(
+            trace(4031, 4093, 5032..9032, 93),
+            (
+                (0, 3092, 4093),
+                (31, 4031, 93, 4093, 4000),
+                vec![GapEditOp::Sub(4000)]
+            )
+        );
+        // Before the start: context 0's last 4000 letters from offset -4001, copied from 50000.
+        assert_eq!(
+            trace(-4001, 50_000, 1000..5000, 50_000),
+            (
+                (51_001, 6030, -1001),
+                (-4001, -1, 50_000, 54_000, 4000),
+                vec![GapEditOp::Sub(4000)]
+            )
+        );
+        // The same start near the subject's end: the shift passes it, and the right extension
+        // reads the subject's last 1000 letters.
+        assert_eq!(
+            trace(-4001, 99_000, 1000..2000, 99_000),
+            (
+                (100_001, -1, -1001),
+                (-4001, -3001, 99_000, 100_000, 1000),
+                vec![GapEditOp::Sub(1000)]
+            )
+        );
     }
 
     // The report refuses a batch whose final hit lists keep an HSP outside its query context

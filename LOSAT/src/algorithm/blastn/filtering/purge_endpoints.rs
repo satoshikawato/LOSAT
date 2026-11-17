@@ -1177,7 +1177,7 @@ pub fn blast_hsp_test_identity_and_length(
     // offsets; output coordinates are adjusted only after pruning. NCBI's `query` is the
     // context's start in the concatenated query (`query_nomask`), read at the HSP's `Int4`
     // offset, outside the context for an HSP outside it (`ContextQuery`).
-    let q_seq = query_nomask.concat;
+    let q_seq = query_nomask.buf;
     let q_offset = query_nomask.at(hit.internal_q_offset_0);
     let s_offset = hit.internal_s_offset_0;
 
@@ -1274,7 +1274,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     // `q` is the context's start in the concatenated query and `qlen` the context's length
     // (`ContextQuery`): the positions below are in the concatenated query, from the HSP's `Int4`
     // offset, which lies outside the context for an HSP outside it.
-    let q_seq = query.concat;
+    let q_seq = query.buf;
     let q_offset = query.at(hit.internal_q_offset_0);
     let s_offset = hit.internal_s_offset_0;
 
@@ -1555,7 +1555,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         let mut qp = best_q_end;
         let mut sp = best_s_end;
         let mut ext = 0usize;
-        while qp < query.start + query.len && sp < s_seq.len() && q_seq[qp] < 4 {
+        while qp < query.at(query.len) && sp < s_seq.len() && q_seq[qp] < 4 {
             if q_seq[qp] == s_seq[sp] {
                 qp += 1;
                 sp += 1;

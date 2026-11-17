@@ -1465,8 +1465,21 @@ most 9 in BLOSUM62).
   volume (the merge, the per-volume hit list size, outfmt 7's `# N hits found` before the cut, volume 0's K). A row
   `rps-gz:rps_mini3v!01.freq` leaves one volume's `.freq` out (`!00.freq`: the first, which NCBI answers with its
   warning and mode 0).
+- `rps_wide` and `rps_wide_ug.loo.gz` (version 5, PS12m): one profile of 133,000 columns (`gnl|CDD|901`: the first
+  fragment of `rps_mini`, 190 columns, tiled 700 times by `rps/build_wide.py tile`), made by makeprofiledb with
+  `-threshold 20 -force`, so that its table holds the nine words that match exactly (700 hits each, one per tile) and
+  the volume has 65 buckets of 2,048 rows: two groups of the scan of `losat rpsblast` and `rpstblastn` (the first
+  of 64 buckets, `RPS_GROUP_BUCKETS`, the second of one bucket, rows 131,072 to 133,000), and each cell's hits lie in both. Its `.freq` is left out (rows with `-comp_based_stats 0`
+  only) and `.rps.gz` is 113 KB (a 15 MB file of one tile's rows repeated). `rps_wide_ug.loo.gz` is its `.loo` with the
+  hits of the nine cells not in ascending order (reversed, rotated by a third, first and last swapped; `build_wide.py
+  ungroup`), which makeprofiledb never writes: rows `db.rps.ungrouped.6` and `db.rpstbn.ungrouped.6` put it in place
+  of `rps_wide.loo` (`rps-gz:rps_wide!loo=rps_wide_ug.loo.gz`), `db.rps.wide.6` and `db.rpstbn.wide.6` search the
+  table as it is; NCBI's bytes are the same for both (the order of a cell is invisible to its scan), LOSAT regroups
+  the cells when it opens the volume. Queries `tests/fasta/rps/wide.faa` (the 190 residues of the fragment, which hit
+  each tile) and `wide.fna` (their back-translation, `build_nq.py`, seed 21).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE][@ALIAS]` with the files
-  `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
+  `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place, inflated when `FILE`
+  ends in `.gz`), `BLASTDB` set
   to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
   run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).

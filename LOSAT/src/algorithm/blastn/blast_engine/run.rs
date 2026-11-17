@@ -8417,7 +8417,7 @@ fn subject_taxonomy(
 fn search_cli(
     mut args: BlastnArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_file: crate::blastinput::input_files::InputFile,
     subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,

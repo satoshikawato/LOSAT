@@ -1312,7 +1312,7 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
     ));
     std::fs::write(&path, text).unwrap();
     let config = ReaderConfig::query("BLASTN", false, false);
-    let read_source = |mut source: FastaInputSource<std::fs::File>| {
+    let read_source = |mut source: FastaInputSource<crate::blastinput::input_files::InputFile>| {
         let mut messages = Vec::new();
         let records = read_all(&mut source, &mut |message: &[u8]| {
             messages.extend_from_slice(message);

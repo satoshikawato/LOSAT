@@ -140,6 +140,7 @@ use anyhow::{Context, Result};
 use crate::blastinput::fasta_reader::{
     FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, ReadError, ReaderConfig,
 };
+use crate::blastinput::input_files::InputFile;
 use crate::blastinput::seq_range::{
     record_interval, Placements, QueryInput, RecordInterval, RecordPlacement, SequenceRange,
 };
@@ -419,7 +420,7 @@ struct State {
 enum Second {
     /// One reader over the file, record after record (`State::read_one`), where the first reading
     /// was not read in parts.
-    Serial(FastaInputSource<File>),
+    Serial(FastaInputSource<InputFile>),
     /// The parts of the first reading (`x_query_scan_par::Span`), each read again by a reader of its
     /// own on the search's threads (`State::read_parts`): `next` is the first part not read.
     #[cfg(all(unix, feature = "parallel"))]
@@ -458,7 +459,7 @@ impl Store {
     /// on them, `x_query_scan_par.rs`).
     pub(super) fn read(
         opening: Opening,
-        source: &mut FastaInputSource<File>,
+        source: &mut FastaInputSource<InputFile>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
         threads: usize,
@@ -472,7 +473,7 @@ impl Store {
     /// the source starts from; the tests cut small parts).
     fn read_with(
         opening: Opening,
-        source: &mut FastaInputSource<File>,
+        source: &mut FastaInputSource<InputFile>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
         in_parts: impl FnOnce(&File, u64) -> Option<super::x_query_scan_par::Scan>,

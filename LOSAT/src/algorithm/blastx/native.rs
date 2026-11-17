@@ -3350,12 +3350,13 @@ mod archive_error_tests {
         assert_eq!(error.chain().count(), 1);
         // Without `-sorthits` the table is written (the score column takes the total's width).
         assert!(write(None).is_ok());
-        // An error of the output stream stays NCBI's write failure.
-        let failure = report_error(io::Error::other("disk full").into());
-        assert_eq!(
-            failure.downcast_ref::<NativeError>().map(|e| e.exit),
-            Some(6)
+        // The output stream's failure stays the stream's (NCBI's end, `ReportStream::finish`).
+        let failure = report_error(
+            io::Error::other(crate::report::ostream::ReportWriteFailure::thrown()).into(),
         );
+        assert!(failure
+            .downcast_ref::<io::Error>()
+            .is_some_and(crate::report::ostream::is_report_write_failure));
     }
 }
 

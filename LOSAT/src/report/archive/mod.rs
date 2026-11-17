@@ -1406,9 +1406,15 @@ mod tests {
         }
         .into();
         let lines = error_lines(&error, false).expect("the output error's lines");
+        // The fault is at the end of the buffer's first write: the document without the
+        // separator, which is a write of its own (`WriteSeparator`).
+        assert_eq!(
+            writer::error_archive_fault(ArchiveEncoding::Text, &lines),
+            356
+        );
         let mut sink = Vec::new();
         write_error_archive(&handle, &lines, &mut sink).unwrap();
-        eprintln!("{}", String::from_utf8_lossy(&sink));
-        assert_eq!(sink.len(), 356);
+        assert_eq!(sink.len(), 357);
+        assert!(sink.ends_with(b"}\n"));
     }
 }

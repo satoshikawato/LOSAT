@@ -1017,8 +1017,9 @@ impl Drop for Core {
 static TIED_STANDARD_OUTPUT: std::sync::Mutex<Option<std::sync::Weak<std::sync::Mutex<Core>>>> =
     std::sync::Mutex::new(None);
 
-/// The application's name in NCBI's posts of the command line's run (`ReportStream::of_cli`), for
-/// the posts of the streams that NCBI writes apart from the report (`write_side_file`).
+/// The application's name in NCBI's posts of the command line's run (`ReportStream::of_cli` in
+/// the command line's process, `cli::is_command_line_run`), for the posts of the streams that NCBI
+/// writes apart from the report (`write_side_file`).
 static RUN_PROGRAM: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
 
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1070,7 +1071,9 @@ impl ReportStream {
                 Site::of_format(number),
             ),
         };
-        *lock(&RUN_PROGRAM) = Some(program);
+        if crate::cli::is_command_line_run() {
+            *lock(&RUN_PROGRAM) = Some(program);
+        }
         stream
     }
 

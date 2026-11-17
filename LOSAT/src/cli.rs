@@ -1692,6 +1692,12 @@ pub fn post_errors_in_run() {
     POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Whether this is the command line's process (`post_errors_in_run`, which `main_entry` alone
+/// calls): its streams post NCBI's texts themselves (`report::ostream::write_side_file`).
+pub fn is_command_line_run() -> bool {
+    POST_ERRORS_IN_RUN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
 // ```c++
 //     } CATCH_ALL(status)

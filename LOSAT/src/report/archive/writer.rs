@@ -953,7 +953,7 @@ pub fn write_error_archive(
 /// archive the document without the ASN.1 text's separator, which is a write of its own).
 #[cold]
 #[inline(never)]
-fn error_archive_fault(encoding: ArchiveEncoding, messages: &[Message]) -> usize {
+pub(super) fn error_archive_fault(encoding: ArchiveEncoding, messages: &[Message]) -> usize {
     let mut buf = Vec::new();
     let mut dropped = std::io::sink();
     let first = match encoding {

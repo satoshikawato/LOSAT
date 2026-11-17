@@ -450,12 +450,12 @@ pub(crate) struct HspAlnVec {
     aln_stop: u32,
 }
 
-/// A row of an `HspAlnVec`: `scrn_lefts`, `scrn_rights` (`TSeqPosList`, read and popped a line
-/// at a time, `HspAlnVec::line`) and `GetSeqAlnRange`.
+/// A row of an `HspAlnVec`: `scrn_lefts` and `scrn_rights` (`TSeqPosList`, whose fronts are
+/// read and popped a line at a time: the entries of line `k` are the `k`-th, `HspAlnVec::line`),
+/// as pairs, and `GetSeqAlnRange`.
 #[derive(Default)]
 struct HspRow {
-    lefts: VecDeque<u32>,
-    rights: VecDeque<u32>,
+    screens: Vec<(u32, u32)>,
     range: (i64, i64),
 }
 
@@ -463,7 +463,8 @@ impl Default for HspAlnVec {
     fn default() -> Self {
         Self {
             ds: Denseg {
-                ids: Vec::new(),
+                // The rows' sequences, which `set` keeps.
+                ids: vec![SeqKey::Query, SeqKey::Subject(0)],
                 lens: Vec::new(),
                 starts: Vec::new(),
                 plus: Vec::new(),
@@ -516,8 +517,6 @@ impl HspAlnVec {
             ));
         }
         let ds = &mut self.ds;
-        ds.ids.clear();
-        ds.ids.extend([SeqKey::Query, SeqKey::Subject(0)]);
         ds.lens.clear();
         ds.lens.extend(lens.iter().map(|&len| len as u32));
         ds.starts.clear();
@@ -534,14 +533,16 @@ impl HspAlnVec {
         ds.plus.clear();
         ds.plus
             .extend([query != Strand::Minus, subject != Strand::Minus]);
-        let map =
-            AlnMap::new_in(&self.ds, std::mem::take(&mut self.map)).map_err(pairwise_internal)?;
+        let map = AlnMap::new_in(&self.ds, &mut self.map).map_err(pairwise_internal)?;
         for (row, data) in self.rows.iter_mut().enumerate() {
-            map.screen_coords(row, line_length as u32, &mut data.lefts, &mut data.rights)?;
+            let screens = &mut data.screens;
+            screens.clear();
+            map.screen_coords(row, line_length as u32, |left, right| {
+                screens.push((left, right));
+            })?;
             data.range = map.seq_aln_range(row);
         }
         self.aln_stop = map.aln_stop();
-        self.map = map.into_buffers();
         Ok(())
     }
 
@@ -551,9 +552,10 @@ impl HspAlnVec {
         self.aln_stop
     }
 
-    /// Row `row` on the line of columns `from..=to`: its first and last position there
-    /// (`seqStarts[row].front()`, `seqStops[row].front()`, 0-based) when the row meets the line
-    /// (`hasSequence`), `None` otherwise; the row's next line follows either way (`pop_front`).
+    /// Row `row` on line `line` (0 for the first), of columns `from..=to`: its first and last
+    /// position there (`seqStarts[row].front()`, `seqStops[row].front()`, 0-based) when the row
+    /// meets the line (`hasSequence`), `None` otherwise. Every line pops each row's fronts
+    /// (`pop_front`), so the fronts of line `line` are the row's `line`-th entries.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1504,1544-1549
     /// ```c++
@@ -574,26 +576,23 @@ impl HspAlnVec {
     ///         }
     /// ```
     /// (A row has an entry for each line: its screens are at most as wide as the lines.)
+    #[inline(always)]
     pub(crate) fn line(
-        &mut self,
+        &self,
         row: usize,
+        line: usize,
         from: i64,
         to: i64,
     ) -> io::Result<Option<(u32, u32)>> {
-        let data = &mut self.rows[row];
+        let data = &self.rows[row];
         let (row_from, row_to) = data.range;
-        let has_sequence = from <= row_to && row_from <= to;
-        let line = if has_sequence {
-            match (data.lefts.front(), data.rights.front()) {
-                (Some(&left), Some(&right)) => Some((left, right)),
-                _ => return Err(pairwise_internal("a row has no coordinates for a line")),
-            }
-        } else {
-            None
-        };
-        data.lefts.pop_front();
-        data.rights.pop_front();
-        Ok(line)
+        if !(from <= row_to && row_from <= to) {
+            return Ok(None);
+        }
+        match data.screens.get(line) {
+            Some(&screen) => Ok(Some(screen)),
+            None => Err(pairwise_internal("a row has no coordinates for a line")),
+        }
     }
 }
 
@@ -1037,8 +1036,9 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     }
     let num_distinct_frames = groups.iter().filter(|indices| !indices.is_empty()).count();
     writer.write_all(b"\n")?;
+    let mut buffers = aln_vec::MapBuffers::default();
     for (group, denseg) in &merged {
-        let mut map = AlnMap::new(denseg).map_err(internal)?;
+        let mut map = AlnMap::new_in(denseg, &mut buffers).map_err(internal)?;
         if num_distinct_frames > 1 {
             writer.write_all(b"For reading frame ")?;
             writer.write_all(K_FRAME_CONVERSION[*group].as_bytes())?;

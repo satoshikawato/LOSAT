@@ -5,6 +5,7 @@
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi};
+use super::serial::asn_text::itoa_i32;
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
@@ -651,17 +652,7 @@ pub fn write_subject_header<W: Write>(
         title.extend_from_slice(subject_title);
     }
     writer.write_all(b"> ")?;
-    let mut do_wrap = false;
-    for (i, &c) in title.iter().enumerate() {
-        if i > 0 && i % 60 == 0 {
-            do_wrap = true;
-        }
-        writer.write_all(&[c])?;
-        if do_wrap && (c.is_ascii_whitespace() || c == 11) {
-            writer.write_all(b"\n")?;
-            do_wrap = false;
-        }
-    }
+    write_wrapped(writer, &title)?;
     writeln!(writer)?;
 
     // Length line
@@ -961,17 +952,7 @@ impl<'a> DatabaseHeading<'a> {
             title
         };
         writer.write_all(b">")?;
-        let mut do_wrap = false;
-        for (i, &c) in heading.iter().enumerate() {
-            if i > 0 && i % 60 == 0 {
-                do_wrap = true;
-            }
-            writer.write_all(&[c])?;
-            if do_wrap && (c.is_ascii_whitespace() || c == 11) {
-                writer.write_all(b"\n")?;
-                do_wrap = false;
-            }
-        }
+        write_wrapped(writer, heading)?;
         writer.write_all(b"\n")?;
         Ok(None)
     }
@@ -1370,7 +1351,7 @@ fn write_alignment_with_sequences<W: Write>(
     // row (showalign.cpp:2495-2521), so they are compared without case, and the protein
     // middle line shows the uppercase residue.
     let write_middle = |writer: &mut W, columns: std::ops::Range<usize>| {
-        let middle: String = q_chars[columns.clone()]
+        let middle = q_chars[columns.clone()]
             .iter()
             .zip(s_chars[columns].iter())
             .map(|(q, s)| {
@@ -1388,9 +1369,8 @@ fn write_alignment_with_sequences<W: Write>(
                 } else {
                     ' ' // Mismatch: show space
                 }
-            })
-            .collect();
-        write!(writer, "{middle}")
+            });
+        write_chars(writer, middle)
     };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1502,1535-1538
@@ -1533,11 +1513,11 @@ fn write_hsp_rows<W: Write>(
             ));
         }
         let mut prev_stop = [0i32; 2];
-        for aln_start in (0..aln_len).step_by(line_length) {
+        for (index, aln_start) in (0..aln_len).step_by(line_length).enumerate() {
             let line = aln_start..(aln_start + line_length).min(aln_len);
             let cur_range = (aln_start as i64, line.end as i64 - 1);
             for (row, label) in ROW_LABELS.into_iter().enumerate() {
-                let Some((left, right)) = rows.line(row, cur_range.0, cur_range.1)? else {
+                let Some((left, right)) = rows.line(row, index, cur_range.0, cur_range.1)? else {
                     continue;
                 };
                 let (start, end) = (left.wrapping_add(1) as i32, right.wrapping_add(1) as i32);
@@ -1554,11 +1534,11 @@ fn write_hsp_rows<W: Write>(
                 if row == 0 {
                     write_spaces(writer, label.len() + 2 + width + 2)?;
                     write_middle(writer, line.clone())?;
-                    writeln!(writer)?;
+                    writer.write_all(b"\n")?;
                 }
                 prev_stop[row] = end;
             }
-            writeln!(writer)?;
+            writer.write_all(b"\n")?;
         }
         Ok(())
     })
@@ -1619,23 +1599,43 @@ fn write_sequence_row<W: Write>(
     write_letters: impl FnOnce(&mut W) -> io::Result<()>,
 ) -> io::Result<()> {
     let empty = (j > 0 && end == prev_stop) || (j == 0 && start == 1 && end == 1);
-    write!(writer, "{label}")?;
-    write_spaces(writer, 2)?;
-    if empty {
-        write_spaces(writer, width + 2)?;
+    let (mut start_text, mut end_text) = (itoa_i32(start), itoa_i32(end));
+    let (start_text, digits, end_text): (&[u8], usize, &[u8]) = if empty {
+        (b"", 0, b"")
     } else {
-        write!(writer, "{start}")?;
-        write_spaces(
-            writer,
-            width + 2 - digit_count(start.unsigned_abs() as usize),
-        )?;
-    }
+        (
+            start_text.text(),
+            digit_count(start.unsigned_abs() as usize),
+            end_text.text(),
+        )
+    };
+    write_joined(
+        writer,
+        &[label.as_bytes(), b"  ", start_text],
+        width + 2 - digits,
+    )?;
     write_letters(writer)?;
-    write_spaces(writer, 2)?;
-    if !empty {
-        write!(writer, "{end}")?;
+    write_joined(writer, &[b"  ", end_text, b"\n"], 0)
+}
+
+/// Writes `parts` and then `spaces` spaces (a row's label, start and the spaces before its
+/// letters, or the spaces, end and line end after them, `write_sequence_row`), in one write
+/// where they fit in a buffer of 128 bytes.
+fn write_joined<W: Write>(writer: &mut W, parts: &[&[u8]], spaces: usize) -> io::Result<()> {
+    let mut buffer = [b' '; 128];
+    let total = parts.iter().map(|part| part.len()).sum::<usize>() + spaces;
+    if total > buffer.len() {
+        for part in parts {
+            writer.write_all(part)?;
+        }
+        return write_spaces(writer, spaces);
     }
-    writeln!(writer)
+    let mut used = 0;
+    for part in parts {
+        buffer[used..used + part.len()].copy_from_slice(part);
+        used += part.len();
+    }
+    writer.write_all(&buffer[..total])
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2491-2493
@@ -1644,12 +1644,79 @@ fn write_sequence_row<W: Write>(
 //     list<CRange<int> > actualSeqloc;
 //     string actualSeq = sequence.substr(start, len);
 // ```
-/// Writes the letters of a chunk of a row kept as `char`s (`write_alignment_with_sequences`).
-fn write_chars<W: Write>(writer: &mut W, letters: &[char]) -> io::Result<()> {
-    for &letter in letters {
-        write!(writer, "{letter}")?;
+/// Writes `letters` (a chunk of a row kept as `char`s, or a middle line,
+/// `write_alignment_with_sequences`) in UTF-8, a buffer of them at a time.
+fn write_chars<W: Write>(
+    writer: &mut W,
+    letters: impl IntoIterator<Item = char>,
+) -> io::Result<()> {
+    let mut buffer = [0u8; 256];
+    let mut used = 0;
+    for letter in letters {
+        if used + letter.len_utf8() > buffer.len() {
+            writer.write_all(&buffer[..used])?;
+            used = 0;
+        }
+        used += letter.encode_utf8(&mut buffer[used..]).len();
     }
-    Ok(())
+    writer.write_all(&buffer[..used])
+}
+
+/// Writes `bytes` (a middle line of rows kept as bytes) a buffer of them at a time.
+fn write_bytes<W: Write>(writer: &mut W, bytes: impl IntoIterator<Item = u8>) -> io::Result<()> {
+    let mut buffer = [0u8; 256];
+    let mut used = 0;
+    for byte in bytes {
+        if used == buffer.len() {
+            writer.write_all(&buffer)?;
+            used = 0;
+        }
+        buffer[used] = byte;
+        used += 1;
+    }
+    writer.write_all(&buffer[..used])
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:340-359
+// ```c++
+// static void s_WrapOutputLine(CNcbiOstream& out, const string& str)
+// {
+//     const int line_len = 60;
+//     bool do_wrap = false;
+//     int length = (int) str.size();
+//     if (length > line_len) {
+//         for (int i = 0; i < length; i ++){
+//             if(i > 0 && i % line_len == 0){
+//                 do_wrap = true;
+//             }
+//             out << str[i];
+//             if(do_wrap && isspace((unsigned char) str[i])){
+//                 out << "\n";
+//                 do_wrap = false;
+//             }
+//         }
+//     } else {
+//         out << str;
+//     }
+// }
+// ```
+/// Writes a subject's heading `text` as `s_WrapOutputLine` does: after the 60th byte, a line ends
+/// at the next space (`isspace`: also a vertical tab, 11), a run of bytes at a time.
+fn write_wrapped<W: Write>(writer: &mut W, text: &[u8]) -> io::Result<()> {
+    let mut do_wrap = false;
+    let mut from = 0;
+    for (i, &c) in text.iter().enumerate() {
+        if i > 0 && i % 60 == 0 {
+            do_wrap = true;
+        }
+        if do_wrap && (c.is_ascii_whitespace() || c == 11) {
+            writer.write_all(&text[from..=i])?;
+            writer.write_all(b"\n")?;
+            from = i + 1;
+            do_wrap = false;
+        }
+    }
+    writer.write_all(&text[from..])
 }
 
 /// Writes the columns `columns` of the row `row` kept as `char`s, its end gaps (the columns
@@ -1661,17 +1728,18 @@ fn write_row_chars<W: Write>(
     span: (usize, usize),
 ) -> io::Result<()> {
     if span.0 <= columns.start && columns.end <= span.1 {
-        return write_chars(writer, &row[columns]);
+        return write_chars(writer, row[columns].iter().copied());
     }
-    for column in columns {
-        let letter = if column < span.0 || column >= span.1 {
-            ' '
-        } else {
-            row[column]
-        };
-        write!(writer, "{letter}")?;
-    }
-    Ok(())
+    write_chars(
+        writer,
+        columns.map(|column| {
+            if column < span.0 || column >= span.1 {
+                ' '
+            } else {
+                row[column]
+            }
+        }),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
@@ -1833,9 +1901,10 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     )
 }
 
+/// The number of decimal digits of `value` (the length of `value.to_string()`).
 #[inline]
 fn digit_count(value: usize) -> usize {
-    value.to_string().len()
+    value.checked_ilog10().map_or(1, |log| log as usize + 1)
 }
 
 /// Width of the start-coordinate column of an alignment block.
@@ -1856,8 +1925,12 @@ fn coordinate_width(hit: &Hit) -> usize {
 
 #[inline]
 fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
-    for _ in 0..count {
-        writer.write_all(b" ")?;
+    const SPACES: [u8; 64] = [b' '; 64];
+    let mut left = count;
+    while left > 0 {
+        let chunk = left.min(SPACES.len());
+        writer.write_all(&SPACES[..chunk])?;
+        left -= chunk;
     }
     Ok(())
 }
@@ -4960,22 +5033,24 @@ fn write_tblastx_alignment<W: Write>(
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| {
-            for (&qc, &sc) in q[columns.clone()].iter().zip(&s[columns]) {
-                let query_residue = qc.to_ascii_uppercase();
-                let mid = if query_residue == sc {
-                    query_residue
-                } else if is_positive_match(
-                    query_residue as char,
-                    sc as char,
-                    config.protein_matrix,
-                ) {
-                    b'+'
-                } else {
-                    b' '
-                };
-                writer.write_all(&[mid])?;
-            }
-            Ok(())
+            let middle = q[columns.clone()]
+                .iter()
+                .zip(&s[columns])
+                .map(|(&qc, &sc)| {
+                    let query_residue = qc.to_ascii_uppercase();
+                    if query_residue == sc {
+                        query_residue
+                    } else if is_positive_match(
+                        query_residue as char,
+                        sc as char,
+                        config.protein_matrix,
+                    ) {
+                        b'+'
+                    } else {
+                        b' '
+                    }
+                });
+            write_bytes(writer, middle)
         },
     )
 }
@@ -6194,7 +6269,7 @@ mod tests {
             rows.set(&starts, &lens, &strands, [1, letters], line_length)
                 .unwrap();
             let last = line_length.min(columns) as i64 - 1;
-            let (_, right) = rows.line(1, 0, last).unwrap().unwrap();
+            let (_, right) = rows.line(1, 0, 0, last).unwrap().unwrap();
             let scrn_width = (line_length as u32).wrapping_mul(letters);
             assert_eq!(
                 i64::from(right) + 1,
@@ -6841,25 +6916,27 @@ fn write_tblastn_alignment<W: Write>(
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| {
-            for (&qc, &sc) in q[columns.clone()].iter().zip(&s[columns]) {
-                // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
-                // the displayed query preserves lowercase masking, while the
-                // protein matrix comparison uses its uppercase residue.
-                let query_residue = qc.to_ascii_uppercase();
-                let mid = if query_residue == sc {
-                    query_residue
-                } else if is_positive_match(
-                    query_residue as char,
-                    sc as char,
-                    config.protein_matrix,
-                ) {
-                    b'+'
-                } else {
-                    b' '
-                };
-                writer.write_all(&[mid])?;
-            }
-            Ok(())
+            let middle = q[columns.clone()]
+                .iter()
+                .zip(&s[columns])
+                .map(|(&qc, &sc)| {
+                    // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
+                    // the displayed query preserves lowercase masking, while the
+                    // protein matrix comparison uses its uppercase residue.
+                    let query_residue = qc.to_ascii_uppercase();
+                    if query_residue == sc {
+                        query_residue
+                    } else if is_positive_match(
+                        query_residue as char,
+                        sc as char,
+                        config.protein_matrix,
+                    ) {
+                        b'+'
+                    } else {
+                        b' '
+                    }
+                });
+            write_bytes(writer, middle)
         },
     )
 }
@@ -7742,18 +7819,20 @@ fn write_blastx_alignment(
             // Both rows may carry lower case (the query's and, with `-lcase_masking`, a
             // `-subject`'s, `blastx/x_soft_subject.rs`), which NCBI applies only when it prints a
             // row (showalign.cpp:2495-2521), so the residues are compared in upper case.
-            for (&qc, &sc) in q[columns.clone()].iter().zip(&s[columns]) {
-                let (qu, su) = (qc.to_ascii_uppercase(), sc.to_ascii_uppercase());
-                let middle = if qu == su {
-                    qu
-                } else if is_positive_match(qu as char, su as char, config.protein_matrix) {
-                    b'+'
-                } else {
-                    b' '
-                };
-                writer.write_all(&[middle])?;
-            }
-            Ok(())
+            let middle = q[columns.clone()]
+                .iter()
+                .zip(&s[columns])
+                .map(|(&qc, &sc)| {
+                    let (qu, su) = (qc.to_ascii_uppercase(), sc.to_ascii_uppercase());
+                    if qu == su {
+                        qu
+                    } else if is_positive_match(qu as char, su as char, config.protein_matrix) {
+                        b'+'
+                    } else {
+                        b' '
+                    }
+                });
+            write_bytes(writer, middle)
         },
     )
 }

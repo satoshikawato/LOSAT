@@ -3845,7 +3845,7 @@ impl XFlatCompressedLookup {
     /// and the presence bits without bounds checks. `CALLER` gives each caller a copy of its own,
     /// as in [`Self::scan_subject`] (`X_BLASTP`, `X_BLASTP_MATRIX`).
     #[inline(never)]
-    pub(crate) unsafe fn x_list_pairs_lean<const CALLER: u8>(
+    pub(crate) unsafe fn x_list_pairs_lean<const CALLER: u8, const PF: bool>(
         &self,
         subject: &[u8],
         subject_length: usize,
@@ -3906,7 +3906,17 @@ impl XFlatCompressedLookup {
             };
             // SAFETY: x_pairs_fit holds (the caller's contract), `next_char` is the letter at
             // s + word length - 1 and `list` has the reserve above, `listed` places of it written.
-            unsafe { x_pairs_loop(sub_w, table, pv.as_ptr(), list, &mut at, s_last) };
+            unsafe {
+                x_pairs_loop::<PF>(
+                    sub_w,
+                    table,
+                    pv.as_ptr(),
+                    self.starts.as_ptr(),
+                    list,
+                    &mut at,
+                    s_last,
+                )
+            };
             XPairsAt {
                 s,
                 listed,
@@ -3942,6 +3952,14 @@ impl XFlatCompressedLookup {
             index = preshift + compressed_char;
             preshift = compressed_reciprocal_divide(index, recip);
             let bit = bit_of(index);
+            if PF {
+                // PROBE (LOSAT_BPF_S16): a cache hint for the slice bound of a listed cell.
+                x_prefetch(
+                    self.starts
+                        .as_ptr()
+                        .wrapping_add((index as u32 & 0u32.wrapping_sub(bit)) as usize),
+                );
+            }
             // SAFETY: each offset adds at most one to `listed`, so `listed` stays below the
             // reserve (as in `for_each_cell`).
             unsafe { list.add(listed).write((s as i32, index as u32)) };
@@ -3979,10 +3997,11 @@ struct XPairsAt {
 /// bits of indices below 15^word length without bounds checks), `at.next_char` is the letter at
 /// `at.s + word length - 1`, and `list` has room for an entry per offset from `at.listed`.
 #[inline(never)]
-unsafe fn x_pairs_loop(
+unsafe fn x_pairs_loop<const PF: bool>(
     sub_w: *const u8,
     table: &[i32; 256],
     pv: *const u32,
+    starts: *const u32,
     list: *mut (i32, u32),
     at: &mut XPairsAt,
     s_last: usize,
@@ -4012,11 +4031,19 @@ unsafe fn x_pairs_loop(
         // SAFETY: s + 1 + word length <= s_last + word length < subject.len() (x_pairs_fit).
         next_char = unsafe { *sub_w.add(s + 1) };
         let bit0 = bit_of(i0);
+        if PF {
+            // PROBE (LOSAT_BPF_S16): a cache hint for the slice bound of a listed cell (cell 0's
+            // for an offset not listed).
+            x_prefetch(starts.wrapping_add((i0 & 0u32.wrapping_sub(bit0)) as usize));
+        }
         // SAFETY: each offset adds at most one to `listed`, within `list`'s room (this function's
         // contract).
         unsafe { list.add(listed).write((s as i32, i0)) };
         listed += bit0 as usize;
         let bit1 = bit_of(i1);
+        if PF {
+            x_prefetch(starts.wrapping_add((i1 & 0u32.wrapping_sub(bit1)) as usize));
+        }
         // SAFETY: as above.
         unsafe { list.add(listed).write((s as i32 + 1, i1)) };
         listed += bit1 as usize;
@@ -5823,7 +5850,7 @@ mod tests {
                 let want_list = cells.clone();
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat.x_list_pairs_lean::<X_BLASTP>(subject, length, &mut lean) };
+                unsafe { flat.x_list_pairs_lean::<X_BLASTP, false>(subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "subject {n}: x_list_pairs_lean's list");
                 assert!(
                     lean.capacity() >= lean.len() + X_STARTS_AHEAD,
@@ -5901,7 +5928,7 @@ mod tests {
                 let want_list = cells.clone();
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat6.x_list_pairs_lean::<X_BLASTP>(&subject, length, &mut lean) };
+                unsafe { flat6.x_list_pairs_lean::<X_BLASTP, false>(&subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "length {length}: list");
                 found += want.len();
                 let got: Vec<(i32, i32)> = lean

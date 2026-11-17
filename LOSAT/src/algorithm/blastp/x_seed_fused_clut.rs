@@ -75,6 +75,10 @@ thread_local! {
 /// [`x_scan_flat_bf`] and the loop with the branch.
 static X_FLAT_SUBJECTS: [std::sync::atomic::AtomicU64; 4] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+// PROBE (LOSAT_BPF_S16, xstats): the lean loop's listed cells, staged hits, and subjects with at
+// most 16 / 64 listed cells.
+static X_S16_COUNTS: [std::sync::atomic::AtomicU64; 4] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 4];
 
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 /// With LOSAT_X_STATS, the `[X_STATS] BPFLAT lean=N fseed=N bf=N branch=N` line at exit: the
@@ -88,6 +92,10 @@ pub(crate) fn x_bp_flat_print_summary() {
         .map(|n| n.load(std::sync::atomic::Ordering::Relaxed));
     if lean + fseed + bf + branch > 0 {
         eprintln!("[X_STATS] BPFLAT lean={lean} fseed={fseed} bf={bf} branch={branch}");
+        let [cells, hits, le16, le64] = X_S16_COUNTS
+            .each_ref()
+            .map(|n| n.load(std::sync::atomic::Ordering::Relaxed));
+        eprintln!("[X_STATS] BPFS16 cells={cells} hits={hits} subjects_le16={le16} le64={le64}");
     }
 }
 
@@ -96,6 +104,23 @@ pub(crate) fn x_bp_flat_print_summary() {
 /// (module header).
 const fn x_fseed_on() -> bool {
     !cfg!(target_arch = "wasm32")
+}
+
+// PROBE (line BPF s16, exp/bpf-s16seed): which arm of the lean loop runs, read once from
+// LOSAT_BPF_S16 (0 = dev's loop; 1 = the first cells' bounds and hits read ahead before the copy;
+// 2 = the scan reads ahead the bound of each listed cell, the copy does not, and the first cells'
+// hits are read ahead before the copy; 3 = 2 without the first cells' hits; 4 = 0 with the copy
+// `x_lean_copy_tight`; 5 = 2 with the copy `x_lean_copy_tight`).
+fn x_bpf_s16_arm() -> u8 {
+    use std::sync::OnceLock;
+    static ARM: OnceLock<u8> = OnceLock::new();
+    *ARM.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S16")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|&a: &u8| a <= 5)
+            .unwrap_or(0)
+    })
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPCLUTSCANBF switch once; it does not change any value
@@ -386,9 +411,105 @@ fn x_stage_test<F>(
 /// the slice bounds of every listed index exist).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
 // `x_scan_two_hit_compressed_flat`)
-#[inline(never)]
+#[inline(always)]
 #[allow(clippy::too_many_arguments)]
 unsafe fn x_scan_flat_lean<const CALLER: u8, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    // SAFETY: this function's contract.
+    unsafe {
+        match x_bpf_s16_arm() {
+            0 => x_scan_flat_lean_arm::<CALLER, 0, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+            1 => x_scan_flat_lean_arm::<CALLER, 1, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+            2 => x_scan_flat_lean_arm::<CALLER, 2, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+            3 => x_scan_flat_lean_arm::<CALLER, 3, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+            4 => x_scan_flat_lean_arm::<CALLER, 4, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+            _ => x_scan_flat_lean_arm::<CALLER, 5, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+        }
+    }
+}
+
+/// PROBE (LOSAT_BPF_S16): [`x_scan_flat_lean`]'s arm `ARM` (see `x_bpf_s16_arm`).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_scan_flat_lean_arm<const CALLER: u8, const ARM: u8, F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -405,9 +526,32 @@ unsafe fn x_scan_flat_lean<const CALLER: u8, F>(
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
     // SAFETY: x_pairs_fit holds (this function's contract).
-    unsafe { lookup.x_list_pairs_lean::<CALLER>(subject, subject_length, &mut cells) };
+    if ARM == 2 || ARM == 3 || ARM == 5 {
+        unsafe { lookup.x_list_pairs_lean::<CALLER, true>(subject, subject_length, &mut cells) };
+    } else {
+        unsafe { lookup.x_list_pairs_lean::<CALLER, false>(subject, subject_length, &mut cells) };
+    }
     let listed = cells.len();
+    crate::utils::xstats::add(&X_S16_COUNTS[0], listed as u64);
+    crate::utils::xstats::add(&X_S16_COUNTS[2], u64::from(listed <= 16));
+    crate::utils::xstats::add(&X_S16_COUNTS[3], u64::from(listed <= 64));
     cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
+    if ARM == 1 || ARM == 2 || ARM == 5 {
+        // PROBE: the read-ahead of the copy's first cells, which its loop does not read ahead.
+        let starts = &lookup.starts[..];
+        let hits = &lookup.hits[..];
+        if ARM == 1 {
+            for &(_, index) in &cells[..listed.min(X_STARTS_AHEAD)] {
+                x_prefetch_ptr(starts.as_ptr().wrapping_add(index as usize));
+                x_prefetch_ptr(starts.as_ptr().wrapping_add(index as usize + 1));
+            }
+        }
+        for &(_, index) in &cells[..listed.min(X_HITS_AHEAD)] {
+            // SAFETY: a listed index is below starts.len() - 1 (x_pairs_fit).
+            let k = unsafe { *starts.get_unchecked(index as usize) } as usize;
+            x_prefetch_ptr(hits.as_ptr().wrapping_add(k));
+        }
+    }
     // The stage made here, not by a helper (#551 measured this code).
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
         Box::new(XStage {
@@ -428,8 +572,20 @@ unsafe fn x_scan_flat_lean<const CALLER: u8, F>(
     loop {
         // SAFETY: the list's indices are below 15^word length < starts.len() - 1 (x_pairs_fit),
         // and `cells` holds X_STARTS_AHEAD entries past them (above).
-        let staged =
-            unsafe { x_lean_copy(&cells, listed, starts, hits, diffs, heres, bf, &mut at) };
+        let staged = if ARM == 4 {
+            unsafe {
+                x_lean_copy_tight::<true>(&cells, listed, starts, hits, diffs, heres, bf, &mut at)
+            }
+        } else if ARM == 5 {
+            unsafe {
+                x_lean_copy_tight::<false>(&cells, listed, starts, hits, diffs, heres, bf, &mut at)
+            }
+        } else if ARM == 2 || ARM == 3 {
+            unsafe { x_lean_copy::<false>(&cells, listed, starts, hits, diffs, heres, bf, &mut at) }
+        } else {
+            unsafe { x_lean_copy::<true>(&cells, listed, starts, hits, diffs, heres, bf, &mut at) }
+        };
+        crate::utils::xstats::add(&X_S16_COUNTS[1], staged as u64);
         x_stage_test(
             &diffs[..staged],
             &heres[..staged],
@@ -475,7 +631,7 @@ struct XLeanAt {
 // `x_scan_two_hit_compressed_flat`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-unsafe fn x_lean_copy(
+unsafe fn x_lean_copy<const PFS: bool>(
     cells: &[(i32, u32)],
     listed: usize,
     starts: &[u32],
@@ -511,9 +667,11 @@ unsafe fn x_lean_copy(
         unsafe {
             let (cell_s, index) = *cells.get_unchecked(n);
             // Cache hints only, as in `for_each_cell`, and the bound after `ahead`'s.
-            let ahead = cells.get_unchecked(n + X_STARTS_AHEAD).1 as usize;
-            x_prefetch_ptr(starts.as_ptr().add(ahead));
-            x_prefetch_ptr(starts.as_ptr().add(ahead + 1));
+            if PFS {
+                let ahead = cells.get_unchecked(n + X_STARTS_AHEAD).1 as usize;
+                x_prefetch_ptr(starts.as_ptr().add(ahead));
+                x_prefetch_ptr(starts.as_ptr().add(ahead + 1));
+            }
             let later = cells.get_unchecked(n + X_HITS_AHEAD).1 as usize;
             x_prefetch_ptr(
                 hits.as_ptr()
@@ -526,6 +684,118 @@ unsafe fn x_lean_copy(
         n += 1;
     }
     *at = XLeanAt { n, k, end, s };
+    staged
+}
+
+/// PROBE (LOSAT_BPF_S16 arms 4 and 5): [`x_lean_copy`] where a cell of at most [`X_RUN`] hits
+/// whose two halves lie in `hits` is staged in one step without the tests of a run (the loop stops
+/// while the stage has room for a whole run), and a longer cell (or one of the last hits) takes the
+/// runs of `x_lean_copy`.
+///
+/// # Safety
+///
+/// As [`x_lean_copy`].
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_lean_copy_tight<const PFS: bool>(
+    cells: &[(i32, u32)],
+    listed: usize,
+    starts: &[u32],
+    hits: &[i32],
+    diffs: &mut [u32],
+    heres: &mut [u32],
+    bf: XHitBf,
+    at: &mut XLeanAt,
+) -> usize {
+    assert!(cells.len() >= listed + X_STARTS_AHEAD);
+    assert!(diffs.len() >= X_STAGE_CAP && heres.len() >= X_STAGE_CAP);
+    let (mut n, mut k, mut end, s) = (at.n, at.k, at.end, at.s);
+    let dp = diffs.as_mut_ptr();
+    let hp = heres.as_mut_ptr();
+    let mut staged = 0usize;
+    // The rest of the cell where the last call stopped.
+    let here = bf.here(s);
+    while k < end {
+        if staged + X_RUN > X_STAGE_CAP {
+            *at = XLeanAt { n, k, end, s };
+            return staged;
+        }
+        // SAFETY: staged + X_RUN <= X_STAGE_CAP, the length of both arrays (above).
+        let take = unsafe { x_lean_run(hits, k, end, s, here, dp, hp, staged) };
+        staged += take;
+        k += take;
+    }
+    let cp = cells.as_ptr();
+    let sp = starts.as_ptr();
+    let hp_hits = hits.as_ptr();
+    // A cell of at most X_RUN hits that ends at or before `tail` reads both halves within `hits`
+    // (each read ends at or before its end + 3).
+    let tail = hits.len().saturating_sub(3);
+    while n < listed && staged <= X_STAGE_CAP - X_RUN {
+        // SAFETY: n + X_STARTS_AHEAD < cells.len() (asserted above; X_HITS_AHEAD <=
+        // X_STARTS_AHEAD), and every index in `cells` is below starts.len() - 1 (the contract).
+        let (cell_s, k0, e0) = unsafe {
+            let (cell_s, index) = *cp.add(n);
+            if PFS {
+                let ahead = (*cp.add(n + X_STARTS_AHEAD)).1 as usize;
+                x_prefetch_ptr(sp.add(ahead));
+                x_prefetch_ptr(sp.add(ahead + 1));
+            }
+            let later = (*cp.add(n + X_HITS_AHEAD)).1 as usize;
+            x_prefetch_ptr(hp_hits.wrapping_add(*sp.add(later) as usize));
+            (
+                cell_s,
+                *sp.add(index as usize) as usize,
+                *sp.add(index as usize + 1) as usize,
+            )
+        };
+        n += 1;
+        let count = e0.wrapping_sub(k0);
+        let here = bf.here(cell_s);
+        if count <= X_RUN && e0 <= tail {
+            // SAFETY: the reads end at or before e0 + 3 <= hits.len() (tail), and the places
+            // staged..staged + X_RUN <= X_STAGE_CAP (the loop's test).
+            unsafe {
+                let lo = std::ptr::read_unaligned(hp_hits.add(k0).cast::<[i32; 4]>());
+                let hi_at = k0 + 4 * usize::from(count > 4);
+                let hi = std::ptr::read_unaligned(hp_hits.add(hi_at).cast::<[i32; 4]>());
+                std::ptr::write_unaligned(
+                    dp.add(staged).cast::<[u32; 4]>(),
+                    lo.map(|q| q.wrapping_sub(cell_s) as u32),
+                );
+                std::ptr::write_unaligned(
+                    dp.add(staged + 4).cast::<[u32; 4]>(),
+                    hi.map(|q| q.wrapping_sub(cell_s) as u32),
+                );
+                std::ptr::write_unaligned(hp.add(staged).cast::<[u32; X_RUN]>(), [here; X_RUN]);
+            }
+            staged += count;
+            continue;
+        }
+        k = k0;
+        end = e0;
+        while k < end {
+            if staged + X_RUN > X_STAGE_CAP {
+                *at = XLeanAt {
+                    n,
+                    k,
+                    end,
+                    s: cell_s,
+                };
+                return staged;
+            }
+            // SAFETY: as above.
+            let take = unsafe { x_lean_run(hits, k, end, cell_s, here, dp, hp, staged) };
+            staged += take;
+            k += take;
+        }
+    }
+    *at = XLeanAt {
+        n,
+        k: 0,
+        end: 0,
+        s: 0,
+    };
     staged
 }
 
@@ -969,7 +1239,7 @@ mod tests {
         assert!(flat.x_pairs_fit(&subject, length));
         let mut cells = Vec::new();
         // SAFETY: x_pairs_fit holds (asserted above).
-        unsafe { flat.x_list_pairs_lean::<X_BLASTP>(&subject, length, &mut cells) };
+        unsafe { flat.x_list_pairs_lean::<X_BLASTP, false>(&subject, length, &mut cells) };
         assert!(
             cells.iter().any(|&(_, index)| index as usize == last),
             "the subject reaches it"

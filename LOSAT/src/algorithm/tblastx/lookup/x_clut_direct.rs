@@ -797,70 +797,86 @@ struct XPairGroup {
 /// (`row_a = matrix_sorted[a]`, `row_b = matrix_sorted[b]`) in the order of `row_a[i] + row_b[j]`
 /// descending, then of k = i * alphabet + j ascending (the stable sort by sum of the pairs in k
 /// order), with the codes `matrix_sorted_char[a][i] + alphabet * matrix_sorted_char[b][j]` of their
-/// two compressed letters (below alphabet^2), in groups of 16 (`XPairGroup`), each made when first
-/// read: the pairs a node reaches are a prefix of the row (`XWords::neighbors_paired`), and most
-/// nodes read the first group only.
+/// two compressed letters (below alphabet^2), in groups of 16 (`XPairGroup`), made in order as they
+/// are first read: the pairs a node reaches are a prefix of the row (`XWords::neighbors_paired`),
+/// and most nodes read the first group only.
 struct XPairRow {
     table: &'static XPairTable,
     a: u8,
     b: u8,
     groups: [std::sync::OnceLock<XPairGroup>; X_PAIR_GROUPS],
+    /// The merge of `XPairRow::make` after the groups made (`next`, see there; `made` groups).
+    merge: Mutex<XPairMerge>,
+}
+
+/// The state of a row's merge between its groups.
+struct XPairMerge {
+    next: [u8; X_PAIR_ALPHABET],
+    made: u8,
 }
 
 impl XPairRow {
-    /// Group `g`: the row's first (g + 1) * 16 pairs taken in order from the two sorted rows (a
-    /// merge of the rows i of the pairs (i, j), j ascending), the last 16 of them kept. `next[i]`
-    /// is the rank j of row i's next pair. Row i's next pair is the next of the merge only when row
-    /// i - 1 has gone past j (`next[i - 1] > next[i]`): else (i - 1, next[i - 1]) has a sum at least
-    /// as large and comes first on a tie (the smaller k), so `next` never increases with i and the
-    /// candidates are the rows up to the first with `next[i] == 0`; among them the largest sum, the
-    /// smallest i on a tie, is the next pair.
+    /// Group `g` (and the groups before it that are not made yet): the merge takes the row's pairs in
+    /// order from the two sorted rows (the rows i of the pairs (i, j), j ascending), continuing from
+    /// the last group made. `next[i]` is the rank j of row i's next pair. Row i's next pair is the
+    /// next of the merge only when row i - 1 has gone past j (`next[i - 1] > next[i]`): else (i - 1,
+    /// next[i - 1]) has a sum at least as large and comes first on a tie (the smaller k), so `next`
+    /// never increases with i and the candidates are the rows up to the first with `next[i] == 0`;
+    /// among them the largest sum, the smallest i on a tie, is the next pair. One thread at a time
+    /// (`merge`); a group is read only once it is set.
     #[cold]
     #[inline(never)]
-    fn group(&self, g: usize) -> XPairGroup {
+    fn make(&self, g: usize) -> &XPairGroup {
+        let mut merge = self.merge.lock().unwrap_or_else(PoisonError::into_inner);
         let table = self.table;
         let alphabet = table.alphabet;
         let (a, b) = (usize::from(self.a), usize::from(self.b));
         let row_a = &table.matrix_sorted[a][..alphabet];
         let row_b = &table.matrix_sorted[b][..alphabet];
-        let mut next = [0usize; X_PAIR_ALPHABET];
-        let mut group = XPairGroup {
-            sums: [i16::MIN; X_PAIR_GROUP],
-            codes: [0; X_PAIR_GROUP],
-        };
-        let first = g * X_PAIR_GROUP;
-        let end = (first + X_PAIR_GROUP).min(alphabet * alphabet);
-        for rank in 0..end {
-            let (mut best, mut best_sum) = (0usize, i32::MIN);
-            for i in 0..alphabet {
-                let j = next[i];
-                if j < alphabet && (i == 0 || next[i - 1] > j) {
-                    let sum = row_a[i] + row_b[j];
-                    if sum > best_sum {
-                        best = i;
-                        best_sum = sum;
+        while usize::from(merge.made) <= g {
+            let first = usize::from(merge.made) * X_PAIR_GROUP;
+            let end = (first + X_PAIR_GROUP).min(alphabet * alphabet);
+            let mut group = XPairGroup {
+                sums: [i16::MIN; X_PAIR_GROUP],
+                codes: [0; X_PAIR_GROUP],
+            };
+            for slot in 0..end.saturating_sub(first) {
+                let (mut best, mut best_sum) = (0usize, i32::MIN);
+                for i in 0..alphabet {
+                    let j = usize::from(merge.next[i]);
+                    if j < alphabet && (i == 0 || usize::from(merge.next[i - 1]) > j) {
+                        let sum = row_a[i] + row_b[j];
+                        if sum > best_sum {
+                            best = i;
+                            best_sum = sum;
+                        }
+                    }
+                    if j == 0 {
+                        break;
                     }
                 }
-                if j == 0 {
-                    break;
-                }
-            }
-            let j = next[best];
-            next[best] = j + 1;
-            if rank >= first {
+                let j = usize::from(merge.next[best]);
+                merge.next[best] += 1;
                 // `x_pair_table` checked the sums of the letters inside the compressed alphabet,
                 // the only rows `XWords` reads.
                 assert!(
                     best_sum > i32::from(i16::MIN) && best_sum <= i32::from(i16::MAX),
                     "a pair sum {best_sum} of letters ({a}, {b}) outside the pair table's i16"
                 );
-                group.sums[rank - first] = best_sum as i16;
-                group.codes[rank - first] = table.matrix_sorted_char[a][best]
+                group.sums[slot] = best_sum as i16;
+                group.codes[slot] = table.matrix_sorted_char[a][best]
                     + alphabet as u8 * table.matrix_sorted_char[b][j];
             }
+            let at = usize::from(merge.made);
+            assert!(
+                self.groups[at].set(group).is_ok(),
+                "a pair group made twice"
+            );
+            merge.made += 1;
+            X_PAIR_GROUPS_MADE.fetch_add(1, Ordering::Relaxed);
         }
-        X_PAIR_GROUPS_MADE.fetch_add(1, Ordering::Relaxed);
-        group
+        drop(merge);
+        self.groups[g].get().expect("made above")
     }
 
     /// Gives `sink` the cells `partial + code * scale` of the row's pairs with a sum of at least
@@ -875,7 +891,10 @@ impl XPairRow {
         }
         let key = key.max(i32::from(i16::MIN) + 1) as i16;
         for (g, group) in self.groups.iter().enumerate() {
-            let group = group.get_or_init(|| self.group(g));
+            let group = match group.get() {
+                Some(group) => group,
+                None => self.make(g),
+            };
             let reached: usize = group.sums.iter().map(|&sum| usize::from(sum >= key)).sum();
             sink.many_coded(partial, scale, &group.codes[..reached]);
             if reached < X_PAIR_GROUP {
@@ -889,7 +908,7 @@ impl XPairRow {
 // for one compressed matrix; it changes no value NCBI computes.
 /// The rows (`XPairRow`) of every pair of query letters for a compressed matrix (`alphabet`,
 /// `matrix_sorted` and `matrix_sorted_char` of its `CompressedNeighborInfo`), each made when first
-/// read (`XPairTable::row`, 792 bytes, its groups made as they are read): a search reads the rows
+/// read (`XPairTable::row`, about 820 bytes, its groups made as they are read): a search reads the rows
 /// of the letter pairs of its query words, at most the 23 x 23 pairs of the letters inside the
 /// 15-letter alphabet (0.40 MiB), and 12.5 KiB for the table's `OnceLock`s.
 struct XPairTable {
@@ -910,6 +929,10 @@ impl XPairTable {
                 a: a as u8,
                 b: b as u8,
                 groups: [const { std::sync::OnceLock::new() }; X_PAIR_GROUPS],
+                merge: Mutex::new(XPairMerge {
+                    next: [0; X_PAIR_ALPHABET],
+                    made: 0,
+                }),
             })
         })
     }
@@ -4928,11 +4951,9 @@ mod tests {
                         }
                         // The order of the stable sort by sum of the pairs in k order.
                         want.sort_by(|x, y| y.0.cmp(&x.0));
-                        // Every group, made in reverse order (a group does not depend on the
-                        // others), then read as `emit` reads them.
-                        for (g, group) in row.groups.iter().enumerate().rev() {
-                            group.get_or_init(|| row.group(g));
-                        }
+                        // Every group (the last makes the ones before it), then read as `emit`
+                        // reads them.
+                        row.make(X_PAIR_GROUPS - 1);
                         let mut got: Vec<(i32, u32)> = Vec::new();
                         for group in &row.groups {
                             let group = group.get().expect("made above");

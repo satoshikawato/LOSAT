@@ -259,12 +259,6 @@ impl BlastpDatabase {
         self.statistics().setup_count
     }
 
-    /// LOSAT's refusal of statistics of 0 sequences for a search of `program` without the
-    /// Gumbel block (`shared::check_statistics_count`).
-    pub(super) fn check_statistics_count(&self, program: &str) -> Result<()> {
-        shared::check_statistics_count(&self.db, program)
-    }
-
     /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(super) fn first_oid_read_fails(&self) -> bool {

@@ -443,18 +443,6 @@ impl RpsUnits {
         self.adjusted.map(|(length, _)| length)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (quoted at
-    // `stats::setup::setup_subject_length`)
-    /// LOSAT's refusal of a unit whose setup counts 0 sequences of a positive total in a search
-    /// without the Gumbel block (`gumbel` false: `-searchsp`, `OLD_FSC`), for every unit
-    /// (`RpsUnit::check_setup_count`): rpsblast's, before any output where a query of the run is
-    /// valid (`blastp::blast_engine::call_setup::setup_fails`).
-    pub(crate) fn check_setup_counts(&self, gumbel: bool, program: &str) -> Result<()> {
-        self.units
-            .iter()
-            .try_for_each(|unit| unit.check_setup_count(gumbel, program))
-    }
-
     /// Whether the setup of a unit fails with NCBI's "The average subject length is too short"
     /// (`RpsUnit::setup_subject_length`, `gumbel`: whether the search has the Gumbel block).
     pub(crate) fn subject_length_too_short(&self, gumbel: bool) -> bool {
@@ -474,9 +462,10 @@ impl RpsUnit {
     /// profiles, and `DbSeqNum` does not reach the division (D1a4-7). The division is the one of
     /// `setup_subject_length`, which NCBI's setup of the unit makes only for a batch with a valid
     /// query (`CLocalBlast::Run`'s `CheckInternalData` before it): rpstblastn checks it at the
-    /// first such batch that searches the unit (`search_window`), rpsblast once before any
-    /// output where a query of the run is valid (`RpsUnits::check_setup_counts`; review C of
-    /// D1a-4, MF1 and N2).
+    /// first such batch that searches the unit (`search_window`). rpsblast refuses it once before
+    /// any output where a query of the call is valid, by the setup's count, which is the first
+    /// unit's, the one that can count 0 (`blastp::blast_engine::call_setup::setup_count_refused`;
+    /// review C of D1a-4, MF1 and N2; review D, N2).
     pub(crate) fn check_setup_count(&self, gumbel: bool, program: &str) -> Result<()> {
         if !gumbel && self.setup_total > 0 && self.setup_count == 0 {
             return Err(crate::algorithm::common::database::refusal(
@@ -1507,8 +1496,8 @@ mod tests {
     #[test]
     fn counts_of_zero_and_concatenated_lengths_are_refused() {
         let zero = units(vec![unit(560, (560, 0), 0, 560)], None, 0);
-        assert!(zero.check_setup_counts(true, "RPSBLAST").is_ok());
-        assert!(zero.check_setup_counts(false, "RPSBLAST").is_err());
+        assert!(zero.first().check_setup_count(true, "RPSBLAST").is_ok());
+        assert!(zero.first().check_setup_count(false, "RPSBLAST").is_err());
         // The average of `NSEQ 1000` over 560 letters is 0 without the Gumbel block: NCBI's "too
         // short" (review A of D1a-4, MF5); the shortest length 10 with it.
         let short = units(vec![unit(560, (560, 1000), 1000, 1560)], None, 0);

@@ -930,32 +930,39 @@ pub(super) fn db_extent<'a>(
 // `BlastScoreBlkCheck`, core/blast_stat.c:853-877: 1 where no context has a Karlin block, so a
 // batch without a valid query never reaches `BLAST_GapAlignSetUp`, core/blast_setup.c:969-975,
 // whose average divides by the count.)
-/// LOSAT's refusal of a setup that divides by 0 sequences: without the Gumbel block (`-searchsp`,
-/// `OLD_FSC`) NCBI's shortest subject length is the statistics' average (blast_setup.c:975,
-/// quoted at `setup_fails`), whose division by a count of 0 crashes (SIGFPE, DECISIONS 14 of line
-/// RG). `setup_fails` calls it only where a query of the run is valid: a run of invalid queries
-/// only is reported as NCBI reports it (exit 0; review C of line RG D1a-4, MF1: probes e1 and
-/// e6). The one owner of blastp's, psiblast's and rpsblast's check (rpstblastn:
-/// `RpsUnit::check_setup_count` per unit in its batches, the same gate).
+/// Whether LOSAT refuses a setup that divides by 0 sequences (`check_setup_count`): without the
+/// Gumbel block (`args.old_fsc`: `-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
+/// statistics' average (blast_setup.c:975, quoted at `setup_fails`), whose division by a count of
+/// 0 crashes (SIGFPE, DECISIONS 14 of line RG). `setup_count` is the setup's count of a search of
+/// `database` (`BlastpDbExtent::setup_numbers`): its statistics' count (0 also where they read 0
+/// sequences of a positive total, `SeqDb::statistics_count_is_zero`, or a database without OIDs
+/// counts none of no letters), or an RPS search's first unit's, which is the one unit that can
+/// count 0 (`RpsUnit::check_setup_count`: a unit of one volume with an alias file's `NSEQ 0`; the
+/// bare volumes of several count their profiles), so this one test is every unit's (review D of
+/// line RG D1a-4, N2). The one test of the refusal: `check_setup_count` makes it in the call, and
+/// the block search (`x_query_block_plan`) leaves a search it would refuse to the call of all
+/// queries, which refuses before any output (review D of D1a-4, SF1).
+pub(super) fn setup_count_refused(
+    args: &ResolvedBlastpArgs,
+    database: Option<&BlastpDatabase>,
+    setup_count: i32,
+) -> bool {
+    args.old_fsc && database.is_some() && setup_count == 0
+}
+
+/// LOSAT's refusal of `setup_count_refused`. `setup_fails` makes it only where a query of the call
+/// is valid: a call of invalid queries only is reported as NCBI reports such a batch (exit 0;
+/// review C of line RG D1a-4, MF1: probes e1 and e6). A call is NCBI's query batches of the run
+/// (blastp and rpsblast; blastp's block search runs a block of them as a call only where this
+/// test passes) or one query's round (psiblast, which searches one query per batch). The one owner
+/// of blastp's, psiblast's and rpsblast's check (rpstblastn: `RpsUnit::check_setup_count` per unit
+/// in its batches, the same gate).
 fn check_setup_count(
     args: &ResolvedBlastpArgs,
     database: Option<&BlastpDatabase>,
-    rps_units: Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
     setup_count: i32,
 ) -> Result<()> {
-    let Some(database) = database.filter(|_| args.old_fsc) else {
-        return Ok(());
-    };
-    // RPS-BLAST: each unit's setup divides by its own count (`RpsUnits::check_setup_counts`;
-    // over several volumes a volume counts its profiles, probe p7 of line RG D1a-4).
-    match rps_units {
-        Some(units) => units.check_setup_counts(false, args.app.name())?,
-        None => database.check_statistics_count(args.app.name())?,
-    }
-    // A database whose setup counts no sequence of no letters gives the same division by 0:
-    // the same refusal (DECISIONS 14 of line RG), not a panic. (Only a database without OIDs: an
-    // RPS unit of a total of 0 or below counts OID 0, 1.)
-    if setup_count == 0 {
+    if setup_count_refused(args, database, setup_count) {
         return Err(crate::algorithm::common::database::refusal(
             crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
             args.app.name(),
@@ -980,8 +987,8 @@ fn check_setup_count(
 /// `stats::setup::SUBJECT_LENGTH_TOO_SHORT` (`setup_subject_length` of the extent's setup
 /// numbers; rpsblast: every unit's, `RpsUnit::setup_subject_length`, one owner with rpstblastn's,
 /// the first unit's numbers being the set-up's), after LOSAT's refusal of its division by a count
-/// of 0 (`check_setup_count`): both only where a query of the run is valid (`contexts`), as NCBI
-/// meets them (`CLocalBlast::Run`, quoted at `check_setup_count`).
+/// of 0 (`check_setup_count`): both only where a query of the call is valid (`contexts`), as NCBI
+/// meets them in a batch (`CLocalBlast::Run`, quoted at `setup_count_refused`).
 pub(super) fn setup_fails(
     args: &ResolvedBlastpArgs,
     database: Option<&BlastpDatabase>,
@@ -992,7 +999,7 @@ pub(super) fn setup_fails(
         return Ok(false);
     }
     let (setup_total, setup_count) = extent.setup_numbers;
-    check_setup_count(args, database, extent.rps_units, setup_count)?;
+    check_setup_count(args, database, setup_count)?;
     let gumbel = !args.old_fsc;
     Ok(extent.rps_units.map_or_else(
         || {

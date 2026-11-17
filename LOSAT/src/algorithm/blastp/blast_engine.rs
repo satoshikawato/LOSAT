@@ -8093,7 +8093,8 @@ fn x_bp_encode_block_subjects(
 // outfmt 5's names too, `x_query_blocks::x_block_xml_subjects_allowed` and
 // `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
-// (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
+// (`blastp_database_search_space`, with `-db` or `-dbsize`), no database whose setup count the
+// reference path refuses (`call_setup::setup_count_refused`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
 // search would have written the reports of the blocks before. Both lookup tables
 // (`AaLookupTable`, and `CompressedAaLookupTable` of blastp-fast) take it.
@@ -8231,9 +8232,20 @@ fn x_query_block_plan(
                 return None;
             }
         }
-        // A database without sequences fails in the first batch (`run_call`).
+        // A database without sequences fails in the first batch (`run_call`). A setup count that
+        // LOSAT refuses (`call_setup::setup_count_refused`, with the setup count of a search
+        // without RPS, `db_extent`'s: the statistics' count) is refused by the call that holds a
+        // valid query: the call of all queries refuses before any output, a block only after the
+        // reports of the blocks before, whose queries were invalid (review D of line RG D1a-4,
+        // SF1).
         BlastpSubjectSource::Database(database) => {
-            if database.num_sequences() == 0 {
+            if database.num_sequences() == 0
+                || call_setup::setup_count_refused(
+                    args,
+                    Some(database),
+                    database.statistics_num_sequences(),
+                )
+            {
                 return None;
             }
         }

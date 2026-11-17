@@ -689,7 +689,7 @@ pub(crate) fn later_requests_refusal(
 /// following profiles of one Seq-align id as one subject: `formatter_kept`; outfmt 0's
 /// descriptions and alignments are within it), after outfmt 7 has counted the HSPs of the whole
 /// list. A profile left out among them is LOSAT's refusal of the batch (PD-LOSAT-NCBI-DEFECTS
-/// 1.42, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one
+/// 1.43, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one
 /// text for `rpsblast` and `rpstblastn` (`program`). A profile left out past the cut (several
 /// volumes, whose merged lists are longer than the hit list size) leaves its list: nothing reads
 /// it again but its header, which NCBI's Seq-aligns read by OID (a header file that fails there

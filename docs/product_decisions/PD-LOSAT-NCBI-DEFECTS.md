@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.42
+- Version: 1.43
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -125,7 +125,11 @@
   loader, which keeps the ids of what the run loaded, finds it first; a directory in place of a
   version 4 ISAM file is no ISAM, as NCBI's; line DBID item loadord, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07);
-  1.42 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
+  1.42 2026-11-17 (a version 4 lookup returns at the first volume that holds the id, as NCBI's, so
+  an ISAM file of a later volume that does not open stops none of its lookups; refused, where
+  LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.43 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
   `FIRST_OID` and `LAST_OID` leave out, which NCBI's report does not find, refused in every format,
   within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37, rule 3,
   where it stops with a null pointer exception: reported sequences only; and the explicit
@@ -135,7 +139,9 @@
   file's last memory page, precedent 1.30; line RG item D1a-4, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; fix round 1 of D1a-4: the reported profiles only,
   the refusals at the batch where NCBI's engine meets them, the row after the profiles read as
-  NCBI reads it, DECISIONS D1a4-9)
+  NCBI reads it, DECISIONS D1a4-9; fix round 2: following profiles of one Seq-id count as one
+  subject in the cut, and a reported profile out of the range is written as the included copy of
+  its record that NCBI's report finds by its Seq-id)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1024,7 +1030,14 @@ masked). Line NP item M4a-2c.
   that volume and go on to the next (review 4 of item loadord: NCBI exit 0 where a later volume
   holds the id, 255 where none does; LOSAT stopped with NCBI's `Error: Could not open input
   file`, which NCBI writes for a regular file that does not open). Where its index or data file
-  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses.
+  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses. NCBI's
+  lookup (`SeqidToOid`, `SeqidToOids` without `multi`) returns at the first OID it finds, in the
+  order of the volumes, so an ISAM file of a later volume that does not open (a regular file of
+  mode 000) stops a lookup only of an id that no volume before it holds in the search's list
+  (review 3 of item loadord, H3, and item v4late: NCBI exit 0 where LOSAT stopped with `Error:
+  Could not open input file`); LOSAT, which also lists the other sequences that hold the id,
+  refuses where that list fails on such a file and a report shows what it can change
+  (`PD-LOSAT-DATABASE-SEARCH`).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 
@@ -1330,7 +1343,7 @@ masked). Line NP item M4a-2c.
   15,000 bits of `-xdrop_ungap` or more).
 
 - RPSBLAST and RPSTBLASTN over an alias file whose `FIRST_OID` and `LAST_OID` leave out profiles of
-  its volumes (version 1.42, 2026-11-17, line RG item D1a-4, Owner-delegated): NCBI's RPS search
+  its volumes (version 1.43, 2026-11-17, line RG item D1a-4, Owner-delegated): NCBI's RPS search
   ignores the range (its lookup table holds every profile of a volume, `blast_aalookup.c:182-184`;
   the volumes of several are searched bare), while its formatter opens the `-db` name with its keys,
   whose `SeqidToOids` keeps only the OIDs of the range (`seqdbimpl.cpp:1414-1418`): a hit of a
@@ -1359,7 +1372,7 @@ masked). Line NP item M4a-2c.
   `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`).
 
 - RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
-  concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (version 1.42,
+  concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (version 1.43,
   2026-11-17, line RG item D1a-4 part B, Owner-delegated; precedent 1.30): NCBI's gapped stage roots
   its interval tree at `[0, Lc + 1]` (`blast_gapalign.c:3830-3831`) while the HSPs of later profiles
   lie past it. A region (the profile's offset plus the HSP's range) that starts past `R = Lc + 1`
@@ -1381,7 +1394,7 @@ masked). Line NP item M4a-2c.
 
 - RPSBLAST and RPSTBLASTN over one volume whose concatenated length `Lc` is longer than the profiles
   (an alias file's `LENGTH` and `NSEQ`, or `-db "a x"` with an alias `a` of the volume `x`, which counts
-  it twice; version 1.42, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): the ungapped
+  it twice; version 1.43, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): the ungapped
   extension to the right runs to `MIN(subject->length - s_off, Lc - q_off)` (`aa_ungapped.c:948`),
   past the rows. The last profile's sentinel row (`-BLAST_SCORE_MAX`, `makeprofiledb.cpp:1166-1167`)
   stops it unless the X-drop is above that score; past it NCBI reads the row pointer after the last
@@ -1404,7 +1417,7 @@ masked). Line NP item M4a-2c.
   `db.rps.1v.n4.over.6`).
 
 - RPSBLAST and RPSTBLASTN with a concatenated length `Lc` whose diagonal table never stops growing
-  (version 1.42, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_BlastDiagTableNew`
+  (version 1.43, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_BlastDiagTableNew`
   (`blast_extend.c:52-57`) doubles an `Int4` from 1 while it is below `Lc` plus the word window; past
   a sum of 2^30 it doubles to 2^31 (`INT_MIN`) and then to 0 and stays there (an alias file's
   `LENGTH` 2^30 over one volume: no end, timeout); a sum above `INT4_MAX` (`LENGTH` 2^31 - 4 and
@@ -1417,7 +1430,7 @@ masked). Line NP item M4a-2c.
   `db.rps.empty.l2p31`, `db.rps.nolet.l2p30`, `db.rpstbn.nolet.l2p30`; review B of D1a-4, MF1).
 
 - RPSBLAST and RPSTBLASTN over one volume whose `LENGTH` and `NSEQ` sum above `INT4_MAX` (version
-  1.42, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_RPSPreliminarySearchEngine`
+  1.43, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_RPSPreliminarySearchEngine`
   returns -3 (`blast_engine.c:1131-1135`) after `RPSPsiMatrixAttach` gave the score block the
   lookup table's profiles, and the score block's free frees them again (`double free or corruption`,
   SIGABRT, exit status -6 after outfmt 0's prolog; `LENGTH` 2^31). LOSAT refuses (exit 1; fixture row

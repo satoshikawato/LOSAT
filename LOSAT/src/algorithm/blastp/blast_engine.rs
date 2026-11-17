@@ -3770,6 +3770,34 @@ fn displayed_letter(letter: char, input: Option<u8>) -> char {
     }
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPRECOUNTO switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPRECOUNTO): strict set (on unless `0`). `recount_shown_identities` tests
+/// each query's letters for an O, and each subject's for an O or a gap character, once per call, not
+/// once per HSP: a sequence's test reads all its letters, and a query with many HSPs, or a subject
+/// in many of them, was read again for each (line BPF s12: about 0.15 s of the human x yeast
+/// `-task blastp-fast` search at 16 threads, on the search's thread between the blocks, while the
+/// pool waited).
+fn x_bprecounto() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPRECOUNTO"))
+}
+
+// No NCBI counterpart: remembers a test's answer (LOSAT_X_BPRECOUNTO); it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPRECOUNTO): `test()` for the sequence `index`, run the first time that index
+/// is asked and remembered in `memo` (0 = not tested, 1 = false, 2 = true). The tests read
+/// sequences that do not change during the call, so each answer is the one a new test would give.
+fn x_tested_once(memo: &mut Vec<u8>, index: usize, test: impl FnOnce() -> bool) -> bool {
+    if memo.len() <= index {
+        memo.resize(index + 1, 0);
+    }
+    if memo[index] == 0 {
+        memo[index] = 1 + u8::from(test());
+    }
+    memo[index] == 2
+}
+
 /// Recounts the identities, mismatches and positives of the HSPs whose query or subject has
 /// pyrrolysine (O), or whose subject has a gap character (`-`, stored in a protein database), and
 /// of every HSP of a search that read other letters than the query record's
@@ -3813,6 +3841,11 @@ fn recount_shown_identities(
             .iter()
             .any(|residue| residue.eq_ignore_ascii_case(&b'O'))
     };
+    // EXPERIMENT (LOSAT_X_BPRECOUNTO): the answers of the tests by query (an O) and by subject index
+    // (an O or a gap character) (`x_tested_once`).
+    let x_once = x_bprecounto();
+    let mut x_query_o = Vec::new();
+    let mut x_subject_o = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter_mut().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -3835,11 +3868,17 @@ fn recount_shown_identities(
             ) else {
                 continue;
             };
-            if !(searched_other_letters
-                || has_o(query.seq())
-                || subject.has_o()
-                || subject.has_gap())
-            {
+            // LOSAT_X_BPRECOUNTO: each query's and each subject's letters read once per call.
+            let recounted = searched_other_letters
+                || if x_once {
+                    x_tested_once(&mut x_query_o, hsp.q_idx as usize, || has_o(query.seq()))
+                        || x_tested_once(&mut x_subject_o, hsp.s_idx as usize, || {
+                            subject.has_o() || subject.has_gap()
+                        })
+                } else {
+                    has_o(query.seq()) || subject.has_o() || subject.has_gap()
+                };
+            if !recounted {
                 continue;
             }
             let implicit = [GapEditOp::Sub(hsp.length as u32)];
@@ -7311,6 +7350,7 @@ fn search(
                 .query_scopes
                 .as_ref()
                 .map(|scopes| scopes.numbered_from(0)),
+            prefetch_scope: None,
             strategy_next: next,
             call_requests: None,
             x_plan_blocks: true,
@@ -7736,6 +7776,7 @@ fn search(
                                     .query_scopes
                                     .as_ref()
                                     .map(|scopes| scopes.numbered_from(block.start)),
+                                prefetch_scope: None,
                                 strategy_next: None,
                                 call_requests: None,
                                 x_plan_blocks: false,
@@ -9314,6 +9355,7 @@ fn unsearched_batches_then_engine_error(
         // BLASTP only (`args.app` above): no psiblast PSSM stops here.
         stopped_pssms: None,
         query_scopes: reports.query_scopes,
+        prefetch_scope: None,
         strategy_next: None,
         call_requests: None,
         x_plan_blocks: false,
@@ -9384,6 +9426,12 @@ struct BlastpReports<'a> {
     /// (`query_batch::QueryScopes`, numbered from the call's first), whose ids the reported
     /// subjects must not have (`ListedTitles::refuse_ids_of_queries`); `None` elsewhere.
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
+    /// psiblast's round of a query (`psi_round`), a call of its own one record: the query records
+    /// that NCBI's scope holds at the round's prefetch (the query's batch, the records that
+    /// `-query_loc` skips before it included, or the PSSM's query of `-in_pssm`), made only where
+    /// the prefetch stops (`common::database::PrefetchQueries`); `None` elsewhere: the call's
+    /// batches are its input records (`report_prep::prefetch_reported_subjects`).
+    prefetch_scope: Option<&'a (dyn Fn() -> crate::blastinput::query_batch::QueryScope + Sync)>,
     /// `-export_search_strategy`: the batch whose request the run writes right after this call's
     /// batches are reported (`NextRequest`), set by the caller.
     strategy_next: Option<NextRequest<'a>>,
@@ -9413,6 +9461,7 @@ impl<'a> BlastpReports<'a> {
             psi_round: None,
             stopped_pssms: None,
             query_scopes: None,
+            prefetch_scope: None,
             strategy_next: None,
             call_requests: None,
             x_plan_blocks: false,
@@ -12698,6 +12747,31 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
     use std::path::PathBuf;
+
+    // EXPERIMENT (LOSAT_X_BPRECOUNTO): each index is tested once, its answer kept, whatever the order
+    // of the questions.
+    #[test]
+    fn x_tested_once_runs_each_test_once() {
+        let mut memo = Vec::new();
+        let mut tests = 0;
+        let answers = [
+            (5, true),
+            (2, false),
+            (5, true),
+            (0, true),
+            (2, false),
+            (5, true),
+        ];
+        for (index, answer) in answers {
+            let got = x_tested_once(&mut memo, index, || {
+                tests += 1;
+                answer
+            });
+            assert_eq!(got, answer, "index {index}");
+        }
+        assert_eq!(tests, 3);
+        assert_eq!(memo, [2, 0, 1, 0, 0, 2]);
+    }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): all four documents (outfmt 13 to 16) get a block plan; a
     // kind added to `Xml2Kind` is not admitted until `x_xml2_kind_takes_blocks` names it.

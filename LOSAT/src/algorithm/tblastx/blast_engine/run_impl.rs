@@ -3721,6 +3721,23 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // The query records that NCBI's scope holds at the prefetch of the batch of the input records
+    // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
+    // reader added for the batch (the records that `-query_loc` drops included, numbered in the
+    // run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
+    // (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those of the batches before.
+    let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
+    let batch_scope = |input: std::ops::Range<usize>| {
+        let input = if xml_scope { 0..input.end } else { input };
+        crate::blastinput::query_batch::QueryScope::of_shown_records(
+            &query_runs.input_records[input],
+        )
+    };
+    // A call of the library's batches after the first (`api::run_batches`) searched the batches
+    // before with a database of its own, whose loads nothing here records.
+    let unrecorded_calls = reports.args.first_query_ordinal > 0;
     // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
     // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
     let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
@@ -4217,12 +4234,14 @@ fn run_batch_loop(
                     super::super::database::seq_aligns_of(ordered),
                 )
             {
+                let scope = || batch_scope(input_start..input_end);
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
                     ordered,
                     &reports.titles.borrow(),
-                    start,
+                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                        .after_unrecorded_calls(unrecorded_calls),
                 ) {
                     prefetch_failed!(error);
                 }
@@ -4317,8 +4336,10 @@ fn run_batch_loop(
                         }
                     }
                 } else if !ordered.is_empty() {
-                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
-                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
+                    // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
+                    // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
+                    // the texts that the cut reports left (`shared::XmlReportsBefore`).
                     let xml_cut = |query: usize| {
                         query_records.get(query).is_some_and(|record| {
                             crate::report::blast_xml::names::iteration_cut_before_hits(
@@ -4331,18 +4352,28 @@ fn run_batch_loop(
                         })
                     };
                     let reads = reports.reads.borrow();
-                    let xml_before = (first_report
-                        == Some(crate::blastinput::app::ReportFormat::Xml))
-                    .then(|| crate::algorithm::common::database::XmlReportsBefore {
-                        reads: &reads,
-                        cut: &xml_cut,
-                    });
+                    // The posts before each query's report: those of the prefetch of the batch
+                    // it begins (`warnings`, the batches before this one).
+                    let prefetched = |query: usize| warnings.get(query);
+                    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
+                        first_report == Some(crate::blastinput::app::ReportFormat::Xml),
+                        &xml_cut,
+                    );
+                    let xml_before = xml_cuts.reports_before(&reads, &prefetched);
+                    let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(
                         database,
+                        super::super::database::LoadedBefore {
+                            hits: &done.hits,
+                            spans: &done.spans,
+                            rows,
+                            cuts: xml_cuts,
+                        },
                         ordered,
                         &reports.titles.borrow(),
-                        start,
-                        xml_before.as_ref(),
+                        &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                            .after_unrecorded_calls(unrecorded_calls)
+                            .after_xml_reports(xml_before.as_ref()),
                     );
                     drop(reads);
                     let messages = match prefetch {
@@ -4444,7 +4475,19 @@ fn run_batch_loop(
         if stream {
             // The batch's reports, written now, as NCBI's loop prints a batch's result sets
             // (`report_stream`), from its lists numbered from its first query as it made them.
-            // Its lists and its queries' warnings are not kept.
+            // Its lists and its queries' warnings are not kept: a later batch's stop does not find
+            // its hits among those the loop holds (the prefetches' `before`), so the run records
+            // what NCBI's data loader loaded for the batch (`database::note_loaded`; nothing for
+            // a database that cannot stop).
+            if let ShownSubjects::Database { database, .. } = &subjects.shown {
+                super::super::database::note_loaded(
+                    database,
+                    &batch.hits,
+                    0..end - start,
+                    &reports.titles.borrow(),
+                    rows,
+                );
+            }
             debug_assert_eq!(reports.queries_written.get(), start);
             let count = end - start;
             let batch_done = SearchedBatches {

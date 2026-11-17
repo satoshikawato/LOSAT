@@ -136,25 +136,29 @@ impl NumericIsam {
     //     }
     // }
     // ```
-    /// The PIG ISAM of the volume `base` (`.ppi`/`.ppd`): `None` when one of its files does not
-    /// exist or the data file has another length than the index says. A file that exists and
-    /// does not open is NCBI's exception of the constructor (no catch here, unlike the GIs).
+    /// The PIG ISAM of the volume `base` (`.ppi`/`.ppd`, [`NumericIsam::pig_file_names`]): `None`
+    /// when one of its files is no regular file (`CSeqDBIsam::IndexExists`,
+    /// `super::isam::open_if_exists`) or the data file has another length than the index says.
+    /// A file that is one and does not open is NCBI's exception of the constructor (no catch
+    /// here, unlike the GIs).
     pub fn open_pig_volume(base: &Path, seqtype: SeqType) -> Result<Option<Self>, SeqDbError> {
-        let index_path = with_extension(base, seqtype, "pi");
-        let data_path = with_extension(base, seqtype, "pd");
-        if !(index_path.exists() && data_path.exists()) {
-            return Ok(None);
+        let (index_path, data_path) = Self::pig_file_names(base, seqtype);
+        match super::isam::open_if_exists(&index_path, &data_path)? {
+            Some((index, data)) => Self::from_files(index, data, "PIG"),
+            None => Ok(None),
         }
-        let opened =
-            || Ok::<_, SeqDbError>((DbFile::open(&index_path)?, DbFile::open(&data_path)?));
-        let Ok((index, data)) = opened() else {
-            return Err(SeqDbError::NotFound(format!(
-                "Error: Could not open input file ({}/{})",
-                index_path.display(),
-                data_path.display()
-            )));
-        };
-        Self::from_files(index, data, "PIG")
+    }
+
+    /// The index and data files of the PIG ISAM of the volume `base` (`x_MakeFilenames` with
+    /// `file_ext_char` `p`).
+    pub fn pig_file_names(
+        base: &Path,
+        seqtype: SeqType,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        (
+            with_extension(base, seqtype, "pi"),
+            with_extension(base, seqtype, "pd"),
+        )
     }
 
     /// The ISAM of `index` and `data`, an index of the numbers `what` names.
@@ -163,9 +167,13 @@ impl NumericIsam {
             path: index.path().to_path_buf(),
             message,
         };
+        let crashes = |message: String| SeqDbError::NcbiCrashes {
+            path: index.path().to_path_buf(),
+            message,
+        };
         if index.len() < HEADER_BYTES {
-            return Err(bad(format!(
-                "a {what} index file of {} bytes (NCBI crashes on it)",
+            return Err(crashes(format!(
+                "a {what} index file of {} bytes",
                 index.len()
             )));
         }
@@ -174,8 +182,8 @@ impl NumericIsam {
         let version = word(0);
         let isam_type = word(1);
         if version != ISAM_VERSION || (isam_type != NUMERIC && isam_type != NUMERIC_LONG_ID) {
-            return Err(bad(format!(
-                "a {what} index file of version {version} and type {isam_type} (NCBI crashes on it)"
+            return Err(crashes(format!(
+                "a {what} index file of version {version} and type {isam_type}"
             )));
         }
         let (num_terms, num_samples, page_size) = (word(3), word(4), word(5));
@@ -482,12 +490,14 @@ mod tests {
         std::fs::write(&ni, &index).unwrap();
         assert!(matches!(
             NumericIsam::open_volume(&base, SeqType::Protein),
-            Err(SeqDbError::Unsupported { .. })
+            Err(error @ SeqDbError::NcbiCrashes { .. }) if error.ncbi_crashes()
+                && error.to_string().contains(": unsupported database: a GI index file of version 2 and type ")
+                && error.to_string().ends_with(" (NCBI crashes on it)")
         ));
         std::fs::write(&ni, &index[..20]).unwrap();
         assert!(matches!(
             NumericIsam::open_volume(&base, SeqType::Protein),
-            Err(SeqDbError::Unsupported { .. })
+            Err(SeqDbError::NcbiCrashes { .. })
         ));
         std::fs::remove_dir_all(&dir).unwrap();
     }

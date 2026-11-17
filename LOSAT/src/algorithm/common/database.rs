@@ -1460,12 +1460,205 @@ pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
     prefetch_off_at(prefetch_seqs_limit(), seq_aligns)
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-772 (quoted at
+// `prefetch_stop`)
+// ```c++
+//     if(!s_PreFetchSeqs(results, format_type)){
+//     	return;
+//     }
+//     try {
+//        ...
+//        LoadSequencesToScope(ids, ranges, scope);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (quoted at
+// `report::tabular::TabularSpec::subject_fetch`): where nothing was loaded before, a row reads
+// the subject's Bioseq only for the fields that need it.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813
+// ```c++
+//         if (results.HasAlignments()) {
+//     	    CSeq_align_set copy_aln_set;
+//             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1216-1217 (the pairwise
+// report's alignments; its description lines likewise, 1550-1551)
+// ```c++
+//     CSeq_align_set copy_aln_set;
+//     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
+// ```
+/// What NCBI's BLAST database data loader loaded for a query batch (`RegisterIds`; the run's
+/// record, [`TaxdbRun::note_loaded`]), as [`batch_loads`] tells it: the one answer to whether
+/// the batch's prefetch ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BatchLoads {
+    /// The prefetch ran: every subject of the batch's Seq-aligns, those that `s_PreFetchSeqs`
+    /// counts (psiblast's traceback hit lists, before the formatter's cut to `-max_target_seqs`).
+    Prefetched,
+    /// `PRE_FETCH_SEQS_LIMIT` turned the prefetch off ([`prefetch_off`]): the subjects that the
+    /// reports NCBI writes read, after the formatter's cut to the hitlist size (`PruneSeqalign`),
+    /// by the first format's rows (`TabularSpec::subject_fetch`; `Every` for a format that is not
+    /// a field list), and those that psiblast's PSSM reads; a report that NCBI's XML stream cut
+    /// before its hits loads nothing ([`XmlCuts`], [`LoadedBefore::subjects`]).
+    Read(crate::report::tabular::SubjectFetch),
+}
+
+impl BatchLoads {
+    /// The rows that these loads read of the hit lists that a batch's reports show, in a program
+    /// whose prefetched set is its reported set (BLASTN, TBLASTN, BLASTX, TBLASTX): every subject
+    /// where the prefetch ran, else the first format's rows (`Read`). Not psiblast's, whose
+    /// prefetch reads its traceback beyond the reports' cut and whose PSSM reads more
+    /// (`blastp::blast_engine::report_prep`). The one owner of that rule (review 7 of line DBID
+    /// loadord, L2).
+    pub(crate) fn reported_rows(self) -> crate::report::tabular::SubjectFetch {
+        match self {
+            BatchLoads::Prefetched => crate::report::tabular::SubjectFetch::Every,
+            BatchLoads::Read(rows) => rows,
+        }
+    }
+
+    /// The queries of the batch of the queries `span` (by query of the call, as `cuts` counts
+    /// them) that these loads are made for: the batch at once where the prefetch ran (it loads the
+    /// subjects of the batch's Seq-aligns before the reports); where it is off, each query whose
+    /// report NCBI writes, alone: not one whose outfmt 5 report NCBI's XML stream cut before its
+    /// hits (`cuts`), which loads nothing. The one walk of a batch's reports for the run's record
+    /// ([`LoadedBefore::subjects`], BLASTX's `ReportedSubjects::note_loaded`; review 7 of line DBID
+    /// loadord, L2).
+    pub(crate) fn report_spans<'c>(
+        self,
+        cuts: XmlCuts<'c>,
+        span: std::ops::Range<usize>,
+    ) -> impl Iterator<Item = std::ops::Range<usize>> + 'c {
+        let (batch, each) = match self {
+            BatchLoads::Prefetched => (Some(span), None),
+            BatchLoads::Read(_) => (None, Some(span)),
+        };
+        batch.into_iter().chain(
+            each.into_iter()
+                .flatten()
+                .filter(move |&query| !cuts.cut(query))
+                .map(|query| query..query + 1),
+        )
+    }
+}
+
+/// What NCBI's BLAST database data loader loads for a query batch with `seq_aligns` Seq-aligns
+/// ([`BatchLoads`]): `Prefetched` where its prefetch is on; where `PRE_FETCH_SEQS_LIMIT` turns it
+/// off ([`prefetch_off`]), what its reports read, `rows` (the first format's), which each program
+/// applies to the hit lists that its reports show (review 3 of line DBID loadord, H2; review 6,
+/// H1: psiblast's prefetched set holds its traceback beyond the reports' cut).
+pub(crate) fn batch_loads(
+    seq_aligns: usize,
+    rows: crate::report::tabular::SubjectFetch,
+) -> BatchLoads {
+    batch_loads_at(prefetch_seqs_limit(), seq_aligns, rows)
+}
+
+/// [`batch_loads`] with the limit `limit` (`prefetch_seqs_limit`).
+fn batch_loads_at(
+    limit: Option<i32>,
+    seq_aligns: usize,
+    rows: crate::report::tabular::SubjectFetch,
+) -> BatchLoads {
+    if prefetch_off_at(limit, seq_aligns) {
+        BatchLoads::Read(rows)
+    } else {
+        BatchLoads::Prefetched
+    }
+}
+
 /// [`prefetch_off`] with the limit `limit` (`prefetch_seqs_limit`).
 fn prefetch_off_at(limit: Option<i32>, seq_aligns: usize) -> bool {
     limit.is_some_and(|limit| {
         limit != i32::MAX
             && (limit == 0 || i64::try_from(seq_aligns).unwrap_or(i64::MAX) > i64::from(limit))
     })
+}
+
+/// The query batches of a call before a batch's prefetch that the call holds, for the run's record
+/// of what NCBI's BLAST database data loader loaded for them ([`batch_prefetch`]'s `before`,
+/// [`LoadedBefore::subjects`]): the hits of the call (`hits`, in each program's form: BLASTP's,
+/// BLASTN's and TBLASTN's final hit lists by query, TBLASTX's reported hits in report order), the
+/// queries of each batch (`spans`), which rows of the first format read a subject where a
+/// batch's prefetch is off (`rows`, `TabularSpec::subject_fetch`), and the outfmt 5 reports that
+/// NCBI's XML stream cuts before their hits (`cuts`, the call's [`XmlCuts`], which the texts that
+/// they leave ask too: [`XmlReportsBefore`]).
+pub(crate) struct LoadedBefore<'a, T> {
+    pub(crate) hits: &'a [T],
+    pub(crate) spans: &'a [std::ops::Range<usize>],
+    pub(crate) rows: crate::report::tabular::SubjectFetch,
+    pub(crate) cuts: XmlCuts<'a>,
+}
+
+// By hand: a derive would ask `T: Copy` of the hits it only borrows.
+impl<T> Clone for LoadedBefore<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for LoadedBefore<'_, T> {}
+
+impl<'a, T> LoadedBefore<'a, T> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted above
+    // `batch_loads`: no prefetch, the reports load what they read)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
+    // `report::query_warnings::ReadCursor::cut`: an `Iteration` that the stream cut makes no
+    // `Hit`, so it loads nothing)
+    /// What NCBI's BLAST database data loader loaded for each held batch, in the order of the
+    /// batches: `loaded(span, hits, loads)` of the batch of the queries `span`, whose hits
+    /// `batch` gives (`None`: the call does not hold them) and whose loads are [`batch_loads`] of
+    /// their Seq-aligns (`seq_aligns(span, hits)`, [`subject_seq_aligns`]); where they are the
+    /// reports' reads ([`BatchLoads::Read`]), of each query of the batch whose report NCBI writes
+    /// (`span` its query alone; not one whose outfmt 5 report the stream cut before its hits,
+    /// `cuts`, which loads nothing: review 6 of line DBID loadord, H2). The walk over the
+    /// batches and the one question whether a batch's prefetch is off are here, which of its
+    /// reports load is [`BatchLoads::report_spans`]; how each program counts its Seq-aligns and
+    /// which of its subjects a batch's loads read stay with its hit lists (review 4 of line DBID
+    /// loadord, L4; [`BatchLoads::reported_rows`] where its prefetched set is its reported set).
+    pub(crate) fn subjects<I>(
+        self,
+        batch: impl Fn(&'a [T], std::ops::Range<usize>) -> Option<&'a [T]> + 'a,
+        seq_aligns: impl Fn(std::ops::Range<usize>, &'a [T]) -> usize + 'a,
+        loaded: impl Fn(std::ops::Range<usize>, &'a [T], BatchLoads) -> I + 'a,
+    ) -> impl Iterator<Item = I::Item> + 'a
+    where
+        I: IntoIterator + 'a,
+        I::IntoIter: 'a,
+    {
+        self.subjects_at(prefetch_seqs_limit(), batch, seq_aligns, loaded)
+    }
+
+    /// [`LoadedBefore::subjects`] with the limit `limit` (`prefetch_seqs_limit`).
+    fn subjects_at<I>(
+        self,
+        limit: Option<i32>,
+        batch: impl Fn(&'a [T], std::ops::Range<usize>) -> Option<&'a [T]> + 'a,
+        seq_aligns: impl Fn(std::ops::Range<usize>, &'a [T]) -> usize + 'a,
+        loaded: impl Fn(std::ops::Range<usize>, &'a [T], BatchLoads) -> I + 'a,
+    ) -> impl Iterator<Item = I::Item> + 'a
+    where
+        I: IntoIterator + 'a,
+        I::IntoIter: 'a,
+    {
+        let Self {
+            hits,
+            spans,
+            rows,
+            cuts,
+        } = self;
+        spans
+            .iter()
+            .flat_map(move |span| {
+                let Some(held) = batch(hits, span.clone()) else {
+                    return Vec::new();
+                };
+                let loads = batch_loads_at(limit, seq_aligns(span.clone(), held), rows);
+                loads
+                    .report_spans(cuts, span.clone())
+                    .filter_map(|queries| Some((queries.clone(), batch(hits, queries)?, loads)))
+                    .collect()
+            })
+            .flat_map(move |(span, hits, loads)| loaded(span, hits, loads))
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1417-1446
@@ -1665,6 +1858,21 @@ impl BatchReads {
 /// before the search count it as unset.
 fn prefetch_seqs_limit() -> Option<i32> {
     crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
+}
+
+/// Whether a Seq-id of the sequence `ordinal` of `db` is one `CSeq_id_Handle` with the key
+/// `handle` (`seqid::mask_handle::mask_handle_key`).
+fn holds_handle(db: &SeqDb, ordinal: u32, handle: &[u8]) -> bool {
+    let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = db.read_header(ordinal) else {
+        return false;
+    };
+    set.deflines
+        .iter()
+        .flat_map(|defline| &defline.ids)
+        .any(|id| {
+            crate::seqid::mask_handle::mask_handle_key(id)
+                .is_ok_and(|key| key.as_deref() == Some(handle))
+        })
 }
 
 impl<'a> HeaderReader<'a> {
@@ -1885,10 +2093,9 @@ impl<'a> HeaderReader<'a> {
         }
         let failed = |error: SeqDbError| {
             (
-                Some(FoundInstead::Failed(match error.ncbi_message() {
-                    Some(message) => crate::report::db_subject::LookupFailure::ncbi(message),
-                    None => crate::report::db_subject::LookupFailure::losat(error.to_string()),
-                })),
+                Some(FoundInstead::Failed(
+                    crate::report::db_subject::LookupFailure::of_error(&error),
+                )),
                 None,
                 None,
             )
@@ -2132,16 +2339,7 @@ impl<'a> HeaderReader<'a> {
     /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
     /// (`seqid::mask_handle::mask_handle_key`).
     fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
-        let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
-            return false;
-        };
-        set.deflines
-            .iter()
-            .flat_map(|defline| &defline.ids)
-            .any(|id| {
-                crate::seqid::mask_handle::mask_handle_key(id)
-                    .is_ok_and(|key| key.as_deref() == Some(handle))
-            })
+        holds_handle(self.db, ordinal, handle)
     }
 
     /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
@@ -3880,6 +4078,102 @@ mod tests {
         assert!(!prefetch_off_at(None, usize::MAX));
     }
 
+    // Review 3 of line DBID loadord, H2 (kit cases `P.off.*`): NCBI's data loader holds what a
+    // batch loaded, not what it reported. A batch whose prefetch is on loads every subject of its
+    // Seq-aligns; one whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off loads what its reports' rows
+    // read (`6 qseqid evalue`: nothing).
+    #[test]
+    fn a_batch_loads_its_seq_aligns_subjects_or_what_its_reports_read() {
+        use crate::report::tabular::SubjectFetch::{Every, Never, WithIdentities};
+        use BatchLoads::{Prefetched, Read};
+        for rows in [Every, Never, WithIdentities] {
+            // No limit, `INT_MAX`, a batch of no more Seq-aligns than the limit: the prefetch.
+            assert_eq!(batch_loads_at(None, 4, rows), Prefetched);
+            assert_eq!(batch_loads_at(Some(i32::MAX), 4, rows), Prefetched);
+            assert_eq!(batch_loads_at(Some(4), 4, rows), Prefetched);
+            // Above the limit, or a limit of 0: the reports' rows. Review 6, H1: a prefetch-off
+            // batch whose rows read every subject is not a prefetched one (psiblast's prefetch
+            // reads its traceback beyond `-max_target_seqs`, its reports the cut lists).
+            assert_eq!(batch_loads_at(Some(2), 4, rows), Read(rows));
+            assert_eq!(batch_loads_at(Some(0), 0, rows), Read(rows));
+            assert_ne!(batch_loads_at(Some(2), 4, rows), Prefetched);
+            // Review 7, L2: where the prefetched set is the reported set, the loads read every
+            // reported subject where the prefetch ran, else what the rows read.
+            assert_eq!(Prefetched.reported_rows(), Every);
+            assert_eq!(Read(rows).reported_rows(), rows);
+        }
+        // Review 4, L4: the one walk of the held batches (`LoadedBefore::subjects`), in their
+        // order, each batch's loads from its own Seq-aligns; a batch past the held hits is not
+        // held.
+        let hits = [2usize, 1, 0, 3];
+        let counted = std::cell::RefCell::new(Vec::new());
+        let walk = |limit: Option<i32>, cuts: XmlCuts<'_>| -> Vec<_> {
+            counted.borrow_mut().clear();
+            LoadedBefore {
+                hits: &hits,
+                spans: &[0..2, 2..4, 4..6],
+                rows: Never,
+                cuts,
+            }
+            .subjects_at(
+                limit,
+                |hits, span| hits.get(span),
+                |span, hits| {
+                    counted.borrow_mut().push(span);
+                    hits.iter().sum()
+                },
+                |span, hits, loads| [(span, hits.to_vec(), loads)],
+            )
+            .collect()
+        };
+        assert_eq!(
+            walk(None, XmlCuts::NONE),
+            [
+                (0..2, vec![2, 1], Prefetched),
+                (2..4, vec![0, 3], Prefetched)
+            ]
+        );
+        assert_eq!(*counted.borrow(), [0..2, 2..4]);
+        // The prefetch off (limit 2: batch 0..2 has 3 Seq-aligns, 2..4 has 3): each query's
+        // report reads, by query.
+        assert_eq!(
+            walk(Some(2), XmlCuts::NONE),
+            [
+                (0..1, vec![2], Read(Never)),
+                (1..2, vec![1], Read(Never)),
+                (2..3, vec![0], Read(Never)),
+                (3..4, vec![3], Read(Never)),
+            ]
+        );
+        // Review 6, H2: an outfmt 5 report that NCBI's XML stream cut before its hits (query 1)
+        // makes none of its loads; the cut does not touch a batch whose prefetch ran (limit 3:
+        // batch 0..2 prefetches, batch 2..4 too).
+        let cut = |query: usize| query == 1 || query == 2;
+        assert_eq!(
+            walk(Some(2), XmlCuts::of(true, &cut)),
+            [(0..1, vec![2], Read(Never)), (3..4, vec![3], Read(Never))]
+        );
+        assert_eq!(
+            walk(Some(3), XmlCuts::of(true, &cut)),
+            [
+                (0..2, vec![2, 1], Prefetched),
+                (2..4, vec![0, 3], Prefetched)
+            ]
+        );
+        // Without outfmt 5 first nothing is cut.
+        assert_eq!(walk(Some(2), XmlCuts::of(false, &cut)).len(), 4);
+        // Review 7, L2: the one walk of a batch's reports (`BatchLoads::report_spans`, which
+        // BLASTX's record walks too), also of a batch that does not start at query 0 (BLASTX's
+        // search batches, by query of the reader batch).
+        let spans = |loads: BatchLoads, cuts: XmlCuts<'_>, span| -> Vec<std::ops::Range<usize>> {
+            loads.report_spans(cuts, span).collect()
+        };
+        assert_eq!(spans(Prefetched, XmlCuts::of(true, &cut), 1..3), [1..3]);
+        assert_eq!(spans(Read(Every), XmlCuts::of(true, &cut), 1..4), [3..4]);
+        assert_eq!(spans(Read(Every), XmlCuts::NONE, 1..3), [1..2, 2..3]);
+        assert_eq!(spans(Read(Never), XmlCuts::NONE, 2..2), []);
+    }
+
     /// The subjects of the database `name` of `tests/db_search/ids` by ordinal id.
     fn parsed_subjects(name: &str) -> Vec<crate::report::db_subject::ParsedSubject> {
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4164,6 +4458,12 @@ pub(crate) struct TaxdbRun {
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
     rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// The sequences with parsed Seq-ids, by ordinal id, that NCBI's BLAST database data loader
+    /// has loaded in the run before a batch whose prefetch stops ([`TaxdbRun::note_loaded`]).
+    loaded: std::sync::Mutex<std::collections::HashSet<u32>>,
+    /// Whether a prefetch of the run can stop, so that the run keeps `loaded`
+    /// ([`TaxdbRun::prefetch_can_stop`]), decided once.
+    can_stop: std::sync::OnceLock<bool>,
     /// The texts of the loads that the model of the reads placed where NCBI makes no load
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
@@ -4423,6 +4723,82 @@ impl TaxdbRun {
         *self.volume_lookups.lock().expect("the volume lookups") = VolumeLookups::default();
         self.rows_open.lock().expect("the rows' texts").clear();
         self.load_texts.clear();
+    }
+
+    /// Whether a prefetch of the run can stop at a lookup that fails on a file with NCBI's
+    /// exception ([`batch_prefetch`]; every producer of `FoundInstead::Failed` with NCBI's message,
+    /// `HeaderReader::found_instead`), the one gate of what the run keeps for such a stop (its
+    /// record of loads, [`TaxdbRun::note_loaded`]; BLASTX's scopes of the batches before in outfmt
+    /// 5): the lookup of `db` cannot be opened, or one of its LMDB files has no accession table
+    /// (`SeqidLookup::lacks_an_accession_table`), or an ISAM of a version 4 volume may fail to open
+    /// (`SeqDb::isams_may_fail_to_open`: the lookup's own open of a string or PIG ISAM, which
+    /// fails with NCBI's `Error: Could not open input file` where both files are regular files
+    /// and one does not open; review 3 of line DBID loadord, M1, and review 4, H1). Asked once, at
+    /// the first record of the run's loads (`note_loaded`, before it makes its subjects, review
+    /// 4, M1) or of psiblast's PSSM's reads: the files are opened, never read, and a database
+    /// whose lookups cannot stop keeps nothing for the rest of the run.
+    pub(crate) fn prefetch_can_stop(&self, db: &SeqDb) -> bool {
+        *self.can_stop.get_or_init(|| {
+            db.seqid_lookup()
+                .map_or(true, |lookup| lookup.lacks_an_accession_table())
+                || db.isams_may_fail_to_open()
+        })
+    }
+
+    /// Records that NCBI's BLAST database data loader has loaded `subjects` in the run (a query
+    /// batch's, or a psiblast round's; [`PrefetchSubject`], in any order), for the stop of a later
+    /// batch's prefetch ([`stop_lookup_unsure`]): the loader keeps the Seq-ids of every sequence
+    /// that it loaded (`RegisterIds`). A batch's loads are every subject of its Seq-aligns where
+    /// its prefetch is on, else the subjects that the reports NCBI writes (after their cut to
+    /// `-max_target_seqs`; not an outfmt 5 report that its XML stream cut before its hits) and
+    /// psiblast's PSSM read ([`batch_loads`], [`LoadedBefore::subjects`]; review 3 of line DBID
+    /// loadord, H2; review 6, H1 and H2). A caller that searches the queries of
+    /// a run in several calls, or writes each batch's reports before it searches the next
+    /// (BLASTX), records each batch that does not stop; the callers that hold a call's batches give
+    /// the loads of the batches before to the stop itself ([`batch_prefetch`]'s `before`). Only the
+    /// sequences with parsed Seq-ids are kept (one without them holds no id that a lookup can fail
+    /// on), and only in a run that can stop ([`TaxdbRun::prefetch_can_stop`], asked first): the
+    /// subjects are made (`subjects`, called once) only there, so a run that cannot stop builds
+    /// and walks nothing (review 4 of line DBID loadord, M1). The callers ask it only of a
+    /// database with parsed Seq-ids: nothing is opened for any other.
+    pub(crate) fn note_loaded<'s, I>(&self, db: &SeqDb, subjects: impl FnOnce() -> I)
+    where
+        I: IntoIterator<Item = PrefetchSubject<'s>>,
+    {
+        if self.prefetch_can_stop(db) {
+            self.keep_loaded(subjects());
+        }
+    }
+
+    /// The record of [`TaxdbRun::note_loaded`] without its gate: at a stop
+    /// ([`batch_prefetch`], [`held_batch_prefetch_stop`]), which only a run that can stop reaches,
+    /// the subjects that the call's batches before loaded.
+    fn keep_loaded<'s>(&self, subjects: impl IntoIterator<Item = PrefetchSubject<'s>>) {
+        let mut parsed = subjects
+            .into_iter()
+            .filter(|subject| subject.parsed.is_some())
+            .map(|subject| subject.ordinal)
+            .peekable();
+        if parsed.peek().is_none() {
+            return;
+        }
+        self.loaded
+            .lock()
+            .expect("the loaded sequences")
+            .extend(parsed);
+    }
+
+    /// The sequences that [`TaxdbRun::note_loaded`] recorded, in the order of their ordinal ids.
+    fn loaded(&self) -> Vec<u32> {
+        let mut loaded: Vec<u32> = self
+            .loaded
+            .lock()
+            .expect("the loaded sequences")
+            .iter()
+            .copied()
+            .collect();
+        loaded.sort_unstable();
+        loaded
     }
 
     /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not
@@ -5222,6 +5598,42 @@ pub(crate) fn subject_read_texts<'s>(
     rows_open: bool,
     program: &str,
 ) -> Result<crate::report::query_warnings::QueryReads> {
+    load_read_texts(
+        db,
+        run,
+        subjects
+            .into_iter()
+            .map(|(key, ordinal, parsed)| (key, ordinal, SubjectLoad::Read(parsed))),
+        rows_open,
+        program,
+    )
+}
+
+/// What one load of [`load_read_texts`] reads.
+#[derive(Clone, Copy)]
+enum SubjectLoad<'s> {
+    /// The read of a subject by its Seq-align id (the definition lines of one with parsed
+    /// Seq-ids), or by its ordinal id (`None`).
+    Read(Option<&'s crate::report::db_subject::ParsedSubject>),
+    /// The load of a sequence that NCBI's BLAST database data loader gives for the Seq-align id
+    /// of the stopping subject `stop` (`by`) without its lookup, as an earlier load registered
+    /// that id (`RegisterIds`; [`StopUnsure::instead`]): the sequence's own blob, whose taxids
+    /// the loader asks for by that id ([`blob_taxids`]).
+    Instead {
+        stop: u32,
+        by: &'s crate::report::db_subject::ParsedSubject,
+    },
+}
+
+/// [`subject_read_texts`] of the loads `loads`, each `(key, ordinal, what it reads)`: also the
+/// loads of the sequences that a skipped stopping lookup is given instead ([`prefetch_stop`]).
+fn load_read_texts<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    loads: impl IntoIterator<Item = (u32, u32, SubjectLoad<'s>)>,
+    rows_open: bool,
+    program: &str,
+) -> Result<crate::report::query_warnings::QueryReads> {
     use crate::report::query_warnings::{ReadLoad, SubjectRead};
     if !run.found(db) {
         return Ok(Vec::new());
@@ -5236,11 +5648,15 @@ pub(crate) fn subject_read_texts<'s>(
     let offset_taxid = run.prefetch_texts(db).offset_error_taxid;
     let mut reads = Vec::new();
     let mut fetched: std::collections::HashSet<u32> = Default::default();
-    for (key, ordinal, parsed) in subjects {
+    for (key, ordinal, load) in loads {
         if !fetched.insert(ordinal) {
             continue;
         }
         let first = fetched.len() == 1;
+        let (parsed, lookups_of) = match load {
+            SubjectLoad::Read(parsed) => (parsed, None),
+            SubjectLoad::Instead { stop, by } => (None, Some((stop, by))),
+        };
         // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads`: the blob of
         // the sequence the scope gets, whose taxids its volume looks up). In
         // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
@@ -5256,7 +5672,10 @@ pub(crate) fn subject_read_texts<'s>(
             None => Some(ordinal),
         };
         if let Some(blob) = blob {
-            let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
+            let lookups = match lookups_of {
+                Some((stop, by)) => blob_taxids(db, stop, Some(by), blob, program)?,
+                None => blob_taxids(db, ordinal, parsed, blob, program)?,
+            };
             let (text, opening) = run.load_text(db, &taxdb, blob, &lookups, &lower, program)?;
             match &texts {
                 Some(texts) => {
@@ -5377,14 +5796,75 @@ pub(crate) fn pssm_load_texts(
 // that NCBI's Seq-id mapper packs (GIs, accessions of a prefix and digits, the text tag's
 // `gnl|BL_ORD_ID|0`) by their packed value, then the others by the address of each id's
 // `CSeq_id_Info` (review 1 of line DBID pfwarn, M1: `gb|FFF00093.1|` loads before the text tag,
-// `lcl|zzz` never), which LOSAT does not model. A lookup that throws on its id there ends the
-// loads, so which subjects were loaded before it is not known here; the throw is caught with
+// `lcl|zzz` never), which LOSAT models only where a lookup stops the run ([`load_before_stop`]).
+// A lookup that throws on its id there ends the loads, and the subjects after it are read by the
+// reports, so which subjects were loaded before it is not known here; the throw is caught with
 // `Error pre-fetching sequence data` (`ERR_POST`, on standard error, after the texts of the
 // loads before). A lookup that fails on a file is a `CSeqDBException`, which the prefetch
 // rethrows (`FoundInstead::Failed`, refused where it is read). A minus-strand Seq-align of a subject
 // without a Bioseq throws after every blob was loaded (`prefetch_gets_no_bioseq`): the texts of
 // the whole batch, then the warning. Either way the prefetch reads no sequence data, which no
 // text comes with (probe of line DBID pfwarn, `R/pfwarn/w0`).
+/// What the stop of a query batch's prefetch ([`prefetch_stop`]) asks of the batch's queries, made
+/// by each program where it prefetches a batch ([`batch_prefetch`]).
+#[derive(Clone, Copy)]
+pub(crate) struct PrefetchQueries<'a> {
+    /// The query that the stop's [`HeaderReadError`] names (the batch's first query of the
+    /// searched queries of the call; BLASTX, which writes each batch's reports before it searches
+    /// the next, names 0).
+    pub(crate) error_query: usize,
+    /// The query records that NCBI's scope holds at the batch's prefetch, asked only where the
+    /// batch stops ([`stop_lookup_unsure`]): the one owner of the ids of the queries of a scope is
+    /// `query_batch::QueryScope` (`QueryScope::of_shown_records`). They are the input records that
+    /// NCBI's reader has added for the batch (a record that `-query_loc` drops included, and the
+    /// query of a PSSM), and in outfmt 5, whose scope the formatter does not reset
+    /// (`CBlastFormat::ResetScopeHistory`, quoted at [`stop_lookup_unsure`]), those of the batches
+    /// before too; never those of the batches after.
+    scope: &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope,
+    /// Whether calls before this one reported sequences of the run that the run's record does not
+    /// hold ([`PrefetchQueries::after_unrecorded_calls`]).
+    unrecorded_calls: bool,
+    /// The outfmt 5 reports of the queries before the batch, where outfmt 5 is the first format
+    /// of a program that writes them after the stop ([`PrefetchQueries::after_xml_reports`]).
+    xml_before: Option<&'a XmlReportsBefore<'a>>,
+}
+
+impl<'a> PrefetchQueries<'a> {
+    /// The batch whose stop names the query `error_query` and whose scope of queries at its
+    /// prefetch `scope` makes.
+    pub(crate) fn new(
+        error_query: usize,
+        scope: &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope,
+    ) -> Self {
+        Self {
+            error_query,
+            scope,
+            unrecorded_calls: false,
+            xml_before: None,
+        }
+    }
+
+    /// The same batch of a call that comes after other calls of the run (`unrecorded`: the
+    /// library's batches, each searched as a call of its own with its own database handle) whose
+    /// loads neither the call's batches before ([`batch_prefetch`]'s `before`) nor the run's
+    /// record ([`TaxdbRun::note_loaded`]) hold: every sequence of the database may have been
+    /// loaded before the batch.
+    pub(crate) fn after_unrecorded_calls(self, unrecorded: bool) -> Self {
+        Self {
+            unrecorded_calls: self.unrecorded_calls || unrecorded,
+            ..self
+        }
+    }
+
+    /// The same batch after the outfmt 5 reports `xml_before` of the queries before it
+    /// ([`XmlReportsBefore`]; `None` for other first formats, and for BLASTX, whose model of a
+    /// batch follows the reports of the batches before), asked only where the batch stops
+    /// ([`prefetch_stop`], line RG K4h's E2).
+    pub(crate) fn after_xml_reports(self, xml_before: Option<&'a XmlReportsBefore<'a>>) -> Self {
+        Self { xml_before, ..self }
+    }
+}
+
 /// One reported sequence of a query batch whose prefetch is on ([`batch_prefetch`]).
 #[derive(Clone, Copy)]
 pub(crate) struct PrefetchSubject<'s> {
@@ -5412,31 +5892,89 @@ impl<'s> PrefetchSubject<'s> {
 }
 
 /// The BLAST XML (outfmt 5) reports of the queries before a batch whose prefetch stops
-/// ([`batch_prefetch`]), where outfmt 5 is the first format: by query, the model's reads of its
-/// report (`reads`: those of the reports of a batch whose prefetch is off, which load their
-/// subjects), and whether NCBI's XML stream throws in its `Iteration` before the first `Hit`
-/// (`cut`, `report::blast_xml::names::iteration_cut_before_hits`). Asked only where the batch's
-/// prefetch stops.
+/// ([`batch_prefetch`], [`PrefetchQueries::after_xml_reports`]), where outfmt 5 is the first
+/// format of a program that models every batch before it writes a report (BLASTP, BLASTN,
+/// TBLASTN, TBLASTX: the run's ledger of the texts left out, `report::query_warnings::LoadTexts`,
+/// holds none of these reports' yet): by query, the model's reads of its report (`reads`: those
+/// of the reports of a batch whose prefetch is off, which load their subjects), whether NCBI's XML
+/// stream throws in its `Iteration` before the first `Hit` (`cut`,
+/// `report::blast_xml::names::iteration_cut_before_hits`), and the posts written before its
+/// report (`prefetched`: those of the prefetch of the batch it begins, whose loads' texts are
+/// made where they are written, `diag_log::Posts::loads`). Asked only where the batch's prefetch
+/// stops. Made by [`XmlCuts::reports_before`], so that its cuts are those of the run's record of
+/// the batches' loads ([`LoadedBefore`]'s `cuts`).
 pub(crate) struct XmlReportsBefore<'a> {
     pub reads: &'a [crate::report::query_warnings::QueryReads],
-    pub cut: &'a dyn Fn(usize) -> bool,
+    cuts: XmlCuts<'a>,
+    pub prefetched: &'a dyn Fn(usize) -> Option<&'a crate::report::diag_log::Posts>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
+// `report::query_warnings::ReadCursor::cut`)
+/// The outfmt 5 reports of a call's queries that NCBI's XML stream cuts before their first `Hit`
+/// (`report::blast_xml::names::iteration_cut_before_hits` of the query's record, at its
+/// `Iteration_query-ID` or `Iteration_query-def`), where outfmt 5 is the first format; none for
+/// any other first format. Such a report makes none of its loads: the one answer to whether a
+/// report before a stopping batch loaded its subjects, for the run's record of the batches'
+/// loads ([`LoadedBefore`]'s `cuts`) and for the texts that the loads not made leave
+/// ([`XmlReportsBefore`], `report::query_warnings::LoadTexts::left_before`), so that one stop
+/// never holds two answers (review 6 of line DBID loadord, H2).
+#[derive(Clone, Copy)]
+pub(crate) struct XmlCuts<'a> {
+    cut: Option<&'a dyn Fn(usize) -> bool>,
+}
+
+impl<'a> XmlCuts<'a> {
+    /// No report is cut: the first format is not outfmt 5, or the record is of batches whose
+    /// reports no outfmt 5 writes (the report streams of BLASTN and TBLASTX, which never write
+    /// it, `x_rpt_stream`, `report_stream`).
+    pub(crate) const NONE: XmlCuts<'static> = XmlCuts { cut: None };
+
+    /// The cuts where outfmt 5 is the first format (`xml_first`): `cut(query)` by query of the
+    /// call (the predicate of the query's record); else none.
+    pub(crate) fn of(xml_first: bool, cut: &'a dyn Fn(usize) -> bool) -> Self {
+        Self {
+            cut: xml_first.then_some(cut),
+        }
+    }
+
+    /// Whether NCBI's XML stream cuts the report of query `query` before its first `Hit`.
+    pub(crate) fn cut(&self, query: usize) -> bool {
+        self.cut.is_some_and(|cut| cut(query))
+    }
+
+    /// The outfmt 5 reports before a batch (`reads`, `prefetched`: [`XmlReportsBefore`]) with
+    /// these cuts, where outfmt 5 is the first format (`None` for any other).
+    pub(crate) fn reports_before(
+        self,
+        reads: &'a [crate::report::query_warnings::QueryReads],
+        prefetched: &'a dyn Fn(usize) -> Option<&'a crate::report::diag_log::Posts>,
+    ) -> Option<XmlReportsBefore<'a>> {
+        self.cut.map(|_| XmlReportsBefore {
+            reads,
+            cuts: self,
+            prefetched,
+        })
+    }
 }
 
 impl XmlReportsBefore<'_> {
-    /// Whether the report of a query before `query` may leave the texts of loads that NCBI does
-    /// not make to a later load (`report::query_warnings::ReadLoad::left_out`): a report that the
-    /// stream cuts before its hits, whose reads have a text in the model.
-    fn leave_texts(&self, query: usize) -> bool {
-        self.reads
-            .iter()
-            .take(query)
-            .enumerate()
-            .any(|(before, reads)| {
-                reads
-                    .iter()
-                    .any(|read| read.load.is_some() && !read.text.is_empty())
-                    && (self.cut)(before)
-            })
+    /// The texts that the loads NCBI did not make (a report that the stream cut before its hits,
+    /// `report::query_warnings::ReadLoad::left_out`) left and that no load of the reports and
+    /// prefetches of the queries before `query` took (`ReadLoad::placed`), where they are written
+    /// in NCBI's order (`report::query_warnings::LoadTexts::left_before`, the writers' model);
+    /// `None` where none is left.
+    fn left_texts(
+        &self,
+        query: usize,
+    ) -> Option<std::sync::Arc<crate::report::query_warnings::LoadTexts>> {
+        let left = crate::report::query_warnings::LoadTexts::left_before(
+            self.reads,
+            &|before| self.cuts.cut(before),
+            self.prefetched,
+            query,
+        );
+        (!left.is_empty()).then_some(left)
     }
 }
 
@@ -5458,29 +5996,32 @@ impl XmlReportsBefore<'_> {
 ///
 /// A subject whose lookup fails on a file of the database with NCBI's own exception
 /// (`ParsedSubject::prefetch_stops`: a list of version 5 databases with and without the accession
-/// table) stops the run there: `Err` with a [`HeaderReadError`] of the batch's first query `query`
-/// (the searched queries of the call) whose error is NCBI's `BLAST Database error: <message>`
-/// (exit status 2). Each program writes then what NCBI wrote before: the prologs, the reports of
-/// the batches before (without the epilog) and the batch's reader messages. That batch is
-/// refused where the other subjects' loads write a text, which NCBI writes before the error or
-/// not as the order of the loads decides, and where another subject's lookup throws on its id
-/// (the prefetch catches that one and ends its loads, so whether it stops is that order's too).
-/// `xml_before`: the outfmt 5 reports of the queries before the batch, for that stop
-/// ([`XmlReportsBefore`]; `None` for other first formats, and for BLASTX, whose model of a batch
-/// follows the reports of the batches before).
-pub(crate) fn batch_prefetch<'s>(
+/// table) stops the run there: `Err` with a [`HeaderReadError`] of the query that `queries` names
+/// (`PrefetchQueries::error_query`) whose error is NCBI's `BLAST Database error: <message>`
+/// (exit status 2), after the texts of the loads that NCBI's prefetch makes before it in the order
+/// of the batch's Seq-id handles ([`load_before_stop`]). Each program writes then what NCBI wrote
+/// before: the prologs, the reports of the batches before (without the epilog) and the batch's
+/// reader messages. That batch is refused where a load whose order to the stop LOSAT does not know
+/// writes a text, and where another subject's lookup throws on its id and may come before it (the
+/// prefetch catches that one and ends its loads); where the batch has several stopping ids, its
+/// loads end at the first lookup that NCBI makes ([`prefetch_stop`]). `before`: the subjects that
+/// NCBI's BLAST database data loader loaded for the batches of the call before this one
+/// ([`batch_loads`]), read only where the batch stops (the run's record of what its loader may
+/// hold, [`TaxdbRun::note_loaded`]); a caller that records each batch itself gives none. The
+/// outfmt 5 reports of the queries before the batch, for that stop, are the queries'
+/// ([`PrefetchQueries::after_xml_reports`], [`XmlReportsBefore`]).
+pub(crate) fn batch_prefetch<'s, 'b>(
     db: &SeqDb,
     run: &TaxdbRun,
+    before: impl IntoIterator<Item = PrefetchSubject<'b>>,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
-    query: usize,
-    xml_before: Option<&XmlReportsBefore<'_>>,
+    queries: &PrefetchQueries<'_>,
 ) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
-    if let Some(stopping) = stopping_subject(&subjects) {
-        return Err(prefetch_stop(
-            db, run, &subjects, program, query, stopping, xml_before,
-        ));
+    if stops(&subjects) {
+        run.keep_loaded(before);
+        return Err(prefetch_stop(db, run, run, &subjects, program, queries));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
     let mut fails = false;
@@ -5625,21 +6166,22 @@ pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
 /// those batches, and the open of the taxonomy database at their first taxid) and nothing of this
 /// batch: BLASTX's own run, which writes each batch's reports before it searches the next; the
 /// programs that write those reports after the stop ask [`held_batch_prefetch_stop`]. As in
-/// [`batch_prefetch`], the batch is refused where the other subjects' loads write a text after
-/// those lookups.
+/// [`batch_prefetch`], the texts of the loads before the stop after those lookups come before the
+/// error, and the batch is refused where a load whose order LOSAT does not know writes a text.
+/// `run` also holds the subjects that NCBI's data loader loaded for the batches before
+/// ([`TaxdbRun::note_loaded`], which BLASTX records as it writes each batch).
 pub(crate) fn batch_prefetch_stop<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
-    query: usize,
+    queries: &PrefetchQueries<'_>,
 ) -> Result<()> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
-    match stopping_subject(&subjects) {
-        Some(stopping) => Err(prefetch_stop(
-            db, run, &subjects, program, query, stopping, None,
-        )),
-        None => Ok(()),
+    if stops(&subjects) {
+        Err(prefetch_stop(db, run, run, &subjects, program, queries))
+    } else {
+        Ok(())
     }
 }
 
@@ -5648,20 +6190,30 @@ pub(crate) fn batch_prefetch_stop<'s>(
 /// write the batches before a failed batch there): their lookups are recorded where the batch
 /// stops, in a run of their own ([`reports_record`]) of the subjects `before` that those batches
 /// report ([`PrefetchSubject`], in any order). Nothing is read where the batch does not stop.
-pub(crate) fn held_batch_prefetch_stop<'s, 'b>(
+/// `run`, the run's own record, takes those subjects as sequences that the run loaded before the
+/// batch ([`TaxdbRun::note_loaded`]: the reports of these formats read every subject they show),
+/// beside those of the calls before, and the other loads of the batches before (`loaded`, read
+/// only where the batch stops: psiblast's traceback beyond the cut, which no report reads), all
+/// without the record's gate, as every stop records the call's loads before it (`keep_loaded`).
+pub(crate) fn held_batch_prefetch_stop<'s, 'b, 'l>(
     db: &SeqDb,
+    run: &TaxdbRun,
     before: impl IntoIterator<Item = PrefetchSubject<'b>>,
+    loaded: impl IntoIterator<Item = PrefetchSubject<'l>>,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
-    query: usize,
+    queries: &PrefetchQueries<'_>,
 ) -> Result<()> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
-    let Some(stopping) = stopping_subject(&subjects) else {
+    if !stops(&subjects) {
         return Ok(());
-    };
-    let run = reports_record(db, before, program)?;
+    }
+    let before: Vec<PrefetchSubject<'b>> = before.into_iter().collect();
+    run.keep_loaded(before.iter().copied());
+    run.keep_loaded(loaded);
+    let lookups = reports_record(db, before, program)?;
     Err(prefetch_stop(
-        db, &run, &subjects, program, query, stopping, None,
+        db, &lookups, run, &subjects, program, queries,
     ))
 }
 
@@ -5690,96 +6242,800 @@ fn reports_record<'s>(
     Ok(run)
 }
 
-/// The first of `subjects` whose lookup fails on a file with NCBI's exception
-/// (`ParsedSubject::prefetch_stops`), with its definition lines.
-fn stopping_subject<'s>(
-    subjects: &[PrefetchSubject<'s>],
-) -> Option<(u32, &'s crate::report::db_subject::ParsedSubject)> {
-    subjects.iter().find_map(|subject| {
+/// Whether one of `subjects` has a lookup that fails on a file with NCBI's exception
+/// (`ParsedSubject::prefetch_stops`): the batch's prefetch stops ([`prefetch_stop`]).
+fn stops(subjects: &[PrefetchSubject<'_>]) -> bool {
+    subjects.iter().any(|subject| {
         subject
             .parsed
-            .filter(|parsed| parsed.prefetch_stops().is_some())
-            .map(|parsed| (subject.ordinal, parsed))
+            .is_some_and(|parsed| parsed.prefetch_stops().is_some())
     })
 }
 
-/// The end of a batch's prefetch at the subject `stopping` (ordinal id, definition lines) whose
-/// lookup fails on a file with NCBI's exception ([`batch_prefetch`], [`batch_prefetch_stop`]),
-/// after the lookups that `run` records: the [`HeaderReadError`] of `query` with NCBI's `BLAST
-/// Database error`, or LOSAT's refusal where what NCBI writes before it depends on the order of
-/// the loads. `xml_before`: the outfmt 5 reports before the batch ([`XmlReportsBefore`]).
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366
+// ```c++
+// CScope_Impl::TBioseqHandles CScope_Impl::GetBioseqHandles(const TIds& ids)
+// {
+//     CSortedSeq_ids sorted_seq_ids(ids);
+//     TIds sorted_ids;
+//     sorted_seq_ids.GetSortedIds(sorted_ids);
+//
+//     TBioseqHandles ret;
+//     size_t count = sorted_ids.size();
+//     ret.resize(count);
+//     if ( count > 200 ) {
+//         // split batch into smaller pieces to avoid problems with GC
+//         for ( size_t pos = 0; pos < count; ) {
+//             size_t cnt = count - pos;
+//             if ( cnt > 150 ) cnt = 100;
+//             x_GetBioseqHandlesSorted(sorted_ids, pos, cnt, ret);
+//             pos += cnt;
+//         }
+//     }
+//     else {
+//         x_GetBioseqHandlesSorted(sorted_ids, 0, count, ret);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2014-2026
+// ```c++
+//         ITERATE(TSeqMatchMap, match, match_map) {
+//             _ASSERT( !match->second );
+//             current_tse_sets.insert(
+//                 CDataLoader::TTSE_LockSets::value_type(
+//                 match->first, CDataLoader::TTSE_LockSet()));
+//             if ( ++current_tse_sets_size >= limit_blobs_request ) {
+//                 s_GetBlobs(m_Loader, tse_sets, current_tse_sets);
+//                 current_tse_sets_size = 0;
+//             }
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-396
+// ```c++
+//     CConstRef<CSeq_id> seqid = idh.GetSeqId();
+//
+//     int oid = -1;
+//
+//     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+//         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+//         return -1;
+//     }
+// ```
+// The prefetch's `GetBioseqHandles` (`LoadSequencesToScope`, quoted at `check_prefetched_parsed`)
+// loads the distinct Seq-align ids of a batch of at most 200 of them in one map of Seq-id handles
+// (`x_GetBioseqHandlesSorted`, scope_impl.cpp:3280-3299; `CDataLoader::GetBlobs`, quoted above
+// `PrefetchSubject`): by `m_Packed - 1` as an unsigned number (`seqid::mask_handle`), then by the
+// address of the handle's info. Each load asks the BLAST database for the id's OID first, so the
+// first id in that order whose lookup fails with NCBI's exception ends the loads, and the loads
+// before it have written their texts (probe of line DBID loadord, `R/loadord/logs/probe.tsv`:
+// `gnl|BL_ORD_ID|1` and `|2` load before `ref|NP_000003.1|`, `|4` to `|7` never, `|3` before it
+// with one command line and after it with another (`-outfmt 6` and `0`); every packed id before
+// `pdb|1ABC|A`, `sp|P00007.1|NAME_X` and `lcl|abc`). More ids are first sorted by
+// `CSortableSeq_id` (seq_id_sort.cpp: a `general` id by its database and tag parts, the others by
+// `CSeq_id_Handle::PLessOrdered`) and loaded in pieces of 100, an order that LOSAT does not
+// model: of the probe's 201 ids, the first 100 `gnl|BL_ORD_ID|n` load before `dbj|AB000001.1|`
+// (a `ddbj` id sorts after every `general` one), where 200 ids load it first.
+/// Whether NCBI's prefetch of a batch that stops ([`prefetch_stop`]) loads one of the batch's
+/// other subjects before the first lookup that stops it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadBeforeStop {
+    Yes,
+    No,
+    /// LOSAT does not know, with the reason.
+    Unknown(&'static str),
+}
+
+/// The most distinct Seq-align ids that NCBI's prefetch loads in one map of Seq-id handles
+/// (`CScope_Impl::GetBioseqHandles`, quoted at [`load_before_stop`]).
+const PREFETCH_ONE_MAP_IDS: usize = 200;
+
+/// The key of the Seq-id handle of the Seq-align id of `subject` in NCBI's map of a batch's loads:
+/// its position among handles of different `m_Packed` (`seqid::mask_handle::mask_handle_order`)
+/// and its identity (`mask_handle_key`; `None` where no pure function knows it: a new handle for
+/// each Seq-id, or a giim id). A sequence without parsed Seq-ids is `gnl|BL_ORD_ID|<OID>`.
+fn prefetch_load_key(db: &SeqDb, subject: &PrefetchSubject<'_>) -> (u64, Option<Vec<u8>>) {
+    use crate::seqid::mask_handle::{mask_handle_key, mask_handle_order, mask_handle_packed};
+    let ordinal_id;
+    let id = match subject.parsed {
+        Some(parsed) => parsed.alignment_id(),
+        None => {
+            ordinal_id = crate::seqid::ParsedSeqId::General(crate::seqid::model::Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: crate::seqid::model::ObjectId::Id(db.oid(subject.ordinal).get() as i32),
+            });
+            &ordinal_id
+        }
+    };
+    (
+        mask_handle_order(mask_handle_packed(id)),
+        mask_handle_key(id).ok().flatten(),
+    )
+}
+
+/// [`LoadBeforeStop`] of each of `subjects` (a stopping batch's reported sequences, in any order,
+/// a sequence possibly more than once) in NCBI's order of the loads (quoted above
+/// [`LoadBeforeStop`]), and the order of the lookups that may stop it ([`LoadOrder`]): the
+/// subjects whose lookups stop the batch (`ParsedSubject::prefetch_stops`) load nothing; the
+/// others load by their handle's place to the stops ([`LoadOrder::before`]). Unknown besides: a
+/// Seq-align id that another subject has too, and every subject of a batch of more than
+/// [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids (whose stops' order LOSAT does not know either).
+/// The one owner of NCBI's order of a stopping batch's loads and lookups.
+fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
+    let stops = |subject: &PrefetchSubject<'_>| {
+        subject
+            .parsed
+            .is_some_and(|parsed| parsed.prefetch_stops().is_some())
+    };
+    let keys: Vec<(u64, Option<Vec<u8>>)> = subjects
+        .iter()
+        .map(|subject| prefetch_load_key(db, subject))
+        .collect();
+    let mut ordinals = std::collections::HashSet::new();
+    let mut handles: std::collections::HashMap<&[u8], u32> = Default::default();
+    let mut shared = std::collections::HashSet::new();
+    let mut ids = 0;
+    // The stopping subjects, each ordinal once, by their index in `subjects`.
+    let mut stopping = Vec::new();
+    for (index, (subject, (_, handle))) in subjects.iter().zip(&keys).enumerate() {
+        if !ordinals.insert(subject.ordinal) {
+            continue;
+        }
+        if stops(subject) {
+            stopping.push(index);
+        }
+        match handle {
+            Some(handle) => match handles.entry(handle) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(subject.ordinal);
+                    ids += 1;
+                }
+                std::collections::hash_map::Entry::Occupied(entry) => {
+                    shared.insert(*entry.get());
+                    shared.insert(subject.ordinal);
+                }
+            },
+            None => ids += 1,
+        }
+    }
+    assert!(
+        !stopping.is_empty(),
+        "a stopping batch has a stopping subject"
+    );
+    let many = ids > PREFETCH_ONE_MAP_IDS;
+    let places = subjects
+        .iter()
+        .zip(&keys)
+        .map(|(subject, (order, _))| LoadPlace {
+            order: *order,
+            stops: stops(subject),
+            unknown: if many {
+                Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100")
+            } else if shared.contains(&subject.ordinal) {
+                Some("another subject of the batch has the same Seq-align id")
+            } else {
+                None
+            },
+        })
+        .collect::<Vec<_>>();
+    // A sort that keeps the order of the batch among the handles of one key (ties).
+    stopping.sort_by_key(|&index| if many { 0 } else { places[index].order });
+    LoadOrder {
+        places,
+        stops: stopping,
+        many,
+    }
+}
+
+/// NCBI's order of the loads and lookups of a stopping batch's subjects ([`load_before_stop`]).
+struct LoadOrder {
+    /// The place of each subject's load, in the order of the batch's subjects.
+    places: Vec<LoadPlace>,
+    /// The stopping subjects (their indexes in the batch's subjects, each sequence once) in the
+    /// order of NCBI's lookups of their Seq-align ids: by their handles' keys
+    /// ([`LoadOrder::stop_key`]), a group of one key in the batch's order (NCBI orders a group by
+    /// the addresses of the handles' infos).
+    stops: Vec<usize>,
+    /// The batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
+    many: bool,
+}
+
+/// The place of one subject's load in NCBI's map of a stopping batch's Seq-id handles
+/// ([`LoadOrder`]).
+#[derive(Clone, Copy, Debug)]
+struct LoadPlace {
+    /// Its handle's key among handles of different `m_Packed` ([`prefetch_load_key`]).
+    order: u64,
+    /// Its lookup stops the batch (`ParsedSubject::prefetch_stops`): it loads nothing.
+    stops: bool,
+    /// Why LOSAT does not know its place, whatever the stops' keys.
+    unknown: Option<&'static str>,
+}
+
+impl LoadOrder {
+    /// The key of the stopping subject `index` (of the batch's subjects) in the order of the
+    /// lookups: its handle's, or one key for all where the batch has more than
+    /// [`PREFETCH_ONE_MAP_IDS`] ids, whose order LOSAT does not know.
+    fn stop_key(&self, index: usize) -> u64 {
+        if self.many {
+            0
+        } else {
+            self.places[index].order
+        }
+    }
+
+    /// The key of the first stopping lookup in NCBI's order.
+    fn first_stop_key(&self) -> u64 {
+        self.stop_key(self.stops[0])
+    }
+
+    /// [`LoadOrder::before`] where the loads end at the first stopping lookup.
+    #[cfg(test)]
+    fn at_first_stop(&self) -> Vec<LoadBeforeStop> {
+        let first = self.first_stop_key();
+        self.before(first, first)
+    }
+
+    /// [`LoadBeforeStop`] of each subject (in the order of the batch's subjects) where NCBI's loads
+    /// end at a stopping lookup whose key lies between `first` (the first stopping key) and `last`
+    /// (where they end for sure, [`prefetch_stop`]): `No` for the stopping subjects and the
+    /// handles after `last`, `Yes` for those before `first`; `Unknown` for a handle of the key of
+    /// `first` or of `last` (both unpacked included), whose order NCBI takes from its info's
+    /// address, for one between them (loaded where the lookups before it are not made), and for
+    /// the subjects whose place is not known ([`LoadPlace::unknown`]).
+    fn before(&self, first: u64, last: u64) -> Vec<LoadBeforeStop> {
+        self.places
+            .iter()
+            .map(|place| {
+                if place.stops {
+                    LoadBeforeStop::No
+                } else if let Some(why) = place.unknown {
+                    LoadBeforeStop::Unknown(why)
+                } else if place.order < first {
+                    LoadBeforeStop::Yes
+                } else if place.order > last {
+                    LoadBeforeStop::No
+                } else if place.order == first || place.order == last {
+                    LoadBeforeStop::Unknown("its Seq-id handle has the same packed number as a stopping one's (or neither is packed), which NCBI orders by their address")
+                } else {
+                    LoadBeforeStop::Unknown("its Seq-id handle comes after the first stopping one's and before the one whose lookup NCBI surely makes: NCBI loads it only where it makes none of the stopping lookups before it, and LOSAT does not know whether it makes them")
+                }
+            })
+            .collect()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-387
+// ```c++
+// int CBlastDbDataLoader::x_GetOid(const CSeq_id_Handle& idh)
+// {
+//     {
+//         CMutexGuard guard(s_Oid_Mutex);
+//         TIdMap::iterator iter = m_Ids.find(idh);
+//         if ( iter != m_Ids.end() ) {
+//             return iter->second;
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:98-110
+// ```c++
+// CCachedSequence::RegisterIds(CBlastDbDataLoader::TIdMap & idmap)
+// {
+//     ...
+//     ITERATE(CBioseq::TId, seqid, ids) {
+//         idmap[CSeq_id_Handle::GetHandle(**seqid)] = m_OID;
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297 (quoted in part at
+// `load_before_stop`): `GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved)` first, then the
+// data sources by priority, the queries' entries (`AddTopLevelSeqEntry`) before the BLAST
+// database's loader.
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2063-2068 and 1449-1468
+// ```c++
+//     else {
+//         NON_CONST_ITERATE(TSeqMatchMap, it, match_map) {
+//             if ( !it->second ) {
+//                 it->second = BestResolve(it->first);
+//             }
+//         }
+//     ...
+//     else if ( idh.HaveMatchingHandles() ) {
+//         // Try to find the best matching id (not exactly equal)
+//         CSeq_id_Handle::TMatches hset;
+//         idh.GetMatchingHandles(hset, eAllowWeakMatch);
+// ```
+// A data source without a loader (the queries' entries) finds a Bioseq of the id itself or, where
+// it holds none, of an id that the id matches weakly (`x_GetSeqMatch`), as the reports' reads
+// find a query (`refuse_id_of_a_query`'s keys, `QueryScopeKeys::own` and `weak`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313
+// ```c++
+//     if (m_FormatType != CFormattingArgs::eXml)
+//     {
+//         m_Scope->ResetDataAndHistory();
+//     }
+// ```
+/// Why NCBI's prefetch may never make the lookup of the Seq-align id of the stopping subject
+/// `ordinal` (`parsed`) of the batch of `queries` that fails with its exception (reviews 1 to 3 of
+/// line DBID loadord, line DBID DECISIONS 60 (5) to (10)), and what NCBI then loads instead:
+/// NCBI's scope finds a query by its id before it asks the BLAST database's data loader, and that
+/// loader keeps every Seq-id of each sequence that the run has loaded (`RegisterIds`) and gives
+/// that sequence for the id without a lookup. So the lookup may not be made where
+/// - a query that the scope holds at the batch's prefetch ([`PrefetchQueries::new`]'s scope, made
+///   here only) has an id that the scope takes for the stopping id, or that the stopping id
+///   matches weakly (the keys of [`refuse_id_of_a_query`]): nothing is loaded instead;
+/// - a load of the batch that may come before the stop (`before` of `subjects`, from
+///   [`load_before_stop`]: `Yes` or `Unknown`) gives a sequence (the first OID of its Seq-align
+///   id's lookup, `x_GetOid`; an unparsed subject's own) that holds an id of the stopping id's
+///   Seq-id handle;
+/// - another sequence of the database that holds such an id may have been loaded before the batch:
+///   the run's record of its loads holds it (`record`, [`TaxdbRun::note_loaded`]: the prefetches,
+///   the reads of the reports where a prefetch is off and the PSSMs' reads of the batches,
+///   queries and rounds before) and its own Seq-align id's lookup does not fail (a sequence whose
+///   own lookup fails loads nothing, and a copy with the same Seq-align id is the same lookup,
+///   which would have stopped the run there), or it is the first sequence that the lookup of an id
+///   of a sequence loaded before gives (NCBI's reads by another id of that sequence, a superset);
+///   and, after calls whose loads nothing recorded ([`PrefetchQueries::after_unrecorded_calls`]),
+///   any such sequence whose own lookup does not fail (found in the LMDB files that have the
+///   accession table, [`crate::seqdb::lookup::SeqidLookup::in_indexed_files`]).
+///
+/// The sequences that may then be given instead are each of those that hold such an id
+/// ([`StopUnsure::instead`]), loaded by the stopping id where the batch's loads go on to a later
+/// stop ([`prefetch_stop`]). `None`: NCBI looks it up.
+fn stop_lookup_unsure(
+    db: &SeqDb,
+    record: &TaxdbRun,
+    subjects: &[PrefetchSubject<'_>],
+    before: &[LoadBeforeStop],
+    queries: &PrefetchQueries<'_>,
+    ordinal: u32,
+    parsed: &crate::report::db_subject::ParsedSubject,
+) -> Result<Option<StopUnsure>> {
+    let id = parsed.alignment_id();
+    let keys = parsed.query_scope_keys();
+    let scope = (queries.scope)();
+    if scope.has_key(&keys.own) || scope.has_key(&keys.weak) {
+        return Ok(Some(StopUnsure {
+            why: "NCBI's scope holds a query (of the batch, or in outfmt 5 of a batch before) with an id that it takes for this one, or that this one matches weakly, at the batch's prefetch, where it finds that query before it asks the database".to_owned(),
+            instead: Some(Vec::new()),
+        }));
+    }
+    let handle = crate::seqid::mask_handle::mask_handle_key(id)
+        .ok()
+        .flatten();
+    let holds = |oid: u32| {
+        handle
+            .as_deref()
+            .is_none_or(|handle| holds_handle(db, db.ordinal_of(oid), handle))
+    };
+    let lookup = db.seqid_lookup()?;
+    // The first reason, and every sequence that may be given instead (by OID).
+    let mut why: Option<String> = None;
+    let mut instead: Option<Vec<u32>> = Some(Vec::new());
+    let mut give = |oid: u32, reason: &dyn Fn() -> String| {
+        why.get_or_insert_with(reason);
+        if let Some(instead) = instead.as_mut() {
+            instead.push(oid);
+        }
+    };
+    for (subject, before) in subjects.iter().zip(before) {
+        if *before == LoadBeforeStop::No {
+            continue;
+        }
+        let given = match subject.parsed {
+            Some(parsed) => lookup
+                .seqid_to_oids(parsed.alignment_id(), true)
+                .ok()
+                .and_then(|oids| oids.first().copied()),
+            None => Some(db.oid(subject.ordinal).get()),
+        };
+        if let Some(oid) = given.filter(|&oid| holds(oid)) {
+            give(oid, &|| {
+                format!(
+                "a load of the batch's prefetch that may come before it gives a sequence of the database (OID {oid}) that holds an id that NCBI's Seq-id handles take for it, which registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup"
+            )
+            });
+        }
+    }
+    let loaded = record.loaded();
+    if loaded.is_empty() && !queries.unrecorded_calls {
+        return Ok(why.map(|why| StopUnsure {
+            why,
+            instead: instead.map(|oids| ordinals_of(db, oids)),
+        }));
+    }
+    let own = db.oid(ordinal).get();
+    // The other sequences of the database that hold such an id, found in the LMDB files that have
+    // the accession table and kept where they hold an id of the handle; the lookup's error where
+    // it fails (a version 4 database's ISAM that does not open): each sequence is then asked.
+    let indexed = db.seqid_lookup()?.in_indexed_files();
+    let holders = indexed
+        .seqid_to_oids(id, true)
+        .and_then(|mut holders| {
+            holders.extend(indexed.case_folded_oids(id)?);
+            holders.extend(indexed.case_variant_oids(id)?);
+            Ok(holders)
+        })
+        .map(|mut holders| {
+            holders.retain(|&oid| oid != own && holds(oid));
+            holders.sort_unstable();
+            holders.dedup();
+            holders
+        });
+    let holder = |oid: u32| {
+        oid != own
+            && match &holders {
+                Ok(holders) => holders.binary_search(&oid).is_ok(),
+                Err(_) => holds(oid),
+            }
+    };
+    let ids_of = |oid_ordinal: u32| match db.read_header(oid_ordinal) {
+        Ok(crate::seqdb::SequenceHeader::Parsed(set)) => Some(set),
+        _ => None,
+    };
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-396
+    // ```c++
+    //     CConstRef<CSeq_id> seqid = idh.GetSeqId();
+    //
+    //     int oid = -1;
+    //
+    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+    //         return -1;
+    //     }
+    // ```
+    // (`SeqidToOid`, quoted at `SeqidLookup::seqid_to_oid`, gives the first OID of the lookup.)
+    // A sequence of a call before whose reports LOSAT has no record of: its own Seq-align id's
+    // lookup does not fail (a load of it by that id may be made).
+    let own_lookup_ok = |oid: u32| {
+        ids_of(db.ordinal_of(oid)).is_none_or(|set| {
+            set.alignment_id()
+                .is_none_or(|id| lookup.seqid_to_oids(id, true).is_ok())
+        })
+    };
+    // A load of the recorded sequence `oid` by its own Seq-align id loads `oid` itself: the
+    // loader loads the first OID that the id's lookup gives, which may be another sequence's
+    // (review 4 of line DBID loadord, L3: two holders of one gi); that one is asked below, as the
+    // first sequence that a lookup of an id of a sequence loaded before gives.
+    let loads_itself = |oid: u32| {
+        ids_of(db.ordinal_of(oid)).is_none_or(|set| {
+            set.alignment_id().is_none_or(|id| {
+                lookup
+                    .seqid_to_oids(id, true)
+                    .is_ok_and(|oids| oids.first() == Some(&oid))
+            })
+        })
+    };
+    if !holders.as_ref().is_ok_and(Vec::is_empty) {
+        if queries.unrecorded_calls {
+            match &holders {
+                Ok(holders) => {
+                    for &oid in holders.iter().filter(|&&oid| own_lookup_ok(oid)) {
+                        give(oid, &|| {
+                            format!("another sequence of the database (OID {oid}) holds an id that NCBI's Seq-id handles take for it, and a load of that sequence by its own Seq-align id in a call of the run before this one, whose reports LOSAT has no record of here, registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup")
+                        });
+                    }
+                }
+                Err(error) => {
+                    why.get_or_insert_with(|| format!(
+                        "a call of the run before this one, whose reports LOSAT has no record of here, may have loaded another sequence of the database that holds an id that NCBI's Seq-id handles take for it, and LOSAT cannot look for one ({error})"
+                    ));
+                    instead = None;
+                }
+            }
+        } else {
+            let registered = |oid: u32| {
+                format!("another sequence of the database (OID {oid}) holds an id that NCBI's Seq-id handles take for it, and the run loaded that sequence, or one that shares an id with it, before the batch: its load there registers the id in NCBI's BLAST database data loader, which then gives that sequence for it without the lookup")
+            };
+            for &before in &loaded {
+                let oid = db.oid(before).get();
+                if holder(oid) && loads_itself(oid) {
+                    give(oid, &|| registered(oid));
+                }
+            }
+            // The first sequence that a lookup of any id of a sequence loaded before gives.
+            for &before in &loaded {
+                let Some(set) = ids_of(before) else {
+                    continue;
+                };
+                for id in set.deflines.iter().flat_map(|defline| &defline.ids) {
+                    let first = lookup
+                        .seqid_to_oids(id, true)
+                        .ok()
+                        .and_then(|oids| oids.first().copied());
+                    if let Some(oid) = first.filter(|&oid| holder(oid)) {
+                        give(oid, &|| registered(oid));
+                    }
+                }
+            }
+        }
+    }
+    Ok(why.map(|why| StopUnsure {
+        why,
+        instead: instead.map(|oids| ordinals_of(db, oids)),
+    }))
+}
+
+/// The ordinal ids of the OIDs `oids`, each once, in their order.
+fn ordinals_of(db: &SeqDb, mut oids: Vec<u32>) -> Vec<u32> {
+    oids.sort_unstable();
+    oids.dedup();
+    oids.into_iter().map(|oid| db.ordinal_of(oid)).collect()
+}
+
+/// Why NCBI's prefetch may not make a stopping lookup ([`stop_lookup_unsure`]).
+#[derive(Debug, PartialEq, Eq)]
+struct StopUnsure {
+    /// The first reason.
+    why: String,
+    /// The sequences (ordinal ids) that NCBI's BLAST database data loader may give for the
+    /// stopping id without its lookup (empty where only the scope finds it, which loads nothing);
+    /// `None` where LOSAT cannot tell which.
+    instead: Option<Vec<u32>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-777
+// ```c++
+//     try {
+//        CScope::TIds ids;
+//        vector<TSeqRange> ranges;
+//        s_ExtractSeqidsAndRanges(results, ids, ranges);
+//        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+//        LoadSequencesToScope(ids, ranges, scope);
+// 	}
+//     catch(const CSeqDBException & e) {
+//         _TRACE(e.GetMsg());
+//     	throw;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (quoted
+// in parts at `stop_lookup_unsure` and above `LoadBeforeStop`): `x_GetOid` of each handle of the
+// map in its order, `m_Ids.find` first, then `SeqidToOid`, whose exception ends the loads; the
+// handles after it are never looked up.
+/// The end of a batch's prefetch whose subjects `subjects` hold one or more whose lookups fail on
+/// a file with NCBI's exception ([`batch_prefetch`], [`batch_prefetch_stop`]), after the lookups
+/// that `run` records and the loads that `record` records ([`TaxdbRun::note_loaded`]; the same
+/// run, or the run's own where `run` is the record of the held reports,
+/// [`held_batch_prefetch_stop`]): the [`HeaderReadError`] of `queries` (its `error_query`) with
+/// the texts of the loads before the stop in NCBI's order ([`load_before_stop`]; with the texts
+/// that loads NCBI did not make left to them, `report::query_warnings::ReadLoad::place`: those
+/// of an outfmt 5 report before the batch that NCBI's XML stream cut, also where the program
+/// writes that report after the stop, [`PrefetchQueries::after_xml_reports`], line RG K4h) and
+/// NCBI's `BLAST Database error`, or LOSAT's refusal where what NCBI writes depends on what LOSAT
+/// does not know.
+///
+/// NCBI's loads end at the first stopping lookup that it makes, in the order of the handles
+/// (`LoadSequencesToScope` rethrows the `CSeqDBException`, quoted at `check_prefetched_parsed`):
+/// the stops are asked in that order ([`LoadOrder::stops`]) until one that NCBI surely makes
+/// ([`stop_lookup_unsure`]: `None`), with the others of its key. A stop before it that NCBI may not
+/// make (review 3 of line DBID loadord, H1) does not refuse the batch by itself: the loads from
+/// the first stop's key to the sure one's and the sequences that such a skipped lookup is given
+/// instead ([`StopUnsure::instead`]) are loads whose place LOSAT does not know, which refuse the
+/// batch where one of them writes a text (as a load of the first stop's packed number), and the
+/// stops that NCBI may end at must have one message. Refused: no stop that NCBI surely makes (it
+/// may then go on), a sequence given instead that LOSAT cannot name.
 fn prefetch_stop(
     db: &SeqDb,
     run: &TaxdbRun,
+    record: &TaxdbRun,
     subjects: &[PrefetchSubject<'_>],
     program: &str,
-    query: usize,
-    stopping: (u32, &crate::report::db_subject::ParsedSubject),
-    xml_before: Option<&XmlReportsBefore<'_>>,
+    queries: &PrefetchQueries<'_>,
 ) -> anyhow::Error {
-    let (ordinal, parsed) = stopping;
-    let message = parsed
-        .prefetch_stops()
-        .expect("the stopping subject's lookup fails with NCBI's exception");
-    let refuse = |what: &str| {
+    let stopping = |index: usize| {
+        let subject = &subjects[index];
+        let parsed = subject
+            .parsed
+            .expect("a stopping subject has parsed Seq-ids");
+        let message = parsed
+            .prefetch_stops()
+            .expect("the stopping subject's lookup fails with NCBI's exception");
+        (subject.ordinal, parsed, message)
+    };
+    let may_not_look_up = |index: usize, why: &str| {
+        let (ordinal, parsed, message) = stopping(index);
         parsed_refusal(
             db.oid(ordinal),
             &format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), in a batch whose other subjects that prefetch loads before it or not, in an order that LOSAT does not reproduce: {what}",
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), but which NCBI's prefetch may not look up: {why}",
+                String::from_utf8_lossy(&parsed.alignment_fasta()),
+            ),
+            program,
+        )
+    };
+    let order = load_before_stop(db, subjects);
+    let first = order.first_stop_key();
+    // The stops that NCBI's loads may end at, in the order of the lookups, up to the key of the
+    // first that NCBI surely makes; the sequences given instead for those it may not make.
+    let mut ends = Vec::new();
+    let mut sure: Option<(u64, usize)> = None;
+    let mut unsure: Option<(usize, String)> = None;
+    let mut unnamed: Option<(usize, String)> = None;
+    let mut instead: Vec<(usize, Vec<u32>)> = Vec::new();
+    for &index in &order.stops {
+        let key = order.stop_key(index);
+        if sure.is_some_and(|(last, _)| key > last) {
+            break;
+        }
+        let (ordinal, parsed, _) = stopping(index);
+        match stop_lookup_unsure(
+            db,
+            record,
+            subjects,
+            &order.before(first, key),
+            queries,
+            ordinal,
+            parsed,
+        ) {
+            Ok(None) => {
+                sure.get_or_insert((key, index));
+            }
+            Ok(Some(StopUnsure {
+                why,
+                instead: given,
+            })) => {
+                match given {
+                    Some(given) => instead.push((index, given)),
+                    None => {
+                        unnamed.get_or_insert((index, why.clone()));
+                    }
+                }
+                unsure.get_or_insert((index, why));
+            }
+            Err(error) => return error,
+        }
+        ends.push(index);
+    }
+    let Some((last, deciding)) = sure else {
+        let (index, why) = unsure.expect("a stop that NCBI may not look up");
+        return may_not_look_up(index, &why);
+    };
+    if let Some((index, why)) = unnamed {
+        return may_not_look_up(
+            index,
+            &format!("{why}; where it does not, NCBI's loads go on to a later stop after a load that LOSAT cannot name"),
+        );
+    }
+    let (_, parsed, message) = stopping(deciding);
+    let refuse = |what: &str| {
+        parsed_refusal(
+            db.oid(subjects[deciding].ordinal),
+            &format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), in a batch of which LOSAT does not know what that prefetch writes before it: {what}",
                 String::from_utf8_lossy(&parsed.alignment_fasta())
             ),
             program,
         )
     };
-    if subjects
+    if let Some(&other) = ends.iter().find(|&&index| stopping(index).2 != message) {
+        let (_, other_parsed, other_message) = stopping(other);
+        return refuse(&format!(
+            "the prefetch may also end at the lookup of {}, which fails with another message ({other_message}), as NCBI makes it or not",
+            String::from_utf8_lossy(&other_parsed.alignment_fasta())
+        ));
+    }
+    let before = order.before(first, last);
+    if subjects.iter().zip(&before).any(|(subject, before)| {
+        *before != LoadBeforeStop::No
+            && subject.parsed.is_some_and(|parsed| parsed.prefetch_fails())
+    }) {
+        return refuse("another of its subjects has an id whose lookup throws, which the prefetch catches and which ends its loads, and which comes before it or may");
+    }
+    // The loads before the stop, then those whose order LOSAT does not know, then the sequences
+    // that a skipped stopping lookup is given instead (loaded by that stopping id). The bytes of a
+    // set of loads do not depend on their order ([`prefetch_messages`]: a text comes with the
+    // run's first open of the taxonomy database or where a lookup asks it, a volume's first
+    // lookup of a taxid, and the lookup of the offset error's taxid that misses its slot needs
+    // another taxid of the slot, which `TaxdbRun::cache_collision` refuses), so where those of
+    // unknown order write nothing after the others, no part of them writes anything before the
+    // stop.
+    const INSTEAD: &str = "the sequence that NCBI's BLAST database data loader gives for a stopping id before it whose lookup NCBI may not make, which NCBI loads where it does not";
+    let mut unknown = None;
+    let reads = subjects
         .iter()
-        .any(|subject| subject.parsed.is_some_and(|parsed| parsed.prefetch_fails()))
-    {
-        return refuse("another of them has an id whose lookup throws, which the prefetch catches and which ends its loads");
-    }
-    let others = subjects.iter().filter(|subject| {
-        subject
-            .parsed
-            .is_none_or(|parsed| parsed.prefetch_stops().is_none())
-    });
-    // A text of a load comes with the run's first open of the taxonomy database or where a lookup
-    // asks it (a volume's first lookup of a taxid, and a lookup of the offset error's taxid that
-    // misses its slot, which needs another taxid of the slot: `TaxdbRun::cache_collision` refuses
-    // such a run): where the other subjects' loads after `run`'s lookups write none, none of them
-    // writes one before the stop in any order, nor in any part of them.
-    let reads = match subject_read_texts(
-        db,
-        run,
-        others.map(|subject| (0, subject.ordinal, subject.parsed)),
-        false,
-        program,
-    ) {
-        Ok(reads) => reads,
-        Err(error) => return error,
-    };
-    if reads.iter().any(|read| !read.text.is_empty()) {
-        return refuse("their loads make the taxonomy database write a text");
-    }
-    // A BLAST XML report before the batch that NCBI's stream cuts before its hits makes none of
-    // its loads, whose texts (in the model, those of its reads) go to the next loads that make the
-    // same asks (`report::query_warnings::ReadLoad::left_out`): then a load of these that asks may
-    // write them before the stop, or not, as the order decides. The four programs that model every
-    // batch before they write a report know of the cut only where they write it, after this.
-    let asks = || {
-        reads.iter().any(|read| {
-            read.load
-                .as_ref()
-                .is_some_and(|load| load.looks_up || load.offset)
+        .zip(&before)
+        .filter(|(_, before)| **before == LoadBeforeStop::Yes)
+        .chain(
+            subjects
+                .iter()
+                .zip(&before)
+                .filter(|(_, before)| matches!(before, LoadBeforeStop::Unknown(_))),
+        )
+        .map(|(subject, before)| {
+            let why = match before {
+                LoadBeforeStop::Unknown(why) => Some(*why),
+                _ => None,
+            };
+            (why, subject.ordinal, SubjectLoad::Read(subject.parsed))
+        });
+    let given = instead.iter().flat_map(|(index, holders)| {
+        let (ordinal, parsed, _) = stopping(*index);
+        holders.iter().map(move |&holder| {
+            (
+                Some(INSTEAD),
+                holder,
+                SubjectLoad::Instead {
+                    stop: ordinal,
+                    by: parsed,
+                },
+            )
         })
+    });
+    // Nothing loads before the stop: no read, so no refusal of the run's taxonomy cache either
+    // (review 1 of line DBID loadord, L5: NCBI writes its error alone). Each load is named by its
+    // place in `whys` (`load_read_texts` reads each sequence once).
+    let (whys, loads): (Vec<Option<&'static str>>, Vec<_>) = reads
+        .chain(given)
+        .enumerate()
+        .map(|(index, (why, ordinal, load))| (why, (index as u32, ordinal, load)))
+        .unzip();
+    let mut reads = if loads.is_empty() {
+        Vec::new()
+    } else {
+        match load_read_texts(db, run, loads, false, program) {
+            Ok(reads) => reads,
+            Err(error) => return error,
+        }
     };
-    if xml_before.is_some_and(|before| before.leave_texts(query)) && asks() {
-        return refuse("their loads may write the taxonomy database's texts of the loads that a BLAST XML report before them does not make, whose Iteration NCBI's XML stream cuts at a query title or id outside US-ASCII");
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1440-1466
+    // (quoted at `TaxdbRun::load`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375 (quoted at
+    // `report::query_warnings::ReadCursor::cut`)
+    // A BLAST XML report before the batch that NCBI's stream cuts before its hits makes none of
+    // its loads, whose texts (in the model, those of its reads: the texts of opening the taxonomy
+    // database at the run's first ask, a volume's offset error at its first lookup of that taxid)
+    // go to NCBI's next loads that make the same asks (`report::query_warnings::ReadLoad::left_out`;
+    // line RG K4h, review 3 H1 = E2): the loads of the reports and prefetches after it, then those
+    // of this prefetch before the stop. BLASTX, which writes each batch's reports before it models
+    // the next, has placed them in the run's ledger already (`ReadLoad::place` in
+    // `load_read_texts`). The four programs that model every batch before they write a report
+    // (`XmlReportsBefore`, [`PrefetchQueries::after_xml_reports`]) place them here by the same
+    // model, run over the reports and prefetches of the queries before the batch in the order the
+    // writers write them (`LoadTexts::left_before`; review 5 of line DBID loadord, M1). The texts
+    // go to the first load that makes the same ask in the order of `reads`: the loads before the
+    // stop (whose order among themselves does not change the bytes, as the texts left are the
+    // texts of opening, which no load's own text holds after the run's first ask, and offset
+    // errors of one text), then those whose place LOSAT does not know, which are refused below
+    // where they take one. The loads after the stop ([`load_before_stop`]'s `No`) are not made: a
+    // text that no load before the stop asks for is never written (NCBI writes its error alone).
+    let mut left_to_unknown = None;
+    if let Some(left) = queries
+        .xml_before
+        .and_then(|before| before.left_texts(queries.error_query))
+    {
+        for read in &mut reads {
+            let own = read.text.len();
+            read.place_left(&left);
+            if read.text.len() > own {
+                if let Some(why) = whys[read.subject as usize] {
+                    left_to_unknown.get_or_insert(why);
+                }
+            }
+        }
+    }
+    if let Some(why) = left_to_unknown {
+        return refuse(&format!(
+            "the load of another of its subjects, which LOSAT does not know NCBI's prefetch to make before the stop ({why}), asks the taxonomy database for what a BLAST XML report before it did not (NCBI's XML stream cut its Iteration at a query title or id outside US-ASCII, so it made none of its loads), and NCBI writes there the texts of those asks where it makes it"
+        ));
+    }
+    let mut text = String::new();
+    for read in &reads {
+        match whys[read.subject as usize] {
+            Some(why) if !read.text.is_empty() => {
+                unknown.get_or_insert(why);
+            }
+            Some(_) => {}
+            None => text.push_str(&String::from_utf8_lossy(&read.text)),
+        }
+    }
+    if let Some(why) = unknown {
+        return refuse(&format!(
+            "the load of another of its subjects, which LOSAT does not know NCBI's prefetch to make before the stop ({why}), makes the taxonomy database write a text"
+        ));
     }
     anyhow::Error::new(HeaderReadError {
-        query,
+        query: queries.error_query,
         error: NativeError {
             exit: 2,
-            message: format!("BLAST Database error: {message}\n"),
+            message: format!("{text}BLAST Database error: {message}\n"),
         }
         .into(),
     })
@@ -6924,9 +8180,16 @@ mod taxdb_prepass_tests {
                 parsed: Some(&*subject),
                 flipped,
             };
-            batch_prefetch(&db, &run, [subject], "TBLASTX", 0, None)
-                .unwrap()
-                .text()
+            batch_prefetch(
+                &db,
+                &run,
+                std::iter::empty(),
+                [subject],
+                "TBLASTX",
+                &stop_queries(0),
+            )
+            .unwrap()
+            .text()
         };
         assert_eq!(prefetch(false), b"");
         assert_eq!(prefetch(true), warning);
@@ -6968,14 +8231,14 @@ mod taxdb_prepass_tests {
             let alone = batch_prefetch(
                 &db,
                 &run,
+                std::iter::empty(),
                 [PrefetchSubject {
                     ordinal: 0,
                     parsed: Some(&*failed),
                     flipped: false,
                 }],
                 "BLASTN",
-                0,
-                None,
+                &stop_queries(0),
             );
             assert_eq!(text(alone.unwrap()), warning);
             // With the other subject, whose load writes the offset error before the failed
@@ -6983,6 +8246,7 @@ mod taxdb_prepass_tests {
             let both = batch_prefetch(
                 &db,
                 &run,
+                std::iter::empty(),
                 [
                     PrefetchSubject {
                         ordinal: 0,
@@ -6996,8 +8260,7 @@ mod taxdb_prepass_tests {
                     },
                 ],
                 "BLASTN",
-                0,
-                None,
+                &stop_queries(0),
             );
             match taxdb {
                 None => assert_eq!(text(both.unwrap()), warning),
@@ -7016,19 +8279,20 @@ mod taxdb_prepass_tests {
                 let first = batch_prefetch(
                     &db,
                     &run,
+                    std::iter::empty(),
                     [PrefetchSubject {
                         ordinal: 1,
                         parsed: Some(&*other),
                         flipped: false,
                     }],
                     "BLASTN",
-                    0,
-                    None,
+                    &stop_queries(0),
                 );
                 assert_eq!(text(first.unwrap()), offset);
                 let later = batch_prefetch(
                     &db,
                     &run,
+                    std::iter::empty(),
                     [
                         PrefetchSubject {
                             ordinal: 1,
@@ -7042,8 +8306,7 @@ mod taxdb_prepass_tests {
                         },
                     ],
                     "BLASTN",
-                    0,
-                    None,
+                    &stop_queries(0),
                 );
                 assert_eq!(text(later.unwrap()), warning);
             }
@@ -7061,6 +8324,7 @@ mod taxdb_prepass_tests {
         let prefetch = batch_prefetch(
             &db,
             &run,
+            std::iter::empty(),
             [
                 PrefetchSubject {
                     ordinal: 1,
@@ -7074,25 +8338,1086 @@ mod taxdb_prepass_tests {
                 },
             ],
             "BLASTN",
-            0,
-            None,
+            &stop_queries(0),
         );
         assert_eq!(text(prefetch.unwrap()), format!("{offset}{warning}"));
         let run = TaxdbRun::default();
         let plus = batch_prefetch(
             &db,
             &run,
+            std::iter::empty(),
             [PrefetchSubject {
                 ordinal: 1,
                 parsed: Some(&*bbs),
                 flipped: false,
             }],
             "BLASTN",
-            0,
-            None,
+            &stop_queries(0),
         );
         assert_eq!(text(plus.unwrap()), "");
         std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
+        // Line DBID loadord (tests/db_search/make_multidb.py --loadord-only): `ldp` holds
+        // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|`; the unparsed `qp1` is
+        // `gnl|BL_ORD_ID|0` beside it in `lda ldp`, `|1` in `ldb ldp` and `|2` in `ldp ldu`.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-load-order-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let open = |names: &[&str]| {
+            let search = SearchPath::new(&cwd, None, None).unwrap();
+            let list: Vec<String> = names
+                .iter()
+                .map(|name| {
+                    root()
+                        .join("db_search/multidb")
+                        .join(name)
+                        .to_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        };
+        let headers_of =
+            |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
+                let headers = HeaderReader::new(db);
+                (0..db.num_seqs())
+                    .map(
+                        |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                            ReportedHeader::Parsed(subject) => Some(subject),
+                            _ => None,
+                        },
+                    )
+                    .collect()
+            };
+        let accession = |parsed: &[Option<
+            std::sync::Arc<crate::report::db_subject::ParsedSubject>,
+        >],
+                         number: &str| {
+            parsed
+                .iter()
+                .position(|header| {
+                    header.as_ref().is_some_and(|subject| {
+                        subject.prefetch_stops().is_some()
+                            && String::from_utf8_lossy(&subject.alignment_fasta()).contains(number)
+                    })
+                })
+                .unwrap() as u32
+        };
+        for (names, want) in [
+            (["lda", "ldp"], LoadBeforeStop::No),
+            (["ldb", "ldp"], LoadBeforeStop::Yes),
+        ] {
+            let db = open(&names);
+            let parsed = headers_of(&db);
+            let stop = accession(&parsed, "NP_000002.1");
+            let unparsed = parsed.iter().rposition(Option::is_none).unwrap() as u32;
+            let subjects = [
+                PrefetchSubject::unflipped(unparsed, None),
+                PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref()),
+            ];
+            assert_eq!(
+                load_before_stop(&db, &subjects).at_first_stop(),
+                [want, LoadBeforeStop::No],
+                "{names:?}"
+            );
+            let before = load_before_stop(&db, &subjects).at_first_stop();
+            // No load before the batch: the run has reported nothing (its first batch, or batches
+            // whose subjects have no parsed Seq-ids), and the scope holds none of its ids.
+            assert_eq!(
+                stop_lookup_unsure(
+                    &db,
+                    &TaxdbRun::default(),
+                    &subjects,
+                    &before,
+                    &stop_queries(0),
+                    stop,
+                    parsed[stop as usize].as_ref().unwrap()
+                )
+                .unwrap(),
+                None
+            );
+        }
+        // The same packed number 2 (the handles' addresses decide), one Seq-align id of two
+        // sequences, more than 200 ids, and two stops (the smaller number decides).
+        let db = open(&["ldp", "ldu"]);
+        let parsed = headers_of(&db);
+        let stop = accession(&parsed, "NP_000002.1");
+        let other = accession(&parsed, "NP_000900.1");
+        let tie = PrefetchSubject::unflipped(2, None);
+        let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
+        assert!(matches!(
+            load_before_stop(&db, &[tie, stopping]).at_first_stop()[0],
+            LoadBeforeStop::Unknown(why) if why.contains("same packed number")
+        ));
+        let unstopped = (**parsed[stop as usize].as_ref().unwrap())
+            .clone()
+            .found_instead(None);
+        let copy = PrefetchSubject::unflipped(other, Some(&unstopped));
+        assert!(matches!(
+            load_before_stop(&db, &[stopping, copy]).at_first_stop()[1],
+            LoadBeforeStop::Unknown(why) if why.contains("the same Seq-align id")
+        ));
+        // `gnl|BL_ORD_ID|3` and on (packed 3 and more, after the stop): 200 distinct ids in one
+        // map, 201 in pieces.
+        let unparsed: Vec<PrefetchSubject<'_>> = (3..204)
+            .map(|ordinal| PrefetchSubject::unflipped(ordinal, None))
+            .collect();
+        let mut many = unparsed.clone();
+        many.push(stopping);
+        assert!(load_before_stop(&db, &many).at_first_stop()[..201]
+            .iter()
+            .all(|before| matches!(
+                before,
+                LoadBeforeStop::Unknown(why) if why.contains("more than 200")
+            )));
+        let mut few = unparsed[..199].to_vec();
+        few.push(stopping);
+        assert!(load_before_stop(&db, &few)
+            .at_first_stop()
+            .iter()
+            .all(|before| *before == LoadBeforeStop::No));
+        let later = PrefetchSubject::unflipped(other, parsed[other as usize].as_deref());
+        assert_eq!(
+            load_before_stop(&db, &[later, tie, stopping]).at_first_stop(),
+            [
+                LoadBeforeStop::No,
+                load_before_stop(&db, &[tie, stopping]).at_first_stop()[0],
+                LoadBeforeStop::No
+            ]
+        );
+        // NCBI may never look the stopping id up (reviews 1 and 2 of line DBID loadord, as
+        // DECISIONS 60 (6) to (8) decided them): `ldg`'s `gi|1|ref|NP_000002.1|` holds it, and its
+        // load registers it in NCBI's data loader: refused where the batch loads that sequence
+        // before the stop (its gi's packed number 1 is smaller), or where the run loaded it
+        // before (`TaxdbRun::note_loaded`: a batch, query or round before; review 2's
+        // `B.loaded`), or after calls that nothing recorded (the library's batches); not where no
+        // batch loaded it (review 2, M1: `B.never`, `P.first.it2`).
+        let unsure = |db: &SeqDb,
+                      run: &TaxdbRun,
+                      subjects: &[PrefetchSubject<'_>],
+                      queries: PrefetchQueries<'_>,
+                      stop: u32,
+                      parsed: &crate::report::db_subject::ParsedSubject| {
+            stop_lookup_unsure(
+                db,
+                run,
+                subjects,
+                &load_before_stop(db, subjects).at_first_stop(),
+                &queries,
+                stop,
+                parsed,
+            )
+            .unwrap()
+            .map(|unsure| unsure.why)
+        };
+        let db = open(&["lda", "ldg", "ldp"]);
+        let parsed = headers_of(&db);
+        let stop = accession(&parsed, "NP_000002.1");
+        let holder = parsed
+            .iter()
+            .position(|header| {
+                header
+                    .as_ref()
+                    .is_some_and(|subject| subject.prefetch_stops().is_none())
+            })
+            .unwrap() as u32;
+        let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
+        let held = PrefetchSubject::unflipped(holder, parsed[holder as usize].as_deref());
+        let unparsed = PrefetchSubject::unflipped(0, None);
+        assert!(parsed[0].is_none());
+        let stop_parsed = parsed[stop as usize].as_ref().unwrap();
+        let why = unsure(
+            &db,
+            &TaxdbRun::default(),
+            &[held, stopping],
+            stop_queries(0),
+            stop,
+            stop_parsed,
+        )
+        .unwrap();
+        assert!(why.contains("a load of the batch's prefetch"), "{why}");
+        assert_eq!(
+            unsure(
+                &db,
+                &TaxdbRun::default(),
+                &[stopping],
+                stop_queries(0),
+                stop,
+                stop_parsed
+            ),
+            None
+        );
+        // A run that reported the holder before (a batch, query or round before; the record of
+        // a run that can stop: `lda` has no accession table).
+        let loaded = TaxdbRun::default();
+        loaded.note_loaded(&db, || [unparsed, held]);
+        assert_eq!(loaded.loaded(), [holder]);
+        let why = unsure(
+            &db,
+            &loaded,
+            &[stopping],
+            stop_queries(1),
+            stop,
+            stop_parsed,
+        )
+        .unwrap();
+        assert!(why.contains("the run loaded that sequence"), "{why}");
+        // A run that reported only sequences without parsed Seq-ids: nothing recorded, NCBI looks
+        // the stopping id up (M1).
+        let never = TaxdbRun::default();
+        never.note_loaded(&db, || [unparsed]);
+        assert!(never.loaded().is_empty());
+        assert_eq!(
+            unsure(&db, &never, &[stopping], stop_queries(1), stop, stop_parsed),
+            None
+        );
+        // A call of the library's batches after others, whose reports nothing recorded.
+        let why = unsure(
+            &db,
+            &never,
+            &[stopping],
+            stop_queries(1).after_unrecorded_calls(true),
+            stop,
+            stop_parsed,
+        )
+        .unwrap();
+        assert!(
+            why.contains("whose reports LOSAT has no record of"),
+            "{why}"
+        );
+        // A copy of the stopping sequence with the same Seq-align id is the same lookup: no
+        // batch before can have loaded it without stopping there (`ldc`, a copy of `ldp`'s
+        // record; kit case `copy.21b` of line DBID mixdb2's review 1, the rows `.copy.6`).
+        let db = open(&["ldp", "ldc", "lda"]);
+        let parsed = headers_of(&db);
+        let stop = accession(&parsed, "NP_000002.1");
+        let copy = parsed
+            .iter()
+            .enumerate()
+            .rposition(|(ordinal, header)| {
+                ordinal != stop as usize
+                    && header.as_ref().is_some_and(|subject| {
+                        String::from_utf8_lossy(&subject.alignment_fasta()).contains("NP_000002.1")
+                    })
+            })
+            .unwrap() as u32;
+        let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
+        let copied = TaxdbRun::default();
+        copied.note_loaded(&db, || {
+            [PrefetchSubject::unflipped(
+                copy,
+                parsed[copy as usize].as_deref(),
+            )]
+        });
+        assert_eq!(copied.loaded(), [copy]);
+        assert_eq!(
+            unsure(
+                &db,
+                &copied,
+                &[stopping],
+                stop_queries(1),
+                stop,
+                parsed[stop as usize].as_ref().unwrap()
+            ),
+            None
+        );
+        // Review 4 of line DBID loadord, M1: the run's record is made only where a prefetch of
+        // the run can stop, and the gate is asked first: a run that cannot stop (`ldp` alone, a
+        // version 5 database with the accession table) never makes the subjects it is given.
+        let closed = open(&["ldp"]);
+        let run = TaxdbRun::default();
+        run.note_loaded(&closed, || -> [PrefetchSubject<'_>; 0] {
+            panic!("the subjects of a run that cannot stop were made")
+        });
+        assert!(!run.prefetch_can_stop(&closed));
+        assert!(run.loaded().is_empty());
+        // (The gate is decided once for a run: another run for another database.)
+        let open_gate = open(&["lda", "ldp"]);
+        let run = TaxdbRun::default();
+        let mut made = 0;
+        run.note_loaded(&open_gate, || {
+            made += 1;
+            std::iter::empty()
+        });
+        assert!(run.prefetch_can_stop(&open_gate) && made == 1);
+        // Review 4, L3: `ldd` and `ldh` hold one Seq-align id, gi|9000, and the stopping
+        // accession: a load of the later one (recorded) by that id loads the first (NCBI's
+        // `x_GetOid` takes the lookup's first OID), so the sequence that NCBI may give for the
+        // stopping id instead is `ldd`, never `ldh` itself.
+        let db = open(&["lda", "ldd", "ldh", "ldp"]);
+        let parsed = headers_of(&db);
+        let stop = accession(&parsed, "NP_000002.1");
+        assert_eq!(db.oid(stop).get(), 3);
+        let recorded = TaxdbRun::default();
+        recorded.note_loaded(&db, || {
+            [PrefetchSubject::unflipped(2, parsed[2].as_deref())]
+        });
+        assert_eq!(recorded.loaded(), [2]);
+        let stopping = [PrefetchSubject::unflipped(
+            stop,
+            parsed[stop as usize].as_deref(),
+        )];
+        let given = stop_lookup_unsure(
+            &db,
+            &recorded,
+            &stopping,
+            &[LoadBeforeStop::No],
+            &stop_queries(1),
+            stop,
+            parsed[stop as usize].as_ref().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(given.instead, Some(vec![1]), "{}", given.why);
+        assert!(given.why.contains("(OID 1)"), "{}", given.why);
+        // `ldq`'s `lcl|Query_1`: NCBI's scope finds it where it holds a query with that id
+        // (`QueryScope`, the owner of the queries' ids), never in the database.
+        let db = open(&["lda", "ldq"]);
+        let parsed = headers_of(&db);
+        let stop = parsed
+            .iter()
+            .position(|header| {
+                header
+                    .as_ref()
+                    .is_some_and(|s| s.prefetch_stops().is_some())
+            })
+            .unwrap() as u32;
+        let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
+        let stop_parsed = parsed[stop as usize].as_ref().unwrap();
+        let scope_refuses = |scope: &dyn Fn() -> crate::blastinput::query_batch::QueryScope| {
+            unsure(
+                &db,
+                &TaxdbRun::default(),
+                &[stopping],
+                PrefetchQueries::new(0, scope),
+                stop,
+                stop_parsed,
+            )
+            .inspect(|why| assert!(why.contains("NCBI's scope holds a query"), "{why}"))
+            .is_some()
+        };
+        use crate::blastinput::query_batch::QueryScope;
+        let records = |fasta: &[u8], parse_deflines: bool| {
+            let config =
+                crate::blastinput::fasta_reader::ReaderConfig::query("BLASTP", true, false)
+                    .with_parse_deflines(parse_deflines);
+            let mut source =
+                crate::blastinput::fasta_reader::FastaInputSource::from_bytes(fasta, config);
+            crate::blastinput::fasta_reader::read_all(&mut source, &mut |_| Ok(())).unwrap()
+        };
+        let letters = "A".repeat(150);
+        let two = records(
+            format!(">qa\n{letters}\n>qb\n{letters}\n").as_bytes(),
+            false,
+        );
+        // The batch of query 0 (its generated id `Query_1`, `FastaRecord::local_id`), of both, or
+        // of query 1 alone (the scope of a later batch, outside outfmt 5, which keeps the batches
+        // before: `ResetScopeHistory`).
+        assert!(scope_refuses(&|| QueryScope::of_shown_records(&two[..1])));
+        assert!(scope_refuses(&|| QueryScope::of_shown_records(&two)));
+        assert!(!scope_refuses(&|| QueryScope::of_shown_records(&two[1..])));
+        // A record that `-query_loc` drops (40 letters, `-query_loc 50-140`) keeps its number and
+        // stays in its batch's scope (review 2, H2): the batch's input records, not its searched
+        // queries, make the scope.
+        let short = records(
+            format!(">qa\n{}\n>qb\n{letters}\n", "A".repeat(40)).as_bytes(),
+            false,
+        );
+        let cut = crate::blastinput::seq_range::cut_queries(
+            &short,
+            &crate::blastinput::seq_range::SequenceRange { from: 50, to: 140 },
+        );
+        let batch = cut.input.batches(u32::MAX).remove(0);
+        assert_eq!((batch.input.clone(), batch.searched.clone()), (0..2, 0..1));
+        assert_eq!(cut.records[0].local_id, "Query_2");
+        assert!(scope_refuses(&|| QueryScope::of_shown_records(
+            &short[batch.input.clone()]
+        )));
+        // With `-parse_deflines` the scope holds the ids of the deflines, and no generated id
+        // (review 2, M2: NCBI looks `lcl|Query_1` up and stops).
+        let believed = records(
+            format!(">lcl|qa\n{letters}\n>lcl|qb\n{letters}\n").as_bytes(),
+            true,
+        );
+        assert!(believed[0].believed().is_some());
+        assert!(!scope_refuses(&|| QueryScope::of_shown_records(&believed)));
+        // The PSSM's query of `-in_pssm` (review 2, H4): its Bioseq's ids, `lcl|Query_1` or
+        // `lcl|myprot`.
+        let local = |id: &str| {
+            crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(
+                id.as_bytes().to_vec(),
+            ))
+        };
+        assert!(scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "Query_1"
+        )])));
+        assert!(!scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "myprot"
+        )])));
+        // Local ids of any case are one handle (`lcl|QUERY_1`); a leading zero is another id.
+        assert!(scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "QUERY_1"
+        )])));
+        assert!(!scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
+            "Query_01"
+        )])));
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // Review 3 of line DBID loadord, H1 (its kit's `R.*` cases): NCBI's loads end at the first
+    // lookup that throws, in the order of the Seq-id handles (`LoadSequencesToScope` rethrows the
+    // `CSeqDBException`); a later stopping id that NCBI's scope or data loader would find without
+    // a lookup is never reached. A stop before it that NCBI may skip leaves the loads up to the
+    // stop that NCBI surely makes, and the sequence that the skipped lookup is given instead, of
+    // an unknown place: refused only where one of them writes a text.
+    #[test]
+    fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
+        // `multidb` (make_multidb.py --loadord-only): `lda` (no accession table) beside `ldp`'s
+        // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|` (packed 900), `ldq`'s
+        // `lcl|Query_1` (not packed), `ldg`'s `gi|1|ref|NP_000002.1|` and the unparsed `ldu`.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-two-stops-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let open = |names: &[&str], taxdb: Option<&Path>| {
+            let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+            let list: Vec<String> = names
+                .iter()
+                .map(|name| {
+                    root()
+                        .join("db_search/multidb")
+                        .join(name)
+                        .to_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        };
+        type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
+        let headers_of =
+            |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
+                let headers = HeaderReader::new(db);
+                (0..db.num_seqs())
+                    .map(
+                        |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                            ReportedHeader::Parsed(subject) => Some(subject),
+                            _ => None,
+                        },
+                    )
+                    .collect()
+            };
+        let find = |parsed: &Headers, text: &str, stops: bool| {
+            parsed
+                .iter()
+                .position(|header| {
+                    header.as_ref().is_some_and(|subject| {
+                        subject.prefetch_stops().is_some() == stops
+                            && String::from_utf8_lossy(&subject.alignment_fasta()).contains(text)
+                    })
+                })
+                .unwrap() as u32
+        };
+        let stopped = |result: Result<crate::report::diag_log::Posts>| -> (usize, String) {
+            let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
+            let native = failure.error.downcast::<NativeError>().unwrap();
+            assert_eq!(native.exit, 2);
+            (failure.query, native.message)
+        };
+        let refused = |result: Result<crate::report::diag_log::Posts>| -> String {
+            let refusal = result.unwrap_err();
+            assert!(!refusal.is::<HeaderReadError>(), "{refusal}");
+            refusal.to_string()
+        };
+        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        // 1. The first stop in NCBI's order is one that it makes: `ref|NP_000002.1|` before
+        // `lcl|Query_1`, which the scope holds (kit `R.q1`), in either order of the batch.
+        let db = open(&["lda", "ldp", "ldq"], None);
+        let parsed = headers_of(&db);
+        let s2 = find(&parsed, "NP_000002.1", true);
+        let q1 = find(&parsed, "Query_1", true);
+        fn subject(parsed: &Headers, ordinal: u32) -> PrefetchSubject<'_> {
+            PrefetchSubject::unflipped(ordinal, parsed[ordinal as usize].as_deref())
+        }
+        let local = |id: &str| {
+            crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(
+                id.as_bytes().to_vec(),
+            ))
+        };
+        let scope =
+            || crate::blastinput::query_batch::QueryScope::of_bioseq_ids(&[local("Query_1")]);
+        let queries = PrefetchQueries::new(0, &scope);
+        for subjects in [
+            [subject(&parsed, q1), subject(&parsed, s2)],
+            [subject(&parsed, s2), subject(&parsed, q1)],
+        ] {
+            assert_eq!(
+                stopped(batch_prefetch(
+                    &db,
+                    &TaxdbRun::default(),
+                    std::iter::empty(),
+                    subjects,
+                    "BLASTP",
+                    &queries
+                )),
+                (0, error.clone())
+            );
+        }
+        // `lcl|Query_1` alone: no stop that NCBI surely makes, refused (NCBI goes on).
+        let why = refused(batch_prefetch(
+            &db,
+            &TaxdbRun::default(),
+            std::iter::empty(),
+            [subject(&parsed, q1)],
+            "BLASTP",
+            &queries,
+        ));
+        assert!(
+            why.contains("may not look up: NCBI's scope holds a query"),
+            "{why}"
+        );
+        // 2. The first stop may be skipped: a batch before loaded `gi|1|ref|NP_000002.1|` (the
+        // run's record), whose load registered the accession, so NCBI may look
+        // `ref|NP_000900.1|` up next and stop there (kit `R.rev`). With `bad_magic`, the loads
+        // write the texts of opening the taxonomy database in a run that has not opened it.
+        let bad_magic = root().join("seqdb/taxdb/bad_magic");
+        for taxdb in [None, Some(bad_magic.as_path())] {
+            let db = open(&["lda", "ldg", "ldp", "ldu"], taxdb);
+            let parsed = headers_of(&db);
+            let s2 = find(&parsed, "NP_000002.1", true);
+            let s900 = find(&parsed, "NP_000900.1", true);
+            let holder = find(&parsed, "gi|1", false);
+            // `ldu`'s `gnl|BL_ORD_ID|4` (packed 4): between the two stops.
+            let between = parsed.iter().rposition(Option::is_none).unwrap() as u32;
+            assert_eq!(db.oid(between).get(), 4);
+            let both = [subject(&parsed, s900), subject(&parsed, s2)];
+            let with_between = [
+                subject(&parsed, s2),
+                PrefetchSubject::unflipped(between, None),
+                subject(&parsed, s900),
+            ];
+            // The run that loaded the holder and looked its taxonomy up (its batch's prefetch).
+            let looked_up = || {
+                let run = TaxdbRun::default();
+                run.note_loaded(&db, || [subject(&parsed, holder)]);
+                let opened = prefetch_messages(
+                    &db,
+                    &run,
+                    [(holder, parsed[holder as usize].as_deref())],
+                    "BLASTP",
+                )
+                .unwrap();
+                assert_eq!(!opened.is_empty(), taxdb.is_some());
+                run
+            };
+            // The holder's load by the skipped id, again: nothing written, NCBI's error.
+            assert_eq!(
+                stopped(batch_prefetch(
+                    &db,
+                    &looked_up(),
+                    std::iter::empty(),
+                    both,
+                    "BLASTP",
+                    &stop_queries(1)
+                )),
+                (1, error.clone())
+            );
+            // A run whose record holds the holder but which has opened nothing (a holder loaded
+            // by a call before, the library's): that load, or the load between the stops, writes
+            // the texts of opening, which NCBI writes only where it skips the first lookup.
+            let fresh = || {
+                let run = TaxdbRun::default();
+                run.note_loaded(&db, || [subject(&parsed, holder)]);
+                run
+            };
+            for (subjects, what) in [
+                (
+                    &both[..],
+                    "the sequence that NCBI's BLAST database data loader gives for a stopping id",
+                ),
+                (
+                    &with_between[..],
+                    "its Seq-id handle comes after the first stopping one's",
+                ),
+            ] {
+                let result = batch_prefetch(
+                    &db,
+                    &fresh(),
+                    std::iter::empty(),
+                    subjects.iter().copied(),
+                    "BLASTP",
+                    &stop_queries(1),
+                );
+                match taxdb {
+                    None => assert_eq!(stopped(result), (1, error.clone())),
+                    Some(_) => {
+                        let why = refused(result);
+                        assert!(
+                            why.contains("makes the taxonomy database write a text"),
+                            "{why}"
+                        );
+                        assert!(why.contains(what), "{why}");
+                    }
+                }
+            }
+            // 3. No stop that NCBI surely makes: `ref|NP_000002.1|` alone, refused.
+            let why = refused(batch_prefetch(
+                &db,
+                &looked_up(),
+                std::iter::empty(),
+                [subject(&parsed, s2)],
+                "BLASTP",
+                &stop_queries(1),
+            ));
+            assert!(why.contains("the run loaded that sequence"), "{why}");
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-758 (quoted at
+    // `report::query_warnings::write_posts_to`: a cut `Iteration` makes none of its loads)
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 and
+    // c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (quoted at `load_before_stop` and
+    // `prefetch_stop`: the loads in the order of the handles, up to the first stopping lookup)
+    /// Line RG K4h's E2 in the programs that model a stopping batch before they write the BLAST XML
+    /// reports before it (review 5 of line DBID loadord, M1): the report of query 0, which NCBI's
+    /// stream cut before its hits, left the texts of opening the taxonomy database, which the first
+    /// load before the stop that asks the database writes before NCBI's error (NCBI 2.17.0,
+    /// review 5 `E2.sure`, `E2.skip`); a load after the stop is not made (`E2.after`: the error
+    /// alone); one of unknown place refuses the batch; a load of the reports or prefetches between
+    /// takes them first.
+    #[test]
+    fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop() {
+        // `multidb` (make_multidb.py --loadord-only, --loadord2-only, --loadord3-only,
+        // --loadord4-only; taxid 9606): `ldb`'s unparsed OID 1 (`gnl|BL_ORD_ID|1`, before
+        // `ldp`'s stopping `ref|NP_000002.1|`), `lda`'s OID 0 (`|0`, after it), `ldu`'s OID 2
+        // (`|2`, the same packed number), `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the
+        // stopping accession) and `lds`'s stopping `ref|NP_000003.1|`.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-e2-placed-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let bad_magic = root().join("seqdb/taxdb/bad_magic");
+        let open = |names: &[&str]| {
+            let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None).unwrap();
+            let list: Vec<String> = names
+                .iter()
+                .map(|name| {
+                    root()
+                        .join("db_search/multidb")
+                        .join(name)
+                        .to_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        };
+        type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
+        let headers_of =
+            |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
+                let headers = HeaderReader::new(db);
+                (0..db.num_seqs())
+                    .map(
+                        |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                            ReportedHeader::Parsed(subject) => Some(subject),
+                            _ => None,
+                        },
+                    )
+                    .collect()
+            };
+        let find = |parsed: &Headers, text: &str| {
+            parsed
+                .iter()
+                .position(|header| {
+                    header.as_ref().is_some_and(|subject| {
+                        String::from_utf8_lossy(&subject.alignment_fasta()).contains(text)
+                    })
+                })
+                .unwrap() as u32
+        };
+        fn subject(parsed: &Headers, ordinal: u32) -> PrefetchSubject<'_> {
+            PrefetchSubject::unflipped(ordinal, parsed[ordinal as usize].as_deref())
+        }
+        let stopped = |result: Result<crate::report::diag_log::Posts>| -> (usize, String) {
+            let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
+            let native = failure.error.downcast::<NativeError>().unwrap();
+            assert_eq!(native.exit, 2);
+            (failure.query, native.message)
+        };
+        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        // The model of the cut report of query 0 in `run`: its reads of `read` (each sequence's
+        // first load in the run; the first writes the texts of opening).
+        let cut_report = |db: &SeqDb, run: &TaxdbRun, read: &[u32]| {
+            let reads = subject_read_texts(
+                db,
+                run,
+                read.iter().map(|&ordinal| (ordinal, ordinal, None)),
+                false,
+                "BLASTP",
+            )
+            .unwrap();
+            assert!(reads.iter().all(|read| read.load.is_some()));
+            reads
+        };
+        // The batch of query `query` after the outfmt 5 reports `before`.
+        fn after_reports<'a>(
+            query: usize,
+            before: &'a XmlReportsBefore<'a>,
+        ) -> PrefetchQueries<'a> {
+            PrefetchQueries::new(query, &crate::blastinput::query_batch::QueryScope::default)
+                .after_xml_reports(Some(before))
+        }
+        let none = |_: usize| None;
+        let cut = |query: usize| query == 0;
+        let uncut = |_: usize| false;
+        // 1. Before the stop (`E2.sure`): `|1` loads before `ref|NP_000002.1|` and writes the
+        // texts of opening that query 0's report left.
+        let db = open(&["ldb", "ldp"]);
+        let parsed = headers_of(&db);
+        let s2 = find(&parsed, "NP_000002.1");
+        assert_eq!(db.oid(1).get(), 1);
+        let batch = [PrefetchSubject::unflipped(1, None), subject(&parsed, s2)];
+        let run = TaxdbRun::default();
+        let reads = vec![cut_report(&db, &run, &[1])];
+        let open_text = String::from_utf8(reads[0][0].text.clone()).unwrap();
+        assert!(open_text.contains("wrong magic number"), "{open_text}");
+        let before = XmlCuts::of(true, &cut)
+            .reports_before(&reads, &none)
+            .unwrap();
+        assert_eq!(
+            stopped(batch_prefetch(
+                &db,
+                &run,
+                std::iter::empty(),
+                batch,
+                "BLASTP",
+                &after_reports(1, &before)
+            )),
+            (1, format!("{open_text}{error}"))
+        );
+        // The report not cut wrote them itself; without outfmt 5 first, the same.
+        let made = XmlCuts::of(true, &uncut)
+            .reports_before(&reads, &none)
+            .unwrap();
+        for queries in [
+            after_reports(1, &made),
+            PrefetchQueries::new(1, &crate::blastinput::query_batch::QueryScope::default),
+        ] {
+            assert_eq!(
+                stopped(batch_prefetch(
+                    &db,
+                    &run,
+                    std::iter::empty(),
+                    batch,
+                    "BLASTP",
+                    &queries
+                )),
+                (1, error.clone())
+            );
+        }
+        // A batch between whose prefetch loads `|1` (its posts before query 1's report) takes
+        // them first: the stop of query 2 writes NCBI's error alone.
+        let mut between = crate::report::diag_log::Posts::new();
+        between.loads(subject_read_texts(&db, &run, [(1, 1, None)], false, "BLASTP").unwrap());
+        let prefetched = |query: usize| (query == 1).then_some(&between);
+        let taken = XmlCuts::of(true, &cut)
+            .reports_before(&reads, &prefetched)
+            .unwrap();
+        assert_eq!(
+            stopped(batch_prefetch(
+                &db,
+                &run,
+                std::iter::empty(),
+                batch,
+                "BLASTP",
+                &after_reports(2, &taken)
+            )),
+            (2, error.clone())
+        );
+        // 2. After the stop (`E2.after`): `|0` loads after it, which NCBI never makes; the texts
+        // are not written.
+        let db = open(&["lda", "ldp"]);
+        let parsed = headers_of(&db);
+        let s2 = find(&parsed, "NP_000002.1");
+        assert_eq!(db.oid(0).get(), 0);
+        let run = TaxdbRun::default();
+        let reads = vec![cut_report(&db, &run, &[0])];
+        let before = XmlCuts::of(true, &cut)
+            .reports_before(&reads, &none)
+            .unwrap();
+        assert_eq!(
+            stopped(batch_prefetch(
+                &db,
+                &run,
+                std::iter::empty(),
+                [PrefetchSubject::unflipped(0, None), subject(&parsed, s2)],
+                "BLASTP",
+                &after_reports(1, &before)
+            )),
+            (1, error.clone())
+        );
+        // 3. Of unknown place: `|2` has the stop's packed number 2, so NCBI's order is that of
+        // the handles' addresses; where it loads first it writes the texts: refused.
+        let db = open(&["ldp", "ldu"]);
+        let parsed = headers_of(&db);
+        let s2 = find(&parsed, "NP_000002.1");
+        let run = TaxdbRun::default();
+        let reads = vec![cut_report(&db, &run, &[2])];
+        let before = XmlCuts::of(true, &cut)
+            .reports_before(&reads, &none)
+            .unwrap();
+        let refusal = batch_prefetch(
+            &db,
+            &run,
+            std::iter::empty(),
+            [PrefetchSubject::unflipped(2, None), subject(&parsed, s2)],
+            "BLASTP",
+            &after_reports(1, &before),
+        )
+        .unwrap_err();
+        assert!(!refusal.is::<HeaderReadError>(), "{refusal}");
+        let why = refusal.to_string();
+        assert!(
+            why.contains("same packed number")
+                && why.contains("for what a BLAST XML report before it did not"),
+            "{why}"
+        );
+        // 4. One skipped stop: the run's record holds the holder `gi|9000|...` (a load before
+        // the cut report's, here set by hand: the cut report's own reads load nothing,
+        // `XmlCuts`, review 6 H2), so `ref|NP_000002.1|` may be skipped and `ref|NP_000003.1|`
+        // is the sure stop; `|1` before both writes the texts that the cut report left, the
+        // holder's load by the skipped id writes nothing more.
+        let db = open(&["ldb", "ldd", "ldp", "lds"]);
+        let parsed = headers_of(&db);
+        let s2 = find(&parsed, "ref|NP_000002.1|");
+        let s3 = find(&parsed, "NP_000003.1");
+        let holder = find(&parsed, "gi|9000");
+        assert!(parsed[s2 as usize]
+            .as_ref()
+            .unwrap()
+            .prefetch_stops()
+            .is_some());
+        let run = TaxdbRun::default();
+        let reads = vec![subject_read_texts(
+            &db,
+            &run,
+            [
+                (1, 1, None),
+                (holder, holder, parsed[holder as usize].as_deref()),
+            ],
+            false,
+            "BLASTP",
+        )
+        .unwrap()];
+        run.note_loaded(&db, || [subject(&parsed, holder)]);
+        let open_text = String::from_utf8(reads[0][0].text.clone()).unwrap();
+        let before = XmlCuts::of(true, &cut)
+            .reports_before(&reads, &none)
+            .unwrap();
+        assert_eq!(
+            stopped(batch_prefetch(
+                &db,
+                &run,
+                std::iter::empty(),
+                [
+                    subject(&parsed, s3),
+                    PrefetchSubject::unflipped(1, None),
+                    subject(&parsed, s2),
+                ],
+                "BLASTP",
+                &after_reports(1, &before)
+            )),
+            (1, format!("{open_text}{error}"))
+        );
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // Review 6 of line DBID loadord (its kit's `n6.ps.H.*` and `n6.*.K.cut.hold.5`): the run's
+    // record of what NCBI's data loader loaded for the batches before a stopping batch. H1: a
+    // batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off loads what its reports read after
+    // the cut to `-max_target_seqs` (`BatchLoads::Read`, also where its rows read every
+    // subject), not psiblast's traceback beyond the cut, which only its prefetch loads
+    // (`BatchLoads::Prefetched`). H2: an outfmt 5 report that NCBI's XML stream cut before its
+    // hits loads nothing (`XmlCuts`, the cut that the texts it left ask too), so the holder that
+    // its model reads leaves the stopping accession sure.
+    #[test]
+    fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded() {
+        use crate::report::tabular::SubjectFetch::Every;
+        // `multidb` (make_multidb.py --loadord-only): `ldb`'s unparsed OID 1 (`gnl|BL_ORD_ID|1`),
+        // `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the stopping accession), `ldp`'s
+        // stopping `ref|NP_000002.1|` (no accession table); taxid 9606, BLASTDB=bad_magic.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-record-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let bad_magic = root().join("seqdb/taxdb/bad_magic");
+        let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None).unwrap();
+        let list: Vec<String> = ["ldb", "ldd", "ldp"]
+            .iter()
+            .map(|name| {
+                root()
+                    .join("db_search/multidb")
+                    .join(name)
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        let db = SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap();
+        let headers = HeaderReader::new(&db);
+        let parsed: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> = (0..db
+            .num_seqs())
+            .map(
+                |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                    ReportedHeader::Parsed(subject) => Some(subject),
+                    _ => None,
+                },
+            )
+            .collect();
+        let find = |text: &str| {
+            parsed
+                .iter()
+                .position(|header| {
+                    header.as_ref().is_some_and(|subject| {
+                        String::from_utf8_lossy(&subject.alignment_fasta()).contains(text)
+                    })
+                })
+                .unwrap() as u32
+        };
+        let (s2, holder) = (find("ref|NP_000002.1|"), find("gi|9000"));
+        let subject =
+            |ordinal: u32| PrefetchSubject::unflipped(ordinal, parsed[ordinal as usize].as_deref());
+        // Query 0 (batch 0..1): its prefetched set (psiblast's traceback) holds `|1` and the
+        // holder; its report shows `shown`.
+        struct Query {
+            traceback: Vec<u32>,
+            shown: Vec<u32>,
+        }
+        let record = |query: &Query, limit: Option<i32>, cuts: XmlCuts<'_>| -> Vec<u32> {
+            LoadedBefore {
+                hits: std::slice::from_ref(query),
+                spans: &[0..1],
+                rows: Every,
+                cuts,
+            }
+            .subjects_at(
+                limit,
+                |hits, span| hits.get(span),
+                |_, hits| hits.iter().map(|query| query.traceback.len()).sum(),
+                |_, hits, loads| {
+                    hits.iter()
+                        .flat_map(|query| match loads {
+                            BatchLoads::Prefetched => query.traceback.clone(),
+                            BatchLoads::Read(_) => query.shown.clone(),
+                        })
+                        .collect::<Vec<u32>>()
+                },
+            )
+            .collect()
+        };
+        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        // The stop of query 1's batch (`ref|NP_000002.1|`) after the record `loaded`.
+        let stop = |loaded: &[u32], queries: &PrefetchQueries<'_>| {
+            batch_prefetch(
+                &db,
+                &TaxdbRun::default(),
+                loaded.iter().map(|&ordinal| subject(ordinal)),
+                [subject(s2)],
+                "BLASTP",
+                queries,
+            )
+            .unwrap_err()
+        };
+        let native = |error: anyhow::Error| -> (usize, String) {
+            let failure = error.downcast::<HeaderReadError>().unwrap();
+            let native = failure.error.downcast::<NativeError>().unwrap();
+            assert_eq!(native.exit, 2);
+            (failure.query, native.message)
+        };
+        let refused = |error: anyhow::Error| {
+            assert!(!error.is::<HeaderReadError>(), "{error}");
+            let why = error.to_string();
+            assert!(why.contains("the run loaded that sequence"), "{why}");
+        };
+        // H1: `-max_target_seqs 1` cuts the report to `|1`; the prefetch off (limit 1 < 2
+        // Seq-aligns), its rows read every subject they show: NCBI never loads the holder, looks
+        // `ref|NP_000002.1|` up and stops.
+        let mts1 = Query {
+            traceback: vec![1, holder],
+            shown: vec![1],
+        };
+        assert_eq!(record(&mts1, Some(1), XmlCuts::NONE), [1]);
+        assert_eq!(
+            native(stop(
+                &record(&mts1, Some(1), XmlCuts::NONE),
+                &stop_queries(1)
+            )),
+            (1, error.clone())
+        );
+        // The prefetch on loads the whole traceback, the holder too: NCBI gives the holder for
+        // the accession and goes on, which LOSAT refuses.
+        assert_eq!(record(&mts1, None, XmlCuts::NONE), [1, holder]);
+        refused(stop(&record(&mts1, None, XmlCuts::NONE), &stop_queries(1)));
+        // H2: query 0's outfmt 5 report shows both, but NCBI's XML stream cuts its Iteration
+        // before its hits: it loads neither, so the stop is sure; the texts of opening that the
+        // model of its reads left go to no load before the stop (NCBI writes its error alone).
+        let both = Query {
+            traceback: vec![1, holder],
+            shown: vec![1, holder],
+        };
+        let cut = |query: usize| query == 0;
+        let cuts = XmlCuts::of(true, &cut);
+        assert!(record(&both, Some(1), cuts).is_empty());
+        let run = TaxdbRun::default();
+        let reads = vec![subject_read_texts(
+            &db,
+            &run,
+            [
+                (1, 1, None),
+                (holder, holder, parsed[holder as usize].as_deref()),
+            ],
+            false,
+            "BLASTP",
+        )
+        .unwrap()];
+        assert!(String::from_utf8_lossy(&reads[0][0].text).contains("wrong magic number"));
+        let none = |_: usize| None;
+        let before = cuts.reports_before(&reads, &none).unwrap();
+        let queries = PrefetchQueries::new(1, &crate::blastinput::query_batch::QueryScope::default)
+            .after_xml_reports(Some(&before));
+        assert_eq!(
+            native(stop(&record(&both, Some(1), cuts), &queries)),
+            (1, error.clone())
+        );
+        // The report written (no outfmt 5 first: no cut, no reports before to ask) loads the
+        // holder: refused as NCBI goes on.
+        let uncut = XmlCuts::of(false, &cut);
+        assert!(uncut.reports_before(&reads, &none).is_none());
+        assert_eq!(record(&both, Some(1), uncut), [1, holder]);
+        refused(stop(&record(&both, Some(1), uncut), &stop_queries(1)));
+        // A cut does not touch a batch whose prefetch ran: it loaded both before the report.
+        assert_eq!(record(&both, None, cuts), [1, holder]);
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    /// The batch whose stop names the query `query` and whose scope holds no query (a run whose
+    /// queries have none of the ids of the database).
+    fn stop_queries(query: usize) -> PrefetchQueries<'static> {
+        PrefetchQueries::new(query, &crate::blastinput::query_batch::QueryScope::default)
     }
 
     #[test]
@@ -7164,76 +9489,149 @@ mod taxdb_prepass_tests {
             // A sequence of tfu_n (the last volume by name): its load looks its taxid up.
             let other = db.num_seqs() - 1;
             assert!(parsed[other as usize].is_none());
-            let opens = !prefetch_messages(&db, &TaxdbRun::default(), [(other, None)], "BLASTN")
-                .unwrap()
-                .is_empty();
-            assert_eq!(opens, taxdb.is_some());
+            let open = String::from_utf8(
+                prefetch_messages(&db, &TaxdbRun::default(), [(other, None)], "BLASTN").unwrap(),
+            )
+            .unwrap();
+            assert_eq!(!open.is_empty(), taxdb.is_some());
             let both = || [subject(stop, &parsed[stop as usize]), subject(other, &None)];
             // The stopping subject alone: NCBI's error, of the batch's first query.
             let run = TaxdbRun::default();
             let alone = [subject(stop, &parsed[stop as usize])];
             assert_eq!(
-                stopped(batch_prefetch(&db, &run, alone, "BLASTN", 3, None).map(drop)),
+                stopped(
+                    batch_prefetch(
+                        &db,
+                        &run,
+                        std::iter::empty(),
+                        alone,
+                        "BLASTN",
+                        &stop_queries(3)
+                    )
+                    .map(drop)
+                ),
                 (3, error.clone())
             );
             assert_eq!(
-                stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", 3)),
+                stopped(batch_prefetch_stop(
+                    &db,
+                    &run,
+                    alone,
+                    "BLASTN",
+                    &stop_queries(3)
+                )),
                 (3, error.clone())
             );
-            // With another subject whose load writes the texts of opening the taxonomy database,
-            // before the stop or not as NCBI's order of the loads decides: refused.
+            // With another subject whose load writes the texts of opening the taxonomy database:
+            // its `gnl|BL_ORD_ID|n` (packed) loads before the stopping `lcl|` id (not packed) in
+            // NCBI's order, so its texts come before the error.
+            let stop_id = parsed[stop as usize].as_ref().unwrap().alignment_id();
+            assert_eq!(
+                crate::seqid::mask_handle::mask_handle_packed(stop_id),
+                0,
+                "{stop_id:?}"
+            );
             let run = TaxdbRun::default();
             match taxdb {
                 None => {
                     assert_eq!(
-                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 0, None).map(drop)).1,
+                        stopped(
+                            batch_prefetch(
+                                &db,
+                                &run,
+                                std::iter::empty(),
+                                both(),
+                                "BLASTN",
+                                &stop_queries(0)
+                            )
+                            .map(drop)
+                        )
+                        .1,
                         error
                     );
                     assert_eq!(
-                        stopped(batch_prefetch_stop(&db, &run, both(), "BLASTN", 0)).1,
+                        stopped(batch_prefetch_stop(
+                            &db,
+                            &run,
+                            both(),
+                            "BLASTN",
+                            &stop_queries(0)
+                        ))
+                        .1,
                         error
                     );
                     assert_eq!(
                         stopped(held_batch_prefetch_stop(
                             &db,
+                            &TaxdbRun::default(),
+                            std::iter::empty(),
                             std::iter::empty(),
                             both(),
                             "BLASTN",
-                            0
+                            &stop_queries(0)
                         ))
                         .1,
                         error
                     );
                 }
                 Some(_) => {
-                    // Each in a run that has looked nothing up: a refused prefetch has recorded
+                    // Each in a run that has looked nothing up: a stopped prefetch has recorded
                     // its loads in its run.
-                    for refused in [
-                        batch_prefetch(&db, &TaxdbRun::default(), both(), "BLASTN", 0, None)
-                            .map(drop),
-                        batch_prefetch_stop(&db, &TaxdbRun::default(), both(), "BLASTN", 0),
-                        held_batch_prefetch_stop(&db, std::iter::empty(), both(), "BLASTN", 0),
+                    for stop in [
+                        batch_prefetch(
+                            &db,
+                            &TaxdbRun::default(),
+                            std::iter::empty(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(0),
+                        )
+                        .map(drop),
+                        batch_prefetch_stop(
+                            &db,
+                            &TaxdbRun::default(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(0),
+                        ),
+                        held_batch_prefetch_stop(
+                            &db,
+                            &TaxdbRun::default(),
+                            std::iter::empty(),
+                            std::iter::empty(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(0),
+                        ),
                     ] {
-                        let refused = refused.unwrap_err();
-                        assert!(!refused.is::<HeaderReadError>());
-                        assert!(
-                            refused
-                                .to_string()
-                                .contains("in an order that LOSAT does not reproduce"),
-                            "{refused}"
-                        );
+                        assert_eq!(stopped(stop), (0, format!("{open}{error}")));
                     }
                     // A batch after one whose prefetch opened it and looked the other subject up
                     // (the formats whose prefetch writes the texts, `batch_prefetch`): its load
                     // writes nothing now, so NCBI's error.
                     let run = TaxdbRun::default();
-                    assert!(
-                        !batch_prefetch(&db, &run, [subject(other, &None)], "BLASTN", 0, None)
-                            .unwrap()
-                            .is_empty()
-                    );
+                    assert!(!batch_prefetch(
+                        &db,
+                        &run,
+                        std::iter::empty(),
+                        [subject(other, &None)],
+                        "BLASTN",
+                        &stop_queries(0)
+                    )
+                    .unwrap()
+                    .is_empty());
                     assert_eq!(
-                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 1, None).map(drop)),
+                        stopped(
+                            batch_prefetch(
+                                &db,
+                                &run,
+                                std::iter::empty(),
+                                both(),
+                                "BLASTN",
+                                &stop_queries(1)
+                            )
+                            .map(drop)
+                        ),
                         (1, error.clone())
                     );
                     // The same after a batch whose XML2 or JSON reports looked it up: in the run
@@ -7251,23 +9649,38 @@ mod taxdb_prepass_tests {
                     )
                     .unwrap();
                     assert_eq!(
-                        stopped(batch_prefetch_stop(&db, &run, both(), "BLASTN", 1)),
+                        stopped(batch_prefetch_stop(
+                            &db,
+                            &run,
+                            both(),
+                            "BLASTN",
+                            &stop_queries(1)
+                        )),
                         (1, error.clone())
                     );
                     assert_eq!(
                         stopped(held_batch_prefetch_stop(
                             &db,
+                            &TaxdbRun::default(),
                             [subject(other, &None)],
+                            std::iter::empty(),
                             both(),
                             "BLASTN",
-                            1
+                            &stop_queries(1)
                         )),
                         (1, error.clone())
                     );
                 }
             }
             // No stopping subject: nothing for the XML2 and JSON formats.
-            batch_prefetch_stop(&db, &run, [subject(other, &None)], "BLASTN", 0).unwrap();
+            batch_prefetch_stop(
+                &db,
+                &run,
+                [subject(other, &None)],
+                "BLASTN",
+                &stop_queries(0),
+            )
+            .unwrap();
         }
         // Another subject whose lookup throws on its id, which the prefetch catches and which ends
         // its loads: whether the stop comes first is the order's, refused. (A text tag of
@@ -7297,10 +9710,10 @@ mod taxdb_prepass_tests {
             batch_prefetch(
                 &db,
                 &run,
+                std::iter::empty(),
                 [subject(stop as u32, &parsed[stop]), subject(other, &throws)],
                 "BLASTN",
-                0,
-                None,
+                &stop_queries(0),
             )
             .map(drop),
             batch_prefetch_stop(
@@ -7308,7 +9721,7 @@ mod taxdb_prepass_tests {
                 &run,
                 [subject(other, &throws), subject(stop as u32, &parsed[stop])],
                 "BLASTN",
-                0,
+                &stop_queries(0),
             ),
         ] {
             let refused = refused.unwrap_err();

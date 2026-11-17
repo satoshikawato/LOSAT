@@ -211,7 +211,7 @@ use super::*;
 use crate::algorithm::tblastx::scan::OffsetPair;
 use crate::utils::threading::SearchPool;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 // EXPERIMENT (LOSAT_X_BPCLUT at more than one thread): the same table built by the search's pool
 // (exactness argument in the file's header).
@@ -800,14 +800,18 @@ struct XPairGroup {
 /// two compressed letters (below alphabet^2), in groups of 16 (`XPairGroup`), made in order as they
 /// are first read: the pairs a node reaches are a prefix of the row (`XWords::neighbors_paired`),
 /// and most nodes read the first group only.
-/// The row holds what its merge reads (`alphabet`, and `info`'s sorted rows): `make` and `emit`
-/// take no table, so nothing of the table is loaded on `emit`'s path (with the table as an
-/// argument, the link-time optimizer moved `make`'s loads of its fields into `emit`'s loop).
-struct XPairRow<'a> {
+/// The row holds what its merge reads (`alphabet`, the sorted rows of a and b and their letters):
+/// `make` and `emit` take no table, so nothing of the table is loaded on `emit`'s path (with the
+/// table as an argument, the link-time optimizer moved `make`'s loads of its fields into `emit`'s
+/// loop).
+struct XPairRow {
     a: u8,
     b: u8,
     alphabet: u8,
-    info: &'a CompressedNeighborInfo,
+    row_a: [i32; X_PAIR_ALPHABET],
+    row_b: [i32; X_PAIR_ALPHABET],
+    char_a: [u8; X_PAIR_ALPHABET],
+    char_b: [u8; X_PAIR_ALPHABET],
     groups: [std::sync::OnceLock<XPairGroup>; X_PAIR_GROUPS],
     /// The merge of `XPairRow::make` after the groups made (`next`, see there; `made` groups).
     merge: Mutex<XPairMerge>,
@@ -829,7 +833,7 @@ fn x_pair_key(sum: i32, i: usize) -> i32 {
     (sum << 4) | (X_PAIR_ALPHABET - i) as i32
 }
 
-impl XPairRow<'_> {
+impl XPairRow {
     /// Group `g` (and the groups before it that are not made yet): the merge takes the row's pairs in
     /// order from the two sorted rows (the rows i of the pairs (i, j), j ascending), continuing from
     /// the last group made. `next[i]` is the rank j of row i's next pair. Row i's next pair is the
@@ -845,12 +849,13 @@ impl XPairRow<'_> {
     fn make(&self, g: usize) -> &XPairGroup {
         let mut merge = self.merge.lock().unwrap_or_else(PoisonError::into_inner);
         let merge = &mut *merge;
-        // Read once: the row's other fields share it with the merge's (a `Mutex`) and groups.
-        let (info, alphabet) = (self.info, usize::from(self.alphabet));
+        // Copied once: the row's other fields share it with the merge's (a `Mutex`) and groups,
+        // which the merge writes.
+        let alphabet = usize::from(self.alphabet);
         let (a, b) = (usize::from(self.a), usize::from(self.b));
-        let row_a = &info.matrix_sorted[a][..alphabet];
-        let row_b = &info.matrix_sorted[b][..alphabet];
-        let (char_a, char_b) = (&info.matrix_sorted_char[a], &info.matrix_sorted_char[b]);
+        let (row_a, row_b) = (self.row_a, self.row_b);
+        let (row_a, row_b) = (&row_a[..alphabet], &row_b[..alphabet]);
+        let (char_a, char_b) = (self.char_a, self.char_b);
         let made = merge.made;
         if made == 0 {
             // Every sum of the row lies between its first and last pair's (the rows are sorted):
@@ -928,40 +933,56 @@ impl XPairRow<'_> {
 
 // No NCBI counterpart: the pairs of letters of `add_word_hits`' two innermost loops (`XWords`),
 // for one compressed matrix; it changes no value NCBI computes.
-/// The rows (`XPairRow`) of every pair of query letters for a compressed matrix (`alphabet`, and
-/// `matrix_sorted` and `matrix_sorted_char` of its `CompressedNeighborInfo`, which the build's
-/// `XWords` reads too), made for each build (`XWords::new`) and freed with it, each row made when
-/// first read (`XPairTable::row`, about 880 bytes on x86-64, its groups as they are read): a build
-/// reads the rows of the letter pairs of its query words, at most the 23 x 23 pairs of the letters
-/// inside the 15-letter alphabet (0.44 MiB), and 12.25 KiB for the table's `OnceLock`s. A build
-/// ends before its search scans, which reuses the memory.
-struct XPairTable<'a> {
+/// The rows (`XPairRow`) of every pair of query letters for a compressed matrix (`alphabet`,
+/// `matrix_sorted` and `matrix_sorted_char` of its `CompressedNeighborInfo`: the table's key),
+/// each row made when first read (`XPairTable::row`, about 1,020 bytes on x86-64, its groups as
+/// they are read). One table per matrix for the builds that run at once (`x_pair_table`: BLASTX's
+/// query batches build on the pool's tasks side by side), freed when the last of them ends: a
+/// table of each build kept the rows of each (blastx-fast, 800 queries, 16 threads: max RSS +5.2
+/// MiB), and a table kept for the process the rows after its builds (UniRef50 at one thread:
+/// +292 KiB). At most the 23 x 23 rows of the letters inside the 15-letter alphabet (0.52 MiB),
+/// and 12.25 KiB for the table's `OnceLock`s.
+struct XPairTable {
     alphabet: usize,
-    info: &'a CompressedNeighborInfo,
-    rows: Vec<std::sync::OnceLock<Box<XPairRow<'a>>>>,
+    matrix_sorted: [[i32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
+    rows: Vec<std::sync::OnceLock<Box<XPairRow>>>,
 }
 
-impl<'a> XPairTable<'a> {
+impl XPairTable {
     /// The row of query letters (a, b).
     #[inline(always)]
-    fn row(&self, a: usize, b: usize) -> &XPairRow<'a> {
+    fn row(&self, a: usize, b: usize) -> &XPairRow {
         self.rows[a * BLASTAA_SIZE + b].get_or_init(|| {
             X_PAIR_ROWS.fetch_add(1, Ordering::Relaxed);
-            Box::new(XPairRow {
+            let alphabet = self.alphabet;
+            let mut row = Box::new(XPairRow {
                 a: a as u8,
                 b: b as u8,
-                alphabet: self.alphabet as u8,
-                info: self.info,
+                alphabet: alphabet as u8,
+                row_a: [0; X_PAIR_ALPHABET],
+                row_b: [0; X_PAIR_ALPHABET],
+                char_a: [0; X_PAIR_ALPHABET],
+                char_b: [0; X_PAIR_ALPHABET],
                 groups: [const { std::sync::OnceLock::new() }; X_PAIR_GROUPS],
                 merge: Mutex::new(XPairMerge {
                     next: [0; X_PAIR_ALPHABET],
                     keys: [i32::MIN; X_PAIR_ALPHABET + 1],
                     made: 0,
                 }),
-            })
+            });
+            row.row_a[..alphabet].copy_from_slice(&self.matrix_sorted[a][..alphabet]);
+            row.row_b[..alphabet].copy_from_slice(&self.matrix_sorted[b][..alphabet]);
+            row.char_a[..alphabet].copy_from_slice(&self.matrix_sorted_char[a][..alphabet]);
+            row.char_b[..alphabet].copy_from_slice(&self.matrix_sorted_char[b][..alphabet]);
+            row
         })
     }
 }
+
+// No NCBI counterpart: the pair tables of the builds that run (`x_pair_table`); it changes no
+// value NCBI computes.
+static X_PAIR_SHARED: Mutex<Vec<std::sync::Weak<XPairTable>>> = Mutex::new(Vec::new());
 
 // No NCBI counterpart: counters of the `[X_STATS] CLUTPAIRS` line at exit (LOSAT_X_STATS); they
 // do not change any value NCBI computes.
@@ -970,8 +991,8 @@ static X_PAIR_ROWS: AtomicU64 = AtomicU64::new(0);
 static X_PAIR_GROUPS_MADE: AtomicU64 = AtomicU64::new(0);
 
 /// EXPERIMENT (LOSAT_X_CLUTPAIRS): with `LOSAT_X_STATS`, the line at exit (printed by `main`) when
-/// `XWords` read a pair table: `tables` the pair tables made (one per `XWords`, a build or its
-/// waves), `rows` their rows made (one per pair of query letters read), `groups` the rows'
+/// `XWords` read a pair table: `tables` the pair tables made (one per matrix for the builds that
+/// run at once, `x_pair_table`), `rows` their rows made (one per pair of query letters read), `groups` the rows'
 /// groups of 16 pairs made.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn x_clutpairs_print_summary() {
@@ -985,12 +1006,26 @@ pub fn x_clutpairs_print_summary() {
     }
 }
 
-/// The pair table of the compressed matrix of `info` for the alphabet of `header` (`XWords::new`).
-/// Every sum of two letters that `XWords` reads (letters inside the compressed alphabet) lies in
-/// (i16::MIN, i16::MAX] for every matrix of NCBI's (test `pair_tables_hold_every_matrix`): checked
-/// here.
-fn x_pair_table<'a>(header: &XHeader, info: &'a CompressedNeighborInfo) -> XPairTable<'a> {
+/// The pair table of the compressed matrix of `info` for the alphabet of `header` (`XWords::new`):
+/// a running build's table of the same key (`X_PAIR_SHARED`), else a new one. Every sum of two
+/// letters that `XWords` reads (letters inside the compressed alphabet) lies in (i16::MIN,
+/// i16::MAX] for every matrix of NCBI's (test `pair_tables_hold_every_matrix`): checked here.
+fn x_pair_table(header: &XHeader, info: &CompressedNeighborInfo) -> Arc<XPairTable> {
     let alphabet = header.alphabet;
+    let mut shared = X_PAIR_SHARED.lock().unwrap_or_else(PoisonError::into_inner);
+    shared.retain(|table| table.strong_count() > 0);
+    let same = |table: &XPairTable| {
+        table.alphabet == alphabet
+            && table.matrix_sorted == info.matrix_sorted
+            && table.matrix_sorted_char == info.matrix_sorted_char
+    };
+    if let Some(table) = shared
+        .iter()
+        .filter_map(std::sync::Weak::upgrade)
+        .find(|table| same(table))
+    {
+        return table;
+    }
     // A row's groups, and a code below alphabet^2 (one byte).
     assert!(
         alphabet <= X_PAIR_ALPHABET,
@@ -1010,13 +1045,16 @@ fn x_pair_table<'a>(header: &XHeader, info: &'a CompressedNeighborInfo) -> XPair
         2 * high
     );
     X_PAIR_TABLES.fetch_add(1, Ordering::Relaxed);
-    XPairTable {
+    let table = Arc::new(XPairTable {
         alphabet,
-        info,
+        matrix_sorted: info.matrix_sorted,
+        matrix_sorted_char: info.matrix_sorted_char,
         rows: (0..BLASTAA_SIZE * BLASTAA_SIZE)
             .map(|_| std::sync::OnceLock::new())
             .collect(),
-    }
+    });
+    shared.push(Arc::downgrade(&table));
+    table
 }
 
 /// No NCBI counterpart: a query word as `XWords` reads it: a slice of the table's word length
@@ -1072,8 +1110,8 @@ struct XWords<'a> {
     /// EXPERIMENT (LOSAT_X_CLUTPAIRS): the pair table of the matrix (`XPairTable`), from which
     /// `neighbors_paired` and `neighbors_below_last_paired` take the cells of the two innermost
     /// positions; `None` with the switch off (`neighbors`, `neighbors_below_last`).
-    /// Boxed: `XWords`' other fields keep the places they have without it.
-    pairs: Option<Box<XPairTable<'a>>>,
+    /// A pointer: `XWords`' other fields keep the places they have without it.
+    pairs: Option<Arc<XPairTable>>,
 }
 
 // No NCBI counterpart: the order of the build's work (item SC9i of line NP).
@@ -1167,7 +1205,7 @@ impl<'a> XWords<'a> {
             power,
             last,
             below_last,
-            pairs: pairs.then(|| Box::new(x_pair_table(header, info))),
+            pairs: pairs.then(|| x_pair_table(header, info)),
         }
     }
 

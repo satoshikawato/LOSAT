@@ -1751,10 +1751,12 @@ pub(super) fn write_xml_epilog(
             });
             (finished, xml2.take_posts())
         }
-        None => (
-            BlastXmlWriter::new(queries).finish(&mut buf).map_err(Err),
-            crate::report::blast_xml::DocumentPosts::default(),
-        ),
+        None => {
+            // The epilog's insertion, line feed and flush (`BlastXmlWriter::finish`'s cuts).
+            let mut document = BlastXmlWriter::new(queries);
+            let finished = document.finish(&mut buf).map_err(Err);
+            (finished, document.take_posts())
+        }
     };
     let post = match finished {
         Ok(()) => None,

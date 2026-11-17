@@ -2476,7 +2476,7 @@ mod tests {
     /// (more splits than any tree of these sizes can hold).
     enum NcbiInsertion {
         Dropped,
-        Added(BlastIntervalTree),
+        Added(Box<BlastIntervalTree>),
         Endless,
     }
 
@@ -2514,7 +2514,7 @@ mod tests {
                 if subject {
                     t.nodes[new_index].midptr = t.nodes[root].midptr;
                     t.nodes[root].midptr = new_index as i32;
-                    return (NcbiInsertion::Added(t), checked);
+                    return (NcbiInsertion::Added(Box::new(t)), checked);
                 }
                 subject = true;
                 if t.nodes[root].midptr == 0 {
@@ -2536,7 +2536,7 @@ mod tests {
                 } else {
                     t.nodes[root].rightptr = new_index as i32;
                 }
-                return (NcbiInsertion::Added(t), checked);
+                return (NcbiInsertion::Added(Box::new(t)), checked);
             }
             if !t.nodes[child as usize].is_leaf() {
                 root = child as usize;

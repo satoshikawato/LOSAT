@@ -653,10 +653,11 @@ pub(crate) fn alignment(
     //     retval('U', 'C') = retval('C', 'C');
     //     retval('C', 'U') = retval('C', 'C');
     // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1019 (quoted at
-    // `report::tabular::TabularWriter::new`): the tabular formatter counts the identities and
-    // positives of the rows itself, so the tabular reports ask for no counts here (`counts`
-    // `None`: 0), and outfmt 0's rows (`pairwise_hits`) for the counts with the search's matrix.
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1022 (its
+    // positives quoted at `report::tabular::TabularWriter::new`): the tabular formatter counts the
+    // identities and positives of the rows itself, so the tabular reports ask for no counts here
+    // (`counts` `None`: 0), and outfmt 0's rows (`pairwise_hits`) for the counts with the search's
+    // matrix.
     let mut identity = 0;
     let mut positive = 0;
     if let Some(matrix) = counts {

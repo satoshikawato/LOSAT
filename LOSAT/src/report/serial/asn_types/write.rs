@@ -92,10 +92,23 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
 
 /// `value` as one document of its type (`MSerial_AsnText << object`: `WriteFileHeader`, the
 /// object, `EndOfWrite` and the separator), for the named type `ty`.
+#[cfg(test)]
 pub(crate) fn write_document<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
+    write_document_until(enc, ty, value, |_| false);
+}
+
+/// `write_document` until `stop(enc)` holds before a step (`write_until`); the document's end
+/// only when the value was written whole.
+fn write_document_until<E: Encoder>(
+    enc: &mut E,
+    ty: u16,
+    value: &Value,
+    stop: impl Fn(&E) -> bool,
+) {
     enc.begin_document(type_info(ty).name());
-    write_value(enc, ty, value);
-    enc.end_document();
+    if write_until(enc, ty, value, stop) {
+        enc.end_document();
+    }
 }
 
 /// What an output stream that has failed gets of `value` written as a document of the named type
@@ -103,18 +116,22 @@ pub(crate) fn write_document<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
 /// `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to the
 /// stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
 /// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer
-/// first flushed. The writing stops there, as NCBI's does, so the text in memory is the cut and
-/// at most one step more.
+/// first flushed. NCBI's writing stops there: the first pass follows its buffer to find how many
+/// bytes it held (`Traced`), the second writes those bytes as they were then
+/// (`AsnTextEncoder::failed_after`: a string's wrap that would come later inserts no end of line
+/// before the cut). Both stop at the cut, so the text in memory is the cut and at most one step
+/// more.
 pub(crate) fn failed_stream_text(ty: u16, value: &Value) -> Vec<u8> {
     let mut out = Vec::new();
-    let mut enc = Traced::new(AsnTextEncoder::new(&mut out), 0);
-    enc.begin_document(type_info(ty).name());
-    if write_until(&mut enc, ty, value, |enc| enc.first_write().is_some()) {
-        enc.end_document();
-    }
-    let cut = enc.first_write().unwrap_or(0);
+    let mut traced = Traced::new(AsnTextEncoder::new(&mut out), 0);
+    write_document_until(&mut traced, ty, value, |enc| enc.first_write().is_some());
+    let held = traced.first_write().unwrap_or(0);
+    drop(traced);
+    out.clear();
+    let mut enc = AsnTextEncoder::failed_after(&mut out, held);
+    write_document_until(&mut enc, ty, value, |enc| enc.held().len() >= held);
     drop(enc);
-    out.truncate(cut);
+    out.truncate(held);
     out
 }
 
@@ -289,13 +306,19 @@ fn write_leaf<E: Encoder>(enc: &mut E, kind: &Kind, value: &Value) {
         //     WriteEnum(values,value,values.FindNameEx(value, values.IsInteger()));
         // }
         // ```
-        // `FindNameEx` takes the first name of the value in module order (`ValueToName`'s map
-        // keeps the first insert, enumerated.cpp); the reader takes an ENUMERATED number only
-        // when it has a name.
+        // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:235-237 (`ValueToName`)
+        // ```c++
+        //             ITERATE ( TValues, i, m_Values ) {
+        //                 (*m)[i->second] = &i->first;
+        //             }
+        // ```
+        // `FindNameEx` takes the last name of the value in module order (each insert replaces
+        // the one before); the reader takes an ENUMERATED number only when it has a name.
         (Kind::Enumerated { integer, values }, Value::Enum(number)) => {
             let name = values
                 .values()
                 .iter()
+                .rev()
                 .find(|value| value.value == *number)
                 .map(|value| value.name());
             match (name, integer) {

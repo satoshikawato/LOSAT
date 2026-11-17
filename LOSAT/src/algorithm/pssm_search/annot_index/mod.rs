@@ -207,26 +207,19 @@ pub(crate) fn index_entry(
             message: String::new(),
         }),
         Err(Stop::NullPointer) => return Err(Refusal::NullPointer),
-        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-        // ```c++
-        //     catch (const CIOException& e) {                                         \
-        //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-        //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-        //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-        //         }                                                                   \
-        //     }                                                                       \
-        // ```
         // The failed write (`CIOException::eWrite`) ends the run with nothing more written and
-        // its exit status unchanged, 0 (`om/` cases f33, k04, k07, k08, k09, k13, k16, k17).
+        // its exit status unchanged, 0 (`cli::NativeError::silent_end`; `om/` cases f33, k04, k07,
+        // k08, k09, k13, k16, k17).
         Err(Stop::FailedWrite) => {
+            let silent = crate::cli::NativeError::silent_end();
             return Ok(AnnotOutcome {
                 posts: ix.posts,
                 muted: ix.muted,
                 abort: Some(Abort {
-                    exit: 0,
-                    message: String::new(),
+                    exit: silent.exit,
+                    message: silent.message,
                 }),
-            })
+            });
         }
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251, 260-263

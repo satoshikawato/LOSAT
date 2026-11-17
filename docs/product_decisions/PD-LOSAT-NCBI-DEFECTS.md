@@ -747,14 +747,23 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     every such PSSM and writes its normal output: the search, or for a query Seq-entry set its
     `CSeq_entry::GetSeq()` exception. LOSAT keeps the values it reads, and the object manager's walks
     over them, on the heap, so it reads every depth on every target as far as memory allows and
-    writes NCBI's output with a stack large enough. No PSSM that psiblast writes nests this way.
+    writes NCBI's output with a stack large enough. NCBI's writer of the same values
+    (`CObjectOStreamAsn`: `WriteObject`, include/serial/impl/objostr.inl:106-110, from each member
+    and variant, src/serial/member.cpp:934-970, src/serial/variant.cpp:577-651) recurses the same
+    way when psiblast writes the PSSM it read back with `-out_pssm` (or the search strategy's request
+    holds it): with 8 MiB NCBI 2.17.0 read and then crashed writing the `-out_pssm` file of
+    a descriptor's User-object nested 4,000 deep and a Seq-table column's data nested 9,600 deep
+    through `int-delta` (exit status 139, no file, no output); LOSAT writes it from a list on the heap (line RG item D3-2,
+    `asn_types::write`), as NCBI writes it with a stack large enough. No PSSM that psiblast writes
+    from a FASTA query nests this way.
     Evidence: `docs/evidence/pssm_nest_depth/` (for each kind of nest, NCBI's run with 8 MiB, a
     crash, and with no stack limit, the same bytes as LOSAT's; the generator of the inputs). Fixture
     rows `db.ps.inpssm.d3.om.r6.nest_*`, `db.ps.inpssm.d3.om.r7.nest_*`, `db.tbn.inpssm.d3.om.r6.nest_*`
-    and `db.tbn.inpssm.d3.om.r7.nest_*` of `LOSAT/tests/db_search_manifest/` (those marked
-    `ncbi-stack: unlimited` frozen from NCBI's run with no stack limit, `LOSAT/tests/db_search_fixtures.py`).
-    Unit tests `every_recursive_type_nests_to_any_depth` and
+    and `db.tbn.inpssm.d3.om.r7.nest_*` of `LOSAT/tests/db_search_manifest/`, with their `.outpssm`
+    twins (those marked `ncbi-stack: unlimited` frozen from NCBI's run with no stack limit,
+    `LOSAT/tests/db_search_fixtures.py`). Unit tests `every_recursive_type_nests_to_any_depth`,
     `a_nest_of_any_depth_is_read_without_recursion` (`LOSAT/src/report/serial/asn_types/read_tests.rs`),
+    `a_nest_of_any_depth_is_written_without_recursion` (`write_tests.rs`),
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 

@@ -380,13 +380,7 @@ pub(crate) fn read_in_pssm(
                 path.display()
             )))
         }
-        PssmFileFormat::Eof => {
-            return Err(crate::cli::NativeError {
-                exit: 0,
-                message: String::new(),
-            }
-            .into())
-        }
+        PssmFileFormat::Eof => return Err(crate::cli::NativeError::silent_end().into()),
         PssmFileFormat::Exception(exception) => {
             return Err(crate::cli::NativeError::exception(&exception).into())
         }
@@ -448,11 +442,7 @@ pub(crate) fn read_in_pssm(
             return Err(crate::cli::NativeError::std_exception(what).into())
         }
         Err(PssmReadError::Ncbi(ReadError::Eof)) => {
-            return Err(crate::cli::NativeError {
-                exit: 0,
-                message: String::new(),
-            }
-            .into())
+            return Err(crate::cli::NativeError::silent_end().into())
         }
         // The lexical reader's own limits (`read_pssm`): LOSAT's refusal, after NCBI's reader read
         // the file. (What NCBI reads and LOSAT's search does not take is refused after the object

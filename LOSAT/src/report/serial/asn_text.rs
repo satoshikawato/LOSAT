@@ -60,6 +60,9 @@ pub struct AsnTextEncoder<'b> {
     /// was on at its last call) in `out`.
     lines_to: usize,
     lines: u64,
+    /// The bytes of the document after which NCBI's write to a failed stream threw
+    /// (`failed_after`); `usize::MAX` for a stream that writes.
+    failed_after: usize,
 }
 
 impl<'b> AsnTextEncoder<'b> {
@@ -76,7 +79,18 @@ impl<'b> AsnTextEncoder<'b> {
             replaced: Vec::new(),
             lines_to: start,
             lines: 0,
+            failed_after: usize::MAX,
         }
+    }
+
+    /// An encoder of a document whose stream failed once NCBI's buffer held `held` bytes of it
+    /// (`asn_types::write::failed_stream_text`): the bytes from there on are not NCBI's (the
+    /// caller cuts them), and the string wrap that would come after inserts no end of line before
+    /// them (`put_eol_at_word_end`'s `Reserve(1)` threw first).
+    pub(crate) fn failed_after(out: &'b mut Vec<u8>, held: usize) -> Self {
+        let mut enc = Self::new(out);
+        enc.failed_after = held;
+        enc
     }
 
     /// `ReplaceVisibleChar` of the byte `byte`, at the line before the byte's wrap (`Replaced`,
@@ -293,6 +307,9 @@ impl<'b> AsnTextEncoder<'b> {
     // Inlined into both forms of `write_string`, as into its one caller before the replacing form.
     #[inline(always)]
     fn put_eol_at_word_end(&mut self, line_length: usize) {
+        if self.out.len() - self.start >= self.failed_after {
+            return;
+        }
         let buffer = self.start;
         let mut line_pos = self.line_length;
         let mut pos = self.out.len();

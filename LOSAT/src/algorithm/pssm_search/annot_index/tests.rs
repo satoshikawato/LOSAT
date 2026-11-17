@@ -399,6 +399,12 @@ fn an_empty_region_after_the_failed_stream_writes_the_object() {
     let k16 = dumped(&[&failing_feature(), &feat(&comment("x", 6000))]);
     assert_eq!(k16.len(), header.len() + 4096 + 1);
     assert!(k16.ends_with(&format!("\n{}\n{}\n", "x".repeat(78), "x".repeat(31))));
+    // Review 1 F1 (w1): the cut inside a string whose wrap at a word's end would come after it
+    // (NCBI's write threw first): no end of line inserted before the cut.
+    let words = format!(" comment \"zzzz {}\",", "abcdefghi ".repeat(600));
+    let w1 = dumped(&[&failing_feature(), &feat(&words)]);
+    assert_eq!(w1.len(), header.len() + 4096 + 1);
+    assert!(w1.ends_with(&format!("\n{} abcdefgh\n", " abcdefghi".repeat(7))));
 }
 
 // What NCBI does not do the same way on every run: f02, t36, a07, t44 and the bounds.

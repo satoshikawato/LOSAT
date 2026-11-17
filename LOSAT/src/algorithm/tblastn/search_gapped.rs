@@ -9,7 +9,9 @@ use crate::algorithm::blastn::interval_tree::{
     x_grid_cells, BlastIntervalTree, IndexMethod, TreeHsp,
 };
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
-use crate::algorithm::blastp::gapalign::{protein_identities_from_edit_ops, GapAlignScratch};
+use crate::algorithm::blastp::gapalign::{
+    gapped_start_window, protein_identities_from_edit_ops, GapAlignScratch,
+};
 use crate::algorithm::common::translated_chunks::TranslatedChunk;
 use crate::algorithm::tblastx::translation::{
     frame_length, translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
@@ -77,7 +79,7 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
     matrix: ScoringMatrix,
     scratch: &mut S::Scratch,
     score: S,
-    one_hit: Option<&XOneHitBuffers<'_>>,
+    one_hit: Option<&XOneHitBuffers>,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let mut results = Vec::new();
     debug_assert_eq!(subject_sequence.len(), chunk.length);
@@ -167,12 +169,12 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
         // status = s_BlastProtGappedAlignment(...);
         // A negative Int4 length comes only from the one-hit word finder (`-window_size 0`,
         // aa_ungapped.c:1054,1083); NCBI reads it as Uint4 (`gapped_start_int4`), and its window
-        // may read past the context and the chunk (`XOneHitBuffers::windows`).
+        // may read past the context and the chunk (`x_gapped_start_negative`).
         let q_gapped_start = if ONE_HIT && hit.length < 0 {
             x_gapped_start_negative(
                 score,
                 one_hit,
-                usize::try_from(context_offset)? + q_start,
+                query_sequence,
                 frame,
                 chunk,
                 subject_frame,
@@ -292,23 +294,20 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
 //       offset += length + 1;
 //       frame_offsets[context+1] = offset;
 // ```
-/// The buffers of NCBI that the gapped start of a one-hit HSP of negative length reads
-/// (`-window_size 0`; `BlastGetStartForGappedAlignment` with the length read as Uint4,
+/// The subject's side of NCBI's buffers that the gapped start of a one-hit HSP of negative length
+/// reads (`-window_size 0`; `BlastGetStartForGappedAlignment` with the length read as Uint4,
 /// blast_gapalign.c:3405-3413). Its window of HSP_MAX_WINDOW letters can pass the end of its
-/// context into the next contexts of the query batch, and the end of its frame into the next
-/// frames of the subject's translation (`BLAST_GetAllTranslations`: frames 1, 2, 3, -1, -2, -3,
-/// each after a NULLB, and a NULLB after the last). NCBI's query buffer ends one byte after the
-/// last context's NULLB (`calloc(buflen + 1)`, `sequence = buf + 1`); its translation buffer is
-/// set up to the NULLB after frame -3 (the byte after it is allocated and never written). Beyond
-/// either NCBI reads bytes it never set or memory that is not its own, and can crash; the window
-/// reads every letter there as the sentinel NULLB, as it reads the NULLB right after a sequence
-/// (PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.47 extends from BLASTP to TBLASTN).
-pub(super) struct XOneHitBuffers<'a> {
-    /// The query batch's contexts (`aa_seq`: a NULLB, the letters and their NULLB), which NCBI's
-    /// `query->sequence` holds one after another from `context_offsets` on.
-    query_frames: &'a [QueryFrame],
-    /// The offset of each context in the query batch.
-    context_offsets: &'a [i32],
+/// frame into the next frames of the subject's translation (`BLAST_GetAllTranslations`: frames 1,
+/// 2, 3, -1, -2, -3, each after a NULLB, and a NULLB after the last), whose letters a PSSM's '-'
+/// column can make count (`TbnScore::GAPPED_START_PAST_FRAME`). The translation buffer is set up
+/// to the NULLB after frame -3 (the byte after it is allocated and never written); beyond it NCBI
+/// reads a byte it never set or memory that is not its own, and can crash, and the window reads
+/// every letter there as the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.47
+/// extends from BLASTP to TBLASTN). The query's side is the context's letters and NULLBs past them
+/// (`gapped_start_window`, as BLASTP and BLASTX read it): with the matrix a window that passes its
+/// context holds the context's NULLB, which scores BLAST_SCORE_MIN, so the bytes after it never
+/// change the start; a PSSM's window reads its rows, not the query.
+pub(super) struct XOneHitBuffers {
     /// `frame_offsets` of the translation buffer: the NULLB before each frame, and the NULLB after
     /// the last (index 6).
     frame_offsets: [usize; 7],
@@ -324,14 +323,10 @@ pub(super) struct XOneHitBuffers<'a> {
     frame_end: std::cell::OnceCell<Vec<u8>>,
 }
 
-impl<'a> XOneHitBuffers<'a> {
+impl XOneHitBuffers {
     /// The buffers of the unit of `chunk` of frame `frame_index` of `frames` (the subject's six
-    /// frames in NCBI's order, `subject` their source), for the query batch of `query_frames`
-    /// (its contexts, from `context_offsets` on).
-    #[allow(clippy::too_many_arguments)]
+    /// frames in NCBI's order, `subject` their source).
     fn new(
-        query_frames: &'a [QueryFrame],
-        context_offsets: &'a [i32],
         frames: &[QueryFrame],
         frame_index: usize,
         chunk: TranslatedChunk,
@@ -344,14 +339,6 @@ impl<'a> XOneHitBuffers<'a> {
         anyhow::ensure!(
             frames.len() == 6 && frames.iter().zip(NCBI_FRAMES).all(|(f, n)| f.frame == n),
             "TBLASTN -window_size 0: the subject's frames are not NCBI's six (internal error)"
-        );
-        anyhow::ensure!(
-            !query_frames.is_empty(),
-            "TBLASTN -window_size 0: no query (internal error)"
-        );
-        anyhow::ensure!(
-            query_frames.len() == context_offsets.len(),
-            "TBLASTN -window_size 0: one offset per query context (internal error)"
         );
         let mut frame_offsets = [0usize; 7];
         for (index, frame) in frames.iter().enumerate() {
@@ -401,29 +388,11 @@ impl<'a> XOneHitBuffers<'a> {
             }
         }
         Ok(Self {
-            query_frames,
-            context_offsets,
             frame_offsets,
             frame_index,
             after_frame,
             frame_end: std::cell::OnceCell::new(),
         })
-    }
-
-    /// The byte of NCBI's `query->sequence` at `q_abs` (a context's letter or NULLB, or past the
-    /// last context's NULLB the byte calloc set to 0 and, past NCBI's allocation, the sentinel
-    /// NULLB: PD-LOSAT-NCBI-DEFECTS exception 3).
-    fn query_byte(&self, q_abs: usize) -> u8 {
-        let context = self
-            .context_offsets
-            .partition_point(|&offset| usize::try_from(offset).is_ok_and(|offset| offset <= q_abs))
-            - 1;
-        let local = q_abs - usize::try_from(self.context_offsets[context]).unwrap_or(0);
-        self.query_frames[context]
-            .aa_seq
-            .get(1 + local)
-            .copied()
-            .unwrap_or(0)
     }
 
     /// The byte of the translation buffer at letter `position` of the unit's `frame` (its NULLB at
@@ -457,33 +426,24 @@ impl<'a> XOneHitBuffers<'a> {
         self.frame_offsets[self.frame_index] + 1 + position > self.frame_offsets[6]
     }
 
-    /// The bytes NCBI reads in the window of a gapped start at `q_abs` of the query batch and at
-    /// `s_start` of `chunk` of the unit's `frame`, with every letter past NCBI's buffers read as
-    /// the sentinel NULLB (`query_byte`, `past_translation`; PD-LOSAT-NCBI-DEFECTS exception 3).
-    /// `reads_query`: whether the window's score reads the query's letters (the matrix's; a PSSM's
-    /// reads its rows, `TbnScore::WINDOW_READS_QUERY`).
-    fn windows(
+    /// The bytes NCBI reads in the subject's window of a gapped start at `s_start` of `chunk` of
+    /// the unit's `frame`, with every letter past the NULLB after frame -3 read as the sentinel
+    /// NULLB (`past_translation`; PD-LOSAT-NCBI-DEFECTS exception 3).
+    fn subject_window(
         &self,
-        q_abs: usize,
         frame: &QueryFrame,
         chunk: TranslatedChunk,
         subject_frame: &[u8],
         s_start: usize,
-        reads_query: bool,
-    ) -> Result<([u8; HSP_MAX_WINDOW], [u8; HSP_MAX_WINDOW])> {
+    ) -> Result<[u8; HSP_MAX_WINDOW]> {
         let s_position = chunk.offset + s_start;
-        let mut query_window = [0u8; HSP_MAX_WINDOW];
-        let mut subject_window = [0u8; HSP_MAX_WINDOW];
-        for index in 0..HSP_MAX_WINDOW {
-            if reads_query {
-                query_window[index] = self.query_byte(q_abs + index);
-            }
+        let mut window = [0u8; HSP_MAX_WINDOW];
+        for (index, byte) in window.iter_mut().enumerate() {
             if !self.past_translation(s_position + index) {
-                subject_window[index] =
-                    self.frame_byte(frame, chunk, subject_frame, s_position + index)?;
+                *byte = self.frame_byte(frame, chunk, subject_frame, s_position + index)?;
             }
         }
-        Ok((query_window, subject_window))
+        Ok(window)
     }
 }
 
@@ -536,17 +496,18 @@ fn x_add_one_hit_hsp(
 //     query_var = query + q_start;
 //     subject_var = subject + s_start;
 // ```
-/// The gapped start of a one-hit HSP of negative `length` at `q_start` (`q_abs` in the query
-/// batch) and `s_start` of `chunk`: the window's bytes in NCBI's buffers, and past them the sentinel
-/// (`XOneHitBuffers::windows`). Out of line, so that the gapped stage of the other HSPs keeps its
-/// code.
+/// The gapped start of a one-hit HSP of negative `length` at `q_start` of the context's letters
+/// (`query_sequence`) and `s_start` of `chunk`: the query's window with the letters past the
+/// context read as NULLB (`gapped_start_window`), the subject's window in NCBI's translation
+/// buffer and past it the sentinel (`XOneHitBuffers::subject_window`). Out of line, so that the
+/// gapped stage of the other HSPs keeps its code.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn x_gapped_start_negative<S: super::score::TbnScore>(
     score: S,
-    one_hit: Option<&XOneHitBuffers<'_>>,
-    q_abs: usize,
+    one_hit: Option<&XOneHitBuffers>,
+    query_sequence: &[u8],
     frame: &QueryFrame,
     chunk: TranslatedChunk,
     subject_frame: &[u8],
@@ -560,14 +521,8 @@ fn x_gapped_start_negative<S: super::score::TbnScore>(
             "TBLASTN: an initial HSP of negative length outside the one-hit word finder (internal error)"
         );
     };
-    let (query_window, subject_window) = buffers.windows(
-        q_abs,
-        frame,
-        chunk,
-        subject_frame,
-        s_start,
-        S::WINDOW_READS_QUERY,
-    )?;
+    let query_window = gapped_start_window(query_sequence, q_start);
+    let subject_window = buffers.subject_window(frame, chunk, subject_frame, s_start)?;
     score.gapped_start_int4(&query_window, &subject_window, q_start, length, matrix)
 }
 
@@ -605,7 +560,7 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
     frame: &QueryFrame,
     chunk: TranslatedChunk,
     subject_frame: &[u8],
-    one_hit: Option<&XOneHitBuffers<'_>>,
+    one_hit: Option<&XOneHitBuffers>,
     q_gapped_start: usize,
     s_gapped_start: usize,
     matrix: ScoringMatrix,
@@ -1399,8 +1354,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         // 0` only).
         let x_one_hit = if ONE_HIT {
             Some(XOneHitBuffers::new(
-                query_frames,
-                context_offsets,
                 &plan.subject.frames,
                 *frame_index,
                 chunk,
@@ -3537,8 +3490,6 @@ mod tests {
                 frame_offsets[k] = frame_offsets[k - 1] + first - usize::from(k > 1) + 1;
             }
             XOneHitBuffers {
-                query_frames: &query_frames,
-                context_offsets: &[0],
                 frame_offsets,
                 frame_index: 0,
                 after_frame,
@@ -3547,7 +3498,7 @@ mod tests {
         };
         let gapped = |pssm: &crate::algorithm::pssm_search::rows::QueryPssm,
                       frame: &QueryFrame,
-                      buffers: &XOneHitBuffers<'_>| {
+                      buffers: &XOneHitBuffers| {
             let chunk = TranslatedChunk {
                 offset: 0,
                 length: frame.aa_len,
@@ -3645,8 +3596,6 @@ mod tests {
             }
             frame_offsets[6] = frame_offsets[5] + aa_len + 1;
             let buffers = XOneHitBuffers {
-                query_frames: &query_frames,
-                context_offsets: &[0],
                 frame_offsets,
                 frame_index: 5,
                 after_frame: Vec::new(),
@@ -3749,8 +3698,6 @@ mod tests {
         };
         let query_frames = [query_frame];
         let buffers = XOneHitBuffers {
-            query_frames: &query_frames,
-            context_offsets: &[0],
             frame_offsets: [0, 61, 121, 181, 242, 302, 362],
             frame_index: 0,
             after_frame: Vec::new(),
@@ -3816,20 +3763,14 @@ mod tests {
         assert!(error.to_string().contains("internal error"), "{error}");
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501 and
-    // c++/src/algo/blast/core/blast_util.c:1058,1098-1101 (quoted at `XOneHitBuffers`)
-    // The window reads NCBI's bytes: past a context its NULLB and the next context's letters, past
-    // the batch's last NULLB the byte calloc set to 0, past a frame its NULLB and the next frame's
-    // letters; past NCBI's buffers (the query's calloc'd byte, the NULLB after frame -3) every letter
-    // reads as the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1098-1101 (quoted at
+    // `XOneHitBuffers`)
+    // The subject's window reads NCBI's bytes: past a frame its NULLB and the next frame's letters;
+    // past the NULLB after frame -3 every letter reads as the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS
+    // exception 3). The query's window is the context's letters and NULLBs past them
+    // (`gapped_start_window`).
     #[test]
     fn one_hit_windows_read_ncbi_buffers_and_the_sentinel_past_them() {
-        // Two contexts: 4 letters (offset 0) and 8 (offset 5); `query->sequence` holds 14 bytes
-        // (1, 2, 3, 4, 0, 5, ..., 12, 0) and the calloc'd 0 after them (its last index, 14).
-        let query_frames = [
-            one_hit_frame(0, &[1, 2, 3, 4]),
-            one_hit_frame(0, &[5, 6, 7, 8, 9, 10, 11, 12]),
-        ];
         // Frames of 5, 4, 4, 5, 4, 4 letters (a subject of 15 bases): NULLBs at 0, 6, 11, 16, 22,
         // 27 and 32.
         let frames: Vec<QueryFrame> = [(1, 5), (2, 4), (3, 4), (-1, 5), (-2, 4), (-3, 4)]
@@ -3843,8 +3784,6 @@ mod tests {
         };
         let buffers = |frame_index: usize| {
             XOneHitBuffers::new(
-                &query_frames,
-                &[0, 5],
                 &frames,
                 frame_index,
                 whole(frame_index),
@@ -3859,55 +3798,41 @@ mod tests {
             first.after_frame,
             vec![11, 11, 11, 11, 0, 12, 12, 12, 12, 0]
         );
-        let window = |buffers: &XOneHitBuffers<'_>, q_abs: usize, frame_index: usize, s: usize| {
+        let window = |buffers: &XOneHitBuffers, frame_index: usize, s: usize| {
             let frame = &frames[frame_index];
-            buffers.windows(
-                q_abs,
-                frame,
-                whole(frame_index),
-                &frame.aa_seq[1..],
-                s,
-                true,
-            )
+            buffers.subject_window(frame, whole(frame_index), &frame.aa_seq[1..], s)
         };
-        // The first context's letter 0 and frame 1's letter 0: the window holds the context's
-        // NULLB and 6 letters of the next context, and frame 1's NULLB and 5 bytes of frame 2.
-        let (q, s) = window(&first, 0, 0, 0).unwrap();
-        assert_eq!(q, [1, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10]);
+        // A context's window: its letters, then NULLBs (the first one is the context's own).
+        assert_eq!(
+            gapped_start_window(&[1, 2, 3, 4], 0),
+            [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            gapped_start_window(&[5, 6, 7, 8, 9, 10, 11, 12], 7),
+            [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        // Frame 1's letter 0: the window holds frame 1's NULLB and 5 bytes of frame 2.
+        let s = window(&first, 0, 0).unwrap();
         assert_eq!(s, [10, 10, 10, 10, 10, 0, 11, 11, 11, 11, 0]);
-        // A window that ends on the calloc'd byte (index 14) reads NCBI's bytes; one that goes
-        // further reads NULLBs past it, up to a window from the batch's last letter.
-        let (q, _) = window(&first, 4, 0, 0).unwrap();
-        assert_eq!(q, [0, 5, 6, 7, 8, 9, 10, 11, 12, 0, 0]);
-        let (q, _) = window(&first, 5, 0, 0).unwrap();
-        assert_eq!(q, [5, 6, 7, 8, 9, 10, 11, 12, 0, 0, 0]);
-        let (q, _) = window(&first, 12, 0, 0).unwrap();
-        assert_eq!(q, [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        // A PSSM's window does not read the query (its rows instead): no query test.
-        let frame = &frames[0];
-        let (q, _) = first
-            .windows(5, frame, whole(0), &frame.aa_seq[1..], 0, false)
-            .unwrap();
-        assert_eq!(q, [0; 11]);
         // Frame -1 (NULLB at 16): its letters 0..10 are bytes 17..27, the last one frame -2's
         // NULLB; from its letter 1 the window ends on byte 28, frame -3's first letter.
         let fourth = buffers(3);
-        let (_, s) = window(&fourth, 0, 3, 0).unwrap();
+        let s = window(&fourth, 3, 0).unwrap();
         assert_eq!(s, [13, 13, 13, 13, 13, 0, 14, 14, 14, 14, 0]);
-        let (_, s) = window(&fourth, 0, 3, 1).unwrap();
+        let s = window(&fourth, 3, 1).unwrap();
         assert_eq!(s, [13, 13, 13, 13, 0, 14, 14, 14, 14, 0, 15]);
         // Frame -2 (NULLB at 22): from its letter 0 (byte 23) the window ends on byte 33, past
         // the NULLB after frame -3 (byte 32), which reads as a NULLB; from frame -3's letters the
         // window holds its NULLB and then NULLBs.
         let fifth = buffers(4);
         assert_eq!(fifth.after_frame, vec![15, 15, 15, 15, 0]);
-        let (_, s) = window(&fifth, 0, 4, 0).unwrap();
+        let s = window(&fifth, 4, 0).unwrap();
         assert_eq!(s, [14, 14, 14, 14, 0, 15, 15, 15, 15, 0, 0]);
         let sixth = buffers(5);
         assert!(sixth.after_frame.is_empty());
-        let (_, s) = window(&sixth, 0, 5, 0).unwrap();
+        let s = window(&sixth, 5, 0).unwrap();
         assert_eq!(s, [15, 15, 15, 15, 0, 0, 0, 0, 0, 0, 0]);
-        let (_, s) = window(&sixth, 0, 5, 3).unwrap();
+        let s = window(&sixth, 5, 3).unwrap();
         assert_eq!(s, [15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert!(sixth.past_translation(5) && !sixth.past_translation(4));
     }
@@ -3920,7 +3845,6 @@ mod tests {
     // longer than the window is cut without its NULLB (NCBI's byte there is a letter).
     #[test]
     fn one_hit_windows_of_a_chunk_near_its_frame_end_read_the_next_frame() {
-        let query_frames = [one_hit_frame(0, &[1; 20])];
         let frames: Vec<QueryFrame> = [(1, 31), (2, 31), (3, 30), (-1, 31), (-2, 31), (-3, 30)]
             .into_iter()
             .enumerate()
@@ -3931,8 +3855,6 @@ mod tests {
             length: 30,
         };
         let buffers = XOneHitBuffers::new(
-            &query_frames,
-            &[0],
             &frames,
             0,
             chunk,
@@ -3942,8 +3864,8 @@ mod tests {
         .unwrap();
         assert_eq!(buffers.after_frame, vec![11; 10]);
         let frame = &frames[0];
-        let (_, s) = buffers
-            .windows(0, frame, chunk, &frame.aa_seq[1..], 26, true)
+        let s = buffers
+            .subject_window(frame, chunk, &frame.aa_seq[1..], 26)
             .unwrap();
         assert_eq!(s, [10, 10, 10, 10, 10, 0, 11, 11, 11, 11, 11]);
         // A chunk that ends HSP_MAX_WINDOW letters or more before its frame's end holds nothing
@@ -3953,8 +3875,6 @@ mod tests {
             length: 21,
         };
         let buffers = XOneHitBuffers::new(
-            &query_frames,
-            &[0],
             &frames,
             0,
             early,
@@ -3976,7 +3896,6 @@ mod tests {
         use super::super::x_subject_store::XPrelimSubject;
         use super::super::x_subject_translate::{x_packed_lean_plan, x_packed_subject_plan};
         use crate::sequence::packed_subject::PackedNucleotide;
-        let query_frames = [one_hit_frame(0, &[1; 20])];
         for length in [14usize, 20, 31, 47, 302, 3001] {
             let letters: Vec<u8> = (0..length)
                 .map(|i| b"ACGT"[(i * 7 + i / 3 + i / 11) % 4])
@@ -3998,17 +3917,9 @@ mod tests {
                         length: aa_len - tail,
                     };
                     let after = |frames: &[QueryFrame]| {
-                        XOneHitBuffers::new(
-                            &query_frames,
-                            &[0],
-                            frames,
-                            frame_index,
-                            chunk,
-                            subject,
-                            1,
-                        )
-                        .unwrap()
-                        .after_frame
+                        XOneHitBuffers::new(frames, frame_index, chunk, subject, 1)
+                            .unwrap()
+                            .after_frame
                     };
                     let (from_lean, from_full) = (after(&lean.frames), after(&full.frames));
                     let case = format!("{length} bases, frame index {frame_index}, tail {tail}");
@@ -4056,8 +3967,6 @@ mod tests {
             length: 30,
         };
         let buffers = XOneHitBuffers::new(
-            &query_frames,
-            &[0],
             &frames,
             0,
             chunk,

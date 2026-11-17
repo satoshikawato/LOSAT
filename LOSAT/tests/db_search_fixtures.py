@@ -32,12 +32,13 @@ LOSAT/tests/db_search (README.md there says how they were built).
   2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject; exception 3: a one-hit gapped
   start whose window reads past the end of a database volume's last memory page, where NCBI faults). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row_id`).
-- a `ncbi` row whose `covers` cell has the word `ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
+- a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
   memcheck, where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3: the window of a one-hit
   gapped start of negative length; natively NCBI may crash there or read bytes that differ from run to run, valgrind
   reports the reads and goes on). `freeze` runs such a row only with `--valgrind CMD` (the command line put before
-  NCBI's, for example `valgrind -q --log-file=/dev/null`, so that NCBI's stderr stays its own) and otherwise leaves
-  its columns and files as they are (`under_valgrind`).
+  NCBI's, for example `valgrind -q --log-file=/dev/null`, so that NCBI's stderr stays its own; a stderr with
+  valgrind's `==PID==` lines stops the freeze) and otherwise leaves its columns and files as they are
+  (`under_valgrind`).
 - a `ncbi` row whose `covers` cell has `ncbi-stack: unlimited`: `freeze` runs NCBI with no stack limit
   (`RLIMIT_STACK` infinity). NCBI's reader of a PSSM recurses once per nested value on its main thread's stack,
   and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
@@ -86,6 +87,7 @@ import argparse
 import gzip
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -370,9 +372,15 @@ def near_row_id(row: dict[str, str]) -> str | None:
 
 
 def under_valgrind(row: dict[str, str]) -> bool:
-    """Whether the frozen bytes of `row` are NCBI's run under valgrind (the word `ncbi-valgrind` in its covers cell):
-    rows where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3)."""
-    return "ncbi-valgrind" in row["covers"].replace("|", " ").split()
+    """Whether the frozen bytes of `row` are NCBI's run under valgrind (a ` | ncbi-valgrind` part of its covers
+    cell): rows where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3)."""
+    return any(part.strip() == "ncbi-valgrind" for part in row["covers"].split(" | ")[1:])
+
+
+def valgrind_messages(stderr: bytes) -> bool:
+    """Whether `stderr` holds valgrind's own lines (`==PID== ...`): `freeze` refuses to freeze them as NCBI's
+    stderr (the `--valgrind` command needs a `--log-file`)."""
+    return re.search(rb"^==\d+==", stderr, re.MULTILINE) is not None
 
 
 def frozen_id(row: dict[str, str]) -> str:
@@ -448,6 +456,8 @@ def freeze(args: argparse.Namespace) -> int:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env), preexec_fn=ncbi_stack(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+        if under_valgrind(row) and valgrind_messages(run.stderr):
+            raise SystemExit(f"{row['row_id']}: valgrind's messages in NCBI's stderr; give --valgrind a --log-file")
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)

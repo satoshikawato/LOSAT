@@ -269,8 +269,12 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    `blast_util.c:1058,1063,1098-1101`); for BLASTX past a `-subject` protein's `malloc(len+2)`
    (`blast_setup_cxx.cpp:885-893`) and past the last memory page of a database volume's sequence
    file (`seqdbatlas.cpp:114-127`). LOSAT reads every letter past those buffers as the sentinel, as
-   for BLASTP; inside them it reads the bytes NCBI reads (the next contexts', frames' or database
-   sequences' letters, the zeros of a mapped file's last page). In 450 random TBLASTN searches with
+   for BLASTP. A window that passes its context or subject already holds that NULLB, which scores
+   `BLAST_SCORE_MIN` with every matrix (`blast_stat.c:1559-1574`), so inside NCBI's buffers the
+   start is the HSP's whatever follows: BLASTX and TBLASTN's query side read NULLBs from there on,
+   as BLASTP does. TBLASTN's subject side reads the bytes NCBI reads (the next frames' letters,
+   which a hand-made PSSM's '-' column can score: the TBLASTN item of version 1.18 below). In 450
+   random TBLASTN searches with
    this setting (300 with `-subject`, 150 with `-db`; one to three queries of 12 to 120 letters, one
    to three subjects of 36 to 360 bases, word sizes 2 to 5, `-threshold` 1 to 4), 129 read past a
    buffer (106 first past the query batch, 23 past the subject's translation); NCBI crashed
@@ -287,9 +291,10 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    from NCBI under valgrind where NCBI reads past its buffers. Not covered, and still refused: with
    TBLASTN `-in_pssm`, a window past the PSSM's last position (`pssm->data` holds one row per
    position and no sentinel row: the read is past a matrix, not past a sequence), and a gapped start
-   that a PSSM whose '-' column scores above `BLAST_SCORE_MIN` puts past the subject's translation
-   buffer, where NCBI's preliminary gapped alignment then reads from (the TBLASTN item of version
-   1.18 below).
+   that a PSSM whose '-' column scores above `BLAST_SCORE_MIN` puts past the NULLB after frame -3,
+   the last byte the translation buffer sets, where NCBI's preliminary gapped alignment then reads
+   the byte after it, which the buffer allocates and never sets, or past it (the TBLASTN item of
+   version 1.18 below).
 
 Explicit rejections (rule 3):
 
@@ -1231,8 +1236,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   `Int4` length, which `BlastGetStartForGappedAlignment` reads as `Uint4`
   (`aa_ungapped.c:1054,1083`, `blast_gapalign.c:3393-3413`): it scores the first window of 11
   letters from the HSP's start, which may pass the end of its context and its frame. Inside NCBI's
-  buffers the window reads the NULLB and then the next contexts' or frames' letters, and LOSAT
-  reads the same bytes. Past them
+  buffers the window reads the NULLB and then the next contexts' or frames' letters. LOSAT reads
+  the subject's bytes as NCBI does (the next frames' letters, which a PSSM's '-' column can score)
+  and the query's context followed by NULLBs: the matrix scores the context's NULLB
+  `BLAST_SCORE_MIN`, so what follows it never changes the start, and a PSSM reads its rows, not the
+  query. Past the buffers
   LOSAT reads NULLBs (approved exception 3, version 1.47; 1.18 refused these searches): past the
   byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with `buflen` from
   `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`, `blast_query_info.c:246-250`) and past
@@ -1296,7 +1304,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     1236-1239`);
   - past the last memory page of a database volume's sequence file. NCBI maps the file whole from
     offset 0 and reads the sequences in place (`seqdbvol.cpp:1802`, `seqdbatlas.hpp:700-722`,
-    `seqdbatlas.cpp:114-127`, `ncbifile.cpp:5636-5638`), and the system fills the rest of the
+    `seqdbatlas.cpp:114-127`, `ncbifile.cpp:5642-5643`), and the system fills the rest of the
     file's last page with zeros, which NCBI reads as NULLBs, as LOSAT does. So only a window from
     the volume's last sequence in a file that ends within 10 bytes of a 4,096-byte page boundary
     reaches past it.

@@ -53,10 +53,6 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     type Walks: XUngapWalks;
     /// The memory of one traceback (`GapAlignScratch` for the matrix's kernel).
     type TracebackScratch;
-    /// Whether the window of `gapped_start_int4` reads the query's letters: the matrix's does
-    /// (`matrix->data[*query_var][*subject_var]`), a PSSM's reads its rows instead
-    /// (`pssm->data[index1][*subject_var]`, blast_gapalign.c:3413-3416).
-    const WINDOW_READS_QUERY: bool;
     /// Whether the gapped start of a one-hit HSP of negative length can lie on or after its
     /// frame's NULLB: only a PSSM's '-' column can score that byte above BLAST_SCORE_MIN (a
     /// hand-made PSSM: NCBI's PSSM engine scores it BLAST_SCORE_MIN, blast_psi_priv.c:2435-2436),
@@ -93,10 +89,13 @@ pub(super) trait TbnScore: Copy + Send + Sync {
 
     /// `gapped_start` of a one-hit HSP whose Int4 `length` is negative (`-window_size 0`,
     /// aa_ungapped.c:1054,1083), which NCBI passes as Uint4 (blast_gapalign.c:3394): its window of
-    /// HSP_MAX_WINDOW letters is scored. `query_window` and `subject_window` are the bytes NCBI
-    /// reads there, from the query's `q_start` and the subject's `s_start` on, in NCBI's buffers
-    /// (past a context or a frame: its NULLB, then the next one's letters), and past those buffers
-    /// the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3; `search_gapped::XOneHitBuffers`).
+    /// HSP_MAX_WINDOW letters is scored. `query_window` holds the context's letters from
+    /// `q_start` on and NULLBs past them (`gapped_start_window`: with the matrix the context's
+    /// NULLB scores BLAST_SCORE_MIN, so what follows it never changes the start; a PSSM reads its
+    /// rows, not the query); `subject_window` the bytes NCBI reads from the subject's `s_start`
+    /// on, in its translation buffer (past a frame: its NULLB, then the next frame's letters) and
+    /// past it the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3;
+    /// `search_gapped::XOneHitBuffers`).
     fn gapped_start_int4(
         self,
         query_window: &[u8; GAPPED_START_WINDOW],
@@ -197,7 +196,6 @@ impl TbnScore for MatrixScore {
     type Scratch = GapAlignScratch;
     type Walks = std::convert::Infallible;
     type TracebackScratch = GapAlignScratch;
-    const WINDOW_READS_QUERY: bool = true;
     const GAPPED_START_PAST_FRAME: bool = false;
 
     #[inline(always)]
@@ -470,7 +468,6 @@ impl<'a> TbnScore for PssmScore<'a> {
     type Scratch = (GapAlignScratch, PssmGapScratch);
     type Walks = XPssmWalks<'a>;
     type TracebackScratch = PssmGapScratch;
-    const WINDOW_READS_QUERY: bool = false;
     const GAPPED_START_PAST_FRAME: bool = true;
 
     fn traceback_scratch() -> Self::TracebackScratch {

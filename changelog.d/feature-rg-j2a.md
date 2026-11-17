@@ -3,8 +3,9 @@
   letters that passes NCBI BLAST+'s buffer of the query batch or of the subject (`blastx`: the
   `-subject` protein or, with `-db`, the last memory page of the database volume's sequence file;
   `tblastn`: the subject's six frames). NCBI BLAST+ 2.17.0 reads outside its memory there and can
-  crash; LOSAT reads the letters past the sequence as its end marker, as `blastp` does, and gives
-  the output NCBI BLAST+ writes when run under valgrind, which reports those reads and does not
-  crash. `tblastn -in_pssm` still stops with an error where such a window passes the PSSM's last
-  position, and where a PSSM whose `-` column scores above NCBI BLAST+'s minimum puts the gapped
-  start past the end of the subject's translation.
+  crash; LOSAT reads the letters past the sequence as its end marker, as `blastp` does. That gives
+  NCBI BLAST+'s own output where those bytes are zero: under valgrind, which reports the reads, NCBI
+  BLAST+ wrote LOSAT's output in every such search of ours that valgrind finished. `tblastn
+  -in_pssm` still stops with an error where such a window passes the PSSM's last position, and
+  where a PSSM whose `-` column scores above NCBI BLAST+'s minimum puts the gapped start past the
+  end of the subject's translation.

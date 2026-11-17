@@ -587,6 +587,24 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
 //     hsp_end = q_start + MIN(q_length, s_length);
 //     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,885-893,
+// c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1802 and seqdbatlas.cpp:114-127
+// ```c++
+//     int buflen = QueryInfo_GetSeqBufLen(qinfo);
+//     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+// ...
+//     buflen = CalculateSeqBufferLength(sv.size(), eBlastEncodingProtein);
+//     _ASSERT(buflen != 0);
+//     buf = buf_var = (Uint1*) malloc(sizeof(Uint1)*buflen);
+// ...
+//     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
+// ...
+//         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
+// ...
+// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+// ...
+//     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
+// ```
 /// The gapped start of a one-hit HSP of negative length at `q_start` of its context's letters
 /// (`query`) and at `s_start` of the subject's (`subject`). NCBI reads the length as `Uint4`, so it
 /// scores only the first window of `HSP_MAX_WINDOW` letters (`gapped_start_int4`). A window that

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.43
+- Version: 1.44
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -132,7 +132,11 @@
   1.43 2026-11-17 (the explicit rejections of a taxonomy record read past NCBI's mapping of
   `taxdb.btd`, rule 3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, and
   exception 14, LOSAT's output where NCBI may fault there, which the Owner decided on 2026-11-15;
-  line RG item T5b; written 2026-11-15 as 1.26 with exception 13)
+  line RG item T5b; written 2026-11-15 as 1.26 with exception 13);
+  1.44 2026-11-17 (TBLASTN `-in_pssm -window_size 0`, a one-hit gapped start on its frame's NULLB
+  or after it, which a PSSM whose '-' column scores above BLAST_SCORE_MIN allows: its preliminary
+  gapped score reproduced, rule 2, and the explicit rejection of its traceback after the NULLB,
+  rule 3; line RG item X2d, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1160,6 +1164,24 @@ masked). Line NP item M4a-2c.
   never straddles a node's middle, and two of them split a node `[p, p]` the same way. LOSAT stops
   where that first inverted node would be made; ranges in order inside the tree's bounds never
   make one, and only this word finder's HSPs are out of order or leave them.
+
+  With `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (a hand-made one: the
+  matrices score it BLAST_SCORE_MIN, `blast_stat.c:1559-1562`, and so does NCBI's PSSM engine, the
+  gap's background probability being 0, `blast_psi_priv.c:2435-2436`), the window can sum above 0
+  over the NULLB after a subject frame's last letter, and the gapped start then lies on that NULLB
+  or one or two letters after it (version 1.44, 2026-11-17, line RG item X2d, Owner-delegated).
+  NCBI's preliminary gapped alignment reads back from the start over the six frames' buffer (the
+  next frame's letters, the NULLB scored with the '-' column, the frame's letters; no right
+  extension, `blast_gapalign.c:4250-4347`), and LOSAT reads the same bytes; an HSP that NCBI drops
+  before its traceback leaves the search as NCBI's. LOSAT refuses where such an HSP reaches the
+  traceback with its start after the NULLB: `BLAST_GappedAlignmentWithTraceback` reads the subject
+  at the start first (`blast_gapalign.c:4609`, `:569-575`), a byte past the fence of the partial
+  translation (`blast_hits.c:1208,1225-1227`) and, on the retry after that fence, past the NULLB of
+  the whole frame's translation (`subject.offset` -1: `blast_traceback.c:424-428`,
+  `blast_hits.c:1175-1177,1189,1208`, no fence; the NULLB of `blast_util.c:453`) or past its
+  allocation. A start on the NULLB is defined there (the fence, then the whole frame's NULLB); LOSAT
+  does not reproduce the reports of that alignment's column of the NULLB yet and refuses it where
+  they would show it, as a gap of its own, not under this rule.
 
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.

@@ -198,8 +198,9 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
             usize::try_from(s_gapped_start).context("negative gapped subject start")?;
         let gapped = if ONE_HIT && s_gapped_start >= chunk.length {
             // Only the window of a negative length reaches past the chunk (`q_gapped_start` is
-            // then `q_start + 5`, inside the frame's letters for a chunk that is not the frame's
-            // last).
+            // then `q_start + 5`: inside the frame's letters, or with a PSSM, for a chunk that ends
+            // within two letters of the frame's end, on the frame's NULLB or up to two letters
+            // after it).
             x_score_only_past_chunk(
                 score,
                 query_sequence,
@@ -319,6 +320,10 @@ pub(super) struct XOneHitBuffers<'a> {
     /// after the frame's NULLB (the next frames' letters and NULLBs, up to the buffer's last
     /// NULLB), as many as a window reads; empty otherwise.
     after_frame: Vec<u8>,
+    /// For a gapped start on the frame's NULLB or after it (`x_score_only_past_chunk`), the bytes of
+    /// NCBI's buffer from the chunk's first letter on: the frame's letters, its NULLB and
+    /// `after_frame`; made once for the unit, at its first such start.
+    frame_end: std::cell::OnceCell<Vec<u8>>,
 }
 
 impl<'a> XOneHitBuffers<'a> {
@@ -404,6 +409,7 @@ impl<'a> XOneHitBuffers<'a> {
             frame_offsets,
             frame_index,
             after_frame,
+            frame_end: std::cell::OnceCell::new(),
         })
     }
 
@@ -590,11 +596,11 @@ fn x_gapped_start_negative<S: super::score::TbnScore>(
 // ```
 /// `s_BlastProtGappedAlignment` of a gapped start at or past the end of its chunk
 /// (`s_gapped_start >= chunk.length`), which only the window of a one-hit HSP of negative length
-/// gives (a chunk that is not its frame's last): NCBI's `subject->sequence` goes on past the chunk
-/// with the frame's next letters, and the left extension reads back from the start over them;
-/// `subject->length` is the chunk's, so the right extension does not run and the HSP ends at the
-/// gapped start. It then goes through the purge, `Blast_HSPListAdjustOffsets` and the merge of the
-/// chunks as any other HSP.
+/// gives: NCBI's `subject->sequence` goes on past the chunk with the frame's next letters or, past
+/// the frame's last one, with its NULLB and the next frame's letters, and the left extension reads
+/// back from the start over them; `subject->length` is the chunk's, so the right extension does
+/// not run and the HSP ends at the gapped start. It then goes through the purge,
+/// `Blast_HSPListAdjustOffsets` and the merge of the chunks as any other HSP.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -613,42 +619,49 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
     x_drop: i32,
     scratch: &mut S::Scratch,
 ) -> Result<crate::algorithm::blastp::gapalign::BlastpScoreOnlyGappedAlignment> {
-    if one_hit.is_none() {
+    let Some(buffers) = one_hit else {
         bail!(
             "TBLASTN: a gapped start past its chunk outside the one-hit word finder (internal error)"
         );
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:424-432,509-512,
-    // 1643-1684, blast_hits.c:1196-1226, blast_util.c:439,453,1303-1305 and
-    // blast_gapalign.c:567-575
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1094-1101
     // ```c
-    //             	 subject = Blast_HSPGetTargetTranslation(target_t, hsp, &subject_length);
+    //             BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
+    //                nucl_length, frame, translation_buffer+offset, genetic_code);
     // ...
-    //                    target_t->translations[context] = (Uint1*) malloc(translation_length+2);
-    // ...
-    //                    target_t->translations[context][length+1] = FENCE_SENTRY;
-    // ...
-    //                  retval->translations[context] = (Uint1*) malloc((2+subject_blk->length/3)*sizeof(Uint1));
-    // ...
-    // 	prot_seq[index_prot] = NULLB;
-    // ...
-    //             if (matrix_index == FENCE_SENTRY) {
+    //       /* Increment offset by 1 extra byte for the sentinel NULLB
+    //          between frames. */
+    //       offset += length + 1;
+    //       frame_offsets[context+1] = offset;
     // ```
-    // A start at or past the frame's end needs a window that sums above 0 over the frame's NULLB,
-    // which only a PSSM whose '-' column is not BLAST_SCORE_MIN gives. NCBI's gapped score here
-    // reads back from it over the six frames' buffer (defined), and the HSP may be dropped before
-    // its traceback. The traceback aligns back from the start on a translation of the frame alone:
-    // on the frame's NULLB it reads the partial translation's fence and is done again on the whole
-    // frame, whose NULLB it then reads; past the NULLB it reads a byte that neither translation
-    // sets. LOSAT does not reproduce either yet (item X2d: the gapped score, then the traceback's
-    // NULLB, and the refusal (PD-LOSAT-NCBI-DEFECTS, rule 3) moved to a traceback past it).
-    if chunk.offset + s_gapped_start >= frame.aa_len {
-        bail!(
-            "TBLASTN -in_pssm with -window_size 0: the gapped start of a one-hit alignment of negative length lies after the last letter of its frame (the PSSM's '-' column lets its window sum above 0); LOSAT does not support it yet"
-        );
+    // A start at or past the frame's end (a chunk near it) needs a window that sums above 0
+    // over the frame's NULLB, which only a PSSM whose '-' column is not BLAST_SCORE_MIN gives
+    // (`TbnScore::GAPPED_START_PAST_FRAME`). NCBI's `subject->sequence` is the frame inside the
+    // six frames' buffer: the left extension reads back from the start over the next frame's
+    // letters (a start past the NULLB), the frame's NULLB (scored with the PSSM's '-' column) and
+    // the frame's letters, all set by `BLAST_GetAllTranslations`. The HSP may then be dropped
+    // before its traceback, or reach it (`x_traceback_start_past_frame`).
+    let in_frame = frame.aa_len.saturating_sub(chunk.offset);
+    let bytes = if s_gapped_start < in_frame {
+        // The frame's letters from the chunk's first one to the gapped start.
+        subject_frame.get(..=s_gapped_start)
+    } else {
+        // The frame's letters from the chunk's first one, its NULLB, and the bytes of the buffer
+        // after it (empty where `subject_frame` does not hold the frame's letters: an internal
+        // error below).
+        let held = buffers.frame_end.get_or_init(|| {
+            let Some(letters) = subject_frame.get(..in_frame) else {
+                return Vec::new();
+            };
+            let mut bytes = Vec::with_capacity(in_frame + 1 + buffers.after_frame.len());
+            bytes.extend_from_slice(letters);
+            bytes.push(0);
+            bytes.extend_from_slice(&buffers.after_frame);
+            bytes
+        });
+        held.get(..=s_gapped_start)
     }
-    // The frame's letters from the chunk's first one to the gapped start.
-    let bytes = subject_frame.get(..=s_gapped_start).with_context(|| {
+    .with_context(|| {
         format!(
             "TBLASTN -window_size 0: letter {} past a chunk is not held (internal error)",
             s_gapped_start
@@ -666,6 +679,62 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
         x_drop,
         scratch,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4609 and :569-575,
+// blast_hits.c:1175-1177,1189,1208,1225-1227 and blast_util.c:453
+// ```c
+//         score_left = ALIGN_EX(query, subject, q_start+1, s_start+1,  &private_q_length, &private_s_length, rev_prelim_tback,
+// ...
+//             matrix_index = *b_ptr;
+// ...
+//          if (hsp->subject.offset < 0) {
+//              nucl_start = 0;
+//              nucl_end = target_t->subject_blk->length;
+// ...
+//          translation_length = 1+nucl_length/CODON_LENGTH;
+// ...
+//                    target_t->translations[context] = (Uint1*) malloc(translation_length+2);
+// ...
+//                if(hsp->subject.offset >= 0) {
+//                    target_t->translations[context][0] = FENCE_SENTRY;
+//                    target_t->translations[context][length+1] = FENCE_SENTRY;
+// ...
+// 	prot_seq[index_prot] = NULLB;
+// ```
+/// The refusal of the traceback of an HSP whose gapped start lies after its frame's NULLB (a one-hit
+/// HSP of negative length, `-in_pssm` with `-window_size 0`, `x_score_only_past_chunk`): NCBI's
+/// traceback reads the subject at the start first, a byte past the last one either translation of
+/// the frame sets (past the fence of the partial translation; on the retry after that fence, the
+/// translation of the whole frame (`subject.offset` -1: `1 + n/3 + 2` bytes, no fence) past its
+/// NULLB, or past its allocation): PSI-TBLASTN's result there is not defined
+/// (PD-LOSAT-NCBI-DEFECTS, rule 3). An HSP dropped before its traceback (below the cutoff,
+/// purged, contained, or cut by the hit list) leaves the search to go on, as does a start on the
+/// NULLB (defined: the fence, then the whole frame's NULLB, scored with the PSSM's '-' column).
+#[cold]
+#[inline(never)]
+fn x_traceback_start_past_frame() -> anyhow::Error {
+    anyhow::anyhow!(
+        "TBLASTN -in_pssm with -window_size 0: the traceback of a one-hit alignment of negative length starts after the NULLB after its frame (NCBI BLAST+ reads a byte its translation does not set there), which LOSAT does not support"
+    )
+}
+
+/// The refusal of `x_traceback_start_past_frame` for a gapped start at letter `s_start` of the window
+/// whose first byte is subject position `subject_base`, in the frame `frame` of a subject of
+/// `subject_length` bases, after its NULLB (`aa_len`). A start on the NULLB goes on: NCBI reads the
+/// fence there and, on the whole frame, the NULLB (`stage_e_report::x_refuse_a_column_of_the_nullb`
+/// refuses its alignment where NCBI reports it).
+fn x_traceback_start_in_frame(
+    subject_length: usize,
+    frame: i8,
+    s_start: usize,
+    subject_base: isize,
+) -> Result<()> {
+    let aa_len = frame_length(subject_length, frame).context("missing translated subject frame")?;
+    if s_start as isize + subject_base > aa_len as isize {
+        return Err(x_traceback_start_past_frame());
+    }
+    Ok(())
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
@@ -3110,6 +3179,12 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
                         .context("gapped start before translated window")?,
                 )
             };
+            // Only a gapped start of a one-hit HSP of negative length with a PSSM lies after the
+            // frame's NULLB (its letter `aa_len`, the last byte of the window there: the fence in
+            // pass 0, the NULLB in pass 1).
+            if S::GAPPED_START_PAST_FRAME {
+                x_traceback_start_in_frame(subject.len(), hit.frame, s_start, subject_base)?;
+            }
             let mut fence_hit = false;
             let mut scratch = S::traceback_scratch();
             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
@@ -3321,6 +3396,169 @@ mod tests {
         }
     }
 
+    /// The PSSM of line RG item X2d's probe (without its motif rows; the fixtures' `x2d_d50.asn`): 30
+    /// rows of -6 ('-' BLAST_SCORE_MIN), row 9 -61 for every letter, W +60 at row 10, V -60 at row
+    /// 11, K +1 at row 12, S +4 at row 14 and '-' `dash` at rows 13 to 15.
+    fn x2d_pssm(dash: i32) -> crate::algorithm::pssm_search::rows::QueryPssm {
+        const W: usize = 20;
+        const V: usize = 19;
+        const K: usize = 10;
+        const S: usize = 17;
+        let rows = (0..30)
+            .map(|r| {
+                let mut row = [-6; crate::core::blast_util::BLASTAA_SIZE];
+                if r == 9 {
+                    row = [-61; crate::core::blast_util::BLASTAA_SIZE];
+                }
+                row[0] = -32768;
+                match r {
+                    10 => row[W] = 60,
+                    11 => row[V] = -60,
+                    12 => row[K] = 1,
+                    14 => row[S] = 4,
+                    _ => {}
+                }
+                if (13..=15).contains(&r) {
+                    row[0] = dash;
+                }
+                row
+            })
+            .collect();
+        crate::algorithm::pssm_search::rows::QueryPssm { rows }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4250-4258,4295,
+    // 4342-4345 (quoted at `x_score_only_past_chunk`) and :3405-3439
+    // The word W V K at letters 14..17 of a frame of 19 letters (its last two N S), with the
+    // probe's PSSM: a one-hit HSP of length -1 at (10, 14) whose window of 11 rows reads the
+    // frame's last five letters, its NULLB (row 15, '-' 50) and five letters of the next frame
+    // (A, -6): 60 - 60 + 1 - 6 + 4 + 50 - 30 = 19 > 0, so the gapped start is (15, 19), on the
+    // NULLB. NCBI's left extension reads back from the NULLB: 50, S/S, three letters of the query
+    // and three of the subject in gaps (-14 each), W/W: 86 at (10, 14), the score of NCBI 2.17.0's
+    // alignment there (37.6 bits, raw 86, in the search of `db.x2d.tblastn.nullb.db.6` at `-evalue
+    // 10`, which LOSAT refuses at the traceback); the right extension does not run, so the HSP
+    // ends at the start.
+    #[test]
+    fn a_one_hit_gapped_start_on_its_frames_nullb_reads_it_with_the_pssms_dash_column() {
+        const A: u8 = 1;
+        let pssm = x2d_pssm(50);
+        let mut letters = vec![A; 14];
+        letters.extend_from_slice(&[20, 19, 10, 13, 17]);
+        let frame = one_hit_frame(1, &letters);
+        let query_frame = one_hit_frame(0, &[A; 30]);
+        let hit = InitHsp {
+            frame: 1,
+            chunk_offset: 0,
+            q_seed: 10,
+            s_seed: 14,
+            q_start: 10,
+            s_start: 14,
+            length: -1,
+            score: 60,
+        };
+        let query_frames = [query_frame];
+        // The six frames' buffer of a subject whose frames hold `first` letters, then one fewer.
+        let buffers = |first: usize, after_frame: Vec<u8>| {
+            let mut frame_offsets = [0; 7];
+            for k in 1..7 {
+                frame_offsets[k] = frame_offsets[k - 1] + first - usize::from(k > 1) + 1;
+            }
+            XOneHitBuffers {
+                query_frames: &query_frames,
+                context_offsets: &[0],
+                query_last: 31,
+                frame_offsets,
+                frame_index: 0,
+                after_frame,
+                frame_end: std::cell::OnceCell::new(),
+            }
+        };
+        let gapped = |pssm: &crate::algorithm::pssm_search::rows::QueryPssm,
+                      frame: &QueryFrame,
+                      buffers: &XOneHitBuffers<'_>| {
+            let chunk = TranslatedChunk {
+                offset: 0,
+                length: frame.aa_len,
+            };
+            score_gapped_chunk::<_, true>(
+                &[&[A; 30]],
+                &query_frames,
+                &[0],
+                30,
+                frame,
+                chunk,
+                &frame.aa_seq[1..=frame.aa_len],
+                &frame.aa_seq[1..],
+                &[hit],
+                11,
+                1,
+                38,
+                &[1],
+                ScoringMatrix::Blosum62,
+                &mut (
+                    GapAlignScratch::new(),
+                    crate::algorithm::pssm_search::gapalign::PssmGapScratch::new(),
+                ),
+                super::super::score::PssmScore(pssm),
+                Some(buffers),
+            )
+            .unwrap()
+        };
+        let hsp = |score| {
+            vec![(
+                0,
+                GappedHsp {
+                    frame: 1,
+                    score,
+                    q_start: 10,
+                    q_end: 15,
+                    q_gapped_start: 15,
+                    s_start: 14,
+                    s_end: 19,
+                    s_gapped_start: 19,
+                },
+            )]
+        };
+        assert_eq!(gapped(&pssm, &frame, &buffers(19, vec![A; 10])), hsp(86));
+        // Without the frame's last letter S the word ends one letter before the NULLB (row 14) and
+        // the start (15, 19) lies on the next frame's first letter: the window is 60 - 60 + 1 - 6
+        // + 50 - 36 = 9, and the left extension reads that letter (A -6, or with row 15 scoring A
+        // +9 instead: 9), the NULLB (50) and the frame's letters back to W/W over the gaps (-14
+        // each): 76 (91) at (10, 14), up to the start; a W there scores -6 in both.
+        let frame = one_hit_frame(1, &letters[..18]);
+        let mut row15 = x2d_pssm(50);
+        row15.rows[15][usize::from(A)] = 9;
+        for (pssm, first, score) in [(&pssm, A, 76), (&row15, A, 91), (&row15, 20, 76)] {
+            let mut after = vec![A; 10];
+            after[0] = first;
+            assert_eq!(gapped(pssm, &frame, &buffers(18, after)), hsp(score));
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4609 and :569-575
+    // (quoted at `x_traceback_start_past_frame`)
+    /// The traceback's check of a gapped start against its frame's NULLB (`aa_len`, here 6 for
+    /// frame +1 of 19 bases): before it and on it the traceback runs, after it NCBI reads a byte its
+    /// translation does not set (rule 3), in frame coordinates whatever the window (`subject_base`
+    /// -1 for a window from the first letter with its left fence, 1 for one from letter 2).
+    #[test]
+    fn the_traceback_refuses_a_gapped_start_after_its_frames_nullb() {
+        for (s_start, base, refused) in [(5, 0, false), (6, 0, false), (7, -1, false), (7, 0, true)]
+        {
+            let result = x_traceback_start_in_frame(19, 1, s_start, base);
+            assert_eq!(result.is_err(), refused, "{s_start} {base}");
+        }
+        let message = x_traceback_start_in_frame(19, 1, 6, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("starts after the NULLB after its frame"),
+            "{message}"
+        );
+        // A subject of fewer than 3 bases has no frame +1: an internal error.
+        assert!(x_traceback_start_in_frame(2, 1, 0, 0).is_err());
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4171-4189,4257-4258,
     // 4281,4295,4342-4345 (quoted at `x_score_only_past_chunk`)
     // A one-hit HSP of length -1 at letter `chunk.length - 3` of a chunk that is not its frame's
@@ -3361,6 +3599,7 @@ mod tests {
             frame_offsets: [0, 61, 121, 181, 242, 302, 362],
             frame_index: 0,
             after_frame: Vec::new(),
+            frame_end: std::cell::OnceCell::new(),
         };
         let gapped = score_gapped_chunk::<_, true>(
             &[&query],

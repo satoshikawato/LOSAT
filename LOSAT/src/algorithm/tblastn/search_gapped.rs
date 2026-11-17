@@ -3446,10 +3446,6 @@ mod tests {
         letters.extend_from_slice(&[20, 19, 10, 13, 17]);
         let frame = one_hit_frame(1, &letters);
         let query_frame = one_hit_frame(0, &[A; 30]);
-        let chunk = TranslatedChunk {
-            offset: 0,
-            length: 19,
-        };
         let hit = InitHsp {
             frame: 1,
             chunk_offset: 0,

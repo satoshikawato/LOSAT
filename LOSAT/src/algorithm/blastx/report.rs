@@ -1990,7 +1990,7 @@ fn write_pairwise(
     // (`Unknown` where it throws), or a sequence's with parsed Seq-ids
     // (`database_description_label`), as the other programs' (D2 of line RG T7: no longer the
     // record's first word and rest); the others are not shown.
-    let ids: Vec<std::sync::Arc<[u8]>> = match shown {
+    let ids: Vec<crate::report::pairwise::DescriptionLabel> = match shown {
         ShownSubjects::Fasta { parsed, .. } => {
             let mut reported = vec![false; subjects.len()];
             for hit in hits {
@@ -1998,20 +1998,19 @@ fn write_pairwise(
                     *seen = true;
                 }
             }
-            let none: std::sync::Arc<[u8]> = std::sync::Arc::from(&b""[..]);
             subjects
                 .iter()
                 .enumerate()
                 .map(|(index, s)| {
                     if !reported[index] {
-                        return std::sync::Arc::clone(&none);
+                        return Default::default();
                     }
-                    std::sync::Arc::from(crate::report::pairwise::database_description_label(
+                    crate::report::pairwise::database_description_label(
                         &s.title,
                         &crate::report::defline::UNNAMED_SOURCE,
                         parsed.shown(index),
                         true,
-                    ))
+                    )
                 })
                 .collect()
         }

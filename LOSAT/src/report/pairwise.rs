@@ -1957,7 +1957,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_order: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_labels: &[Arc<[u8]>],
+    subject_labels: &[DescriptionLabel],
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
@@ -1970,10 +1970,10 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         show_sum_n,
         columns,
         |s_idx| {
-            subject_labels
-                .get(s_idx as usize)
-                .map_or(&b"unknown"[..], |label| label)
-                .to_vec()
+            subject_labels.get(s_idx as usize).map_or_else(
+                || DescriptionLabel::title_only(b"unknown".to_vec()),
+                DescriptionLabel::clone,
+            )
         },
         read,
     )
@@ -3704,7 +3704,7 @@ fn write_description_table<W: Write>(
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     show_sum_n: bool,
     columns: Option<SortColumns>,
-    mut label_of: impl FnMut(u32) -> Vec<u8>,
+    mut label_of: impl FnMut(u32) -> DescriptionLabel,
     read: super::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
@@ -3845,24 +3845,7 @@ fn write_description_table<W: Write>(
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
         read(*s_idx, writer)?;
-        let label = label_of(*s_idx);
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
-        // ```c++
-        //         if(line_component.size()+line_length > m_LineLen){
-        //             actual_line_component = line_component.substr(0, m_LineLen -
-        //                                                           line_length - 3);
-        //             actual_line_component += kEllipsis;
-        //     ...
-        //         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
-        // ```
-        // String widths are byte counts, including non-ASCII FASTA titles.
-        if label.len() > 68 {
-            writer.write_all(&label[..65])?;
-            writer.write_all(b"...")?;
-        } else {
-            writer.write_all(&label)?;
-            write_spaces(writer, 68 - label.len())?;
-        }
+        label_of(*s_idx).write_cut(writer)?;
         write!(
             writer,
             "  {:<max_score$}",
@@ -4070,6 +4053,82 @@ fn record_skipped_id(
     }
 }
 
+/// A description line's label in NCBI's two parts (`x_DisplayDeflineTableBody`): the id text
+/// (`gi|N|` and the id, the `line_length` that NCBI counts before the title; under `-html` the
+/// text of the sequence's link) and the title (`line_component`: the defline, after two spaces
+/// where a gi was written; under `-html` HTML-encoded). The plain line writes them as one string
+/// (`write_cut`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:883-913
+/// ```c++
+///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
+///             out << sdl->id_url;
+///         }
+///         if(m_Option & eShowGi){
+///             if(sdl->gi > ZERO_GI){
+///                 line_component = "gi|" + NStr::NumericToString(sdl->gi) + "|";
+///                 out << line_component;
+///                 line_length += line_component.size();
+///             }
+///         }
+///         if(!sdl->id.Empty()){
+///             ...
+///                 out << idStr;
+///                 line_length += idStr.size();
+///             }
+///         }
+///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
+///             out << "</a>";
+///         }
+///         line_component = (line_component.empty() ? "" : "  ") + sdl->defline;
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DescriptionLabel {
+    /// The id text (`ParsedSubject::description`'s start; empty for a title alone).
+    pub id: Vec<u8>,
+    /// The title.
+    pub title: Vec<u8>,
+}
+
+impl DescriptionLabel {
+    /// A label of a title alone (a generated defline, `Unknown`).
+    pub fn title_only(title: Vec<u8>) -> Self {
+        DescriptionLabel {
+            id: Vec::new(),
+            title,
+        }
+    }
+
+    /// The plain label on the description line: the id text and the title as one string cut to
+    /// 68 columns (a longer one is its first 65 bytes and `...`), or padded to them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:915-918,930
+    /// ```c++
+    ///         if(line_component.size()+line_length > m_LineLen){
+    ///             actual_line_component = line_component.substr(0, m_LineLen -
+    ///                                                           line_length - 3);
+    ///             actual_line_component += kEllipsis;
+    ///     ...
+    ///         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
+    /// ```
+    /// String widths are byte counts, including non-ASCII FASTA titles. (NCBI cuts the title
+    /// alone, which is the same cut for an id text of up to 65 bytes; LOSAT keeps its cut of the
+    /// whole label for a longer one until line RG item T4a writes the parts.)
+    fn write_cut<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        let len = self.id.len() + self.title.len();
+        if len > 68 {
+            let id = self.id.len().min(65);
+            writer.write_all(&self.id[..id])?;
+            writer.write_all(&self.title[..65 - id])?;
+            writer.write_all(b"...")
+        } else {
+            writer.write_all(&self.id)?;
+            writer.write_all(&self.title)?;
+            write_spaces(writer, 68 - len)
+        }
+    }
+}
+
 /// The description-table label of a database sequence (before the cut to the line): the title
 /// that `GenerateDefline` makes of the stored title `title` and the source `source` of the
 /// Bioseq, which an empty title is made from (`Unknown` where NCBI's `HtmlDecode` throws), or for
@@ -4079,17 +4138,21 @@ pub fn database_description_label(
     source: &super::defline::SourceTaxname,
     parsed: Option<&crate::report::db_subject::ParsedSubject>,
     protein: bool,
-) -> Vec<u8> {
+) -> DescriptionLabel {
     if let Some(subject) = parsed {
-        let (mut label, title) = subject.description(protein);
-        label.extend_from_slice(&title.text);
-        return label;
+        let (id, title) = subject.description(protein);
+        return DescriptionLabel {
+            id,
+            title: title.text,
+        };
     }
     let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
-    match super::defline::generate_bioseq_defline(title, protein, true, &facts) {
-        Ok(defline) => defline.text,
-        Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
-    }
+    DescriptionLabel::title_only(
+        match super::defline::generate_bioseq_defline(title, protein, true, &facts) {
+            Ok(defline) => defline.text,
+            Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
+        },
+    )
 }
 
 // The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
@@ -5364,6 +5427,32 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The plain description label is the id text and the title as one string, cut to 68 columns
+    /// or padded to them, wherever the parts split it (line RG, item T4a0).
+    #[test]
+    fn a_description_label_in_parts_writes_the_joined_line() {
+        let cut = |id: &[u8], title: &[u8]| {
+            let mut out = Vec::new();
+            DescriptionLabel {
+                id: id.to_vec(),
+                title: title.to_vec(),
+            }
+            .write_cut(&mut out)
+            .unwrap();
+            String::from_utf8(out).unwrap()
+        };
+        let joined = |label: &[u8]| cut(b"", label);
+        assert_eq!(cut(b"P1 ", b"title"), format!("P1 title{}", " ".repeat(60)));
+        assert_eq!(joined(b"P1 title"), cut(b"P1 ", b"title"));
+        let long = [b'x'; 70];
+        for split in [0, 3, 64, 65, 66, 70] {
+            let line = cut(&long[..split], &long[split..]);
+            assert_eq!(line, format!("{}...", "x".repeat(65)), "split {split}");
+        }
+        let exact = [b'y'; 68];
+        assert_eq!(cut(&exact[..10], &exact[10..]), "y".repeat(68));
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:642-649 (`s_SetFlags`,
     // quoted at `report::query_anchored`) and c++/src/algo/blast/blastinput/blast_args.cpp:2980-2987
@@ -7004,7 +7093,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
-    subject_labels: &[Arc<[u8]>],
+    subject_labels: &[DescriptionLabel],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<BlastxDatabaseSubjects<'_>>,
@@ -7082,7 +7171,7 @@ struct BlastxSections<'a> {
     options: &'a BlastxPairwiseOptions,
     queries: &'a [BlastpPairwiseQuery],
     /// The description line of each subject, by subject index (`database_description_label`).
-    subject_labels: &'a [Arc<[u8]>],
+    subject_labels: &'a [DescriptionLabel],
     report: &'a BlastpPairwiseReport,
     /// A `-db` report's subjects (`None` for `-subject`).
     database: Option<BlastxDatabaseSubjects<'a>>,
@@ -8353,7 +8442,9 @@ mod tblastx_tests {
         }
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&first, &best, &tie])].into_iter().collect();
-        let ids = [Arc::<[u8]>::from(&b"YOL075C pep YOL075C"[..])];
+        let ids = [DescriptionLabel::title_only(
+            b"YOL075C pep YOL075C".to_vec(),
+        )];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
             write_subject_summary_table_with_sum_n(
@@ -8475,7 +8566,7 @@ mod tblastx_tests {
                 Some(&mut warnings),
                 &config,
                 &queries,
-                &[Arc::from(&b"s0 title"[..])],
+                &[DescriptionLabel::title_only(b"s0 title".to_vec())],
                 &report,
                 &options,
                 None,

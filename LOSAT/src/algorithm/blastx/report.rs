@@ -67,9 +67,9 @@ pub(crate) struct DisplayAlignment {
     pub subject_stored_gaps: Vec<u32>,
 }
 
-/// The identities and positives of a display alignment's rows (`RowCounts::of`): outfmt 0's hits
+/// The identities and positives of a display alignment's rows (`counted_alignment`): outfmt 0's hits
 /// (`pairwise_hits`) count them; the tabular writer counts its rows' own
-/// (`report::tabular::TabularWriter::row`), so `alignment` makes none.
+/// (`report::tabular::TabularWriter::row`), so its `alignment` makes none.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RowCounts {
     pub identity: usize,
@@ -77,44 +77,6 @@ pub(crate) struct RowCounts {
 }
 
 impl RowCounts {
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
-    // ```c++
-    //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
-    //
-    //     SNCBIFullScoreMatrix mtx;
-    //     NCBISM_Unpack(packed_mtx, &mtx);
-    //
-    //     for(int i = 0; i < ePMatrixSize; ++i){
-    //         for(int j = 0; j < ePMatrixSize; ++j){
-    //             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
-    //                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
-    //         }
-    //     }
-    //     for(int i = 0; i < ePMatrixSize; ++i) {
-    //         retval((size_t)k_PSymbol[i], '*') = retval('*',(size_t)k_PSymbol[i]) = -4;
-    //     }
-    //     retval('*', '*') = 1;
-    //     // this is to count Selenocysteine to Cysteine matches as positive
-    //     retval('U', 'U') = retval('C', 'C');
-    //     retval('U', 'C') = retval('C', 'C');
-    //     retval('C', 'U') = retval('C', 'C');
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1022 (its
-    // positives quoted at `report::tabular::TabularWriter::new`)
-    /// The counts of `a`'s rows, the positives by `matrix` (the formatter's matrix of the search).
-    pub(crate) fn of(a: &DisplayAlignment, matrix: crate::config::ScoringMatrix) -> Self {
-        let (mut identity, mut positive) = (0, 0);
-        for (&qc, &sc) in a.qseq.as_bytes().iter().zip(a.sseq.as_bytes()) {
-            if qc == sc {
-                identity += 1;
-                positive += 1;
-            } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
-                positive += 1;
-            }
-        }
-        Self { identity, positive }
-    }
-
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
     // ```c++
     // inline void CBlastTabularInfo::x_PrintMismatches(void)
@@ -454,6 +416,35 @@ pub(crate) fn alignment(
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
 ) -> Result<DisplayAlignment> {
+    Ok(display_alignment(batch, hsp, subject, query_record, code, None)?.0)
+}
+
+/// `alignment` and the counts of its rows (`RowCounts`), the positives by `matrix` (the
+/// formatter's matrix of the search): outfmt 0's hits (`pairwise_hits`).
+pub(crate) fn counted_alignment(
+    batch: &BatchResults,
+    hsp: &Hsp,
+    subject: &FastaRecord,
+    query_record: &FastaRecord,
+    code: &crate::utils::genetic_code::GeneticCode,
+    matrix: crate::config::ScoringMatrix,
+) -> Result<(DisplayAlignment, RowCounts)> {
+    display_alignment(batch, hsp, subject, query_record, code, Some(matrix))
+}
+
+/// The display alignment of `alignment`, with the counts of its rows where `counts` gives the
+/// matrix (`counted_alignment`; none, zeros that `alignment` drops, otherwise). One function out
+/// of line for both, as before the counts were split off (no NCBI counterpart: code placement
+/// only).
+#[inline(never)]
+fn display_alignment(
+    batch: &BatchResults,
+    hsp: &Hsp,
+    subject: &FastaRecord,
+    query_record: &FastaRecord,
+    code: &crate::utils::genetic_code::GeneticCode,
+    counts: Option<crate::config::ScoringMatrix>,
+) -> Result<(DisplayAlignment, RowCounts)> {
     let raw = &hsp.hsp;
     let context = &batch.prepared.contexts[raw.context];
     let query_length = query_record.sequence.len();
@@ -689,8 +680,45 @@ pub(crate) fn alignment(
             *c = c.to_ascii_lowercase();
         }
     }
-    // The identities and positives are not counted here (`RowCounts`): the tabular writer counts
-    // its rows' own, outfmt 0's hits count them (`pairwise_hits`).
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+    // ```c++
+    //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
+    //
+    //     SNCBIFullScoreMatrix mtx;
+    //     NCBISM_Unpack(packed_mtx, &mtx);
+    //
+    //     for(int i = 0; i < ePMatrixSize; ++i){
+    //         for(int j = 0; j < ePMatrixSize; ++j){
+    //             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
+    //                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
+    //         }
+    //     }
+    //     for(int i = 0; i < ePMatrixSize; ++i) {
+    //         retval((size_t)k_PSymbol[i], '*') = retval('*',(size_t)k_PSymbol[i]) = -4;
+    //     }
+    //     retval('*', '*') = 1;
+    //     // this is to count Selenocysteine to Cysteine matches as positive
+    //     retval('U', 'U') = retval('C', 'C');
+    //     retval('U', 'C') = retval('C', 'C');
+    //     retval('C', 'U') = retval('C', 'C');
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1022 (its
+    // positives quoted at `report::tabular::TabularWriter::new`): the tabular writer counts its
+    // rows' identities and positives itself, so only outfmt 0's hits ask for them (`counts`).
+    let mut row_counts = RowCounts {
+        identity: 0,
+        positive: 0,
+    };
+    if let Some(matrix) = counts {
+        for (&qc, &sc) in qseq.iter().zip(&sseq) {
+            if qc == sc {
+                row_counts.identity += 1;
+                row_counts.positive += 1;
+            } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
+                row_counts.positive += 1;
+            }
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
     // ```c++
     // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
@@ -713,19 +741,22 @@ pub(crate) fn alignment(
     // starts of their intervals (the subject's alike, `s_RemapToSubjectLoc`).
     let query_offset = query_place.offset as i32;
     let subject_offset = subject.placement().offset as i32;
-    Ok(DisplayAlignment {
-        qseq: String::from_utf8(qseq)?,
-        sseq: String::from_utf8(sseq)?,
-        masked_qseq: String::from_utf8(masked)?,
-        gaps,
-        gap_opens,
-        qstart: qstart + query_offset,
-        qend: qend + query_offset,
-        sstart: raw.s_start + 1 + subject_offset,
-        send: raw.s_end + subject_offset,
-        frame,
-        subject_stored_gaps,
-    })
+    Ok((
+        DisplayAlignment {
+            qseq: String::from_utf8(qseq)?,
+            sseq: String::from_utf8(sseq)?,
+            masked_qseq: String::from_utf8(masked)?,
+            gaps,
+            gap_opens,
+            qstart: qstart + query_offset,
+            qend: qend + query_offset,
+            sstart: raw.s_start + 1 + subject_offset,
+            send: raw.s_end + subject_offset,
+            frame,
+            subject_stored_gaps,
+        },
+        row_counts,
+    ))
 }
 
 /// The operations of the display alignment of `hsp` (`alignment`, a column for each letter of an
@@ -1577,8 +1608,8 @@ pub(super) fn pairwise_hits(
                     if !has_seqalign(hsp, options.gapped) {
                         continue;
                     }
-                    let a = alignment(batch, hsp, subject, query, &code)?;
-                    let counts = RowCounts::of(&a, options.scoring);
+                    let (a, counts) =
+                        counted_alignment(batch, hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
                     let len = a.qseq.len();
                     let hit = Hit {

@@ -13701,7 +13701,6 @@ fn search_query_chunks(
             &mut merged,
             batch.chunk_prelim_lists,
             chunk,
-            &lengths,
             context_offsets,
             batching.split.overlap as u32 as i32,
         )?;
@@ -13760,7 +13759,6 @@ fn merge_query_chunk(
     merged: &mut PrelimHitLists,
     chunk_lists: PrelimHitLists,
     chunk: &QueryChunk,
-    query_lengths: &[usize],
     context_offsets: &[i32],
     chunk_overlap_size: i32,
 ) -> Result<()> {
@@ -13769,7 +13767,6 @@ fn merge_query_chunk(
             continue;
         };
         let part = &chunk.queries[local_query];
-        let query_length = query_lengths[part.query] as i64;
         for list in &mut hit_list.hsplist_array {
             for hsp in &mut list.hsps {
                 let local_context = hsp.context_idx as usize;
@@ -13779,22 +13776,26 @@ fn merge_query_chunk(
                         "internal error: an HSP of a query chunk is in a context that is not searched"
                     )
                 })?;
-                let offset = chunk.context_offsets[local_context] as i64;
-                let query_offset = i64::from(hsp.prelim_qs) + offset;
-                let query_end = i64::from(hsp.prelim_qe) + offset;
-                let gapped_start = i64::from(hsp.seed_qs) + offset;
-                // The offsets are the starts of the parts (`query_split::context_offsets`).
-                anyhow::ensure!(
-                    query_offset >= 0 && query_end <= query_length && gapped_start < query_length,
-                    "internal error: an HSP of a query chunk maps outside its query"
-                );
+                // The offsets are the starts of the parts (`query_split::context_offsets`). NCBI
+                // adds them unchecked: an HSP that NCBI keeps outside its chunk's context (an
+                // ungapped walk past two sentinels with `-xdrop_ungap 1e10`, the megablast greedy
+                // alignment from it) keeps its place relative to the part, inside or outside the
+                // query's context. The sums lie within the query block, far inside an Int4.
+                let offset = chunk.context_offsets[local_context];
+                let shift = |value: i32| {
+                    value.checked_add(offset).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "internal error: an HSP offset of a query chunk leaves the 32-bit range"
+                        )
+                    })
+                };
+                hsp.prelim_qs = shift(hsp.prelim_qs)?;
+                hsp.prelim_qe = shift(hsp.prelim_qe)?;
+                hsp.seed_qs = shift(hsp.seed_qs)?;
                 hsp.context_idx = context as u32;
                 hsp.query_idx = part.query as u32;
                 hsp.query_frame = if context % 2 == 0 { 1 } else { -1 };
                 hsp.query_context_offset = context_offsets[context];
-                hsp.prelim_qs = query_offset as i32;
-                hsp.prelim_qe = query_end as i32;
-                hsp.seed_qs = gapped_start as i32;
             }
         }
         // A context that the chunk does not have (a strand that is not searched) keeps -1.

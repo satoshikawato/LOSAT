@@ -7,7 +7,9 @@
   and the megablast greedy alignment, which runs from NCBI's seed on the whole query block, on
   both sides of the context), and the word sizes 4 to 8 extend on the whole query block as NCBI
   does. So a megablast search gives NCBI BLAST+'s alignment where its greedy alignment from such a
-  hit comes back into the context. Default searches give the same output in every case checked;
+  hit comes back into the context, also where the query batch is split into chunks (a batch of
+  more than 1,000,000 letters, 5,000,000 for megablast, or a smaller `CHUNK_SIZE`), where LOSAT
+  stopped with an internal error. Default searches give the same output in every case checked;
   a hit that the approximate two-hit extension keeps below the cutoff and that starts left of its
   context, which a default search can reach (the debug build stopped at an assertion there), now
   sorts and aligns as NCBI BLAST+'s does.

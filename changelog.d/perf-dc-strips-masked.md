@@ -1,0 +1,1 @@
+- `-task dc-megablast` against a masked database (`-db_soft_mask`) on one thread now takes the same seed stage as an unmasked one, scanning only the unmasked ranges as before. Reports do not change.

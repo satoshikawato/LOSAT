@@ -73,7 +73,7 @@
 use super::DiagStruct;
 use super::{
     determine_scanning_offsets, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
-    mask_lookup_index, packed_kmer_at_seed_mask, scan_subject_kmers_range,
+    first_scan_range, mask_lookup_index, packed_kmer_at_seed_mask, scan_subject_kmers_range,
     scan_subject_kmers_range_mb_10_1, scan_subject_kmers_range_mb_10_2,
     scan_subject_kmers_range_mb_10_3, scan_subject_kmers_range_mb_11_1mod4,
     scan_subject_kmers_range_mb_11_2mod4, scan_subject_kmers_range_mb_11_3mod4,
@@ -497,23 +497,30 @@ pub(super) fn takes_owner_chunks(
 ///
 ///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
 /// ```
-/// The scan ranges `scan_subject_kmers_with_ranges` visits for an unmasked subject
-/// (`scan_range[1] = 0`, `scan_range[2] = subject->length - lut_word_length`), each cut into
-/// strips of at most `per` grid points; the last strip of a range ends at the range's end.
-/// `s_range` is the range's `scan_range[2] + lut_word_length`.
+/// The scan ranges `scan_subject_kmers_with_ranges` visits (from `first_scan_range`: the whole
+/// subject when it is unmasked, else its `seq_ranges` one by one), each cut into strips of at
+/// most `per` grid points; the last strip of a range ends at the range's end. `s_range` is the
+/// range's `scan_range[2] + lut_word_length`.
 fn plan_strips(
     seq_ranges: &[(i32, i32)],
     s_len: usize,
     word_length: usize,
     lut_word_length: usize,
     scan_step: usize,
+    subject_masked: bool,
     target_strips: usize,
 ) -> Vec<StripJob> {
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     if seq_ranges.is_empty() || scan_step == 0 {
         return Vec::new();
     }
-    let mut scan_range = [0i32, 0i32, s_len as i32 - lut_word_length as i32];
+    let mut scan_range = first_scan_range(
+        seq_ranges,
+        s_len,
+        word_length,
+        lut_word_length,
+        subject_masked,
+    );
     while determine_scanning_offsets(
         seq_ranges,
         word_length as i32,
@@ -1707,6 +1714,7 @@ fn seed_stage_of(
         x.two_stage.word_length(),
         x.two_stage.lut_word_length(),
         x.scan_step,
+        x.subject_masked,
         strips_per_thread * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip(x, &jobs[i], out);

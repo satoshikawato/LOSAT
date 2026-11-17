@@ -1,5 +1,6 @@
-//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0) of
-//! BLASTN, TBLASTX and BLASTP formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
+//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0, and the
+//! query-anchored 1 to 4) of BLASTN, TBLASTX, BLASTP, TBLASTN and BLASTX (RPSTBLASTN with BLASTX's
+//! writer) formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
 //! rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`; `algorithm/blastp/blast_engine.rs`,
 //! `build_pairwise_hits`) made on it.
 //!
@@ -10,7 +11,9 @@
 //! that thread at 8 and 16 threads (local, 2026-10-19), 0.26 s of it in the rows; TBLASTX's
 //! outfmt 0 text 0.41 s of the genome 3 x 3 input at 16 threads, after LOSAT_X_TBXRPTPAR.
 //!
-//! The three writers have one shape (`write`): after the prolog, for each query its warnings
+//! The writers of the five programs have one shape (`write`; TBLASTN gives it no pool, BLASTX
+//! the pool of a query batch whose searches are done, `write_blastx_pairwise_report`): after the
+//! prolog, for each query its warnings
 //! (`QueryWarnings`), then its head (`QuerySections::head`: `\n\n`, the query's header, and
 //! either "No hits found" with its footer or the description table and a blank line), the
 //! alignments of each of the first `num_alignments` subjects in the order of the table
@@ -462,6 +465,30 @@ pub(crate) trait QuerySections: Sync {
         false
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
+    // ```c++
+    //             const CBioseq_Handle& subj_handle =
+    //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
+    //             if(subj_handle){
+    //                 //need to convert to denseg for stdseg
+    //                 if((*alnIter)->GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
+    //                     CTypeConstIterator<CStd_seg> ss = ConstBegin(**alnIter);
+    //                     CRef<CSeq_align> convertedDs =
+    //                         (*alnIter)->CreateDensegFromStdseg();
+    // ```
+    /// Where `merges_alignments`: the merge's work on aligned subject `s_idx` of the query
+    /// (`group`) after it reads the subject and before it reads the next one, all before the
+    /// section's first byte. NCBI makes the Dense-segs of the subject's Std-segs there, which can
+    /// throw (BLASTX's `EmptyRowsStop::StdSegLengths`); nothing by default.
+    fn merged_subject<W: Write>(
+        &self,
+        _writer: &mut W,
+        _group: &QueryGroup<'_>,
+        _s_idx: u32,
+    ) -> io::Result<()> {
+        Ok(())
+    }
+
     /// The one section of the alignments of the query's aligned subjects (`group`), where
     /// `merges_alignments`.
     fn alignments<W: Write>(
@@ -560,12 +587,14 @@ fn write_serial<S: QuerySections, W: Write>(
                 //             const CBioseq_Handle& subj_handle =
                 //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
                 // ```
-                // The merge loads every aligned subject before the section's first byte; without
-                // one (`-num_alignments 0`) there is no section (`DisplaySeqalign` returns at once).
+                // The merge loads every aligned subject before the section's first byte
+                // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
+                // no section (`DisplaySeqalign` returns at once).
                 let aligned = group.aligned(sections.num_alignments());
                 if !aligned.is_empty() {
                     for &s_idx in aligned {
                         read(s_idx, &mut *writer)?;
+                        sections.merged_subject(writer, group, s_idx)?;
                     }
                     sections.alignments(writer, q_idx, group)?;
                 }
@@ -775,6 +804,7 @@ fn format_piece<S: QuerySections>(
             let group = group.expect("a query with a section has hits");
             for &s_idx in group.aligned(sections.num_alignments()) {
                 mark(s_idx, &mut buffer)?;
+                sections.merged_subject(&mut buffer, group, s_idx)?;
             }
             sections.alignments(&mut buffer, piece.query, group)
         }
@@ -1210,7 +1240,8 @@ mod tests {
                 )
                 .unwrap(),
                 Some((budget, piece_bytes)) => {
-                    crate::utils::threading::with_search_pool(4, "test", |pool| {
+                    // The warnings' sink need not be `Send` (BLASTX's diagnostics are not).
+                    crate::utils::threading::x_with_search_pool_local(4, "test", |pool| {
                         write_parallel_with(
                             &mut report,
                             &marks,

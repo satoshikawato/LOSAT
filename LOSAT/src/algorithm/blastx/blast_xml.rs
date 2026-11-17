@@ -1087,7 +1087,6 @@ pub(super) fn documents_may_refuse(
                 || documents().any(|&outfmt| {
                     crate::algorithm::common::database::report_sum_refusal(
                         pairwise.num_sequences,
-                        pairwise.total_letters,
                         pairwise.total_letters_overflow,
                         outfmt,
                     )

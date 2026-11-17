@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.44
+- Version: 1.45
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -145,7 +145,11 @@
   the refusals at the batch where NCBI's engine meets them, the row after the profiles read as
   NCBI reads it, DECISIONS D1a4-9; fix round 2: following profiles of one Seq-id count as one
   subject in the cut, and a reported profile out of the range is written as the included copy of
-  its record that NCBI's report finds by its Seq-id)
+  its record that NCBI's report finds by its Seq-id);
+  1.45 2026-11-17 (approved exception 15, the Owner's decision of 2026-11-17 on line RG's question
+  D1a-3 Q1, 「A 正しい数を書く (推奨)」: a database length or `-dbsize` of exactly -2^63, which NCBI's
+  serial writer prints as `-0`, written as `-9223372036854775808`; the rule-3 refusal of that one
+  value removed)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1482,6 +1486,30 @@ Numbered after exception 13 (version 1.35).
     This was LOSAT's behaviour for the maskers' and blastdbcmd's loads before line RG item T5b
     (dev), and is now its behaviour in the searches as well. What the output writes from past the
     mapping stays refused (the rejections above).
+
+## Approved exception (an Int8 of exactly -2^63 in NCBI's serial output, version 1.45)
+
+Version 1.45. The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117, D1a-3's Q1 = A,
+words 「A 正しい数を書く (推奨)」) the question of line RG items D1a-3 and D1a-4: LOSAT writes the
+value's digits, as it writes the `Int4` `INT_MIN` of an archive as `-2147483648` where NCBI writes
+`-8` (line DI4, decision 13), against the rule-3 refusal of that one value that LOSAT made until
+then. Numbered after exception 14 (version 1.43).
+
+15. **An `Int8` of exactly -2^63 that NCBI's serial writer prints.** `COStreamBuffer::PutInt8`
+    (`util/strbuffer.cpp:1002-1010`) negates a negative value before it writes the digits; for
+    INT64_MIN that is a signed overflow, and NCBI BLAST+ 2.17.0's build prints `-0`. NCBI writes
+    such a value where an alias file's `LENGTH` (or `STATS_TOTLEN` over several RPS volumes) is
+    exactly 9223372036854775808, NCBI's Int8 -2^63: BLAST XML's `<Statistics_db-len>-0</Statistics_db-len>`
+    and XML2's `<db-len>-0</db-len>` (outfmt 5, 14 and 16; probes p5_neg_2p63 and p5b_neg_fmt of
+    line RG D1a-3), the `DbLength` of RPSBLAST's and RPSTBLASTN's search strategy requests after the
+    first (`big-integer -0`; probe r2_3v_l2p63 of D1a-4's review A), and with `-dbsize
+    -9223372036854775808` the `DbLength` of every program's strategy and of the BLAST archive of ASN.1
+    text or XML (probe x_dbsize_min of D1a-4's fix round 1). Its JSON writer prints
+    `-9223372036854775808`, the binary writer the value's bytes. LOSAT writes `-9223372036854775808`
+    in every one of them (`report::serial` `big_int`); every other byte of these runs is NCBI's
+    (probe minus0 of D1a-4's fix round 2: the nine commands that LOSAT refused, each NCBI's output
+    with that one value written as its digits). The writers' unit tests hold the value, as for
+    `INT_MIN` (no fixture row kind holds NCBI's bytes with one value written otherwise).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

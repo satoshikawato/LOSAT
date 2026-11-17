@@ -377,12 +377,9 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
             refused
         };
         assert!(refused(&overflow), "{kind:?}");
-        // `-0` in the serial XML only (outfmt 14 and 16); JSON writes INT64_MIN.
-        assert_eq!(
-            refused(&int64_min),
-            matches!(kind, Xml2Kind::Single16 | Xml2Kind::Files14),
-            "{kind:?}"
-        );
+        // NCBI's serial XML (outfmt 14 and 16) prints INT64_MIN as `-0`, its JSON the digits:
+        // LOSAT writes the digits in every format (PD-LOSAT-NCBI-DEFECTS approved exception 15).
+        assert!(!refused(&int64_min), "{kind:?}");
         // A call that writes no report (a run without a query) prints no count.
         let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
         let mut out = Vec::new();
@@ -396,7 +393,9 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
     let mut blast_xml = crate::report::blast_xml::BlastXmlWriter::new(0);
     let mut out = Vec::new();
     assert!(blast_xml.start(Some(&overflow), &mut out).is_err());
-    assert!(blast_xml.start(Some(&int64_min), &mut out).is_err());
+    assert!(crate::report::blast_xml::BlastXmlWriter::new(0)
+        .start(Some(&int64_min), &mut Vec::new())
+        .is_ok());
     let mut count = run(None, "d");
     count.db_num = i64::from(i32::MAX) + 1;
     assert!(blast_xml.start(Some(&count), &mut out).is_err());

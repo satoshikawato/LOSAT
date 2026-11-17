@@ -47,8 +47,8 @@ use crate::algorithm::rps_search::engine::{
     RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
 };
 use crate::algorithm::rps_search::volumes::{
-    later_requests_refusal, mask_unsupported_letters, merge_volume, report_ordinal_ids,
-    shift_ordinal_ids, Consensus, RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
+    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
+    RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::core::blast_util::frame_to_context;
 use crate::stats::KarlinParams;
@@ -195,18 +195,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                         RpsEvent::Warn(_) => None,
                     })
                     .collect();
-                // The search strategy's requests after the run's first hold the `DbLength` that the
-                // batches before set (`handle_sets`): one that NCBI writes as `-0` is LOSAT's refusal
-                // (`rps_search::volumes::later_requests_refusal`, as the writer of the requests refuses
-                // it), before the output of the window that holds such a request.
-                if self.strategy
-                    && !batches.is_empty()
-                    && (processed.get() > 0 || batches.len() > 1)
-                {
-                    if let Some(refusal) = later_requests_refusal(&self.handle_sets(), PROGRAM) {
-                        return Err(refusal);
-                    }
-                }
                 let searched = self.search_window(
                     &batches, options, database, &volumes, units, &setup, pool, &workers,
                 );

@@ -854,19 +854,19 @@ pub(crate) fn pairwise_database_masked(
 //     }
 // ```
 // The sums are signed overflow where they pass their type (NCBI 2.17.0 prints them wrapped,
-// probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3), and the serial XML writer's `-n` of
-// INT64_MIN is too (it writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT refuses these
-// (DECISIONS D1a3-2 of line RG: Q2 = A, rule 3; Q1 waits for the Owner, refused until then).
+// probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3): LOSAT refuses these (DECISIONS D1a3-2 of
+// line RG: Q2 = A, rule 3). The serial XML writer's `-n` of INT64_MIN is signed overflow too (it
+// writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT writes the digits of a summed length of
+// exactly -2^63 (`big_int`; PD-LOSAT-NCBI-DEFECTS approved exception 15, the Owner's Q1 = A of
+// 2026-11-17, DECISIONS OQ-1117 of line RG).
 /// What LOSAT refuses of the database counts that the report of `outfmt` (NCBI's format number)
-/// would print where NCBI's arithmetic overflows (`num_sequences` and `total_letters` are the
-/// `PairwiseDatabase` sums over the names of the `-db` list, `total_letters_overflow` whether the
-/// lengths' sum passes `Int8`): a sum of the total lengths past `Int8` (the pairwise prolog of
-/// outfmt 0 to 4, BLAST XML 5, the XML2 and JSON documents 13 to 16), a sum of the numbers of
-/// sequences past NCBI's `int` (BLAST XML), and a summed length of exactly -2^63 in the serial
-/// XML of BLAST XML and XML2 (5, 14, 16).
+/// would print where NCBI's arithmetic overflows (`num_sequences` is the `PairwiseDatabase` sum
+/// over the names of the `-db` list, `total_letters_overflow` whether its lengths' sum passes
+/// `Int8`): a sum of the total lengths past `Int8` (the pairwise prolog of
+/// outfmt 0 to 4, BLAST XML 5, the XML2 and JSON documents 13 to 16) and a sum of the numbers of
+/// sequences past NCBI's `int` (BLAST XML).
 pub(crate) fn report_sum_refusal(
     num_sequences: i64,
-    total_letters: i64,
     total_letters_overflow: bool,
     outfmt: i32,
 ) -> Option<&'static str> {
@@ -880,63 +880,7 @@ pub(crate) fn report_sum_refusal(
             "the numbers of sequences of the databases of the -db list (their alias files' NSEQ) sum to more than BLAST XML's 32-bit count holds",
         );
     }
-    if matches!(outfmt, 5 | 14 | 16) && !total_letters_overflow && total_letters == i64::MIN {
-        return Some(
-            "a total length of 9223372036854775808 letters (an alias file's LENGTH), which NCBI BLAST+'s XML writer prints as -0 (a signed overflow), in BLAST XML or XML2",
-        );
-    }
     None
-}
-
-/// LOSAT's reason for the search strategy's `DbLength` of exactly -2^63 that RPS-BLAST's
-/// `x_AdjustDbSize` writes over several volumes (`rps_search::volumes::RpsUnits::
-/// strategy_db_length`): the serial writer's `-n` of INT64_MIN of `report_sum_refusal`'s third
-/// reason (`COStreamBuffer::PutInt8`, which NCBI's ASN.1 text writer shares with its XML writer),
-/// refused with it until the Owner answers DECISIONS D1a3-2's Q1 (D1a4-6 of line RG).
-pub(crate) const STRATEGY_MINUS_ZERO_LENGTH: &str = "a total length of 9223372036854775808 letters (an alias file's LENGTH or STATS_TOTLEN over several RPS-BLAST volumes), which NCBI BLAST+'s serial writer prints as -0 (a signed overflow), in the search strategy's DbLength";
-
-/// LOSAT's reason for a `-dbsize` of exactly -2^63, which every request of the search strategy
-/// and of a BLAST archive of ASN.1 text or XML holds as the `DbLength` option, and which NCBI's
-/// serial writer prints as `-0` (`request_minus_zero_refusal`): the same signed overflow as
-/// `STRATEGY_MINUS_ZERO_LENGTH`'s (found by fix round 1 of D1a-4; dev wrote the value).
-pub(crate) const DBSIZE_MINUS_ZERO: &str = "a -dbsize of -9223372036854775808, which NCBI BLAST+'s serial writer prints as -0 (a signed overflow) in the search strategy and in a BLAST archive of ASN.1 text or XML,";
-
-// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213 (quoted at
-// `blastp::blast_engine::rps_hooks::failed_batch_error`) and
-// c++/src/algo/blast/api/rpsblast_local.cpp:349-371 (quoted at `rps_search::volumes::search_sets`):
-// `SaveSearchStrategy` writes a batch's request before its search, whose `x_AdjustDbSize` then
-// sets `DbLength` in the options handle: the first request holds none, every later one the
-// value of the batch before (D1a4-6 of line RG, corrected in fix 1 of D1a-4).
-// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010 (quoted at
-// `report_sum_refusal`): `PutInt8`'s `-n` of INT64_MIN, which the ASN.1 text and XML writers share
-// (the binary writer writes the value's bytes).
-/// LOSAT's refusal of a request of the search strategy or of a BLAST archive of ASN.1 text or XML
-/// (`report::archive::strategy::StrategyExport::write_with` and `report::archive::writer::
-/// write_archive`, the writers of every program's requests: the one owner of the serial `-0`
-/// besides `report_sum_refusal`'s of the XML reports) whose options hold a big integer of
-/// exactly -2^63, which NCBI's serial writer prints as `-0`: in the parameters that the batches
-/// before set in NCBI's options handle (`sets`), RPS-BLAST's `DbLength` of `x_AdjustDbSize`
-/// (`STRATEGY_MINUS_ZERO_LENGTH`; the requests after the first), and in the command line's
-/// (`algorithm`), `-dbsize` (`DBSIZE_MINUS_ZERO`; every request). `None` for every other request.
-/// `program` names the refusal (`ArchiveRequest::application` in capitals).
-pub(crate) fn request_minus_zero_refusal(
-    algorithm: &[crate::report::archive::options::Param],
-    sets: &[crate::report::archive::options::Param],
-    program: &str,
-) -> Option<anyhow::Error> {
-    let minus_zero = |params: &[crate::report::archive::options::Param]| {
-        params.iter().any(|param| {
-            matches!(
-                param.value,
-                crate::report::archive::options::ParamValue::BigInteger(i64::MIN)
-            )
-        })
-    };
-    if minus_zero(sets) {
-        return Some(refusal(STRATEGY_MINUS_ZERO_LENGTH, program));
-    }
-    minus_zero(algorithm)
-        .then(|| anyhow::anyhow!("{DBSIZE_MINUS_ZERO} is not supported by LOSAT's {program}"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-747
@@ -975,16 +919,15 @@ impl std::error::Error for ReportSumRefusal {}
 
 /// LOSAT's refusal (`ReportSumRefusal`) of the database counts that the report of `outfmt` would
 /// print where NCBI's sums overflow (`report_sum_refusal`), for `program` (its name in the
-/// message): `num_sequences`, `total_letters` and `total_letters_overflow` are the
-/// `PairwiseDatabase` sums of the `-db` list.
+/// message): `num_sequences` and `total_letters_overflow` are the `PairwiseDatabase` sums of the
+/// `-db` list.
 pub(crate) fn check_sums_of(
     num_sequences: i64,
-    total_letters: i64,
     total_letters_overflow: bool,
     outfmt: i32,
     program: &str,
 ) -> Result<()> {
-    match report_sum_refusal(num_sequences, total_letters, total_letters_overflow, outfmt) {
+    match report_sum_refusal(num_sequences, total_letters_overflow, outfmt) {
         Some(reason) => Err(ReportSumRefusal(refusal(reason, program).to_string()).into()),
         None => Ok(()),
     }
@@ -1002,7 +945,6 @@ pub(crate) fn check_report_sums(
     }
     check_sums_of(
         database.num_sequences,
-        database.total_letters,
         database.total_letters_overflow,
         outfmt,
         program,
@@ -3996,7 +3938,8 @@ mod tests {
     use super::*;
 
     // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
-    // wrapped sums and `-0`): the report counts LOSAT refuses, by format; the prolog's (outfmt 0 to
+    // wrapped sums and `-0`): the report counts LOSAT refuses, by format (not -2^63, whose digits
+    // it writes: approved exception 15); the prolog's (outfmt 0 to
     // 4) at open (`check_report_sums`), the documents' when they are written (`report_sum_refusal`,
     // after NCBI's own errors of the search: p5_pr_sum2#6).
     #[test]
@@ -4013,7 +3956,6 @@ mod tests {
         let refused = |database: &PairwiseDatabase, outfmt: i32| {
             report_sum_refusal(
                 database.num_sequences,
-                database.total_letters,
                 database.total_letters_overflow,
                 outfmt,
             )
@@ -4050,11 +3992,10 @@ mod tests {
         }
         // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
         assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
+        // A length of exactly -2^63 is written as its digits (PD-LOSAT-NCBI-DEFECTS approved
+        // exception 15: NCBI's XML writer prints -0).
         let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
-        for outfmt in [5, 14, 16] {
-            assert!(refused(&int64_min, outfmt), "{outfmt}");
-        }
-        for outfmt in [0, 13, 15, 6] {
+        for outfmt in [0, 5, 6, 13, 14, 15, 16] {
             assert!(!refused(&int64_min, outfmt), "{outfmt}");
         }
     }

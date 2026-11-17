@@ -247,9 +247,11 @@ subject length is too short" (it fails for a count of 2^31 or a length of 2^32 t
 order of NCBI's one-thread traceback: by OID, then the hit list's heap), and the reports'
 signed counts with NCBI's commas, which lose digits from 4,294,967,296,000,000,000. Refused,
 where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases summed past
-`Int8` (outfmt 0 to 5 and 13 to 16), their numbers of sequences summed past `int` (outfmt 5),
-and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
-the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
+`Int8` (outfmt 0 to 5 and 13 to 16) and their numbers of sequences summed past `int` (outfmt 5).
+A summed length of exactly 2^63 (NCBI's Int8 -2^63), which NCBI's serial writer prints as `-0` in
+BLAST XML and XML2 (outfmt 5, 14, 16), the strategy and the archive, is written as
+`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 15, the Owner's answer Q1 = A of
+2026-11-17 to D1a-3's question, DECISIONS OQ-1117 of line RG; refused before). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
 (the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
 NCBI's option spaces of the statistics before their fallback to OID 0
@@ -307,11 +309,11 @@ without end) and one where `Lc` is above the rows and an ungapped extension read
 profiles past the `.rps` file's last page or goes on past that row (NCBI reads past its score
 matrix), RPSBLAST before any output and RPSTBLASTN after the reports of the query batches before, a
 setup count of 0 without the Gumbel block (`NSEQ 0` over one volume with `-searchsp` or `OLD_FSC`:
-SIGFPE; a bare volume counts its profiles), and with `-export_search_strategy` a request after the
-first (a run of two query batches or more) whose `DbLength` is exactly -2^63 (`LENGTH` or
-`STATS_TOTLEN` 2^63 over several volumes, which NCBI writes as `-0`, until the Owner answers D1a-3's
-Q1; with one query batch NCBI's only request holds no `DbLength`, and the run is NCBI's: fix round
-1, review A MF4). Refused for
+SIGFPE; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
+first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
+`STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
+`-9223372036854775808` (approved exception 15; with one query batch NCBI's only request holds no
+`DbLength`: fix round 1, review A MF4; refused until fix round 2). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX

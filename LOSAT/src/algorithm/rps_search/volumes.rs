@@ -436,9 +436,9 @@ impl RpsUnits {
     /// batch's set-up (`search_sets`): `D` for any value where it runs, `None` elsewhere. The
     /// requests after the first hold it (the first is written before the first batch's set-up);
     /// a `D` of exactly -2^63 (an alias file's `LENGTH` or `STATS_TOTLEN` of 2^63), which NCBI's
-    /// serial writer prints as `-0` (a signed overflow), is LOSAT's refusal where such a request
-    /// is written (`common::database::request_minus_zero_refusal`; DECISIONS D1a3-2 and D1a4-6 of line
-    /// RG: until the Owner answers D1a-3's Q1).
+    /// serial writer prints as `-0` (a signed overflow), is written as its digits
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 15: the Owner's answer to D1a-3's Q1, A, of
+    /// 2026-11-17, DECISIONS OQ-1117 of line RG).
     pub(crate) fn strategy_db_length(&self) -> Option<i64> {
         self.adjusted.map(|(length, _)| length)
     }
@@ -632,19 +632,6 @@ pub(crate) fn search_sets(
         });
     }
     sets
-}
-
-/// LOSAT's refusal of the search strategy's requests after a run's first where the parameters
-/// that each query batch's set-up writes into NCBI's options handle (`sets`, `search_sets`) hold
-/// a `DbLength` that NCBI writes as `-0` (`common::database::request_minus_zero_refusal`, the
-/// owner, which the requests' writer asks): for RPSTBLASTN, which writes a batch's request after
-/// the reports of the batches before, before the output of the window of batches that holds
-/// such a request (`rpstblastn::search`).
-pub(crate) fn later_requests_refusal(
-    sets: &[crate::report::archive::options::Param],
-    program: &str,
-) -> Option<anyhow::Error> {
-    crate::algorithm::common::database::request_minus_zero_refusal(&[], sets, program)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1414-1418 (quoted
@@ -1474,12 +1461,13 @@ mod tests {
             .contains("overflows NCBI BLAST+'s 64-bit effective search space"));
     }
 
-    /// The strategy's `DbLength`: `D` of any sign where `x_AdjustDbSize` runs (-2^63 too: the
-    /// writer of the requests after the first refuses it, `common::database::
-    /// request_minus_zero_refusal`).
+    /// The strategy's `DbLength`: `D` of any sign where `x_AdjustDbSize` runs, -2^63 too, which the
+    /// ASN.1 text writer of the requests writes as its digits where NCBI writes `-0`
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 15; NCBI's `big-integer -0` of probe r2_3v_l2p63#2
+    /// of line RG D1a-4's review A).
     #[test]
-    fn the_strategy_db_length_is_d_and_minus_two_to_the_63_is_refused_where_written() {
-        use crate::report::archive::options::{Param, ParamValue};
+    fn the_strategy_db_length_is_d_and_minus_two_to_the_63_is_written_as_its_digits() {
+        use crate::report::serial::encoder::Encoder;
         let volume = unit(190, (190, 1), 1, 191);
         for length in [0, -1, 5000, -9_223_372_036_854_775_807, i64::MIN] {
             assert_eq!(
@@ -1488,51 +1476,9 @@ mod tests {
             );
         }
         assert_eq!(units(vec![volume], None, 0).strategy_db_length(), None);
-        let sets = |length| super::search_sets(Some(length), Some(("BLOSUM62".to_string(), 11, 1)));
-        let refusal = crate::algorithm::common::database::request_minus_zero_refusal(
-            &[],
-            &sets(i64::MIN),
-            "RPSTBLASTN",
-        )
-        .expect("-2^63 is refused")
-        .to_string();
-        assert!(
-            refusal.contains("in the search strategy's DbLength"),
-            "{refusal}"
-        );
-        assert!(refusal.ends_with("LOSAT's RPSTBLASTN"), "{refusal}");
-        assert!(
-            crate::algorithm::common::database::request_minus_zero_refusal(
-                &[],
-                &sets(-9_223_372_036_854_775_807),
-                "RPSBLAST"
-            )
-            .is_none()
-        );
-        // `-dbsize` of -2^63 on the command line: every request.
-        let dbsize = [Param {
-            name: "DbLength",
-            value: ParamValue::BigInteger(i64::MIN),
-        }];
-        let refusal =
-            crate::algorithm::common::database::request_minus_zero_refusal(&dbsize, &[], "BLASTP")
-                .expect("-dbsize -2^63 is refused")
-                .to_string();
-        assert!(
-            refusal.starts_with("a -dbsize of -9223372036854775808"),
-            "{refusal}"
-        );
-        assert!(
-            crate::algorithm::common::database::request_minus_zero_refusal(
-                &[Param {
-                    name: "DbLength",
-                    value: ParamValue::BigInteger(i64::MAX),
-                }],
-                &[],
-                "BLASTP"
-            )
-            .is_none()
-        );
+        let mut out = Vec::new();
+        crate::report::serial::asn_text::AsnTextEncoder::new(&mut out).big_int(i64::MIN);
+        assert_eq!(out, b"-9223372036854775808");
     }
 
     /// The setup's division by 0 without the Gumbel block, and the concatenated lengths.

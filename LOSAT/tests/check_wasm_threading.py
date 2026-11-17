@@ -6,6 +6,7 @@ import json
 import os
 import platform
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -179,6 +180,43 @@ def main():
                 assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(row_id, "-db raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:448-453
+    # ```c++
+    #         /*** Get the query sequence(s) or PSSM (these two options are mutually
+    #          * exclusive) ***/
+    #         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
+    #         CRef<CBlastInput> input;
+    #
+    #         if (pssm.Empty()) {  // FASTA input
+    # ```
+    # psiblast through each WASI command, every row of its frozen NCBI fixtures, compared by the
+    # checkers of the native gates: the -subject rows of outfmt0_manifest.tsv
+    # (docs/evidence/losat_web_e2a/check_losat.py) and the -db rows of db_search_manifest/psiblast*.tsv
+    # (db_search_fixtures.py check: stdout, stderr, exit status, PSSM files), at -num_threads 1. A PSSM
+    # query (-in_pssm) opens no query input, as NCBI reads none (WASI cannot copy the standard input's
+    # descriptor), and the ASN.1 PSSM file's staging name has no process id on WASI
+    # (LOSAT/src/utils/process_id.rs); both had stopped 47 of these rows in the serial command.
+    # The checkers run a wrapper that starts the command's runner, in the place of the binary.
+    for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+        wrapper = out / "psiblast-fixtures" / kind / "losat"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(str(x)) for x in prefixes[kind]) + ' "$@"\n')
+        wrapper.chmod(0o755)
+        checks = [
+            ("outfmt0", [sys.executable, ROOT / "docs/evidence/losat_web_e2a/check_losat.py", "--losat", wrapper,
+                         "--programs", "psiblast", "--threads", "1"]),
+            ("db", [sys.executable, TESTS / "db_search_fixtures.py", "check", "--losat", wrapper,
+                    "--program", "psiblast", "--threads", "1"]),
+        ]
+        for name, argv in checks:
+            label = f"psiblast-fixtures/{kind}/{name}"
+            try:
+                execute(label, argv, timeout=7200)
+            except AssertionError:
+                lines = (out / label / "stdout").read_text(errors="replace").splitlines()
+                print("\n".join(line for line in lines if "\tDIFF\t" in line or "\tdiffers\t" in line or line.startswith("# ")), flush=True)
+                raise
+            print(label, (out / label / "stdout").read_text().splitlines()[-1], flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

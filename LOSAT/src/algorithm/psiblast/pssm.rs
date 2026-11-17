@@ -2028,7 +2028,8 @@ impl PssmFiles {
     }
 
     /// Writes `bytes` to a new staging file `.losat-<pid>-<n>` in the target's `directory`; its
-    /// path and owner.
+    /// path and owner. The pid is `utils::process_id` (0 on the Wasm targets, which have none:
+    /// `std::process::id()` panics there).
     fn write_staging(
         &mut self,
         directory: &std::path::Path,
@@ -2038,7 +2039,7 @@ impl PssmFiles {
             self.staging_count += 1;
             let staging = directory.join(format!(
                 ".losat-{}-{}",
-                std::process::id(),
+                crate::utils::process_id::process_id(),
                 self.staging_count
             ));
             let mut file = match std::fs::OpenOptions::new()

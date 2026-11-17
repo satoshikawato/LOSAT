@@ -26,7 +26,8 @@ struct SegWithOffset {
     offset: i32,
 }
 
-/// The CAlnMap of a merged Dense-seg (`ds`), with the anchor when set.
+/// The CAlnMap of a Dense-seg (`ds`: a section's merged one, or one HSP's in outfmt 0,
+/// `super::HspAlnVec`), with the anchor when set.
 pub(crate) struct AlnMap<'d> {
     ds: &'d Denseg,
     num_rows: usize,
@@ -41,6 +42,28 @@ pub(crate) struct AlnMap<'d> {
     /// `x_GetSeqLeftSeg` and `x_GetSeqRightSeg` of each row (raw segments).
     left_segs: Vec<usize>,
     right_segs: Vec<usize>,
+}
+
+/// The vectors of an `AlnMap`, kept from map to map to reuse them (`AlnMap::new_in`,
+/// `AlnMap::into_buffers`: outfmt 0 makes one map per HSP, `super::HspAlnVec`). No NCBI
+/// counterpart: NCBI makes a new `CAlnVec` per HSP (showalign.cpp:1857-1860).
+#[derive(Default)]
+pub(crate) struct MapBuffers {
+    aln_seg_idx: Vec<usize>,
+    num_seg_with_offsets: Vec<SegWithOffset>,
+    aln_starts: Vec<u32>,
+    left_segs: Vec<usize>,
+    right_segs: Vec<usize>,
+}
+
+/// What `GetWholeAlnSeqString` makes besides the per-line coordinates when asked for it
+/// (`AlnMap::aln_seq_string`): the row's letters (`buffer`, read by `GetSeqString` from
+/// `sequences`) and, in an anchored map, its insertions (`insert_aln_starts`, `insert_starts` and
+/// `insert_lens`: `RowString::inserts`).
+struct Letters<'a> {
+    sequences: &'a dyn Sequences,
+    buffer: &'a mut Vec<u8>,
+    inserts: &'a mut std::collections::VecDeque<(u32, u32, u32)>,
 }
 
 /// The letters, insertions and per-line coordinates of one row (`GetWholeAlnSeqString`).
@@ -75,16 +98,33 @@ impl<'d> AlnMap<'d> {
     /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-755 (`x_GetSeqLeftSeg`,
     /// `x_GetSeqRightSeg`: the first and the last segment of the row with a start; "Invalid
-    /// Dense-seg: Row ... contains gaps only." for a row of none, which `x_CreateDenseg` removed).
+    /// Dense-seg: Row ... contains gaps only." for a row of none, which `x_CreateDenseg` removed,
+    /// and which an HSP's own Dense-seg does not have).
     /// A Dense-seg without segments is an internal error (the merge of an HSP makes at least one,
-    /// and `GetAlnStop` would read `m_AlnStarts[-1]`).
+    /// as does every producer of an HSP's segments, `report::serial::seqalign`, and `GetAlnStop`
+    /// would read `m_AlnStarts[-1]`).
     pub(crate) fn new(ds: &'d Denseg) -> Result<Self, &'static str> {
+        Self::new_in(ds, MapBuffers::default())
+    }
+
+    /// `new` in the vectors `buffers` (`MapBuffers`), which `into_buffers` gives back.
+    pub(crate) fn new_in(ds: &'d Denseg, buffers: MapBuffers) -> Result<Self, &'static str> {
         let num_rows = ds.ids.len();
         let num_segs = ds.lens.len();
         if num_segs == 0 {
-            return Err("a merged Dense-seg without segments");
+            return Err("a Dense-seg without segments");
         }
-        let mut aln_starts = Vec::with_capacity(num_segs);
+        let MapBuffers {
+            mut aln_seg_idx,
+            mut num_seg_with_offsets,
+            mut aln_starts,
+            mut left_segs,
+            mut right_segs,
+        } = buffers;
+        aln_seg_idx.clear();
+        num_seg_with_offsets.clear();
+        aln_starts.clear();
+        aln_starts.reserve(num_segs);
         let mut start = 0u32;
         let mut len = 0u32;
         for &seg_len in &ds.lens {
@@ -92,24 +132,35 @@ impl<'d> AlnMap<'d> {
             aln_starts.push(start);
             len = seg_len;
         }
-        let mut left_segs = vec![0; num_rows];
-        let mut right_segs = vec![0; num_rows];
+        left_segs.clear();
+        right_segs.clear();
         for row in 0..num_rows {
             let present = |seg: &usize| ds.starts[seg * num_rows + row] >= 0;
-            left_segs[row] = (0..num_segs).find(present).unwrap_or(0);
-            right_segs[row] = (0..num_segs).rev().find(present).unwrap_or(0);
+            left_segs.push((0..num_segs).find(present).unwrap_or(0));
+            right_segs.push((0..num_segs).rev().find(present).unwrap_or(0));
         }
         Ok(Self {
             ds,
             num_rows,
             num_segs,
             anchor: None,
-            aln_seg_idx: Vec::new(),
-            num_seg_with_offsets: Vec::new(),
+            aln_seg_idx,
+            num_seg_with_offsets,
             aln_starts,
             left_segs,
             right_segs,
         })
+    }
+
+    /// The map's vectors, for the next `new_in`.
+    pub(crate) fn into_buffers(self) -> MapBuffers {
+        MapBuffers {
+            aln_seg_idx: self.aln_seg_idx,
+            num_seg_with_offsets: self.num_seg_with_offsets,
+            aln_starts: self.aln_starts,
+            left_segs: self.left_segs,
+            right_segs: self.right_segs,
+        }
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:79-121
@@ -723,9 +774,11 @@ impl<'d> AlnMap<'d> {
     }
 
     /// `GetWholeAlnSeqString(row, buffer, &insert_aln_starts, &insert_starts, &insert_lens,
-    /// scrn_width, &scrn_lefts, &scrn_rights)`, the letters read by `seq_string`
-    /// (`GetSeqString`). The gap character is `-` and the end character a space
-    /// (`x_PrepareRowData`, showalign.cpp:1209-1215).
+    /// scrn_width, &scrn_lefts, &scrn_rights)` (`whole_aln_seq_string`, outfmt 1 to 4), the
+    /// letters read by `seq_string` (`GetSeqString`), or, without `letters`, its per-line
+    /// coordinates alone (`screen_coords`, outfmt 0): the one owner of the coordinates of a
+    /// row's lines. The gap character is `-` and the end character a space (`x_PrepareRowData`,
+    /// showalign.cpp:1209-1215). `lefts` and `rights` get `scrn_lefts` and `scrn_rights`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:199-405
     /// ```c++
@@ -924,19 +977,17 @@ impl<'d> AlnMap<'d> {
     /// ```
     /// (The arithmetic is that of NCBI's types: `TSeqPos` (`u32`) wraps, `TSignedSeqPos` and
     /// `int` are `i32`, and a quotient stored in an `int` is cut to 32 bits.) A row of width 3 counts
-    /// its alignment positions and screens in its nucleotides (`scrn_width *= width`).
-    pub(crate) fn whole_aln_seq_string(
+    /// its alignment positions and screens in its nucleotides (`scrn_width *= width`). Without
+    /// `letters` the insert pointers are null (`record_inserts` is false) and no letter is read:
+    /// the coordinates do not depend on them.
+    fn aln_seq_string(
         &self,
         row: usize,
         scrn_width: u32,
-        sequences: &dyn Sequences,
-    ) -> io::Result<RowString> {
-        let mut out = RowString {
-            buffer: Vec::new(),
-            inserts: std::collections::VecDeque::new(),
-            lefts: std::collections::VecDeque::new(),
-            rights: std::collections::VecDeque::new(),
-        };
+        mut letters: Option<Letters<'_>>,
+        lefts: &mut std::collections::VecDeque<u32>,
+        rights: &mut std::collections::VecDeque<u32>,
+    ) -> io::Result<()> {
         let (mut aln_pos, mut scrn_pos, mut prev_len, mut ttl_len) = (0u32, 0u32, 0u32, 0u32);
         let (mut scrn_lft_seq_pos, mut scrn_rgt_seq_pos) = (-1i32, -1i32);
         let (mut prev_aln_pos, mut prev_start) = (-1i32, -1i32);
@@ -944,7 +995,14 @@ impl<'d> AlnMap<'d> {
         let width = self.width(row);
         let scrn_width = scrn_width.wrapping_mul(width);
         let record_coords = scrn_width != 0;
-        out.buffer.reserve(self.aln_stop().wrapping_add(1) as usize);
+        lefts.clear();
+        rights.clear();
+        if let Some(letters) = letters.as_mut() {
+            letters.buffer.clear();
+            letters
+                .buffer
+                .reserve(self.aln_stop().wrapping_add(1) as usize);
+        }
         let (left_seg, right_seg) = (self.left_segs[row], self.right_segs[row]);
         let mut buff = Vec::new();
         for seg in 0..self.num_segs {
@@ -955,7 +1013,7 @@ impl<'d> AlnMap<'d> {
                 .anchor
                 .is_some_and(|anchor| self.raw_start(anchor, seg) < 0)
             {
-                if start >= 0 {
+                if let (true, Some(letters)) = (start >= 0, letters.as_mut()) {
                     let adjacent = if plus {
                         prev_start.wrapping_add(prev_len as i32)
                     } else {
@@ -963,7 +1021,7 @@ impl<'d> AlnMap<'d> {
                     };
                     if prev_aln_pos == (aln_pos / width) as i32 && start == adjacent {
                         ttl_len = ttl_len.wrapping_add(len);
-                        let last = out.inserts.back_mut().expect("the insert before");
+                        let last = letters.inserts.back_mut().expect("the insert before");
                         last.2 = ttl_len;
                         if !plus {
                             last.1 = start as u32;
@@ -971,7 +1029,8 @@ impl<'d> AlnMap<'d> {
                     } else {
                         prev_aln_pos = (aln_pos / width) as i32;
                         ttl_len = len;
-                        out.inserts
+                        letters
+                            .inserts
                             .push_back((prev_aln_pos as u32, start as u32, len));
                     }
                     prev_start = start;
@@ -979,20 +1038,23 @@ impl<'d> AlnMap<'d> {
                 }
                 continue;
             }
+            let fill_ch = if seg < left_seg || seg > right_seg {
+                b' '
+            } else {
+                b'-'
+            };
             if start >= 0 {
                 let stop = start.wrapping_add(len as i32).wrapping_sub(1);
-                buff.clear();
-                self.seq_string(row, start as u32, stop as u32, sequences, &mut buff)?;
-                let buf_len = (buff.len() as u32).min(seg_len);
-                out.buffer.extend_from_slice(&buff);
-                if buf_len < seg_len {
-                    let fill_ch = if seg < left_seg || seg > right_seg {
-                        b' '
-                    } else {
-                        b'-'
-                    };
-                    out.buffer
-                        .extend(std::iter::repeat_n(fill_ch, (seg_len - buf_len) as usize));
+                if let Some(letters) = letters.as_mut() {
+                    buff.clear();
+                    self.seq_string(row, start as u32, stop as u32, letters.sequences, &mut buff)?;
+                    let buf_len = (buff.len() as u32).min(seg_len);
+                    letters.buffer.extend_from_slice(&buff);
+                    if buf_len < seg_len {
+                        letters
+                            .buffer
+                            .extend(std::iter::repeat_n(fill_ch, (seg_len - buf_len) as usize));
+                    }
                 }
                 if record_coords {
                     let near = if plus { start } else { stop };
@@ -1004,8 +1066,8 @@ impl<'d> AlnMap<'d> {
                     }
                     let nscrns = (aln_pos.wrapping_sub(scrn_pos) / scrn_width) as i32;
                     for i in 0..nscrns {
-                        out.lefts.push_back(scrn_lft_seq_pos as u32);
-                        out.rights.push_back(scrn_rgt_seq_pos as u32);
+                        lefts.push_back(scrn_lft_seq_pos as u32);
+                        rights.push_back(scrn_rgt_seq_pos as u32);
                         if i == 0 {
                             scrn_lft_seq_pos = near;
                         }
@@ -1024,7 +1086,7 @@ impl<'d> AlnMap<'d> {
                         } else {
                             curr_pos.wrapping_sub(scrn_pos).wrapping_sub(scrn_width)
                         } as i32;
-                        out.lefts.push_back(scrn_lft_seq_pos as u32);
+                        lefts.push_back(scrn_lft_seq_pos as u32);
                         if if plus {
                             scrn_lft_seq_pos < start
                         } else {
@@ -1040,7 +1102,7 @@ impl<'d> AlnMap<'d> {
                         if seg == left_seg && scrn_lft_seq_pos == scrn_rgt_seq_pos {
                             scrn_rgt_seq_pos = scrn_rgt_seq_pos.wrapping_add(step);
                         }
-                        out.rights.push_back(scrn_rgt_seq_pos as u32);
+                        rights.push_back(scrn_rgt_seq_pos as u32);
                         scrn_pos = scrn_pos.wrapping_add(scrn_width);
                         curr_pos = scrn_pos;
                     }
@@ -1049,13 +1111,9 @@ impl<'d> AlnMap<'d> {
                     }
                     scrn_rgt_seq_pos = if plus { stop } else { start };
                 }
-            } else {
-                let fill_ch = if seg < left_seg || seg > right_seg {
-                    b' '
-                } else {
-                    b'-'
-                };
-                out.buffer
+            } else if let Some(letters) = letters.as_mut() {
+                letters
+                    .buffer
                     .extend(std::iter::repeat_n(fill_ch, seg_len as usize));
             }
             aln_pos = aln_pos.wrapping_add(len);
@@ -1068,8 +1126,8 @@ impl<'d> AlnMap<'d> {
                     nscrns += 1;
                 }
                 for i in 0..nscrns {
-                    out.lefts.push_back(scrn_lft_seq_pos as u32);
-                    out.rights.push_back(scrn_rgt_seq_pos as u32);
+                    lefts.push_back(scrn_lft_seq_pos as u32);
+                    rights.push_back(scrn_rgt_seq_pos as u32);
                     if i == 0 {
                         scrn_lft_seq_pos = scrn_rgt_seq_pos;
                     }
@@ -1077,7 +1135,50 @@ impl<'d> AlnMap<'d> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// `GetWholeAlnSeqString` of the query-anchored reports (`aln_seq_string` with the letters
+    /// and the insertions): the row's `RowString`.
+    pub(crate) fn whole_aln_seq_string(
+        &self,
+        row: usize,
+        scrn_width: u32,
+        sequences: &dyn Sequences,
+    ) -> io::Result<RowString> {
+        let mut out = RowString {
+            buffer: Vec::new(),
+            inserts: std::collections::VecDeque::new(),
+            lefts: std::collections::VecDeque::new(),
+            rights: std::collections::VecDeque::new(),
+        };
+        let letters = Letters {
+            sequences,
+            buffer: &mut out.buffer,
+            inserts: &mut out.inserts,
+        };
+        self.aln_seq_string(
+            row,
+            scrn_width,
+            Some(letters),
+            &mut out.lefts,
+            &mut out.rights,
+        )?;
         Ok(out)
+    }
+
+    /// The per-line coordinates of row `row` alone (`aln_seq_string` without the letters):
+    /// `scrn_lefts` and `scrn_rights` of `GetWholeAlnSeqString` in `lefts` and `rights`, which
+    /// are cleared first. Outfmt 0 reads them (`x_PrepareRowData` calls `GetWholeAlnSeqString`
+    /// with the same `(int)m_LineLen`, showalign.cpp:1281-1283; `super::HspAlnVec`).
+    pub(crate) fn screen_coords(
+        &self,
+        row: usize,
+        scrn_width: u32,
+        lefts: &mut std::collections::VecDeque<u32>,
+        rights: &mut std::collections::VecDeque<u32>,
+    ) -> io::Result<()> {
+        self.aln_seq_string(row, scrn_width, None, lefts, rights)
     }
 
     /// `GetSeqString(buffer, row, seq_from, seq_to)`: the letters `seq_from..=seq_to` of the row's

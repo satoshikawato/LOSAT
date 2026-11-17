@@ -381,6 +381,262 @@ pub(crate) struct Denseg {
     widths: Vec<u32>,
 }
 
+/// Outfmt 0's `CAlnVec` of one HSP (`CDisplaySeqalign::x_GetAlnVecForSeqalign`, without an
+/// anchor: outfmt 0 has no `eMasterAnchored`): the HSP's own Dense-seg of two rows, the query's
+/// and the subject's, each row's alignment range (`GetSeqAlnRange`) and its first and last
+/// position on each line of `-line_length` columns (`scrn_lefts` and `scrn_rights` of
+/// `GetWholeAlnSeqString`, `aln_vec::AlnMap::screen_coords`), which `report::pairwise` prints.
+/// Kept from HSP to HSP to reuse its vectors (`report::pairwise` keeps one per thread).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1823-1861
+/// ```c++
+///     if (align.GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
+///         CRef<CSeq_align> densegAln = align.CreateDensegFromStdseg();
+///         if (m_AlignOption & eTranslateNucToNucAlignment) {
+///             finalAln = densegAln->CreateTranslatedDensegFromNADenseg();
+///         } else {
+///             finalAln = densegAln;
+///         }
+///     } else if(align.GetSegs().Which() ==
+///               CSeq_align::C_Segs::e_Denseg){
+///         if (m_AlignOption & eTranslateNucToNucAlignment) {
+///             finalAln = align.CreateTranslatedDensegFromNADenseg();
+///         } else {
+///             finalAln = &align;
+///         }
+///     } else if(align.GetSegs().Which() ==
+///               CSeq_align::C_Segs::e_Dendiag){
+///         CRef<CSeq_align> densegAln =
+///             CAlignFormatUtil::CreateDensegFromDendiag(align);
+///     ...
+///     CRef<CDense_seg> finalDenseg(new CDense_seg);
+///     const CTypeConstIterator<CDense_seg> ds = ConstBegin(*finalAln);
+///     if((ds->IsSetStrands()
+///         && ds->GetStrands().front()==eNa_strand_minus)
+///        && !(ds->IsSetWidths() && ds->GetWidths()[0] == 3)){
+///         //show plus strand if master is minus for non-translated case
+///         finalDenseg->Assign(*ds);
+///         finalDenseg->Reverse();
+///         avRef = new CAlnVec(*finalDenseg, m_Scope);
+///     } else {
+///         avRef = new CAlnVec(*ds, m_Scope);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:979-992
+/// (`CreateTranslatedDensegFromNADenseg`)
+/// ```c++
+///     for (CDense_seg::TNumseg numseg = 0; numseg < ds.GetNumseg(); numseg++) {
+///         if (orig_lens[numseg] % 3) {
+///     ...
+///         } else {
+///             lens[numseg] = orig_lens[numseg] / 3;
+///         }
+///     }
+///
+///     // add the widths
+///     ds.SetWidths().resize(ds.GetDim(), 3);
+/// ```
+/// The HSP's segments are those of its Seq-align (`report::serial::seqalign`: the starts in the
+/// records, the lengths in residues, `CreateDensegFromStdseg`'s for a Std-seg) with the strands
+/// that `s_CollectSeqAlignData` gives them, the Dense-seg's (`CAlnMap::IsPositiveStrand` reads a
+/// row's strand of the first segment, alnmap.hpp:599-603, quoted at `AlnMap::width`). TBLASTX's
+/// Std-seg of two nucleotide rows becomes one of widths 3 with the lengths in residues
+/// (`CreateTranslatedDensegFromNADenseg`), which the segments already have. The Dense-diag of an
+/// ungapped BLASTN HSP (`CreateDensegFromDendiag`) is the Dense-seg of its one segment.
+pub(crate) struct HspAlnVec {
+    ds: Denseg,
+    map: aln_vec::MapBuffers,
+    rows: [HspRow; 2],
+    aln_stop: u32,
+}
+
+/// A row of an `HspAlnVec`: `scrn_lefts`, `scrn_rights` (`TSeqPosList`, read and popped a line
+/// at a time, `HspAlnVec::line`) and `GetSeqAlnRange`.
+#[derive(Default)]
+struct HspRow {
+    lefts: VecDeque<u32>,
+    rights: VecDeque<u32>,
+    range: (i64, i64),
+}
+
+impl Default for HspAlnVec {
+    fn default() -> Self {
+        Self {
+            ds: Denseg {
+                ids: Vec::new(),
+                lens: Vec::new(),
+                starts: Vec::new(),
+                plus: Vec::new(),
+                widths: Vec::new(),
+            },
+            map: aln_vec::MapBuffers::default(),
+            rows: Default::default(),
+            aln_stop: 0,
+        }
+    }
+}
+
+/// An error that NCBI's outfmt 0 code reaches only with input that a BLAST search does not make.
+fn pairwise_internal(what: &str) -> io::Error {
+    io::Error::other(format!(
+        "LOSAT internal error in the pairwise report: {what}"
+    ))
+}
+
+impl HspAlnVec {
+    /// Makes the `CAlnVec` of the HSP whose Seq-align has the segments `starts` (two per
+    /// segment, the query's then the subject's, `-1` for a gap), `lens` (in residues) and
+    /// `strands` (two per segment, `report::serial::seqalign::Segments`), its rows of widths
+    /// `widths` (the query's and the subject's: 3 for a row of nucleotides translated against
+    /// proteins, `CreateDensegFromStdseg`; `[1, 1]` for a Dense-seg without widths), and its rows'
+    /// per-line coordinates for lines of `line_length` columns (`(int)m_LineLen`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1281-1283
+    /// ```c++
+    ///         m_AV->GetWholeAlnSeqString(row, sequence[row], &insertAlnStart[row],
+    ///                                    &insertStart[row], &insertLength[row],
+    ///                                    (int)m_LineLen, &seqStarts[row], &seqStops[row]);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1272
+    /// ```c++
+    ///         rowRng[row] = m_AV->GetSeqAlnRange(row);
+    /// ```
+    pub(crate) fn set(
+        &mut self,
+        starts: &[i32],
+        lens: &[i32],
+        strands: &[crate::report::serial::seqalign::Strand],
+        widths: [u32; 2],
+        line_length: usize,
+    ) -> io::Result<()> {
+        use crate::report::serial::seqalign::Strand;
+        if starts.len() != 2 * lens.len() || strands.len() != starts.len() || lens.is_empty() {
+            return Err(pairwise_internal(
+                "an HSP's segments are not a Dense-seg of two rows",
+            ));
+        }
+        let ds = &mut self.ds;
+        ds.ids.clear();
+        ds.ids.extend([SeqKey::Query, SeqKey::Subject(0)]);
+        ds.lens.clear();
+        ds.lens.extend(lens.iter().map(|&len| len as u32));
+        ds.starts.clear();
+        ds.starts.extend_from_slice(starts);
+        ds.widths.clear();
+        if widths != [1, 1] {
+            ds.widths.extend(widths);
+        }
+        let (mut query, mut subject) = (strands[0], strands[1]);
+        if query == Strand::Minus && widths[0] != 3 {
+            ds.reverse();
+            (query, subject) = (query.reversed(), subject.reversed());
+        }
+        ds.plus.clear();
+        ds.plus
+            .extend([query != Strand::Minus, subject != Strand::Minus]);
+        let map =
+            AlnMap::new_in(&self.ds, std::mem::take(&mut self.map)).map_err(pairwise_internal)?;
+        for (row, data) in self.rows.iter_mut().enumerate() {
+            map.screen_coords(row, line_length as u32, &mut data.lefts, &mut data.rights)?;
+            data.range = map.seq_aln_range(row);
+        }
+        self.aln_stop = map.aln_stop();
+        self.map = map.into_buffers();
+        Ok(())
+    }
+
+    /// `GetAlnStop()` of the HSP (`x_DisplayRowData`'s `aln_stop`): `u32::MAX` for an HSP of
+    /// length 0 (BLASTX's empty rows), whose lines `j <= (int)aln_stop` are none.
+    pub(crate) fn aln_stop(&self) -> u32 {
+        self.aln_stop
+    }
+
+    /// Row `row` on the line of columns `from..=to`: its first and last position there
+    /// (`seqStarts[row].front()`, `seqStops[row].front()`, 0-based) when the row meets the line
+    /// (`hasSequence`), `None` otherwise; the row's next line follows either way (`pop_front`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1504,1544-1549
+    /// ```c++
+    ///     for (int row=0; row<rowNum; row++) {
+    ///         bool hasSequence = true;
+    ///         if (!(m_AlignOption & eShowGapOnlyLines)) {
+    ///             hasSequence = curRange.IntersectingWith(alnRoInfo->rowRng[row]);
+    ///         }
+    ///         //only output rows that have sequence
+    ///         if (hasSequence){
+    ///             int end = alnRoInfo->seqStops[row].front() + 1;
+    ///     ...
+    ///         if(!alnRoInfo->seqStarts[row].empty()){ //shouldn't need this check
+    ///                 alnRoInfo->seqStarts[row].pop_front();
+    ///         }
+    ///         if(!alnRoInfo->seqStops[row].empty()){
+    ///                 alnRoInfo->seqStops[row].pop_front();
+    ///         }
+    /// ```
+    /// (A row has an entry for each line: its screens are at most as wide as the lines.)
+    pub(crate) fn line(
+        &mut self,
+        row: usize,
+        from: i64,
+        to: i64,
+    ) -> io::Result<Option<(u32, u32)>> {
+        let data = &mut self.rows[row];
+        let (row_from, row_to) = data.range;
+        let has_sequence = from <= row_to && row_from <= to;
+        let line = if has_sequence {
+            match (data.lefts.front(), data.rights.front()) {
+                (Some(&left), Some(&right)) => Some((left, right)),
+                _ => return Err(pairwise_internal("a row has no coordinates for a line")),
+            }
+        } else {
+            None
+        };
+        data.lefts.pop_front();
+        data.rights.pop_front();
+        Ok(line)
+    }
+}
+
+impl Denseg {
+    /// `CDense_seg::Reverse`: the segments in the other order, each row on the other strand
+    /// (here the rows' strands are the caller's, `HspAlnVec::set`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:661-680
+    /// ```c++
+    ///     //reverse list o' lengths
+    ///     {
+    ///         CDense_seg::TLens::iterator f = SetLens().begin();
+    ///         CDense_seg::TLens::iterator r = SetLens().end();
+    ///         while (f < r) {
+    ///             swap(*(f++), *(--r));
+    ///         }
+    ///     }
+    ///
+    ///     //reverse list o' starts
+    ///     CDense_seg::TStarts &starts = SetStarts();
+    ///     int f = 0;
+    ///     int r = (GetNumseg() - 1) * GetDim();
+    ///     while (f < r) {
+    ///         for (int i = 0;  i < GetDim();  ++i) {
+    ///             swap(starts[f+i], starts[r+i]);
+    ///         }
+    ///         f += GetDim();
+    ///         r -= GetDim();
+    ///     }
+    /// ```
+    fn reverse(&mut self) {
+        let dim = self.ids.len();
+        self.lens.reverse();
+        let num_segs = self.lens.len();
+        for seg in 0..num_segs / 2 {
+            for row in 0..dim {
+                self.starts
+                    .swap(seg * dim + row, (num_segs - 1 - seg) * dim + row);
+            }
+        }
+    }
+}
+
 /// What a program gives the section about its sequences.
 pub(crate) trait Sequences {
     /// Appends the letters `from..=to` (0-based, in the records) of `seq`'s plus strand as the

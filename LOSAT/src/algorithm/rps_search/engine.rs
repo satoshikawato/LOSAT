@@ -693,16 +693,20 @@ impl RpsRun<'_> {
         // one that reads what NCBI cannot is LOSAT's refusal (`RpsPastRows::overran`).
         let concat_length = self.concat_length;
         let extension_length = concat_length.clamp(0, rows.len() as i32) as usize;
-        let past_rows = (i64::from(concat_length) > rows.len() as i64).then(|| {
-            // One flag for each context of each query (query after query, the same number of
-            // contexts each).
-            let flags: Vec<std::sync::atomic::AtomicBool> = self
-                .queries
+        let past_row =
+            (i64::from(concat_length) > rows.len() as i64).then(|| files.row_after_rows());
+        // One for each context of each query (query after query, the same number of contexts
+        // each), with its flag.
+        let past_rows: Option<Vec<RpsPastRows<'_>>> = past_row.as_ref().map(|row| {
+            self.queries
                 .iter()
                 .flat_map(|query| &query.frames)
-                .map(|_| std::sync::atomic::AtomicBool::new(false))
-                .collect();
-            (files.row_after_rows(), flags)
+                .map(|_| RpsPastRows {
+                    row,
+                    concat_length,
+                    overran: std::sync::atomic::AtomicBool::new(false),
+                })
+                .collect()
         });
         // The preliminary stage of one context of a query (NCBI's frame loop: each context
         // scanned as a subject with its own cutoffs).
@@ -714,11 +718,9 @@ impl RpsRun<'_> {
                     rows: RpsRows {
                         rows,
                         length: extension_length,
-                        past: past_rows.as_ref().map(|(row, flags)| RpsPastRows {
-                            row,
-                            concat_length,
-                            overran: &flags[q_idx * self.queries[q_idx].frames.len() + context],
-                        }),
+                        past: past_rows
+                            .as_deref()
+                            .map(|past| &past[q_idx * self.queries[q_idx].frames.len() + context]),
                     },
                     table,
                     window: self.window,

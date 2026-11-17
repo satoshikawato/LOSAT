@@ -1435,7 +1435,13 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   reports of an untitled query whose annotations hold features (NCBI's definition line reads them;
   not ported). Since line RG item D3-2 LOSAT writes NCBI's ASN.1 text of the values it reads: the
   annotation's text that NCBI prints after its `Failed to parse location of` message (1204.6) is
-  written, and with `-out_pssm` and `-export_search_strategy` every member of the PSSM. The rest is
+  written, and with `-out_pssm` and `-export_search_strategy` every member of the PSSM. A value of
+  -2147483648 (`Int4`) or -9223372036854775808 (`Int8`) that the PSSM holds is written as its
+  digits: NCBI's `COStreamBuffer::PutInt4` and `PutInt8` negate it with a signed overflow, and its
+  build writes `-8` and `-0`: a result of undefined behaviour, which LOSAT does not reproduce under
+  the Owner's rule of 2026-10-10 and 2026-10-22 (NCBI's signed overflows widened), as line DI-4's
+  decision 13 writes the archive's `WordThreshold` through the same `PutInt4` (Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07). The rest is
   NCBI's (rules 2 and 4): the index's messages (`Invalid 'lens' size in denseg`, the Seq-table
   column messages, `Failed to parse location of`, after which NCBI's later messages print their
   headers only and an empty region the object's ASN.1 text as far as NCBI's 4096-byte output

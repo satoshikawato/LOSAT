@@ -1,12 +1,15 @@
 //! The batch-wide setup that `search_query_batch` does before its subjects: the query block (the
 //! contexts of the queries and their BLASTNA buffer), the lookup table with the offset array
-//! size, and the cutoffs of every context.
+//! size, the preliminary stage's search spaces, and the cutoffs of every context (of the batch
+//! and of one subject).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:152-273
 //! (`SetupQueryInfo_OMF`) and :484-658 (`SetupQueries_OMF`);
 //! c++/src/algo/blast/core/blast_nalookup.c:1227-1368 (`BlastMBLookupTableNew`);
 //! c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`) and
-//! :830-994 (`BlastHitSavingParametersUpdate`).
+//! :830-994 (`BlastHitSavingParametersUpdate`);
+//! c++/src/algo/blast/api/prelim_stage.cpp:219-221 (the preliminary stage's option spaces) and
+//! c++/src/algo/blast/core/blast_setup.c:1001-1025 (`BLAST_OneSubjectUpdateParameters`).
 //!
 //! This module is a child of `run` for the types it keeps private (`QueryContext`,
 //! `QueryContextIndex`, `SubjectSource`). The functions are statements of
@@ -16,8 +19,8 @@
 use super::{
     diag_container_query_length, fill_strand_query_blastna_buffer, mask_query_letters,
     reverse_mask_intervals, ungapped, ungapped_cutoff_limit_error, x_mb_lut_keep, x_query_drop,
-    x_query_prep_par, BlastnArgs, ContextKarlin, LookupTables, QueryContext, QueryContextIndex,
-    QueryLetters, QueryStrand, SequenceData, SubjectSource, OFFSET_ARRAY_SIZE,
+    x_query_prep_par, BatchStage, BlastnArgs, ContextKarlin, LookupTables, QueryContext,
+    QueryContextIndex, QueryLetters, QueryStrand, SequenceData, SubjectSource, OFFSET_ARRAY_SIZE,
 };
 use crate::algorithm::blastn::coordination::{build_lookup_tables, TaskConfig};
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
@@ -397,7 +400,133 @@ pub(super) fn batch_lookup_tables(inputs: &LookupInputs<'_>) -> (LookupTables, u
     (lookup_tables, scan_step, offset_array_size)
 }
 
-/// What `batch_cutoffs` reads.
+/// What `batch_spaces` reads.
+pub(super) struct SpaceInputs<'a> {
+    pub(super) args: &'a BlastnArgs,
+    pub(super) stage: BatchStage<'a>,
+    pub(super) subjects: SubjectSource<'a>,
+    pub(super) query_contexts: &'a [QueryContext],
+    pub(super) context_valid: &'a [bool],
+    pub(super) search_karlin: &'a [ContextKarlin],
+    /// The setup's effective search space of each context (`context_statistics`).
+    pub(super) query_eff_searchsp: &'a [i64],
+}
+
+/// The preliminary stage's search spaces of a batch.
+pub(super) struct BatchSpaces {
+    /// The database has the statistics of each subject (`DbStatistics::per_subject`): its subjects
+    /// read their own cutoffs and spaces.
+    pub(super) per_subject: bool,
+    /// The preliminary stage's option spaces of the batch's contexts: the setup's reads them in
+    /// place of its own and the statistics of each subject read them. `None`: the setup's own.
+    pub(super) option_spaces: Option<Vec<i64>>,
+    /// The preliminary stage's effective search spaces where they differ from the setup's
+    /// `query_eff_searchsp` (which the traceback and the reports read): a context's option space
+    /// when it is not 0. `None`: the setup's.
+    pub(super) prelim_eff_searchsp: Option<Vec<i64>>,
+}
+
+/// The preliminary stage's option spaces of the batch's contexts, which its setup reads in place
+/// of its own where the statistics' total before the fallback to OID 0 is not positive, and which
+/// the statistics of each subject read (`DbStatistics::per_subject`). A query chunk has the
+/// batch's (`BatchStage::ChunkPrelim`): its own setup's spaces are already them.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-221 (the memento and
+/// `SplitQuery_SetEffectiveSearchSpace`, whose spaces the preliminary stage reads; the spaces of
+/// one option are `stats::setup::preliminary_option_space`)
+/// ```c++
+///     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+///     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+///                                        m_InternalData);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1444 (the statistics of
+/// each subject, `BLAST_OneSubjectUpdateParameters`, where the database length is 0)
+/// ```c
+///        if (db_length == 0) {
+///            /* This is not a database search, hence need to recalculate and save
+///             the effective search spaces and length adjustments for all
+///             queries based on the length of the current single subject
+///             sequence. */
+///            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+///                           seq_arg.seq->length, score_options, query_info,
+///                           sbp, hit_params, word_params,
+///                           eff_len_params)) != 0)
+///               return status;
+///       }
+/// ```
+pub(super) fn batch_spaces(inputs: &SpaceInputs<'_>) -> Result<BatchSpaces> {
+    let &SpaceInputs {
+        args,
+        stage,
+        subjects,
+        query_contexts,
+        context_valid,
+        search_karlin,
+        query_eff_searchsp,
+    } = inputs;
+    let x_statistics = match subjects {
+        SubjectSource::Database(database) => Some(database.statistics()),
+        SubjectSource::Prepared(_) => None,
+    };
+    let per_subject = x_statistics.is_some_and(|statistics| statistics.per_subject());
+    let option_spaces: Option<Vec<i64>> = match (stage, x_statistics) {
+        (BatchStage::Search { .. }, Some(statistics))
+            if statistics.gumbel_db_length <= 0 || per_subject =>
+        {
+            Some(
+                query_contexts
+                    .iter()
+                    .zip(search_karlin)
+                    .zip(context_valid)
+                    .map(|((ctx, blocks), &valid)| {
+                        crate::stats::setup::preliminary_option_space(
+                            if valid { ctx.len as i64 } else { 0 },
+                            statistics.gumbel_db_length,
+                            statistics.request_count,
+                            args.db_length(),
+                            args.options_searchsp(),
+                            false,
+                            &blocks.gapped,
+                            "BLASTN",
+                        )
+                    })
+                    .collect::<Result<_, _>>()?,
+            )
+        }
+        (
+            BatchStage::ChunkPrelim {
+                batch_eff_searchsp, ..
+            },
+            _,
+        ) if per_subject => Some(batch_eff_searchsp.to_vec()),
+        _ => None,
+    };
+    // The preliminary stage's spaces where they differ from the setup's (`query_eff_searchsp`,
+    // which the traceback and the reports read): a context's option space when it is not 0.
+    let prelim_eff_searchsp: Option<Vec<i64>> = match (stage, &option_spaces, x_statistics) {
+        (BatchStage::Search { .. }, Some(spaces), Some(statistics))
+            if statistics.gumbel_db_length <= 0 =>
+        {
+            Some(
+                query_eff_searchsp
+                    .iter()
+                    .zip(spaces)
+                    .map(|(&setup, &option)| if option != 0 { option } else { setup })
+                    .collect(),
+            )
+        }
+        _ => None,
+    };
+    Ok(BatchSpaces {
+        per_subject,
+        option_spaces,
+        prelim_eff_searchsp,
+    })
+}
+
+/// What `batch_cutoffs` reads. The set of the batch, of its preliminary stage and of one subject differ in
+/// `query_eff_searchsp` and `subject_length` only (`CutoffInputs { query_eff_searchsp: spaces, ..inputs }`).
+#[derive(Clone, Copy)]
 pub(super) struct CutoffInputs<'a> {
     pub(super) subjects: SubjectSource<'a>,
     pub(super) db_len_total: usize,
@@ -596,4 +725,124 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
         x_dropoff_scores,
         reduced_cutoff_scores,
     ))
+}
+
+/// The cutoffs of the batch and of its preliminary stage.
+pub(super) struct BatchCutoffSet {
+    /// The cutoffs of the batch's contexts with the setup's spaces (`CutoffInputs::query_eff_searchsp`).
+    pub(super) batch: BatchCutoffs,
+    /// The cutoffs of the preliminary stage's own spaces where they differ (`prelim_eff_searchsp`),
+    /// `None` where they are the batch's.
+    pub(super) prelim: Option<BatchCutoffs>,
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
+/// ```c
+/// if (!gapped_calculation || sbp->matrix_only_scoring) {
+///    double cutoff_e = s_GetCutoffEvalue(program_number);
+///    Int4 query_length = query_info->contexts[context].query_length;
+///
+/// ...
+///       query_length *= 2;
+/// ...
+///    kbp = kbp_array[context];
+/// ...
+///    BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+///                  MIN((Uint8)subj_length,
+///                      (Uint8)query_length)*((Uint8)subj_length),
+///                  TRUE, gap_decay_rate);
+/// ...
+/// } else {
+///    new_cutoff = gap_trigger;
+/// }
+/// new_cutoff *= (Int4)sbp->scale_factor;
+/// new_cutoff = MIN(new_cutoff,
+/// ...
+/// curr_cutoffs->cutoff_score = new_cutoff;
+/// ```
+/// NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
+/// and GAPPED params (kbp_gap) for cutoff_score_max calculation
+/// The cutoffs of every context of the batch (`batch_setup::batch_cutoffs`): they depend on
+/// the context only (the gapped calculation's branch above: gap_trigger capped by
+/// cutoff_score_max), so the batch computes them once, and both stages read them from their
+/// batch (`PrelimBatch`, `TraceBatch`).
+///
+/// The preliminary stage's own spaces `prelim_eff_searchsp` give the second set (the batch's cutoffs
+/// are computed first: both can fail with the same refusal).
+pub(super) fn batch_cutoff_set<const UNGAPPED: bool>(
+    inputs: &CutoffInputs<'_>,
+    prelim_eff_searchsp: Option<&[i64]>,
+) -> Result<BatchCutoffSet> {
+    let batch = batch_cutoffs::<UNGAPPED>(inputs)?;
+    let prelim = match prelim_eff_searchsp {
+        Some(spaces) => Some(batch_cutoffs::<UNGAPPED>(&CutoffInputs {
+            query_eff_searchsp: spaces,
+            ..*inputs
+        })?),
+        None => None,
+    };
+    Ok(BatchCutoffSet { batch, prelim })
+}
+
+/// The statistics of one subject (`per_subject`): each context's effective search space for the
+/// subject's length with the option spaces `spaces` (the preliminary stage's, or the traceback's
+/// own: `-searchsp`, which the memento gives it back, prelim_stage.cpp:219), and the cutoffs of
+/// `BlastHitSavingParametersUpdate` and `BlastInitialWordParametersUpdate` (the X-drops keep their
+/// initial values). The traceback of a list reads the subject's hit-saving cutoffs
+/// (`Blast_HSPReevaluateWithAmbiguitiesGapped`, its `hit_params` being thread 0's in NCBI's one
+/// thread, blast_traceback.c:1598-1650) and the e-values of the setup's spaces. `inputs` are the
+/// batch's (`query_eff_searchsp` and `subject_length` are replaced for each subject); `db_length` is
+/// `-dbsize`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1022 (quoted in full at
+/// `stats::setup::subject_eff_lengths`)
+/// ```c
+///    eff_len_params->real_db_length = subject_length;
+///    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
+///                                 eff_len_params, sbp, query_info, NULL)) != 0)
+///       return status;
+///    /* Update cutoff scores in hit saving parameters */
+///    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
+///                                   hit_params);
+///
+///    if (word_params) {
+///       /* Update cutoff scores in initial word parameters */
+///       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
+///            subject_length, word_params);
+/// ```
+pub(super) fn subject_statistics<'a, const UNGAPPED: bool>(
+    inputs: CutoffInputs<'a>,
+    db_length: i64,
+) -> impl Fn(usize, &[i64]) -> Result<(BatchCutoffs, Vec<i64>)> + Sync + 'a {
+    move |subject_length: usize, spaces: &[i64]| -> Result<(BatchCutoffs, Vec<i64>)> {
+        let subject_spaces: Vec<i64> = inputs
+            .query_contexts
+            .iter()
+            .zip(inputs.search_karlin)
+            .zip(inputs.context_valid)
+            .zip(spaces)
+            .map(|(((ctx, blocks), &valid), &space)| {
+                if !valid {
+                    return Ok(space);
+                }
+                Ok(crate::stats::setup::subject_eff_lengths(
+                    ctx.len as i64,
+                    subject_length as i64,
+                    inputs.db_num_seqs,
+                    db_length,
+                    space,
+                    false,
+                    &blocks.gapped,
+                    "BLASTN",
+                )?
+                .eff_searchsp)
+            })
+            .collect::<Result<_, crate::stats::setup::SearchSpaceOverflow>>()?;
+        let cutoffs = batch_cutoffs::<UNGAPPED>(&CutoffInputs {
+            query_eff_searchsp: &subject_spaces,
+            subject_length: Some(subject_length as u64),
+            ..inputs
+        })?;
+        Ok((cutoffs, subject_spaces))
+    }
 }

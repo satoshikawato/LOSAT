@@ -117,8 +117,63 @@ fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> 
     }
     if request.ascii_path.is_some() {
         check_long_ascii(&file.object)?;
+        if !ascii_letters_defined(&file.object) {
+            bail!(
+                "an ASCII PSSM (-out_ascii_pssm) of a PSSM query with a residue that NCBIstdaa does not have (NCBI BLAST+ prints its letter from memory it never set) is not supported by LOSAT's PSIBLAST"
+            );
+        }
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:252-259
+// ```c++
+//     CNCBIstdaa query;
+//     pssm_with_params.GetPssm().GetQuerySequenceData(query);
+//     const vector<char>& query_seq = query.Get();
+//     ...
+//         out << "\n" << setw(5) << (i+1) << " " <<
+//             NCBISTDAA_TO_AMINOACID[(int)query_seq[i]] << "  ";
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:88-93 (`GetQuerySequenceData`)
+// ```c++
+//     if ( !seq_data.IsNcbistdaa() ) {
+//         CSeq_data ncbistdaa;
+//         CSeqportUtil::Convert(seq_data, &ncbistdaa, CSeq_data::e_Ncbistdaa);
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:254-258, 3486-3487 and the
+// tables at 6621-6626 (iupacaa: num 26, start-at 65) and 6655-6658 (ncbieaa: num 49, start-at 42,
+// 255 for every byte of 42-90 but `*`, `-` and the capitals)
+// ```c++
+//         CWrapper_table(size_t size, size_t start)
+//         {
+//             m_Table   = new T[256];
+//     ...
+//         (*(i_out++)) =
+//             m_IupacaaNcbistdaa->m_Table[static_cast<unsigned char>(*i_in)];
+// ```
+/// Whether NCBI's ASCII PSSM prints a letter of NCBIstdaa for every query residue of `object`:
+/// the query's data converts through `CSeqportUtil`, whose tables hold the capitals of iupacaa,
+/// and the capitals, `*` and `-` of ncbieaa; any other byte reads an entry never set (`new
+/// T[256]`) or 255, and an NCBIstdaa code of 28 or more reads past `NCBISTDAA_TO_AMINOACID`
+/// (NCBI BLAST+ 2.17.0 printed a NUL byte, M4a-1c E probe `old_ps_bad_iupacaa.ps.files`).
+fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
+    match object
+        .pssm
+        .query
+        .as_ref()
+        .and_then(SeqEntry::seq)
+        .and_then(|query| query.inst.seq_data.as_ref())
+    {
+        Some(SeqData::Ncbistdaa(codes)) => {
+            codes.iter().all(|&code| usize::from(code) < BLASTAA_SIZE)
+        }
+        Some(SeqData::Iupacaa(text)) => text.iter().all(u8::is_ascii_uppercase),
+        Some(SeqData::Ncbieaa(text)) => text
+            .iter()
+            .all(|&c| c.is_ascii_uppercase() || c == b'*' || c == b'-'),
+        Some(SeqData::Other(_)) | None => true,
+    }
 }
 
 /// The refusal of the long ASCII form of a PSSM file that NCBI cannot print (`rounds_input`).
@@ -467,6 +522,41 @@ mod tests {
             pseudocount: 0,
             versions: Default::default(),
         }
+    }
+
+    // blastfmtutil.cpp:252-259, Pssm.cpp:88-93 (quoted at `ascii_letters_defined`): NCBI's ASCII
+    // PSSM prints a letter of NCBIstdaa only for the capitals of iupacaa, the capitals, `*` and
+    // `-` of ncbieaa and the codes below 28.
+    #[test]
+    fn the_ascii_pssm_letters_are_defined_for_ncbistdaa_residues_only() {
+        let with = |data: SeqData| {
+            let mut object = pssm(ObjectId::Id(1), 3, 28);
+            let Some(SeqEntry::Seq(query)) = object.pssm.query.as_mut() else {
+                unreachable!("the test's PSSM has a Bioseq");
+            };
+            query.inst.seq_data = Some(data);
+            ascii_letters_defined(&object)
+        };
+        assert!(with(SeqData::Ncbistdaa(vec![0, 12, 27])));
+        assert!(!with(SeqData::Ncbistdaa(vec![1, 28, 2])));
+        assert!(with(SeqData::Iupacaa(b"MKV".to_vec())));
+        for bad in [b"M*V", b"M-V", b"M#V", b"MkV"] {
+            assert!(!with(SeqData::Iupacaa(bad.to_vec())), "{bad:?}");
+        }
+        assert!(with(SeqData::Ncbieaa(b"M*-".to_vec())));
+        assert!(!with(SeqData::Ncbieaa(b"Mk#".to_vec())));
+        let mut file_pssm = pssm(ObjectId::Id(1), 3, 28);
+        if let Some(SeqEntry::Seq(query)) = file_pssm.pssm.query.as_mut() {
+            query.inst.seq_data = Some(SeqData::Iupacaa(b"M#V".to_vec()));
+        }
+        let file = InPssmFile {
+            object: file_pssm,
+            computed: false,
+            valid: true,
+        };
+        let error = written_back_refusal(&file, &request(false, true)).unwrap_err();
+        assert!(error.to_string().contains("memory it never set"), "{error}");
+        assert!(written_back_refusal(&file, &request(true, false)).is_ok());
     }
 
     const GAPPED: KarlinBlk = KarlinBlk {

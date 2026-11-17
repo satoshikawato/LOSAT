@@ -6186,8 +6186,14 @@ fn search_pssm_query(
     // The PSSM files of round 1 (written back from the input PSSM, or the engine's), which a run
     // that never searches does not write (NCBI BLAST+ 2.17.0 leaves `-out_pssm` and
     // `-out_ascii_pssm` alone when the object manager ends the run: line RG D3-1 fix 3 S1, fix 4).
+    // The query set-up's stop comes after round 1's files (`PssmQueryStop::after_round_files`),
+    // so their refusals apply to it too.
     let searches = psi.searches(resolved.strategy.is_some(), database.is_some());
-    if searches {
+    let writes_round_files = psi.joins_scope()
+        && psi
+            .stop_before_search(resolved.strategy.is_some(), database.is_some())
+            .is_none_or(|stop| stop.after_round_files());
+    if writes_round_files {
         if let Some(input) = resolved
             .psi_rounds
             .as_deref()
@@ -6879,6 +6885,17 @@ fn psiblast_stop_at_invalid_query(
     database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
+    // The PSSM search's own stops (`PsiSearch::stop_before_search`: NCBI's check of the PSSM, its
+    // scores, the query's set-up, blast_aux_priv.cpp:149-151) come before the score block whose
+    // Karlin-Altschul parameters and the database read that this function checks
+    // (`psiblast_stop_at_pssm_query` makes them; a query of invalid residues only has no valid
+    // context here, M4a-1c E probe `old_ps_lower_ncbieaa.ps.strat`).
+    if args.psi_search.as_deref().is_some_and(|psi| {
+        psi.stop_before_search(args.strategy.is_some(), database.is_some())
+            .is_some()
+    }) {
+        return batches;
+    }
     let frames: Vec<Vec<QueryFrame>> = batches
         .starts
         .iter()

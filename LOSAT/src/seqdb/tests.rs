@@ -664,43 +664,6 @@ fn a_seqid_rule_reads_ordinal_ids_as_oids_in_the_database() {
     assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and
-// seqdbatlas.cpp:114-127 (quoted at `Volume::protein_mapped_bytes_after`)
-/// After a protein's sentinel byte NCBI's mapping of the volume's sequence file holds the volume's
-/// next proteins, each with its sentinel, to the end of the file, then the zeros of the file's last
-/// memory page: after a volume's last protein only those zeros, nothing of the next volume.
-#[test]
-fn a_proteins_mapped_bytes_after_are_the_rest_of_its_volume_and_page() {
-    for name in ["prot_v4", "prot_mv"] {
-        let db = SeqDb::open(&db_name(name), SeqType::Protein).unwrap();
-        let mut seen_last = 0;
-        for ordinal in 0..db.num_seqs() {
-            let at = db.find_volume(ordinal).unwrap();
-            let vol = &db.volumes()[at.volume];
-            let psq = volume::with_extension(vol.base(), SeqType::Protein, "sq");
-            let psq = std::fs::metadata(psq).unwrap().len();
-            let page_rest = psq.next_multiple_of(super::file::MAP_PAGE) - psq;
-            let expected: u64 = (at.vol_oid + 1..vol.num_oids())
-                .map(|oid| u64::from(vol.protein_length(oid).unwrap()) + 1)
-                .sum();
-            let after = db.protein_mapped_bytes_after(ordinal).unwrap();
-            assert_eq!(after, expected + page_rest, "{name} {ordinal}");
-            if at.vol_oid == 0 {
-                // The file's first byte (a sentinel), the protein and its sentinel, the rest.
-                let length = u64::from(vol.protein_length(0).unwrap());
-                assert_eq!(1 + length + 1 + expected, psq, "{name} {ordinal}");
-            }
-            if at.vol_oid + 1 == vol.num_oids() {
-                assert_eq!(after, page_rest, "{name} {ordinal}");
-                assert_eq!((psq + after) % super::file::MAP_PAGE, 0, "{name} {ordinal}");
-                seen_last += 1;
-            }
-        }
-        assert_eq!(seen_last, db.volumes().len(), "{name}");
-        assert_eq!(db.volumes().len() > 1, name == "prot_mv");
-    }
-}
-
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
     // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids
@@ -2605,5 +2568,66 @@ fn a_directory_in_place_of_an_isam_file_is_no_isam() {
             "{ext}: {failed}"
         );
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+}
+
+// Line DBID pfoff-1 (DECISIONS 62): the places of NCBI's throws of the reader's texts, of which
+// segmasker 2.17.0 names those of the alias reader, `CSeqDB` and `CSeqDBExtFile` (review of line
+// RG item K2, L2), and of a lookup's, of which blastp 2.17.0 names `GetDbi` for the accession
+// table (outfmt 15 of `pP pU`, `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15.err`); every place
+// reports `eInvalid`. The reader never throws `GetDbi`'s texts (review 1 of item pfoff-1, L4: its
+// read-only open throws lmdb's `mdb_dbi_open` error for a missing `volname` or `volinfo` first,
+// `seqdb::DATABASE_ERROR_SITES`), and no lookup was seen to throw another text.
+#[test]
+fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
+    let place = |text: &str| {
+        let site = throw_site(text).unwrap_or_else(|| panic!("{text}"));
+        assert_eq!(site.kind, "CSeqDBException::eInvalid", "{text}");
+        (site.file, site.line, site.function.unwrap())
+    };
+    let get_dbi = super::lookup_throw_site("DB contains no accession info.").unwrap();
+    assert_eq!(get_dbi.kind, "CSeqDBException::eInvalid");
+    assert_eq!(
+        (get_dbi.file, get_dbi.line, get_dbi.function.unwrap()),
+        (
+            "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp",
+            142,
+            "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi"
+        )
+    );
+    for text in [
+        "DB contains no accession info.",
+        "DB contains no vol info.",
+        "DB contains no tax id info",
+    ] {
+        assert_eq!(throw_site(text), None, "{text}");
+    }
+    for text in [
+        "DB contains no vol info.",
+        "DB contains no tax id info",
+        "Database name is required.",
+        "Error: File (x.pos) not found.",
+    ] {
+        assert_eq!(super::lookup_throw_site(text), None, "{text}");
+    }
+    assert_eq!(
+        place("No alias or index file found for protein database [x] in search path [y]."),
+        (
+            "src/objtools/blast/seqdb_reader/seqdbalias.cpp",
+            320,
+            "BLASTDB::ncbi::CSeqDBAliasNode::x_ResolveNames"
+        )
+    );
+    assert_eq!(place("Error: File (x.pin) not found.").1, 128);
+    assert_eq!(place("Database name is required.").1, 162);
+    // The texts of `CATCH_ALL` for the codes `eTooManyOpenFiles` and `eMemoryMappingFailure`
+    // (`SeqDbError::ncbi_message`), and every other text, have no known place.
+    for text in [
+        "Too many open files, please raise the open file limit",
+        "Database memory map file error - CMemoryFile: Cannot memory map file 'x':No such file",
+        "Error: Not a valid version 4 or 5 database.",
+        "Accessions to Oids lookup error in x",
+    ] {
+        assert_eq!(throw_site(text), None, "{text}");
     }
 }

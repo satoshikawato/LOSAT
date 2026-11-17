@@ -1,0 +1,71 @@
+{
+"BlastOutput2": [
+,
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/multidb/na tests/db_search/multidb/nut"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "mix2_u the glob1 ORF of multidb/nnp",
+          "query_len": 153,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|13"
+                }
+              ],
+              "len": 1043,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 315.849,
+                  "score": 808,
+                  "evalue": 2.90035e-113,
+                  "identity": 153,
+                  "positive": 153,
+                  "query_from": 1,
+                  "query_to": 153,
+                  "hit_from": 225,
+                  "hit_to": 683,
+                  "hit_frame": 3,
+                  "align_len": 153,
+                  "gaps": 0,
+                  "qseq": "MNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAHAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAACSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK",
+                  "hseq": "MNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAHAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAACSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK",
+                  "midline": "MNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAHAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAACSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 17,
+            "db_len": 11514,
+            "hsp_len": 38,
+            "eff_space": 367080,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

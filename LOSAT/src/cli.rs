@@ -1544,11 +1544,44 @@ impl NativeError {
     //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+    // ```c++
+    //     catch (const CSeqDBException& e) {                                      \
+    // 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {         \
+    // 			string err_msg =                                                \
+    //                 "Too many open files, please raise the open file limit";    \
+    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
+    //             exit_code = BLAST_DATABASE_ERROR;                               \
+    // 		}                                                                   \
+    // 		else if (e.GetErrCode() == CSeqDBException::eMemoryMappingFailure){ \
+    // 			string err_msg = "Database memory map file error";              \
+    //             if (!e.GetMsg().empty())                                        \
+    //                 err_msg += " - " + e.GetMsg();                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
+    //             exit_code = BLAST_DATABASE_ERROR;                               \
+    // 		}                                                                   \
+    //         else {                                                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+    //         	exit_code = BLAST_DATABASE_ERROR;                               \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
     /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
-    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
-    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
+    /// `CATCH_ALL` catches before (its branch comes first), `BLAST Database error: ` and its
+    /// message, exit status 2 (`BLAST_DATABASE_ERROR`). Every place of a `CSeqDBException` that
+    /// LOSAT raises reports the code `eInvalid` (`seqdb::throw_site`), so the texts of that
+    /// branch for `eTooManyOpenFiles` and `eMemoryMappingFailure` do not arise here (the reader's
+    /// errors of those codes are `common::database::database_error`'s). The one producer of these
+    /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        if e.kind().starts_with("CSeqDBException::") {
+            return NativeError {
+                exit: 2,
+                message: format!("BLAST Database error: {}\n", e.get_msg()),
+            };
+        }
         NativeError {
             exit: 255,
             message: format!("Error: {}\n", e.what()),
@@ -2532,6 +2565,34 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    // Line DBID pfoff-1 (DECISIONS 62): `CATCH_ALL` reports a `CSeqDBException` (blastp 2.17.0,
+    // outfmt 13 of `pP pU` with the prefetch off: `BLAST Database error: DB contains no accession
+    // info.`, exit 2) before any other `CException` (`Error: ` and `what()`, exit 255).
+    #[test]
+    fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
+        use crate::ncbi_exception::{NcbiException, ThrowSite};
+        let site = crate::seqdb::lookup_throw_site("DB contains no accession info.").unwrap();
+        let error =
+            NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
+        assert_eq!(error.exit, 2);
+        assert_eq!(
+            error.message,
+            "BLAST Database error: DB contains no accession info.\n"
+        );
+        let other = NcbiException::new(
+            ThrowSite {
+                file: "src/corelib/ncbistr.cpp",
+                line: 852,
+                kind: "CStringException::eConvert",
+                function: Some("ncbi::NStr::StringToInt8"),
+            },
+            "x",
+        );
+        let error = NativeError::exception(&other);
+        assert_eq!(error.exit, 255);
+        assert_eq!(error.message, format!("Error: {}\n", other.what()));
     }
 
     #[test]

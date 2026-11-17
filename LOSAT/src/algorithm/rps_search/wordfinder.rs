@@ -898,7 +898,11 @@ mod tests {
         }
         let hits_of = |window: i32, group_buckets: usize| {
             let params = RpsWordParams {
-                rows: RpsRows { rows: &rows },
+                rows: RpsRows {
+                    rows: &rows,
+                    length: rows.len(),
+                    past: None,
+                },
                 table: RpsTable {
                     cells: &cells,
                     overflow: &overflow,

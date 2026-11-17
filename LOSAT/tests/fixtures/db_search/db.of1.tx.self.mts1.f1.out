@@ -1,0 +1,93 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txselfs.fa).
+           2 sequences; 1,389 total letters
+
+
+
+Query= selfx self record
+
+Length=453
+                                                                      Score   Total  Query    E      Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value   NIdent
+
+selfx self record                                                     392      3440   100%   6e-114  1  33%       
+
+
+
+For reading frame +1 of query sequence:
+
+selfx  1    SDHQWKNLPLRQHIGNWMTMVWEWVWYKTDIAGFQEQAHYHLPEKALPIAQQITRSVPAN  180
+
+selfx  181  WSRIENVHSGSFRKHANPEC*FSILLQLAGTLRVICCAMGSAFSGR**CAVS*KPRISVL  360
+
+selfx  361  YQTHSHTMVIQLPMCMRKCRFFHWWQDSVRL  453
+
+For reading frame +2 of query sequence:
+
+selfx  2    VTTSGRTYPCDNILAIG*LWYGNGCGTRLTSLGFKSKPTIIFPKKLFR*PNRSLGASQQI  181
+
+selfx  182  GPGSRTSTPVLSGSTLTQSADFRFCSNWQGRSV*SAVLWVVPFRAGDSVQSLENPGYPSC  361
+
+selfx  362  TRPTPIPWSSSCQCACASVGSSIGGRTL*G  451
+selfx  368      .T.IPW.SS.Q..               406
+selfx  374    .I.WSS.CQ.A..                 412
+
+For reading frame +3 of query sequence:
+
+selfx  3    *PPVEEPTPATTYWQLDDYGMGMGVVQD*HRWVSRASPLSSSRKSSSDSPTDHSERPSKL  182
+
+selfx  183  VQDRERPLRFFPEAR*PRVLIFDSAPIGRDAPCDLLCYG*CLFGQVIVCSLLKTPDIRLV  362
+
+selfx  363  PDPLPYHGHPVANVHAQV*VLPLVAGLCEV  452
+
+For reading frame -1 of query sequence:
+
+selfx  453  QPHRVLPPMEEPTLAHAHWQLDDHGMGVGLVQDGYPGFSRDCTLSPARKGTTHSTADHTE  274
+
+selfx  273  RPCQLEQNRKSALWVSVLPERTGVDVLDPGPICWDAPSDLLGYRKSFFGKMIVGLLLKPS  94
+
+selfx  93   DVSLVPHPFPYHSHPIANMLSQG*VLPLVVT  1
+
+For reading frame -2 of query sequence:
+
+selfx  452  NLTESCHQWKNLHLRMHIGNWMTMVWEWVWYKTDIRGFQETAHYHLPEKALPIAQQITRS  273
+
+selfx  272  VPANWSRIENQHSGLACFRKEPEWTFSILDQFAGTLRVICWAIGRAFSGR**WACS*NPA  93
+
+selfx  92   MSVLYHTHSHTIVIQLPICCRRGRFFHWWS  3
+
+For reading frame -3 of query sequence:
+
+selfx  451  TSQSPATNGRTYTCACTLATG*PWYGSGSGTRRISGVFKRLHTITCPKRHYP*HSRSHGA  272
+
+selfx  271  SLPIGAESKISTLG*RASGKNRSGRSRSWTNLLGRSE*SVGLSEELFREDDSGLALETQR  92
+
+selfx  91   CQSCTTPIPIP*SSNCQYVVAGVGSSTGGH  2
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 56100
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/txselfs.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,389
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

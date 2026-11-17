@@ -65,11 +65,12 @@ impl Sequences for Probe {
         });
     }
 
-    fn masks(&self, seq: SeqKey, out: &mut Vec<(u32, u32)>) {
-        out.extend_from_slice(match seq {
+    fn masks(&self, seq: SeqKey, out: &mut Vec<Mask>) {
+        let masks = match seq {
             SeqKey::Query => &self.query_masks,
             SeqKey::Subject(index) => &self.subject_masks[index as usize],
-        });
+        };
+        out.extend(masks.iter().map(|&(from, to)| (from, to, 0)));
     }
 }
 
@@ -130,7 +131,7 @@ fn push_btop(hsps: &mut Hsps, subject: u32, qstart: u32, sstart: u32, btop: &str
         }
         index += run as usize;
     }
-    hsps.push_dense_seg(subject, &starts, &lens, 0, 0, false);
+    hsps.push_dense_seg(subject, &starts, &lens, 0, 0, HspStrands::default());
 }
 
 /// The section of the HSPs `rows` (subject index, qstart, sstart, BTOP) in format `format`.

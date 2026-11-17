@@ -1,0 +1,106 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/db_search/of1/txselfs3.fa).
+           2 sequences; 400 total letters
+
+
+
+Query= selfx self record
+
+Length=453
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+ydup two copies                                                       176     2e-49  1
+selfx self record                                                     176     2e-49  1
+
+
+
+For reading frame +1 of query sequence:
+
+selfx  1    SDHQWKNLPLRQHIGNWMTMVWEWVWYKTDIAGFQEQAHYHLPEKALPIAQQITRSVPAN  180
+selfx  98                                   ..KSKPTIIF.K.                 136
+ydup   1    ............................................................  180
+ydup   98                                   ..KSKPTIIF.K.                 136
+
+selfx  181  WSRIEN  198
+ydup   181  ......  198
+
+For reading frame +2 of query sequence:
+
+selfx  2    VTTSGRTYPCDNILAIG*LWYGNGCGTRLTSLGFKSKPTIIFPKKLFR*PNRSLGASQQI  181
+selfx  97                                   ..QEQAHYHL.E.                 135
+ydup   2    .................*..............................*...........  181
+ydup   97                                   ..QEQAHYHL.E.                 135
+
+selfx  182  GPGSRT  199
+ydup   182  ......  199
+
+For reading frame +3 of query sequence:
+
+selfx  39   YWQLDDYGMGMGVVQD*HRWVsrasplsssrksssdsptdhsERPSKLVQDRERPLRFFP  218
+selfx  165                                            ............        200
+
+selfx  219  EAR*PRVLIFDSAPIGRDAPCDLLCYG*CLFGQVIVCSLLKTPDIRLVPDPLPYHGHPVA  398
+ydup   198          VL.PG..CW...S...G.RKSF..KM..GL...PS.VS...H.F...S..I.  43
+ydup   73                                                   .I.I.         59
+
+selfx  399  NVHAQV*VLPLV  434
+ydup   42   .MLS.G*.....  7
+
+For reading frame -1 of query sequence:
+
+selfx  198  VLDPGPICWDAPSDLLGYRKSFFGKMIVGLLLKPSDVSLVPHPFPYHSHPIANMLSQG*V  19
+selfx  44        ...                                                      36
+ydup   198  ..........................................................*.  19
+ydup   44        ...                                                      36
+
+selfx  18   LPLVVT  1
+ydup   18   ......  1
+
+For reading frame -2 of query sequence:
+
+selfx  326  HYHLPEKALPIAQQITRSVPANWSRIENQHSGLACFRKEPEWTFSILDQFAGTLRVICWA  147
+selfx  71   .S.TIVIQ...                                                   39
+ydup   200                                            ..................  147
+ydup   71   .S.TIVIQ...                                                   39
+
+selfx  146  IGRAFSGR**WACS*NPAMSVLYHTHSHTIVIQLPICCRRGRFFHWWS  3
+ydup   146  ........**....*.................................  3
+
+For reading frame -3 of query sequence:
+
+selfx  199  RSRSWTNLLGRSE*SVGLSEELFREDDSGLALETQRCQSCTTPIPIP*SSNCQYVVAGVG  20
+ydup   199  .............*.................................*............  20
+
+selfx  19   SSTGGH  2
+ydup   19   ......  2
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 14008
+
+
+  Database: User specified sequence set (Input:
+tests/db_search/of1/txselfs3.fa).
+    Posted date:  Unknown
+  Number of letters in database: 400
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

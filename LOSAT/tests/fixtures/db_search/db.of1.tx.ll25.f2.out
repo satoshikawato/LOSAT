@@ -1,0 +1,206 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txs.fa).
+           5 sequences; 1,224 total letters
+
+
+
+Query= txq coding query
+
+Length=571
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+tx_pm plus then minus                                                 130     5e-35  1
+tx_c minus query frames                                               105     1e-27  1
+tx_two two subject frames                                             84.0    7e-23  2
+tx_mp minus then plus                                                 61.6    3e-14  1
+tx_far weak                                                           44.1    6e-09  1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    HPASQKWHIKIVIRVNLLRFMFGHL  75
+Subject_1  1    HPASQKWHIKIVIRVNALRFMFGHL  75
+Subject_4  92                       MFGHL  106
+Subject_4  1    HPASQKWHIKIVIRVNLLRFMFGHL  75
+
+Query_1    76   QLYHMPWQYYTKNEFPQNAGHRARK  150
+Subject_1  76   QLYHMPWQYYTKNEFPQNAGHRARK  150
+Subject_3  97     YHNPYQF                  117
+Subject_3  10         WSYYTQ               27
+Subject_4  107  QLYHMPWQYYTKNEFPQNAGHRARK  181
+Subject_4  76   QLYHM                      90
+
+Query_1    151  CESI*L*KKKSGYGERALL*KEQYR  225
+Subject_3  125    SIWV*YASYNHGDRALL        175
+Subject_2  278          KGTSYG*CTFLQEE*HG  328
+Subject_2  162                  ALL*KT*YG  188
+
+Query_1    226  GRVPtatattttatatICD*RSYPT  300
+Subject_2  329  GRLP                       340
+Subject_2  189  GRVP                       200
+
+Query_1    301  QAAVR*IINDFGRDYDKNRGFYNG*  375
+
+Query_1    376  lp*s*lasspasRSLVFHNSSPYIS  450
+
+Query_1    451  GGTI*SLIQ*SWWP*AASPGHQASL  525
+Subject_3  145         IL*SW*PCAASPGHQISL  198
+
+Query_1    526  VKVTQECVCA  555
+Subject_3  199  VKVTQEWVWA  228
+
+For reading frame +2 of query sequence:
+
+Query_1    14   KNGI*K*SYESICLGSCLDIFSYTT  88
+Subject_1  62                   CLVTFSSIT  88
+Subject_3  215                 SCVTFTNDIW  186
+Subject_4  14   RSGT*RLLSGSICLDLCSGIYSYIT  88
+Subject_4  93                   CSDIYSCII  119
+
+Query_1    89   CPGNTTPRTNFHKMRVTVLANASLY  163
+Subject_1  89   CPGSTTRRTSFPKTR            133
+Subject_3  185  WPGEAAHGHHDYKMRIT          135
+Subject_4  120  CRGNTIQKMN                 149
+
+Query_1    164  DFRRKNLVMASAHSCKKNNTEEGCq  238
+Subject_2  126    RRFNLVMASAHSCKKNNTEKGCQ  58
+
+Query_1    239  qqqqqqqqqqqqFVTSGVTPHRLRF  313
+Subject_2  57   QQQQQQQQQQQQFVTSGVT        1
+
+Query_1    314  GR*LTILVGIMIKIGDFIMGNFLEV  388
+Subject_3  123     LSELVWVMIEVWDFVVGYLLEI  58
+
+Query_1    389  NLPPLLPAGLLCFITPVLT  445
+Subject_3  57   YLTSLLPASLLRVI*PVFT  1
+
+For reading frame +3 of query sequence:
+
+Query_1    57   VHVWTSSAIPHALAILHQERISTKC  131
+Subject_1  57   IYVWSPSALSHALAVLHEERVSPKR  131
+
+Query_1    132  GSPCSQMRVYMTLEEKIWLWRARTP  206
+Subject_1  132  GTSCAE                     149
+Subject_2  164                         TP  169
+
+Query_1    207  VKRTIPRKGAnsnsnnnnsnsnnL*  281
+Subject_2  170  LKNIIRRKGA                 199
+
+Query_1    282  LAELPHTGCGSVDN*RFW*GL**KS  356
+Subject_3  113                   WYGL**KS  90
+
+Query_1    357  GIL*WVTSLKLTCLLSCQQVSCVS*  431
+Subject_1  62               CLVTFSSITC     91
+Subject_3  89   GIL*WVTSLKFT*RLSCQQVSCV*Y  15
+Subject_5  71         TSLKLTIRRSFQHPLWVS*  15
+
+Query_1    432  LQSL  443
+Subject_3  14   DQSL  3
+
+For reading frame -1 of query sequence:
+
+Query_1    445  CKDWSYETQETCWQERRQVNFKEVT  371
+Subject_3  1    CKDWSYYTQETCWQERRQVNFKEVT  75
+Subject_5  7      DQSYETQRGCWNERRMVNFREV   72
+
+Query_1    370  HYKIPDFYHNPYQNR*LSTEPQPVW  296
+Subject_1  259         YHFPWQ              242
+Subject_3  76   HYKIPDFYHNPYQFR            120
+Subject_4  113         YHMPWQ              130
+
+Query_1    295  GNSASHKllllllllllllLAPFLG  221
+
+Query_1    220  IVLFTGVRARHNQIFSSKVI*TRIC  146
+
+Query_1    145  EHGDPHFVEIRSWCSIARACGIAED  71
+Subject_1  142   HDVPRFGETRSSCSTARACDRAEG  71
+
+Query_1    70   VQT*  59
+Subject_1  70   DQT*  59
+
+For reading frame -2 of query sequence:
+
+Query_1    555  STHALLCYFY**CLVArrsssrppR  481
+Subject_3  228  SPHPLLCYFH**YLVA           181
+
+Query_1    480  LLDEALDCASRYVRTGVMKHKRPAG  406
+
+Query_1    405  RRGGKLTSRklpiikspifiiiptk  331
+
+Query_1    330  IVNYLPNRSLCGVTPLVTNcccccc  256
+Subject_2  254               TPDGTNC*PCFI  219
+
+Query_1    255  cccccCWHPSSVLFFLQECALAITR  181
+Subject_2  218  RCCCCCWHPSSVLCFLKECQWA     153
+Subject_2  340        WQPSSVLFFLQECALAITS  284
+
+Query_1    180  FFLLKSYRLAFASTVTRILWKFvlg  106
+Subject_1  194             SGTATCVLREFIFC  235
+Subject_2  283  SF                         278
+
+Query_1    105  vvlpghvv*LKMSKHEPKQIDSYDY  31
+Subject_1  236  IVLPWKVIKCSVPEHKSQKYHSVDY  310
+Subject_4  72              MPEHKSKQIDPDNN  31
+
+Query_1    30   FYMPFLASRV  1
+Subject_1  311  LDVPFL*GRM  340
+Subject_4  30   LYVPLLRCRM  1
+
+For reading frame -3 of query sequence:
+
+Query_1    557  TAHTHSCVTFTNDAWWPGEAAHGHH  483
+Subject_3  230  TAHTHSCVTFTNDIWWPGEAAHGHH  156
+
+Query_1    482  DYWMRL*IVPPDM*GLEL*NTRDLL  408
+Subject_3  155  DYKMRI                     138
+
+Query_1    407  AGEEAS*LQGSYPL*NPRFLS*SLP  333
+
+Query_1    332  KSLIIYRTAACVG*LR*SQIvavav  258
+
+Query_1    257  vvvavaVGTLPRYCSFYRSARSP*P  183
+Subject_3  171                    SARSP*   154
+Subject_2  199         GTLPPYYVF*RSA       161
+
+Query_1    182  DFFF*SHIDSHLRAR*PAFCGNSFL  108
+Subject_1  146              RARCPAFWGNSFF  108
+Subject_4  165                  PAFWGNSFF  139
+
+Query_1    107  V*YCQGMWYS*RCPNMNLSRLTRMT  33
+Subject_1  107  V*YCQGM**S*R*PNINLRALTRIT  33
+Subject_4  89         M*YSCKCPNINLSKLTLIT  33
+Subject_4  138  V*YCHGI*YNCRCPNIHV         85
+
+Query_1    32   IFICHFWLAG  3
+Subject_1  32   ILMCHF*DAG  3
+Subject_4  32   IFMCHFCDAG  3
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 54696
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/txs.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,224
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

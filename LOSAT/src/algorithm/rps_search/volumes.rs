@@ -605,7 +605,7 @@ pub(crate) fn search_sets(
 /// `FIRST_OID` and `LAST_OID`, while its formatter does not find a profile that they leave out
 /// (`Unknown`, "no longer exists in database", or a null pointer exception in `sacc` and
 /// `saccver`). Such a profile in the lists is LOSAT's refusal of the batch (PD-LOSAT-NCBI-DEFECTS
-/// 1.38, the classes of 1.10 and 1.37; DECISIONS D1a4-4 of line RG), one text for `rpsblast` and
+/// 1.40, the classes of 1.10 and 1.37; DECISIONS D1a4-4 of line RG), one text for `rpsblast` and
 /// `rpstblastn` (`program`). Nothing changes where the ordinal ids are the OIDs
 /// (`SeqDb::ordinal_ids_are_oids`: no range).
 pub(crate) fn report_ordinal_ids(

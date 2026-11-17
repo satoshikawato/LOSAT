@@ -38,6 +38,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             ids: record.ids,
             title: record.title,
             taxname: None,
+            has_source: false,
             iupac: record.letters,
         }))
     }

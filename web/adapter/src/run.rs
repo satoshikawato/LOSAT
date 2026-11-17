@@ -166,7 +166,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
-/// outfmt 0); BLASTP's, BLASTN's and TBLASTN's 1 to 4 add one without the words. The output of outfmt 13 and 14 is a
+/// outfmt 0); 1 to 4 add one without the words. The output of outfmt 13 and 14 is a
 /// ZIP archive of the master file and the side files (`search`). The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
@@ -249,10 +249,9 @@ fn read_outfmt(
     let custom = match choice.number {
         0 => None,
         6 | 7 => words_follow.then_some(outfmt),
-        // The query-anchored formats of BLASTP, BLASTN and TBLASTN (BLASTX's and TBLASTX's are
-        // rejected above) without the words after the number, which the CLI drops
-        // (`FormatChoice::normalized`) and the engine's library refuses after 0 to 4, as a field
-        // list.
+        // The query-anchored formats (every program's, line RG T3) without the words after the
+        // number, which the CLI drops (`FormatChoice::normalized`) and the engine's library
+        // refuses after 0 to 4, as a field list.
         1..=4 => Some(choice.normalized()),
         _ => Some(outfmt),
     };
@@ -2144,24 +2143,19 @@ mod tests {
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
                 assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
             }
-            // BLASTP (line RG T3a), BLASTN and TBLASTN (T3b) write the query-anchored formats 1 to
-            // 4, each an output of its own without the words after the number, which the CLI
-            // drops; BLASTX and TBLASTX reject them as the CLI does (below).
-            let writes_anchored = matches!(program, "blastp" | "blastn" | "tblastn");
-            let anchored: &[(&str, &str)] = if writes_anchored {
-                &[
-                    ("1", "1"),
-                    ("2", "2"),
-                    ("3", "3"),
-                    ("4", "4"),
-                    (" 3 ", "3"),
-                    ("+02", "2"),
-                    ("1 qseqid", "1"),
-                    ("4 std", "4"),
-                ]
-            } else {
-                &[]
-            };
+            // Every program writes the query-anchored formats 1 to 4 (line RG T3: BLASTP in T3a,
+            // BLASTN and TBLASTN in T3b, BLASTX and TBLASTX in T3c), each an output of its own
+            // without the words after the number, which the CLI drops.
+            let anchored: &[(&str, &str)] = &[
+                ("1", "1"),
+                ("2", "2"),
+                ("3", "3"),
+                ("4", "4"),
+                (" 3 ", "3"),
+                ("+02", "2"),
+                ("1 qseqid", "1"),
+                ("4 std", "4"),
+            ];
             for &(outfmt, number) in anchored {
                 assert_eq!(
                     custom(program, outfmt),
@@ -2173,11 +2167,7 @@ mod tests {
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
-            let rejected: &[&str] = if writes_anchored {
-                &["abc", "99", "6\tqseqid"]
-            } else {
-                &["abc", "99", "1", "4", "6\tqseqid"]
-            };
+            let rejected: &[&str] = &["abc", "99", "6\tqseqid"];
             for &outfmt in rejected {
                 let cli = losat::web_adapter::parse_formatting_string(outfmt)
                     .and_then(|choice| {

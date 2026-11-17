@@ -1,0 +1,72 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txrep2.fa).
+           1 sequences; 300 total letters
+
+
+
+Query= other1 first query
+
+Length=270
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+rep2 two copies of a coding piece                                     127     7e-35  1
+
+
+
+For reading frame +1 of query sequence:
+
+other1  121  HNLVYVGSARPSVVYSLGIFFVTCKIDGSSTEFLRWESYVVPPCLYRPLP  270
+rep2    301  HNLVYVGSARPSVVYSLGIFFVTCKIDGSSTEFLRWESYVVPPCLYRPLP  450
+
+For reading frame +2 of query sequence:
+
+other1  122  ITWYMSGLRGRV*YIP*EYSLLRVRLTVVAPSSLGGNRMSSPPACIDLS  268
+rep2    302  ITWYMSGLRGRV*YIP*EYSLLRVRLTVVAPSSLGGNRMSSPPACIDLS  448
+
+For reading frame +3 of query sequence:
+
+other1  123  *PGICRVCEAECSIFPRNILCYV*D*R**HRVP*VGIVCRPPLLV*TSP  269
+rep2    303  *PGICRVCEAECSIFPRNILCYV*D*R**HRVP*VGIVCRPPLLV*TSP  449
+
+For reading frame -1 of query sequence:
+
+other1  270  RERSIQAGGDDIRFPPKELGATTVNLTRNKEYS*GIYYTRPRRPDIYQVM  121
+rep2    450  RERSIQAGGDDIRFPPKELGATTVNLTRNKEYS*GIYYTRPRRPDIYQVM  301
+
+For reading frame -2 of query sequence:
+
+other1  269  GRGLYKQGGTTYDSHLRNSVLLPSILHVTKNIPREYTTLGLADPTYTRL  123
+rep2    449  GRGLYKQGGTTYDSHLRNSVLLPSILHVTKNIPREYTTLGLADPTYTRL  303
+
+For reading frame -3 of query sequence:
+
+other1  268  GEVYTSRGGRHTIPT*GTRCYYRQSYT*QRIFLGNILHSASQTRHIPGY  122
+rep2    448  GEVYTSRGGRHTIPT*GTRCYYRQSYT*QRIFLGNILHSASQTRHIPGY  302
+
+
+Lambda      K        H
+   0.317    0.136    0.427 
+
+
+Effective search space used: 6699
+
+
+Query= rep2 two copies of a coding piece
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+rep2 two copies of a coding piece                                     252     3e-72  1
+
+

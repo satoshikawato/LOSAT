@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -51,6 +51,11 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   letters of ../taxfilter/q.faa or q.fna followed by `qp2` (back-translated in the nucleotide files), which hits `pa` or
   `na`, `put` or `nut` and the volume `putl` or `nutl` that the first query does not.
   `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut`, `putl`, `nutl` and these.
+- `putb` (line RG item T5c, merge 3): `put` with protein titles ending in `]` (`alpha, partial [Homo sapiens]`,
+  `chi, partial [ ]`, `MAG: (plastid) [ ]` for the three proteins of ../ids/ids_q.faa, taxid 9606): in a list with
+  `pa`, the first batch of mix2_qc.faa / mix2_qcx.fna reports `alpha, ...`, whose end NCBI's
+  `x_AdjustProteinTitleSuffix` rewrites in the tabular ids but not in the XML2 and JSON `Hit` titles (the definition
+  line's), before the second batch's prefetch stops. `make_multidb.py --mixsfx-only MAKEBLASTDB` builds only `putb`.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -240,6 +245,19 @@ def make_mixtax(binary):
                 f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
 
 
+def make_mixsfx(binary):
+    """Builds putb (line RG item T5c, merge 3): `put` with protein titles ending in `]`."""
+    titles = ("alpha, partial [Homo sapiens]", "chi, partial [ ]", "MAG: (plastid) [ ]")
+    records = read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    with open(os.path.join(HERE, "putb.fa"), "w") as f:
+        for title, (_, lines) in zip(titles, records, strict=True):
+            seq = "".join(line.strip() for line in lines)
+            f.write(">" + title + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+    makeblastdb(binary, "-in", "putb.fa", "-dbtype", "prot", "-out", "putb", "-blastdb_version", "5", "-taxid",
+                "9606", "-title", "multidb putb")
+    os.remove(os.path.join(HERE, "putb.pjs"))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -293,8 +311,11 @@ if __name__ == "__main__":
         make_mixdb2(sys.argv[2])
     elif sys.argv[1] == "--mixtax-only":
         make_mixtax(sys.argv[2])
+    elif sys.argv[1] == "--mixsfx-only":
+        make_mixsfx(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
         make_mixdb2(sys.argv[1])
         make_mixtax(sys.argv[1])
+        make_mixsfx(sys.argv[1])

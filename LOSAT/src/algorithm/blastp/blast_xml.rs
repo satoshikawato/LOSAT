@@ -85,13 +85,11 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let program = xml.program;
-    // Everything NCBI cannot write is refused before the first byte of the document: the
-    // database name, and for the reports that the document writes each query's definition line
-    // and message and the names of the subjects with hits. A run that stops never writes the
+    // A title NCBI crashes on (`names::Refusal`) is refused before the first byte of the
+    // document: for the reports that the document writes, each query's definition line and the
+    // names of the subjects with hits. A run that stops never writes the
     // `-subject` report of its last query, which NCBI holds back, unless another format of the
     // call (outfmt 5) writes it (`written_queries`).
-    names::check_text(xml.run.db_name)
-        .map_err(|refusal| refusal.error(program, "a database name"))?;
     let reports = written_queries(
         hit_lists.len(),
         xml.stops,
@@ -113,7 +111,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         has_hits,
     )?;
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
-    // cannot write is refused here, before the first byte.
+    // crashes on is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);
     for hit_list in hit_lists.iter().take(reports).flatten() {
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
@@ -137,14 +135,19 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
             document.unwritten(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
             break;
         }
         let record = &xml.queries.records[q_idx];
         let text = &texts[q_idx];
         let query = XmlQuery {
-            id: text.id.as_deref().unwrap_or(record.local_id.as_bytes()),
+            id: text.query_id(record.local_id.as_bytes()),
             title: &text.title,
             len: xml.queries.searched_lengths[q_idx] as i32,
             stats: xml.stats[q_idx],
@@ -227,6 +230,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             buf.truncate(start);
             return Err(error);
         }
+        posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(
             &buf,
             &posts,
@@ -238,7 +242,12 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     }
     if xml.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }

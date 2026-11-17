@@ -6,9 +6,12 @@ losat blastx -query query.fna -subject subject.faa -outfmt "7 std qframe btop st
 ```
 
 The local FASTA path uses the final Rust runtime results for pairwise format 0,
-tabular format 6, commented tabular format 7, BLAST XML format 5, Seq-align
-formats 8 (text ASN.1), 9 (binary ASN.1) and 12 (JSON), BLAST JSON format 15 and
-BLAST XML2 format 16; `-db` writes the same formats. Format 0 is the default.
+the query-anchored formats 1 to 4 (with and without identities, and flat), tabular
+format 6, commented tabular format 7, CSV formats 10 and 20 (20 with header lines),
+BLAST XML format 5, Seq-align formats 8 (text ASN.1), 9 (binary ASN.1) and 12
+(JSON), the BLAST archive format 11, BLAST JSON format 15, BLAST XML2 format 16 and
+the organism report format 18; `-db` writes the same formats. Format 0 is the
+default; format 17 (SAM) is BLASTN's alone.
 Formats 15 and 16 take the structure of 5 (one document across the query
 batches) and, with `-db`, the taxid and scientific name from `taxdb.bti` when
 the taxonomy database is on the search path. Formats 13 and 14 (multiple-file

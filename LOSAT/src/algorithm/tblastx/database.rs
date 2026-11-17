@@ -252,8 +252,8 @@ impl TblastxDatabase {
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
-    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, the taxonomy
-    /// database's refusals and the non-ASCII refusal come before any byte).
+    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, and the taxonomy
+    /// database's refusals before any byte).
     pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len()).collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
@@ -501,19 +501,23 @@ pub(crate) fn subject_read_texts<'h>(
 /// [`prefetch_messages`], then the warning where the prefetch fails, at a subject whose lookup
 /// fails or one without a Bioseq with a Seq-align whose first Std-seg has a minus query frame
 /// and a plus subject frame (`CSeq_align::GetSeqStrand` reads the first segment): `ordered`
-/// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`).
+/// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`);
+/// `xml_before`: the outfmt 5 reports before the batch whose first query is `query`
+/// (`shared::XmlReportsBefore`).
 pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     query: usize,
-) -> Result<Vec<u8>> {
+    xml_before: Option<&shared::XmlReportsBefore<'_>>,
+) -> Result<crate::report::diag_log::Posts> {
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,
         prefetch_subjects(ordered, titles),
         PROGRAM,
         query,
+        xml_before,
     )
 }
 

@@ -207,6 +207,7 @@ fn run_masks(
                 ids: &record.ids,
                 title: record.title.as_deref(),
                 taxname: record.taxname.as_ref(),
+                has_source: record.has_source,
                 iupac: &record.iupacaa,
                 protein: true,
             };
@@ -312,6 +313,8 @@ struct Record {
     /// The name of a database sequence's source, from which its empty title is made
     /// (`seqmasks_io::bdb_reader::BdbRecord::taxname`); none for a FASTA record.
     taxname: Option<std::sync::Arc<[u8]>>,
+    /// Whether a database sequence's Bioseq has a source (`BdbRecord::has_source`).
+    has_source: bool,
     stdaa: Vec<u8>,
     iupacaa: Vec<u8>,
 }
@@ -408,6 +411,7 @@ impl Source<'_> {
                     ids: record.ids,
                     title: record.title,
                     taxname: None,
+                    has_source: false,
                     // IUPACaa letters: the 20 of SEG's alphabet have their NCBIstdaa codes, and
                     // every other letter is one SEG counts as bogus, as NCBIstdaa's `*` and `-`
                     // that the IUPACaa `X` stands for.
@@ -433,6 +437,7 @@ impl Source<'_> {
                     ids: record.ids,
                     title: Some(record.title),
                     taxname: record.taxname,
+                    has_source: record.has_source,
                     iupacaa: iupacaa_letters(&record.residues),
                     stdaa: record.residues,
                 }))

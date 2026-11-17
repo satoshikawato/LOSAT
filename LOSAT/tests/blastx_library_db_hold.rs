@@ -1,9 +1,10 @@
 //! BLASTX through the library API with `-db`: a run in which a later query batch can still refuse
-//! the taxonomy database (a scientific name NCBI's XML stream cannot write) or a subject of a
-//! database with parsed Seq-ids holds every format of the call until its epilog, as the command
-//! line holds its BLAST XML, XML2 or JSON document, so that the refusal follows no byte (line NP,
-//! series SM; the command line's hold: `tests/outfmt16_blastx.rs`, DECISIONS 21 and 32 of line
-//! OF). The side files of outfmt 13 and 14 are part of what is held.
+//! a subject of a database with parsed Seq-ids holds every format of the call until its epilog, as
+//! the command line holds its BLAST XML, XML2 or JSON document, so that the refusal follows no byte
+//! (line NP, series SM; the command line's hold: `tests/outfmt16_blastx.rs`, DECISIONS 21 and 32 of
+//! line OF). The side files of outfmt 13 and 14 are part of what is held. A taxonomy name with a
+//! byte >= 0x80 is no refusal (NCBI's JSON stream copies it and its XML stream stops at it): the
+//! library writes what the command line writes.
 //!
 //! The library runs are `examples/library_command_line` (the command line's arguments through
 //! `losat::api::run` and `run_to_file`; a failure ends with status 1), each next to the command
@@ -11,8 +12,8 @@
 //! `BATCH_SIZE=1` makes a query batch of each record; a first record without a hit makes the
 //! refusal one of a later batch.
 //!
-//! No NCBI counterpart for the refusals (LOSAT's own); what a held run writes when nothing is
-//! refused is NCBI BLAST+ 2.17.0's output (`tests/fixtures/outfmt16/mixtax_blastx_badname_*`).
+//! No NCBI counterpart for the refusals (LOSAT's own); what a run writes when nothing is refused
+//! is NCBI BLAST+ 2.17.0's output (`tests/fixtures/outfmt16/mixtax_blastx_badname_*`, `taxbad_blastx_db_*`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -162,7 +163,8 @@ fn search(
 
 /// The library's run ends as the command line's run of the same arguments: the same bytes on
 /// standard output and in the files, and the command line's message (the example writes LOSAT's
-/// own error without the `Error: ` before it, and ends every failure with status 1).
+/// own error without the `Error: ` before it, NCBI's exception text and posts with it, and ends
+/// every failure with status 1).
 fn same_as_command_line(what: &str, library: &Run, cli: &Run) {
     assert_eq!(
         library.status == Some(0),
@@ -200,7 +202,10 @@ fn same_as_command_line(what: &str, library: &Run, cli: &Run) {
         .stderr
         .lines()
         .map(|line| match line.strip_prefix("Error: ") {
-            Some(own) if !own.starts_with("[blastx]") => own,
+            // NCBI's own exception text and its posts keep the `Error: `; LOSAT's own errors lose it.
+            Some(own) if !own.starts_with("[blastx]") && !own.starts_with("NCBI C++ Exception") => {
+                own
+            }
             _ => line,
         })
         .collect::<Vec<_>>()
@@ -246,18 +251,18 @@ fn after_no_hit(dir: &TempDir, name: &str, last: &str) -> PathBuf {
     )
 }
 
-const TAXDB_REFUSAL: &str =
-    "a taxonomy database scientific name with a character outside the US-ASCII range";
 const PARSED_REFUSAL: &str = "by which NCBI BLAST+'s formatters do not find the sequence";
 const EACH: (&str, &str) = ("BATCH_SIZE", "1");
 
-/// A scientific name of the taxonomy database that the XML2 and JSON documents cannot write
-/// (`tests/seqdb/taxdb/high_bytes_utf8`: taxid 9606), of a sequence that the second query batch
-/// is the first to report (`db/sprot_tax`, `qnx_late.fna`: two batches of 10,003 bases): the
-/// library, like the command line, writes nothing, and leaves no side file of the first batch.
-/// Outfmt 5 asks no scientific name and writes both batches.
+/// A scientific name of the taxonomy database with a byte >= 0x80 (`tests/seqdb/taxdb/high_bytes_utf8`:
+/// taxid 9606), of a sequence that the second query batch is the first to report (`db/sprot_tax`,
+/// `qnx_late.fna`: two batches of 10,003 bases), is no refusal: the command line writes what NCBI BLAST+
+/// 2.17.0 writes (`tests/outfmt16_blastx.rs`, `tests/fixtures/outfmt16/taxbad_blastx_db_{15,16}.out`: the XML2
+/// document cut at the name, the JSON one with its bytes; the frozen run names the database `db/sprot_tax`
+/// from the fixtures' directory, this one by its path from `LOSAT/`), and the library, with its side files,
+/// writes the command line's bytes and the command line's message. Outfmt 5 asks no scientific name and writes both batches.
 #[test]
-fn a_taxonomy_refusal_of_a_later_batch_follows_no_byte_of_the_library() {
+fn a_taxonomy_name_of_a_later_batch_is_written_by_the_library_as_by_the_command_line() {
     let dir = TempDir::new("taxdb");
     let taxdb = engine().join("tests/seqdb/taxdb/high_bytes_utf8");
     let env = [("BLASTDB", taxdb.to_str().unwrap())];
@@ -266,9 +271,7 @@ fn a_taxonomy_refusal_of_a_later_batch_follows_no_byte_of_the_library() {
     for outfmt in ["13", "14", "15", "16"] {
         let what = format!("outfmt {outfmt}");
         let library = search(&dir, true, db, &query, outfmt, &env, &[]);
-        refused(&what, &library, TAXDB_REFUSAL);
         let cli = search(&dir, false, db, &query, outfmt, &env, &[]);
-        refused(&format!("{what}, the command line"), &cli, TAXDB_REFUSAL);
         same_as_command_line(&what, &library, &cli);
     }
     let library = search(&dir, true, db, &query, "5", &env, &[]);
@@ -283,12 +286,11 @@ fn a_taxonomy_refusal_of_a_later_batch_follows_no_byte_of_the_library() {
     same_as_command_line("outfmt 5", &library, &cli);
 }
 
-/// The hold changes no byte of a run that nothing refuses: `db/sprot_mixtax` has a sequence, never
-/// hit, with the taxid whose name would be refused, so the run holds its output (DECISIONS 32 of
-/// line OF) and writes what NCBI BLAST+ 2.17.0 writes (`mixtax_blastx_badname_{15,16}`), through
-/// the library too.
+/// `db/sprot_mixtax` has a sequence, never hit, with the taxid whose name has bytes >= 0x80: the run
+/// writes what NCBI BLAST+ 2.17.0 writes (`mixtax_blastx_badname_{15,16}`; NCBI never looks that taxid
+/// up), through the library too.
 #[test]
-fn a_held_library_run_that_nothing_refuses_writes_ncbis_bytes() {
+fn a_library_run_with_an_unreported_taxonomy_name_writes_ncbis_bytes() {
     let dir = TempDir::new("mixtax");
     let taxdb = engine().join("tests/seqdb/taxdb/high_bytes_utf8");
     let env = [("BLASTDB", taxdb.to_str().unwrap())];

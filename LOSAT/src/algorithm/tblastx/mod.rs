@@ -6,6 +6,7 @@
 
 // NCBI c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
+mod anchored;
 mod archive;
 pub mod args;
 pub mod blast_aascan;
@@ -51,6 +52,7 @@ mod x_scan_bf;
 // The lookup scan without a branch on the presence vector, used by TBLASTN, BLASTP, BLASTX and
 // TBLASTX (moved from `tblastn`, SW6 item 3).
 pub(crate) mod x_aascan_bf;
+pub(crate) mod x_scan_byte;
 // EXPERIMENT (LOSAT_X_TBXBOARD): units and link groups handed out by one board per search.
 pub mod x_seed_bucket;
 pub(crate) mod x_work_board;

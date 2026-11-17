@@ -733,10 +733,10 @@ impl DeflineFields {
             let tax_id = defline.taxid.unwrap_or(0);
             fields.tax_id = tax_id.to_string();
             if wants(b"LBKS") {
-                match source.tax_names(tax_id)? {
+                match source.tax_names(tax_id)?.names() {
                     Some(names) => {
-                        fields.scientific_name = names.scientific_name;
-                        fields.common_name = names.common_name;
+                        fields.scientific_name = names.scientific_name.clone();
+                        fields.common_name = names.common_name.clone();
                         fields.blast_name = check_name(&names.blast_name);
                         fields.super_kingdom = check_name(&names.super_kingdom);
                     }
@@ -767,7 +767,7 @@ impl DeflineFields {
                     fields
                         .leaf_node_common_names
                         .extend_from_slice(separator.as_bytes());
-                    match source.tax_names(tax_id)? {
+                    match source.tax_names(tax_id)?.names() {
                         Some(names) => {
                             fields
                                 .leaf_node_scientific_names

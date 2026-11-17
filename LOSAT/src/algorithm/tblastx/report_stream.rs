@@ -39,7 +39,8 @@
 //!   list, record, statistics and warnings, the subjects and the options. The writers write the
 //!   queries in order, so the reports of consecutive batches written one after the other are the
 //!   reports of all of them (outfmt 0 writes a window of queries at a time already, ID4t fix
-//!   2a).
+//!   2a). Formats 1 to 4 are outfmt 0 with another alignment section, made from the query's
+//!   aligned hits and records alone (`report::query_anchored`).
 //! - a database's reported sequences are numbered by rank among the sequences that the lists of
 //!   the call name (`database::reported_subjects`); the rank only indexes the call's records,
 //!   titles and ids, and every comparison is already made (the lists are final), so a rank among
@@ -70,8 +71,18 @@
 //!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
 //!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
 //!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
-//!   stream is written yet. With one batch (the first batch takes every query record) nothing can
-//!   come after it, so the stream does not act and nothing is checked. LOSAT's internal
+//!   stream is written yet. Formats 1 to 4 (line RG T3c fix 1, `check`): the exception of NCBI's
+//!   merge in a query's section (a query record that is also a `-subject` record,
+//!   `query_anchored::write_section`) is NCBI's error, after the reports of the batches before and
+//!   of the batch's queries before, and the query's report up to its description table, without
+//!   the epilog, as NCBI's; the refusal of a `-db` sequence whose generated id (`lcl|Query_N`) is
+//!   that of a query of its batch (NCBI's scope is the batch's, `ResetScopeHistory`) comes before
+//!   that batch's first byte, after the batches before. Under `-parse_deflines` a `-db` sequence
+//!   with the id of a query of the run turns the stream off (`Off::Database`), so its refusal
+//!   (`common::database::refuse_reported_ids_of_queries`, in the batch that reports it) comes
+//!   before the first batch's reports. With one batch (the
+//!   first batch takes every query record) nothing can come after it, so the stream does not act
+//!   and nothing is checked. LOSAT's internal
 //!   invariant errors and panics are not argued; a write error of the output stops the run where
 //!   it happens (at the end without the stream).
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
@@ -83,7 +94,7 @@
 //! Off (the reports after the loop): outputs other than one format of the command line or ABI v1
 //! (the hit records and the format observer of the Web adapter, whose HSP numbers count over the
 //! whole search; a file sink, created when its report is written; two or more formats, which the
-//! library API allows on one stream); formats other than 0, 6 and 7 (the BLAST XML documents,
+//! library API allows on one stream); formats other than 0 to 4, 6 and 7 (the BLAST XML documents,
 //! the Seq-annots and the archive, whose framing and refusals are not argued here); the tabular
 //! reports with a field list or a delimiter and outfmt 10 and 20 (`Off::CustomTabular`: their
 //! refusals of a subject, a name of the taxonomy database or a definition line's ids, must come
@@ -115,7 +126,7 @@ pub(super) enum Off {
     OneBatch,
     /// Hit records, a format observer, a file sink, or two or more formats.
     Outputs,
-    /// A format other than 0, 6 and 7.
+    /// A format other than 0 to 4, 6 and 7.
     Format,
     /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
     /// (`TblastxOutputFormat::CustomTabular`), which is written after the loop (the module
@@ -208,7 +219,16 @@ pub(super) fn check(
     if let report::TblastxOutputFormat::CustomTabular(_) = format {
         return Err(Off::CustomTabular);
     }
-    if !(format == report::TblastxOutputFormat::Pairwise || format.is_tabular()) {
+    // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): NCBI's exception of a
+    // section's merge comes where NCBI's does (`query_anchored::write_section`), and the refusal of
+    // a `-db` sequence whose generated id is that of a query of its batch
+    // (`anchored::refuse_anchored_reports`) before that batch's first byte, after the batches
+    // before, as NCBI's error in a later batch's format (DECISIONS T3a-7 (2) of line RG, BLASTN's
+    // and BLASTP's per batch and block). Under `-parse_deflines` the database check below turns
+    // the stream off for a sequence with the id of a query of the run (`database_check`), whose
+    // refusal in the batch loop (`common::database::refuse_reported_ids_of_queries`) then comes
+    // before the first batch's reports.
+    if !(format.is_pairwise() || format.is_tabular()) {
         return Err(Off::Format);
     }
     if writes_debug_output() {
@@ -281,7 +301,7 @@ pub(super) fn check(
     }
 }
 
-/// The `-db` part of `check` for the report `format` (0, 6 or 7): a database with parsed Seq-ids
+/// The `-db` part of `check` for the report `format` (0 to 4, 6 or 7): a database with parsed Seq-ids
 /// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
 /// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
 /// loop, as blastn's), a run whose prefetch NCBI's taxonomy cache refuses is not streamed
@@ -297,7 +317,7 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let pairwise = format == report::TblastxOutputFormat::Pairwise;
+    let pairwise = format.is_pairwise();
     let shown = crate::algorithm::common::database::ParsedShown {
         tabular: format.tabular_reads_subject(),
         pairwise,
@@ -362,7 +382,7 @@ mod tests {
         };
         let formats = [
             report::TblastxOutputFormat::Tabular,
-            report::TblastxOutputFormat::Pairwise,
+            report::TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
         ];
         let answers = |pool: &SearchPool<'_>| {
             ["nucl_v5", "nrefuse_v5"].map(|name| {

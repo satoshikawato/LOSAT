@@ -1773,7 +1773,7 @@ fn push_ops(ops: &mut Vec<(u8, u32)>, op: u8, n: u32) {
 // No NCBI counterpart: vector instruction wrappers (one operation on all lanes); they do not
 // change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
-mod arch {
+pub(crate) mod arch {
     use core::arch::x86_64::*;
     pub type V = __m128i;
     #[inline(always)]
@@ -2004,12 +2004,45 @@ mod arch {
     pub unsafe fn packs32(a: V, b: V) -> V {
         _mm_packs_epi32(a, b)
     }
+    // The wrappers below are used by tblastn's 128-bit translation (`tblastn/x_subject_translate.rs`)
+    // on x86-64 and wasm32 only; the aarch64 layer does not have them.
+    /// 16-bit lanes shifted left by `n` bits (`n < 16`).
+    #[inline(always)]
+    pub unsafe fn shl16n(v: V, n: u32) -> V {
+        _mm_sll_epi16(v, _mm_cvtsi32_si128(n as i32))
+    }
+    /// 16-bit lanes shifted right (logical) by `n` bits (`n < 16`).
+    #[inline(always)]
+    pub unsafe fn shr16n(v: V, n: u32) -> V {
+        _mm_srl_epi16(v, _mm_cvtsi32_si128(n as i32))
+    }
+    /// 32-bit lanes shifted right (logical) by `N` bits.
+    #[inline(always)]
+    pub unsafe fn shr32<const N: i32>(v: V) -> V {
+        _mm_srli_epi32::<N>(v)
+    }
+    /// The low 16 bits of the products of the 16-bit lanes.
+    #[inline(always)]
+    pub unsafe fn mullo16(a: V, b: V) -> V {
+        _mm_mullo_epi16(a, b)
+    }
+    /// 8-bit lanes: all ones where equal, zero elsewhere.
+    #[inline(always)]
+    pub unsafe fn eq8(a: V, b: V) -> V {
+        _mm_cmpeq_epi8(a, b)
+    }
+    /// The bytes of `b` where `mask`'s byte is all ones, those of `a` where it is zero (`mask` has
+    /// no other bytes).
+    #[inline(always)]
+    pub unsafe fn blend8(a: V, b: V, mask: V) -> V {
+        _mm_blendv_epi8(a, b, mask)
+    }
 }
 
 // No NCBI counterpart: vector instruction wrappers (one operation on all lanes); they do not
 // change any value NCBI computes.
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-mod arch {
+pub(crate) mod arch {
     use core::arch::wasm32::*;
     pub type V = v128;
     #[inline(always)]
@@ -2238,6 +2271,39 @@ mod arch {
     #[inline(always)]
     pub unsafe fn packs32(a: V, b: V) -> V {
         i16x8_narrow_i32x4(a, b)
+    }
+    // The wrappers below are used by tblastn's 128-bit translation (`tblastn/x_subject_translate.rs`)
+    // on x86-64 and wasm32 only; the aarch64 layer does not have them.
+    /// 16-bit lanes shifted left by `n` bits (`n < 16`).
+    #[inline(always)]
+    pub unsafe fn shl16n(v: V, n: u32) -> V {
+        i16x8_shl(v, n)
+    }
+    /// 16-bit lanes shifted right (logical) by `n` bits (`n < 16`).
+    #[inline(always)]
+    pub unsafe fn shr16n(v: V, n: u32) -> V {
+        u16x8_shr(v, n)
+    }
+    /// 32-bit lanes shifted right (logical) by `N` bits.
+    #[inline(always)]
+    pub unsafe fn shr32<const N: i32>(v: V) -> V {
+        u32x4_shr(v, N as u32)
+    }
+    /// The low 16 bits of the products of the 16-bit lanes.
+    #[inline(always)]
+    pub unsafe fn mullo16(a: V, b: V) -> V {
+        i16x8_mul(a, b)
+    }
+    /// 8-bit lanes: all ones where equal, zero elsewhere.
+    #[inline(always)]
+    pub unsafe fn eq8(a: V, b: V) -> V {
+        i8x16_eq(a, b)
+    }
+    /// The bytes of `b` where `mask`'s byte is all ones, those of `a` where it is zero (`mask` has
+    /// no other bytes).
+    #[inline(always)]
+    pub unsafe fn blend8(a: V, b: V, mask: V) -> V {
+        v128_bitselect(b, a, mask)
     }
 }
 

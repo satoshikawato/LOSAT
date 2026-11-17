@@ -219,9 +219,9 @@ def is_env_token(token: str) -> bool:
 def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
     """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
     the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
-    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux) and the alias file the run
-    searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files, `-db ALIAS`; its
-    DBLIST names them); None for another cell."""
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux, inflated when FILE ends in .gz) and
+    the alias file the run searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files,
+    `-db ALIAS`; its DBLIST names them); None for another cell."""
     if not cell.startswith("rps-gz:"):
         return None
     body, at, alias = cell.removeprefix("rps-gz:").partition("@")
@@ -248,7 +248,8 @@ def inflate_rps(cell: str) -> Path:
                 continue
             (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
         for extension, file in replaced.items():
-            (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+            data = (rps_dir / file).read_bytes()
+            (target / f"{name}{extension}").write_bytes(gzip.decompress(data) if file.endswith(".gz") else data)
     if alias is not None:
         (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target

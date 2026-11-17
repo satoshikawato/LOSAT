@@ -626,16 +626,14 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
     };
     // Each letter of iupacaa and ncbieaa that converts is its capital's place in
     // `NCBISTDAA_TO_AMINOACID`, which holds all 26 capitals: its letter is the capital itself.
-    let push = |residues: &mut QueryResidues, position: usize, letter: Option<u8>| {
-        match letter {
-            Some(letter) => {
-                residues.gap |= letter == b'-';
-                residues.letters.push(letter);
-            }
-            None => {
-                residues.letters.push(b'X');
-                residues.invalid.push(position);
-            }
+    let push = |residues: &mut QueryResidues, position: usize, letter: Option<u8>| match letter {
+        Some(letter) => {
+            residues.gap |= letter == b'-';
+            residues.letters.push(letter);
+        }
+        None => {
+            residues.letters.push(b'X');
+            residues.invalid.push(position);
         }
     };
     match seq_data {

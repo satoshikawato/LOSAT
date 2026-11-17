@@ -575,11 +575,24 @@ pub fn write_marked(
     match warnings {
         Some(warnings) => {
             let QueryWarnings { reads, sink, .. } = warnings;
-            write_reads(report, &posts, query, writer, &mut **sink, reads.as_mut())
+            write_reads(
+                report,
+                &posts,
+                query,
+                &mut unregioned(writer),
+                &mut **sink,
+                reads.as_mut(),
+            )
         }
         // Marks alone post nothing of their own.
         None => writer.write_all(report),
     }
+}
+
+/// Writes `report` to `writer` (each write one insertion of NCBI's; a part of a report that
+/// declares no `Cuts`).
+fn unregioned(writer: &mut dyn Write) -> crate::report::ostream::Unregioned<'_> {
+    crate::report::ostream::Unregioned(writer)
 }
 
 /// The places in a query's report, formatted into a buffer, where NCBI loads a subject and posts
@@ -608,6 +621,9 @@ pub struct HitPosts {
     cut: bool,
     /// The exception that ends the run after these posts (`DocumentPosts::ends_run`).
     ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
+    /// Where NCBI's insertions end in the report, and its regions and flushes
+    /// (`DocumentPosts::cuts`).
+    cuts: crate::report::ostream::Cuts,
 }
 
 impl HitPosts {
@@ -646,8 +662,10 @@ impl HitPosts {
             posts,
             cut,
             ends_run,
+            cuts,
         } = posts;
         self.document.extend(posts);
+        self.cuts.extend(cuts);
         self.cut |= cut;
         if ends_run.is_some() {
             self.ends_run = ends_run;
@@ -663,23 +681,25 @@ impl HitPosts {
     /// bytes before it: `read` of its subject (the model's text, to `sink`; `writer` is the
     /// report) and the texts the writer made there, to `sink` after `writer` is flushed; the
     /// document's posts (`document`) likewise at their places.
+    /// The report's bytes are written as NCBI inserts them (`ostream::Cuts`, `cuts`).
     pub fn write(
         &self,
         report: &[u8],
-        writer: &mut dyn Write,
+        writer: &mut dyn crate::report::ostream::ReportWrite,
         sink: &mut dyn Write,
         mut read: impl FnMut(u32, &mut dyn Write, &mut dyn Write) -> io::Result<()>,
     ) -> io::Result<()> {
         let (mut index, mut from) = (0, 0);
         let mut document = self.document.iter().peekable();
+        let mut cuts = self.cuts.cursor();
         let mut written = 0;
         for &(at, subject) in &self.marks {
             while let Some(post) = document.next_if(|post| post.at < at) {
-                writer.write_all(&report[written..post.at])?;
+                cuts.write(writer, report, written, post.at)?;
                 written = post.at;
                 write_after(writer, &mut *sink, &post.text)?;
             }
-            writer.write_all(&report[written..at])?;
+            cuts.write(writer, report, written, at)?;
             written = at;
             read(subject, writer, &mut *sink)?;
             let end = self.ends[index];
@@ -689,11 +709,11 @@ impl HitPosts {
             write_after(writer, &mut *sink, texts)?;
         }
         for post in document {
-            writer.write_all(&report[written..post.at])?;
+            cuts.write(writer, report, written, post.at)?;
             written = post.at;
             write_after(writer, &mut *sink, &post.text)?;
         }
-        writer.write_all(&report[written..])
+        cuts.write(writer, report, written, report.len())
     }
 }
 
@@ -703,7 +723,7 @@ impl HitPosts {
 pub fn write_document_posts(
     report: &[u8],
     posts: crate::report::blast_xml::DocumentPosts,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();
@@ -720,7 +740,7 @@ pub fn write_hit_posts(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     match warnings {
@@ -756,34 +776,48 @@ pub fn write_hit_posts(
 /// no read after its last `Hit` (`DocumentPosts::cut`) moves the texts of the later reads
 /// (`ReadCursor::cut`); an exception of NCBI's XML stream that ends the run is returned after the
 /// posts (`blast_xml::writer::run_ending_exception`), and no text of a read is written after it.
+/// A failed write of the report's stream that NCBI's writer catches
+/// (`ostream::is_caught_report_write_failure`: an `Iteration` of BLAST XML, whose post the stream
+/// made) ends the report there as a cut one (no later `Hit` is made, nor its subject loaded); the
+/// run goes on.
 pub fn write_posts_to(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     sink: &mut dyn Write,
     mut reads: Option<&mut ReadCursor<'_>>,
 ) -> Result<()> {
-    write_reads(
+    let caught = match write_reads(
         report,
         hits,
         query,
         writer,
         &mut *sink,
         reads.as_deref_mut(),
-    )?;
+    ) {
+        // The catch returns to the formatter, whose region the next insertions are in.
+        Err(error) if crate::report::ostream::is_caught_report_write_failure(&error) => {
+            writer.site(crate::report::ostream::Site::Report)?;
+            true
+        }
+        written => {
+            written?;
+            false
+        }
+    };
     if let Some(cursor) = reads {
-        if hits.ends_run.is_some() {
+        if hits.ends_run.is_some() && !caught {
             cursor.end_run();
-        } else if hits.cut {
+        } else if hits.cut || caught {
             cursor.cut(query, writer, sink)?;
         }
     }
     match &hits.ends_run {
-        Some(thrown) => Err(crate::report::blast_xml::writer::run_ending_exception(
+        Some(thrown) if !caught => Err(crate::report::blast_xml::writer::run_ending_exception(
             thrown,
         )),
-        None => Ok(()),
+        _ => Ok(()),
     }
 }
 
@@ -792,7 +826,7 @@ fn write_reads(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     sink: &mut dyn Write,
     mut reads: Option<&mut ReadCursor<'_>>,
 ) -> io::Result<()> {
@@ -1491,6 +1525,8 @@ mod tests {
             Ok(())
         }
     }
+
+    impl crate::report::ostream::ReportWrite for Log {}
 
     #[test]
     fn the_texts_of_the_reads_follow_the_report_up_to_each_read() {

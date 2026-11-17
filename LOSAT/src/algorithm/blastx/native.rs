@@ -221,8 +221,18 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
-    } else if let Some(e) = error.downcast_ref::<io::Error>() {
+    } else if let Some(e) = error
+        .downcast_ref::<io::Error>()
+        .filter(|e| e.kind() == io::ErrorKind::BrokenPipe)
+    {
+        // A write to a closed pipe, which NCBI's SIGPIPE ends: reported as before the report
+        // stream until line RG's question T6-Q1 (`ostream::ClosedPipe`).
         output_error(io::Error::new(e.kind(), e.to_string()))
+    } else if error.downcast_ref::<io::Error>().is_some() {
+        // Any other error carried as an `io::Error` is LOSAT's own (an internal error of a
+        // formatter, `report::query_anchored::internal`): only the report stream's failure is
+        // NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
+        error
     } else {
         engine(error)
     }
@@ -496,13 +506,11 @@ fn run_inner(
         true => {
             let report = device.handle();
             crate::cli::NcbiOstream::before_report(
-                Box::new(
-                    held.insert(super::blast_xml::HeldOutput::new(
-                        Box::new(device),
-                        side_files.clone(),
-                    ))
-                    .clone(),
-                ),
+                held.insert(
+                    super::blast_xml::HeldOutput::new(Box::new(device), side_files.clone())
+                        .with_report(report.clone()),
+                )
+                .clone(),
                 report,
             )
         }
@@ -2389,7 +2397,7 @@ fn write_run_error_archive(
             handle,
             error,
             &lines,
-            &mut destination,
+            &mut crate::report::ostream::Unregioned(&mut destination),
         );
         let _ = destination.flush();
     }
@@ -3160,6 +3168,21 @@ mod archive_error_tests {
         let engine_error = archive_error(anyhow::anyhow!("something else"));
         assert!(engine_error.downcast_ref::<NativeError>().is_some());
         assert!(archive::error_lines(&engine_error, false).is_some());
+    }
+
+    /// Line RG T3c review 3 N4: an internal error of a formatter carried as an `io::Error`
+    /// (`report::query_anchored::internal`) is LOSAT's own error, not NCBI's "BLAST failed to
+    /// write output" (exit status 6): that is the report stream's failure alone
+    /// (`ReportStream::finish`), and a closed pipe until line RG's T6-Q1.
+    #[test]
+    fn only_the_report_streams_failure_is_the_output_error() {
+        let internal = report_error(
+            io::Error::other("LOSAT internal error: a query-anchored segment without a row").into(),
+        );
+        assert!(internal.downcast_ref::<NativeError>().is_none());
+        assert!(internal.downcast_ref::<io::Error>().is_some());
+        let pipe = report_error(io::Error::from(io::ErrorKind::BrokenPipe).into());
+        assert_eq!(pipe.downcast_ref::<NativeError>().map(|e| e.exit), Some(6));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the

@@ -181,7 +181,7 @@ pub(super) fn write_seqalign(
     //         }
     // ```
     // The Seq-annot of each query with alignments (`seqalign`).
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let subjects = match (
         listed_subjects.as_ref(),
         pairwise_database.as_ref(),
@@ -263,7 +263,7 @@ pub(super) fn write_archive(
         .archive
         .as_ref()
         .expect("a BLAST archive request has its handle");
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let subject_names = match (
         listed_subjects.as_ref(),
         pairwise_database.as_ref(),
@@ -453,7 +453,7 @@ pub(super) fn write_xml(
             return Ok(());
         }
     };
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let xml_stats = query_stats();
     // The messages of each query's result: the same ones the warnings of the other
     // formats write (`query_warning_lines`).

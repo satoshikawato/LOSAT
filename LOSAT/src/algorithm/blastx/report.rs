@@ -2483,7 +2483,7 @@ pub(crate) fn write_prolog(
 //     }
 // ```
 pub(crate) fn write_epilog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],

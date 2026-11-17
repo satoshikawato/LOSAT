@@ -237,9 +237,22 @@ impl<'b> JsonEncoder<'b> {
 }
 
 impl Encoder for JsonEncoder<'_> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::Json);
+
     /// `m_EnforceWritingDefaults = true` (the constructor, quoted in the module).
     fn writes_defaults(&self) -> bool {
         true
+    }
+
+    /// The document so far (`Traced` follows NCBI's buffer over it).
+    fn held(&self) -> &[u8] {
+        self.out
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        sink.write_all(&self.out[..count])?;
+        self.out.drain(..count);
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:137-150

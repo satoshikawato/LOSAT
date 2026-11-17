@@ -545,6 +545,13 @@ impl<E: Encoder, P> Traced<E, P> {
         stack
     }
 
+    /// The writes of NCBI's buffer of the document to its output so far (`OutBuffer::pieces`):
+    /// NCBI's insertions of it into the report's stream; none for a stream without a model of its
+    /// buffer.
+    pub fn pieces(&self) -> &[usize] {
+        self.buffer.as_ref().map_or(&[], OutBuffer::pieces)
+    }
+
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
     pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
         self.take_posted()
@@ -676,7 +683,27 @@ impl<E: Encoder, P> Traced<E, P> {
     }
 
     /// Hands on the bytes of the document up to `target` (bytes from its start).
+    /// Each of NCBI's writes of its buffer (`pieces`) is handed on by itself: one insertion of
+    /// NCBI's into the report's stream (`ostream::ReportStream`).
     fn hand_to(&mut self, sink: &mut dyn std::io::Write, target: u64) -> std::io::Result<()> {
+        let mut end = 0u64;
+        let ends: Vec<u64> = self
+            .pieces()
+            .iter()
+            .map(|&piece| {
+                end += piece as u64;
+                end
+            })
+            .filter(|&end| end > self.handed && end < target)
+            .collect();
+        for end in ends {
+            self.hand_piece(sink, end)?;
+        }
+        self.hand_piece(sink, target)
+    }
+
+    /// Hands on the bytes of the document up to `target`, in one hand-on.
+    fn hand_piece(&mut self, sink: &mut dyn std::io::Write, target: u64) -> std::io::Result<()> {
         if target > self.handed {
             let count = (target - self.handed) as usize + std::mem::take(&mut self.foreign);
             // NCBI's buffer never writes more than the encoder holds: a larger count is a model
@@ -812,6 +839,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Traced<E, P> {
             }
         }
         if all {
+            if let Some(written) = self.buffer.as_ref().map(OutBuffer::written) {
+                self.hand_to(sink, written)?;
+            }
             self.foreign = 0;
             return self.inner.flush_to(sink, true);
         }

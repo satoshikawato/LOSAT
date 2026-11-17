@@ -787,8 +787,12 @@ impl ReportOutputs<'_> {
                 let _ = out.make();
             }
             let mut writer = format.sink.open()?;
-            let written = crate::report::archive::write_error_archive(handle, &lines, &mut writer)
-                .and_then(|()| writer.flush().map_err(anyhow::Error::from));
+            let written = crate::report::archive::write_error_archive(
+                handle,
+                &lines,
+                &mut crate::report::ostream::Unregioned(&mut writer),
+            )
+            .and_then(|()| writer.flush().map_err(anyhow::Error::from));
             if result.is_ok() {
                 written?;
             }

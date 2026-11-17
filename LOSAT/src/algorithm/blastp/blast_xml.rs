@@ -26,8 +26,6 @@
 //! (`PrintOneResultSet` is called once per query's result set, the accumulated lists hold that
 //! one query.)
 
-use std::io::Write;
-
 use anyhow::{bail, Context, Result};
 
 use super::blast_engine::query_rows::QueryRows;
@@ -81,7 +79,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     document: &mut W,
     hit_lists: &[Option<BlastpHitList>],
     rows: &mut QueryRows<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let program = xml.program;

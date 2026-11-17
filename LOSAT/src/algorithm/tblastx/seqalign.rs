@@ -46,8 +46,6 @@
 //!                                                seqid_list,
 //! ```
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::blast_engine::TblastxHsp;
@@ -155,7 +153,7 @@ pub(crate) fn query_records_of<'a>(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tblastx_seqalign(
     format: SerialFormat,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     hits: &[TblastxHsp],
     engine: &[(u32, u32)],
     queries: &[FastaRecord],

@@ -39,8 +39,6 @@
 //!             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
 //! ```
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::hsp::BlastpHitList;
@@ -103,7 +101,7 @@ pub(crate) fn write_blastp_seqalign(
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
     engine_counts: &EngineCounts,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {

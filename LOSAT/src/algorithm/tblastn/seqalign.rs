@@ -35,8 +35,6 @@
 //!             }
 //! ```
 
-use std::io::Write;
-
 use anyhow::{Context, Result};
 
 use super::stage_d_results::KappaResultHitList;
@@ -57,7 +55,7 @@ use crate::report::serial::{write_query_to, SerialFormat};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_tblastn_seqalign(
     format: SerialFormat,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,

@@ -184,6 +184,24 @@ impl SideFiles for FsSideFiles {
         self.name(&self.listed_base, n)
     }
 
+    /// Writes the n-th report to its file as NCBI's object stream and `CNcbiOfstream` write it
+    /// (`ostream::write_side_file`): NCBI's pieces of the document (`out_buffer::xml_pieces`,
+    /// `json_pieces`) through the file's buffer, so that a failed write ends as NCBI's does.
+    fn write_file(&mut self, n: u32, report: &[u8]) -> anyhow::Result<()> {
+        use crate::report::serial::out_buffer::{json_pieces, xml_pieces, Stream};
+        let file = std::fs::File::create(self.path(n))
+            .map_err(|_| super::framing::side_file_open_error())?;
+        let (pieces, stream) = if self.extension == ".xml" {
+            (
+                xml_pieces(report, super::writer::is_string_element),
+                Stream::Xml,
+            )
+        } else {
+            (json_pieces(report), Stream::Json)
+        };
+        crate::report::ostream::write_side_file(file, report, &pieces, stream.back_limit())
+    }
+
     /// Opens the side file of the n-th report as NCBI does when it writes the report, without
     /// leaving a mark: a path that exists is opened for writing and not truncated (a directory or a
     /// file without write permission fails), a path that does not exist is created and removed. The

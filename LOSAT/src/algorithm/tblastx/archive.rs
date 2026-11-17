@@ -26,7 +26,6 @@
 //! +1: 0 when that context is not valid), which is the `EffectiveSearchSpace` option of the
 //! batch (`SplitQuery_SetEffectiveSearchSpace`, `BlastOptions` memento: the first context).
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -365,7 +364,7 @@ pub(super) fn write_tblastx_archives(
     handle: &ArchiveHandle,
     data: &ArchiveData<'_>,
     warnings: &mut QueryWarnings<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,

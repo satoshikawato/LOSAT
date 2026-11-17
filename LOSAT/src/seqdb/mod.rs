@@ -200,6 +200,13 @@ pub enum SeqDbError {
     Integrity { path: PathBuf, message: String },
     /// A valid database that needs something LOSAT does not read.
     Unsupported { path: PathBuf, message: String },
+    /// A file that NCBI BLAST+ crashes on where it reads it (an ISAM whose header does not fit its
+    /// files, as an empty `.psi` or `.psd`: NCBI's constructor reads its index bounds whatever
+    /// `x_InitSearch` returned, `isam_num::NumericIsam::open_volume`; probe I of line BDC, review 4
+    /// of line DBID loadord), which LOSAT refuses as an `Unsupported` database: the text of one
+    /// whose message is `message` followed by [`NCBI_CRASHES_ON_IT`]
+    /// ([`SeqDbError::ncbi_crashes`]).
+    NcbiCrashes { path: PathBuf, message: String },
     /// A request outside the database (ordinal id, block range).
     Range(String),
     /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
@@ -222,10 +229,20 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Unsupported { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
+            SeqDbError::NcbiCrashes { path, message } => write!(
+                f,
+                "{}: unsupported database: {} {NCBI_CRASHES_ON_IT}",
+                path.display(),
+                message
+            ),
             SeqDbError::Ncbi(exception) => f.write_str(exception.what().trim_end()),
         }
     }
 }
+
+/// The end of the text of LOSAT's refusal of a database file that NCBI BLAST+ crashes on where it
+/// reads it ([`SeqDbError::NcbiCrashes`]).
+pub const NCBI_CRASHES_ON_IT: &str = "(NCBI crashes on it)";
 
 impl SeqDbError {
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
@@ -233,6 +250,13 @@ impl SeqDbError {
     /// with `-parse_seqids`; `SeqDb::read_header`).
     pub fn is_parsed_seqids(&self) -> bool {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
+    }
+
+    /// Whether this is LOSAT's refusal of a file that NCBI BLAST+ crashes on where it reads it
+    /// ([`SeqDbError::NcbiCrashes`]; review 5 of line DBID loadord, L4: the variant, not the text,
+    /// says it).
+    pub fn ncbi_crashes(&self) -> bool {
+        matches!(self, SeqDbError::NcbiCrashes { .. })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
@@ -371,6 +395,7 @@ impl SeqDbError {
             SeqDbError::Io { .. }
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
+            | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
         }
@@ -1274,7 +1299,7 @@ impl SeqDb {
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
         if db.is_version5() {
             match db.lmdb_entries() {
-                Ok(_) | Err(SeqDbError::Unsupported { .. }) => {}
+                Ok(_) | Err(SeqDbError::Unsupported { .. } | SeqDbError::NcbiCrashes { .. }) => {}
                 Err(error) => return Err(error),
             }
         }

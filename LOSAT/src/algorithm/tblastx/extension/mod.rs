@@ -12,11 +12,16 @@
 
 // The one-hit extension (`-window_size 0`).
 mod one_hit;
+// The query batch the walks go on into past a context's ends.
+mod query_batch;
 mod two_hit;
 // The table walks of the two-hit extension.
 mod x_two_hit_fast;
 
-pub(crate) use one_hit::extend_hit_one_hit;
+pub(crate) use one_hit::{
+    extend_hit_one_hit_alone, extend_hit_one_hit_resume, OneHit, OneHitAlone,
+};
+pub(crate) use query_batch::{Again, InBatch, QueryBatch};
 pub(crate) use two_hit::extend_hit_two_hit_fitting;
 pub(crate) use two_hit::extend_hit_two_hit_with;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.

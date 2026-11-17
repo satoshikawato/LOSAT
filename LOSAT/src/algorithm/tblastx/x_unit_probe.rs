@@ -73,7 +73,7 @@ pub(super) trait XProbe {
     fn batch_end(&mut self);
     /// An extension starts.
     fn ext_begin(&mut self) -> Self::Mark;
-    /// The extension `extend_hit_two_hit_reference(sc, q, s, s_left, s_right, q_right, x_drop,
+    /// The extension `extend_hit_two_hit_reference(sc, q, qb, s, s_left, s_right, q_right, x_drop,
     /// false)` (the search's scores and word length) ended.
     #[allow(clippy::too_many_arguments)]
     fn ext_end<M: TbxScore>(

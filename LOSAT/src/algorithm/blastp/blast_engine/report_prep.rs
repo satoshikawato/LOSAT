@@ -198,6 +198,7 @@ pub(super) fn prefetch_reported_subjects(
         args,
         outputs,
         reports,
+        ranges,
         query_batches,
         database,
         listed_titles,
@@ -341,8 +342,56 @@ pub(super) fn prefetch_reported_subjects(
     // (blast_format.cpp:1523-1541), so they read the subjects in one order.
     let pairwise_first = first_report
         .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
-    // Outfmt 5 first: a later batch's prefetch stop asks whether a report before it was cut
-    // (`shared::XmlReportsBefore`), from the reads of the queries' reports modelled here.
+    // The query records that NCBI's scope holds at the prefetch of the batch of the searched
+    // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): psiblast's round
+    // of a query gives its query's batch (`BlastpReports::prefetch_scope`); the PSSM's query of
+    // `-in_pssm` (`PsiSearch::query_scope`); else the input records that NCBI's reader added for
+    // the batch (`RangedBatch::input`: the records that `-query_loc` drops included, numbered in
+    // the run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
+    // (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those of the batches before.
+    let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
+    let batch_scope = |span: &std::ops::Range<usize>| {
+        if let Some(scope) = reports.prefetch_scope {
+            return scope();
+        }
+        if let Some(psi) = args.psi_search.as_deref() {
+            return psi.query_scope();
+        }
+        let input = query_batches
+            .iter()
+            .find(|batch| batch.searched == *span)
+            .map_or(0..0, |batch| batch.input.clone());
+        let input = if xml_scope { 0..input.end } else { input };
+        crate::blastinput::query_batch::QueryScope::of_shown_records(&ranges.input_records[input])
+    };
+    // A call of the library's batches after the first (`api::run_batches`): the calls before
+    // searched with a database of their own, whose loads nothing here records.
+    let unrecorded_calls = args.first_query_ordinal > 0;
+    // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
+    // formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a
+    // custom tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
+    let rows = match format_plans.first() {
+        Some(BlastpReport::CustomTabular(spec)) => {
+            spec.subject_fetch(crate::blastinput::app::Program::Blastp)
+        }
+        _ => crate::report::tabular::SubjectFetch::Every,
+    };
+    // The Seq-aligns of the batch of the searched queries `span`, one for each HSP of its results
+    // (psiblast's before the cut, `psiblast_hits_found`), which `PRE_FETCH_SEQS_LIMIT` counts
+    // (`shared::prefetch_off`; as `batch_prefetch` counts them).
+    let batch_seq_aligns = |span: std::ops::Range<usize>| -> usize {
+        match psiblast_hits_found.as_ref() {
+            Some(found) => found[span].iter().sum(),
+            None => blastp_hit_list_hsp_count(&hit_lists[span]),
+        }
+    };
+    // Outfmt 5 first: whether NCBI's XML stream cuts a query's report before its hits
+    // (`shared::XmlCuts`), the one answer for the run's record of the batches' loads (`loaded`:
+    // a cut report loads nothing) and for a later batch's prefetch stop, which asks for the texts
+    // that the cut reports left (`shared::XmlReportsBefore`, from the reads of the queries'
+    // reports modelled here).
     let xml_first = first_report == Some(crate::blastinput::app::ReportFormat::Xml);
     let xml_cut = |query: usize| {
         query_records.get(query).is_some_and(|record| {
@@ -355,6 +404,49 @@ pub(super) fn prefetch_reported_subjects(
             )
         })
     };
+    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(xml_first, &xml_cut);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted at
+    // `shared::batch_loads`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813 (quoted at
+    // `shared::BatchLoads`: the tabular report reads the Seq-aligns after the cut to the hitlist
+    // size)
+    // The subjects, by rank, that NCBI's BLAST database data loader loaded for the call's batches
+    // before the searched query `start` (`shared::LoadedBefore::subjects`, review 3 of line DBID
+    // loadord, H2): a batch whose prefetch is on loads the subjects of its Seq-aligns (psiblast's
+    // of its traceback hit lists, `prefetched_ranks`, beyond `-max_target_seqs`); one whose
+    // prefetch is off, those that the rows of the reports NCBI writes read, of the hit lists
+    // they show (after psiblast's cut, `ListedTitles::fetched_ranks`; review 6, H1; none of an
+    // outfmt 5 report that NCBI's XML stream cut, `xml_cuts`: review 6, H2), and the subjects
+    // that psiblast's PSSM includes (`PssmReads::one_by_one`, where a PSSM is made). Made only
+    // where the batch at `start` stops, and for the run's record of psiblast's rounds where a
+    // prefetch of the run can stop (`ListedTitles::note_loaded`).
+    let loaded = |start: usize| {
+        crate::algorithm::common::database::LoadedBefore {
+            hits: &hit_lists[..start],
+            spans: batch_ranges,
+            rows,
+            cuts: xml_cuts,
+        }
+        .subjects(
+            |hits, span| hits.get(span),
+            move |span, _| batch_seq_aligns(span),
+            move |span, hits, loads| match loads {
+                crate::algorithm::common::database::BatchLoads::Prefetched => {
+                    prefetched_ranks(span)
+                }
+                crate::algorithm::common::database::BatchLoads::Read(rows) => {
+                    let mut ranks: Vec<usize> =
+                        database::ListedTitles::fetched_ranks(hits, rows).collect();
+                    if pssm_made {
+                        for query in span {
+                            ranks.extend_from_slice(pssm_reads.one_by_one(query));
+                        }
+                    }
+                    ranks
+                }
+            },
+        )
+    };
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
@@ -362,22 +454,31 @@ pub(super) fn prefetch_reported_subjects(
         // lookups of the reports of the batches before), whose other subjects' loads write their
         // texts at each `Hit`.
         if let Some(span) = prefetch_stop.as_ref().filter(|_| xml2_prefetch) {
+            let scope = || batch_scope(span);
+            // The loads of the batches before (psiblast's traceback beyond the cut, which no
+            // report reads), beside their reports' lookups, which the stop records as every stop
+            // records the call's loads before it (without the record's gate, f8 decision b of
+            // line DBID loadord; review 5 L3).
             titles.batch_prefetch_stop(
                 database,
                 &hit_lists[..span.start],
+                loaded(span.start),
                 prefetched_ranks(span.clone()),
-                span.start,
+                &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
+                    .after_unrecorded_calls(unrecorded_calls),
             )?;
         } else if let Some(span) = prefetch_stop
             .as_ref()
             .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))
         {
+            let scope = || batch_scope(span);
             // No report's reads are modelled before it (`prefetch_taxids` is off).
             titles.batch_prefetch(
                 database,
+                loaded(span.start),
                 database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
-                span.start,
-                None,
+                &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
+                    .after_unrecorded_calls(unrecorded_calls),
             )?;
         }
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
@@ -388,12 +489,6 @@ pub(super) fn prefetch_reported_subjects(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.looks_up_every_taxid()
             );
-            let rows = match format_plans.first() {
-                Some(BlastpReport::CustomTabular(spec)) => {
-                    spec.subject_fetch(crate::blastinput::app::Program::Blastp)
-                }
-                _ => crate::report::tabular::SubjectFetch::Every,
-            };
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
                     && lists
@@ -407,11 +502,7 @@ pub(super) fn prefetch_reported_subjects(
             };
             for batch in query_batches {
                 let lists = &hit_lists[batch.searched.clone()];
-                // The batch's Seq-aligns, one for each HSP of its results.
-                let seq_aligns = match psiblast_hits_found.as_ref() {
-                    Some(found) => found[batch.searched.clone()].iter().sum(),
-                    None => blastp_hit_list_hsp_count(lists),
-                };
+                let seq_aligns = batch_seq_aligns(batch.searched.clone());
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     if !prefetch_taxids {
                         continue;
@@ -505,11 +596,20 @@ pub(super) fn prefetch_reported_subjects(
                 }
                 // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
                 // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
-                let xml_before =
-                    xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
-                        reads: subject_reads.queries(),
-                        cut: &xml_cut,
-                    });
+                let prefetched = |query: usize| {
+                    prefetch_posts
+                        .iter()
+                        .find(|(first, _)| *first == query)
+                        .map(|(_, posts)| posts)
+                };
+                let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+                let scope = || batch_scope(&batch.searched);
+                let queries = crate::algorithm::common::database::PrefetchQueries::new(
+                    batch.searched.start,
+                    &scope,
+                )
+                .after_unrecorded_calls(unrecorded_calls)
+                .after_xml_reports(xml_before.as_ref());
                 let messages = match psiblast_prefetched.as_ref() {
                     Some(ranks) => {
                         let prefetched = titles.prefetched_ranks(
@@ -520,9 +620,9 @@ pub(super) fn prefetch_reported_subjects(
                         )?;
                         titles.batch_prefetch(
                             database,
+                            loaded(batch.searched.start),
                             prefetched,
-                            batch.searched.start,
-                            xml_before.as_ref(),
+                            &queries,
                         )?
                     }
                     None => {
@@ -534,9 +634,9 @@ pub(super) fn prefetch_reported_subjects(
                         }
                         titles.batch_prefetch(
                             database,
+                            loaded(batch.searched.start),
                             database::ListedTitles::reported_ranks(lists),
-                            batch.searched.start,
-                            xml_before.as_ref(),
+                            &queries,
                         )?
                     }
                 };
@@ -547,6 +647,28 @@ pub(super) fn prefetch_reported_subjects(
                     prefetch_posts.push((batch.searched.start, messages));
                 }
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-264
+        // ```c++
+        //             while (itr) {
+        //
+        //                 SavePssmToFile(pssm, &itr);
+        //     ...
+        //                    results = psiblast->Run();
+        //                    BlastFormatter_PreFetchSequenceData(*results, scope,
+        //                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
+        // ```
+        // Every round prefetches into the one scope of the query's batch, which the formatter
+        // resets after the batch (`ResetScopeHistory`, psiblast_app.cpp:513), and into the one
+        // BLAST database data loader of the run, which keeps every Seq-id it registered
+        // (`RegisterIds`, quoted at `shared::stop_lookup_unsure`).
+        // psiblast's round of a query is a call of its own: the run's record of what its prefetch
+        // (the traceback hit lists, `psiblast_prefetched`), or where it is off its reports and its
+        // PSSM's reads, loaded (`loaded`), for the stop of a later round's or query's prefetch
+        // (`shared::TaxdbRun::note_loaded`, on the database that the rounds share). The call
+        // reaches here where its prefetch did not stop.
+        if reports.psi_round.is_some() {
+            titles.note_loaded(database, || loaded(hit_lists.len()));
         }
     }
     Ok(subject_reads)

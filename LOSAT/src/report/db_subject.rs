@@ -210,7 +210,18 @@ pub enum Prefetched {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LookupFailure {
     message: String,
-    ncbi: bool,
+    ncbi: NcbiFailure,
+}
+
+/// What NCBI's lookup does where LOSAT's fails on a file ([`LookupFailure`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NcbiFailure {
+    /// It throws a `CSeqDBException` with the message (NCBI's own text).
+    Message,
+    /// It throws, with a message that LOSAT does not reproduce.
+    Other,
+    /// It crashes on the file (`SeqDbError::ncbi_crashes`).
+    Crashes,
 }
 
 impl LookupFailure {
@@ -220,11 +231,17 @@ impl LookupFailure {
     /// the format decides (DECISIONS 53 (1) of line DBID).
     pub const NCBI_READS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it";
 
+    /// What NCBI does where its lookup reads a file that it crashes on (an ISAM whose header does
+    /// not fit its files, as an empty `.psi` or `.psd`: SIGSEGV; review 4 of line DBID loadord):
+    /// a run whose lookups never reach it (the sequence was loaded before by another id) goes on.
+    pub const NCBI_CRASHES: &'static str =
+        "NCBI BLAST+ 2.17.0 crashes where its lookup reads that file";
+
     /// NCBI's own message.
     pub fn ncbi(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            ncbi: true,
+            ncbi: NcbiFailure::Message,
         }
     }
 
@@ -232,13 +249,36 @@ impl LookupFailure {
     pub fn losat(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            ncbi: false,
+            ncbi: NcbiFailure::Other,
+        }
+    }
+
+    /// The failure of a lookup with the error `error`: NCBI's message where it is one of NCBI's
+    /// (`SeqDbError::ncbi_message`), NCBI's crash where LOSAT refuses a file that NCBI crashes on
+    /// (`SeqDbError::ncbi_crashes`), else LOSAT's text.
+    pub fn of_error(error: &crate::seqdb::SeqDbError) -> Self {
+        match error.ncbi_message() {
+            Some(message) => Self::ncbi(message),
+            None if error.ncbi_crashes() => Self {
+                message: error.to_string(),
+                ncbi: NcbiFailure::Crashes,
+            },
+            None => Self::losat(error.to_string()),
         }
     }
 
     /// The text NCBI writes after `BLAST Database error: `, where the message is NCBI's own.
     pub fn ncbi_message(&self) -> Option<&str> {
-        self.ncbi.then_some(self.message.as_str())
+        (self.ncbi == NcbiFailure::Message).then_some(self.message.as_str())
+    }
+
+    /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
+    /// [`LookupFailure::NCBI_CRASHES`]), for the reason of LOSAT's refusal.
+    pub fn what_ncbi_does(&self) -> &'static str {
+        match self.ncbi {
+            NcbiFailure::Message | NcbiFailure::Other => Self::NCBI_READS,
+            NcbiFailure::Crashes => Self::NCBI_CRASHES,
+        }
     }
 }
 
@@ -762,7 +802,7 @@ impl ParsedSubject {
             ),
             FoundInstead::Failed(failure) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
-                LookupFailure::NCBI_READS
+                failure.what_ncbi_does()
             ),
             FoundInstead::ThrowsOnId(message) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
@@ -828,7 +868,7 @@ impl ParsedSubject {
             Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
                 "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
                 String::from_utf8_lossy(&self.alignment_fasta()),
-                LookupFailure::NCBI_READS
+                failure.what_ncbi_does()
             )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),
@@ -1810,8 +1850,8 @@ fn defline_tabular_ids(defline: &BlastDefline, word: &[u8]) -> super::tabular::D
 }
 
 /// The subjects of a `-subject` run under `-parse_deflines`, by subject index: `records` gives the
-/// ids (`None`: shown as a record without the option) and title of each. With `pairwise` (outfmt
-/// 0) LOSAT's refusals of `check_pairwise_record`. `program` names the program.
+/// ids (`None`: shown as a record without the option) and title of each. LOSAT's refusals of them
+/// in outfmt 0 are `check_pairwise_records`.
 pub fn parsed_records<'a>(
     records: impl Iterator<
         Item = (
@@ -1820,22 +1860,31 @@ pub fn parsed_records<'a>(
         ),
     >,
     show_gis: bool,
-    protein: bool,
-    pairwise: bool,
-    program: &str,
-) -> anyhow::Result<Vec<Option<std::sync::Arc<ParsedSubject>>>> {
+) -> Vec<Option<std::sync::Arc<ParsedSubject>>> {
     records
         .map(|(ids, title)| {
-            let Some(ids) = ids else {
-                return Ok(None);
-            };
-            let subject = ParsedSubject::of_record(ids, title).showing_gis(show_gis);
-            if pairwise && !subject.shown_as_record() {
-                check_pairwise_record(&subject, protein, program)?;
-            }
-            Ok(Some(std::sync::Arc::new(subject)))
+            ids.map(|ids| {
+                std::sync::Arc::new(ParsedSubject::of_record(ids, title).showing_gis(show_gis))
+            })
         })
         .collect()
+}
+
+/// LOSAT's refusals of outfmt 0 of the subjects of `parsed_records`, in their order: those that
+/// outfmt 0 shows by their parsed ids (`ParsedSubject::shown_as_record`) go through
+/// `check_pairwise_record`. A call passes the result to the refusal of each of its formats that
+/// shows the titles (`FormatRefusal::check`), made right after `parsed_records`; `program` names
+/// the program.
+pub fn check_pairwise_records(
+    subjects: &[Option<std::sync::Arc<ParsedSubject>>],
+    protein: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    subjects
+        .iter()
+        .flatten()
+        .filter(|subject| !subject.shown_as_record())
+        .try_for_each(|subject| check_pairwise_record(subject, protein, program))
 }
 
 /// LOSAT's refusals of a `-subject` record in outfmt 0, as of a database sequence

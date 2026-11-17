@@ -1052,13 +1052,22 @@ impl Core {
         Ok(())
     }
 
-    /// NCBI's buffer writes what it holds (a flush; `tie`: `cerr`'s): that write is pending.
+    /// NCBI's buffer writes what it holds (a flush; `tie`: `cerr`'s): that write is pending. In
+    /// an object that LOSAT inserts in its own pieces (`Site::Serial { whole: true }`: the archive
+    /// in several writes), NCBI's pieces decide where NCBI's writes failed (`resolve_object`):
+    /// the flush's failure is undecided too.
     fn flush_buffer(&mut self, tie: bool) {
         if let Some(buffer) = &mut self.buffer {
             buffer.flush();
         }
         if self.held.len() > self.out {
-            let mut write = self.write_here(true, None);
+            let object = matches!(
+                self.site,
+                Site::Serial { whole: true } | Site::Xml2Report { .. }
+            )
+            .then_some(self.object_start)
+            .flatten();
+            let mut write = self.write_here(true, object);
             write.tie = tie;
             self.pending.push(write);
             self.out = self.held.len();

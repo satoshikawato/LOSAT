@@ -739,7 +739,10 @@ pub fn write_archive<A: AlignSource>(
     use crate::report::ostream::Site;
     let messages = handle.take_messages();
     sink.site(Site::Serial { whole: true })?;
-    let written = write_archive_object(handle, batch, aligns, &messages, sink, diagnostics);
+    // The object and `Close`'s flush: where a device write of either fails, NCBI's pieces of the
+    // object decide NCBI's end (LOSAT writes the archive in pieces of its own).
+    let written = write_archive_object(handle, batch, aligns, &messages, sink, diagnostics)
+        .and_then(|()| sink.ncbi_flush().map_err(Into::into));
     let undecided = written
         .as_ref()
         .err()
@@ -757,7 +760,6 @@ pub fn write_archive<A: AlignSource>(
             .map_err(|error| failed(error.into()))?;
     } else {
         written.map_err(failed)?;
-        sink.ncbi_flush().map_err(|error| failed(error.into()))?;
     }
     sink.site(Site::Report)?;
     Ok(())

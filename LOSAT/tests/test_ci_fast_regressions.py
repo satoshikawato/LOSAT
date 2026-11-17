@@ -138,9 +138,12 @@ class DbSearchFixtureTests(unittest.TestCase):
         by_id = {r["row_id"]: r for r in rows}
         for r in rows:
             if r["kind"] != "ncbi":
+                self.assertFalse(db_fixtures.under_valgrind(r), r["row_id"])
                 continue
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
+            # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.
+            self.assertFalse(near and db_fixtures.under_valgrind(r), r["row_id"])
             if near:
                 source = by_id[near]
                 self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
@@ -155,6 +158,12 @@ class DbSearchFixtureTests(unittest.TestCase):
             err = db_fixtures.FROZEN / f"{frozen}.err"
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
+
+    def test_valgrind_marker_is_a_word_of_covers(self):
+        self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))
+        self.assertTrue(db_fixtures.under_valgrind({"covers": "a|ncbi-valgrind"}))
+        self.assertFalse(db_fixtures.under_valgrind({"covers": "not frozen under ncbi-valgrinds"}))
+        self.assertFalse(db_fixtures.under_valgrind({"covers": "ncbi-near: db.x | expect: valgrind"}))
 
     def test_env_tokens_are_environment_not_arguments(self):
         row = {"extra_args": "BLASTDB=tests/seqdb/taxdb/good BATCH_SIZE=100 -evalue 1e-5 -word_size 3",

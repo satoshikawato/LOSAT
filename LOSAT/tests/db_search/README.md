@@ -136,7 +136,19 @@ FASTA files:
   `x2f_last.faa` the same two in the other order, for the databases `x2f_in` and `x2f_last`.
   `x2f_page.faa` is `x2f_f1` repeated to 4,075 letters, then `x2f_s1`, for the database `x2f_page`, whose
   `.psq` file is exactly 4,096 bytes (1 + 4,076 + 19): a window past `s1`'s NULLB leaves the file's last
-  memory page.
+  memory page. `x2f_pagepad` (line RG J2A, row `db.x2f.bx.pagepad.6`, the expectation of `db.x2f.bx.page.6`) is
+  `x2f_page` with 16 zero bytes after its `.psq` file (4,112 bytes; `.pin` and `.phr` copied unchanged), so that
+  NCBI's window past `s1` reads zeros inside its mapping. `x2f_c0346_q.fna` / `x2f_c0346_s.faa` (case c0346 of the
+  survey, rows `db.x2f.bx.crash.*`; the database `x2f_c0346` of its subject, title `x2f c0346 subject`): windows past
+  the query batch's buffer, where NCBI BLAST+ 2.17.0 exits with SIGSEGV natively; the rows are frozen from NCBI
+  under valgrind.
+
+- The databases `x2_negwin` and `x2_negtail` (rows `db.x2.tblastn.qpast.db.6` and `db.x2.tblastn.frame.db.6`, line
+  RG J2A; titles `x2 negwin subject (VNV in frame 1)` and `x2 negtail subject (VNV at the end of frame -3)`,
+  `-dbtype nucl -blastdb_version 4`, only `.nin .nsq .nhr` kept) are `LOSAT/tests/fasta/outfmt0/x2_negwin_s.fna` and
+  `x2_negtail_s.fna`: the `-db` twins of the rows `db.x2.tblastn.qpast.6` (the query `x2_negpast_q.faa`, 15 letters,
+  whose one-hit windows pass the query batch's buffer) and `db.x2.tblastn.frame.6` (windows past the subject's
+  translation buffer).
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
@@ -166,6 +178,10 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "a filler, then x2f_s1" -blastdb_version 4
     makeblastdb -in tests/db_search/x2f_page.faa -dbtype prot -out tests/db_search/x2f_page \
         -title "a filler of 4,075 letters, then x2f_s1" -blastdb_version 4
+    for x in pin phr; do cp tests/db_search/x2f_page.$x tests/db_search/x2f_pagepad.$x; done
+    { cat tests/db_search/x2f_page.psq; head -c 16 /dev/zero; } > tests/db_search/x2f_pagepad.psq
+    makeblastdb -in tests/db_search/x2f_c0346_s.faa -dbtype prot -out tests/db_search/x2f_c0346 \
+        -title "x2f c0346 subject" -blastdb_version 4
     makeblastdb -in tests/fasta/outfmt0/x2g_c0054_s.faa -dbtype prot -out tests/db_search/x2g_c0054 \
         -title "x2g c0054 subject" -blastdb_version 4
     for n in f0616:x2g_f0616_s.faa f3147:x2g_f3147_s.faa f1144:x2g_f1144_s.faa ms:x2g_ms.faa rk:x2g_rk.faa; do
@@ -260,6 +276,10 @@ Run from `LOSAT/`:
         -title "nucleotide slices of two shrimp viruses" -blastdb_version 4
     makeblastdb -in tests/db_search/tgc4.fna -dbtype nucl -out tests/db_search/tgc4 \
         -title "slices of a genetic code 4 genome" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2_negwin_s.fna -dbtype nucl -out tests/db_search/x2_negwin \
+        -title "x2 negwin subject (VNV in frame 1)" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2_negtail_s.fna -dbtype nucl -out tests/db_search/x2_negtail \
+        -title "x2 negtail subject (VNV at the end of frame -3)" -blastdb_version 4
     rm tests/db_search/tslice.njs tests/db_search/tgc4.njs
 
 TBLASTN tblastn-fast inputs (rows `tfast.*` of `outfmt0_manifest.tsv` and `db.tfast.*`, line DI4: AMRFinderPlus runs

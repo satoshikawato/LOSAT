@@ -111,6 +111,24 @@ FASTA files:
   (`gen_sets.py 11 30`), whose HSPs of length 0 with `-strand minus` make segments of length 0 of a query row,
   where NCBI's `FillUnalignedRegions` frees one that it still reads.
 
+- The database `x2d_a0m` (rows `db.x2d.*`, line RG item X2d; title `x2d a0m subjects`, `-blastdb_version 4`) is the
+  two subjects `LOSAT/tests/fasta/outfmt0/x2d_a0m_s.fna`: `x2d_a0_r0`, whose frame +1 ends with the word W V K and
+  two letters, and `x2d_motif`, a match of the PSSM `LOSAT/tests/fixtures/pssm/x2d_d50.asn.gz`'s rows 18 to 29 (rows from 0).
+  That PSSM scores its `-` column 50 at rows 13 to 15, so with `-window_size 0 -threshold 1` the one-hit alignment
+  of length -1 on that word gets its gapped start on frame +1's NULLB; `x2d_b1m_s.fna` there is the same with
+  `x2d_b1_r0` (the word and one letter: the start one past the NULLB). Made by the line's `gen_x2d.py` (the
+  PSSM's rows of -6 but row 9 at -61, W +60 at row 10, V -60, K +1, S +4 at row 14, the motif MHYFREDQILTA at
+  +25; subjects of random codons without another TGG or any CCA, so that no other frame holds a W).
+
+- The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
+  `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
+  whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's
+  frames for its traceback only from 12 bases (blast_hits.c:1161-1163); with `-window_size 0` the one-hit HSP on `w11`
+  reaches the traceback, which reads the translation never made (NCBI crashes, LOSAT refuses). `xs_*_s.fna` there:
+  the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
+  (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
+  `w11` followed by 21 A, searched in `-subject_loc` 1-11 and 1-12 (NCBI measures the range).
+
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
   one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)
@@ -1453,8 +1471,21 @@ most 9 in BLOSUM62).
   volume (the merge, the per-volume hit list size, outfmt 7's `# N hits found` before the cut, volume 0's K). A row
   `rps-gz:rps_mini3v!01.freq` leaves one volume's `.freq` out (`!00.freq`: the first, which NCBI answers with its
   warning and mode 0).
+- `rps_wide` and `rps_wide_ug.loo.gz` (version 5, PS12m): one profile of 133,000 columns (`gnl|CDD|901`: the first
+  fragment of `rps_mini`, 190 columns, tiled 700 times by `rps/build_wide.py tile`), made by makeprofiledb with
+  `-threshold 20 -force`, so that its table holds the nine words that match exactly (700 hits each, one per tile) and
+  the volume has 65 buckets of 2,048 rows: two groups of the scan of `losat rpsblast` and `rpstblastn` (the first
+  of 64 buckets, `RPS_GROUP_BUCKETS`, the second of one bucket, rows 131,072 to 133,000), and each cell's hits lie in both. Its `.freq` is left out (rows with `-comp_based_stats 0`
+  only) and `.rps.gz` is 113 KB (a 15 MB file of one tile's rows repeated). `rps_wide_ug.loo.gz` is its `.loo` with the
+  hits of the nine cells not in ascending order (reversed, rotated by a third, first and last swapped; `build_wide.py
+  ungroup`), which makeprofiledb never writes: rows `db.rps.ungrouped.6` and `db.rpstbn.ungrouped.6` put it in place
+  of `rps_wide.loo` (`rps-gz:rps_wide!loo=rps_wide_ug.loo.gz`), `db.rps.wide.6` and `db.rpstbn.wide.6` search the
+  table as it is; NCBI's bytes are the same for both (the order of a cell is invisible to its scan), LOSAT regroups
+  the cells when it opens the volume. Queries `tests/fasta/rps/wide.faa` (the 190 residues of the fragment, which hit
+  each tile) and `wide.fna` (their back-translation, `build_nq.py`, seed 21).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE][@ALIAS]` with the files
-  `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
+  `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place, inflated when `FILE`
+  ends in `.gz`), `BLASTDB` set
   to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
   run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
@@ -2016,3 +2047,11 @@ reverse complement as `lcl|q<DEL>1` and `lcl|q<DEL>2`, and `qp.faa` the protein 
 The rows `db.dbtitle.blastn.qdel.8` and `db.dbtitle.blastx.qdel.9` write the title and, with `-parse_deflines`, the query ids
 with `#` and NCBI's 803.7 message for each byte; fasta_input's `blastp.seqannot_delid_s.*` searches `qp.faa` against
 `pdel.faa` (`-subject -parse_deflines`, its id `lcl|p<DEL>1`).
+
+A `pdb` Seq-id whose chain is an INTEGER outside 0-255 without a chain-id (line RG item K4j; rows `db.pdbchain.*`):
+`pdbchain/make_pdbchain.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb) writes the version 4 database
+`pdbchain/pdbchain` of five sequences without a title, each with a `gb|AB60000<n>.1|` Seq-id and a `pdb` one with the
+chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n>|<letter>` and a rewrite of the stored
+deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
+`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
+(with the pdb one alone it prints `Unknown` and `no longer exists in database`).

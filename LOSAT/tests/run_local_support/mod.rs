@@ -371,7 +371,8 @@ pub fn assert_observer_ranges(outcome: &Outcome, [fmt0, fmt6, fmt7]: [usize; 3],
         let hsp = hit.index;
         let text = std::str::from_utf8(&out0[section.clone()]).expect("utf-8 section");
         // NCBI writes this line in the place of each HSP of a subject whose title its definition
-        // line generator cannot decode (showalign.cpp:1977-1981; `pairwise::record_heading`).
+        // line generator cannot decode (showalign.cpp:1977-1981;
+        // `pairwise::write_subject_alignments_part`).
         let skipped = text.starts_with("Sequence with id ")
             && text.ends_with(" no longer exists in database...alignment skipped\n");
         if !skipped {

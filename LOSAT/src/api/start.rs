@@ -133,9 +133,18 @@ pub(crate) struct CallStart {
     log: Option<DiagTarget>,
     /// Whether the argv has `-dryrun`.
     dry_run: bool,
+    /// The diagnostic stream of NCBI's main thread of the call's run (`ncbi_exception::MainDiag`),
+    /// which the call's code reads where it runs (`CallStart::enter`).
+    diag: std::sync::Arc<crate::ncbi_exception::MainDiag>,
 }
 
 impl CallStart {
+    /// The calling thread runs this call until the guard is dropped: the call's posts read its
+    /// own diagnostic stream (`ncbi_exception::main_diag_failbit`), not another call's.
+    pub(super) fn enter(&self) -> crate::ncbi_exception::MainDiagGuard {
+        crate::ncbi_exception::MainDiag::enter(Some(self.diag.clone()))
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
     // `cli::main_entry`: the BLAST programs keep the default `DryRun`, which returns 0 after the
     // arguments have passed their definitions)
@@ -151,13 +160,17 @@ impl CallStart {
         inputs: Inputs<'_>,
         diagnostics: &mut dyn Write,
     ) -> Result<CallStart, Error> {
+        // The call is a run of its own: NCBI's application of it starts with a diagnostic stream
+        // that no other run in the process fails or reads.
         let program = search.program().name();
         let mut call = CallStart {
             program,
             settings: None,
             log: None,
             dry_run: search.dry_run(),
+            diag: Default::default(),
         };
+        let _run = call.enter();
         let started = match search.starts() {
             true => Some(begin(program, search.argv(), diagnostics)?),
             false => None,
@@ -342,6 +355,8 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
     diagnostics: &mut dyn Write,
 ) -> Result<CallerStart, String> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+    // A run of its own (LOSAT Web's), whose diagnostic stream never fails: LOSAT Web refuses
+    // `-in_pssm` (`ncbi_exception::main_diag_failbit`), and no call it runs reads another's.
     let follows = run_messages_follow_log(start.program());
     let mut opened =
         open_with(start, words, files, diagnostics).map_err(|error| error.message().to_string())?;

@@ -24,12 +24,14 @@ use crate::utils::threading::SearchPool;
 
 /// The windows of the queries `0..num_queries` whose rows are made together: the windows of
 /// `x_pairwise_par::query_windows` over the estimates of the queries' reports (the lengths of
-/// the HSPs of their final lists, `x_pairwise_par::query_estimate_of`), made before any row,
-/// with the budget of `x_pool` (`x_pairwise_par::window_bytes`). No window without a query.
+/// the HSPs of their final lists in a report of `line_length` columns a line,
+/// `x_pairwise_par::query_estimate_of`), made before any row, with the budget of `x_pool`
+/// (`x_pairwise_par::window_bytes`). No window without a query.
 pub(super) fn row_windows(
     hit_lists: &[Option<BlastpHitList>],
     num_queries: usize,
     x_pool: Option<&SearchPool<'_>>,
+    line_length: usize,
 ) -> Vec<Range<usize>> {
     use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
     let estimates: Vec<usize> = (0..num_queries)
@@ -42,6 +44,7 @@ pub(super) fn row_windows(
                     .flat_map(|hit_list| hit_list.hsplist_array.iter().take(hit_list.hsplist_count))
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.length),
+                line_length,
             )
         })
         .collect();

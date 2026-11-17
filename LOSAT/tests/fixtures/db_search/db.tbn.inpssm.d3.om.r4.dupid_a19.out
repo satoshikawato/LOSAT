@@ -1,0 +1,20 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Error: NCBI C++ Exception: T0 ""/home/coremake/release_build/bu
+ild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRele
+ase_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objmgr/tse_info.cpp
+"", line 901: Error: (CObjMgrException::eAddDataError)
+ ncbi::objects::CTSE_Info::x_SetBioseqIds() - duplicate Bioseq id lcl|Query_1
+ present in seq1: lcl|Query_1 | lcl|Query_1 seq2: lcl|Query_1 | lcl|Query_1"
+    }
+  }
+}

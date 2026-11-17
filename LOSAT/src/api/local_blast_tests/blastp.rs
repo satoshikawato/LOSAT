@@ -535,9 +535,13 @@ fn window_budget(threads: usize) -> usize {
     (1 << 20) * threads
 }
 
-/// `x_pairwise_par::query_estimate_of` of the rows of one query's HSPs of lengths `lengths`.
+/// The estimate of the report of one query's HSPs of lengths `lengths` at the default line
+/// length, which the windows' search uses (`x_pairwise_par::query_estimate_of`).
 fn query_estimate(lengths: impl Iterator<Item = usize>) -> usize {
-    lengths.fold(512, |bytes, length| bytes + 100 + 400 + 4 * length)
+    crate::report::x_pairwise_par::query_estimate_of(
+        lengths,
+        crate::report::pairwise::DEFAULT_LINE_LENGTH,
+    )
 }
 
 /// `sequence` with the letter at `position` replaced by `letter`.

@@ -1612,6 +1612,145 @@ fn two_searches_at_once_give_the_reports_of_each_alone() {
     }
 }
 
+/// One run of `run_batches`, split in two: the start (`run_batches`), then its batches.
+struct BatchRun {
+    search: losat::api::Search,
+    queries: Vec<FastaRecord>,
+    subjects: Vec<FastaRecord>,
+    pssm: Option<(PathBuf, String)>,
+}
+
+impl BatchRun {
+    /// psiblast `-in_pssm` of the PSSM whose query's annotations make NCBI's object manager fail
+    /// its main thread's diagnostic stream (`Failed to parse location of`, 1204.6), after which
+    /// its later posts print their headers alone (the fixture `db.ps.inpssm.d3.om.k01_failed_then_warn`).
+    fn muting(directory: &Path, threads: &str) -> BatchRun {
+        let case = PssmCase {
+            program: Program::Psiblast,
+            pssm: "fixtures/pssm/d3om_k01_failed_then_alwarn.asn.gz",
+            subject: "db_search/paja",
+            database: true,
+            options: &[],
+        };
+        BatchRun {
+            search: validate(
+                Program::Psiblast,
+                &["-comp_based_stats", "0", "-num_threads", threads],
+            )
+            .unwrap(),
+            queries: Vec::new(),
+            subjects: Vec::new(),
+            pssm: Some((case.file(directory), engine_tests(case.subject).to_string())),
+        }
+    }
+
+    /// blastp of a query that NCBI warns about (`Warning: [blastp] Query_1 p1: Could not
+    /// calculate ungapped Karlin-Altschul parameters ...`), a post of the main thread.
+    fn warning(threads: &str) -> BatchRun {
+        let subjects = read_fasta(
+            Program::Blastp,
+            Role::Subject,
+            &std::fs::read(fixture("outfmt0/e2e_many_subject.faa")).unwrap(),
+        )
+        .unwrap();
+        BatchRun {
+            search: validate(Program::Blastp, &["-num_threads", threads]).unwrap(),
+            queries: read_fasta(
+                Program::Blastp,
+                Role::Query,
+                b">p1\nXXXXXXXXXXXXXXXXXXXXXXXXX\n",
+            )
+            .unwrap(),
+            subjects,
+            pssm: None,
+        }
+    }
+
+    fn inputs(&self) -> Inputs<'_> {
+        match &self.pssm {
+            Some((pssm, database)) => Inputs::pssm_database(pssm, database),
+            None => Inputs::new(&self.queries, &self.subjects),
+        }
+    }
+
+    /// The diagnostics of every batch.
+    fn diagnostics(batches: losat::api::Batches<'_>) -> Vec<u8> {
+        batches
+            .flat_map(|batch| batch.unwrap().diagnostics)
+            .collect()
+    }
+
+    fn alone(&self) -> Vec<u8> {
+        BatchRun::diagnostics(run_batches(&self.search, self.inputs()).unwrap())
+    }
+}
+
+// Line RG D3-1 review 4 B1: NCBI's object manager fails the main thread's diagnostic stream of
+// one run (one application); in the library each call is a run, and a call's failed stream mutes
+// no other call's posts, nor does another call's start unmute them: two calls whose batches one
+// thread takes in turn, and two calls at once on two threads, write the diagnostics of each alone.
+#[test]
+fn a_failed_diagnostic_stream_is_its_own_runs() {
+    let directory = temp_path("muted_streams");
+    std::fs::create_dir_all(&directory).unwrap();
+    let muting = BatchRun::muting(&directory, "1");
+    let warning = BatchRun::warning("1");
+    let (muted_alone, warning_alone) = (muting.alone(), warning.alone());
+    assert!(
+        muted_alone.starts_with(b"Error: (1204.6) [psiblast] Failed to parse location of \n"),
+        "{}",
+        String::from_utf8_lossy(&muted_alone)
+    );
+    assert!(
+        warning_alone.starts_with(b"Warning: [blastp] Query_1 p1: Could not calculate"),
+        "{}",
+        String::from_utf8_lossy(&warning_alone)
+    );
+    // One thread: both calls start, then the muting call's batch, then the other's; and the other
+    // way round.
+    for muting_first in [true, false] {
+        let mut muted = run_batches(&muting.search, muting.inputs()).unwrap();
+        let mut warned = run_batches(&warning.search, warning.inputs()).unwrap();
+        let (mut muted_text, mut warned_text) = (Vec::new(), Vec::new());
+        if muting_first {
+            muted_text.extend(muted.next().unwrap().unwrap().diagnostics);
+            warned_text.extend(BatchRun::diagnostics(warned));
+            muted_text.extend(BatchRun::diagnostics(muted));
+        } else {
+            warned_text.extend(warned.next().unwrap().unwrap().diagnostics);
+            muted_text.extend(BatchRun::diagnostics(muted));
+            warned_text.extend(BatchRun::diagnostics(warned));
+        }
+        assert_eq!(muted_text, muted_alone, "muting first {muting_first}");
+        assert_eq!(warned_text, warning_alone, "muting first {muting_first}");
+    }
+    // Two threads: both calls start, then each searches on its thread (the muting call first),
+    // with pools of two threads.
+    let (muting, warning) = (BatchRun::muting(&directory, "2"), BatchRun::warning("2"));
+    let started = std::sync::Barrier::new(2);
+    let muted_done = std::sync::Barrier::new(2);
+    let (muted_text, warned_text) = std::thread::scope(|scope| {
+        let muted = scope.spawn(|| {
+            let batches = run_batches(&muting.search, muting.inputs()).unwrap();
+            started.wait();
+            let text = BatchRun::diagnostics(batches);
+            muted_done.wait();
+            text
+        });
+        let warned = scope.spawn(|| {
+            let batches = run_batches(&warning.search, warning.inputs()).unwrap();
+            started.wait();
+            muted_done.wait();
+            BatchRun::diagnostics(batches)
+        });
+        (muted.join().unwrap(), warned.join().unwrap())
+    });
+    assert_eq!(muted_text, muting.alone(), "two threads");
+    assert_eq!(warned_text, warning.alone(), "two threads");
+    assert_eq!(muted_text, muted_alone, "two threads: as with one");
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 #[test]
 fn the_example_prints_the_command_lines_report_and_writes_only_its_warnings_to_stderr() {
     let example = example_binary("library_search");

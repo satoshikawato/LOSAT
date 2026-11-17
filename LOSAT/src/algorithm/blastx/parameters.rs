@@ -618,7 +618,7 @@ pub fn subject_parameters(
         db_count,
         gumbel_block_used.then_some((i32::try_from(shortest).unwrap_or(i32::MAX), false)),
     ) else {
-        bail!("The average subject length is too short");
+        bail!(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760 (quoted at
     // `stats::setup::hit_saving_parameters_fail`)

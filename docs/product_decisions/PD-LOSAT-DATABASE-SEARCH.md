@@ -333,9 +333,10 @@ volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without th
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
 also with `-ungapped`), where NCBI divides by zero (SIGFPE) as a query is searched. A run of
 queries without a valid one, which NCBI reports without dividing, is reported as NCBI's by
-BLASTP, BLASTX and PSI-BLAST (fix round 3 of D1a-4, rows `db.ak.bp.nseq0.oldfsc.allx.7`); BLASTN,
-TBLASTN and TBLASTX still refuse it (their check runs at the database's open, before the
-queries; open, probe e8 of fix round 3). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+BLASTX (its own check in the batch's setup) and, since fix round 3 of D1a-4, by BLASTP and
+PSI-BLAST (rows `db.ak.bp.nseq0.oldfsc.allx.7`, `db.ak.bp.nseq0.ssp.allx.7` and
+`db.ak.ps.nseq0.oldfsc.allx.7`); BLASTN, TBLASTN and TBLASTX still refuse it (their check runs at
+the database's open, before the queries; probe e8 of fix round 3, line RG's next item D1a-5). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 

@@ -547,8 +547,9 @@ impl SubjectPasses<'_> {
         // The preliminary stage's word cutoffs and spaces (`Blast_HSPListReevaluateUngapped` and the
         // e-values of an ungapped search, blast_engine.c:1492-1497).
         let &PrelimBatch {
-            encoded_queries_blastna,
+            encoded_query_concat_blastna,
             encoded_queries_nomask,
+            ungapped_refusal,
             score_matrix,
             search_karlin_ref,
             round_down_evalue_score,
@@ -575,10 +576,10 @@ impl SubjectPasses<'_> {
             stage
                 .database
                 .with_blastna(ordinal, self.db_hard_mask, |s_blastna| {
-                    ungapped_subject_stage(
+                    let finished = ungapped_subject_stage(
                         hits,
                         s_blastna,
-                        encoded_queries_blastna,
+                        encoded_query_concat_blastna,
                         encoded_queries_nomask,
                         score_matrix,
                         cutoff_scores,
@@ -598,6 +599,12 @@ impl SubjectPasses<'_> {
                         },
                         evalue_threshold,
                     );
+                    if let Err(error) = finished {
+                        ungapped_refusal
+                            .lock()
+                            .expect("the error cell is not poisoned")
+                            .get_or_insert(error);
+                    }
                     self.x_ungapped_query_coverage(hits);
                 })
         });

@@ -357,6 +357,7 @@ mod tests {
             prelim_ss: ss,
             prelim_se: ss + (qe - qs),
             prelim_score: score,
+            prelim_q_left: 0,
             seed_qs: qs,
             seed_ss: ss,
             prelim_evalue: evalue,

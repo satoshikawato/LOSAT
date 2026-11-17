@@ -132,52 +132,29 @@ pub(super) fn ungapped_hsp_list(
     let mut chunk_prelim_hits: Vec<PrelimHit> = ungapped_hits
         .iter()
         .map(|uh| {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:699-715
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
             // ```c
-            //    for (index = 0; index < hsp_length; ++index) {
-            //       sum += matrix[*query & kResidueMask][*subject];
-            //       query++;
-            //       subject++;
-            //       if (sum < 0) {
-            //           /* Start from new offset */
-            //           sum = 0;
-            //           current_q_start = query;
-            //           current_s_start = subject;
-            // ...
-            //          if (score < cutoff_score) {
-            //             best_q_start = best_q_end = query;
-            //             best_s_start = best_s_end = subject;
-            //             score = 0;
-            //          }
+            //       Blast_HSPInit(ungapped_data->q_start,
+            //                     ungapped_data->length+ungapped_data->q_start,
+            //                     ungapped_data->s_start,
+            //                     ungapped_data->length+ungapped_data->s_start,
             // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1122-1127
-            // ```c
-            //     /* The value of 15 is a gap, which is a sentinel between strands in
-            //     the ungapped extension algorithm */
-            //     for (index1=0; index1<BLASTNA_SIZE; index1++)
-            //         matrix[BLASTNA_SIZE-1][index1] = INT4_MIN / 2;
-            // ```
-            // A hit that starts left of its context (`UngappedHit::saved`, a negative `qs`) is
-            // an HSP from the context's start here: `Blast_HSPReevaluateWithAmbiguitiesUngapped`
-            // (`ungapped_subject_stage`) reads NCBI's HSP from its negative offset, and the
-            // sentinel before the context (`INT4_MIN / 2`) starts it over there, from the
-            // context's first letter, with no top score kept when the part before the context
-            // scored below the cutoff, so that its result is that of the re-evaluation from the
-            // context's start. Where that part scores the cutoff or more, NCBI keeps its
-            // top-scoring piece, which starts left of the context (NCBI's report of such an HSP
-            // ends in an exception, remaining-gaps X1b-o, 2026-11-17), unless a later piece scores
-            // more; LOSAT's `PrelimHit` (`usize` offsets) does not hold that offset.
+            // NCBI's HSP of a hit that starts left of its context (`UngappedHit::saved`, a
+            // negative `qs`) starts at that negative offset: here its query start is the
+            // context's (`usize` offsets) with the letters before it in `prelim_q_left`, and its
+            // subject start NCBI's; `ungapped_subject_stage` re-evaluates it from NCBI's start.
             let left = (-uh.qs).max(0) as usize;
             PrelimHit {
                 context_idx: uh.context_idx,
                 query_idx: uh.query_idx,
                 query_frame: uh.query_frame,
                 query_context_offset: uh.query_context_offset,
-                prelim_qs: (uh.qs.max(0)) as usize,
+                prelim_qs: uh.qs.max(0) as usize,
                 prelim_qe: uh.qe as usize,
-                prelim_ss: (uh.ss as usize + left).saturating_add(chunk.offset),
+                prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
                 prelim_se: (uh.se as usize).saturating_add(chunk.offset),
                 prelim_score: uh.score,
+                prelim_q_left: left as u32,
                 seed_qs: uh.seed_q_off as usize,
                 seed_ss: (uh.seed_s_off as usize).saturating_add(chunk.offset),
                 prelim_evalue: 0.0,
@@ -1030,6 +1007,7 @@ pub(super) fn gapped_score_list(
                 prelim_ss,
                 prelim_se,
                 prelim_score,
+                prelim_q_left: 0,
                 seed_qs,
                 seed_ss,
                 prelim_evalue: 0.0,

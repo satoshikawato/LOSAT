@@ -204,6 +204,10 @@ pub(super) struct PrelimBatch<'a> {
     /// whether an e-value is rounded down from its score, the e-value threshold and the minimum
     /// percent identity.
     pub(super) encoded_queries_nomask: &'a [&'a [u8]],
+    /// The `-ungapped` finish's refusal (`ungapped_subject_stage`: an HSP that NCBI keeps with a
+    /// query start left of its context), noted by the first subject that meets it; the batch
+    /// returns it after the preliminary stage.
+    pub(super) ungapped_refusal: &'a std::sync::Mutex<Option<anyhow::Error>>,
     pub(super) search_karlin_ref: &'a [ContextKarlin],
     pub(super) round_down_evalue_score: bool,
     pub(super) evalue_threshold: f64,
@@ -2081,8 +2085,9 @@ pub(super) fn finish_ungapped_prelim(
     combined_prelim_hits: &mut Vec<PrelimHit>,
 ) {
     let &PrelimBatch {
-        encoded_queries_blastna,
+        encoded_query_concat_blastna,
         encoded_queries_nomask,
+        ungapped_refusal,
         score_matrix,
         percent_identity,
         search_karlin_ref,
@@ -2120,10 +2125,10 @@ pub(super) fn finish_ungapped_prelim(
         // (`percent_identity` and the cutoffs are the values the traceback
         // (`traceback_subject::traceback_subject`) reads too; the query coverage is reaped by the
         // collector's caller.)
-        ungapped_subject_stage(
+        let finished = ungapped_subject_stage(
             combined_prelim_hits,
             s_blastna,
-            encoded_queries_blastna,
+            encoded_query_concat_blastna,
             encoded_queries_nomask,
             score_matrix,
             cutoff_scores,
@@ -2143,6 +2148,12 @@ pub(super) fn finish_ungapped_prelim(
             },
             evalue_threshold,
         );
+        if let Err(error) = finished {
+            ungapped_refusal
+                .lock()
+                .expect("the error cell is not poisoned")
+                .get_or_insert(error);
+        }
     }
 }
 

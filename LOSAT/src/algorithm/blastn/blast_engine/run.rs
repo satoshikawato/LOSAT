@@ -4100,11 +4100,34 @@ struct PrelimHit {
     prelim_ss: usize,
     prelim_se: usize,
     prelim_score: i32,
+    /// An ungapped (`-ungapped`) HSP from a hit that starts left of its context
+    /// (`UngappedHit::saved`): the letters of NCBI's HSP before the context, whose
+    /// context-relative `Int4` start is `-prelim_q_left` (`prelim_qs` and `prelim_ss` are then
+    /// the context's start and the subject letter there, `prelim_hsp_list::ungapped_hsp_list`);
+    /// 0 for every other HSP. The re-evaluation reads the HSP from NCBI's start
+    /// (`ungapped_subject_stage`).
+    prelim_q_left: u32,
     seed_qs: usize,
     seed_ss: usize,
     /// The e-value of the preliminary stage (set before its reap); a merge of two HSPs keeps
     /// the first one's (`s_BlastMergeTwoHSPs` does not change `evalue`).
     prelim_evalue: f64,
+}
+
+impl PrelimHit {
+    /// NCBI's `Int4` query offset of the HSP in its context, negative for an `-ungapped` HSP
+    /// that starts left of it (`prelim_q_left`).
+    #[inline(always)]
+    fn q_start(&self) -> isize {
+        self.prelim_qs as isize - self.prelim_q_left as isize
+    }
+
+    /// Sets the query offset to NCBI's `start` (`q_start`).
+    #[inline(always)]
+    fn set_q_start(&mut self, start: isize) {
+        self.prelim_qs = start.max(0) as usize;
+        self.prelim_q_left = (-start).max(0) as u32;
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
@@ -4121,7 +4144,7 @@ fn score_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering
         .cmp(&a.prelim_score)
         .then_with(|| a.prelim_ss.cmp(&b.prelim_ss))
         .then_with(|| b.prelim_se.cmp(&a.prelim_se))
-        .then_with(|| a.prelim_qs.cmp(&b.prelim_qs))
+        .then_with(|| a.q_start().cmp(&b.q_start()))
         .then_with(|| b.prelim_qe.cmp(&a.prelim_qe))
 }
 
@@ -4279,7 +4302,7 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
 //     (((a <= c && b >= c) && (d <= f && e >= f)) ? TRUE : FALSE)
 // ```
 #[inline]
-fn contained_in_hsp(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> bool {
+fn contained_in_hsp<T: PartialOrd>(a: T, b: T, c: T, d: T, e: T, f: T) -> bool {
     a <= c && b >= c && d <= f && e >= f
 }
 
@@ -4288,36 +4311,36 @@ fn contained_in_hsp(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) 
 // static Boolean s_BlastMergeTwoHSPs(BlastHSP* hsp1, BlastHSP* hsp2, Boolean allow_gap)
 // ```
 fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool) -> bool {
-    if !allow_gap
-        && (hsp1.prelim_ss as isize - hsp2.prelim_ss as isize - hsp1.prelim_qs as isize
-            + hsp2.prelim_qs as isize)
-            != 0
-    {
+    // NCBI's `Int4` query offsets (`PrelimHit::q_start`: an `-ungapped` HSP can start left of its
+    // context).
+    let (q1, q2) = (hsp1.q_start(), hsp2.q_start());
+    if !allow_gap && (hsp1.prelim_ss as isize - hsp2.prelim_ss as isize - q1 + q2) != 0 {
         return false;
     }
 
     // BLASTN subject frame is always +1, so no frame mismatch handling needed here.
 
+    let (qe1, qe2) = (hsp1.prelim_qe as isize, hsp2.prelim_qe as isize);
     if contained_in_hsp(
-        hsp1.prelim_qs,
-        hsp1.prelim_qe,
-        hsp2.prelim_qs,
-        hsp1.prelim_ss,
-        hsp1.prelim_se,
-        hsp2.prelim_ss,
+        q1,
+        qe1,
+        q2,
+        hsp1.prelim_ss as isize,
+        hsp1.prelim_se as isize,
+        hsp2.prelim_ss as isize,
     ) || contained_in_hsp(
-        hsp1.prelim_qs,
-        hsp1.prelim_qe,
-        hsp2.prelim_qe,
-        hsp1.prelim_ss,
-        hsp1.prelim_se,
-        hsp2.prelim_se,
+        q1,
+        qe1,
+        qe2,
+        hsp1.prelim_ss as isize,
+        hsp1.prelim_se as isize,
+        hsp2.prelim_se as isize,
     ) {
-        let len1 = hsp1.prelim_qe.saturating_sub(hsp1.prelim_qs) as f64;
-        let len2 = hsp2.prelim_qe.saturating_sub(hsp2.prelim_qs) as f64;
+        let len1 = (qe1 - q1).max(0) as f64;
+        let len2 = (qe2 - q2).max(0) as f64;
         let score_density = (hsp1.prelim_score as f64 + hsp2.prelim_score as f64) / (len1 + len2);
 
-        hsp1.prelim_qs = hsp1.prelim_qs.min(hsp2.prelim_qs);
+        hsp1.set_q_start(q1.min(q2));
         hsp1.prelim_ss = hsp1.prelim_ss.min(hsp2.prelim_ss);
         hsp1.prelim_qe = hsp1.prelim_qe.max(hsp2.prelim_qe);
         hsp1.prelim_se = hsp1.prelim_se.max(hsp2.prelim_se);
@@ -4328,7 +4351,7 @@ fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool
             hsp1.prelim_score = hsp2.prelim_score;
         }
 
-        let new_len = hsp1.prelim_qe.saturating_sub(hsp1.prelim_qs) as f64;
+        let new_len = (hsp1.prelim_qe as isize - hsp1.q_start()).max(0) as f64;
         let score_from_density = (score_density * new_len) as i32;
         if score_from_density > hsp1.prelim_score {
             hsp1.prelim_score = score_from_density;
@@ -9965,36 +9988,69 @@ enum Subjects<'a> {
 ///    Blast_HSPListSortByScore(hsp_list);
 ///    Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
 /// ```
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2694-2697
+/// ```c
+///       context = hsp->context;
+///
+///       query_start = query_blk->sequence +
+///           query_info->contexts[context].query_offset;
+/// ```
+/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start +
+/// hsp->query.offset`, which lies before the context for an HSP whose ungapped hit starts left of
+/// it (`PrelimHit::prelim_q_left`); the context's letters are the same bytes. Where the
+/// re-evaluation keeps a piece that starts there, NCBI's HSP keeps a negative offset: LOSAT's
+/// refusal (`ungapped_hsp_left_of_context`), returned as the error.
 #[allow(clippy::too_many_arguments)]
 fn ungapped_subject_stage(
     hits: &mut Vec<PrelimHit>,
     s_blastna: &[u8],
-    queries_blastna: &[&[u8]],
+    query_concat: &[u8],
     queries_nomask: &[&[u8]],
     score_matrix: &[i32; 256],
     word_cutoffs: &[i32],
     percent_identity: f64,
     evalue_of: impl Fn(&PrelimHit) -> f64,
     evalue_threshold: f64,
-) {
+) -> Result<()> {
+    let mut left_of_context = false;
     hits.retain_mut(|hit| {
+        if left_of_context {
+            return false;
+        }
         let context_idx = hit.context_idx as usize;
-        let query = queries_blastna[context_idx];
-        let length = hit.prelim_qe - hit.prelim_qs;
+        let context_start = hit.query_context_offset as usize;
+        let left = hit.prelim_q_left as usize;
         let Some(reevaluated) = ungapped::reevaluate_with_ambiguities_ungapped(
-            query,
+            query_concat,
             s_blastna,
-            hit.prelim_qs,
+            context_start + hit.prelim_qs - left,
             hit.prelim_ss,
-            length,
+            hit.prelim_qe - hit.prelim_qs + left,
             word_cutoffs[context_idx],
             score_matrix,
         ) else {
             return false;
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:453-456
+        // ```c
+        //     if (hsp->score >= cutoff_score) {
+        //         /* Update all HSP offsets. */
+        //         hsp->query.offset = (Int4)(best_q_start - query_start);
+        //         hsp->query.end = (Int4)(hsp->query.offset + best_q_end - best_q_start);
+        // ```
+        // A kept piece before the context (the part there reaches the cutoff and the context's
+        // letters score no more; the sentinel before the context starts the sum over,
+        // blast_stat.c:1122-1127) has a negative offset, on which NCBI's reports stop with an
+        // exception (remaining-gaps X1b-o, 2026-11-17).
+        let Some(q_offset) = reevaluated.q_offset.checked_sub(context_start) else {
+            left_of_context = true;
+            return false;
+        };
         hit.prelim_score = reevaluated.score;
-        hit.prelim_qs = reevaluated.q_offset;
-        hit.prelim_qe = reevaluated.q_end;
+        hit.prelim_q_left = 0;
+        hit.prelim_qs = q_offset;
+        hit.prelim_qe = reevaluated.q_end - context_start;
         hit.prelim_ss = reevaluated.s_offset;
         hit.prelim_se = reevaluated.s_end;
         let align_length = hit.prelim_qe - hit.prelim_qs;
@@ -10014,11 +10070,30 @@ fn ungapped_subject_stage(
             0,
         )
     });
+    if left_of_context {
+        hits.clear();
+        return Err(ungapped_hsp_left_of_context());
+    }
     sort_prelim_hits_by_score(hits);
     hits.retain_mut(|hit| {
         hit.prelim_evalue = evalue_of(hit);
         hsp_survives_evalue_reap(hit.prelim_evalue, evalue_threshold)
     });
+    Ok(())
+}
+
+/// LOSAT's refusal of an ungapped (`-ungapped`) HSP that NCBI keeps with a query start left of
+/// its context (`ungapped_subject_stage`): the ungapped extension ran past the sentinel into an
+/// earlier context (an X-drop of `INT_MIN`, `-xdrop_ungap 1e10`, lets the walk's `Int4` sum wrap
+/// there) and the re-evaluation keeps the part there. NCBI's reports of it stop with an exception
+/// (`CAnnotMapperException`, exit status 255; remaining-gaps X1b-o), which LOSAT does not
+/// reproduce yet.
+#[cold]
+#[inline(never)]
+fn ungapped_hsp_left_of_context() -> anyhow::Error {
+    anyhow::anyhow!(
+        "BLASTN with -ungapped: an ungapped alignment whose extension ran into an earlier query context (such as with -xdrop_ungap 1e10) keeps its part there in NCBI BLAST+'s re-evaluation, a query start left of its context on which NCBI BLAST+'s reports stop with an exception (CAnnotMapperException), which LOSAT does not reproduce yet"
+    )
 }
 
 /// The last step of the preliminary stage's finish of a subject's HSP list in an ungapped
@@ -13444,6 +13519,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         .filter(|&(_, _, kind)| kind == crate::blastinput::db_mask::MaskKind::Hard)
         .map(|(_, algo_id, _)| algo_id);
     let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
+    let ungapped_refusal: std::sync::Mutex<Option<anyhow::Error>> = std::sync::Mutex::new(None);
     // What the preliminary search of a subject reads of the batch
     // (`prelim_subject::PrelimBatch`), built once: the preliminary stage's cutoffs and
     // spaces (the setup's, or its own where they differ, `prelim_eff_searchsp`). With the
@@ -13507,6 +13583,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         db_mask,
         db_mask_error: &db_mask_error,
         encoded_queries_nomask,
+        ungapped_refusal: &ungapped_refusal,
         search_karlin_ref,
         round_down_evalue_score,
         evalue_threshold,
@@ -13632,6 +13709,15 @@ fn search_query_batch<const UNGAPPED: bool>(
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
     subject_space_overflow.check()?;
+    // LOSAT's refusal of an `-ungapped` HSP that NCBI keeps with a query start left of its context
+    // (`ungapped_subject_stage`), after the preliminary stage as the overflow above.
+    if let Some(error) = ungapped_refusal
+        .lock()
+        .expect("the error cell is not poisoned")
+        .take()
+    {
+        return Err(error);
+    }
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -14699,6 +14785,7 @@ mod tests {
             prelim_ss: 20,
             prelim_se: 40,
             prelim_score: 50,
+            prelim_q_left: 0,
             seed_qs,
             seed_ss,
             prelim_evalue: 0.0,
@@ -14725,6 +14812,7 @@ mod tests {
             prelim_ss,
             prelim_se,
             prelim_score,
+            prelim_q_left: 0,
             seed_qs: prelim_qs,
             seed_ss: prelim_ss,
             prelim_evalue: 0.0,
@@ -16112,5 +16200,101 @@ mod tests {
             score_compare_ungapped_hits(&before, &hit),
             std::cmp::Ordering::Greater
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:699-715 (the re-evaluation
+    // loop, `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :453-456 (the kept offsets)
+    // ```c
+    //       if (sum < 0) {
+    //           /* Start from new offset */
+    //           sum = 0;
+    // ...
+    //          if (score < cutoff_score) {
+    //             best_q_start = best_q_end = query;
+    // ...
+    //         hsp->query.offset = (Int4)(best_q_start - query_start);
+    // ```
+    // An `-ungapped` HSP of context 1 whose NCBI start lies 21 letters before it (20 letters of
+    // context 0 and the sentinel) is read from there: a part before the context below the cutoff
+    // is dropped at the sentinel (the HSP is the context's), one at the cutoff or more stays the
+    // HSP unless the context's letters score more (then the HSP is theirs), and where it stays
+    // NCBI's offset is negative: LOSAT's refusal. `PrelimHit` keeps its size.
+    #[test]
+    fn an_ungapped_hsp_is_reevaluated_from_ncbis_start_before_its_context() {
+        assert_eq!(std::mem::size_of::<PrelimHit>(), 80);
+        let matrix = build_blastna_matrix(2, -3);
+        // BLASTNA A, C, G, T = 0..3; `other` is a mismatch of each.
+        let other = |b: u8| (b + 1) % 4;
+        let ctx0: Vec<u8> = (0..20u8).map(|i| (i * 7 + 3) % 4).collect();
+        let ctx1: Vec<u8> = (0..40u8).map(|i| (i * 5 + 1) % 4).collect();
+        let concat: Vec<u8> = [ctx0.as_slice(), &[15], ctx1.as_slice()].concat();
+        let nomask: Vec<&[u8]> = vec![&concat[..20], &concat[21..]];
+        // `before` letters of ctx0's tail match the subject (the rest mismatch), then the letter
+        // against the sentinel, then the first `inside` letters of ctx1 match.
+        let run = |before: usize, inside: usize| {
+            let mut subject: Vec<u8> = ctx0
+                .iter()
+                .enumerate()
+                .map(|(i, &b)| if i >= 20 - before { b } else { other(b) })
+                .collect();
+            subject.push(0);
+            subject.extend(
+                ctx1.iter()
+                    .enumerate()
+                    .map(|(i, &b)| if i < inside { b } else { other(b) }),
+            );
+            let mut hits = vec![PrelimHit {
+                context_idx: 1,
+                query_idx: 0,
+                query_frame: -1,
+                query_context_offset: 21,
+                prelim_qs: 0,
+                prelim_qe: 40,
+                prelim_ss: 0,
+                prelim_se: 61,
+                prelim_score: i32::MAX - 5,
+                prelim_q_left: 21,
+                seed_qs: 0,
+                seed_ss: 21,
+                prelim_evalue: 0.0,
+            }];
+            let result = ungapped_subject_stage(
+                &mut hits,
+                &subject,
+                &concat,
+                &nomask,
+                &matrix,
+                &[10, 10],
+                0.0,
+                |_| 0.0,
+                10.0,
+            );
+            result.map(|()| {
+                hits.iter()
+                    .map(|h| {
+                        (
+                            h.prelim_qs,
+                            h.prelim_qe,
+                            h.prelim_ss,
+                            h.prelim_se,
+                            h.prelim_score,
+                            h.prelim_q_left,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+        // Below the cutoff before the context (2 matches, 4 < 10): the context's 15 matches.
+        assert_eq!(run(2, 15).unwrap(), vec![(0, 15, 21, 36, 30, 0)]);
+        // At the cutoff or more before it (12 matches, 24) and 10 matches inside (20): refused.
+        let error = run(12, 10).unwrap_err().to_string();
+        assert!(
+            error.contains("which LOSAT does not reproduce yet"),
+            "{error}"
+        );
+        // The same piece before it, and 30 matches inside (60 > 24): the context's piece.
+        assert_eq!(run(12, 30).unwrap(), vec![(0, 30, 21, 51, 60, 0)]);
+        // Ties keep the piece before the context (`sum > score`): 12 matches each side.
+        assert!(run(12, 12).is_err());
     }
 }

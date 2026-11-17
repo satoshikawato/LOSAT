@@ -1488,7 +1488,7 @@ struct XGroup {
     rank: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table of the full backbone that
     /// NCBI's loop scanned (`x_scan_bf::x_tbx_presence`), `None` for the others.
-    presence: Option<std::sync::Arc<[u8]>>,
+    presence: Option<crate::algorithm::tblastx::x_scan_byte::XPresence>,
 }
 
 impl XGroup {

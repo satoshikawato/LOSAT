@@ -349,6 +349,23 @@ def strip_sam_cl(data: bytes) -> bytes:
     return data if end < 0 else data[:start] + data[end:]
 
 
+def frozen_stdout(row: dict[str, str], stdout: bytes) -> bytes:
+    """The stdout that `freeze` writes for `row`: NCBI's, except that a SAM document (outfmt 17) whose bytes
+    differ from the frozen file's only in the CL tag of its @PG line keeps the frozen bytes.
+
+    NCBI writes its argv[0] in that tag, the path of the NCBI build that ran (the oracle, Bioconda's, ws's).
+    Without this rule a freeze with another build of the same NCBI release would rewrite the file and its
+    sha256 and byte cells although the search output is the same by the rule that `check` (and set D's
+    `run_oracle.py`) compares with, and a freeze of the candidate would leave `git status` dirty."""
+    if not is_sam_outfmt(row["outfmt"]):
+        return stdout
+    path = FROZEN / f"{row['row_id']}.out"
+    if not path.is_file():
+        return stdout
+    frozen = path.read_bytes()
+    return frozen if strip_sam_cl(frozen) == strip_sam_cl(stdout) else stdout
+
+
 def first_difference(expected: bytes, actual: bytes) -> str:
     for number, (left, right) in enumerate(zip(expected.split(b"\n"), actual.split(b"\n")), 1):
         if left != right:
@@ -425,9 +442,10 @@ def freeze(args: argparse.Namespace) -> int:
             else:
                 run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                      env=row_env(row, env), preexec_fn=ncbi_stack(row))
-            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
-            row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
-            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
+            out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+            row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
+            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
             continue
         if row["kind"] != "ncbi" or near_row_id(row):
             continue
@@ -445,17 +463,20 @@ def freeze(args: argparse.Namespace) -> int:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = written.run
+            out = run.stdout
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
             pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                            timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = pssms.run
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
-            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+            out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env), preexec_fn=ncbi_stack(row))
-            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+            out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         if under_valgrind(row) and valgrind_messages(run.stderr):
             raise SystemExit(f"{row['row_id']}: valgrind's messages in NCBI's stderr; give --valgrind a --log-file")
         err = FROZEN / f"{row['row_id']}.err"
@@ -463,13 +484,13 @@ def freeze(args: argparse.Namespace) -> int:
             err.write_bytes(run.stderr)
         else:
             err.unlink(missing_ok=True)
-        row.update(rc=str(run.returncode), stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)),
+        row.update(rc=str(run.returncode), stdout_sha256=sha256(out), stdout_bytes=str(len(out)),
                    stderr_sha256=sha256(run.stderr) if run.stderr else "")
         if files:
             row.update(xinclude.observed(written))
         if pssm:
             row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
-        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
+        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(out)}\tstderr={len(run.stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     # The rows whose expectation is a near input's NCBI run (`near_row_id`) take that row's columns, after it

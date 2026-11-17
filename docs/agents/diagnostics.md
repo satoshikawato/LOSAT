@@ -7575,16 +7575,19 @@ Scheduling (each value computed by one thread with the original function; order 
   (`the_128_bit_cross_cell_batches_give_the_reports_of_the_reference`) runs `=2` end to end against the reference
   with every search, the shadow and `=0`.
   Timed on the workstation (node 0, one core, Node 26.8.2, the serial WebAssembly command; `dev` b59c21dc4 against
-  the final build NUMBERS_TBD in one Node process, rotating rounds after a warm-up; the same output in every arm): a
-  50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`; 25-31 hits per used cell) NUMBERS_TBD,
-  five fly cDNAs (19.5) NUMBERS_TBD, and by hits per used cell (one to three fly cDNAs): 6.77 (the fewest the fused
-  loop takes) NUMBERS_TBD, 7.74 NUMBERS_TBD, 8.27 NUMBERS_TBD, 9.85 NUMBERS_TBD, 13.32 NUMBERS_TBD; a 1.5-kb cDNA
-  (4.91, the direct loop in both arms) NUMBERS_TBD. Where the form does not pay: at 6.77 hits per used cell the
-  windows tested hit by hit cut the 128-bit windows' cycles from 0.235 G (in parts) to 0.094 G, and the fused
-  loop's seed functions still take about 4 % more cycles than the direct loop's (0.70 against 0.67 G; untimed
-  `perf` counts, v4-W results/w2/bx128). Native x86-64 with AVX2 (the final build against `dev`): cycles
-  NUMBERS_TBD, instructions NUMBERS_TBD; `=2` (the 128-bit kernel in place of the AVX2 one) NUMBERS_TBD of the
-  default's cycles on the 50-kb piece and NUMBERS_TBD on the 2.1-kb cDNA, with the same output. Not timed: x86-64
+  the final build 1da1745f4 in one Node process, 7 rounds, rotating rounds after a warm-up; the same output in every arm): a
+  50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`; 25-31 hits per used cell) 14.420 -> 11.183 s, x0.748 [0.724-0.789] (7 of 7 rounds below 1),
+  five fly cDNAs (19.5) x0.769 [0.756-0.787] (7 of 7), and by hits per used cell (one to three fly cDNAs): 6.77 (the fewest the fused
+  loop takes) x0.992 [0.988-1.031] (5 of 7), 7.74 x0.943 [0.939-0.994] (7 of 7), 8.27 x0.901 [0.887-0.948] (7 of
+  7), 9.85 x0.858 [0.852-0.886] (7 of 7), 13.32 x0.799 [0.780-0.809] (7 of 7); a 1.5-kb cDNA (4.91, the direct loop
+  in both arms) x1.006 [0.996-1.054] (2 of 7), the spread of the rounds. Where the form pays least: at 6.77 hits per
+  used cell the gain is within the spread; testing the windows with a repeated entry hit by hit cut their cycles
+  there from 0.235 G (in parts) to 0.094 G (a build that tested them in parts was x1.023 [1.013-1.062]), and the
+  untimed `perf` counts of the seed functions are 0.70 against the direct loop's 0.67 G (v4-W results/w2/bx128). Native x86-64 with AVX2 (the final build against `dev`, the same rounds): cycles
+  x0.9967 [0.9872-0.9985] on the 50-kb piece and x0.9886-1.0003 on the cDNAs, instructions x1.0012-1.0035
+  (x0.9998 on the 1.5-kb cDNA); `=2` (the 128-bit kernel in place of the AVX2 one; build e9fec94f8, whose
+  kernels are the final build's machine code) x1.116 [1.113-1.119] of the default's cycles on the 50-kb piece and
+  x1.049 [1.042-1.055] on the 2.1-kb cDNA, with the same output. Not timed: x86-64
   without AVX2, where the 128-bit kernel replaces the direct loop by default (no run compares the two there; `=2`
   on a CPU with AVX2 compares the 128-bit kernel with the AVX2 one, not with that class's direct loop).
 - `LOSAT_X_BXCROSSDEFER=1` (BLASTX, speed; in the strict set since 2026-10-25, from the pull request that

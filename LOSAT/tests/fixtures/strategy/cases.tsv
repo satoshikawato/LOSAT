@@ -421,12 +421,12 @@ psiblast.pssm.db.scaled.f0	psiblast	-	-in_pssm tests/fasta/strategy/pssm_scaled.
 psiblast.pssm.db.trunc	psiblast	-	-in_pssm tests/fixtures/pssm/ps4_trunc.asn -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
 psiblast.pssm.db.nopsq	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/arch_sprot_nopsq -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 psiblast.pssm.db.nophr.it2	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/nophr -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
-psiblast.pssm.db.comment	psiblast	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	refuse	1	-	which NCBI BLAST+ writes back with -export_search_strategy, is not supported by LOSAT's PSIBLAST
+psiblast.pssm.db.comment	psiblast	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.sub.in_pssm.f0	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -subject tests/db_search/tslice.fna -export_search_strategy {ss}	ncbi	1	-	-
 tblastn.db.in_pssm.opts	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/tslice -evalue 1e-3 -threshold 12 -window_size 30 -db_gencode 4 -comp_based_stats 2 -max_target_seqs 5 -task tblastn-fast -max_intron_length 100 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.db.in_pssm.scaled	tblastn	-	-in_pssm tests/fasta/strategy/pssm_scaled.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 tblastn.sub.in_pssm.scaled	tblastn	-	-in_pssm tests/fasta/strategy/pssm_scaled.asn -subject tests/db_search/tslice.fna -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
-tblastn.db.in_pssm.comment	tblastn	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	refuse	1	-	which NCBI BLAST+ writes back with -export_search_strategy, is not supported by LOSAT's TBLASTN
+tblastn.db.in_pssm.comment	tblastn	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.ratio30	psiblast	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.db.in_pssm.ratio30	tblastn	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.db.in_pssm.ratio30.m45	tblastn	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/tslice -matrix BLOSUM45 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
@@ -478,3 +478,15 @@ tblastn.db.list.f11.batches	tblastn	BATCH_SIZE=1	-query tests/db_search/seqidlis
 tblastn.db.list.none.f11	tblastn	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.faa -db tests/db_search/taxfilter/tfn -seqidlist tests/db_search/seqidlist/sl_none.txt -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.db.list.f11.batches	tblastx	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.fna -db tests/db_search/taxfilter/tfn -negative_taxidlist tests/db_search/taxfilter/tl_neg.txt -no_taxid_expansion -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.db.list.none.f11	tblastx	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.fna -db tests/db_search/taxfilter/tfn -seqidlist tests/db_search/seqidlist/sl_none.txt -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.pssm.db.d3.c10_user	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c10_user.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.d3.c10_user	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c10_user.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.pssm.db.d3.c11_delay	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c11_delay.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.d3.c11_delay	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c11_delay.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.pssm.db.d3.c13_variation	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c13_variation.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.d3.c13_variation	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c13_variation.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.pssm.db.d3.c15_scoremat	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.d3.c15_scoremat	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.pssm.db.d3.c17_locs	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c17_locs.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.d3.c17_locs	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c17_locs.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.pssm.db.d3.m01_members	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_m01_members.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.d3.m01_members	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_m01_members.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

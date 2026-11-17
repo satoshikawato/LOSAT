@@ -177,7 +177,7 @@ pub(super) enum Piece {
     Number,
     /// `WriteDouble`.
     Real,
-    /// `WriteBool`.
+    /// `WriteBool` and `WriteNull`: `PutString` of `TRUE`, `FALSE` or `NULL`.
     Bool,
     /// `WriteEnum` (an ENUMERATED value or an INTEGER with named values).
     Enum,
@@ -185,6 +185,9 @@ pub(super) enum Piece {
     Str,
     /// An OCTET STRING (`BeginBytes`, `WriteBytes`, `EndBytes`).
     Octets,
+    /// The text of a delay buffer (`Encoder::delayed`), copied with
+    /// `COStreamBuffer::Write(CByteSourceReader&)`.
+    Raw,
     /// `EndOfWrite` and the separator.
     End,
 }
@@ -200,6 +203,8 @@ pub(super) struct OutBuffer {
     used: usize,
     /// The bytes of the document written to the output (`m_BufferPos`).
     written: u64,
+    /// The bytes that the buffer held when it first wrote to the output (`first_write`).
+    first_write: Option<usize>,
 }
 
 impl OutBuffer {
@@ -209,6 +214,7 @@ impl OutBuffer {
             capacity: 4096,
             used: 0,
             written: 0,
+            first_write: None,
         }
     }
 
@@ -217,11 +223,67 @@ impl OutBuffer {
         self.written
     }
 
+    /// The bytes at the start of the document that the buffer held when it first wrote to its
+    /// output (a `FlushBuffer` with bytes to write, or the end of the document), `None` before:
+    /// all that an output stream that has failed gets of the document (the object manager's
+    /// messages after its diagnostic stream failed, `pssm_search::annot_index`). The write to
+    /// such a stream throws before the buffer changes, and the object stream's destructor writes
+    /// what the buffer holds with the stream's state cleared (`Close`, `DefaultFlush`, `Flush`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-897
+    /// ```c++
+    ///     if ( count != 0 ) {
+    ///         if ( !m_Output.write(m_Buffer, count) ) {
+    ///             m_Error = "write fault";
+    ///             NCBI_THROW(CIOException,eWrite,m_Error);
+    ///         }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-336
+    /// ```c++
+    /// CObjectOStream::~CObjectOStream(void)
+    /// {
+    ///     try {
+    ///         Close();
+    ///         ResetLocalHooks();
+    ///     }
+    ///     NCBI_CATCH_X(4, "Cannot close serializing output stream")
+    /// }
+    ///
+    ///
+    /// void CObjectOStream::DefaultFlush(void)
+    /// {
+    ///     if ( GetFlags() & fFlagNoAutoFlush ) {
+    ///         FlushBuffer();
+    ///     }
+    ///     else {
+    ///         Flush();
+    ///     }
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:910-918
+    /// ```c++
+    /// void COStreamBuffer::Flush(void)
+    ///     THROWS1((CIOException))
+    /// {
+    ///     STemporarilyClearStreamState state(m_Output);
+    ///     FlushBuffer();
+    ///     if ( !m_Output.flush() ) {
+    ///         NCBI_THROW(CIOException,eFlush,"COStreamBuffer::Flush: failed");
+    ///     }
+    /// }
+    /// ```
+    pub(super) fn first_write(&self) -> Option<usize> {
+        self.first_write
+    }
+
     /// `FlushBuffer(false)`.
     fn flush_buffer(&mut self) {
         let leave = self.stream.back_limit();
         if self.used < leave {
             return;
+        }
+        if self.used > leave && self.first_write.is_none() {
+            self.first_write = Some(self.used);
         }
         self.written += (self.used - leave) as u64;
         self.used = leave;
@@ -296,6 +358,48 @@ impl OutBuffer {
         self.used += length;
     }
 
+    /// `Write(CByteSourceReader&)` of `length` bytes: the buffer filled up and flushed whenever it
+    /// is full, without growing it, and flushed once more when the bytes end exactly at its end
+    /// (the reader's last `Read` finds no room first).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1164-1182
+    /// ```c++
+    /// void COStreamBuffer::Write(CByteSourceReader& reader)
+    ///     THROWS1((CIOException, bad_alloc))
+    /// {
+    ///     for ( ;; ) {
+    ///         size_t available = GetAvailableSpace();
+    ///         if ( available == 0 ) {
+    ///             FlushBuffer(false);
+    ///             available = GetAvailableSpace();
+    ///         }
+    ///         size_t count = reader.Read(m_CurrentPos, available);
+    ///         if ( count == 0 ) {
+    ///             if ( reader.EndOfData() )
+    ///                 return;
+    ///             else
+    ///                 NCBI_THROW(CIOException,eRead,"buffer read fault");
+    ///         }
+    ///         m_CurrentPos += count;
+    ///     }
+    /// }
+    /// ```
+    /// (The reader of a delay buffer reads at most one of its chunks per call: the buffer fills
+    /// and flushes at the same bytes.)
+    fn write_reader(&mut self, mut length: usize) {
+        loop {
+            if self.used == self.capacity {
+                self.flush_buffer();
+            }
+            let count = (self.capacity - self.used).min(length);
+            if count == 0 {
+                return;
+            }
+            self.used += count;
+            length -= count;
+        }
+    }
+
     /// `BackChar`: the stream takes its last byte back (XML's `OpenTagEndBack`).
     fn back_char(&mut self) {
         self.used -= 1;
@@ -323,8 +427,17 @@ impl OutBuffer {
         written: &mut Vec<u64>,
     ) {
         if piece == Piece::End {
+            // `EndOfWrite`'s `FlushBuffer`, then the separator.
+            if self.used > 0 && self.first_write.is_none() {
+                self.first_write = Some(self.used);
+            }
             self.written += (self.used + bytes.len()) as u64;
             self.used = 0;
+            return;
+        }
+        // A call that wrote nothing (a value that the stream refused, `SerialError`) made no
+        // buffer call.
+        if bytes.is_empty() {
             return;
         }
         match self.stream {
@@ -344,8 +457,9 @@ impl OutBuffer {
                 self.skip(bytes.len() - name);
             }
             Piece::Markup => self.asn_text_markup(bytes),
-            // `PutInt4`, `PutInt8`, `PutString("TRUE")`.
+            // `PutInt4`, `PutInt8`, `PutString("TRUE")`, `PutString("NULL")`.
             Piece::Number | Piece::Bool => self.skip(bytes.len()),
+            Piece::Raw => self.write_reader(bytes.len()),
             // `PutChar(tolower(name[0]))` and `PutString(name + 1)` (objostrasn.cpp:113-127).
             Piece::Enum => {
                 self.skip(1);
@@ -595,7 +709,7 @@ impl OutBuffer {
                     }
                 }
             }
-            Piece::Header | Piece::Markup | Piece::End => {}
+            Piece::Header | Piece::Markup | Piece::Raw | Piece::End => {}
         }
     }
 

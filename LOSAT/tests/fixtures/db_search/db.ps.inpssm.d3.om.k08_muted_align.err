@@ -1,0 +1,20 @@
+Error: (1204.6) [psiblast] Failed to parse location of 
+Error: (1204.3) [psiblast] Seq-align ::= {
+  type global,
+  dim 2,
+  segs denseg {
+    dim 2,
+    numseg 1,
+    ids {
+      local str "Query_1",
+      local id 2
+    },
+    starts {
+      5,
+      5
+    },
+    lens {
+      0
+    }
+  }
+}

@@ -5468,9 +5468,7 @@ pub fn run(
     // reads (`check_options`). `-in_pssm` excludes `-query` (blast_args.cpp:1242-1244, the
     // parser's exclusion), so the query is the default `-` (`kDfltArgQuery`,
     // blast_args.cpp:3425-3427), which NCBI takes as `&cin` (no platform refuses it) and never
-    // reads. LOSAT opens no query input then, as tblastn's `-in_pssm` (`tblastn_app`): its
-    // standard input is a copy of the descriptor (`input_files::open_input`), which the WASI
-    // targets cannot make.
+    // reads. LOSAT opens no query input then, as tblastn's `-in_pssm` (`tblastn_app`).
     let query_file = if pssm_query(&args) {
         None
     } else {
@@ -5915,7 +5913,7 @@ fn subject_taxonomy(
 fn search_cli(
     args: BlastpArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: Option<std::fs::File>,
+    query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
     choice: crate::blastinput::app::FormatChoice,

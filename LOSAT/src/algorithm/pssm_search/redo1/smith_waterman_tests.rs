@@ -2,6 +2,7 @@
 //! frequency ratios 0 (BLOSUM62's rows of its letters), the redo's scaled block, and RPS-BLAST's
 //! roles (the profile is the redo's query, the user's query its subject).
 
+use super::super::ProteinSubject;
 use super::*;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;

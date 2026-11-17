@@ -48,7 +48,7 @@ use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
 use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, RedoSubject, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
-use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
+use crate::core::composition_adjustment::compo_scale::{PosMatrixInfo, RedoInstance};
 use crate::core::psi::PsiScoreBlk;
 use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::KarlinParams;

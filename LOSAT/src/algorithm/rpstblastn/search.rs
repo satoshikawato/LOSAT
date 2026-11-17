@@ -1594,4 +1594,19 @@ mod tests {
         assert!(outcome[1].is_none(), "{outcome:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    // blast_results.cpp:82-104 (quoted at `footer_gapped_k`): only the first query's footer reads
+    // `kbp_gap[0]`, which the batch's last redo wrote, and only where frame +1 is valid.
+    #[test]
+    fn only_the_first_footer_shows_the_redos_k() {
+        let marks = [Some(2), None, Some(0)];
+        let karlin_k = [0.1, 0.2, 0.3];
+        let k = footer_gapped_k(&marks, &karlin_k, 0.041, true);
+        assert_eq!(k, [1.2 * 0.1, 0.041, 0.041]);
+        assert_eq!(footer_gapped_k(&marks, &karlin_k, 0.041, false), [0.041; 3]);
+        assert_eq!(
+            footer_gapped_k(&[None, None], &karlin_k, 0.041, true),
+            [0.041; 2]
+        );
+    }
 }

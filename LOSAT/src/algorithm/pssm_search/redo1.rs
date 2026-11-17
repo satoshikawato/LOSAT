@@ -1149,7 +1149,7 @@ impl RedoMatch<'_> {
                     &window_align.compo(None),
                 );
             if !test_identical {
-                *subject_maybe_biased = seg_subject(&mut data);
+                seg_subject(&mut data, subject_maybe_biased);
             }
         }
         data
@@ -1874,6 +1874,9 @@ fn reap_contained<C: RedoInstance>(redone: &mut Vec<Redone>) {
 // `Blast_RedoOneMatchSmithWaterman` in the place of `Blast_RedoOneMatch` (series PR, item
 // PS11c-3: RPS-BLAST's redo).
 pub(crate) mod smith_waterman;
+
+#[cfg(test)]
+mod frame_tests;
 
 #[cfg(test)]
 mod tests {

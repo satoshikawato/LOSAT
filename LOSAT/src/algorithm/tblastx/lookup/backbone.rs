@@ -275,6 +275,28 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
         p: *const Self,
         in_rest: std::arch::x86_64::__m256i,
     ) -> std::arch::x86_64::__m256i;
+
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // of a cell's hits, read in order)
+    // ```c
+    //                     for (i = 0; i < numhits; i++) {
+    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+    // ```
+    /// EXPERIMENT (LOSAT_X_BXCROSS128): the first `n` (at most 24) hits from `p` as the `i32` lanes of
+    /// six vectors of the 128-bit layer (`utils/xdrop_simd.rs` `arch`), four hits each in order;
+    /// the lanes past `n` are not used by the caller. `i32`: a 16-byte load for each four hits
+    /// inside the list and scalar loads for the last fewer than four, so nothing past the hits is
+    /// read. `u16`: three 16-byte loads, each widened into two vectors, so the 48 bytes from `p`
+    /// must lie inside the allocation (`XCell::PAD_HITS`, `XCell::PAD_CELLS`).
+    ///
+    /// # Safety
+    /// Inlined into code compiled for the layer (x86-64: SSE4.1); `p` must point to `n` hits, with
+    /// (for `u16`) 48 readable bytes from `p` on.
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    unsafe fn x_load24_w128(p: *const Self, n: usize) -> [crate::utils::xdrop_simd::arch::V; 6];
 }
 
 impl XHit for i32 {
@@ -332,6 +354,37 @@ impl XHit for i32 {
     ) -> std::arch::x86_64::__m256i {
         // SAFETY: (caller) the CPU has AVX2; the masked load reads only the lanes in `in_rest`.
         unsafe { std::arch::x86_64::_mm256_maskload_epi32(p, in_rest) }
+    }
+
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // of a cell's hits, read in order)
+    // ```c
+    //                     for (i = 0; i < numhits; i++) {
+    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+    // ```
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    #[inline(always)]
+    unsafe fn x_load24_w128(p: *const Self, n: usize) -> [crate::utils::xdrop_simd::arch::V; 6] {
+        use crate::utils::xdrop_simd::arch::*;
+        debug_assert!(n <= 24);
+        // SAFETY: (caller) `p` points to `n` hits; each load reads hits below `n` only.
+        unsafe {
+            let mut lanes = [zero(); 6];
+            let full = n / 4;
+            for (k, v) in lanes.iter_mut().enumerate().take(full) {
+                *v = load(p.add(4 * k));
+            }
+            let rest = n % 4;
+            if rest != 0 {
+                let at = p.add(4 * full);
+                let q = |j: usize| if j < rest { *at.add(j) } else { 0 };
+                lanes[full] = set32(q(0), q(1), q(2), q(3));
+            }
+            lanes
+        }
     }
 }
 
@@ -400,6 +453,35 @@ impl XHit for u16 {
         // SAFETY: (caller) the CPU has AVX2 and the 16 bytes at `p` are inside the allocation;
         // the lanes past the hits are blended away by the caller.
         unsafe { _mm256_cvtepu16_epi32(_mm_loadu_si128(p.cast())) }
+    }
+
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // of a cell's hits, read in order)
+    // ```c
+    //                     for (i = 0; i < numhits; i++) {
+    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+    // ```
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    #[inline(always)]
+    unsafe fn x_load24_w128(p: *const Self, n: usize) -> [crate::utils::xdrop_simd::arch::V; 6] {
+        use crate::utils::xdrop_simd::arch::*;
+        debug_assert!(n <= 24);
+        // SAFETY: (caller) the 48 bytes from `p` are inside the allocation; the lanes past the hits
+        // are not used by the caller.
+        unsafe {
+            let w = [load(p), load(p.add(8)), load(p.add(16))];
+            [
+                zext_lo16(w[0]),
+                zext_hi16(w[0]),
+                zext_lo16(w[1]),
+                zext_hi16(w[1]),
+                zext_lo16(w[2]),
+                zext_hi16(w[2]),
+            ]
+        }
     }
 }
 

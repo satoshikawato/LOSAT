@@ -100,6 +100,25 @@ export const BLOCK_STORE_CASES: readonly ContractCase<BlockStoreEnv>[] = [
     },
   },
   {
+    name: 'clear: an open block drops its bytes, frees them and takes new ones; a sealed one is not cleared',
+    async run({ store }) {
+      const writer = await store.create('a/cleared');
+      writer.append(pattern(3000, 1));
+      writer.append(pattern(500, 2));
+      const kept = await sealed(store, 'a/kept', [pattern(200, 3)]);
+      same(store.usage(), 3700, 'usage before clear');
+      writer.clear();
+      same(store.usage(), 200, 'usage after clear');
+      const after = pattern(40, 4);
+      writer.append(after);
+      same(await writer.seal(), 40, 'sealed length');
+      sameBytes(await store.read('a/cleared', 0, 40), after, 'the bytes appended after the clear');
+      same(store.usage(), 240, 'usage');
+      throws(() => writer.clear(), /not open/, 'clear after seal');
+      sameBytes(await store.read('a/kept', 0, 200), kept, 'the other block');
+    },
+  },
+  {
     name: 'discard: a staged or sealed block disappears and its bytes are freed',
     async run({ store }) {
       const staged = await store.create('a/staged');

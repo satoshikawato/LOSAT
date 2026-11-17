@@ -34,7 +34,7 @@ pub struct QueryWarnings<'a> {
     /// The BLAST archive's handle, which saves each whole post as one message (`Posts::write`).
     archive: Option<&'a ArchiveHandle>,
     /// Standard error (the CLI) or the caller's diagnostics.
-    pub sink: &'a mut (dyn Write + Send),
+    pub sink: &'a mut dyn Write,
     /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
     /// how many of them are written.
     reads: Option<ReadCursor<'a>>,
@@ -892,8 +892,17 @@ impl<'a> QueryWarnings<'a> {
     /// The texts of the subjects' reads (`with_subject_reads`; `None` without a read that writes
     /// one) and the sink, apart: a writer that writes texts of its own to the sink between the
     /// reads places them with the cursor (`tax_report::write_report`).
-    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut (dyn Write + Send)) {
+    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut dyn Write) {
         (self.reads.as_mut(), &mut *self.sink)
+    }
+
+    /// The run ends at the error of a report's writer (NCBI's exception, its stream's failure):
+    /// NCBI loads nothing after it, so no text of a read that is not written yet is written, also
+    /// not when the warnings end (`ReadCursor::end_run`).
+    pub fn end_run(&mut self) {
+        if let Some(cursor) = self.reads.as_mut() {
+            cursor.end_run();
+        }
     }
 
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),
@@ -915,7 +924,7 @@ impl<'a> QueryWarnings<'a> {
     pub fn of_posts(
         before: &'a [Posts],
         archive: Option<&'a ArchiveHandle>,
-        sink: &'a mut (dyn Write + Send),
+        sink: &'a mut dyn Write,
     ) -> Self {
         Self {
             before,
@@ -1226,15 +1235,31 @@ pub fn query_warning<R: InputRecord>(
         query.believed_warning_id().unwrap_or(local_id.as_bytes()),
         &query.title_bytes(),
     );
-    let mut warning = format!("Warning: [{program}] ").into_bytes();
-    warning.extend_from_slice(&query_id);
-    warning.extend_from_slice(b": ");
+    warning_line(program, &query_id, messages)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1449-1452
+// ```c++
+//     if (!results.GetWarningStrings().empty()) {
+//         ...
+//         ERR_POST(Warning << results.GetWarningStrings());
+// ```
+/// The warning line of a query whose id is `query_id`, posted by NCBI's main thread
+/// (`ncbi_exception::post_line`: its header alone after the stream failed, line RG D3-1
+/// `om/mute/` e01-e04, e12, e16).
+fn warning_line(program: &str, query_id: &[u8], messages: &[String]) -> Vec<u8> {
+    let mut text = query_id.to_vec();
+    text.extend_from_slice(b": ");
     for message in sorted_query_messages(messages) {
-        warning.extend_from_slice(message.as_bytes());
-        warning.push(b' ');
+        text.extend_from_slice(message.as_bytes());
+        text.push(b' ');
     }
-    warning.push(b'\n');
-    warning
+    crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        Some(program),
+        &text,
+    )
 }
 
 /// `query_warning` for a query whose Seq-id is its own rather than the `Query_N` that NCBI's
@@ -1260,15 +1285,7 @@ pub fn query_warning_with_seq_id(
     if messages.is_empty() {
         return Vec::new();
     }
-    let mut warning = format!("Warning: [{program}] ").into_bytes();
-    warning.extend_from_slice(&warning_query_id(seq_id, title));
-    warning.extend_from_slice(b": ");
-    for message in sorted_query_messages(messages) {
-        warning.extend_from_slice(message.as_bytes());
-        warning.push(b' ');
-    }
-    warning.push(b'\n');
-    warning
+    warning_line(program, &warning_query_id(seq_id, title), messages)
 }
 
 /// The query ID that NCBI's warnings of a query show: the local ID (`Query_N`), then a

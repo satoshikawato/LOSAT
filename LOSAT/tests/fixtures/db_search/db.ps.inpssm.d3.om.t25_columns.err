@@ -1,0 +1,4 @@
+Error: (1213.8) [psiblast] SeqTable-column-info.field-id = 9999
+Error: (1213.10) [psiblast] SeqTable-column-info.field-name is empty
+Error: (1213.9) [psiblast] SeqTable-column-info: neither field-id nor field-name is set
+Error: (1213.8) [psiblast] SeqTable-column-info.field-id = 8

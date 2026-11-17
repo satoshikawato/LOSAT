@@ -15,7 +15,8 @@
 //! - `label`: the printings (`fasta`, `content`, `format_label`, `bare`,
 //!   `seqid_list_string`, `first_gi`).
 //! - `mask_handle`: when two Seq-ids are one `CSeq_id_Handle` (what `makeblastdb -mask_data`
-//!   matches a mask to a sequence by).
+//!   matches a mask to a sequence by, and the annotation index of a PSSM query keys its ranges
+//!   by), and the order of handles.
 //! - `rank`: `text_score` (Score, WorstRank), `best_rank_score` and `find_best`.
 //! - `defline_set`: the definition lines of one sequence, the Seq-align id, the definition
 //!   line of the subject Bioseq and of the shown id, and the joins of the formats that show

@@ -300,8 +300,9 @@ pub enum SourceTaxname {
     /// runs for any source: it then drops a ` [ ]` end. Elsewhere it reads as `Unnamed`.
     Nameless,
     /// LOSAT's refusal where a report shows the title, with what the sequence has (after
-    /// "database sequence N has"): a lookup of the taxid that reads past the mapped end of
-    /// `taxdb.btd` (NCBI BLAST+ reads unmapped memory), or a definition line whose taxid does not
+    /// "database sequence N has"): a lookup of the taxid whose scientific name NCBI BLAST+ reads
+    /// past its mapping of `taxdb.btd` (an empty file: NCBI faults; otherwise its bytes, or
+    /// whether NCBI faults, depend on its memory map), or a definition line whose taxid does not
     /// read.
     Refused(&'static str),
 }
@@ -545,7 +546,9 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
         let mut title = b"Chain ".to_vec();
         if !chain_id.is_empty() {
             title.extend_from_slice(chain_id);
-        } else if (0x20..0x7f).contains(chain) {
+        } else if (0x20..0x7f).contains(&(*chain as u8)) {
+            // `isprint ((unsigned char) m_PDBChain)` and `string chain(1, (char) m_PDBChain)`: the
+            // low byte of the integer (`chain 321` is `A`).
             title.push(*chain as u8);
         } else {
             return Vec::new();
@@ -2765,6 +2768,18 @@ mod tests {
                 .text,
             b"x"
         );
+        // `isprint ((unsigned char) m_PDBChain)` of an integer chain (create_defline.cpp:1842-1843):
+        // its low byte, so 321 and -191 are `A` (65), and 383 (0x17F) is not printable.
+        for (chain, text) in [
+            (65, &b"Chain A"[..]),
+            (321, b"Chain A"),
+            (-191, b"Chain A"),
+            (383, b"x"),
+        ] {
+            pdb.pdb = Some((Vec::new(), chain));
+            let made = generate_bioseq_defline(b"", false, false, &pdb);
+            assert_eq!(made.unwrap().text, text, "chain {chain}");
+        }
     }
 
     // NCBI reference: c++/src/corelib/ncbistr.cpp:3197-3234 (`TruncateSpacesInPlace`): the C

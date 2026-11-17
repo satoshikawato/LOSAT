@@ -27,6 +27,9 @@ No NCBI counterpart: test inputs. Usage: python3 build_nq.py [OUT_DIR] (default:
   first batch of its own without a valid frame), the records w45-w50 of nwin.fna (two of them hit),
   and `p_tgg`, 20 TGGTGTTGC repeats (frames whose Lambda is below the ideal one: a large
   `-xdrop_ungap` leaves 32 bits for them first).
+- wide.faa and wide.fna (series PR, item PS12m): the 190 residues of the first profile of `rps_mini` (the fragment
+  that build_wide.py tiles into `rps_wide`), and their back-translation (seed 21, no flanks, one strand): the
+  queries that hit each tile of `rps_wide`.
 """
 
 import random
@@ -165,6 +168,11 @@ def nfirst(window: str) -> str:
     return fasta([("n0 nrun", "N" * 210)] + records[start : start + 6] + [tgg])
 
 
+def wide(proteins: list[tuple[str, str]]) -> str:
+    title, letters = proteins[0]
+    return fasta([(title.split()[0], back_translate(letters, random.Random(21)))])
+
+
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE
     proteins = read_fasta(HERE / "q40.faa")
@@ -175,6 +183,7 @@ def main() -> int:
     (out / "nwin.fna").write_text(window)
     (out / "nwin0.fna").write_text(nwin(proteins, 36, 13, 110))
     (out / "nfirst.fna").write_text(nfirst(window))
+    (out / "wide.fna").write_text(wide(read_fasta(HERE / "wide.faa")))
     return 0
 
 

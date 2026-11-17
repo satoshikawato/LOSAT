@@ -299,11 +299,14 @@ their variables mean
   more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNREDOLPT` only where the
   composition-based redo runs on the pool (2 or more threads, 2 or more matches); `REDOCONTAINIDX` only where
   one query's list of kept alignments in a composition-based redo reaches 32; `TBNXLATESIMD` only
-  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
+  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `TBNXLATE128`
+  only where `TBNXLATESIMD`'s AVX2 loop does not run (`=2`: in its place); `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPDIAG` batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
-  vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
-  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
+  vector alignment only with AVX2, BMI1 and LZCNT, or with `BPGAP128` on wasm32 simd128 and with SSSE3 and
+  SSE4.1 (else the reference function); `BPGAP16` acts only
+  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPGAP128` only where the AVX2 rows do not run
+  (`=2`: in their place) and `BPGAP16` is on; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
   `run_local` call with several outputs, the hit records or an observer, with more than one block, and blastp's search of all queries
   (the other reports, `-query_loc`) runs its preliminary stage in the same blocks (see its entry);
   `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
@@ -371,6 +374,7 @@ export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
 export LOSAT_X_BPGAP=1
+export LOSAT_X_BPGAP128=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPGAPBAND=1
 export LOSAT_X_BPHITBF=1
@@ -400,6 +404,7 @@ export LOSAT_X_BXCHUNKSLICE=1
 export LOSAT_X_BXCLUTCAP=3
 export LOSAT_X_BXCLUTPOOL=1
 export LOSAT_X_BXCROSS=1
+export LOSAT_X_BXCROSS128=1
 export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXCTXONCE=1
 export LOSAT_X_BXDIAG=1
@@ -6242,8 +6247,9 @@ Scheduling (each value computed by one thread with the original function; order 
   its header): in the rows where no gap opens in A the cells depend on each other only through the
   X-drop test, whose `best_score` is a prefix maximum; in the other rows the row gap is a decayed
   prefix maximum. 32-bit values as in the reference, the matrix rows read from 16-bit tables built
-  from the reference's score function. Without AVX2 (other CPUs, aarch64, Wasm) the reference
-  function runs (the scalar loops on the same arrays were slower than it). A letter
+  from the reference's score function. Without AVX2 the reference function runs (the scalar loops
+  on the same arrays were slower than it), except where `LOSAT_X_BPGAP128` runs the sixteen-bit
+  rows in 128 bits (Wasm simd128, x86-64 with SSSE3 and SSE4.1); aarch64 runs it. A letter
   code of 28 or more, a negative gap cost, a gap cost above 65,536 or an X-drop above 2^28 leaves
   the call to the reference function. In the strict set since 2026-10-14 (`=0` turns it off). With
   `LOSAT_X_STATS=1` a `[X_STATS] BPGAP fast= not_taken=` line on stderr at the end.
@@ -6256,8 +6262,9 @@ Scheduling (each value computed by one thread with the original function; order 
   are at most 4,096, `gap_extend` at most 256 and the largest matrix entry at most 4,096 (every
   matrix and gap cost pair blastp supports); a row starts in 16 bits only while the best score is at
   most 32,767 - largest entry - 16 x `gap_extend` - 1 (32,739 for BLOSUM62 with 11/1), and past that
-  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT only:
-  aarch64 and WebAssembly keep the reference function (no AVX-512 on the default path).
+  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT; since
+  `LOSAT_X_BPGAP128` also WebAssembly simd128 and x86-64 without AVX2 (eight cells per step, see
+  its entry); aarch64 keeps the reference function (no AVX-512 on the default path).
   Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight,
   their HT siblings idle, warmed 3 s before every run, arm order reversed every other round, medians
   of the per-round ratios against dev 7cfec941, the binary before the switch; every report identical
@@ -6270,6 +6277,54 @@ Scheduling (each value computed by one thread with the original function; order 
   Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf
   record`). With `=0` the instruction counts equal dev's (x1.00006) at x1.002-1.003 of its time. Max
   RSS within the spread of repeated runs of one binary.
+- `LOSAT_X_BPGAP128=1` (BLASTP, speed; in the strict set from the pull request that added it,
+  2026-11-17, class platform, on by default; `=0` turns it off, `=2` runs it on any x86-64 CPU with
+  SSSE3 and SSE4.1, AVX2 or not, as a diagnostic; acts only where `LOSAT_X_BPGAP` and
+  `LOSAT_X_BPGAP16` are on; `restricted_rows16_w128` and `x_w128_16` in
+  `blastp/x_restricted_gap.rs`; one driver, `restricted_rows16`, runs both kernels of the
+  sixteen-bit rows) the sixteen-bit rows of the restricted gapped alignment
+  (`LOSAT_X_BPGAP16`) in 128 bits, eight cells per step, for the targets without the AVX2 rows: the
+  WebAssembly build (simd128) and x86-64 with SSSE3 and SSE4.1 but not AVX2, BMI1 and LZCNT, which
+  ran the reference function before. A step does for its eight cells what a block of the AVX2
+  rows does for sixteen, with the same lane operations and saturation; the exactness argument of
+  the module comment ("Sixteen-bit rows") does not depend on the cells per step, and the row gap's
+  lanes add at most 8 x `gap_extend`. Written differently, with the same values: the letters are
+  looked up sixteen at a time for two steps; the steps whose lanes are all cells take no lane mask
+  and only the first step of a row clears lane 0's diagonal (const parameters, so no test of them
+  runs per step); the lanes moved up across the vector take the lanes moved in from a second
+  vector (`palignr`; on wasm32 a window of two vectors, one `palignr` in V8); the row gap carried
+  between steps stays a vector; a step that raises the best score takes `b_offset` from the last
+  lane above the best before it (the first lane holding the step's maximum); the vector constants
+  are made once per alignment from values the compiler cannot see (`black_box`), since a wasm
+  engine builds a constant again at each use in a loop. The operations come from the 128-bit layer
+  of the X-drop kernel (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128,
+  which gained `subs16`, `up16_1`, `up16_2`, `up16_4` and `lut32k`; not the aarch64 layer: the rows
+  do not run there). They are the only rows of that build: where they do not take an alignment
+  (costs past `fits16`, which no matrix and gap cost pair blastp supports is, or a best score past
+  `limit16`, about 32,700) the reference function runs, as before the switch, and so it does with
+  `LOSAT_X_BPGAP16=0`. The rows return why they stopped (`XStop`): only where they reached the
+  letters `col` holds (`LOSAT_X_BPGAPBAND`) do the arrays double and the rows run again; a best
+  score past `limit16` or a letter code of 28 or more ends the try at once (before, it doubled the
+  arrays up to `full` and ran the rows again each time). The AVX2 rows compute as before: the
+  choice (`x_rows`, `restricted_fast`) and the stop reason are new, and `fill_col` has one
+  instance per row kernel (the AVX2 and the scalar 32-bit rows too:
+  with one shared instance fat LTO kept it out of line once `restricted_fast` took the 128-bit
+  rows, which changed `restricted_rows_avx2`). Tests: lib tests
+  `x_bpgap128_rows_match_the_reference_and_the_avx2_rows` (rows of 1 to 40 cells, every column
+  phase, X-drop 0 to 4,096, gap costs from 0, ties, long related pairs; the result of the
+  reference and of the AVX2 sixteen-bit rows), `x_bpgap128_layer_operations_match_their_definitions`,
+  `x_bpgap16_*` with both sixteen-bit rows, and every restricted-alignment test of `check()` with the
+  128-bit rows (their x86-64 SSSE3 / SSE4.1 build); `tests/blastp_restricted_gapped.rs` compares
+  NCBI BLAST+ 2.17.0's rows with `=0` and `=2` and counts the 128-bit rows' alignments with `=2`
+  (`[X_STATS] BPGAP fast=`); web.yml runs the lib tests of `x_restricted_gap` on wasm32-wasip1.
+  Measured (ws node 0, one core, 5 rounds; dev b59c21dc4 against 9be1d1d0e, the branch with that
+  dev merged; serial WASI command in one Node 26.8.2 process; blastp of the first 1,000 human
+  proteins against the 6,600 yeast proteins as `-subject`, `-evalue 0.001`, the same output): Wasm
+  18.024 -> 15.176 s (x0.844 [0.836-0.847], 5 of 5 rounds below 1); native cycles x1.0021
+  [0.9961-1.0076], instructions x1.00023. The AVX2 functions differ from dev's only in their stop
+  paths (`restricted_rows_avx2` +21 bytes, `restricted_rows16_avx2` +18); the build before the stop
+  reason, whose AVX2 functions were dev's machine code, measured native cycles x1.0023 in the same
+  setting.
 - `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
   v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
   restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the
@@ -7258,17 +7313,21 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.000 / x0.985 (16 / 8 pairs), the cDNAs x1.002 / x1.000 (8 pairs; x1.002 is one 10 ms step of 8.17 s).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
-  per cell: on by default where the cell test is `LOSAT_X_BXCROSS`'s (an x86-64 CPU with AVX2 and POPCNT;
-  `LOSAT_X_BXCROSS=0` or no POPCNT leaves the direct loop on every table), `=0` turns it
-  off; set to a value (or with `LOSAT_X_BXDIAGSHADOW`) it runs with any cell test (`LOSAT_X_BXCROSS`'s where that
-  runs, otherwise the masked AVX2 batch on a CPU with AVX2 and the per-hit loop elsewhere); acts
+  per cell: on by default where the cell test is `LOSAT_X_BXCROSS`'s (an x86-64 CPU with AVX2 and POPCNT) or
+  `LOSAT_X_BXCROSS128`'s (the WebAssembly build, x86-64 with SSSE3, SSE4.1 and POPCNT; since 2026-11-17;
+  `LOSAT_X_BXCROSS=0`, or neither, leaves the direct loop on every table), `=0` turns it
+  off; set to a value (or with `LOSAT_X_BXDIAGSHADOW`) it runs with any cell test (`LOSAT_X_BXCROSS`'s or
+  `LOSAT_X_BXCROSS128`'s where one runs, otherwise the masked AVX2 batch on a CPU with AVX2 and the per-hit loop
+  elsewhere); acts
   in the two-hit stage with the standard lookup table,
   `-word_size 3`, when no diagnostic stage traces the seeds)
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of BPSEED with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
   with AVX2, in the form of `LOSAT_X_BXCROSS` where the CPU also has POPCNT, otherwise (with a value of
-  `LOSAT_X_BXDIAG` or `LOSAT_X_BXDIAGSHADOW`) the masked batch of 2026-11-02's fold, below; the per-hit loop elsewhere), and the
+  `LOSAT_X_BXDIAG` or `LOSAT_X_BXDIAGSHADOW`) the masked batch of 2026-11-02's fold, below; `LOSAT_X_BXCROSS`'s
+  batches in 128 bits (`LOSAT_X_BXCROSS128`) in the WebAssembly build and on x86-64 with SSSE3, SSE4.1 and POPCNT
+  but no AVX2; the per-hit loop elsewhere), and the
   hits that
   pass the test go to the reference's context
   check, extension, save and entry update unchanged (the context from blastp's `XContextTable`, made once
@@ -7278,10 +7337,11 @@ Scheduling (each value computed by one thread with the original function; order 
   the diagonal table for every subject and stops at a difference of the hit lists or the tables (the
   tables are not compared for a subject shorter than a word less one letter, whose one scan position the
   reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
-  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-cross-defer|avx2-cross|avx2-defer-masked|scalar|per-hit> subjects=
+  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-cross-defer|avx2-cross|w128-cross|avx2-defer-masked|scalar|per-hit> subjects=
   cells= batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST`
   (until 2026-11-02 it also gave `defer_min_hits_per_cell=` and `tables_avx2=`, `LOSAT_X_BXDEFER`'s rule), and
-  with `mode=avx2-cross` `cross_splits=` (`LOSAT_X_BXCROSS`'s windows tested in parts). A query batch whose
+  with `mode=avx2-cross`, `avx2-cross-defer` or `w128-cross` `cross_splits=` (the windows with a repeated entry,
+  which `LOSAT_X_BXCROSS`'s AVX2 batches test in parts and `LOSAT_X_BXCROSS128`'s hit by hit). A query batch whose
   lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 670 for
   every cell test since 2026-11-02, the fold of line SF S3 family bx-seed-loop, which had 670 with
   `LOSAT_X_BXCROSS`'s cell test and 900 with the others; a number set is the cutoff, `0` fuses every batch) is scanned by the direct loop instead, which is faster there; the
@@ -7426,9 +7486,11 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_BXCROSS=1` (BLASTX, speed; in the strict set since 2026-10-23, from the pull request that made it the
   default (it was an opt-in prototype the same day; v4-A14 DECISIONS 14): `=0` turns it off; acts where
   `LOSAT_X_BXDIAG`'s fused loop runs an AVX2 cell test on an x86-64 CPU with AVX2 and POPCNT, on every table
-  that loop takes; off, or without POPCNT, `LOSAT_X_BXDIAG` not set leaves the direct loop on every table, and
-  with a value (or `LOSAT_X_BXDIAGSHADOW`) the fused loop takes the masked AVX2 batch (`mode=avx2-defer-masked`; until 2026-11-02 the default
-  took `LOSAT_X_BXDEFER`'s choice there).
+  that loop takes, and since 2026-11-17 in 128 bits where the CPU has no AVX2 (`LOSAT_X_BXCROSS128`: the
+  WebAssembly build, x86-64 with SSSE3, SSE4.1 and POPCNT); off, or on a CPU with neither (AVX2 without POPCNT,
+  x86-64 without SSSE3, SSE4.1 or POPCNT, aarch64), `LOSAT_X_BXDIAG` not set leaves the direct loop on every table,
+  and with a value (or `LOSAT_X_BXDIAGSHADOW`) the fused loop takes the masked AVX2 batch (`mode=avx2-defer-masked`,
+  the per-hit loop without AVX2; until 2026-11-02 the default took `LOSAT_X_BXDEFER`'s choice there).
   Which query batches the fused loop takes is `LOSAT_X_BXDIAGMIN`'s rule, a separate cutoff against the direct
   loop, whose built-in value is 670 (900 without this cell test until 2026-11-02)) the cell test of blastx's fused seed loop cuts its batches of eight
   across the cells' borders (`blastp/x_seed_fused.rs`, `x_scan_cells_avx2_cross`, exactness argument in its
@@ -7471,6 +7533,63 @@ Scheduling (each value computed by one thread with the original function; order 
   (and results/fab against 32a63700). Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3
   (DESIGN_s3.md: round 2) and results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays,
   the windows with a repeated entry out of line).
+- `LOSAT_X_BXCROSS128=1` (BLASTX, speed; in the strict set since 2026-11-17, class platform, on by default; `=0`
+  turns it off, `=2` runs it on any x86-64 CPU with SSSE3, SSE4.1 and POPCNT, AVX2 or not, as a diagnostic;
+  `blastp/x_seed_fused.rs`, exactness argument in its header) `LOSAT_X_BXCROSS`'s cell test of blastx's fused seed
+  loop in 128-bit vectors, for the targets without its AVX2 kernel: the WebAssembly build (simd128) and x86-64 with
+  SSSE3, SSE4.1 and POPCNT but no AVX2, which ran the direct loop on every table before. With it `LOSAT_X_BXDIAG`'s
+  fused loop runs by default there too, on the tables `LOSAT_X_BXDIAGMIN` gives it (670, as for the AVX2 kernel),
+  and those tables take 16-bit hits. Both kernels run one driver (`XCrossKernel`: the stage, the drain and the
+  batches are written once; a kernel gives a piece's stage, the conflict test, the test of eight lanes and its
+  window with a repeated entry, and the AVX2 kernel also the deferral of `LOSAT_X_BXCROSSDEFER`). The 128-bit
+  kernel holds a window's eight lanes in two vectors of four: the conflict test compares each half with itself one
+  and two lanes round and the low half with the high one zero to three lanes round (all 28 pairs), the batch
+  computes the AVX2 batch's lane formulas by half and reads and stores the entries by lane, a cell's piece is
+  staged as six vectors (`u16` hits by three 16-byte loads, the AVX2 stage's reads; `i32` hits without reading past
+  the list), and a window with a repeated entry takes its eight hits one after the other (the reference's order)
+  instead of the AVX2 kernel's parts (at 6.77 hits per used cell a fifth of the windows repeat an entry, and the
+  parts cost the 128-bit kernel more than the scalar tests). It calls each batch's candidates at once (its drain
+  refuses `DEFER` when it is compiled): `LOSAT_X_BXCROSSDEFER`'s deferral made the WebAssembly build slower (in the
+  prototype build bx1 of v4-W W2 s3, whose windows with a repeated entry were still tested in parts, on the 50-kb
+  piece of the fly genome of the timings below: x0.780 of `dev` with it against x0.749 without; on x86-64 with `=2`
+  it was 3 % faster, which a CPU without AVX2 forgoes so that the kernel has one form). Its operations come from the
+  128-bit layer of the X-drop kernel (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128;
+  new there: `sub32`, `eq32`, `shl32`, `sra32`, `set32`, `mask32`, `any_set`, `rot32_1/2/3`, `zext_lo16/hi16`); on
+  x86-64 it asks for SSSE3 as that layer does, though none of its operations needs it. The AVX2 kernel keeps its
+  instructions, not all of its machine code: in the release build of rustc 1.92.0 (v4-W W2 s3 build bx6 against
+  `dev` b59c21dc4; the review fixes left every seed-loop function as bx6's, build bx8) the functions of the seed
+  loops, the scans, the X-drop kernels and the rest of BLASTX (880) disassemble as `dev`'s but for the AVX2 drain with the
+  deferral (`x_cross_drain` with `DEFER`, the default: the same instructions, its blocks laid out otherwise and its
+  frame 16 bytes smaller; its cycles are in the timings below), the closures that choose the cell test
+  (`x_word_finder_fused*`) and the timing line's writer; rustc marks `#[inline(never)]` of a `#[target_feature]`
+  function only at call sites in functions with those features, so the kernels call their out-of-line functions
+  from methods compiled for their instructions (otherwise LLVM inlined the drain without the deferral into the
+  scan), and the scan's closure, the windows with a repeated entry and the AVX2 unit are written in the kernels'
+  functions. With `LOSAT_TIMING=1` the `blastx_diag` line names `mode=w128-cross` and ends with `cross_splits=` (the
+  windows with a repeated entry, tested hit by hit). Tests: the unit tests run the 128-bit kernel natively (its SSE
+  build) against the per-hit test with every cell test (random and edge tables, the chunks of 1,024 and 64, the
+  tables of 16-bit hits, the conflict test on all 4,140 patterns of equal lanes), pin the choice of the cell test
+  for every class of CPU (`the_cell_test_follows_the_cpu_and_the_switches`), and run in the WebAssembly build in CI
+  (`.github/workflows/web.yml`, step "SIMD kernel tests on wasm32-wasip1": the unit tests of `x_seed_fused` and
+  `x_seed_diag` under `web/tools/wasi-test-runner.mjs`); `tests/blastx_diag.rs`
+  (`the_128_bit_cross_cell_batches_give_the_reports_of_the_reference`) runs `=2` end to end against the reference
+  with every search, the shadow and `=0`.
+  Timed on the workstation (node 0, one core, Node 26.8.2, the serial WebAssembly command; `dev` b59c21dc4 against
+  the final build 1da1745f4 in one Node process, 7 rounds, rotating rounds after a warm-up; the same output in every arm): a
+  50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`; 25-31 hits per used cell) 14.420 -> 11.183 s, x0.748 [0.724-0.789] (7 of 7 rounds below 1),
+  five fly cDNAs (19.5) x0.769 [0.756-0.787] (7 of 7), and by hits per used cell (one to three fly cDNAs): 6.77 (the fewest the fused
+  loop takes) x0.992 [0.988-1.031] (5 of 7), 7.74 x0.943 [0.939-0.994] (7 of 7), 8.27 x0.901 [0.887-0.948] (7 of
+  7), 9.85 x0.858 [0.852-0.886] (7 of 7), 13.32 x0.799 [0.780-0.809] (7 of 7); a 1.5-kb cDNA (4.91, the direct loop
+  in both arms) x1.006 [0.996-1.054] (2 of 7), the spread of the rounds. Where the form pays least: at 6.77 hits per
+  used cell the gain is within the spread; testing the windows with a repeated entry hit by hit cut their cycles
+  there from 0.235 G (in parts) to 0.094 G (a build that tested them in parts was x1.023 [1.013-1.062]), and the
+  untimed `perf` counts of the seed functions are 0.70 against the direct loop's 0.67 G (v4-W results/w2/bx128). Native x86-64 with AVX2 (the final build against `dev`, the same rounds): cycles
+  x0.9967 [0.9872-0.9985] on the 50-kb piece and x0.9886-1.0003 on the cDNAs, instructions x1.0012-1.0035
+  (x0.9998 on the 1.5-kb cDNA); `=2` (the 128-bit kernel in place of the AVX2 one; build e9fec94f8, whose
+  kernels are the final build's machine code) x1.116 [1.113-1.119] of the default's cycles on the 50-kb piece and
+  x1.049 [1.042-1.055] on the 2.1-kb cDNA, with the same output. Not timed: x86-64
+  without AVX2, where the 128-bit kernel replaces the direct loop by default (no run compares the two there; `=2`
+  on a CPU with AVX2 compares the 128-bit kernel with the AVX2 one, not with that class's direct loop).
 - `LOSAT_X_BXCROSSDEFER=1` (BLASTX, speed; in the strict set since 2026-10-25, from the pull request that
   added it (perf/bx-cross-defer; v4-A14 DECISIONS 26-27): `=0` turns it off; acts where `LOSAT_X_BXCROSS`'s cell
   test runs, on every table blastx's fused loop takes on an x86-64 CPU with AVX2 and POPCNT) `LOSAT_X_BXCROSS`'s
@@ -7583,8 +7702,10 @@ Scheduling (each value computed by one thread with the original function; order 
   as u32 < 2 (window - wordsize)`, and the cell's next value is selected. A flag-1 cell or a candidate goes on
   to the reference's statements. Acts per subject where `1 <= wordsize < window`, `0 <= diag_offset` and
   `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: the one-hit search,
-  and offsets near 2^30 at a `-window_size` near 2^29). The direct loop scans every subject where the CPU
-  has no AVX2 and POPCNT (aarch64, WebAssembly: `LOSAT_X_BXDIAG` is off there) or with `LOSAT_X_BXCROSS=0`, and on x86-64 the query batches whose
+  and offsets near 2^30 at a `-window_size` near 2^29). The direct loop scans every subject where no cell test
+  of batches across the cells' borders runs (`LOSAT_X_BXDIAG` is off by default there: aarch64, x86-64 without
+  POPCNT, SSSE3 or SSE4.1, `LOSAT_X_BXCROSS=0`, and `LOSAT_X_BXCROSS128=0` on x86-64 without AVX2 and in
+  WebAssembly), and elsewhere (x86-64, WebAssembly) the query batches whose
   lookup table has fewer hits per used cell than `LOSAT_X_BXDIAGMIN` (short queries); the fused loop of
   `LOSAT_X_BXDIAG` keeps its own tests. With `LOSAT_X_BXDIAG=0` 79-81 % of the hits of the three cases
   below are too far, 14.5-17.4 % overlap, 1.2-1.4 % meet a flag-1 cell and 2.1-2.8 % are candidates

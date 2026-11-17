@@ -1,11 +1,13 @@
-//! The end of a TBLASTX subject's search after its frame loop, up to its linked HSP list: the end
+//! The linking parameters of a TBLASTX subject (`subject_linking_params`, made before its frame
+//! loop) and the end of its search after its frame loop, up to its linked HSP list: the end
 //! of its seed stage (`end_subject_seed_stage`), the frame bases of its HSP list
 //! (`subject_frame_bases`), the linking call (`link_subject_hits`, twice), the sort and the reap by
 //! the preliminary E-value after the first one (`sort_and_reap_after_first_link`), the
 //! re-evaluation with the subject's letters (`reevaluate_subject_hits`) and the second linking
 //! call (`relink_subject_hits`).
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-899 (in
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1456 (in
+//! `BLAST_PreliminarySearchEngine`: `CalculateLinkHSPCutoffs`), :870-899 (in
 //! `s_BlastSearchEngineCore`: `BLAST_LinkHsps`, then `s_Blast_HSPListReapByPrelimEvalue`) and
 //! :1492-1520 (in `BLAST_PreliminarySearchEngine`: `Blast_HSPListReevaluateUngapped`, then
 //! `BLAST_LinkHsps` again); c++/src/algo/blast/core/link_hsps.c:1761-1813 (`BLAST_LinkHsps`). The
@@ -22,15 +24,52 @@ use super::x_batch_pipe::XSeedGuard;
 use super::x_search_timing::XLap;
 use super::x_seed_release::{self, XSeedStage};
 use super::{
-    apply_sum_stats_even_gap_linking_with_parallel, link_one_hit_with_int4_ends,
-    reevaluate_ungapped_hsp_list, sort_ungapped_hits_by_score_ncbi, stage_dump, trace_hsp_target,
-    trace_ungapped_hit_if_match, ungapped_hits_is_sorted_by_score_ncbi, AtomicOrdering, AtomicU64,
-    DiagStruct, DiagnosticCounters, Instant, KarlinParams, LinkCall, LinkingParams, QueryContext,
-    QueryFrame, TbxScore, UngappedHit, XStage,
+    apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
+    link_one_hit_with_int4_ends, reevaluate_ungapped_hsp_list, sort_ungapped_hits_by_score_ncbi,
+    stage_dump, trace_hsp_target, trace_ungapped_hit_if_match,
+    ungapped_hits_is_sorted_by_score_ncbi, AtomicOrdering, AtomicU64, DiagStruct,
+    DiagnosticCounters, Instant, KarlinParams, LinkCall, LinkingParams, QueryContext, QueryFrame,
+    TbxScore, UngappedHit, XStage, BLAST_GAP_DECAY_RATE,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::sum_stats_linking::XHelped;
 use crate::algorithm::tblastx::x_link_timing::XLinkTimer;
+
+/// The subject's linking parameters: its length, the gap decay rate and the linking cutoffs of a
+/// subject of `subject_len_nucl` nucleotides, computed once per subject before its scan; both
+/// linking calls read them.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1456
+/// ```c
+///       /* Calculate cutoff scores for linking HSPs. Do this only for
+///          ungapped protein searches and ungapped translated
+///          searches. */
+///       if (hit_params->link_hsp_params && !kNucleotide &&
+///           !gapped_calculation) {
+///           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+///             hit_params->link_hsp_params, word_params, db_length,
+///             seq_arg.seq->length);
+///       }
+/// ```
+pub(super) fn subject_linking_params(
+    avg_query_length: i32,
+    subject_len_nucl: i64,
+    link_db_length_nucl: i64,
+    cutoff_score_min: i32,
+    linking_params_for_cutoff: &KarlinParams,
+) -> LinkingParams {
+    LinkingParams {
+        subject_len_nucl,
+        gap_decay_rate: BLAST_GAP_DECAY_RATE,
+        cutoffs: calculate_link_hsp_cutoffs_ncbi(
+            avg_query_length,
+            subject_len_nucl,
+            link_db_length_nucl,
+            cutoff_score_min,
+            linking_params_for_cutoff,
+        ),
+    }
+}
 
 // No NCBI counterpart: the seed release and the batch pipe decide when tables are freed and where
 // the linking calls run, not a value NCBI computes (see the note in the body).

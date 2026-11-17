@@ -1286,10 +1286,17 @@ impl BlastpArgs {
                 let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
                     crate::algorithm::pssm_search::in_pssm::PssmReader {
+                        // The PSSM engine makes the scores of a PSSM of frequency ratios only with
+                        // the options' matrix, as tblastn's (`opts.GetMatrixName()`; NCBI BLAST+
+                        // 2.17.0 `-matrix BLOSUM45 -gapopen 15 -gapextend 2`: the engine's error,
+                        // line RG D3-1 review 4c `out_m/` m13-m15).
+                        matrix_name: &options.matrix_name,
                         strategy: self.export_search_strategy.is_some(),
                         database: self.db.is_some(),
+                        archive: self.archive.as_ref(),
                         ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
                     },
+                    diagnostics,
                 )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(

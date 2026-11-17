@@ -297,10 +297,11 @@ fn blastn_short_gives_the_same_report_with_the_level_bounds() {
 // other at one thread and by the workers at four, so that every worker's diagonal hash keeps
 // its cells and bounds from subject to subject with a growing offset. With `LOSAT_X_BNDCONE` at
 // one thread every subject takes the dc-megablast strips stage in turn on that one table, and
-// the memo answers; with `-lcase_masking` and every
-// third piece in lowercase those subjects take the reference fold between the stages, whose
-// memo is made again at each stage's start (`[TIMING] x_pairpardisc_seed:` counts the chunks the
-// stage took).
+// the memo answers; with `-lcase_masking`, every third piece in lowercase (no scan range) and
+// the next ones lowercase from letter 1,000 to 2,499 (two scan ranges), every subject takes the
+// stage too, a masked one in its ranges (`[TIMING] x_pairpardisc_seed:` counts the chunks the
+// stage took). Until 2026-11-17 the masked subjects took the reference fold between the stages;
+// the unit test `x_diag_lv::the_memo_makes_the_decisions_of_retrieve` keeps that order.
 #[test]
 fn many_subjects_give_the_same_report_with_the_level_bounds() {
     let dir = TestDir::new("many");
@@ -351,10 +352,15 @@ fn many_subjects_give_the_same_report_with_the_level_bounds() {
     {
         let (name, letters) = record.split_once('\n').expect("a record");
         let letters = letters.trim_end();
-        let letters = if index % 3 == 0 {
-            letters.to_ascii_lowercase()
-        } else {
-            letters.to_string()
+        let letters = match index % 3 {
+            0 => letters.to_ascii_lowercase(),
+            1 if letters.len() > 2_500 => format!(
+                "{}{}{}",
+                &letters[..1_000],
+                letters[1_000..2_500].to_ascii_lowercase(),
+                &letters[2_500..]
+            ),
+            _ => letters.to_string(),
         };
         text.push_str(&format!(">{name}\n{letters}\n"));
     }
@@ -384,7 +390,7 @@ fn many_subjects_give_the_same_report_with_the_level_bounds() {
         .next()
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| panic!("{at}: {line}"));
-    // 61 records, every third in lowercase (21, among them the 8-letter one): the other 40 take
-    // the stage, one chunk each
-    assert_eq!(chunks, 40, "{at}: {line}");
+    // 61 records, one chunk each: all but the 8-letter one (shorter than the template) take the
+    // stage, masked or not
+    assert_eq!(chunks, 60, "{at}: {line}");
 }

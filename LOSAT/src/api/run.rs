@@ -780,8 +780,56 @@ fn taxdb_setting(
 // (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
 // BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
 // (`start::CallStart::settings`).
-/// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
+/// One `run_local` call: the program's entry for the parsed arguments and `inputs`
+/// (`run_local_entry`), whose end is the command line's run's: a run that NCBI ends with exit
+/// status 0 and no word ends the call without an error, and an NCBI error after NCBI's main-thread
+/// diagnostic stream failed is the text that the command line writes for it.
 pub(super) fn run_local(
+    command: Commands,
+    inputs: Inputs<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    start: &mut CallStart,
+) -> anyhow::Result<()> {
+    // The call's code runs on this thread with the call's own diagnostic stream (one batch of
+    // `run_batches` after another's of another call, too), and its searches' workers with it
+    // (`utils::threading::with_search_pool`).
+    let _run = start.enter();
+    let Err(error) = run_local_entry(command, inputs, outputs, start) else {
+        return Ok(());
+    };
+    let Some(native) = error.downcast_ref::<crate::cli::NativeError>() else {
+        return Err(error);
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
+    // The `-in_pssm` reader's `CEofException` (a `CIOException`, `pssm_search::in_pssm`): NCBI's
+    // run returns 0 without a word, so the call succeeds with what it wrote (nothing).
+    if native.exit == 0 && native.message.is_empty() {
+        return Ok(());
+    }
+    // After NCBI's object manager failed the stream (`ncbi_exception::main_diag_failbit`, this
+    // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
+    // (`cli::catch_all_text`), as the command line writes the error.
+    if crate::ncbi_exception::main_diag_failbit() {
+        let message = crate::cli::catch_all_text(&native.message).into_owned();
+        return Err(crate::cli::NativeError {
+            exit: native.exit,
+            message,
+        }
+        .into());
+    }
+    Err(error)
+}
+
+/// The program's entry of a `run_local` call.
+fn run_local_entry(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,

@@ -3335,6 +3335,39 @@ fn determine_scanning_offsets(
     true
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1674
+// ```c
+// scan_range[0] = 0;  /* subject seq mask index */
+// scan_range[1] = 0;  /* start pos of scan */
+// scan_range[2] = subject->length - lut_word_length;
+// if (subject->mask_type != eNoSubjMasking) {
+//     ...
+//     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+//     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+// }
+// ```
+/// The scan range a subject's scan starts from (`seq_ranges` not empty): the whole subject when
+/// it is unmasked, else its first range; `determine_scanning_offsets` moves on to the next.
+#[inline(always)]
+fn first_scan_range(
+    seq_ranges: &[(i32, i32)],
+    subject_len: usize,
+    word_length: usize,
+    lut_word_length: usize,
+    subject_masked: bool,
+) -> [i32; 3] {
+    if subject_masked {
+        let (left, right) = seq_ranges[0];
+        [
+            0,
+            left + word_length as i32 - lut_word_length as i32,
+            right - lut_word_length as i32,
+        ]
+    } else {
+        [0, 0, subject_len as i32 - lut_word_length as i32]
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1673-1676
 // ```c
 // while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
@@ -3392,15 +3425,13 @@ fn scan_subject_kmers_with_ranges<F>(
         return;
     }
 
-    let mut scan_range = [0i32, 0i32, 0i32];
-    if subject_masked {
-        let (left, right) = seq_ranges[0];
-        scan_range[1] = left + word_length as i32 - lut_word_length as i32;
-        scan_range[2] = right - lut_word_length as i32;
-    } else {
-        scan_range[1] = 0;
-        scan_range[2] = subject_len as i32 - lut_word_length as i32;
-    }
+    let scan_range = first_scan_range(
+        seq_ranges,
+        subject_len,
+        word_length,
+        lut_word_length,
+        subject_masked,
+    );
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1635-1676
     // ```c
@@ -3682,15 +3713,13 @@ fn scan_subject_disc_words_with_ranges<F>(
         return;
     }
     let template_length = disc.template_length;
-    let mut scan_range = [0i32, 0i32, 0i32];
-    if subject_masked {
-        let (left, right) = seq_ranges[0];
-        scan_range[1] = left;
-        scan_range[2] = right - template_length as i32;
-    } else {
-        scan_range[1] = 0;
-        scan_range[2] = subject_len as i32 - template_length as i32;
-    }
+    let scan_range = first_scan_range(
+        seq_ranges,
+        subject_len,
+        template_length,
+        template_length,
+        subject_masked,
+    );
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     scan_subject_kmers_with_offsets(
         seq_ranges,

@@ -115,13 +115,16 @@ pub(super) fn search_rounds(
             // do the search strategy's request without a database and the PSSM engine's scores
             // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
             // rounds).
+            // The object manager's exception (`PsiSearch::annot_abort`) stops before round 1 too.
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
                 && args.psi_search.as_deref().is_some_and(|psi| {
-                    psi.stop_before_search(
-                        args.strategy.is_some(),
-                        subject_source.database().is_some(),
-                    )
-                    .is_none()
+                    psi.annot.abort.is_none()
+                        && psi
+                            .stop_before_search(
+                                args.strategy.is_some(),
+                                subject_source.database().is_some(),
+                            )
+                            .is_none()
                 });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
@@ -1159,12 +1162,15 @@ impl SubjectKeys<'_> {
     ) {
         for &s_idx in unread {
             if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                let mut line = Vec::new();
-                line.extend_from_slice(b"Warning: [");
-                line.extend_from_slice(program.as_bytes());
-                line.extend_from_slice(b"] Failed to retrieve sequence ");
-                line.extend_from_slice(&subject.alignment_fasta());
-                line.push(b'\n');
+                let mut text = b"Failed to retrieve sequence ".to_vec();
+                text.extend_from_slice(&subject.alignment_fasta());
+                // A post of NCBI's main thread (`ncbi_exception::post_line`).
+                let line = crate::ncbi_exception::post_line(
+                    crate::ncbi_exception::Severity::Warning,
+                    None,
+                    Some(program),
+                    &text,
+                );
                 out.push(s_idx, line);
             }
         }

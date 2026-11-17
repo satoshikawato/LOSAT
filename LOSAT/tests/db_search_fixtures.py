@@ -31,6 +31,11 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
   2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject). The row has no frozen files of its own; `freeze` does not run NCBI
   for it and copies ROW_ID's columns (`near_row_id`).
+- a `ncbi` row whose `covers` cell has `ncbi-stack: unlimited`: `freeze` runs NCBI with no stack limit
+  (`RLIMIT_STACK` infinity). NCBI's reader of a PSSM recurses once per nested value on its main thread's stack,
+  and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
+  that the stack limit, the environment and the stack's random start move; its output with a stack large enough
+  is the expectation (PD-LOSAT-NCBI-DEFECTS exception 15). `check` runs LOSAT with the caller's limit.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -79,6 +84,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -213,9 +219,9 @@ def is_env_token(token: str) -> bool:
 def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
     """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
     the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
-    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux) and the alias file the run
-    searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files, `-db ALIAS`; its
-    DBLIST names them); None for another cell."""
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux, inflated when FILE ends in .gz) and
+    the alias file the run searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files,
+    `-db ALIAS`; its DBLIST names them); None for another cell."""
     if not cell.startswith("rps-gz:"):
         return None
     body, at, alias = cell.removeprefix("rps-gz:").partition("@")
@@ -242,7 +248,8 @@ def inflate_rps(cell: str) -> Path:
                 continue
             (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
         for extension, file in replaced.items():
-            (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+            data = (rps_dir / file).read_bytes()
+            (target / f"{name}{extension}").write_bytes(gzip.decompress(data) if file.endswith(".gz") else data)
     if alias is not None:
         (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target
@@ -360,6 +367,21 @@ def frozen_id(row: dict[str, str]) -> str:
     return near_row_id(row) or row["row_id"]
 
 
+def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:
+    """The `preexec_fn` of `freeze`'s NCBI run of `row`: with `ncbi-stack: unlimited` in its covers cell, the run's
+    stack limit is its hard limit (`RLIMIT_STACK` infinity by default, as `prlimit --stack=unlimited`); else None,
+    the caller's limit."""
+    if "ncbi-stack: unlimited" not in row["covers"]:
+        return None
+    import resource  # POSIX: NCBI's runs of `freeze` are on Linux
+
+    def unlimited() -> None:
+        _, hard = resource.getrlimit(resource.RLIMIT_STACK)
+        resource.setrlimit(resource.RLIMIT_STACK, (hard, hard))
+
+    return unlimited
+
+
 def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
     return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
 
@@ -378,10 +400,10 @@ def freeze(args: argparse.Namespace) -> int:
             # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
-                                             timeout=TIMEOUT, env=row_env(row, env)).run
+                                             timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
             else:
                 run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                     env=row_env(row, env))
+                                     env=row_env(row, env), preexec_fn=ncbi_stack(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
             row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
             print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
@@ -395,18 +417,18 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         if files:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
-                                              timeout=TIMEOUT, env=row_env(row, env))
+                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = written.run
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
             pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
-                                           timeout=TIMEOUT, env=row_env(row, env))
+                                           timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = pssms.run
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                 env=row_env(row, env))
+                                 env=row_env(row, env), preexec_fn=ncbi_stack(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:

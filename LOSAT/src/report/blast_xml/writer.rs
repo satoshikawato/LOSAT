@@ -530,6 +530,8 @@ impl StructuredXml for BlastXmlWriter {
         // The `Iteration`'s insertions, in the `try` (`Site::XmlIteration`): `serial_xml_start`,
         // `"\n<Iteration_hits>\n"`, each `Hit` (`Xml5Hits`), `"</Iteration_hits>"` and
         // `serial_xml_end`.
+        // The `Iteration`'s regions, its parts and (most often) its `Hit`s, in one allocation.
+        self.posts.cuts.reserve(32);
         self.posts.cuts.push(start, Cut::Site(Site::XmlIteration));
         self.posts.cuts.push(out.len(), Cut::Insertion);
         out.extend_from_slice(b"\n<Iteration_hits>\n");

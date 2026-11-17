@@ -516,7 +516,19 @@ impl HeldState {
                 flushed => flushed?,
             }
             if let Some((stderr, _)) = self.stderr.as_mut() {
-                stderr.write_all(&text)?;
+                // The text's stream (tied) makes NCBI's writes before it first.
+                match stderr.write_all(&text) {
+                    Err(error)
+                        if crate::report::ostream::is_caught_report_write_failure(&error) =>
+                    {
+                        skipping = true;
+                        if let Some(report) = &self.report {
+                            report.declare(crate::report::ostream::Site::Report)?;
+                        }
+                        continue;
+                    }
+                    written => written?,
+                }
                 stderr.flush()?;
             }
         }

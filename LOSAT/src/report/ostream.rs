@@ -1490,10 +1490,10 @@ impl std::io::Write for ReportStream {
         lock(&self.0).insert(buf)
     }
 
-    /// LOSAT's flush of the report: NCBI's writes so far are made (NCBI's buffer holds what it
-    /// holds; NCBI's flushes are `ReportWrite::ncbi_flush`).
+    /// LOSAT's flushes of the report hold (NCBI's are `ReportWrite::ncbi_flush`; NCBI's writes
+    /// are made before a text on standard error, `tie_standard_output`).
     fn flush(&mut self) -> std::io::Result<()> {
-        lock(&self.0).sync()
+        Ok(())
     }
 }
 
@@ -1511,10 +1511,6 @@ impl ReportHandle {
     #[inline]
     fn insert(&self, buf: &[u8]) -> std::io::Result<()> {
         lock(&self.0).insert(buf)
-    }
-
-    fn sync(&self) -> std::io::Result<()> {
-        lock(&self.0).sync()
     }
 
     fn flush(&self) -> std::io::Result<()> {
@@ -1728,6 +1724,11 @@ impl Cuts {
     pub fn push(&mut self, at: usize, cut: Cut) {
         debug_assert!(self.0.last().is_none_or(|&(last, _)| last <= at));
         self.0.push((at, cut));
+    }
+
+    /// Room for `additional` more cuts (one allocation for a document's cuts).
+    pub fn reserve(&mut self, additional: usize) {
+        self.0.reserve(additional);
     }
 
     /// The cuts of `other`, after these.
@@ -2173,7 +2174,8 @@ impl std::io::Write for NcbiOstream<'_> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         match &self.direct {
-            Some(report) => report.sync(),
+            // LOSAT's flushes of the command line's stream hold (`ReportStream`'s).
+            Some(_) => Ok(()),
             None => self.out.flush(),
         }
     }
@@ -2468,10 +2470,10 @@ mod tests {
         buffer.flush().unwrap();
         assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 0);
         // The 8191st byte makes NCBI's write, which LOSAT makes before anything else is written
-        // (here its own flush, `Core::sync`): all 8,191 bytes at once.
+        // (`Core::sync`): all 8,191 bytes at once.
         buffer.write_all(b"x").unwrap();
         assert_eq!(lock(&buffer.0).ncbi_written(), 8191);
-        assert!(buffer.flush().is_err());
+        assert!(lock(&buffer.0).sync().is_err());
         assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8191);
         // What a buffer holds at the end is written, a failure unreported.
         let quiet = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -2806,7 +2808,9 @@ mod tests {
         display.enter(&mut ostream).unwrap();
         ostream.write_all(b"> subject\n").unwrap();
         // `out2`'s flush is NCBI's write; LOSAT makes it before anything else is written.
-        let left = display.leave(&mut ostream).and_then(|()| ostream.flush());
+        let left = display
+            .leave(&mut ostream)
+            .and_then(|()| lock(&stream.0).sync());
         assert!(left.is_err());
         drop(ostream);
         assert_eq!(native(stream.finish(Ok(()))), (6, post.to_string()));
@@ -2837,7 +2841,7 @@ mod tests {
         );
         stream.write_all(b"> subject\n").unwrap();
         lock(&stream.0).flush().unwrap();
-        assert!(stream.flush().is_err());
+        assert!(lock(&stream.0).sync().is_err());
         assert_eq!(native(stream.finish(Ok(()))).0, -6);
     }
 
@@ -3201,7 +3205,7 @@ mod tests {
                 }
                 Step::Flush if skipping => Ok(()),
                 Step::Flush => ostream.ncbi_flush(),
-                Step::Sync => ostream.flush(),
+                Step::Sync => lock(&report.0).sync(),
                 Step::Site(site) => {
                     skipping = false;
                     match ostream.site(*site) {

@@ -2235,6 +2235,10 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     /// `c` as a masked subject: its scan ranges (NCBI's `seq_ranges`, right end exclusive) cover
     /// most of it with gaps of 1 to 120 bases between them; some are shorter than any template
     /// (the scan skips them) and the last may end at the subject's end.

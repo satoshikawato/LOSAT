@@ -379,10 +379,10 @@ pub(super) struct GappedListState<'s> {
 /// that starts left of its context lies outside it than in it. NCBI then aligns from that seed in
 /// the memory before the context (the right extension's query starts at `query + q_off`; the left
 /// one, of length `q_off < 0`, finds no letter), which LOSAT's aligner, given the context alone,
-/// does not read. NCBI keeps no HSP from it when its score is below the cutoff (every probe of
-/// remaining-gaps X1b-o, 2026-11-17: the seed lies in a context unrelated to the subject); an HSP
-/// it would keep there starts left of its context, as the `-ungapped` HSPs whose NCBI report
-/// ends in an exception.
+/// does not read; an HSP from there would start at the seed, left of its context (the left
+/// extension is empty). NCBI's report has no HSP from such a hit in every probe of remaining-gaps
+/// X1b-o (2026-11-17), also where the seed lies in a part of the earlier context that matches the
+/// subject (design d4), and LOSAT's reports there are NCBI's bytes.
 fn greedy_seed_in_context(uh: &UngappedHit) -> Option<(usize, usize)> {
     let (seed_q, seed_s) = uh.greedy_seed();
     Some((usize::try_from(seed_q).ok()?, seed_s as usize))

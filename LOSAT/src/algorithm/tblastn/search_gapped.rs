@@ -1316,8 +1316,22 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
             scratch: S::unit_scratch(scratch),
         }
     };
-    #[cfg(feature = "parallel")]
-    let new_state = || state_on(None);
+    // No NCBI counterpart: the buffers a unit state leaves for the next units (both paths); it
+    // does not change any value NCBI computes.
+    let buffers_of = |state: UnitState<'_, S::Scratch>| {
+        let UnitState {
+            two_hit,
+            pairs,
+            hits,
+            scratch,
+        } = state;
+        XUnitBuffers {
+            diagonals: two_hit.into_table(),
+            pairs,
+            hits,
+            scratch: S::kept_scratch(scratch),
+        }
+    };
     let run_unit = |state: &mut UnitState<'_, S::Scratch>,
                     unit: usize|
      -> Result<Vec<(usize, GappedHsp)>> {
@@ -1504,8 +1518,8 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
     //     for (context=first_context; context<=last_context; context++) {
     // ```
     // Dispatch point: NCBI visits the units one after another. With a pool the units run in
-    // parallel (map_init gives each thread its own state); without one the loop below runs them in
-    // order. The results are collected by unit index.
+    // parallel (each thread of the pool keeps one state for the call, see below); without one the
+    // loop below runs them in order. The results are collected by unit index.
     let unit_count = plan.subject.units.len();
     let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled) && unit_count > 1;
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
@@ -1519,10 +1533,34 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         use rayon::prelude::*;
         let pool = pool.expect("parallel pool selected");
         purged = pool.install(|| {
+            // No NCBI counterpart (NCBI's search thread sets up its word-finder state once, see
+            // `XUnitBuffers`): one kept state per thread of the pool, for this call only. A unit
+            // takes its thread's state and puts it back when it ends, as the sequential path keeps
+            // one state for its units; a thread that finds its slot empty (its first unit, or a
+            // unit it runs while another one of its units holds the state) makes a new one, and
+            // the states go when the units end. It does not change any value NCBI computes.
+            let threads = rayon::current_num_threads();
+            let kept: Vec<std::sync::Mutex<Option<XUnitBuffers>>> =
+                (0..threads).map(|_| std::sync::Mutex::new(None)).collect();
+            let slot = |index: Option<usize>| index.and_then(|i| kept.get(i));
             (0..unit_count)
                 .into_par_iter()
                 .with_max_len(1)
-                .map_init(&new_state, |state, unit| run_unit(state, unit))
+                .map(|unit| {
+                    let index = rayon::current_thread_index();
+                    let taken = slot(index).and_then(|s| {
+                        s.lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .take()
+                    });
+                    let mut state = state_on(taken);
+                    let result = run_unit(&mut state, unit);
+                    if let Some(s) = slot(index) {
+                        *s.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(buffers_of(state));
+                    }
+                    result
+                })
                 .collect()
         });
     }
@@ -1531,18 +1569,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         for unit in 0..unit_count {
             purged.push(run_unit(&mut state, unit));
         }
-        let UnitState {
-            two_hit,
-            pairs,
-            hits,
-            scratch,
-        } = state;
-        X_UNIT_STATE.set(Some(XUnitBuffers {
-            diagonals: two_hit.into_table(),
-            pairs,
-            hits,
-            scratch: S::kept_scratch(scratch),
-        }));
+        X_UNIT_STATE.set(Some(buffers_of(state)));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584,844
     // ```c

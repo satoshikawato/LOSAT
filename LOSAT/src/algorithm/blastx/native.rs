@@ -203,9 +203,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
             || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
             || e.exit == 255
+            || e.exit == 0
     }) {
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
-        // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
+        // write to one that fails (`framing::side_file_write_error`; on the command line NCBI's
+        // write fault, which `CATCH_ALL` swallows: exit status 0, `ostream::write_side_file`),
+        // NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as

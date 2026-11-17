@@ -22,6 +22,7 @@
 //! and those of the value being read are kept). The readers are generic over the source, so the
 //! slice reader is what it was before the stream existed.
 
+use crate::ncbi_exception::ThrowSite;
 use crate::ncbi_str::{is_space, string_to_double_posix, NCBI_NAN};
 use std::io::Read;
 use std::ops::Range;
@@ -47,7 +48,174 @@ pub struct AsnTextError {
     pub line: usize,
     pub message: String,
     pub(crate) kind: AsnTextErrorKind,
+    /// What NCBI's object stream throws there, where the reader names it (`None`: the reader
+    /// does not; a reader that reports NCBI's exceptions, `writedb::mask_info`, builds them from
+    /// this).
+    pub(crate) ncbi: Option<NcbiThrow>,
 }
+
+/// What NCBI throws for an [`AsnTextError`]: the place of the throw and the form of its message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NcbiThrow {
+    /// `ThrowError(flag, message)` of the object stream (`ThrowError1`, objistr.cpp:828-853): a
+    /// `CSerialException` whose message is the stream's position, `line N: `, then the error's.
+    Stream(ThrowSite),
+    /// `NCBI_THROW` of a `CSerialException` with the error's message as it is (the values of an
+    /// enumerated type: `FindValue`, `FindName`).
+    Plain(ThrowSite),
+    /// `BadNumber` / `NumberOverflow` of the input buffer: a `CUtilException`, the error's message
+    /// and ` in line N`.
+    Buffer(ThrowSite),
+    /// The `CEofException` that `SkipWhiteSpace` catches (objistrasn.cpp:234-240): it goes on as
+    /// it is at a stack depth of 2 or less, and becomes the `CSerialException` of
+    /// [`SKIP_WHITE_SPACE_EOF`] deeper. Its kind is [`AsnTextErrorKind::Eof`].
+    WhiteSpaceEof,
+}
+
+/// A `ThrowError` of `CObjectIStreamAsn` (objistrasn.cpp) at `line` of `function`.
+const fn asn_site(line: u32, kind: &'static str, function: &'static str) -> ThrowSite {
+    ThrowSite {
+        file: "src/serial/objistrasn.cpp",
+        line,
+        kind,
+        function: Some(function),
+    }
+}
+
+const FORMAT_ERROR: &str = "CSerialException::eFormatError";
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243 (quoted at the module and at
+// `Reader::skip_white_space`)
+// ```c++
+//     } catch (CEofException& e) {
+//         if (GetStackDepth() <= 2) {
+//             throw;
+//         } else {
+//             // There should be no eof here, report as error
+//             ThrowError(fEOF, e.what());
+//         }
+//     }
+// ```
+/// `SkipWhiteSpace`'s `ThrowError(fEOF, e.what())` ([`NcbiThrow::WhiteSpaceEof`]).
+pub(crate) const SKIP_WHITE_SPACE_EOF: ThrowSite = asn_site(
+    239,
+    "CSerialException::eEOF",
+    "ncbi::CObjectIStreamAsn::SkipWhiteSpace",
+);
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:177-185
+// ```c++
+// void CObjectIStreamAsn::Expect(char expect, bool skipWhiteSpace)
+// {
+//     if ( !GetChar(expect, skipWhiteSpace) ) {
+//         string msg("\'");
+//         msg += expect;
+//         msg += "' expected";
+//         ThrowError(fFormatError, msg);
+//     }
+// }
+// ```
+const EXPECT: ThrowSite = asn_site(183, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::Expect");
+const READ_TYPE_ID: ThrowSite = asn_site(299, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadTypeId");
+const READ_MEMBER_ID: ThrowSite =
+    asn_site(350, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadMemberId");
+const READ_NULL: ThrowSite = asn_site(454, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadNull");
+const READ_FILE_HEADER: ThrowSite =
+    asn_site(719, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadFileHeader");
+const READ_BOOL: ThrowSite = asn_site(762, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadBool");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:866-871
+// ```c++
+// void CObjectIStreamAsn::UnendedString(size_t startLine)
+// {
+//     ThrowError(fFormatError,
+//                "unclosed string starts at line "+
+//                NStr::SizetToString(startLine));
+// }
+// ```
+const UNENDED_STRING: ThrowSite =
+    asn_site(869, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::UnendedString");
+const NEXT_ELEMENT: ThrowSite =
+    asn_site(1220, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::NextElement");
+/// `UnexpectedMember` (objistrasn.cpp:1306-1314).
+pub(crate) const UNEXPECTED_MEMBER: ThrowSite = asn_site(
+    1313,
+    FORMAT_ERROR,
+    "ncbi::CObjectIStreamAsn::UnexpectedMember",
+);
+// NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:123-160
+// ```c++
+// TEnumValueType CEnumeratedTypeValues::FindValue(const CTempString& name) const
+// {
+//     ...
+//         if ( i == m.end() ) {
+//             NCBI_THROW(CSerialException,eInvalidData,
+//                        "invalid value of enumerated type: " + string(name));
+//     ...
+// const string& CEnumeratedTypeValues::FindName(TEnumValueType value,
+//                                               bool allowBadValue) const
+// {
+//     ...
+//             NCBI_THROW(CSerialException,eInvalidData,
+//                        "invalid value of enumerated type: " + NStr::NumericToString(value));
+// ```
+// (NCBI's report of these two names no function.)
+const FIND_VALUE: ThrowSite = ThrowSite {
+    file: "src/serial/enumerated.cpp",
+    line: 133,
+    kind: "CSerialException::eInvalidData",
+    function: None,
+};
+/// `CEnumeratedTypeValues::FindName` of a number that names no value (enumerated.cpp:156): the
+/// binary reader's too.
+pub(crate) const FIND_NAME: ThrowSite = ThrowSite {
+    file: "src/serial/enumerated.cpp",
+    line: 156,
+    kind: "CSerialException::eInvalidData",
+    function: None,
+};
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:570-584
+// ```c++
+// void CIStreamBuffer::BadNumber(void)
+//     THROWS1((CUtilException))
+// {
+//     m_Error = "bad number";
+//     NCBI_THROW_FMT(CUtilException, eWrongData,
+//                    "bad number in line " << GetLine());
+// }
+//
+//
+// void CIStreamBuffer::NumberOverflow(void)
+//     THROWS1((CUtilException))
+// {
+//     m_Error = "number overflow";
+//     NCBI_THROW_FMT(CUtilException, eWrongData,
+//                    "number overflow in line " << GetLine());
+// }
+// ```
+/// `CIStreamBuffer::BadNumber`: the readers of numbers in ASN.1 text (this one and
+/// `report::serial::asn_types::read`).
+pub(crate) const BAD_NUMBER: ThrowSite = ThrowSite {
+    file: "src/util/strbuffer.cpp",
+    line: 574,
+    kind: "CUtilException::eWrongData",
+    function: Some("ncbi::CIStreamBuffer::BadNumber"),
+};
+/// `CIStreamBuffer::NumberOverflow`.
+pub(crate) const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
+    file: "src/util/strbuffer.cpp",
+    line: 583,
+    kind: "CUtilException::eWrongData",
+    function: Some("ncbi::CIStreamBuffer::NumberOverflow"),
+};
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:420-436 (`FillBuffer` at the end of a
+// file: `NCBI_THROW(CEofException,eEof,m_Error)`, the error "end of file")
+/// The `CEofException` of NCBI's input buffer at the end of the input: what `SkipWhiteSpace`
+/// quotes ([`SKIP_WHITE_SPACE_EOF`]).
+pub(crate) const FILL_BUFFER_EOF: ThrowSite = ThrowSite {
+    file: "src/util/strbuffer.cpp",
+    line: 435,
+    kind: "CEofException::eEof",
+    function: Some("ncbi::CIStreamBuffer::FillBuffer"),
+};
 
 impl std::fmt::Display for AsnTextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -295,6 +463,15 @@ impl<S: AsnSource> Reader<S> {
             line: self.line,
             message: message.into(),
             kind: AsnTextErrorKind::Format,
+            ncbi: None,
+        }
+    }
+
+    /// `error`, with what NCBI throws there.
+    pub(crate) fn error_at(&self, ncbi: NcbiThrow, message: impl Into<String>) -> AsnTextError {
+        AsnTextError {
+            ncbi: Some(ncbi),
+            ..self.error(message)
         }
     }
 
@@ -304,6 +481,7 @@ impl<S: AsnSource> Reader<S> {
             line: self.line,
             message: message.into(),
             kind: AsnTextErrorKind::Unsupported,
+            ncbi: None,
         }
     }
 
@@ -320,6 +498,15 @@ impl<S: AsnSource> Reader<S> {
             line: self.line,
             message: format!("unexpected end of the {}", self.document),
             kind: AsnTextErrorKind::Eof,
+            ncbi: None,
+        }
+    }
+
+    /// `end_of_text` inside `SkipWhiteSpace` ([`NcbiThrow::WhiteSpaceEof`]).
+    fn end_of_text_in_white_space(&self) -> AsnTextError {
+        AsnTextError {
+            ncbi: Some(NcbiThrow::WhiteSpaceEof),
+            ..self.end_of_text()
         }
     }
 
@@ -418,7 +605,7 @@ impl<S: AsnSource> Reader<S> {
     pub(crate) fn skip_white_space(&mut self) -> Result<u8> {
         loop {
             let Some(c) = self.src.byte_at(self.pos) else {
-                return Err(self.end_of_text());
+                return Err(self.end_of_text_in_white_space());
             };
             match c {
                 b' ' | b'\t' => self.pos += 1,
@@ -426,11 +613,11 @@ impl<S: AsnSource> Reader<S> {
                     self.pos += 1;
                     self.skip_end_of_line(c);
                 }
-                b'-' if self.peek_char(1)? == b'-' => {
+                b'-' if self.peek_white_space(1)? == b'-' => {
                     self.pos += 2;
                     loop {
                         let Some(c) = self.src.byte_at(self.pos) else {
-                            return Err(self.end_of_text());
+                            return Err(self.end_of_text_in_white_space());
                         };
                         self.pos += 1;
                         match c {
@@ -440,7 +627,7 @@ impl<S: AsnSource> Reader<S> {
                             }
                             b'-' => {
                                 let Some(c) = self.src.byte_at(self.pos) else {
-                                    return Err(self.end_of_text());
+                                    return Err(self.end_of_text_in_white_space());
                                 };
                                 self.pos += 1;
                                 match c {
@@ -461,10 +648,19 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
+    /// `peek_char` inside `SkipWhiteSpace`.
+    fn peek_white_space(&mut self, offset: usize) -> Result<u8> {
+        self.peek_char(offset)
+            .map_err(|_| self.end_of_text_in_white_space())
+    }
+
     /// `Expect(c, true)`.
     pub(crate) fn expect(&mut self, c: u8) -> Result<()> {
         if self.skip_white_space()? != c {
-            return Err(self.error(format!("'{}' expected", c as char)));
+            return Err(self.error_at(
+                NcbiThrow::Stream(EXPECT),
+                format!("'{}' expected", c as char),
+            ));
         }
         self.pos += 1;
         Ok(())
@@ -561,7 +757,12 @@ impl<S: AsnSource> Reader<S> {
         let mut i = 1;
         loop {
             match self.peek_char(i)? {
-                b'\r' | b'\n' => return Err(self.error("end of line: expected ']'")),
+                b'\r' | b'\n' => {
+                    return Err(self.error_at(
+                        NcbiThrow::Stream(READ_MEMBER_ID),
+                        "end of line: expected ']'",
+                    ))
+                }
                 b']' => {
                     let id = self.pos + 1..self.pos + i;
                     self.pos += i + 1;
@@ -627,8 +828,17 @@ impl<S: AsnSource> Reader<S> {
             let mut i = 1;
             loop {
                 match self.peek_char(i)? {
-                    b'\r' | b'\n' => return Err(self.error("end of line: expected ']'")),
-                    b']' => return Err(self.error("'::=' expected")),
+                    b'\r' | b'\n' => {
+                        return Err(self.error_at(
+                            NcbiThrow::Stream(READ_TYPE_ID),
+                            "end of line: expected ']'",
+                        ))
+                    }
+                    b']' => {
+                        return Err(
+                            self.error_at(NcbiThrow::Stream(READ_FILE_HEADER), "'::=' expected")
+                        )
+                    }
                     _ => i += 1,
                 }
             }
@@ -636,7 +846,7 @@ impl<S: AsnSource> Reader<S> {
             self.scan_end_of_id(is_first_id_char(c))?
         };
         if self.skip_white_space()? != b':' || self.peek_at(1) != b':' || self.peek_at(2) != b'=' {
-            return Err(self.error("'::=' expected"));
+            return Err(self.error_at(NcbiThrow::Stream(READ_FILE_HEADER), "'::=' expected"));
         }
         self.pos += 3;
         Ok(id)
@@ -729,7 +939,7 @@ impl<S: AsnSource> Reader<S> {
             return Ok(true);
         }
         if c != b'}' {
-            return Err(self.error("',' or '}' expected"));
+            return Err(self.error_at(NcbiThrow::Stream(NEXT_ELEMENT), "',' or '}' expected"));
         }
         Ok(false)
     }
@@ -814,7 +1024,7 @@ impl<S: AsnSource> Reader<S> {
             c = self.peek_char(0)?;
         }
         if !c.is_ascii_digit() {
-            return Err(self.error("bad number"));
+            return Err(self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number"));
         }
         let mut n: i128 = 0;
         loop {
@@ -824,13 +1034,13 @@ impl<S: AsnSource> Reader<S> {
             }
             n = n * 10 + i128::from(c - b'0');
             if n > max.max(-min) {
-                return Err(self.error("number overflow"));
+                return Err(self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow"));
             }
             self.pos += 1;
         }
         let n = if negative { -n } else { n };
         if n < min || n > max {
-            return Err(self.error("number overflow"));
+            return Err(self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow"));
         }
         Ok(n)
     }
@@ -966,7 +1176,7 @@ impl<S: AsnSource> Reader<S> {
             self.pos += 5;
             return Ok(false);
         }
-        Err(self.error("TRUE or FALSE expected"))
+        Err(self.error_at(NcbiThrow::Stream(READ_BOOL), "TRUE or FALSE expected"))
     }
 
     /// `ReadNull`: the word `NULL`.
@@ -996,7 +1206,7 @@ impl<S: AsnSource> Reader<S> {
             self.pos += 4;
             return Ok(());
         }
-        Err(self.error("'NULL' expected"))
+        Err(self.error_at(NcbiThrow::Stream(READ_NULL), "'NULL' expected"))
     }
 
     /// `ReadEnum` of an ENUMERATED type with the values `values`: a name or a number.
@@ -1018,7 +1228,10 @@ impl<S: AsnSource> Reader<S> {
     ) -> Result<(&'static str, i32)> {
         match self.enum_item(values)? {
             Ok(item) => Ok(item),
-            Err(_) => Err(self.error("invalid enum value")),
+            Err(value) => Err(self.error_at(
+                NcbiThrow::Plain(FIND_NAME),
+                format!("invalid value of enumerated type: {value}"),
+            )),
         }
     }
 
@@ -1050,7 +1263,13 @@ impl<S: AsnSource> Reader<S> {
         let text = self.bytes(id);
         match values.iter().find(|&&(name, _)| name.as_bytes() == text) {
             Some(&item) => Ok(Ok(item)),
-            None => Err(self.error("invalid enum value")),
+            None => {
+                let message = format!(
+                    "invalid value of enumerated type: {}",
+                    String::from_utf8_lossy(text)
+                );
+                Err(self.error_at(NcbiThrow::Plain(FIND_VALUE), message))
+            }
         }
     }
 
@@ -1122,11 +1341,7 @@ impl<S: AsnSource> Reader<S> {
         let start_line = self.line;
         loop {
             let Some(c) = self.src.byte_at(self.pos) else {
-                return Err(AsnTextError {
-                    line: self.line,
-                    message: format!("unclosed string starts at line {start_line}"),
-                    kind: AsnTextErrorKind::Format,
-                });
+                return Err(self.unended_string(start_line));
             };
             self.pos += 1;
             match c {
@@ -1156,6 +1371,140 @@ impl<S: AsnSource> Reader<S> {
                 }
             }
         }
+    }
+
+    /// The `CEofException` inside a string, which `ReadStringValue` turns into its error
+    /// (`UnendedString`, quoted at [`UNENDED_STRING`]) at the line where the text ends.
+    fn unended_string(&self, start_line: usize) -> AsnTextError {
+        self.error_at(
+            NcbiThrow::Stream(UNENDED_STRING),
+            format!("unclosed string starts at line {start_line}"),
+        )
+    }
+
+    /// `ReadStringValue` (`SkipString` when `skip`) of a VisibleString (`visible`) or a
+    /// UTF8String: the string's lines joined and `""` read as one quote, appended to `out`
+    /// (nothing when skipping). In a VisibleString each byte outside 0x20..0x7E is read as `#`,
+    /// and `bad_char` gets the line, the byte and the piece of the string that NCBI's message
+    /// quotes (`ReplaceVisibleChar`'s post, `report::serial::encoder::ReplacedChar`): the piece
+    /// being appended (`AppendStringData`: up to the end of the line, the quote, or 128 bytes;
+    /// after `""` the next piece starts with the second quote), none when skipping. The one
+    /// reader of a VisibleString in ASN.1 text for the readers that post NCBI's messages (the
+    /// PSSM reader, `asn_types::read`, and the mask reader, `writedb::mask_info`).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912 (`AppendStringData`)
+    // ```c++
+    //     const char* data = m_Input.GetCurrentPos();
+    //     if ( fix_method != eFNP_Allow ) {
+    //         size_t done = 0, valid = 0;
+    //         for ( size_t i = 0; i < count; ++i ) {
+    //             char c = data[i];
+    //             if ( !GoodVisibleChar(c) ) {
+    //                 ...
+    //                 if (valid == 0) {
+    //                     if ( i > done ) {
+    //                         s.append(data + done, i - done);
+    //                     }
+    //                     c = ReplaceVisibleChar(c, fix_method, this, CTempString(data,count), x_FixCharsSubst());
+    //                     if (c != 0) {
+    //                         s += c;
+    //                     }
+    //                     done = i + 1;
+    //                 }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986 (`ReadStringValue`, quoted
+    // at `string`; its `catch ( CEofException& )` calls `UnendedString`)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1093-1155
+    // ```c++
+    // void CObjectIStreamAsn::SkipString(EStringType type)
+    // {
+    //     ...
+    //             default:
+    //                 if (type == eStringTypeVisible) {
+    //                     if ( !GoodVisibleChar(c) ) {
+    //                         ...
+    //                         if (valid == 0) {
+    //                             c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst());
+    //                         }
+    // ```
+    // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163: `valid` stays 0;
+    // the fix is `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`, objistr.cpp:302.)
+    pub(crate) fn visible_string(
+        &mut self,
+        out: &mut Vec<u8>,
+        visible: bool,
+        skip: bool,
+        bad_char: &mut dyn FnMut(usize, u8, &[u8]),
+    ) -> Result<()> {
+        self.expect(b'"')?;
+        let start_line = self.line;
+        let mut i = 0usize;
+        loop {
+            let Some(c) = self.src.byte_at(self.pos + i) else {
+                return Err(self.unended_string(start_line));
+            };
+            match c {
+                b'\r' | b'\n' => {
+                    self.append_piece(out, i, visible, skip, bad_char);
+                    self.pos += i + 1;
+                    i = 0;
+                    self.skip_end_of_line(c);
+                }
+                b'"' => {
+                    self.append_piece(out, i, visible, skip, bad_char);
+                    self.pos += i + 1;
+                    if self.peek_at(0) != b'"' {
+                        return Ok(());
+                    }
+                    // `""`: the second quote starts the next piece (`SkipString` takes both).
+                    if skip {
+                        self.pos += 1;
+                        i = 0;
+                    } else {
+                        i = 1;
+                    }
+                }
+                _ => {
+                    if skip && visible && !(b' '..=b'~').contains(&c) {
+                        bad_char(self.line, c, &[]);
+                    }
+                    i += 1;
+                    if i == 128 {
+                        self.append_piece(out, i, visible, skip, bad_char);
+                        self.pos += i;
+                        i = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    /// `AppendStringData` of the `count` bytes at the reader's position (not taken).
+    fn append_piece(
+        &self,
+        out: &mut Vec<u8>,
+        count: usize,
+        visible: bool,
+        skip: bool,
+        bad_char: &mut dyn FnMut(usize, u8, &[u8]),
+    ) {
+        if skip {
+            return;
+        }
+        let data = self.src.bytes(self.pos..self.pos + count);
+        if !visible {
+            out.extend_from_slice(data);
+            return;
+        }
+        let mut done = 0;
+        for (i, &c) in data.iter().enumerate() {
+            if !(b' '..=b'~').contains(&c) {
+                out.extend_from_slice(&data[done..i]);
+                bad_char(self.line, c, data);
+                out.push(b'#');
+                done = i + 1;
+            }
+        }
+        out.extend_from_slice(&data[done..]);
     }
 
     /// An OCTET STRING: `'`, hex digits across lines, `'H`.

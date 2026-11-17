@@ -6,9 +6,67 @@
 //! its variant `[n]` around the value, and every constructed item ends with `00 00` when
 //! its length is indefinite (`80`); a definite length is accepted as well.
 
-use super::reader::{format_err, Fail, Input, R};
+use super::reader::{reserve_string, throw_error, Fail, Input, StringPost, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::asn_text_reader::FIND_NAME;
+use crate::report::serial::encoder::StreamPosition;
 use crate::seqid::ber::StdSignedError;
+
+/// A `ThrowError` of `CObjectIStreamAsnBinary` (objistrasnb.cpp) at `line` of `function` (`None`:
+/// the template functions of the numbers, whose report names none).
+const fn asnb_site(line: u32, kind: &'static str, function: Option<&'static str>) -> ThrowSite {
+    ThrowSite {
+        file: "src/serial/objistrasnb.cpp",
+        line,
+        kind,
+        function,
+    }
+}
+
+const FORMAT_ERROR: &str = "CSerialException::eFormatError";
+const OVERFLOW: &str = "CSerialException::eOverflow";
+const PEEK_LONG_TAG: ThrowSite = asnb_site(
+    161,
+    OVERFLOW,
+    Some("ncbi::CObjectIStreamAsnBinary::PeekLongTag"),
+);
+const UNEXPECTED_TAG_CLASS_BYTE: ThrowSite = asnb_site(
+    177,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedTagClassByte"),
+);
+const UNEXPECTED_SHORT_LENGTH: ThrowSite = asnb_site(
+    185,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedShortLength"),
+);
+const UNEXPECTED_CONTINUATION: ThrowSite = asnb_site(
+    197,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedContinuation"),
+);
+const UNEXPECTED_LONG_LENGTH: ThrowSite = asnb_site(
+    202,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedLongLength"),
+);
+const UNEXPECTED_TAG_VALUE: ThrowSite = asnb_site(
+    216,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedTagValue"),
+);
+const UNEXPECTED_SYS_TAG_BYTE: ThrowSite = asnb_site(
+    377,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedSysTagByte"),
+);
+const READ_LENGTH_LONG: &str = "ncbi::CObjectIStreamAsnBinary::ReadLengthLong";
+const UNEXPECTED_MEMBER: ThrowSite = asnb_site(
+    1066,
+    FORMAT_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::UnexpectedMember"),
+);
 
 pub(super) struct BerIn<'a> {
     data: &'a [u8],
@@ -68,6 +126,12 @@ impl<'a> BerIn<'a> {
             limit: 0,
             limits: Vec::new(),
         }
+    }
+
+    /// `ThrowError(fFormatError or fOverflow, message)` at `site` at the current position.
+    #[cold]
+    fn throw<T>(&self, site: ThrowSite, message: impl std::fmt::Display) -> R<T> {
+        throw_error(site, &self.position(), message)
     }
 
     /// `m_Input.PeekChar(i)`: the end of the data throws `CEofException`.
@@ -132,7 +196,7 @@ impl<'a> BerIn<'a> {
         let mut i = 1;
         loop {
             if tag >= (1 << 24) {
-                return format_err(format!("tag number is too big: {tag}"));
+                return self.throw(PEEK_LONG_TAG, format_args!("tag number is too big: {tag}"));
             }
             let byte = self.peek(i)?;
             i += 1;
@@ -170,9 +234,14 @@ impl<'a> BerIn<'a> {
     fn peek_tag_of_class(&mut self, class_and_constructed: u8) -> R<i32> {
         let first = self.peek(0)?;
         if first & CLASS_AND_CONSTRUCTED_MASK != class_and_constructed {
-            return format_err(format!(
-                "unexpected tag: {first}, should be {class_and_constructed}"
-            ));
+            return self.throw(
+                UNEXPECTED_TAG_CLASS_BYTE,
+                format_args!(
+                    "unexpected tag: {}, should be {}",
+                    tag_to_string(first),
+                    tag_to_string(class_and_constructed)
+                ),
+            );
         }
         self.peek_tag()
     }
@@ -200,7 +269,12 @@ impl<'a> BerIn<'a> {
     fn expect_tag(&mut self, class_and_constructed: u8, value: i32) -> R<()> {
         let tag = self.peek_tag_of_class(class_and_constructed)?;
         if tag != value {
-            return format_err(format!("Unexpected tag: {tag}, expected: {value}"));
+            // The class was checked (universal or context specific): no "Application " or
+            // "Private " before the number.
+            return self.throw(
+                UNEXPECTED_TAG_VALUE,
+                format_args!("Unexpected tag: {tag}, expected: {value}"),
+            );
         }
         Ok(())
     }
@@ -229,14 +303,23 @@ impl<'a> BerIn<'a> {
     fn read_length_long(&mut self, byte: u8) -> R<u64> {
         let mut length_length = usize::from(byte - 0x80);
         if length_length == 0 {
-            return format_err("unexpected indefinite length");
+            return self.throw(
+                asnb_site(398, FORMAT_ERROR, Some(READ_LENGTH_LONG)),
+                "unexpected indefinite length",
+            );
         }
         if length_length > 8 {
-            return format_err("length overflow");
+            return self.throw(
+                asnb_site(401, OVERFLOW, Some(READ_LENGTH_LONG)),
+                "length overflow",
+            );
         }
         let mut length = u64::from(self.byte()?);
         if length == 0 {
-            return format_err("illegal length start");
+            return self.throw(
+                asnb_site(405, FORMAT_ERROR, Some(READ_LENGTH_LONG)),
+                "illegal length start",
+            );
         }
         loop {
             length_length -= 1;
@@ -367,15 +450,15 @@ impl<'a> BerIn<'a> {
     fn expect_end_of_content(&mut self) -> R<()> {
         if self.limit != 0 {
             if self.limit != self.pos as i64 {
-                return format_err("EndOfContentsByte expected");
+                return self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected");
             }
         } else {
             if self.peek(0)? != 0 {
-                return format_err("EndOfContentsByte expected");
+                return self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected");
             }
             self.pos += 1;
             if self.peek(0)? != 0 {
-                return format_err("EndOfContentsByte expected");
+                return self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected");
             }
             self.pos += 1;
         }
@@ -411,16 +494,38 @@ impl<'a> BerIn<'a> {
         self.tag_len = 0;
         let byte = self.byte()?;
         if byte >= 0x80 {
-            return format_err("ShortLength expected");
+            return self.throw(UNEXPECTED_LONG_LENGTH, "ShortLength expected");
         }
         Ok(usize::from(byte))
     }
 
-    /// `ExpectSysTagByte(byte)` (objistrasnb.inl:90-100): the exact tag byte.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:374-379
+    // ```c++
+    // void CObjectIStreamAsnBinary::UnexpectedSysTagByte(TByte tag_byte)
+    // {
+    //     TByte got = PeekTagByte();
+    //     ThrowError(fFormatError, "unexpected tag: " + TagToString(got) +
+    //                              ", should be: "    + TagToString(tag_byte));
+    // }
+    // ```
+    /// `UnexpectedSysTagByte(byte)`: the tag at the current position is not `byte`.
+    #[cold]
+    fn unexpected_sys_tag_byte<T>(&self, got: u8, byte: u8) -> R<T> {
+        self.throw(
+            UNEXPECTED_SYS_TAG_BYTE,
+            format_args!(
+                "unexpected tag: {}, should be: {}",
+                tag_to_string(got),
+                tag_to_string(byte)
+            ),
+        )
+    }
+
+    /// `ExpectSysTagByte(byte)` (objistrasnb.inl:115-123): the exact tag byte.
     fn expect_sys_tag_byte(&mut self, byte: u8) -> R<()> {
         let got = self.peek(0)?;
         if got != byte {
-            return format_err(format!("unexpected tag: {got}, should be: {byte}"));
+            return self.unexpected_sys_tag_byte(got, byte);
         }
         self.tag_len = 1;
         Ok(())
@@ -454,7 +559,7 @@ impl<'a> BerIn<'a> {
                 self.tag_len = 1;
                 Ok(())
             }
-            got => format_err(format!("unexpected tag: {got}, should be: {TAG_INTEGER}")),
+            got => self.unexpected_sys_tag_byte(got, TAG_INTEGER),
         }
     }
 
@@ -462,13 +567,16 @@ impl<'a> BerIn<'a> {
     /// `sizeof(T)`; the result is the value of `T` widened to `i64`.
     fn read_std_signed(&mut self, size: usize) -> R<i64> {
         let length = self.read_short_length()?;
-        crate::seqid::ber::read_std_signed(length, size, || self.byte()).or_else(
-            |error| match error {
-                StdSignedError::ZeroLength => format_err("zero length of number"),
-                StdSignedError::Overflow => format_err("overflow error"),
-                StdSignedError::Read(fail) => Err(fail),
-            },
-        )
+        let result = crate::seqid::ber::read_std_signed(length, size, || self.byte());
+        result.or_else(|error| match error {
+            StdSignedError::ZeroLength => {
+                self.throw(asnb_site(480, FORMAT_ERROR, None), "zero length of number")
+            }
+            StdSignedError::Overflow { line } => {
+                self.throw(asnb_site(line, OVERFLOW, None), "overflow error")
+            }
+            StdSignedError::Read(fail) => Err(fail),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:514-549
@@ -513,14 +621,14 @@ impl<'a> BerIn<'a> {
     fn read_std_unsigned32(&mut self) -> R<u32> {
         let mut length = self.read_short_length()?;
         if length == 0 {
-            return format_err("zero length of number");
+            return self.throw(asnb_site(519, FORMAT_ERROR, None), "zero length of number");
         }
         let mut n: u32;
         if length > 4 {
             while length > 4 {
                 length -= 1;
                 if self.byte()? != 0 {
-                    return format_err("overflow error");
+                    return self.throw(asnb_site(527, OVERFLOW, None), "overflow error");
                 }
             }
             length -= 1;
@@ -529,7 +637,7 @@ impl<'a> BerIn<'a> {
             length -= 1;
             n = u32::from(self.byte()?);
             if n & 0x80 != 0 {
-                return format_err("overflow error");
+                return self.throw(asnb_site(537, OVERFLOW, None), "overflow error");
             }
         } else {
             n = 0;
@@ -543,6 +651,19 @@ impl<'a> BerIn<'a> {
 }
 
 impl Input for BerIn<'_> {
+    /// `GetPosition()` of the binary stream: the bytes read from the start of the object
+    /// (`m_Input.GetStreamPosAsInt8()`; each object of the file is read by a stream of its own).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:118-121
+    // ```c++
+    // string CObjectIStreamAsnBinary::GetPosition(void) const
+    // {
+    //     return "byte "+NStr::Int8ToString(GetStreamPos());
+    // }
+    // ```
+    fn position(&self) -> String {
+        format!("byte {}", self.pos)
+    }
+
     fn read_file_header(&mut self) -> R<Option<Vec<u8>>> {
         Ok(None)
     }
@@ -616,7 +737,7 @@ impl Input for BerIn<'_> {
         self.expect_indefinite_length()?;
         match usize::try_from(tag) {
             Ok(index) if index >= pos && index < def.members.len() => Ok(Some(index)),
-            _ => format_err(format!("unexpected member: [{tag}]")),
+            _ => self.unexpected_member(tag, def.members.iter().map(|m| m.name)),
         }
     }
 
@@ -651,7 +772,7 @@ impl Input for BerIn<'_> {
         self.expect_indefinite_length()?;
         match usize::try_from(tag) {
             Ok(index) if index < def.variants.len() => Ok(index),
-            _ => format_err(format!("unexpected member: [{tag}]")),
+            _ => self.unexpected_member(tag, def.variants.iter().map(|v| v.name)),
         }
     }
 
@@ -723,7 +844,10 @@ impl Input for BerIn<'_> {
         self.expect_sys_tag_byte(TAG_BOOLEAN)?;
         let length = self.read_short_length()?;
         if length != 1 {
-            return format_err(format!("unexpected length: {length}, should be: 1"));
+            return self.throw(
+                UNEXPECTED_SHORT_LENGTH,
+                format_args!("unexpected length: {length}, should be: 1"),
+            );
         }
         Ok(self.byte()? != 0)
     }
@@ -741,7 +865,10 @@ impl Input for BerIn<'_> {
         self.expect_sys_tag_byte(TAG_NULL)?;
         let length = self.read_short_length()?;
         if length != 0 {
-            return format_err(format!("unexpected length: {length}, should be: 0"));
+            return self.throw(
+                UNEXPECTED_SHORT_LENGTH,
+                format_args!("unexpected length: {length}, should be: 0"),
+            );
         }
         Ok(())
     }
@@ -776,17 +903,13 @@ impl Input for BerIn<'_> {
     // ```
     // (`SERIAL_READ_ANY_VISIBLESTRING_TAG` is 1 by default: a UTF8String is accepted for a
     // VisibleString, with a warning.)
-    fn read_string(&mut self) -> R<(Vec<u8>, bool)> {
-        let utf8_tag = self.peek(0)? == TAG_UTF8_STRING;
+    fn read_string(&mut self, posts: &mut Vec<StringPost>) -> R<Vec<u8>> {
         match self.peek(0)? {
-            TAG_VISIBLE_STRING | TAG_UTF8_STRING => self.tag_len = 1,
-            got => {
-                return format_err(format!(
-                    "unexpected tag: {got}, should be: {TAG_VISIBLE_STRING}"
-                ))
-            }
+            TAG_VISIBLE_STRING => {}
+            TAG_UTF8_STRING => posts.push(StringPost::Utf8Tag),
+            got => return self.unexpected_sys_tag_byte(got, TAG_VISIBLE_STRING),
         }
-        self.pos += self.tag_len;
+        self.pos += 1;
         self.tag_len = 0;
         let byte = self.byte()?;
         let length = if byte >= 0x80 {
@@ -794,16 +917,19 @@ impl Input for BerIn<'_> {
         } else {
             u64::from(byte)
         };
-        // `m_Input.GetChars(str, count)` reads `count` bytes or throws at the end of the file;
-        // the length is not trusted for an allocation.
+        // `ReadBytes(s, length)`: `GetChars(str, count)`, which reserves `count` bytes first when
+        // they are not all in the input buffer, and reads to the end of the file.
         let remaining = (self.data.len() - self.pos) as u64;
         if length > remaining {
+            reserve_string(length)?;
+            self.pos = self.data.len();
             return Err(Fail::Eof);
         }
         let length = length as usize;
-        let s = self.data[self.pos..self.pos + length].to_vec();
+        let mut s = self.data[self.pos..self.pos + length].to_vec();
         self.pos += length;
-        Ok((s, utf8_tag))
+        fix_visible_chars(&mut s, self.pos, posts);
+        Ok(s)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2023-2039
@@ -834,8 +960,157 @@ impl Input for BerIn<'_> {
         self.expect_sys_tag_byte(TAG_ENUMERATED)?;
         let value = self.read_std_signed(4)? as i32;
         if !def.values.iter().any(|&(_, v)| v == value) {
-            return format_err(format!("invalid value of enumerated type: {value}"));
+            return Err(Fail::Serial(NcbiException::new(
+                FIND_NAME,
+                format!("invalid value of enumerated type: {value}"),
+            )));
         }
         Ok(value)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1058-1067
+// ```c++
+// void CObjectIStreamAsnBinary::UnexpectedMember(TLongTag tag, const CItemsInfo& items)
+// {
+//     string message ="unexpected member: ["+NStr::IntToString(tag)+
+//                     "], should be one of: ";
+//     for ( CItemsInfo::CIterator i(items); i.Valid(); ++i ) {
+//         message += items.GetItemInfo(i)->GetId().GetName()+ "[" +
+//             NStr::IntToString(items.GetItemInfo(i)->GetId().GetTag()) + "] ";
+//     }
+//     ThrowError(fFormatError, message);
+// }
+// ```
+impl BerIn<'_> {
+    /// `UnexpectedMember(tag, items)` of a SEQUENCE or CHOICE whose members or variants are
+    /// `names` (their automatic tags are 0, 1, ... in order).
+    #[cold]
+    fn unexpected_member<T>(&self, tag: i32, names: impl Iterator<Item = &'static str>) -> R<T> {
+        let mut message = format!("unexpected member: [{tag}], should be one of: ");
+        for (tag, name) in names.enumerate() {
+            message.push_str(&format!("{name}[{tag}] "));
+        }
+        self.throw(UNEXPECTED_MEMBER, message)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:316-372
+// ```c++
+// string CObjectIStreamAsnBinary::TagToString(TByte byte)
+// {
+//     const char *cls, *con;
+//
+//     switch (byte & eTagClassMask) {
+//     default:
+//     case eUniversal:       cls = "";                break;
+//     case eApplication:     cls = "application/";    break;
+//     case eContextSpecific: cls = "contextspecific/";break;
+//     case ePrivate:         cls = "private/";        break;
+//     }
+//     string str(cls);
+//     switch (byte & eTagConstructedMask) {
+//     default:
+//     case ePrimitive:         con = "";              break;
+//     case eConstructed:       con = "constructed/";  break;
+//     }
+//     str += con;
+//     if ((byte & eTagClassMask) == eUniversal) {
+//         const char *v;
+//         switch (byte & eTagValueMask) {
+//         case eNone:              v= "None";             break;
+//         case eBoolean:           v= "Boolean";          break;
+//         ...
+//         case eObjectReference:   v= "ObjectReference";  break;
+//         default:                 v= "unknown";          break;
+//         }
+//         str += v;
+//     } else {
+//         str += NStr::NumericToString((byte & eTagValueMask));
+//     }
+//     return str += " (" + NStr::NumericToString(byte) + ")";
+// }
+// ```
+/// `TagToString(byte)`: the class, `constructed/`, the universal type's name or the number,
+/// and the byte.
+fn tag_to_string(byte: u8) -> String {
+    let class = match byte & 0xc0 {
+        0x40 => "application/",
+        0x80 => "contextspecific/",
+        0xc0 => "private/",
+        _ => "",
+    };
+    let constructed = if byte & 0x20 != 0 { "constructed/" } else { "" };
+    let value = byte & 0x1f;
+    if byte & 0xc0 != 0 {
+        return format!("{class}{constructed}{value} ({byte})");
+    }
+    let name = match value {
+        0 => "None",
+        1 => "Boolean",
+        2 => "Integer",
+        3 => "BitString",
+        4 => "OctetString",
+        5 => "Null",
+        6 => "ObjectIdentifier",
+        7 => "ObjectDescriptor",
+        8 => "External",
+        9 => "Real",
+        10 => "Enumerated",
+        12 => "UTF8String",
+        16 => "Sequence",
+        17 => "Set",
+        18 => "NumericString",
+        19 => "PrintableString",
+        20 => "TeletextString",
+        21 => "VideotextString",
+        22 => "IA5String",
+        23 => "UTCTime",
+        24 => "GeneralizedTime",
+        25 => "GraphicString",
+        26 => "VisibleString",
+        27 => "GeneralString",
+        29 => "MemberReference",
+        30 => "ObjectReference",
+        _ => "unknown",
+    };
+    format!("{constructed}{name} ({byte})")
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:703-749
+// ```c++
+// bool CObjectIStreamAsnBinary::FixVisibleChars(string& str, EFixNonPrint fix_method)
+// {
+//     ...
+//         for(string::iterator i = str.begin(); i < to; ++i) {
+//             if ( BadVisibleChar(*i) ) {
+//                 ...
+//                 {
+//                     char c = ReplaceVisibleChar(*i, fix_method, this, str, subst);
+//                     if (c != '\0') {
+//                         *i = subst;
+//                     } else {
+//                         ...
+//                     }
+//                     result = true;
+//                 }
+// ```
+// (`ReadStringValue`, objistrasnb.cpp:803-826, fixes a new string after `ReadBytes`, before
+// `EndOfTag`: the position is the byte after the string. `SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_
+// READING` is 0.)
+/// `FixVisibleChars(str)` of the string `s`, read up to the byte `end` of the object: each byte
+/// outside `' '..='~'` becomes `#`, posted with the string as fixed so far (the bytes before it
+/// already `#`).
+fn fix_visible_chars(s: &mut [u8], end: usize, posts: &mut Vec<StringPost>) {
+    for i in 0..s.len() {
+        let byte = s[i];
+        if !(b' '..=b'~').contains(&byte) {
+            posts.push(StringPost::BadChar {
+                position: StreamPosition::Byte(end as u64),
+                byte,
+                string: s.to_vec(),
+            });
+            s[i] = b'#';
+        }
     }
 }

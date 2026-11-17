@@ -39,6 +39,12 @@ pub(super) struct Member {
     pub(super) ty: &'static Ty,
     /// `OPTIONAL` or `DEFAULT`: the reader does not insist that the member is present.
     pub(super) optional: bool,
+    /// Whether the generated class has a set flag for the member (`SET_MEMBER`, `HaveSetFlag()`):
+    /// such a member is read by `ReadWithSetFlagMember`, which adds "error while reading <name>"
+    /// to a `CSerialException`. The generated classes give every member one except a member that
+    /// holds a class or choice by reference (`ADD_NAMED_REF_MEMBER`, `CRef<>`): `ref_req`,
+    /// `ref_opt`.
+    pub(super) set_flag: bool,
 }
 
 pub(super) struct ClassDef {
@@ -53,6 +59,9 @@ pub(super) struct Variant {
 }
 
 pub(super) struct ChoiceDef {
+    /// The type's name (`Object type= ` of its frame), empty for a CHOICE declared inside a
+    /// SEQUENCE (`Id-pat.id`).
+    pub(super) name: &'static str,
     pub(super) variants: &'static [Variant],
 }
 
@@ -61,6 +70,7 @@ const fn req(name: &'static str, ty: &'static Ty) -> Member {
         name,
         ty,
         optional: false,
+        set_flag: true,
     }
 }
 
@@ -69,6 +79,46 @@ const fn opt(name: &'static str, ty: &'static Ty) -> Member {
         name,
         ty,
         optional: true,
+        set_flag: true,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval_.cpp:110-123
+// ```c++
+// BEGIN_NAMED_BASE_CLASS_INFO("Seq-interval", CSeq_interval)
+// {
+//     SET_CLASS_MODULE("NCBI-Seqloc");
+//     ADD_NAMED_STD_MEMBER("from", m_From)->SetSetFlag(MEMBER_PTR(m_set_State[0]));
+//     ADD_NAMED_STD_MEMBER("to", m_To)->SetSetFlag(MEMBER_PTR(m_set_State[0]));
+//     ADD_NAMED_ENUM_MEMBER("strand", m_Strand, ENa_strand)->SetSetFlag(MEMBER_PTR(m_set_State[0]))->SetOptional();
+//     ADD_NAMED_REF_MEMBER("id", m_Id, CSeq_id);
+//     ADD_NAMED_REF_MEMBER("fuzz-from", m_Fuzz_from, CInt_fuzz)->SetOptional();
+//     ADD_NAMED_REF_MEMBER("fuzz-to", m_Fuzz_to, CInt_fuzz)->SetOptional();
+//     info->RandomOrder();
+//     info->CodeVersion(22400);
+//     info->DataSpec(ncbi::EDataSpec::eASN);
+// }
+// END_CLASS_INFO
+// ```
+// (The other generated classes of these types are alike: `ADD_NAMED_REF_MEMBER` has no set flag;
+// `Blast-db-mask-info.masks`, `Seq-point.id`/`fuzz`, `Packed-seqpnt.id`/`fuzz`, `Seq-bond.a`/`b`,
+// `Dbtag.tag`, `Patent-seq-id.cit`, `Id-pat.id` and `PDB-seq-id.rel` are such members; checked
+// with makeblastdb 2.17.0's "error while reading" lines.)
+const fn ref_req(name: &'static str, ty: &'static Ty) -> Member {
+    Member {
+        name,
+        ty,
+        optional: false,
+        set_flag: false,
+    }
+}
+
+const fn ref_opt(name: &'static str, ty: &'static Ty) -> Member {
+    Member {
+        name,
+        ty,
+        optional: true,
+        set_flag: false,
     }
 }
 
@@ -118,7 +168,7 @@ pub(super) static BLAST_DB_MASK_INFO: ClassDef = ClassDef {
         req("algo-id", &T_INT32),
         req("algo-program", &T_FILTER_PROGRAM),
         req("algo-options", &T_STR),
-        req("masks", &T_BLAST_MASK_LIST),
+        ref_req("masks", &T_BLAST_MASK_LIST),
     ],
 };
 static T_BLAST_MASK_LIST: Ty = Ty::Class(&BLAST_MASK_LIST);
@@ -153,6 +203,7 @@ static T_NULL: Ty = Ty::Null;
 // ```
 pub(super) static T_SEQ_LOC: Ty = Ty::Choice(&SEQ_LOC);
 pub(super) static SEQ_LOC: ChoiceDef = ChoiceDef {
+    name: "Seq-loc",
     variants: &[
         var("null", &T_NULL),
         var("empty", &T_SEQ_ID),
@@ -238,9 +289,9 @@ pub(super) static SEQ_INTERVAL: ClassDef = ClassDef {
         req("from", &T_UINT32),
         req("to", &T_UINT32),
         opt("strand", &T_NA_STRAND),
-        req("id", &T_SEQ_ID),
-        opt("fuzz-from", &T_INT_FUZZ),
-        opt("fuzz-to", &T_INT_FUZZ),
+        ref_req("id", &T_SEQ_ID),
+        ref_opt("fuzz-from", &T_INT_FUZZ),
+        ref_opt("fuzz-to", &T_INT_FUZZ),
     ],
 };
 pub(super) const SEQ_INTERVAL_FROM: usize = 0;
@@ -255,8 +306,8 @@ pub(super) static SEQ_POINT: ClassDef = ClassDef {
     members: &[
         req("point", &T_UINT32),
         opt("strand", &T_NA_STRAND),
-        req("id", &T_SEQ_ID),
-        opt("fuzz", &T_INT_FUZZ),
+        ref_req("id", &T_SEQ_ID),
+        ref_opt("fuzz", &T_INT_FUZZ),
     ],
 };
 static T_SEQ_POINT: Ty = Ty::Class(&SEQ_POINT);
@@ -266,8 +317,8 @@ pub(super) static PACKED_SEQPNT: ClassDef = ClassDef {
     name: "Packed-seqpnt",
     members: &[
         opt("strand", &T_NA_STRAND),
-        req("id", &T_SEQ_ID),
-        opt("fuzz", &T_INT_FUZZ),
+        ref_req("id", &T_SEQ_ID),
+        ref_opt("fuzz", &T_INT_FUZZ),
         req("points", &T_UINT32_LIST),
     ],
 };
@@ -288,7 +339,7 @@ static T_NA_STRAND: Ty = Ty::Enum(&NA_STRAND);
 
 pub(super) static SEQ_BOND: ClassDef = ClassDef {
     name: "Seq-bond",
-    members: &[req("a", &T_SEQ_POINT), opt("b", &T_SEQ_POINT)],
+    members: &[ref_req("a", &T_SEQ_POINT), ref_opt("b", &T_SEQ_POINT)],
 };
 static T_SEQ_BOND: Ty = Ty::Class(&SEQ_BOND);
 
@@ -304,6 +355,7 @@ static T_SEQ_LOC_EQUIV: Ty = Ty::SetOf(&T_SEQ_LOC);
 //     general Dbtag }           -- for use by various databases
 // ```
 static FEAT_ID: ChoiceDef = ChoiceDef {
+    name: "Feat-id",
     variants: &[
         var("gibb", &T_INT32),
         var("giim", &T_GIIMPORT_ID),
@@ -359,6 +411,7 @@ static INT_FUZZ_LIM: EnumDef = EnumDef {
 static T_INT_FUZZ_LIM: Ty = Ty::Enum(&INT_FUZZ_LIM);
 static T_UINT32_SET: Ty = Ty::SetOf(&T_UINT32);
 static INT_FUZZ: ChoiceDef = ChoiceDef {
+    name: "Int-fuzz",
     variants: &[
         var("p-m", &T_UINT32),
         var("range", &T_INT_FUZZ_RANGE),
@@ -393,6 +446,7 @@ static T_INT_FUZZ: Ty = Ty::Choice(&INT_FUZZ);
 //     str VisibleString }
 // ```
 static OBJECT_ID: ChoiceDef = ChoiceDef {
+    name: "Object-id",
     variants: &[var("id", &T_INT32), var("str", &T_STR)],
 };
 pub(super) static T_OBJECT_ID: Ty = Ty::Choice(&OBJECT_ID);
@@ -400,7 +454,7 @@ pub(super) const OBJECT_ID_ID: usize = 0;
 
 pub(super) static DBTAG: ClassDef = ClassDef {
     name: "Dbtag",
-    members: &[req("db", &T_STR), req("tag", &T_OBJECT_ID)],
+    members: &[req("db", &T_STR), ref_req("tag", &T_OBJECT_ID)],
 };
 static T_DBTAG: Ty = Ty::Class(&DBTAG);
 
@@ -418,6 +472,7 @@ pub(super) static DATE_STD: ClassDef = ClassDef {
 };
 static T_DATE_STD: Ty = Ty::Class(&DATE_STD);
 pub(super) static DATE: ChoiceDef = ChoiceDef {
+    name: "Date",
     variants: &[var("str", &T_STR), var("std", &T_DATE_STD)],
 };
 static T_DATE: Ty = Ty::Choice(&DATE);
@@ -486,6 +541,7 @@ static T_DATE: Ty = Ty::Choice(&DATE);
 //     doc-type VisibleString OPTIONAL }   -- Patent Doc Type
 // ```
 pub(super) static ID_PAT_ID: ChoiceDef = ChoiceDef {
+    name: "",
     variants: &[var("number", &T_STR), var("app-number", &T_STR)],
 };
 static T_ID_PAT_ID: Ty = Ty::Choice(&ID_PAT_ID);
@@ -493,14 +549,14 @@ pub(super) static ID_PAT: ClassDef = ClassDef {
     name: "Id-pat",
     members: &[
         req("country", &T_STR),
-        req("id", &T_ID_PAT_ID),
+        ref_req("id", &T_ID_PAT_ID),
         opt("doc-type", &T_STR),
     ],
 };
 static T_ID_PAT: Ty = Ty::Class(&ID_PAT);
 pub(super) static PATENT_SEQ_ID: ClassDef = ClassDef {
     name: "Patent-seq-id",
-    members: &[req("seqid", &T_INT32), req("cit", &T_ID_PAT)],
+    members: &[req("seqid", &T_INT32), ref_req("cit", &T_ID_PAT)],
 };
 static T_PATENT_SEQ_ID: Ty = Ty::Class(&PATENT_SEQ_ID);
 pub(super) static TEXTSEQ_ID: ClassDef = ClassDef {
@@ -527,13 +583,14 @@ pub(super) static PDB_SEQ_ID: ClassDef = ClassDef {
     members: &[
         req("mol", &T_STR),
         opt("chain", &T_INT32),
-        opt("rel", &T_DATE),
+        ref_opt("rel", &T_DATE),
         opt("chain-id", &T_STR),
     ],
 };
 static T_PDB_SEQ_ID: Ty = Ty::Class(&PDB_SEQ_ID);
 
 pub(super) static SEQ_ID: ChoiceDef = ChoiceDef {
+    name: "Seq-id",
     variants: &[
         var("local", &T_OBJECT_ID),
         var("gibbsq", &T_INT32),

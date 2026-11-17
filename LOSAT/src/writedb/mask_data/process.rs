@@ -53,7 +53,7 @@ use crate::ncbi_str::{string_to_int, truncate_spaces_str};
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
-use crate::writedb::mask_info::{MaskFileError, MaskFileReader};
+use crate::writedb::mask_info::{MaskFileError, MaskFileReader, MaskPost};
 use crate::writedb::WriteDbError;
 
 /// The values of the options that `x_ProcessMaskData` reads: `None` for an option that was not
@@ -81,9 +81,8 @@ pub(crate) enum MaskDataError {
     /// ([`WriteDbError::Options`]), `CWriteDBException` ([`WriteDbError::Creation`]) of the
     /// registry, LOSAT's refusal of a negative algorithm id ([`WriteDbError::Unsupported`]).
     Ncbi(WriteDbError),
-    /// A failure of the mask file reader: [`MaskFileError::Ncbi`] (the format guess, NCBI's
-    /// text), [`MaskFileError::Malformed`] (NCBI: a `CSerialException`, status 255, or
-    /// `std::bad_alloc`, status 4), [`MaskFileError::Unsupported`],
+    /// A failure of the mask file reader: [`MaskFileError::Ncbi`] (the format guess and what
+    /// NCBI's serial reader throws, NCBI's text), [`MaskFileError::Unsupported`],
     /// [`MaskFileError::EofInContinuation`].
     File(MaskFileError),
 }
@@ -143,19 +142,27 @@ impl MaskDataError {
     //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-263
+    // ```c++
+    //     catch (const std::bad_alloc&) {                                         \
+    //         LOG_POST(Error << "BLAST ran out of memory");                       \
+    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
+    //     }                                                                       \
+    //     catch (const std::exception& e) {                                       \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
     /// Where each outcome of `x_ProcessMaskData` becomes makeblastdb's (exit status, message);
     /// the only place that decides it. `None` is a run that ends with status 0 and no message.
     ///
     /// * [`MaskDataError::Ncbi`], [`MaskFileError::Ncbi`]: `CATCH_ALL` as NCBI (`BLAST options
     ///   error: ...`, status 1; `BLAST Database creation error: ...`, status 1; the message of a
-    ///   failure of the file system, "Error: ...", status 255); LOSAT's refusal of a negative
-    ///   algorithm id ("losat makeblastdb: ...", status 1).
-    /// * [`MaskFileError::Malformed`]: a file that NCBI's serial reader refuses. NCBI ends with
-    ///   status 255 and "Error: NCBI C++ Exception: ..." (a `CSerialException`, whose text names
-    ///   the directory of NCBI's build and is not reproduced); LOSAT prints `Error: mask data in
-    ///   '<file>': <its own text>` with status 255. NCBI's `std::bad_alloc` for a string whose
-    ///   length cannot be allocated (status 4, "BLAST ran out of memory") depends on the memory
-    ///   of the host and is not told apart.
+    ///   failure of the file system, "Error: ...", status 255); what NCBI's serial reader throws
+    ///   for a file it refuses ("Error: NCBI C++ Exception: ..." of a `CException`, status 255;
+    ///   "BLAST ran out of memory" of a `std::bad_alloc`, status 4; "Error: ..." of the
+    ///   `std::length_error` of a string longer than `std::string` holds, status 255); LOSAT's
+    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1).
     /// * [`MaskFileError::Unsupported`]: NCBI reads the file and LOSAT does not
     ///   (`MakedbError::Unsupported`, status 1).
     /// * [`MaskFileError::EofInContinuation`]: `None`, exactly as NCBI (status 0, nothing is
@@ -169,9 +176,6 @@ impl MaskDataError {
             MaskDataError::File(MaskFileError::Unsupported(what)) => Some(
                 MakedbError::Unsupported(format!("mask data that LOSAT does not read: {what}")),
             ),
-            MaskDataError::File(error @ MaskFileError::Malformed { .. }) => {
-                Some(MakedbError::Build(WriteDbError::Other(error.to_string())))
-            }
         }
     }
 }
@@ -438,6 +442,7 @@ pub(crate) fn process_mask_data(
         desc_list = vec![""; id_list.len()];
     }
 
+    let mut utf8_warned = false;
     for (i, &file) in file_list.iter().enumerate() {
         let path: PathBuf = match options.root {
             Some(root) => root.join(file),
@@ -455,7 +460,12 @@ pub(crate) fn process_mask_data(
         let mut reader = open_mask_file(&path, Path::new(file))?;
 
         let mut algo_id: Option<i32> = None;
-        while let Some(first_obj) = reader.next_info()? {
+        loop {
+            let next = reader.next_info();
+            write_posts(&mut reader, warn, &mut utf8_warned);
+            let Some(first_obj) = next? else {
+                break;
+            };
             let algo_id = match algo_id {
                 Some(id) => id,
                 None => {
@@ -498,11 +508,30 @@ pub(crate) fn process_mask_data(
                     break;
                 }
 
-                masks = reader.next_list()?;
+                let next = reader.next_list();
+                write_posts(&mut reader, warn, &mut utf8_warned);
+                masks = next?;
             }
         }
     }
     Ok(())
+}
+
+/// Writes on standard error what NCBI's serial reader posted while `reader` read its last object
+/// (also when it then failed), in the order posted: before makeblastdb does anything with the
+/// object or the error. The warning of a UTF8String tag is `ERR_POST_X_ONCE`, once per run
+/// (`utf8_warned`), whichever file it is in.
+fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_warned: &mut bool) {
+    for post in reader.take_posts() {
+        if matches!(post, MaskPost::Utf8Tag(_)) {
+            if *utf8_warned {
+                continue;
+            }
+            *utf8_warned = true;
+        }
+        let line = post.line();
+        warn(line.strip_suffix(b"\n").unwrap_or(&line));
+    }
 }
 
 /// The reader of the mask file at `path`, whose name in messages is `name`. A file that cannot

@@ -25,10 +25,13 @@
 //! `null`, `empty`, `whole`, `int`, `packed-int`, `pnt`, `packed-pnt`, `mix` and `equiv` (nested),
 //! `bond`; a `feat` has no Seq-id ("Cannot get masked range Seq-id", as `null` alone).
 //!
-//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): strings
-//! with bytes outside 0x20-0x7e that NCBI repairs and logs (`fix_visible_chars`; a binary Seq-id
-//! has no such byte), and a `UTF8String` tag where a `VisibleString` belongs
-//! (objistrasnb.cpp:276-312): LOSAT does not write NCBI's diagnostics for them.
+//! A string's bytes outside 0x20-0x7e are read as `#` with NCBI's diagnostic, and a `UTF8String`
+//! tag where a `VisibleString` belongs with NCBI's warning (once per run): the reader hands them
+//! out (`MaskPost`, `MaskFileReader::take_posts`) and `process` posts them. A file that NCBI's
+//! serial reader cannot read ends with NCBI's exception (`MaskFileError::Ncbi`). What is refused
+//! (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): objects nested more than
+//! 400 levels deep, and a string whose length passes the end of the file by an amount that
+//! makeblastdb may or may not be able to allocate on the host (1 GiB to 128 TiB).
 
 mod ber;
 mod guess;
@@ -40,7 +43,7 @@ mod seq_id_tests;
 mod tests;
 mod text;
 
-pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader};
+pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader, MaskPost};
 
 use crate::seqid::ParsedSeqId;
 

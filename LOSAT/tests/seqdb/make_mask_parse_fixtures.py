@@ -266,6 +266,26 @@ def hand_cases():
     c["bom_before_object"] = "\xef\xbb\xbf" + ok
     c["long_comment_before_object"] = "-- " + "x" * 9000 + "\n" + ok
     c["comment_mostly_punctuation"] = "-- " + "#" * 400 + "\n" + ok
+    # Bytes that NCBI stores as '#' in a VisibleString, with an error naming the reader's stack
+    # trace, the line and the chunk of the string being read (ReplaceVisibleChar): in a Seq-id, in
+    # a second object (its lines count from where the first ended), in chunks (128 bytes, a
+    # doubled quote, a line end), after white space that the reader of a number skips without
+    # counting lines, in the strings of other Seq-ids, in a continuation, and in a second object
+    # that starts on the line where the first ended.
+    c["bad_char_seq_id"] = obj('packed-int { { from 5, to 14,  id local str "a\tb" } }')
+    c["bad_char_second_object"] = ok + (
+        "Blast-db-mask-info ::= {\n algo-id 0, algo-program windowmasker, algo-options \"q\tr\", "
+        "masks { masks { packed-int { { from 5, to 14,  id local id 3 } } }, more FALSE } }\n")
+    c["bad_char_chunks"] = obj(f"packed-int {{ {iv(5, 14)} }}",
+                               options='"' + "A" * 130 + '\x01B""\x02C\nD\x03E"')
+    c["bad_char_after_vertical_tab"] = ok.replace("algo-id 0", "algo-id\x0b\n\n 0").replace('"x"', '"\x7f"')
+    c["bad_char_seq_id_strings"] = obj(
+        'mix { int { from 5, to 14, id general { db "d\tb", tag str "t\tg" } }, packed-int { { from 1, to 2, '
+        'id genbank { name "n\tm", accession "A\t1" } } } }')
+    c["bad_char_continuation"] = obj(f"packed-int {{ {iv(5, 14)} }}", more="TRUE") + (
+        'Blast-mask-list ::= { masks { packed-int { { from 20, to 24, id local str "c\td" } } }, more FALSE }\n')
+    c["bad_char_second_object_same_line"] = ok.replace("{ algo-id", "{\n algo-id").replace(
+        '"x", masks', '"x",\n masks').rstrip("\n") + " " + ok.replace('"x"', '"u\tv"')
     # Files that makeblastdb takes for neither format ("Unknown encoding for mask data in ...").
     c["not_asn_fasta.fna"] = ">seq1 not a mask file\nACGTACGTACGT\nACGT\n"
     c["not_asn_text.txt"] = "hello\n"
@@ -332,6 +352,16 @@ def damaged_binary(dust):
     c["indefinite_never_closed"] = dust[:-2]
     c["length_beyond_file"] = dust.replace(b"\x1a\x1d", b"\x1a\x84\x00\x10\x00\x00", 1)
     c["length_huge"] = dust.replace(b"\x1a\x1d", b"\x1a\x88\x7f\xff\xff\xff\xff\xff\xff\xff", 1)
+    # The length of a string beyond the end of the file: NCBI reserves it first (GetChars), so a
+    # length of 2^47 bytes or more is std::bad_alloc ("BLAST ran out of memory", status 4) up to
+    # the largest std::string (2^63 - 1 bytes) and std::length_error past it (status 255); a
+    # length the host can reserve ends at the end of the file (`length_beyond_file`).
+    for name, length in (("length_2_47", 1 << 47), ("length_2_62_less_1", (1 << 62) - 1),
+                         ("length_2_63_less_2", (1 << 63) - 2), ("length_2_63", 1 << 63),
+                         ("length_2_64_less_1", (1 << 64) - 1)):
+        size = (length.bit_length() + 7) // 8
+        c[name] = dust.replace(b"\x1a\x1d", bytes([0x1a, 0x80 + size]) + length.to_bytes(size, "big"), 1)
+    c["length_1_mib_beyond_file"] = dust.replace(b"\x1a\x1d", b"\x1a\x83\x10\x00\x00", 1)
     c["length_nine_bytes"] = dust.replace(b"\x1a\x1d", b"\x1a\x89\x01\x00\x00\x00\x00\x00\x00\x00\x00", 1)
     c["tag_ten_bytes"] = dust.replace(b"\xa0\x80\x02\x01\x02", b"\xbf\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x80\x02\x01\x02", 1)
     c["tag_long_form"] = dust.replace(b"\xa0\x80\x02\x01\x02", b"\xbf\x00\x80\x02\x01\x02", 1)
@@ -341,6 +371,15 @@ def damaged_binary(dust):
     c["two_objects"] = dust + dust
     c["definite_top_long_form"] = b"\x30\x82" + (len(dust) - 4).to_bytes(2, "big") + dust[2:-2]
     c["utf8_options"] = dust.replace(b"\x1a\x1d", b"\x0c\x1d", 1)
+    # Bytes outside the visible range in the options ("at byte N", the string as it is fixed), in
+    # one object and in two; a UTF8String tag in two objects (one warning per process).
+    assert dust[0x12:0x14] == b"\x1a\x1d"
+    bad = bytearray(dust)
+    bad[0x14] = 0x09
+    bad[0x16] = 0xE9
+    c["bad_chars_options"] = bytes(bad)
+    c["bad_chars_two_objects"] = bytes(bad) + bytes(bad)
+    c["utf8_options_two_objects"] = c["utf8_options"] * 2
     c["bad_options_tag"] = dust.replace(b"\x1a\x1d", b"\x13\x1d", 1)
     c["wrong_first_tag"] = b"\x31" + dust[1:]
     c["swapped_members"] = dust.replace(b"\xa0\x80\x02\x01\x02\x00\x00\xa1\x80\x02\x01\x0a\x00\x00",

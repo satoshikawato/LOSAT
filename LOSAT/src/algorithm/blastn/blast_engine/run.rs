@@ -10005,10 +10005,15 @@ enum BatchStage<'a> {
     /// `lower_case_before`: whether the letter before each query's interval is lower case, which
     /// the chunks restrict too (empty without a range, without `-lcase_masking` and with
     /// `-window_masker_db`).
+    ///
+    /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
+    /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
+    /// (`x_lut_drop::after_prelim`).
     Search {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
         lower_case_before: &'a [bool],
+        last: bool,
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -10017,6 +10022,23 @@ enum BatchStage<'a> {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
     },
+}
+
+/// Whether `run_in_pool`'s batch loop reads a batch from input record `input_start` of
+/// `records`: records are left, or what ends the reading after them (`reading`: blank lines or
+/// an error, `QueryReading::reads_past_records`) has not come yet (`reading_ended`).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277
+/// ```c
+///         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+/// ```
+fn batches_follow(
+    input_start: usize,
+    records: usize,
+    reading: &QueryReading,
+    reading_ended: bool,
+) -> bool {
+    input_start < records || (reading.reads_past_records() && !reading_ended)
 }
 
 /// Searches the queries in NCBI's query batches and writes the results of all of them.
@@ -10250,7 +10272,7 @@ fn run_in_pool(
         batching,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
-    // (`lookup::x_mb_lut_keep`), freed when the loop ends.
+    // (`lookup::x_mb_lut_keep`), whose table is freed after the last batch's preliminary stage.
     let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
     // No NCBI counterpart (memory placement only; NCBI allocates the buffer of each batch,
     // `x_query_sentinels`): the query buffer this loop keeps between its batches, freed when the
@@ -10307,9 +10329,12 @@ fn run_in_pool(
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
     // run out before the batch reaches its size, and otherwise in a batch of its own.
-    while input_start < query_input.input_lengths.len()
-        || (reading.reads_past_records() && !reading_ended)
-    {
+    while batches_follow(
+        input_start,
+        query_input.input_lengths.len(),
+        &reading,
+        reading_ended,
+    ) {
         let (input_end, reached_size) = next_ranged_batch(
             &query_input.input_lengths,
             &query_input.skipped,
@@ -10712,6 +10737,14 @@ fn run_in_pool(
         } else {
             Vec::new()
         };
+        // Whether the loop reads no batch after this one: its keep then frees the table after the
+        // batch's preliminary stage (`BatchStage::Search`'s `last`).
+        let last = !batches_follow(
+            input_end,
+            query_input.input_lengths.len(),
+            &reading,
+            reading_ended,
+        );
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
@@ -10732,6 +10765,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    last,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -10750,6 +10784,7 @@ fn run_in_pool(
                     query_offsets: &query_offsets[start..end],
                     query_masks: window_masker_masks.as_deref(),
                     lower_case_before: &lower_case_before,
+                    last,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -13346,7 +13381,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
     // so the tables are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211)
     // (`x_lut_drop.rs`).
-    x_lut_drop::after_prelim(lookup_tables);
+    // The keep of LOSAT_X_MBLUTKEEP frees its table too when no later batch builds one on it.
+    x_lut_drop::after_prelim(
+        lookup_tables,
+        x_keep
+            .filter(|_| matches!(stage, BatchStage::Search { last: true, .. }))
+            .map(|keep| &**keep),
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
     // ```c
     // s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)

@@ -2145,6 +2145,37 @@ pub(crate) fn write_flatfile_wrapped<W: Write + ?Sized>(
     text: &[u8],
     width: usize,
 ) -> io::Result<()> {
+    write_flatfile_wrapped_with(writer, text, width, TextFacts::of(text))
+}
+
+/// Whether a text holds a newline or a backspace, which `write_flatfile_wrapped_with` needs to know (a text
+/// without either has a column for each byte and no line of its own).
+#[derive(Clone, Copy)]
+pub(crate) struct TextFacts {
+    /// The text holds a `\n`.
+    pub(crate) newlines: bool,
+    /// The text holds a backspace (8).
+    pub(crate) backspaces: bool,
+}
+
+impl TextFacts {
+    /// The facts of `text`.
+    pub(crate) fn of(text: &[u8]) -> Self {
+        TextFacts {
+            newlines: text.contains(&b'\n'),
+            backspaces: text.contains(&8),
+        }
+    }
+}
+
+/// `write_flatfile_wrapped` of a text whose facts (`TextFacts`) are `facts`: the caller of a
+/// constant text knows them (`report::reference`).
+pub(crate) fn write_flatfile_wrapped_with<W: Write + ?Sized>(
+    writer: &mut W,
+    text: &[u8],
+    width: usize,
+    facts: TextFacts,
+) -> io::Result<()> {
     let bytes = text;
     let mut pos = 0;
     // NCBI reference: c++/src/corelib/ncbistr.cpp:5100,5153-5157,5137
@@ -2154,62 +2185,80 @@ pub(crate) fn write_flatfile_wrapped<W: Write + ?Sized>(
     while pos < bytes.len() {
         let mut has_backspace = false;
         if newline <= pos {
-            newline = bytes[pos..]
-                .iter()
-                .position(|&c| c == b'\n')
-                .map_or(bytes.len(), |n| pos + n);
+            newline = if facts.newlines {
+                bytes[pos..]
+                    .iter()
+                    .position(|&c| c == b'\n')
+                    .map_or(bytes.len(), |n| pos + n)
+            } else {
+                bytes.len()
+            };
         }
-        let pos0 = if newline - pos <= width { newline } else { pos };
-        let mut scan = pos0;
-        let mut column = 0;
-        let mut best = pos;
-        let mut best_score = 0;
-        while scan < bytes.len() && column <= width {
-            let c = bytes[scan];
-            let mut score = 0;
-            let mut score_pos = scan;
-            if c == b'\n' {
-                best = scan;
-                best_score = 4;
-                break;
-            }
-            if c.is_ascii_whitespace() || c == 11 {
-                score = 3;
-            } else if c == b',' && column < width && scan + 1 < bytes.len() {
-                score = 2;
-                score_pos += 1;
-            } else if c == b'-' && column < width && scan + 1 < bytes.len() {
-                score = 1;
-                score_pos += 1;
-            }
-            if score >= best_score && score_pos > pos0 {
-                best = score_pos;
-                best_score = score;
-            }
-            while scan + 1 < bytes.len() && bytes[scan + 1] == 8 {
+        let (best, best_score) = if !facts.backspaces && width > 0 && newline - pos > width {
+            // The scan below on a text without backspaces, from a line start whose next newline
+            // is past `width` columns: it reads the columns `pos..=pos + width`, which hold no
+            // newline, and ends past them (`column > width`); its break is the last of the
+            // highest score, which `last_break` finds from the end.
+            last_break(bytes, pos, pos + width)
+        } else {
+            let pos0 = if newline - pos <= width { newline } else { pos };
+            let mut scan = pos0;
+            let mut column = 0;
+            let mut best = pos;
+            let mut best_score = 0;
+            while scan < bytes.len() && column <= width {
+                let c = bytes[scan];
+                let mut score = 0;
+                let mut score_pos = scan;
+                if c == b'\n' {
+                    best = scan;
+                    best_score = 4;
+                    break;
+                }
+                if c.is_ascii_whitespace() || c == 11 {
+                    score = 3;
+                } else if c == b',' && column < width && scan + 1 < bytes.len() {
+                    score = 2;
+                    score_pos += 1;
+                } else if c == b'-' && column < width && scan + 1 < bytes.len() {
+                    score = 1;
+                    score_pos += 1;
+                }
+                if score >= best_score && score_pos > pos0 {
+                    best = score_pos;
+                    best_score = score;
+                }
+                while scan + 1 < bytes.len() && bytes[scan + 1] == 8 {
+                    scan += 1;
+                    column = column.saturating_sub(1);
+                    has_backspace = true;
+                }
                 scan += 1;
-                column = column.saturating_sub(1);
+                column += 1;
+            }
+            // NCBI reference: c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
+            // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
+            // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
+            if best_score != 4 && column <= width && best != bytes.len() {
+                best = bytes.len();
                 has_backspace = true;
             }
-            scan += 1;
-            column += 1;
-        }
-        // NCBI reference: c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
-        // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
-        // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
-        if best_score != 4 && column <= width && best != bytes.len() {
-            best = bytes.len();
-            has_backspace = true;
-        }
-        let mut line = Vec::with_capacity(best - pos);
-        for &c in &bytes[pos..best] {
-            if has_backspace && c == 8 {
-                line.pop();
-            } else {
-                line.push(c);
+            (best, best_score)
+        };
+        // Eating backspaces leaves a line without them as it is.
+        if has_backspace && facts.backspaces {
+            let mut line = Vec::with_capacity(best - pos);
+            for &c in &bytes[pos..best] {
+                if c == 8 {
+                    line.pop();
+                } else {
+                    line.push(c);
+                }
             }
+            crate::cli::insert(writer, &line)?;
+        } else {
+            crate::cli::insert(writer, &bytes[pos..best])?;
         }
-        crate::cli::insert(writer, &line)?;
         crate::cli::insert(writer, b"\n")?;
         pos = best;
         if best_score == 3 {
@@ -2228,6 +2277,26 @@ pub(crate) fn write_flatfile_wrapped<W: Write + ?Sized>(
         }
     }
     Ok(())
+}
+
+/// The break of the line from `pos` of `write_flatfile_wrapped_with`'s scan where its columns
+/// `pos..=end` hold no newline and no backspace and the scan ends past `end`: the last of the
+/// highest score, the running maximum of `score >= best_score && score_pos > pos0` (`pos0` is
+/// `pos`): a blank after `pos` (score 3, the line ends before it), else a `,` or else a `-` before
+/// `end` (scores 2 and 1, the line ends after it), else `end` itself (score 0: every column after
+/// `pos` scores 0, `end` last).
+fn last_break(bytes: &[u8], pos: usize, end: usize) -> (usize, i32) {
+    let blank = |c: &u8| c.is_ascii_whitespace() || *c == 11;
+    if let Some(at) = bytes[pos + 1..=end].iter().rposition(blank) {
+        return (pos + 1 + at, 3);
+    }
+    if let Some(at) = bytes[pos..end].iter().rposition(|&c| c == b',') {
+        return (pos + at + 1, 2);
+    }
+    if let Some(at) = bytes[pos..end].iter().rposition(|&c| c == b'-') {
+        return (pos + at + 1, 1);
+    }
+    (end, 0)
 }
 
 /// The outfmt 0 prolog of blastp (the version, the references and the database), which
@@ -4115,14 +4184,19 @@ impl DescriptionLabel {
     /// alone, which is the same cut for an id text of up to 65 bytes; LOSAT keeps its cut of the
     /// whole label for a longer one until line RG item T4a writes the parts.)
     fn write_cut<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        // A label of a title alone is written as the joined label was: one write of its letters.
         let len = self.id.len() + self.title.len();
         if len > 68 {
             let id = self.id.len().min(65);
-            writer.write_all(&self.id[..id])?;
+            if id > 0 {
+                writer.write_all(&self.id[..id])?;
+            }
             writer.write_all(&self.title[..65 - id])?;
             writer.write_all(b"...")
         } else {
-            writer.write_all(&self.id)?;
+            if !self.id.is_empty() {
+                writer.write_all(&self.id)?;
+            }
             writer.write_all(&self.title)?;
             write_spaces(writer, 68 - len)
         }
@@ -5427,6 +5501,44 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
+    /// end; it equals the scan of every column (the form it takes for a text that may hold a
+    /// backspace) on texts of every scored class, at every width.
+    #[test]
+    fn the_break_found_from_the_end_is_the_scans() {
+        let alphabet = b"ab ,-\n\t\x0bxyz  \x08";
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..20_000 {
+            let len = (next() % 160) as usize;
+            let backspace = next() % 4 == 0;
+            let text: Vec<u8> = (0..len)
+                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+                .map(|c| if c == 8 && !backspace { b'q' } else { c })
+                .collect();
+            let width = 1 + (next() % 70) as usize;
+            let mut found = Vec::new();
+            write_flatfile_wrapped(&mut found, &text, width).unwrap();
+            let mut scanned = Vec::new();
+            let every_column = TextFacts {
+                newlines: true,
+                backspaces: true,
+            };
+            write_flatfile_wrapped_with(&mut scanned, &text, width, every_column).unwrap();
+            assert_eq!(
+                found,
+                scanned,
+                "{:?} at width {width}",
+                String::from_utf8_lossy(&text)
+            );
+        }
+    }
 
     /// The plain description label is the id text and the title as one string, cut to 68 columns
     /// or padded to them, wherever the parts split it (line RG, item T4a0).

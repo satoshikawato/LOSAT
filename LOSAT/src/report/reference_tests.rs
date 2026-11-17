@@ -107,10 +107,10 @@ fn the_html_free_text_writes_the_entity_as_a() {
         "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402."
     );
     // DELTA-BLAST's text has no entity; the sentinel's is empty.
-    assert!(matches!(
-        Publication::DeltaBlast.html_free_string(),
-        Cow::Borrowed(_)
-    ));
+    assert_eq!(
+        Publication::DeltaBlast.html_free_parts(),
+        [Publication::DeltaBlast.string(), "", ""]
+    );
     assert_eq!(Publication::MaxPublications.html_free_string(), "");
     for index in 0..TABLE_LEN {
         assert!(!REFERENCES[index].replacen("&auml;", "a", 1).contains('&'));

@@ -6,7 +6,6 @@
 //! The pairwise prologs of every program (`pairwise::write_blastp_pairwise_intro` and the
 //! others) and the XML reports (`blast_xml::REFERENCE_GAPPED_BLAST`) read the table here.
 
-use std::borrow::Cow;
 use std::io::{self, Write};
 
 /// NCBI's BLAST publications (`CReference::EPublication`), in its order; `MaxPublications` is the
@@ -134,6 +133,59 @@ const PUBMED_URLS: [&str; TABLE_LEN] = [
     "",
 ];
 
+/// `GetHTMLFreeString`'s parts of each text (`Publication::html_free_parts`).
+const HTML_FREE: [[&str; 3]; TABLE_LEN] = {
+    let mut parts = [[""; 3]; TABLE_LEN];
+    let mut index = 0;
+    while index < TABLE_LEN {
+        parts[index] = html_free(REFERENCES[index]);
+        index += 1;
+    }
+    parts
+};
+
+/// `text` before its first `&auml;`, `a` and `text` after it; `text`, `""` and `""` without one.
+const fn html_free(text: &'static str) -> [&'static str; 3] {
+    const ENTITY: &[u8] = b"&auml;";
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    while at + ENTITY.len() <= bytes.len() {
+        let mut matched = 0;
+        while matched < ENTITY.len() && bytes[at + matched] == ENTITY[matched] {
+            matched += 1;
+        }
+        if matched == ENTITY.len() {
+            let (before, rest) = text.split_at(at);
+            let (_, after) = rest.split_at(ENTITY.len());
+            return [before, "a", after];
+        }
+        at += 1;
+    }
+    [text, "", ""]
+}
+
+/// Whether `text` holds the byte `byte`.
+const fn holds(text: &str, byte: u8) -> bool {
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == byte {
+            return true;
+        }
+        at += 1;
+    }
+    false
+}
+
+// No text holds a newline or a backspace (the plain references' `TextFacts`, `write_reference`).
+const _: () = {
+    let mut index = 0;
+    while index < TABLE_LEN {
+        assert!(!holds(REFERENCES[index], b'\n') && !holds(REFERENCES[index], 8));
+        index += 1;
+    }
+};
+
 impl Publication {
     /// `CReference::GetString`: the publication's text, with NCBI's HTML entity (`&auml;`).
     ///
@@ -165,14 +217,17 @@ impl Publication {
     ///     return pub_string;
     /// }
     /// ```
-    pub(crate) fn html_free_string(self) -> Cow<'static, str> {
-        let text = self.string();
-        match text.find("&auml;") {
-            Some(offset) => {
-                Cow::Owned([&text[..offset], "a", &text[offset + "&auml;".len()..]].concat())
-            }
-            None => Cow::Borrowed(text),
-        }
+    /// (The writer reads the parts, `html_free_parts`.)
+    #[cfg(test)]
+    pub(crate) fn html_free_string(self) -> String {
+        self.html_free_parts().concat()
+    }
+
+    /// `GetHTMLFreeString`'s text in three parts: before the first `&auml;`, the `a` that replaces
+    /// it, and after it (the text and two empty parts where it has none), found when compiled
+    /// (`HTML_FREE`).
+    pub(crate) const fn html_free_parts(self) -> [&'static str; 3] {
+        HTML_FREE[self as usize]
     }
 
     /// `CReference::GetPubmedUrl`: the publication's PubMed URL without its scheme.
@@ -228,12 +283,29 @@ pub(crate) fn write_version_line<W: Write + ?Sized>(
     program: &str,
     version: &str,
 ) -> io::Result<()> {
-    let program = program.to_ascii_uppercase();
-    if html {
-        writeln!(out, "<b>{program} {version}</b>")
+    // `BlastGetVersion(program)`, one insertion, built on the stack where it fits.
+    let len = program.len() + 1 + version.len();
+    let mut stack = [0u8; 64];
+    let mut heap = Vec::new();
+    let line: &mut [u8] = if len <= stack.len() {
+        &mut stack[..len]
     } else {
-        writeln!(out, "{program} {version}")
+        heap.resize(len, 0);
+        &mut heap[..]
+    };
+    let (name, rest) = line.split_at_mut(program.len());
+    name.copy_from_slice(program.as_bytes());
+    name.make_ascii_uppercase();
+    rest[0] = b' ';
+    rest[1..].copy_from_slice(version.as_bytes());
+    if html {
+        crate::cli::insert(out, b"<b>")?;
     }
+    crate::cli::insert(out, line)?;
+    if html {
+        crate::cli::insert(out, b"</b>")?;
+    }
+    crate::cli::insert(out, b"\n")
 }
 
 /// `CBlastFormatUtil::BlastPrintReference`: the reference's label and the publication's text,
@@ -304,36 +376,69 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
     publication: Publication,
     is_psiblast: bool,
 ) -> io::Result<()> {
-    let mut reference = String::from("Reference");
-    match publication {
-        Publication::CompAdjustedMatrices => {
-            reference.push_str(" for compositional score matrix adjustment");
+    // `reference`: "Reference" and these.
+    let (label, round_2) = match publication {
+        Publication::CompAdjustedMatrices => (" for compositional score matrix adjustment", ""),
+        Publication::CompBasedStats if is_psiblast => {
+            (" for composition-based statistics", " starting in round 2")
         }
-        Publication::CompBasedStats => {
-            reference.push_str(" for composition-based statistics");
-            if is_psiblast {
-                reference.push_str(" starting in round 2");
-            }
-        }
-        Publication::IndexedMegablast => reference.push_str(" for database indexing"),
-        Publication::DeltaBlast => reference.push_str(" for DELTA-BLAST"),
-        _ => {}
-    }
-    let mut text = Vec::new();
-    if html {
-        text.extend_from_slice(b"<b><a href=\"");
-        text.extend_from_slice(protocol);
-        text.extend_from_slice(publication.pubmed_url().as_bytes());
-        text.extend_from_slice(b"\">");
-        text.extend_from_slice(reference.as_bytes());
-        text.extend_from_slice(b"</a>:</b>\n");
-        text.extend_from_slice(publication.string().as_bytes());
+        Publication::CompBasedStats => (" for composition-based statistics", ""),
+        Publication::IndexedMegablast => (" for database indexing", ""),
+        Publication::DeltaBlast => (" for DELTA-BLAST", ""),
+        _ => ("", ""),
+    };
+    let pieces: [&[u8]; 9] = if html {
+        [
+            b"<b><a href=\"",
+            protocol,
+            publication.pubmed_url().as_bytes(),
+            b"\">",
+            b"Reference",
+            label.as_bytes(),
+            round_2.as_bytes(),
+            b"</a>:</b>\n",
+            publication.string().as_bytes(),
+        ]
     } else {
-        text.extend_from_slice(reference.as_bytes());
-        text.extend_from_slice(b": ");
-        text.extend_from_slice(publication.html_free_string().as_bytes());
+        let [before, a, after] = publication.html_free_parts();
+        [
+            b"Reference",
+            label.as_bytes(),
+            round_2.as_bytes(),
+            b": ",
+            before.as_bytes(),
+            a.as_bytes(),
+            after.as_bytes(),
+            b"",
+            b"",
+        ]
+    };
+    // The string, built on the stack where it fits.
+    let len = pieces.iter().map(|piece| piece.len()).sum();
+    let mut stack = [0u8; 512];
+    let mut heap = Vec::new();
+    let text: &mut [u8] = if len <= stack.len() {
+        &mut stack[..len]
+    } else {
+        heap.resize(len, 0);
+        &mut heap[..]
+    };
+    let mut at = 0;
+    for piece in pieces {
+        text[at..at + piece.len()].copy_from_slice(piece);
+        at += piece.len();
     }
-    super::pairwise::write_flatfile_wrapped(out, &text, FORMAT_LINE_LENGTH)?;
+    // The plain string is the labels and the table's text, which hold no newline and no
+    // backspace (checked when compiled, above `impl Publication`); the `-html` one holds `protocol`.
+    let facts = if html {
+        super::pairwise::TextFacts::of(text)
+    } else {
+        super::pairwise::TextFacts {
+            newlines: false,
+            backspaces: false,
+        }
+    };
+    super::pairwise::write_flatfile_wrapped_with(out, text, FORMAT_LINE_LENGTH, facts)?;
     crate::cli::insert(out, b"\n")
 }
 

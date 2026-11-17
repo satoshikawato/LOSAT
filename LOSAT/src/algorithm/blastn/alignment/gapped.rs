@@ -624,16 +624,25 @@ pub fn blast_get_offsets_for_gapped_alignment(
 /// Refine a gapped-start seed for nucleotide alignments based on identity runs.
 ///
 /// NCBI reference: blast_gapalign.c:3323-3389 BlastGetStartForGappedAlignmentNucl
+///
+/// The query offsets are NCBI's `Int4` offsets in the context `query` (its `query` pointer,
+/// `ContextQuery`), and so is the query start returned: for an HSP outside its context the runs
+/// read the concatenated query there (`q = query + q_start`), and only the backward run stops at
+/// the context's first letter (`q-query >= 0`). The reads below are at places in
+/// `query.concat` (`q`), NCBI's offsets plus `base`.
+#[allow(clippy::too_many_arguments)]
 pub fn blast_get_start_for_gapped_alignment_nucl(
-    q_seq: &[u8],
+    query: super::ContextQuery<'_>,
     s_seq: &[u8],
-    q_offset: usize,
-    q_end: usize,
+    q_offset: i32,
+    q_end: i32,
     s_offset: usize,
     s_end: usize,
-    q_gapped_start: usize,
+    q_gapped_start: i32,
     s_gapped_start: usize,
-) -> (usize, usize) {
+) -> (i32, usize) {
+    let q_seq = query.concat;
+    let base = query.start as i32;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3323-3389
     // ```c
     // int hspMaxIdentRun = 10;
@@ -666,7 +675,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     // ```
     // Valid HSP coordinates are expected here, as in NCBI. Guard invalid
     // starts only to satisfy Rust bounds requirements.
-    if q_gapped_start >= q_seq.len() || s_gapped_start >= s_seq.len() {
+    if (base + q_gapped_start) as usize >= q_seq.len() || s_gapped_start >= s_seq.len() {
         return (q_gapped_start, s_gapped_start);
     }
 
@@ -682,13 +691,12 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     // `offset` is an Int4 and is negative when a gapped start lies left of the
     // HSP start; the arithmetic below is Int4 as in C.
     let mut hsp_max_ident_run: i32 = 10;
-    let offset: i32 =
-        (s_gapped_start as i32 - s_offset as i32).min(q_gapped_start as i32 - q_offset as i32);
+    let offset: i32 = (s_gapped_start as i32 - s_offset as i32).min(q_gapped_start - q_offset);
 
-    let mut q_start = q_gapped_start;
+    let mut q_start = (base + q_gapped_start) as usize;
     let mut s_start = s_gapped_start;
     let mut score: i32 = -1;
-    let q_len = q_end;
+    let q_len = (base + q_end) as usize;
 
     // NCBI walks both identity runs on the query bound only: the subject buffer
     // of the traceback has a sentinel byte at each end, which differs from every
@@ -732,9 +740,11 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
         s_start += 1;
     }
 
-    q_start = q_gapped_start;
+    // The backward run starts only from the context (`q-query >= 0`) and stops at its first
+    // letter (`base`).
+    q_start = (base + q_gapped_start) as usize;
     s_start = s_gapped_start;
-    loop {
+    while q_start >= base as usize {
         if q_seq[q_start] != s_seq[s_start] {
             break;
         }
@@ -742,7 +752,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
         if score > hsp_max_ident_run {
             return (q_gapped_start, s_gapped_start);
         }
-        if q_start == 0 || s_start == 0 {
+        if q_start == base as usize || s_start == 0 {
             break;
         }
         q_start -= 1;
@@ -765,17 +775,17 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     // prev_match = FALSE;
     // ```
     hsp_max_ident_run = (f64::from(hsp_max_ident_run) * 1.5) as i32;
-    let q_start: i32 = q_gapped_start as i32 - offset;
+    let q_start: i32 = q_gapped_start - offset;
     let s_start: i32 = s_gapped_start as i32 - offset;
-    let q_len: i32 = (s_end as i32 - s_start).min(q_end as i32 - q_start);
+    let q_len: i32 = (s_end as i32 - s_start).min(q_end - q_start);
 
     // The loop reads query[q_start .. q_start + q_len) and the same number of
     // subject bases from s_start; HSP coordinates keep them inside the
     // sequences, as in NCBI. Guard the reads only to satisfy Rust bounds.
     if q_len > 0
-        && (q_start < 0
+        && (base + q_start < 0
             || s_start < 0
-            || (q_start + q_len) as usize > q_seq.len()
+            || (base + q_start + q_len) as usize > q_seq.len()
             || (s_start + q_len) as usize > s_seq.len())
     {
         return (q_gapped_start, s_gapped_start);
@@ -820,7 +830,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     // ```
     let mut index: i32 = q_start;
     while index < q_start + q_len {
-        let q_idx = index as usize;
+        let q_idx = (base + index) as usize;
         let s_idx = (s_start + (index - q_start)) as usize;
         match_run = q_seq[q_idx] == s_seq[s_idx];
         if match_run != prev_match {
@@ -835,10 +845,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
             score += 1;
             if score > hsp_max_ident_run {
                 max_offset = index - hsp_max_ident_run / 2;
-                return (
-                    max_offset as usize,
-                    (max_offset + s_start - q_start) as usize,
-                );
+                return (max_offset, (max_offset + s_start - q_start) as usize);
             }
         }
         index += 1;
@@ -850,10 +857,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     }
 
     if max_score > 0 {
-        return (
-            max_offset as usize,
-            (max_offset + s_start - q_start) as usize,
-        );
+        return (max_offset, (max_offset + s_start - q_start) as usize);
     }
 
     (q_gapped_start, s_gapped_start)
@@ -3297,7 +3301,12 @@ mod tests {
     fn gapped_start_stops_at_the_subject_start() {
         let query = blastna("GGGGGACGT");
         let subject = blastna("ACGTCCCC");
-        let start = blast_get_start_for_gapped_alignment_nucl(&query, &subject, 5, 9, 0, 4, 5, 0);
+        let query = crate::algorithm::blastn::alignment::ContextQuery {
+            concat: &query,
+            start: 0,
+            len: query.len(),
+        };
+        let start = blast_get_start_for_gapped_alignment_nucl(query, &subject, 5, 9, 0, 4, 5, 0);
         assert_eq!(start, (7, 2));
     }
 
@@ -3307,7 +3316,12 @@ mod tests {
     fn gapped_start_stops_at_the_subject_end() {
         let query = blastna("ACGTACGTAA");
         let subject = blastna("ACGTACGT");
-        let start = blast_get_start_for_gapped_alignment_nucl(&query, &subject, 0, 10, 0, 8, 0, 0);
+        let query = crate::algorithm::blastn::alignment::ContextQuery {
+            concat: &query,
+            start: 0,
+            len: query.len(),
+        };
+        let start = blast_get_start_for_gapped_alignment_nucl(query, &subject, 0, 10, 0, 8, 0, 0);
         assert_eq!(start, (4, 4));
     }
 

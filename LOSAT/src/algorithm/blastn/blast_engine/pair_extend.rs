@@ -451,8 +451,8 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 q_idx,
                 s_idx,
                 s_id,
-                q_pos_usize,
-                q_pos_usize.saturating_add(lut_word_length),
+                q_pos_usize as i32,
+                q_pos_usize.saturating_add(lut_word_length) as i32,
                 kmer_start.saturating_add(chunk.offset),
                 kmer_start
                     .saturating_add(lut_word_length)
@@ -599,10 +599,10 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 q_idx,
                 s_idx,
                 s_id,
-                q_ext_start.saturating_sub(q_context_start),
+                q_ext_start.saturating_sub(q_context_start) as i32,
                 q_ext_start
                     .saturating_add(word_length)
-                    .saturating_sub(q_context_start),
+                    .saturating_sub(q_context_start) as i32,
                 s_ext_start.saturating_add(chunk.offset),
                 s_ext_start
                     .saturating_add(word_length)
@@ -835,11 +835,11 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 q_idx,
                 s_idx,
                 s_id,
-                q_off.saturating_sub(q_context_start),
+                q_off.saturating_sub(q_context_start) as i32,
                 q_off
                     .saturating_add(word_length)
                     .saturating_add(extended)
-                    .saturating_sub(q_context_start),
+                    .saturating_sub(q_context_start) as i32,
                 s_off.saturating_add(chunk.offset),
                 s_end_pos
                     .saturating_sub(diag_offset as usize)
@@ -987,15 +987,15 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             // No NCBI counterpart (LOSAT_TRACE_BLASTN_* diagnostics): a rejected approximate
             // result may start left of its context (see the NCBI reference at the assertion
             // below), so the trace uses signed context offsets.
-            let trace_qs = ungapped.q_start as isize - q_context_start as isize;
-            let trace_qe = trace_qs + ungapped.length as isize;
+            let trace_qs = (ungapped.q_start as isize - q_context_start as isize) as i32;
+            let trace_qe = trace_qs + ungapped.length as i32;
             if blastn_trace::should_trace_range(
                 "ungapped",
                 q_idx,
                 s_idx,
                 s_id,
-                trace_qs.max(0) as usize,
-                trace_qe.max(0) as usize,
+                trace_qs,
+                trace_qe,
                 ss.saturating_add(chunk.offset),
                 ungapped_se.saturating_add(chunk.offset),
                 ctx.len,

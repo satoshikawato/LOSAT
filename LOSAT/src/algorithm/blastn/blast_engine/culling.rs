@@ -39,16 +39,15 @@ fn int4(length: usize) -> i32 {
 ///       }
 /// ```
 /// `query_offset` and `query_end` are the HSP's offsets within its context, NCBI's `Int4` ones
-/// (an `-ungapped` HSP can lie left of its context, `PrelimHit::prelim_q_left`).
+/// (outside the context for an HSP from a hit that passes an end of it, `PrelimHit::prelim_qs`).
 fn cull_key(
     minus: bool,
     qlen: i32,
-    query_offset: i64,
-    query_end: i64,
+    query_offset: i32,
+    query_end: i32,
     score: i32,
     subject_offset: usize,
 ) -> CullKey {
-    let (query_offset, query_end) = (query_offset as i32, query_end as i32);
     let (begin, end) = if minus {
         (qlen - query_end, qlen - query_offset)
     } else {
@@ -133,8 +132,8 @@ impl PrelimCulling {
             let key = cull_key(
                 hit.context_idx % 2 == 1,
                 qlen,
-                hit.q_start() as i64,
-                hit.q_end() as i64,
+                hit.prelim_qs,
+                hit.prelim_qe,
                 hit.prelim_score,
                 hit.prelim_ss,
             );
@@ -293,8 +292,8 @@ pub(super) fn cull_traceback(
             let key = cull_key(
                 hsp.query_frame < 0,
                 qlen,
-                hsp.q_offset_ncbi(),
-                hsp.q_end_ncbi(),
+                hsp.internal_q_offset_0,
+                hsp.internal_q_end_0,
                 hsp.raw_score,
                 hsp.internal_s_offset_0,
             );
@@ -342,8 +341,8 @@ mod tests {
     fn prelim(
         query: u32,
         minus: bool,
-        qs: usize,
-        qe: usize,
+        qs: i32,
+        qe: i32,
         ss: usize,
         score: i32,
         evalue: f64,
@@ -356,9 +355,8 @@ mod tests {
             prelim_qs: qs,
             prelim_qe: qe,
             prelim_ss: ss,
-            prelim_se: ss + (qe - qs),
+            prelim_se: ss + (qe - qs) as usize,
             prelim_score: score,
-            prelim_q_left: 0,
             seed_qs: qs,
             seed_ss: ss,
             prelim_evalue: evalue,
@@ -411,14 +409,22 @@ mod tests {
                     prelim(
                         0,
                         false,
-                        100 + 50 * oid,
-                        120 + 50 * oid,
+                        100 + 50 * oid as i32,
+                        120 + 50 * oid as i32,
                         1,
                         40 - oid as i32,
                         1e-5,
                     ),
                     prelim(1, false, 10, 30, 1, 30, 1e-3),
-                    prelim(0, false, 100 + 50 * oid, 110 + 50 * oid, 2, 20, 1e-2),
+                    prelim(
+                        0,
+                        false,
+                        100 + 50 * oid as i32,
+                        110 + 50 * oid as i32,
+                        2,
+                        20,
+                        1e-2,
+                    ),
                 ],
             );
         }

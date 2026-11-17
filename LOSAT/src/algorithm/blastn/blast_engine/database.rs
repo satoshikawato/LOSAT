@@ -2524,7 +2524,6 @@ mod tests {
             internal_s_offset_0: 0,
             internal_s_end_0: 10,
             internal_query_context_offset: 0,
-            internal_q_left: 0,
             gap_info: None,
             num_positives: 10,
         }

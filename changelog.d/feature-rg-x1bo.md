@@ -1,15 +1,21 @@
-- BLASTN: with an ungapped X-drop of 2^30 or more (`-xdrop_ungap 1e10`, which NCBI BLAST+ turns into
-  INT_MIN), the debug and test builds no longer abort, `-ungapped` searches no longer crash, and
-  searches with a word size of 4 to 8 (such as `-task blastn-short`) give NCBI BLAST+'s hits. Where
-  NCBI's ungapped walk runs past two sentinels and its 32-bit sum wraps, the saved hit starts left of
-  its query context; LOSAT now keeps NCBI's signed start and length for it (in the sort, the
-  containment test, the greedy seed and the `-ungapped` re-evaluation, which reads it from NCBI's
-  start), and the word sizes 4 to 8 extend on the whole query block as NCBI does. Default searches
-  are unchanged.
-- BLASTN `-ungapped`: an alignment whose re-evaluation keeps its part in an earlier query context,
-  which NCBI BLAST+ keeps with a query start left of its context, goes through the later steps as
-  NCBI's does (its e-value, percent identity, query coverage, `-max_hsps`, `-max_target_seqs` and
-  `-culling_limit` ranks), so a search whose limits drop it gives NCBI BLAST+'s report; where it
-  reaches the report, on which NCBI BLAST+ stops with an exception (plus strand) or shows query
-  coordinates outside the query (minus strand, or from a database), it is refused (a result LOSAT
-  does not reproduce yet; README, What LOSAT refuses).
+- BLASTN: with a raw ungapped X-drop of 2^30 or more (`-xdrop_ungap 1e10`, which NCBI BLAST+
+  turns into INT_MIN), the debug and test builds no longer abort, `-ungapped` searches no longer
+  crash, and searches with a word size of 4 to 8 (such as `-task blastn-short`) give NCBI BLAST+'s
+  hits. Where NCBI's ungapped walk runs past two sentinels and its 32-bit sum wraps, the saved hit
+  passes an end of its query context; LOSAT now keeps NCBI's signed query offsets for it and for
+  the alignments made from it (in the sort, the containment test, the `-ungapped` re-evaluation,
+  and the megablast greedy alignment, which runs from NCBI's seed on the whole query block, on
+  both sides of the context), and the word sizes 4 to 8 extend on the whole query block as NCBI
+  does. So a megablast search gives NCBI BLAST+'s alignment where its greedy alignment from such a
+  hit comes back into the context. Default searches give the same output in every case checked;
+  a hit that the approximate two-hit extension keeps below the cutoff and that starts left of its
+  context, which a default search can reach (the debug build stopped at an assertion there), now
+  sorts and aligns as NCBI BLAST+'s does.
+- BLASTN: an alignment that NCBI BLAST+ keeps outside its query context (an `-ungapped`
+  alignment whose re-evaluation keeps its part there, or a megablast alignment whose greedy
+  extension stays there) goes through the later steps as NCBI's does (its e-value, percent
+  identity, query coverage, `-max_hsps`, `-max_target_seqs`, `-culling_limit` and
+  `-subject_besthit` ranks), so a search whose limits drop it gives NCBI BLAST+'s report; where it
+  reaches the report, on which NCBI BLAST+ stops with an exception (query coordinates that leave
+  the query on the left) or shows query coordinates past the query's end, it is refused, on both
+  sides of the context (a result LOSAT does not reproduce yet; README, What LOSAT refuses).

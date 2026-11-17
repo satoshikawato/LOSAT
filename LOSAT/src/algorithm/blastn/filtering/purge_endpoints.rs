@@ -14,7 +14,8 @@
 //!
 //! Reference: blast_traceback.c:637-669
 
-use super::super::hsp::BlastnHsp;
+use super::super::alignment::ContextQuery;
+use super::super::hsp::{adjust_blastn_offsets, BlastnHsp};
 // NCBI reference: c++/include/algo/blast/core/blast_hits.h:153-166
 // BlastHSP** hsp_array;
 use super::super::tracing as blastn_trace;
@@ -22,43 +23,6 @@ use crate::common::GapEditOp;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-// ```c
-// if (hsp->query.frame != hsp->subject.frame) {
-//    *q_end = query_length - hsp->query.offset;
-//    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-//    *s_end = hsp->subject.offset + 1;
-//    *s_start = hsp->subject.end;
-// } else {
-//    *q_start = hsp->query.offset + 1;
-//    *q_end = hsp->query.end;
-//    *s_start = hsp->subject.offset + 1;
-//    *s_end = hsp->subject.end;
-// }
-// ```
-fn adjust_blastn_offsets(
-    query_offset: usize,
-    query_end: usize,
-    subject_offset: usize,
-    subject_end: usize,
-    query_length: usize,
-    query_frame: i32,
-) -> (usize, usize, usize, usize) {
-    if query_frame < 0 {
-        let q_end = query_length.saturating_sub(query_offset);
-        let q_start = query_length.saturating_sub(query_end).saturating_add(1);
-        let s_end = subject_offset + 1;
-        let s_start = subject_end;
-        (q_start, q_end, s_start, s_end)
-    } else {
-        let q_start = query_offset + 1;
-        let q_end = query_end;
-        let s_start = subject_offset + 1;
-        let s_end = subject_end;
-        (q_start, q_end, s_start, s_end)
-    }
-}
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2484-2487
 // ```c
@@ -180,7 +144,7 @@ fn compare_query_end_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> O
 /// * `false` if no gap_info or cut point not found
 pub fn cut_off_gap_edit_script(
     hit: &mut BlastnHsp,
-    q_cut: usize,
+    q_cut: i32,
     s_cut: usize,
     cut_begin: bool,
 ) -> bool {
@@ -216,7 +180,9 @@ pub fn cut_off_gap_edit_script(
 
     // Convert absolute cut positions to relative (within HSP)
     // NCBI: q_cut -= hsp->query.offset; s_cut -= hsp->subject.offset;
-    let q_cut_rel = q_cut.saturating_sub(q_offset_0);
+    // NCBI's `Int4` difference; one below 0 tests as 0 (`qid` and `sid` are at least 0 when
+    // they are tested).
+    let q_cut_rel = (q_cut - q_offset_0).max(0) as usize;
     let s_cut_rel = s_cut.saturating_sub(s_offset_0);
 
     // Walk through edit script to find cut point
@@ -314,7 +280,7 @@ pub fn cut_off_gap_edit_script(
 
         // Update HSP coordinates
         // NCBI: hsp->query.offset += qid; hsp->subject.offset += sid;
-        q_offset_0 = q_offset_0.saturating_add(qid);
+        q_offset_0 += qid as i32;
         s_offset_0 = s_offset_0.saturating_add(sid);
     } else {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2442-2449
@@ -340,7 +306,7 @@ pub fn cut_off_gap_edit_script(
         // Update HSP coordinates
         // NCBI: hsp->query.end = hsp->query.offset + qid;
         // hsp->subject.end = hsp->subject.offset + sid;
-        q_end_0 = q_offset_0.saturating_add(qid);
+        q_end_0 = q_offset_0 + qid as i32;
         s_end_0 = s_offset_0.saturating_add(sid);
     }
 
@@ -1044,7 +1010,7 @@ fn trace_common_endpoint_purge_decision(
     purge: bool,
     keeper: &BlastnHsp,
     removed: &BlastnHsp,
-    cut_q: usize,
+    cut_q: i32,
     cut_s: usize,
 ) {
     if !blastn_trace::enabled() {
@@ -1190,7 +1156,7 @@ fn stats_from_edit_ops(
 /// ```
 pub fn blast_hsp_test_identity_and_length(
     hit: &mut BlastnHsp,
-    q_seq: &[u8],
+    query_nomask: ContextQuery<'_>,
     s_seq: &[u8],
     percent_identity: f64,
 ) -> bool {
@@ -1208,8 +1174,11 @@ pub fn blast_hsp_test_identity_and_length(
     // lower score, and may be purged.
     // ```
     // BLASTN re-evaluation and identity counting operate on canonical internal
-    // offsets; output coordinates are adjusted only after pruning.
-    let q_offset = hit.internal_q_offset_0;
+    // offsets; output coordinates are adjusted only after pruning. NCBI's `query` is the
+    // context's start in the concatenated query (`query_nomask`), read at the HSP's `Int4`
+    // offset, outside the context for an HSP outside it (`ContextQuery`).
+    let q_seq = query_nomask.concat;
+    let q_offset = query_nomask.at(hit.internal_q_offset_0);
     let s_offset = hit.internal_s_offset_0;
 
     let (matches, mismatches, gap_opens, _gap_letters, align_length) =
@@ -1217,7 +1186,7 @@ pub fn blast_hsp_test_identity_and_length(
             stats_from_edit_ops(q_seq, s_seq, q_offset, s_offset, ops)
         } else {
             // Ungapped fallback (N.B. not expected for BLASTN reevaluation path).
-            let align_length = hit.internal_q_end_0.saturating_sub(hit.internal_q_offset_0);
+            let align_length = (hit.internal_q_end_0 - hit.internal_q_offset_0).max(0) as usize;
             let mut matches = 0usize;
             let mut mismatches = 0usize;
             for i in 0..align_length {
@@ -1281,7 +1250,7 @@ pub struct ReevalParams {
 /// NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
 pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     hit: &mut BlastnHsp,
-    q_seq: &[u8],
+    query: ContextQuery<'_>,
     s_seq: &[u8],
     reward: i32,
     penalty: i32,
@@ -1302,7 +1271,11 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     // NCBI reference: blast_hits.c:528-535
     // query = q + hsp->query.offset;
     // subject = s + hsp->subject.offset;
-    let q_offset = hit.internal_q_offset_0;
+    // `q` is the context's start in the concatenated query and `qlen` the context's length
+    // (`ContextQuery`): the positions below are in the concatenated query, from the HSP's `Int4`
+    // offset, which lies outside the context for an HSP outside it.
+    let q_seq = query.concat;
+    let q_offset = query.at(hit.internal_q_offset_0);
     let s_offset = hit.internal_s_offset_0;
 
     // NCBI reference: blast_hits.c:508-526 (factor and gap penalties)
@@ -1551,10 +1524,12 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         debug_assert!(matches!(gap_ops[best_start_esp_index], GapEditOp::Sub(_)));
         debug_assert!(matches!(gap_ops[best_end_esp_index], GapEditOp::Sub(_)));
 
+        // NCBI's `qp > 0` and `qp < qlen` on the offsets in the context: an end outside the
+        // context is not extended.
         let mut qp = best_q_start;
         let mut sp = best_s_start;
         let mut ext = 0usize;
-        while qp > 0 && sp > 0 {
+        while qp > query.start && sp > 0 {
             let q_prev = qp - 1;
             let s_prev = sp - 1;
             if q_seq[q_prev] == s_seq[s_prev] && q_seq[q_prev] < 4 {
@@ -1580,7 +1555,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         let mut qp = best_q_end;
         let mut sp = best_s_end;
         let mut ext = 0usize;
-        while qp < q_seq.len() && sp < s_seq.len() && q_seq[qp] < 4 {
+        while qp < query.start + query.len && sp < s_seq.len() && q_seq[qp] < 4 {
             if q_seq[qp] == s_seq[sp] {
                 qp += 1;
                 sp += 1;
@@ -1621,8 +1596,11 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     // hsp->subject.offset = (Int4)(best_s_start - subject_start);
     // hsp->subject.end = (Int4)(hsp->subject.offset + best_s_end - best_s_start);
     // ```
+    // Back to NCBI's `Int4` offsets in the context.
+    let best_q_start = (best_q_start as isize - query.start as isize) as i32;
+    let best_q_end = (best_q_end as isize - query.start as isize) as i32;
     hit.internal_q_offset_0 = best_q_start;
-    hit.internal_q_end_0 = best_q_start.saturating_add(best_q_end.saturating_sub(best_q_start));
+    hit.internal_q_end_0 = best_q_end;
     hit.internal_s_offset_0 = best_s_start;
     hit.internal_s_end_0 = best_s_start.saturating_add(best_s_end.saturating_sub(best_s_start));
     let (q_start, q_end, s_start, s_end) = adjust_blastn_offsets(
@@ -1795,7 +1773,6 @@ mod tests {
             internal_s_offset_0: 11,
             internal_s_end_0: 33,
             internal_query_context_offset: 0,
-            internal_q_left: 0,
             gap_info: Some(gap_info),
             num_positives: matches,
         };
@@ -1820,9 +1797,9 @@ mod tests {
             h.q_idx = 0;
             h.s_idx = 0;
             h.raw_score = score;
-            h.internal_q_offset_0 = start;
+            h.internal_q_offset_0 = start as i32;
             h.internal_s_offset_0 = start;
-            h.internal_q_end_0 = end;
+            h.internal_q_end_0 = end as i32;
             h.internal_s_end_0 = end;
             h.q_start = start + 1;
             h.s_start = start + 1;
@@ -1846,8 +1823,8 @@ mod tests {
             let spans: Vec<_> = result
                 .iter()
                 .map(|h| {
-                    assert_eq!(h.internal_q_offset_0, h.internal_s_offset_0);
-                    assert_eq!(h.internal_q_end_0, h.internal_s_end_0);
+                    assert_eq!(h.internal_q_offset_0 as usize, h.internal_s_offset_0);
+                    assert_eq!(h.internal_q_end_0 as usize, h.internal_s_end_0);
                     assert_eq!(
                         h.gap_info,
                         Some(vec![GapEditOp::Sub(
@@ -2010,9 +1987,9 @@ mod tests {
             h.query_frame = 1;
             h.query_length = 128;
             h.raw_score = score;
-            h.internal_q_offset_0 = start;
+            h.internal_q_offset_0 = start as i32;
             h.internal_s_offset_0 = start;
-            h.internal_q_end_0 = end;
+            h.internal_q_end_0 = end as i32;
             h.internal_s_end_0 = end;
             h.q_start = start + 1;
             h.s_start = start + 1;
@@ -2043,7 +2020,7 @@ mod tests {
                             tail.internal_s_offset_0,
                             tail.internal_s_end_0
                         ),
-                        (start, end, start, end)
+                        (start as i32, end as i32, start, end)
                     );
                     assert_eq!(
                         tail.gap_info,
@@ -2273,11 +2250,10 @@ mod tests {
                 s_idx: 0,
                 raw_score: 100,
                 internal_q_offset_0: 0,
-                internal_q_end_0: q_end,
+                internal_q_end_0: q_end as i32,
                 internal_s_offset_0: 0,
                 internal_s_end_0: s_end,
                 internal_query_context_offset: 0,
-                internal_q_left: 0,
                 gap_info: None,
                 num_positives: q_end,
             }

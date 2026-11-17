@@ -341,18 +341,23 @@ pub struct BlastnHsp {
     pub q_idx: u32,
     pub s_idx: u32,
     pub raw_score: i32,
-    pub internal_q_offset_0: usize,
-    pub internal_q_end_0: usize,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-101
+    // ```c
+    // typedef struct BlastSeg {
+    //    Int2 frame;  /**< Translation frame */
+    //    Int4 offset; /**< Start of hsp */
+    //    Int4 end;    /**< End of hsp */
+    // ```
+    /// NCBI's `Int4` `query.offset` and `query.end` in the HSP's context. They lie outside the
+    /// context (`internal_q_offset_0 < 0`, or `internal_q_end_0` past the context's length,
+    /// `BlastnHsp::outside_query_context`) for an HSP from a hit that passes an end of its
+    /// context, which LOSAT refuses where its report starts
+    /// (`blast_engine::run::post_process_hits_and_write`).
+    pub internal_q_offset_0: i32,
+    pub internal_q_end_0: i32,
     pub internal_s_offset_0: usize,
     pub internal_s_end_0: usize,
     pub internal_query_context_offset: i32,
-    /// An ungapped (`-ungapped`) HSP that NCBI keeps left of its context (with negative
-    /// context-relative `Int4` offsets, `PrelimHit::prelim_q_left`): the letters its offsets
-    /// are stored to the right (`internal_q_offset_0` is then 0); NCBI's offsets are
-    /// `q_offset_ncbi` and `q_end_ncbi`. 0 for every other HSP. NCBI's reports of such an HSP
-    /// stop with an exception, which LOSAT refuses where its report starts
-    /// (`blast_engine::run::post_process_hits_and_write`).
-    pub internal_q_left: u32,
     pub gap_info: Option<Vec<GapEditOp>>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
     // ```c
@@ -364,17 +369,82 @@ pub struct BlastnHsp {
     pub num_positives: usize,
 }
 
-impl BlastnHsp {
-    /// NCBI's `Int4` query offset of the HSP in its context (`internal_q_left`).
-    #[inline(always)]
-    pub fn q_offset_ncbi(&self) -> i64 {
-        self.internal_q_offset_0 as i64 - i64::from(self.internal_q_left)
-    }
+// No NCBI counterpart: the size of the record of a final HSP (64-bit targets; `usize` fields).
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<BlastnHsp>() == 176);
 
-    /// NCBI's `Int4` query end of the HSP in its context (`internal_q_left`).
-    #[inline(always)]
-    pub fn q_end_ncbi(&self) -> i64 {
-        self.internal_q_end_0 as i64 - i64::from(self.internal_q_left)
+impl BlastnHsp {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2390-2391
+    // ```c
+    //     ASSERT(init_hsp->ungapped_data == NULL ||
+    //            init_hsp->ungapped_data->q_start >= 0);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1126-1127
+    // ```c
+    //          *q_end = query_length - hsp->query.offset;
+    //          *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    // ```
+    /// Whether the HSP lies outside its query context (`query.offset < 0`, which NCBI's debug
+    /// build asserts against, or `query.end` past the context's length `query_length`), where
+    /// NCBI's report coordinates (`Blast_HSPGetAdjustedOffsets`) leave the query: an HSP from a
+    /// hit whose ungapped extension passed an end of its context (an ungapped X-drop of 2^30
+    /// raw or more, remaining-gaps X1b-o).
+    #[inline]
+    pub fn outside_query_context(&self) -> bool {
+        self.internal_q_offset_0 < 0 || self.internal_q_end_0 as i64 > self.query_length as i64
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
+// ```c
+//       if (hsp->query.frame != hsp->subject.frame) {
+//          *q_end = query_length - hsp->query.offset;
+//          *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+//          *s_end = hsp->subject.offset + 1;
+//          *s_start = hsp->subject.end;
+//       } else {
+//          *q_start = hsp->query.offset + 1;
+//          *q_end = hsp->query.end;
+//          *s_start = hsp->subject.offset + 1;
+//          *s_end = hsp->subject.end;
+//       }
+// ```
+/// NCBI's 1-based report offsets of a blastn HSP (`Blast_HSPGetAdjustedOffsets`) from its offsets
+/// in its context: `query_offset` and `query_end` are NCBI's `Int4` ones (`BlastnHsp::
+/// internal_q_offset_0`), `query_length` the context's length and `query_frame` its strand. The
+/// query offsets are computed in `i64`; for an HSP outside its query context
+/// (`BlastnHsp::outside_query_context`) one below 0 is kept as 0: such an HSP never reaches a
+/// report (`run::post_process_hits_and_write` refuses the search).
+pub(crate) fn adjust_blastn_offsets(
+    query_offset: i32,
+    query_end: i32,
+    subject_offset: usize,
+    subject_end: usize,
+    query_length: usize,
+    query_frame: i32,
+) -> (usize, usize, usize, usize) {
+    let (offset, end, length) = (
+        i64::from(query_offset),
+        i64::from(query_end),
+        query_length as i64,
+    );
+    let reported = |value: i64| value.max(0) as usize;
+    if query_frame < 0 {
+        let q_end = length - offset;
+        let q_start = q_end - end + offset + 1;
+        (
+            reported(q_start),
+            reported(q_end),
+            subject_end,
+            subject_offset + 1,
+        )
+    } else {
+        (
+            reported(offset + 1),
+            reported(end),
+            subject_offset + 1,
+            subject_end,
+        )
     }
 }
 
@@ -666,10 +736,9 @@ pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     // }
     // ```
     // ScoreCompareHSPs compares canonical internal offsets/endpoints directly (NCBI's `Int4`
-    // offsets: an `-ungapped` HSP can lie left of its context, `BlastnHsp::internal_q_left`).
-    let query_offsets = |h: &BlastnHsp| (h.q_offset_ncbi(), h.q_end_ncbi());
-    let (a_q_offset, a_q_end) = query_offsets(a);
-    let (b_q_offset, b_q_end) = query_offsets(b);
+    // offsets, which may lie outside the context: `BlastnHsp::internal_q_offset_0`).
+    let (a_q_offset, a_q_end) = (a.internal_q_offset_0, a.internal_q_end_0);
+    let (b_q_offset, b_q_end) = (b.internal_q_offset_0, b.internal_q_end_0);
     let (a_s_offset, a_s_end) = (a.internal_s_offset_0, a.internal_s_end_0);
     let (b_s_offset, b_s_end) = (b.internal_s_offset_0, b.internal_s_end_0);
 
@@ -1587,7 +1656,6 @@ mod tests {
             internal_s_offset_0: 0,
             internal_s_end_0: 1,
             internal_query_context_offset: 0,
-            internal_q_left: 0,
             gap_info: None,
             num_positives: 0,
         }

@@ -17,6 +17,36 @@ pub(crate) mod x_fence;
 // base per byte, or on a one-byte copy of the whole subject (see its doc for the NCBI references).
 pub mod x_greedy_prelim;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:385-389
+// ```c
+//           query = query_blk->sequence +
+//               query_info->contexts[hsp->context].query_offset;
+//           query_nomask = query_blk->sequence_nomask +
+//               query_info->contexts[hsp->context].query_offset;
+//           query_length = query_info->contexts[hsp->context].query_length;
+// ```
+/// NCBI's query pointer of one context with its length: the letters of the concatenated query
+/// `concat` (every context, with the sentinel between two of them; NCBI's `sequence` or
+/// `sequence_nomask`) from the context's first letter `start`, and the context's `len`. NCBI's
+/// `Int4` offsets relative to that pointer (`at`) read the concatenated query outside the context
+/// too, before it for a negative offset and past its end for one at `len` or more, as NCBI's
+/// pointer arithmetic does for an HSP from a hit that passes an end of its context
+/// (remaining-gaps X1b-o).
+#[derive(Clone, Copy, Debug)]
+pub struct ContextQuery<'a> {
+    pub concat: &'a [u8],
+    pub start: usize,
+    pub len: usize,
+}
+
+impl ContextQuery<'_> {
+    /// The place in `concat` of NCBI's offset `off` from the context's start (`query + off`).
+    #[inline(always)]
+    pub fn at(&self, off: i32) -> usize {
+        (self.start as isize + off as isize) as usize
+    }
+}
+
 // Re-export public APIs
 pub use greedy::{
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)

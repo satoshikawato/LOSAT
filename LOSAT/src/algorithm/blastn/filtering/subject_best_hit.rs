@@ -14,8 +14,8 @@ use super::super::hsp::BlastnHsp;
 const MAX_RANGE_DIFF: i64 = 3;
 
 /// The fields of an HSP that `Blast_HSPListSubjectBestHit` reads: its context, the frame of
-/// the query, the query offsets within the context (NCBI's `Int4` offsets: an `-ungapped` HSP
-/// can lie left of its context) and the length of the context.
+/// the query, the query offsets within the context (NCBI's `Int4` offsets: an HSP can lie
+/// outside its context, `BlastnHsp::outside_query_context`) and the length of the context.
 #[derive(Debug, Clone, Copy)]
 pub struct BestHitKey {
     pub context: u32,
@@ -52,8 +52,8 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
     subject_best_hit_by(hits, |h| BestHitKey {
         context: h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 },
         query_frame: h.query_frame,
-        query_offset: h.q_offset_ncbi(),
-        query_end: h.q_end_ncbi(),
+        query_offset: i64::from(h.internal_q_offset_0),
+        query_end: i64::from(h.internal_q_end_0),
         query_length: query_len as i64,
     });
 }
@@ -237,19 +237,18 @@ mod tests {
             s_idx: 0,
             raw_score: score,
             internal_q_offset_0: if query_frame < 0 {
-                1000usize.saturating_sub(q_end)
+                1000usize.saturating_sub(q_end) as i32
             } else {
-                q_start.saturating_sub(1)
+                q_start.saturating_sub(1) as i32
             },
             internal_q_end_0: if query_frame < 0 {
-                1000usize.saturating_sub(q_start).saturating_add(1)
+                1000usize.saturating_sub(q_start).saturating_add(1) as i32
             } else {
-                q_end
+                q_end as i32
             },
             internal_s_offset_0: s_start.min(s_end).saturating_sub(1),
             internal_s_end_0: s_start.max(s_end),
             internal_query_context_offset: 0,
-            internal_q_left: 0,
             gap_info: None,
             num_positives: q_end - q_start + 1,
         }

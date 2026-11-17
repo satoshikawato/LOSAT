@@ -362,8 +362,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                         q_idx,
                         s_idx,
                         s_id,
-                        q_pos_usize,
-                        q_pos_usize.saturating_add(safe_k),
+                        q_pos_usize as i32,
+                        q_pos_usize.saturating_add(safe_k) as i32,
                         kmer_start.saturating_add(chunk.offset),
                         kmer_start
                             .saturating_add(safe_k)
@@ -779,10 +779,6 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     }
                     scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
                 }
-                // The trace's context-relative range (no NCBI counterpart), from 0.
-                let qs = ungapped.q_start.saturating_sub(ctx.query_offset as usize);
-                let qe =
-                    (ungapped.q_start + ungapped.length).saturating_sub(ctx.query_offset as usize);
                 let ss = ungapped.s_start;
                 let ungapped_se = ungapped.s_start + ungapped.length;
                 let ungapped_score = ungapped.score;
@@ -795,8 +791,13 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 //     BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
                 // }
                 // ```
-                if blastn_trace_enabled
-                    && blastn_trace::should_trace_range(
+                if blastn_trace_enabled {
+                    // No NCBI counterpart (LOSAT_TRACE_BLASTN_* diagnostics): the hit's
+                    // context-relative range, NCBI's `Int4` one (below 0 for a hit that starts
+                    // left of its context), computed only for the trace.
+                    let qs = (ungapped.q_start as isize - ctx.query_offset as isize) as i32;
+                    let qe = qs + ungapped.length as i32;
+                    if blastn_trace::should_trace_range(
                         "ungapped",
                         q_idx,
                         s_idx,
@@ -807,9 +808,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                         ungapped_se.saturating_add(chunk.offset),
                         ctx.len,
                         ctx.frame,
-                    )
-                {
-                    blastn_trace::log(
+                    ) {
+                        blastn_trace::log(
                         "ungapped",
                         format!(
                             "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
@@ -829,6 +829,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                             off_found || ungapped_score >= cutoff_score
                         ),
                     );
+                    }
                 }
 
                 // NCBI reference: na_ungapped.c:757-758

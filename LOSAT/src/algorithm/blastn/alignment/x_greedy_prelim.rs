@@ -68,6 +68,7 @@
 
 use super::greedy::{greedy_gapped_alignment_internal, GreedyAlignScratch, FENCE_SENTRY};
 use super::x_fence;
+use super::ContextQuery;
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -236,15 +237,16 @@ impl<'a> XPrelimSubject<'a> {
     /// `subject_len` bases, for the ungapped hit at `hit` (subject offsets of the chunk): first on
     /// a window that holds the hit and `X_WINDOW_MARGIN` bases on each side, again on the whole
     /// copy when that call meets a fence (module doc). Subject offsets of the result are offsets
-    /// of the chunk.
+    /// of the chunk; query offsets are NCBI's `Int4` offsets in the context `query`, as `q_off`
+    /// is (`greedy_gapped_alignment_internal`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn score_only(
         &self,
         chunk_offset: usize,
         subject_len: usize,
         hit: (usize, usize),
-        query: &[u8],
-        q_off: usize,
+        query: ContextQuery<'_>,
+        q_off: i32,
         s_off: usize,
         reward: i32,
         penalty: i32,
@@ -252,7 +254,7 @@ impl<'a> XPrelimSubject<'a> {
         gap_extend: i32,
         x_drop: i32,
         scratch: &mut GreedyAlignScratch,
-    ) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
+    ) -> Option<GreedyPrelim> {
         assert!(
             self.enabled,
             "a score-only greedy call runs only in the preliminary stage of a greedy search"
@@ -331,9 +333,9 @@ impl<'a> XPrelimSubject<'a> {
 #[allow(clippy::too_many_arguments)]
 pub fn x_greedy_gapped_alignment_score_only(
     subject_unpacked: &[u8],
-    query: &[u8],
+    query: ContextQuery<'_>,
     subject_len: usize,
-    q_off: usize,
+    q_off: i32,
     s_off: usize,
     reward: i32,
     penalty: i32,
@@ -341,7 +343,7 @@ pub fn x_greedy_gapped_alignment_score_only(
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GreedyAlignScratch,
-) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
+) -> Option<GreedyPrelim> {
     let core = greedy_gapped_alignment_internal(
         query,
         subject_unpacked,
@@ -362,6 +364,13 @@ pub fn x_greedy_gapped_alignment_score_only(
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2539-2569
 /// (s_BlastGreedyGapAlignStructFill: query_start/stop, subject_start/stop, score)
+/// What a preliminary greedy alignment gives (`s_BlastGreedyGapAlignStructFill`): its query start
+/// and end, subject start and end, score, and the query and subject offsets of NCBI's estimate of
+/// its best start (`greedy_query_seed_start`, `greedy_subject_seed_start`). The query offsets are
+/// NCBI's `Int4` offsets in the context, outside it where the alignment is; the subject offsets
+/// are offsets of the chunk.
+pub(crate) type GreedyPrelim = (i32, i32, usize, usize, i32, i32, usize);
+
 /// The result of a score-only call whose subject bytes start `shift` bases into the chunk (a
 /// window's start less its sentry, 0 for the whole copy), in offsets of the chunk. A window call
 /// that did not meet a fence starts at or after the window's first base, so the shift never
@@ -369,18 +378,18 @@ pub fn x_greedy_gapped_alignment_score_only(
 fn x_score_only_result(
     core: Option<super::greedy::GreedyGappedCore>,
     shift: usize,
-) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
+) -> Option<GreedyPrelim> {
     let core = core?;
-    if core.q_start < 0 || core.s_start < 0 {
+    if core.s_start < 0 {
         return None;
     }
     Some((
-        core.q_start as usize,
-        core.q_end as usize,
+        core.q_start,
+        core.q_end,
         core.s_start as usize + shift,
         core.s_end as usize + shift,
         core.score,
-        core.q_seed_start as usize,
+        core.q_seed_start,
         core.s_seed_start as usize + shift,
     ))
 }
@@ -517,12 +526,17 @@ mod tests {
                         (s_off + half).min(subject_len - 1),
                     );
                     let fences = x_fence::x_fence_count();
+                    let context = ContextQuery {
+                        concat: &query,
+                        start: 0,
+                        len: query.len(),
+                    };
                     let got = subject.score_only(
                         chunk_offset,
                         subject_len,
                         hit,
-                        &query,
-                        q_off,
+                        context,
+                        q_off as i32,
                         s_off,
                         reward,
                         penalty,
@@ -535,9 +549,9 @@ mod tests {
                     calls += 1;
                     let want = x_greedy_gapped_alignment_score_only(
                         &whole[chunk_offset..],
-                        &query,
+                        context,
                         subject_len,
-                        q_off,
+                        q_off as i32,
                         s_off,
                         reward,
                         penalty,

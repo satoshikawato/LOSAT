@@ -27,10 +27,10 @@ use super::traceback_finish::TracebackCtx;
 use super::{
     adjust_blastn_offsets, adjust_subject_range, blast_get_offsets_for_gapped_alignment,
     blast_get_start_for_gapped_alignment_nucl, blastn_trace, calculate_blastn_context_statistics,
-    extend_gapped_heuristic_with_traceback_with_scratch, format_gap_edit_ops_for_trace,
-    greedy_gapped_alignment_with_traceback, stats_from_edit_ops, x_fence, BlastIntervalTree,
-    BlastnHsp, BlastnTiming, GapAlignScratch, GreedyAlignScratch, IndexMethod, PrelimHit,
-    QueryContext, TreeHsp, XAheadScratch, XSpecTraceback,
+    context_query, extend_gapped_heuristic_with_traceback_with_scratch,
+    format_gap_edit_ops_for_trace, greedy_gapped_alignment_with_traceback, stats_from_edit_ops,
+    x_fence, BlastIntervalTree, BlastnHsp, BlastnTiming, GapAlignScratch, GreedyAlignScratch,
+    IndexMethod, PrelimHit, QueryContext, TreeHsp, XAheadScratch, XSpecTraceback,
 };
 use crate::common::GapEditOp;
 #[cfg(all(
@@ -40,10 +40,11 @@ use crate::common::GapEditOp;
 use {crate::utils::threading::SearchPool, rayon::prelude::*};
 
 /// Where the traceback of one HSP starts: `(trace_q_start, trace_s_start, start_shift,
-/// adjusted_s_len, trace_s_start_adj)`, the start offsets on the query and on the subject, the
-/// subject range that `AdjustSubjectRange` keeps (its first letter and its length) and the
-/// subject start in that range.
-pub(super) type TraceStart = (usize, usize, usize, usize, usize);
+/// adjusted_s_len, trace_s_start_adj)`, the start offsets on the query (NCBI's `Int4` one in the
+/// context, outside it for a greedy HSP from a hit that passes an end of its context) and on the
+/// subject, the subject range that `AdjustSubjectRange` keeps (its first letter and its length)
+/// and the subject start in that range.
+pub(super) type TraceStart = (i32, usize, usize, usize, usize);
 
 /// What the dynamic-programming traceback call returns
 /// (`extend_gapped_heuristic_with_traceback_with_scratch`).
@@ -60,8 +61,9 @@ pub(super) type DpTraceback = (
     Vec<GapEditOp>,
 );
 
-/// What the greedy traceback call returns (`greedy_gapped_alignment_with_traceback`).
-pub(super) type GreedyTraceback = Option<(usize, usize, usize, usize, i32, usize, Vec<GapEditOp>)>;
+/// What the greedy traceback call returns (`greedy_gapped_alignment_with_traceback`; its query
+/// offsets are NCBI's `Int4` ones in the context).
+pub(super) type GreedyTraceback = Option<(i32, i32, usize, usize, i32, usize, Vec<GapEditOp>)>;
 
 /// The traceback of one HSP computed ahead of the ordered loop: where it starts and the value of
 /// its traceback call.
@@ -118,11 +120,19 @@ pub(super) fn prepare_traceback(
 ) -> Option<TraceStart> {
     let &TracebackCtx {
         s_seq_blastna,
-        encoded_queries_blastna,
+        encoded_query_concat_blastna,
+        query_contexts,
         score_matrix,
         ..
     } = traceback_ctx;
-    let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize];
+    // NCBI's `query` (blast_traceback.c:386-387): the context in the concatenated query, read at
+    // the HSP's offsets, which lie outside it for a greedy HSP from a hit that passes an end of
+    // its context. Both functions below give the same offsets on the context's letters alone for
+    // an HSP in its context.
+    let query = context_query(
+        encoded_query_concat_blastna,
+        &query_contexts[prelim.context_idx as usize],
+    );
     let mut trace_q_start = prelim.seed_qs;
     let mut trace_s_start = prelim.seed_ss;
 
@@ -145,19 +155,19 @@ pub(super) fn prepare_traceback(
     // ```
     if trace_q_start == 0 && trace_s_start == 0 {
         let (q_start, s_start) = blast_get_offsets_for_gapped_alignment(
-            q_seq_blastna,
+            query.concat,
             s_seq_blastna,
-            prelim.prelim_qs,
-            prelim.prelim_qe,
+            query.at(prelim.prelim_qs),
+            query.at(prelim.prelim_qe),
             prelim.prelim_ss,
             prelim.prelim_se,
             score_matrix,
         )?;
-        trace_q_start = q_start;
+        trace_q_start = (q_start as isize - query.start as isize) as i32;
         trace_s_start = s_start;
     } else {
         let (q_start, s_start) = blast_get_start_for_gapped_alignment_nucl(
-            q_seq_blastna,
+            query,
             s_seq_blastna,
             prelim.prelim_qs,
             prelim.prelim_qe,
@@ -183,8 +193,8 @@ pub(super) fn prepare_traceback(
     let start_shift_i32 = adjust_subject_range(
         &mut s_start_i32,
         &mut s_len_i32,
-        trace_q_start as i32,
-        q_seq_blastna.len() as i32,
+        trace_q_start,
+        query.len as i32,
     );
     let start_shift = start_shift_i32 as usize;
     adjusted_s_len = s_len_i32 as usize;
@@ -197,6 +207,103 @@ pub(super) fn prepare_traceback(
         adjusted_s_len,
         trace_s_start_adj,
     ))
+}
+
+/// The greedy traceback call of `prelim` from where `prepare_traceback` starts it (`start`), on
+/// the scratch `scratch`: NCBI's `query` is the context in the concatenated query
+/// (`ContextQuery`), which the alignment reads outside the context from a start outside it.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
+/// ```c
+///          } else if (kGreedyTraceback) {
+///             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+///                 query_length, adjusted_s_length, gap_align,
+///                 score_params, q_start, s_start, FALSE, TRUE,
+///                 fence_hit);
+/// ```
+#[inline]
+pub(super) fn greedy_trace_call(
+    traceback_ctx: &TracebackCtx<'_>,
+    prelim: &PrelimHit,
+    start: &TraceStart,
+    scratch: &mut GreedyAlignScratch,
+) -> GreedyTraceback {
+    let &TracebackCtx {
+        s_seq_blastna,
+        encoded_query_concat_blastna,
+        query_contexts,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        ..
+    } = traceback_ctx;
+    let &(q_start, _, start_shift, adjusted_s_len, s_start) = start;
+    greedy_gapped_alignment_with_traceback(
+        context_query(
+            encoded_query_concat_blastna,
+            &query_contexts[prelim.context_idx as usize],
+        ),
+        &s_seq_blastna[start_shift..start_shift + adjusted_s_len],
+        adjusted_s_len,
+        q_start,
+        s_start,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        scratch,
+    )
+}
+
+/// The dynamic-programming traceback call of `prelim` from where `prepare_traceback` starts it
+/// (`start`), on the scratch `scratch`, on the context's letters: a dynamic-programming HSP lies
+/// in its context (its preliminary alignment runs on `query_tmp` from a word hit in it), so the
+/// start is not negative.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:508-512
+/// ```c
+///          } else {
+///            BLAST_GappedAlignmentWithTraceback(program_number, query,
+///                  adjusted_subject, gap_align, score_params, q_start, s_start,
+///                  query_length, adjusted_s_length,
+///                  fence_hit);
+/// ```
+#[inline]
+pub(super) fn dp_trace_call(
+    traceback_ctx: &TracebackCtx<'_>,
+    prelim: &PrelimHit,
+    start: &TraceStart,
+    scratch: &mut GapAlignScratch,
+) -> DpTraceback {
+    let &TracebackCtx {
+        s_seq_blastna,
+        encoded_queries_blastna,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        score_matrix,
+        x_drop_final,
+        ..
+    } = traceback_ctx;
+    let &(q_start, _, start_shift, adjusted_s_len, s_start) = start;
+    extend_gapped_heuristic_with_traceback_with_scratch(
+        encoded_queries_blastna[prelim.context_idx as usize],
+        &s_seq_blastna[start_shift..start_shift + adjusted_s_len],
+        q_start as usize,
+        s_start,
+        1,
+        reward,
+        penalty,
+        score_matrix,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        scratch,
+    )
 }
 
 /// The traceback of `prelim_hits[x_index]`: where it starts and the value of its traceback call on
@@ -236,56 +343,20 @@ pub(super) fn x_trace_compute(
     x_scratch: &mut XAheadScratch<'_>,
 ) -> Option<XTraced> {
     let &TracebackCtx {
-        s_seq_blastna,
-        encoded_queries_blastna,
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        score_matrix,
-        use_dp,
-        x_fenced,
-        x_drop_final,
-        ..
+        use_dp, x_fenced, ..
     } = traceback_ctx;
     let p = &prelim_hits[x_index];
     let prepared = prepare_traceback(traceback_ctx, p)?;
-    let (qs, _, shift, slen, ss) = prepared;
     if x_fence::x_fenced(x_fenced) {
         return None;
     }
     let x_mark = x_fence::x_fence_mark(x_fenced);
     if !use_dp {
-        let result = greedy_gapped_alignment_with_traceback(
-            encoded_queries_blastna[p.context_idx as usize],
-            &s_seq_blastna[shift..shift + slen],
-            slen,
-            qs,
-            ss,
-            reward,
-            penalty,
-            gap_open,
-            gap_extend,
-            x_drop_final,
-            &mut *x_scratch.greedy,
-        );
+        let result = greedy_trace_call(traceback_ctx, p, &prepared, &mut *x_scratch.greedy);
         x_fence::x_fence_note(x_fenced, x_mark);
         return Some((prepared, XSpecTraceback::Greedy(result)));
     }
-    let result = extend_gapped_heuristic_with_traceback_with_scratch(
-        encoded_queries_blastna[p.context_idx as usize],
-        &s_seq_blastna[shift..shift + slen],
-        qs,
-        ss,
-        1,
-        reward,
-        penalty,
-        score_matrix,
-        gap_open,
-        gap_extend,
-        x_drop_final,
-        &mut *x_scratch.gap,
-    );
+    let result = dp_trace_call(traceback_ctx, p, &prepared, &mut *x_scratch.gap);
     x_fence::x_fence_note(x_fenced, x_mark);
     Some((prepared, XSpecTraceback::Dp(result)))
 }
@@ -348,17 +419,9 @@ pub(super) struct SpeculativeBatch<'b, 's> {
 ))]
 pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: SpeculativeBatch<'_, '_>) {
     let &TracebackCtx {
-        s_seq_blastna,
-        encoded_queries_blastna,
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        score_matrix,
         use_dp,
         min_diag_separation,
         x_fenced,
-        x_drop_final,
         query_contexts,
         ..
     } = traceback_ctx;
@@ -378,8 +441,8 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
     speculative_jobs.extend((prelim_index..batch_end).filter(|&index| {
         let p = &prelim_hits[index];
         let h = TreeHsp {
-            query_offset: p.prelim_qs as i32,
-            query_end: p.prelim_qe as i32,
+            query_offset: p.prelim_qs,
+            query_end: p.prelim_qe,
             subject_offset: p.prelim_ss as i32,
             subject_end: p.prelim_se as i32,
             score: p.prelim_score,
@@ -416,7 +479,6 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
                             // BLAST_GappedAlignmentWithTraceback(...);
                             // Keep the exact preparation with its speculative DP.
                             let prepared = prepare_traceback(traceback_ctx, p)?;
-                            let (qs, _, shift, slen, ss) = prepared;
                             if x_fence::x_fenced(x_fenced) {
                                 return None;
                             }
@@ -436,36 +498,16 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
                                 // No NCBI counterpart: the call of the ordered loop
                                 // (`trace_align_one`, called by `traceback_list::trace_hsp_list`), on this
                                 // slot's scratch.
-                                let result = greedy_gapped_alignment_with_traceback(
-                                    encoded_queries_blastna[p.context_idx as usize],
-                                    &s_seq_blastna[shift..shift + slen],
-                                    slen,
-                                    qs,
-                                    ss,
-                                    reward,
-                                    penalty,
-                                    gap_open,
-                                    gap_extend,
-                                    x_drop_final,
+                                let result = greedy_trace_call(
+                                    traceback_ctx,
+                                    p,
+                                    &prepared,
                                     x_greedy_scratch,
                                 );
                                 x_fence::x_fence_note(x_fenced, x_mark);
                                 return Some((index, (prepared, XSpecTraceback::Greedy(result))));
                             }
-                            let result = extend_gapped_heuristic_with_traceback_with_scratch(
-                                encoded_queries_blastna[p.context_idx as usize],
-                                &s_seq_blastna[shift..shift + slen],
-                                qs,
-                                ss,
-                                1,
-                                reward,
-                                penalty,
-                                score_matrix,
-                                gap_open,
-                                gap_extend,
-                                x_drop_final,
-                                scratch,
-                            );
+                            let result = dp_trace_call(traceback_ctx, p, &prepared, scratch);
                             x_fence::x_fence_note(x_fenced, x_mark);
                             Some((index, (prepared, XSpecTraceback::Dp(result))))
                         }),
@@ -491,27 +533,28 @@ pub(super) struct TraceHsp<'h> {
     /// The HSP and its query context.
     pub(super) prelim: &'h PrelimHit,
     pub(super) ctx: &'h QueryContext,
-    /// The context's letters in blastna: the alignment's (masked) and the identities' (unmasked).
-    pub(super) q_seq_blastna: &'h [u8],
+    /// The context's letters in blastna without masks, which a dynamic-programming HSP's
+    /// identities are counted on.
     pub(super) q_seq_nomask_blastna: &'h [u8],
     /// Whether the trace (`blastn_trace`) follows this HSP's seed, and the subject's frame sign
     /// in the tree.
     pub(super) trace_traceback_seed: bool,
     pub(super) subject_frame_sign: i32,
     /// Where its traceback starts (`TraceStart`, as `prepare_traceback` gives it).
-    pub(super) trace_q_start: usize,
+    pub(super) trace_q_start: i32,
     pub(super) trace_s_start: usize,
     pub(super) start_shift: usize,
     pub(super) adjusted_s_len: usize,
     pub(super) trace_s_start_adj: usize,
 }
 
-/// The alignment of one HSP (`trace_align_one`): its ends on the query and on the subject range of
-/// the alignment, its score, the identities, mismatches, gap opens and gap letters the traceback
-/// call counts (0 from the greedy call), its length and its edit script.
+/// The alignment of one HSP (`trace_align_one`): its ends on the query (NCBI's `Int4` offsets in
+/// the context) and on the subject range of the alignment, its score, the identities,
+/// mismatches, gap opens and gap letters the traceback call counts (0 from the greedy call), its
+/// length and its edit script.
 pub(super) struct Aligned {
-    pub(super) final_qs: usize,
-    pub(super) final_qe: usize,
+    pub(super) final_qs: i32,
+    pub(super) final_qe: i32,
     pub(super) final_ss: usize,
     pub(super) final_se: usize,
     pub(super) score: i32,
@@ -563,27 +606,26 @@ pub(super) fn trace_align_one(
     let &TracebackCtx {
         timing_ref,
         timing_enabled,
-        s_seq_blastna,
         x_fenced,
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        x_drop_final,
-        score_matrix,
         use_dp,
         ..
     } = traceback_ctx;
     let &TraceHsp {
-        q_seq_blastna,
+        prelim,
         trace_q_start,
+        trace_s_start,
         start_shift,
         adjusted_s_len,
         trace_s_start_adj,
         ..
     } = trace_hsp;
-    let adjusted_subject = &s_seq_blastna[start_shift..start_shift + adjusted_s_len];
-    let x_drop_trace = x_drop_final;
+    let start: TraceStart = (
+        trace_q_start,
+        trace_s_start,
+        start_shift,
+        adjusted_s_len,
+        trace_s_start_adj,
+    );
     if let Some(timing) = timing_ref {
         BlastnTiming::record_count(&timing.traceback_full_traceback_hsps, 1);
     }
@@ -641,20 +683,7 @@ pub(super) fn trace_align_one(
             let x_mark = x_fence::x_fence_mark(x_fenced);
             let x_result = match precomputed {
                 Some((_, XSpecTraceback::Dp(result))) => result,
-                _ => extend_gapped_heuristic_with_traceback_with_scratch(
-                    q_seq_blastna,
-                    adjusted_subject,
-                    trace_q_start,
-                    trace_s_start_adj,
-                    1,
-                    reward,
-                    penalty,
-                    score_matrix,
-                    gap_open,
-                    gap_extend,
-                    x_drop_trace,
-                    gap_scratch,
-                ),
+                _ => dp_trace_call(traceback_ctx, prelim, &start, gap_scratch),
             };
             // EXPERIMENT (LOSAT_X_BNTBRANGE): an alignment that met a
             // fence (here or ahead) makes no HSP; the sequence is traced
@@ -667,8 +696,8 @@ pub(super) fn trace_align_one(
         };
         let aln_len = matches + mismatches + gap_letters;
         (
-            final_qs,
-            final_qe,
+            final_qs as i32,
+            final_qe as i32,
             final_ss,
             final_se,
             score,
@@ -698,19 +727,7 @@ pub(super) fn trace_align_one(
         let x_mark = x_fence::x_fence_mark(x_fenced);
         let x_greedy_result = match precomputed {
             Some((_, XSpecTraceback::Greedy(result))) => result,
-            _ => greedy_gapped_alignment_with_traceback(
-                q_seq_blastna,
-                adjusted_subject,
-                adjusted_subject.len(),
-                trace_q_start,
-                trace_s_start_adj,
-                reward,
-                penalty,
-                gap_open,
-                gap_extend,
-                x_drop_trace,
-                &mut *greedy_align_scratch,
-            ),
+            _ => greedy_trace_call(traceback_ctx, prelim, &start, &mut *greedy_align_scratch),
         };
         // EXPERIMENT (LOSAT_X_BNTBRANGE): as for the DP traceback above.
         x_fence::x_fence_note(x_fenced, x_mark);
@@ -886,11 +903,12 @@ pub(super) fn trace_build_hsp(
     // Traceback scoring uses query_blk->sequence; identity/length
     // reporting uses query_blk->sequence_nomask. Without masks written
     // into the query (`mask_query_letters`) these slices alias.
+    // A dynamic-programming HSP lies in its context (`dp_trace_call`).
     let (matches, mismatches, gaps, gap_letters, aln_len) = if use_dp {
         let (matches, mismatches, gaps, gap_letters) = stats_from_edit_ops(
             q_seq_nomask_blastna,
             s_seq_blastna,
-            final_qs,
+            final_qs as usize,
             final_ss,
             &edit_ops,
         );
@@ -997,8 +1015,8 @@ pub(super) fn trace_build_hsp(
     // }
     // ```
     let final_tree_hsp = TreeHsp {
-        query_offset: final_qs as i32,
-        query_end: final_qe as i32,
+        query_offset: final_qs,
+        query_end: final_qe,
         subject_offset: final_ss as i32,
         subject_end: final_se as i32,
         score,
@@ -1103,7 +1121,6 @@ pub(super) fn trace_build_hsp(
         internal_s_offset_0: final_ss,
         internal_s_end_0: final_se,
         internal_query_context_offset: prelim.query_context_offset,
-        internal_q_left: 0,
         gap_info,
         num_positives: matches,
     });

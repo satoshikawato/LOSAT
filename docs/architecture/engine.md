@@ -273,7 +273,7 @@ flowchart LR
 | traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `search_subject` (`subject_passes.rs`, its second call per subject) calls `traceback_subject` (`traceback_subject.rs`), which calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
-| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Archive, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
+| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Seqalign, Archive, Xml and Xml2, Pairwise, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
 
 Neither blastn nor blastp links HSPs or uses sum statistics: NCBI's option handles start with
 sum statistics off (`api/blast_options_local_priv.cpp`), only those of tblastn, blastx and
@@ -315,8 +315,9 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   the reports read, the check of the prefetch environment, the subjects that the reports show, what
   the reports read of the final hit lists' Seq-aligns (psiblast's PSSMs and cut among it) and the
   labels of the reports, are in `blast_engine/report_prep.rs`;
-  the BLAST archive, the tabular reports and the organism report are in
-  `blast_engine/report_write.rs`).
+  the Seq-annots, the BLAST archive, the BLAST XML, XML2 and JSON documents, the pairwise and
+  query-anchored reports, the tabular reports and the organism report are in
+  `blast_engine/report_write.rs`, one function per arm of the loop over the formats).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are

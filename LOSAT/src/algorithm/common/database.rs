@@ -961,22 +961,25 @@ fn prints_report_sums(outfmt: i32) -> bool {
     (0..=4).contains(&outfmt)
 }
 
-/// [`check_report_sums`] for each report format of `outfmts` (`-outfmt` values), with the
-/// database's report made by `shown` once, only where a format prints its sums.
-pub(crate) fn check_formats_report_sums<'f>(
+/// [`check_report_sums`] for each report format of `formats` (its `-outfmt` value and its
+/// refusal), with the database's report made by `shown` once, only where a format prints its
+/// sums: each format's refusal goes to that format's `FormatRefusal::check`, which fails the call
+/// (the command line's format) or that format alone, as a program's other checks of a format
+/// before its rows.
+pub(crate) fn check_formats_report_sums<'f, 'r>(
     shown: impl FnOnce() -> PairwiseDatabase,
-    outfmts: impl IntoIterator<Item = &'f str>,
+    formats: impl IntoIterator<Item = (&'f str, &'r mut crate::api::local_blast::FormatRefusal)>,
     program: &str,
 ) -> Result<()> {
     let mut shown = Some(shown);
     let mut made = None;
-    for outfmt in outfmts {
+    for (outfmt, refusal) in formats {
         let number = crate::blastinput::app::parse_formatting_string(outfmt)?.number;
-        if !prints_report_sums(number) {
+        if !prints_report_sums(number) || refusal.refused() {
             continue;
         }
         let database = made.get_or_insert_with(|| (shown.take().expect("made once"))());
-        check_report_sums(database, number, program)?;
+        refusal.check(check_report_sums(database, number, program))?;
     }
     Ok(())
 }
@@ -3990,6 +3993,64 @@ mod tests {
         for outfmt in [0, 13, 15, 6] {
             assert!(!refused(&int64_min, outfmt), "{outfmt}");
         }
+    }
+
+    // The report-sum check of the prolog of outfmt 0 to 4 at open goes through each format's
+    // refusal (`FormatRefusal::check`, line RG T7-W): the command line's format fails the call, a
+    // format of LOSAT Web's that fails alone is refused and the others stay; the database's
+    // report is made once, only where a format prints its sums.
+    #[test]
+    fn the_report_sums_of_each_format_go_to_its_refusal() {
+        use crate::api::local_blast::FormatRefusal;
+        let info = |total_letters: i64| DatabaseInfo {
+            definition: b"t".to_vec(),
+            date: String::new(),
+            num_sequences: 23,
+            total_letters,
+            filt_algorithm_name: String::new(),
+            filt_algorithm_options: String::new(),
+        };
+        let made = std::cell::Cell::new(0);
+        let overflow = || {
+            made.set(made.get() + 1);
+            PairwiseDatabase::new(vec![
+                info(5_000_000_000_000_000_000),
+                info(5_000_000_000_000_000_000),
+            ])
+        };
+        let mut call = FormatRefusal::FailsCall;
+        let error = check_formats_report_sums(overflow, [("0", &mut call)], "BLASTN").unwrap_err();
+        assert!(error.is::<ReportSumRefusal>());
+        let (mut pairwise, mut tabular, mut query_anchored) = (
+            FormatRefusal::FailsAlone,
+            FormatRefusal::FailsCall,
+            FormatRefusal::FailsAlone,
+        );
+        check_formats_report_sums(
+            overflow,
+            [
+                ("0", &mut pairwise),
+                ("6", &mut tabular),
+                ("3", &mut query_anchored),
+            ],
+            "BLASTN",
+        )
+        .unwrap();
+        assert!(pairwise.refused() && query_anchored.refused());
+        assert!(matches!(tabular, FormatRefusal::FailsCall));
+        assert!(pairwise
+            .take_refused()
+            .is_some_and(|error| error.is::<ReportSumRefusal>()));
+        assert_eq!(made.get(), 2);
+        let mut alone = FormatRefusal::FailsAlone;
+        check_formats_report_sums(overflow, [("6", &mut alone), ("5", &mut call)], "BLASTN")
+            .unwrap();
+        assert!(!alone.refused());
+        assert_eq!(
+            made.get(),
+            2,
+            "no format printing the prolog's sums: not made"
+        );
     }
     use crate::utils::matrix::BLASTAA_SIZE;
 

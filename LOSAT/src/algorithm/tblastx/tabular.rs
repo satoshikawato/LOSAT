@@ -195,10 +195,7 @@ pub(super) fn write_tblastx_tabular(
                 .iter()
                 .map(|record| (record.believed(), record.title.as_slice())),
             run.args.show_gis,
-            false,
-            false,
-            "TBLASTX",
-        )?
+        )
     } else {
         Vec::new()
     };

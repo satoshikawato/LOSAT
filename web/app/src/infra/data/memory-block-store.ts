@@ -54,6 +54,12 @@ export class MemoryBlockStore implements BlockStore {
         block.length += bytes.length;
         this.used += bytes.length;
       },
+      clear: () => {
+        if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+        this.used -= block.length;
+        block.chunks.length = 0;
+        block.length = 0;
+      },
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError(this.fullMessage);
         if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);

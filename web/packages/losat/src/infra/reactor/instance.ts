@@ -1,6 +1,6 @@
 // Loading and instantiating the engine modules (docs/web/abi_v2.md §2-§3).
 import { sha256Hex } from '../digest.js';
-import { ReactorAbi, type AbiExports } from './abi.js';
+import { ABI_VERSION, ReactorAbi, type AbiExports } from './abi.js';
 import { inspectReactor, type ReactorArtifact } from './artifact.js';
 import type { ReactorAsset } from './assets.js';
 import { createWasi, type WasiContext } from './wasi.js';
@@ -69,7 +69,7 @@ function hostImports(emit: (stream: number, ptr: number, len: number) => void): 
 
 function checkVersion(abi: ReactorAbi): ReactorAbi {
   const version = abi.abiVersion();
-  if (version !== 2) throw new Error(`the engine module has ABI version ${version}; LOSAT needs version 2`);
+  if (version !== ABI_VERSION) throw new Error(`the engine module has ABI version ${version}; LOSAT needs version ${ABI_VERSION}`);
   return abi;
 }
 

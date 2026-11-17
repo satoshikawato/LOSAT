@@ -648,7 +648,10 @@ fn open_search_database(
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
-                outputs.formats.iter().map(|format| format.outfmt),
+                outputs
+                    .formats
+                    .iter_mut()
+                    .map(|format| (format.outfmt, &mut format.refusal)),
                 "TBLASTN",
             )?;
             Some(database)
@@ -2675,15 +2678,26 @@ fn search(
                     .iter()
                     .map(|record| (record.believed(), record.title.as_slice())),
                 args.show_gis,
-                false,
-                (0..=4).contains(
-                    &crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number,
-                ),
-                "TBLASTN",
-            )?
+            )
         } else {
             Vec::new()
         };
+        // LOSAT's refusals of these records in outfmt 0 to 4, each such format's
+        // (`FormatRefusal`).
+        if !records_parsed.is_empty() {
+            for format in outputs.formats.iter_mut() {
+                let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
+                if (0..=4).contains(&number) {
+                    format
+                        .refusal
+                        .check(crate::report::db_subject::check_pairwise_records(
+                            &records_parsed,
+                            false,
+                            "TBLASTN",
+                        ))?;
+                }
+            }
+        }
         let (report_records, report_letters, shown) = match (&reported, database) {
             (Some(reported), Some(database)) => (
                 reported.records.as_slice(),

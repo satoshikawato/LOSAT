@@ -2304,7 +2304,7 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 // the composition-based redo (blast_kappa.c:527-528), the ungapped re-evaluation
 // (blast_hits.c:2700-2705; LOSAT's TBLASTN refuses `-ungapped`). NCBI BLAST+ 2.17.0 dies there with
 // SIGSEGV (probes on ws, 2026-11-17: `-subject` and `-db`, frames + and -, a matrix query at
-// `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS 1.43, rule
+// `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS 1.44, rule
 // 3). A subject that leaves no HSP to that point (9 or 10 bases at the probes' settings, 11 below
 // the cutoff of `-evalue 1e-30`, in NCBI and LOSAT alike) lets the search go on.
 /// The refusal of a read of the translation of a frame of a subject of fewer than 12 bases

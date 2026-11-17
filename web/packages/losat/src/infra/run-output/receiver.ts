@@ -1,5 +1,6 @@
 // Data worker side of the run output channel (ports/run-output.ts).
-import { OUTPUT_STREAMS, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
+import type { RunOutput } from '../../domain/output-format.js';
+import { isRunOutput, OUTPUT_STREAMS, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
 
 export type RunOutputResult =
   /** `end` arrived and its totals agree with what arrived. */
@@ -17,15 +18,19 @@ export class RunOutputReceiver {
   private chunks = 0;
   private bytes = 0;
 
-  /** `onChunk` receives each chunk in order until the output finishes; it must not throw. */
+  /**
+   * `onChunk` receives each chunk in order until the output finishes, and `onDiscard` each
+   * `discard` among them (drop what arrived of that output); neither may throw.
+   */
   constructor(
     private readonly port: MessagePort,
     onChunk: (stream: OutputStream, bytes: Uint8Array) => void,
+    onDiscard: (stream: RunOutput) => void,
   ) {
     this.finished = new Promise((resolve) => {
       this.settle = resolve;
     });
-    port.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data, onChunk);
+    port.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data, onChunk, onDiscard);
   }
 
   /** Stops receiving; later messages are dropped. */
@@ -33,13 +38,21 @@ export class RunOutputReceiver {
     this.finish({ state: 'closed' });
   }
 
-  private receive(message: unknown, onChunk: (stream: OutputStream, bytes: Uint8Array) => void): void {
+  private receive(
+    message: unknown,
+    onChunk: (stream: OutputStream, bytes: Uint8Array) => void,
+    onDiscard: (stream: RunOutput) => void,
+  ): void {
     if (this.done) return;
     const data = message as Partial<RunOutputMessage> | null;
     if (data?.type === 'chunk' && OUTPUT_STREAMS.includes(data.stream as OutputStream) && data.bytes instanceof Uint8Array) {
       this.chunks++;
       this.bytes += data.bytes.length;
       onChunk(data.stream as OutputStream, data.bytes);
+      return;
+    }
+    if (data?.type === 'discard' && isRunOutput(data.stream)) {
+      onDiscard(data.stream);
       return;
     }
     if (data?.type === 'end' && typeof data.chunks === 'number' && typeof data.bytes === 'number') {

@@ -5,6 +5,9 @@ export * from './domain/index.js';
 export * from './ports/index.js';
 export { sha256Hex } from './infra/digest.js';
 export {
+  ABI_VERSION,
+  discardedStream,
+  DISCARD_STREAM,
   EngineAllocationError,
   EngineCallError,
   EngineStoppedError,

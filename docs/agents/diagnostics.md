@@ -6299,11 +6299,14 @@ Scheduling (each value computed by one thread with the original function; order 
   128-bit rows (their x86-64 SSSE3 / SSE4.1 build); `tests/blastp_restricted_gapped.rs` compares
   NCBI BLAST+ 2.17.0's rows with `=0` and `=2` and counts the 128-bit rows' alignments with `=2`
   (`[X_STATS] BPGAP fast=`); web.yml runs the lib tests of `x_restricted_gap` on wasm32-wasip1.
-  Measured (ws node 0, one core, 5 rounds; dev 24652e373 against the rows of 27f07216f; serial
-  WASI command in one Node 26.8.2 process; blastp of the first 1,000 human proteins
-  against the 6,600 yeast proteins as `-subject`, `-evalue 0.001`, the same output): Wasm 19.014 -> 16.726 s (x0.847 [0.831-0.918], 5 of 5
-  rounds below 1); native cycles x1.0023 [0.997-1.0095], instructions x1.00007, the AVX2 functions
-  the same machine code as dev's.
+  Measured (ws node 0, one core, 5 rounds; dev b59c21dc4 against 9be1d1d0e, the branch with that
+  dev merged; serial WASI command in one Node 26.8.2 process; blastp of the first 1,000 human
+  proteins against the 6,600 yeast proteins as `-subject`, `-evalue 0.001`, the same output): Wasm
+  18.024 -> 15.176 s (x0.844 [0.836-0.847], 5 of 5 rounds below 1); native cycles x1.0021
+  [0.9961-1.0076], instructions x1.00023. The AVX2 functions differ from dev's only in their stop
+  paths (`restricted_rows_avx2` +21 bytes, `restricted_rows16_avx2` +18); the build before the stop
+  reason, whose AVX2 functions were dev's machine code, measured native cycles x1.0023 in the same
+  setting.
 - `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
   v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
   restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the

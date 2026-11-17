@@ -7,6 +7,7 @@ pub mod genetic_code;
 // quoted in the module).
 pub(crate) mod mapped_file;
 pub mod matrix;
+pub(crate) mod process_id;
 pub mod seg;
 mod seg_lnfact;
 // libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, quoted in the module): the order

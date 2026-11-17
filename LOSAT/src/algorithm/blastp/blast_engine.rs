@@ -5446,14 +5446,41 @@ pub fn run(
     // ```
     // The query is opened and the output file created before the options are checked;
     // `-` is standard input and standard output.
-    input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
-    // NCBI opens the query file inside `Run` too: its error is saved and an error archive
-    // follows.
-    let query_file = match input_files::open_input(&args.query, "query", args.app.name()) {
-        Ok(file) => file,
-        Err(error) => {
-            write_run_error_archive(&args, archive.as_ref(), &error);
-            return Err(error);
+    //
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
+    // ```c++
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios  = &cin;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:448-453
+    // ```c++
+    //         /*** Get the query sequence(s) or PSSM (these two options are mutually
+    //          * exclusive) ***/
+    //         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
+    //         CRef<CBlastInput> input;
+    //
+    //         if (pssm.Empty()) {  // FASTA input
+    // ```
+    // psiblast `-in_pssm` (`pssm_query`): the query is the PSSM, which the options' handler
+    // reads (`check_options`). `-in_pssm` excludes `-query` (blast_args.cpp:1242-1244, the
+    // parser's exclusion), so the query is the default `-` (`kDfltArgQuery`,
+    // blast_args.cpp:3425-3427), which NCBI takes as `&cin` (no platform refuses it) and never
+    // reads. LOSAT opens no query input then, as tblastn's `-in_pssm` (`tblastn_app`).
+    let query_file = if pssm_query(&args) {
+        None
+    } else {
+        input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
+        // NCBI opens the query file inside `Run` too: its error is saved and an error archive
+        // follows.
+        match input_files::open_input(&args.query, "query", args.app.name()) {
+            Ok(file) => Some(file),
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
         }
     };
     let out_file = open_out_file(&args)?;
@@ -5886,7 +5913,7 @@ fn subject_taxonomy(
 fn search_cli(
     args: BlastpArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: crate::blastinput::input_files::InputFile,
+    query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
     choice: crate::blastinput::app::FormatChoice,
@@ -5960,6 +5987,13 @@ fn search_cli(
     // opened file, before it is read (`stream_is_empty`). When the subjects were read from
     // standard input too, `cin` has reached its end (a failed stream), so NCBI gets no
     // position for the query either, and its reader is at its end: no query batch is read.
+    // The query input is opened for every query but the PSSM of `-in_pssm` (`pssm_query`), which
+    // the branch above searched (`psi_search` is that PSSM, read with the options).
+    let Some(query_file) = query_file else {
+        return Err(anyhow::anyhow!(
+            "LOSAT internal error: a FASTA query search without its query input"
+        ));
+    };
     let shared_standard_input = args.query.as_os_str() == "-"
         && args
             .subject

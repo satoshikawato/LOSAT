@@ -305,7 +305,7 @@ fn unnamed_temporary_file(
     for attempt in 0u32..64 {
         let path = directory.join(format!(
             ".losat-{role}-{}-{stamp}-{attempt}.inflated",
-            process_id()
+            crate::utils::process_id::process_id()
         ));
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
@@ -338,20 +338,6 @@ fn unnamed_temporary_file(
         std::io::ErrorKind::AlreadyExists,
         format!("no free temporary file name in {}", directory.display()),
     ))
-}
-
-/// The process id in the temporary file's name: `std::process::id()`.
-#[cfg(not(target_os = "wasi"))]
-fn process_id() -> u32 {
-    std::process::id()
-}
-
-/// 0 on WASI, which has no process id (Rust's `std::process::id()` panics there,
-/// "unsupported", `library/std/src/sys/pal/wasip1/os.rs:131` of 1.92); `create_new` and the
-/// time stamp keep the names apart.
-#[cfg(target_os = "wasi")]
-fn process_id() -> u32 {
-    0
 }
 
 /// The standard input as an `InputFile` (`open_input`'s `-`, NCBI's `cin`): the process's own

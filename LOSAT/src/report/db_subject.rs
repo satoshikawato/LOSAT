@@ -144,11 +144,19 @@ pub enum FoundInstead {
     /// The lookup fails on a file of the database (`LookupFailure`): NCBI's formatters, and its
     /// prefetch, stop with the `CSeqDBException`.
     Failed(LookupFailure),
-    /// LOSAT's own search of the keys that differ from the Seq-align id's in the case of its
-    /// letters fails, with this message (`SeqidLookup::case_variant_oids`: version 5, a name or a
-    /// `pir` or `prf` id), on pages that NCBI's exact lookup need not read: whether another sequence
-    /// holds an id that NCBI's scope takes for it is unknown.
-    CaseUnknown(String),
+    /// LOSAT's own list of the other sequences that hold the Seq-align id fails on a file that
+    /// NCBI's lookup does not read (`why`: what LOSAT cannot list, with the error), so whether
+    /// another sequence holds an id that NCBI's scope takes for it is unknown: the list of every
+    /// OID of the lookup (`SeqidLookup::seqid_to_oids` with `multi`) on an ISAM of a volume after
+    /// the first one that holds the id (a version 4 string ISAM that does not open), where NCBI's
+    /// lookup has returned (review 3 of line DBID loadord, H3), or the searches of the keys that
+    /// differ from the Seq-align id's in the case of its letters (`SeqidLookup::case_folded_oids`
+    /// and `case_variant_oids`: version 5). `instead`: the sequence that the lookup gives where it
+    /// is another one (as `Sequence`), else the lookup gives the subject or the same record.
+    HoldersUnknown {
+        instead: Option<DbSequence>,
+        why: String,
+    },
     /// The lookup throws on the id itself before it reads a file (`SeqidLookup::throws_on_id`: a
     /// `gnl|BL_ORD_ID|0` that makeblastdb stores with a text tag), with this message: NCBI's
     /// formatters stop, its prefetch catches the exception with its warning
@@ -186,15 +194,25 @@ pub enum Prefetched {
     /// No sequence: the prefetch reads nothing for it.
     Nothing,
     /// Another sequence (`DbSequence`) where LOSAT knows it, whose taxids the prefetch can look up
-    /// instead: `FoundInstead::Sequence` (that sequence where one of its ids compares equal to
-    /// the Seq-align id, else none), `AlsoHeld` (`or_itself`: the subject or that sequence, as
-    /// the ids of the blobs read before in the run decide, `CBlastDbDataLoader::m_Ids`), and the
-    /// same record whose lookups write other texts (`None`); `reason` as `fetched` gives it.
+    /// instead: `FoundInstead::Sequence` and `HoldersUnknown` with another sequence that the
+    /// lookup gives (that sequence where one of its ids compares equal to the Seq-align id, else
+    /// none), `AlsoHeld` (`or_itself`: the subject or that sequence, as the ids of the blobs read
+    /// before in the run decide, `CBlastDbDataLoader::m_Ids`), and the same record whose lookups
+    /// write other texts (`None`); `or_none`: or nothing, where the Bioseq of another sequence
+    /// that holds the id, which the scope read before, can stand for it without a load (one that
+    /// `also_held` names, or one that LOSAT cannot list, `HoldersUnknown`); `reason` as `fetched`
+    /// gives it.
     Another {
         other: Option<DbSequence>,
         or_itself: bool,
+        or_none: bool,
         reason: String,
     },
+    /// The sequence itself, or nothing where the Bioseq of another sequence that holds the id,
+    /// which the scope read before and which LOSAT cannot list, stands for it
+    /// (`FoundInstead::HoldersUnknown` where the lookup gives the subject or the same record);
+    /// `reason` as `fetched` gives it.
+    ItselfOrNothing { reason: String },
     /// A lookup that fails (the reason): on the id itself NCBI's prefetch catches the exception
     /// and writes the warning `Error pre-fetching sequence data`
     /// (`ParsedSubject::prefetch_fails`, `common::database::batch_prefetch`); on a file it
@@ -689,7 +707,7 @@ impl ParsedSubject {
         match &self.found_instead {
             Some(
                 found @ (FoundInstead::AlsoHeld(_)
-                | FoundInstead::CaseUnknown(_)
+                | FoundInstead::HoldersUnknown { .. }
                 | FoundInstead::Failed(_)
                 | FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)),
             ) => return Err(self.found_reason(found, false).unwrap_or_default()),
@@ -797,8 +815,11 @@ impl ParsedSubject {
             FoundInstead::AlsoHeld(other) => format!(
                 "has the Seq-align id {id}, which database sequence {other} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
             ),
-            FoundInstead::CaseUnknown(message) => format!(
-                "has the Seq-align id {id}, for which LOSAT cannot list the sequences that hold it in another letter case ({message}): where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it"
+            FoundInstead::HoldersUnknown { instead, why } => format!(
+                "has the Seq-align id {id}, {}for which LOSAT cannot list {why}: where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it",
+                instead.map_or_else(String::new, |other| format!(
+                    "by which NCBI BLAST+'s lookup gives database sequence {other} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops), and "
+                ))
             ),
             FoundInstead::Failed(failure) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
@@ -873,18 +894,31 @@ impl ParsedSubject {
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),
                 or_itself: false,
+                or_none: self.also_held.is_some(),
                 reason: reason(),
             },
+            Some(FoundInstead::HoldersUnknown {
+                instead: Some(other),
+                ..
+            }) => Prefetched::Another {
+                other: Some(*other),
+                or_itself: false,
+                or_none: true,
+                reason: reason(),
+            },
+            Some(FoundInstead::HoldersUnknown { instead: None, .. }) => {
+                Prefetched::ItselfOrNothing { reason: reason() }
+            }
             Some(FoundInstead::AlsoHeld(other)) => Prefetched::Another {
                 other: Some(*other),
                 or_itself: true,
+                or_none: false,
                 reason: reason(),
             },
-            Some(
-                FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts) | FoundInstead::CaseUnknown(_),
-            ) => Prefetched::Another {
+            Some(FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)) => Prefetched::Another {
                 other: None,
                 or_itself: false,
+                or_none: false,
                 reason: reason(),
             },
         }
@@ -2787,6 +2821,27 @@ mod tests {
             ))),
             Prefetched::Another { other: None, .. }
         ));
+        // Other holders that LOSAT cannot list (line DBID v4late): what the lookup gives, or
+        // nothing where such a holder's Bioseq read before stands for it.
+        assert!(matches!(
+            prefetched(Some(FoundInstead::HoldersUnknown {
+                instead: Some(DbSequence::of_unrestricted(4)),
+                why: String::new(),
+            })),
+            Prefetched::Another {
+                other: Some(other),
+                or_itself: false,
+                or_none: true,
+                ..
+            } if other == DbSequence::of_unrestricted(4)
+        ));
+        assert!(matches!(
+            prefetched(Some(FoundInstead::HoldersUnknown {
+                instead: None,
+                why: String::new(),
+            })),
+            Prefetched::ItselfOrNothing { .. }
+        ));
         // A subject whose definition line the formatters do not find: what its lookup gives, as
         // any other (review 2 of line DBID pssmread, H3).
         let shown = lines(vec![
@@ -2796,7 +2851,7 @@ mod tests {
         assert_eq!(shown.prefetched(), Prefetched::Itself);
         assert!(matches!(
             shown.clone().found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(3)))).prefetched(),
-            Prefetched::Another { other: Some(other), or_itself: false, reason }
+            Prefetched::Another { other: Some(other), or_itself: false, or_none: false, reason }
                 if other == DbSequence::of_unrestricted(3) && reason.contains("gives database sequence 3 first")
         ));
         assert_eq!(

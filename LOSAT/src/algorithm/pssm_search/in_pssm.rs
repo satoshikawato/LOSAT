@@ -1505,18 +1505,19 @@ pub(crate) fn convert_2_matrix<T: Copy>(
     fill: T,
 ) -> Vec<[T; BLASTAA_SIZE]> {
     let mut rows: Vec<[T; BLASTAA_SIZE]> = (0..num_columns).map(|_| [fill; BLASTAA_SIZE]).collect();
-    let mut values = values.iter().copied();
     if by_row {
+        let mut values = values.iter().copied();
         for r in 0..num_rows {
             for row in rows.iter_mut() {
                 row[r] = values.next().unwrap_or(fill);
             }
         }
-    } else {
-        for row in rows.iter_mut() {
-            for cell in row.iter_mut().take(num_rows) {
-                *cell = values.next().unwrap_or(fill);
-            }
+    } else if num_rows > 0 {
+        // Column by column (NCBI's engine writes `byRow` false): each column's values are the next
+        // `num_rows` of the file's, copied as one slice; the cells past the values keep `fill`.
+        let column_rows = num_rows.min(BLASTAA_SIZE);
+        for (row, column) in rows.iter_mut().zip(values.chunks(column_rows)) {
+            row[..column.len()].copy_from_slice(column);
         }
     }
     rows
@@ -2692,6 +2693,14 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!((rows[0][0], rows[0][1], rows[2][1]), (1, 2, 6));
         assert_eq!(rows[1][2], BLAST_SCORE_MIN);
+        // Fewer values than cells: the cells past them keep the fill.
+        let rows = convert_2_matrix(&[1, 2, 3], 2, 3, false, BLAST_SCORE_MIN);
+        assert_eq!((rows[0][0], rows[0][1], rows[1][0]), (1, 2, 3));
+        assert_eq!((rows[1][1], rows[2][0]), (BLAST_SCORE_MIN, BLAST_SCORE_MIN));
+        assert_eq!(
+            convert_2_matrix(&[1, 2], 0, 2, false, 0),
+            vec![[0; BLASTAA_SIZE]; 2]
+        );
         // The same values row by row.
         let rows = convert_2_matrix(&[1, 3, 5, 2, 4, 6], 2, 3, true, BLAST_SCORE_MIN);
         assert_eq!((rows[0][0], rows[0][1], rows[2][1]), (1, 2, 6));

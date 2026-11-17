@@ -1,0 +1,130 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: alias over txs OIDs 2 to 4
+           5 sequences; 1,224 total letters
+
+
+
+Query= txq coding query
+
+Length=571
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+tx_c minus query frames                                               105     1e-27  1
+tx_two two subject frames                                             84.0    7e-23  2
+tx_mp minus then plus                                                 61.6    3e-14  1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1    HPASQKWHIKIVIRVNLLRFMFGHLQLYHMPWQYYTKNEFPQNAGHRARKCESI*L*KKK  180
+2        125                                                      SIWV*YAS  148
+2        97                              YHNPYQF                            117
+2        10                                  WSYYTQ                         27
+3        92                       MFGHLQLYHMPWQYYTKNEFPQNAGHRARK            181
+3        1    HPASQKWHIKIVIRVNLLRFMFGHLQLYHM                                90
+1        278                                                            KG  283
+
+Query_1  181  SGYGERALL*KEQYRGRVPtatattttatatICD*RSYPTQAAVR*IINDFGRDYDKNRG  360
+2        149  YNHGDRALL                                                     175
+1        284  TSYG*CTFLQEE*HGGRLP                                           340
+1        162        ALL*KT*YGGRVP                                           200
+
+Query_1  361  FYNG*lp*s*lasspasRSLVFHNSSPYISGGTI*SLIQ*SWWP*AASPGHQASLVKVTQ  540
+2        145                                       IL*SW*PCAASPGHQISLVKVTQ  213
+
+Query_1  541  ECVCA  555
+2        214  EWVWA  228
+
+For reading frame +2 of query sequence:
+
+Query_1  14   KNGI*K*SYESICLGSCLDIFSYTTCPGNTTPRTNFHKMRVTVLANASLYDFRRKNLVMA  193
+2        215                 SCVTFTNDIWWPGEAAHGHHDYKMRIT                    135
+3        14   RSGT*RLLSGSICLDLCSGIYSYIT                                     88
+3        93                   CSDIYSCIICRGNTIQKMN                           149
+1        126                                                      RRFNLVMA  103
+
+Query_1  194  SAHSCKKNNTEEGCqqqqqqqqqqqqqFVTSGVTPHRLRFGR*LTILVGIMIKIGDFIMG  373
+2        123                                             LSELVWVMIEVWDFVVG  73
+1        102  SAHSCKKNNTEKGCQQQQQQQQQQQQQFVTSGVT                            1
+
+Query_1  374  NFLEVNLPPLLPAGLLCFITPVLT  445
+2        72   YLLEIYLTSLLPASLLRVI*PVFT  1
+
+For reading frame +3 of query sequence:
+
+Query_1  201  TPVKRTIPRKGAnsnsnnnnsnsnnL*LAELPHTGCGSVDN*RFW*GL**KSGIL*WVTS  380
+2        113                                              WYGL**KSGIL*WVTS  66
+1        164  TPLKNIIRRKGA                                                  199
+
+Query_1  381  LKLTCLLSCQQVSCVS*LQSL  443
+2        65   LKFT*RLSCQQVSCV*YDQSL  3
+
+For reading frame -1 of query sequence:
+
+Query_1  445  CKDWSYETQETCWQERRQVNFKEVTHYKIPDFYHNPYQNR  326
+2        1    CKDWSYYTQETCWQERRQVNFKEVTHYKIPDFYHNPYQFR  120
+3        113                                  YHMPWQ    130
+
+For reading frame -2 of query sequence:
+
+Query_1  555  STHALLCYFY**CLVArrsssrppRLLDEALDCASRYVRTGVMKHKRPAGRRGGKLTSRk  376
+2        228  SPHPLLCYFH**YLVA                                              181
+
+Query_1  375  lpiikspifiiiptkIVNYLPNRSLCGVTPLVTNcccccccccccCWHPSSVLFFLQECA  196
+1        254                              TPDGTNC*PCFIRCCCCCWHPSSVLCFLKECQ  159
+1        340                                                WQPSSVLFFLQECA  299
+
+Query_1  195  LAITRFFLLKSYRLAFASTVTRILWKFvlgvvlpghvv*LKMSKHEPKQIDSYDYFYMPF  16
+3        72                                            MPEHKSKQIDPDNNLYVPL  16
+1        158  WA                                                            153
+1        298  LAITSSF                                                       278
+
+Query_1  15   LASRV  1
+3        15   LRCRM  1
+
+For reading frame -3 of query sequence:
+
+Query_1  557  TAHTHSCVTFTNDAWWPGEAAHGHHDYWMRL*IVPPDM*GLEL*NTRDLLAGEEAS*LQG  378
+2        230  TAHTHSCVTFTNDIWWPGEAAHGHHDYKMRI                               138
+
+Query_1  377  SYPL*NPRFLS*SLPKSLIIYRTAACVG*LR*SQIvavavvvvavaVGTLPRYCSFYRSA  198
+2        171                                                            SA  166
+1        199                                                 GTLPPYYVF*RSA  161
+
+Query_1  197  RSP*PDFFF*SHIDSHLRAR*PAFCGNSFLV*YCQGMWYS*RCPNMNLSRLTRMTIFICH  18
+2        165  RSP*                                                          154
+3        89                                       M*YSCKCPNINLSKLTLITIFMCH  18
+3        165                       PAFWGNSFFV*YCHGI*YNCRCPNIHV              85
+
+Query_1  17   FWLAG  3
+3        17   FCDAG  3
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 54696
+
+
+  Database: alias over txs OIDs 2 to 4
+    Posted date:  Nov 15, 2026  10:24 AM
+  Number of letters in database: 1,224
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

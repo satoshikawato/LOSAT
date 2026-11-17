@@ -579,7 +579,9 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
 //  * `badbatch_tblastn_{sub,db}_N`: `BATCH_SIZE=100`, `qprot_bad.faa` against `snucl.fna` | `db/snucl`;
 //  * `badbatch_tblastx_{sub,db}_N`: `BATCH_SIZE=100`, `qnucl_bad.fna`, `-evalue 1e-20 -max_hsps 2`;
 //  * `holdmix_blastx_db_N`: `qnx_late.fna` against `db/sprot_mixtax` with `BLASTDB` the taxonomy
-//    database `high_bytes_utf8` (DECISIONS 32: LOSAT holds the output of this run in memory).
+//    database `high_bytes_utf8` (the name of 9606 has bytes >= 0x80; NCBI never looks that taxid up);
+//  * `taxbad_blastx_db_N`: the same taxonomy database with `db/sprot_tax`, whose 9606 the second batch
+//    reports (`.err`: the standard error of the run; `.rc`: its exit status).
 // ---------------------------------------------------------------------------------------------
 
 const BAD_BATCH: &str = "BLAST query error: CFastaReader: Near line";
@@ -817,11 +819,11 @@ fn tblastn_matrix_error_leaves_an_empty_master_and_no_side_file() {
     }
 }
 
-/// BLASTX's hold (DECISIONS 21/32) keeps the side files' bytes too: a `-db` search whose taxonomy database
-/// has a name LOSAT would refuse for a sequence never reported is held until the epilog, and then writes what
-/// NCBI writes (`holdmix_blastx_db_N`: NCBI never looks that taxid up).
+/// A `-db` search whose taxonomy database has a name with bytes >= 0x80 for a sequence that is never reported
+/// writes what NCBI writes (`holdmix_blastx_db_N`: NCBI never looks that taxid up), the side files and the
+/// master included.
 #[test]
-fn blastx_hold_writes_the_files_at_the_epilog_as_ncbi_does() {
+fn blastx_with_an_unreported_taxonomy_name_writes_the_files_as_ncbi_does() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for format in ["13", "14"] {
         equals_frozen_files(
@@ -835,10 +837,10 @@ fn blastx_hold_writes_the_files_at_the_epilog_as_ncbi_does() {
     }
 }
 
-/// An unopenable side file under the hold: the held side files are written at the epilog, in order, and the
-/// run stops at the one it cannot open with NCBI's message (the files before it stay; the master stays empty).
+/// An unopenable side file of that run: the side files are written in order, and the run stops at the one it
+/// cannot open with NCBI's message (the files before it stay; the master stays empty).
 #[test]
-fn blastx_hold_stops_at_a_side_file_it_cannot_open() {
+fn blastx_stops_at_a_side_file_it_cannot_open() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for (format, extension) in [("13", "json"), ("14", "xml")] {
         for (blocked, written) in [(2, 1), (1, 0)] {
@@ -880,43 +882,27 @@ fn blastx_hold_stops_at_a_side_file_it_cannot_open() {
     }
 }
 
-/// DECISIONS 28/30 for 13 and 14: a taxonomy database name outside US-ASCII that the second batch reports is
-/// refused after the first batch's report was made: the hold drops it, so no side file is written and the master
-/// stays empty. (NCBI cuts the side file of the failing report at the byte, rc 255, in 14: a refusal is LOSAT's.)
+/// DECISIONS 28/30 for 13 and 14: a taxonomy database name with a byte >= 0x80 that the second batch reports
+/// (`high_bytes_utf8`, `db/sprot_tax`, `qnx_late.fna`) is written as NCBI BLAST+ 2.17.0 writes it
+/// (`taxbad_blastx_db_{13,14}`: `BLASTDB=.../high_bytes_utf8 blastx -query qnx_late.fna -db db/sprot_tax
+/// -num_threads 1 -outfmt N -out taxbad_blastx_db_N.out`, run in `tests/fixtures/outfmt16`): the JSON side
+/// files hold the name as it is and the master lists both (exit status 0); the second XML2 side file is cut at
+/// the byte, the master stays empty, and `Error: NCBI C++ Exception:` and its trace follow on standard error,
+/// exit status 255.
 #[test]
-fn a_refusal_in_a_later_batch_leaves_no_side_file_and_an_empty_master() {
+fn a_taxonomy_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
-    for format in ["13", "14"] {
-        for threads in ["1", "4", "8", "16"] {
-            let work = temp_dir("taxrefused");
-            let out = work.join("o.out");
-            let mut args = blastx_args("qnx_late.fna", ["-db", "db/sprot_tax"]);
-            args.extend([
-                "-num_threads",
-                threads,
-                "-outfmt",
-                format,
-                "-out",
-                out.to_str().unwrap(),
-            ]);
-            let output = run_in(&inputs(), &args, &[("BLASTDB", taxdb.to_str().unwrap())]);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(
-                output.status.code(),
-                Some(1),
-                "{format} {threads}: {stderr}"
-            );
-            assert!(
-                stderr.contains(
-                    "a taxonomy database scientific name with a character outside the US-ASCII range"
-                ),
-                "{format} {threads}: {stderr}"
-            );
-            assert!(output.stdout.is_empty());
-            assert_eq!(names(&work), ["o.out"], "{format} {threads}");
-            assert_eq!(fs::read(&out).unwrap(), b"", "{format} {threads}");
-            fs::remove_dir_all(work).ok();
-        }
+    for (format, rc) in [("13", 0), ("14", 255)] {
+        let case = format!("taxbad_blastx_db_{format}");
+        let err = String::from_utf8(read_frozen(&format!("{case}.err"))).unwrap();
+        equals_frozen_files(
+            &case,
+            format,
+            &blastx_args("qnx_late.fna", ["-db", "db/sprot_tax"]),
+            &[("BLASTDB", taxdb.to_str().unwrap())],
+            rc,
+            &err,
+        );
     }
 }
 
@@ -928,11 +914,12 @@ fn write_fasta(path: &Path, records: &[(&str, String)]) {
     fs::write(path, text).unwrap();
 }
 
-/// Q2 for 13 and 14 (as `a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16`): a byte >= 0x80 in a
-/// query title (also in a later batch, which the pre-scan finds), a `-subject` title or the `-db` name is refused
-/// before anything is written: the master is empty and there is no side file.
+/// The title that NCBI BLAST+ 2.17.0 cannot make (punctuation alone) for 13 and 14 (as `a_title_of_punctuation_is_refused_in_15_and_16`):
+/// in a query title (also in a later batch, which the pre-scan finds) or a `-subject` title it is refused before
+/// anything is written: the master is empty and there is no side file. (The titles NCBI does write are the rows
+/// `db.xb.*`, and the `-db` name `tests/xml_dbname.rs`.)
 #[test]
-fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
+fn a_title_of_punctuation_is_refused_in_13_and_14_with_nothing_written() {
     let protein = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
     let codons: std::collections::HashMap<char, &str> = [
         ('A', "GCT"),
@@ -965,7 +952,7 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
     }
     let refused_title = |stderr: &str, what: &str| {
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTX"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTX"
         ))
     };
     for format in ["13", "14"] {
@@ -1003,8 +990,8 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
             write_fasta(&subject, &[("s1 subject", protein.to_string())]);
             // a query title: the first query's, or the second's in the next batch
             for (first, second, label) in [
-                ("caf\u{e9} q1", "q2 ok", "first"),
-                ("q1 ok", "caf\u{e9} q2", "second, same batch"),
+                (", ,", "q2 ok", "first"),
+                ("q1 ok", ", ,", "second, same batch"),
             ] {
                 write_fasta(
                     &query,
@@ -1018,10 +1005,7 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
             }
             write_fasta(
                 &query,
-                &[
-                    ("q1 ok", padded.clone()),
-                    ("caf\u{e9} q2", nucleotide.clone()),
-                ],
+                &[("q1 ok", padded.clone()), (", ,", nucleotide.clone())],
             );
             check(
                 &run(),
@@ -1040,7 +1024,7 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
                         "s1 ok",
                         "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM".to_string(),
                     ),
-                    ("s2 caf\u{e9}", protein.to_string()),
+                    (", ,", protein.to_string()),
                 ],
             );
             check(
@@ -1321,8 +1305,8 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
 // ---- OF5c review fixes (DECISIONS 35) ----
 
 /// The inputs of the probes `W1` of the OF5c review: three query batches (BLASTX reads batches of 10,002 bases) of
-/// which the third carries an invalid residue (a reader warning), and a `-subject` file with a title outside
-/// US-ASCII on a sequence without a hit, which makes BLASTX hold its output.
+/// which the third carries an invalid residue (a reader warning), and a `-subject` file with a title of
+/// punctuation alone (`, ,`) on a sequence without a hit, which makes BLASTX hold its output.
 fn write_hold_inputs(work: &Path, third_query: &str) -> (PathBuf, PathBuf) {
     let protein = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
     let codons: std::collections::HashMap<char, &str> = [
@@ -1368,7 +1352,7 @@ fn write_hold_inputs(work: &Path, third_query: &str) -> (PathBuf, PathBuf) {
         &[
             ("s1 subject", protein.to_string()),
             (
-                "s2 caf\u{e9} no hit",
+                ", ,",
                 "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM".to_string(),
             ),
         ],
@@ -1593,7 +1577,7 @@ fn a_side_file_write_error_gives_one_answer_in_every_program() {
             ]),
             false,
         ),
-        // the hold: the subject file has a title outside US-ASCII on a sequence without a hit
+        // the hold: the subject file has a title of punctuation alone on a sequence without a hit
         ("blastx -subject, hold", Vec::new(), true),
     ];
     for (format, extension) in [("13", "json"), ("14", "xml")] {

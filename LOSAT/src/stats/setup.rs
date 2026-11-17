@@ -359,7 +359,7 @@ impl SubjectSpaceOverflow {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:900-904, 969-980
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:903-906,969-983
 // ```c
 //    Uint4 max_subject_length;
 //    Uint4 min_subject_length;

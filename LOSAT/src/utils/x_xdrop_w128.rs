@@ -1604,9 +1604,57 @@ unsafe fn body8_bytes(
 }
 
 // No NCBI counterpart: the kernel of `body8` for one trace layout (`NIB`: four-bit codes,
-// `LOSAT_X_DPNIBBLE`).
+// `LOSAT_X_DPNIBBLE`), with its row loop compiled once for a matrix of at most 16 columns (one
+// table lookup per block) and once for a larger one (two), so that no block computes the lookup
+// it does not use (wasm32 had both, merged by a select).
 #[inline(always)]
 unsafe fn body8_rows<const TB: bool, const NIB: bool>(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    max_m: i32,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    if scores.ncols() <= 16 {
+        body8_rows_t::<TB, NIB, true>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    } else {
+        body8_rows_t::<TB, NIB, false>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+}
+
+// No NCBI counterpart: `body8_rows` for a matrix of at most 16 columns (`SMALL`) or more.
+#[inline(always)]
+unsafe fn body8_rows_t<const TB: bool, const NIB: bool, const SMALL: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1694,9 +1742,11 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
         ramp1: load(ramp1.as_ptr()),
         xv: splat8(sat(x)),
         kb15: load(core::hint::black_box(&KB15).as_ptr()),
-        c3: splat8(const { script_codes(NIB).0 } as i8),
-        c10: splat8(const { script_codes(NIB).1 } as i8),
-        c40: splat8(const { script_codes(NIB).2 } as i8),
+        // (opaque, as `kb15`: wasm32's engines build a constant vector again at each use, here
+        // in every block of the row loop; a vector made once from a value is kept or reloaded)
+        c3: splat8(core::hint::black_box(const { script_codes(NIB).0 }) as i8),
+        c10: splat8(core::hint::black_box(const { script_codes(NIB).1 }) as i8),
+        c40: splat8(core::hint::black_box(const { script_codes(NIB).2 }) as i8),
     };
     let zero_v = zero();
     let hpm0 = load(HPM8.as_ptr());
@@ -1704,7 +1754,7 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
         Scores::Tables { t, .. } => Some(t.data.as_ptr()),
         _ => None,
     };
-    let small_alphabet = ncols <= 16;
+    debug_assert_eq!(SMALL, ncols <= 16);
     let mut cells: u64 = 0;
 
     let mut base: i32 = 0;
@@ -1782,8 +1832,6 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
             base += best_rel;
             best_rel = 0;
         }
-        let mut hpm = hpm0;
-
         let tr = if TB {
             // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
             sc.trace.x_row(bend - first + num_extra + 96)
@@ -1802,35 +1850,42 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = first;
-        loop {
-            // scores for the 16 lanes b0..b0+16 (lane b reads column b-1)
-            let idx = load(sb.add(b0));
-            let sv = if small_alphabet {
-                pick(t0, idx)
-            } else {
-                lut32(t0, t1, idx)
-            };
-            let mask = if b0 + 16 <= limit {
-                None
-            } else {
-                Some(load(LANE_MASK8.as_ptr().add(16 - (limit - b0))))
-            };
-            let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
-            hpm = zero_v;
-            if TB && NIB {
-                store64(tr.add((b0 - first) >> 1), nibs(r0));
-            } else if TB {
-                store(tr.add(b0 - first), r0);
-            }
-            // 1 bit per lane (item 1)
-            let live = (!mask8(d0)) & 0xFFFF;
-            if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
+        // One block of 16 lanes at `b0` (lane b reads column b-1): `$mask` the lanes of the row's
+        // last block up to `limit`, `$hpm` the left edge of the first block. The first block, the
+        // blocks inside the band and the last block are written out apart (each with its own
+        // constant mask and edge), so the blocks between carry neither from one to the next.
+        macro_rules! step {
+            ($mask:expr, $hpm:expr) => {{
+                let idx = load(sb.add(b0));
+                let sv = if SMALL {
+                    pick(t0, idx)
+                } else {
+                    lut32(t0, t1, idx)
+                };
+                let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, $mask, $hpm);
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(r0));
+                } else if TB {
+                    store(tr.add(b0 - first), r0);
                 }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
-            }
-            b0 += 16;
+                // 1 bit per lane (item 1)
+                let live = (!mask8(d0)) & 0xFFFF;
+                if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + live.trailing_zeros() as usize;
+                    }
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+                b0 += 16;
+            }};
+        }
+        let last_mask = |b0: usize| load(LANE_MASK8.as_ptr().add(16 - (limit - b0)));
+        if b0 + 16 <= limit {
+            step!(None, hpm0);
+        } else {
+            step!(Some(last_mask(b0)), hpm0);
+        }
+        loop {
             if b0 >= bend {
                 if b0 >= limit {
                     break;
@@ -1838,6 +1893,11 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
                 if lane0_u8(rs.carry) < lane0_u8(rs.thrv) {
                     break;
                 }
+            }
+            if b0 + 16 <= limit {
+                step!(None, zero_v);
+            } else {
+                step!(Some(last_mask(b0)), zero_v);
             }
         }
         let proc_end = b0;

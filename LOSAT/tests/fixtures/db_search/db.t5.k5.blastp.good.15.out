@@ -1,0 +1,903 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/t5/pk5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q0 none",
+          "query_len": 30,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 15,
+            "db_len": 1900,
+            "hsp_len": 4,
+            "eff_space": 47840,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/t5/pk5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q1 aéb z",
+          "query_len": 250,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|13",
+                  "accession": "13",
+                  "title": "hypothetical protein [ ]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|12",
+                  "accession": "12",
+                  "title": "alpha, partial [Homo sapiens]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|11",
+                  "accession": "11",
+                  "title": "chi, partial [ ]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "nu, partial [Homo sapiens]",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|8",
+                  "accession": "8",
+                  "title": "mu, partial [ ]",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|6"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 7,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|4",
+                  "accession": "4",
+                  "title": "iota, partial [Homo sapiens]",
+                  "taxid": 5002,
+                  "sciname": "Ctl\u0007 name"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 8,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|3",
+                  "accession": "3",
+                  "title": "theta, partial [ ]",
+                  "taxid": 5002,
+                  "sciname": "Ctl\u0007 name"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 9,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "MAG: (plastid) [ ]",
+                  "taxid": 5001,
+                  "sciname": "Café sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 10,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "eta, partial [ ]",
+                  "taxid": 5001,
+                  "sciname": "Café sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 276.559,
+                  "score": 706,
+                  "evalue": 1.17578e-99,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 11,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|14",
+                  "accession": "14",
+                  "title": "bchi, partial [ ]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 120,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 254.218,
+                  "score": 648,
+                  "evalue": 5.67711e-91,
+                  "identity": 120,
+                  "positive": 120,
+                  "query_from": 131,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 120,
+                  "align_len": 120,
+                  "gaps": 0,
+                  "qseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "hseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "midline": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL"
+                }
+              ]
+            },
+            {
+              "num": 12,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|10",
+                  "accession": "10",
+                  "title": "bmu, partial [ ]",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 120,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 254.218,
+                  "score": 648,
+                  "evalue": 5.67711e-91,
+                  "identity": 120,
+                  "positive": 120,
+                  "query_from": 131,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 120,
+                  "align_len": 120,
+                  "gaps": 0,
+                  "qseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "hseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "midline": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL"
+                }
+              ]
+            },
+            {
+              "num": 13,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|7"
+                }
+              ],
+              "len": 120,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 254.218,
+                  "score": 648,
+                  "evalue": 5.67711e-91,
+                  "identity": 120,
+                  "positive": 120,
+                  "query_from": 131,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 120,
+                  "align_len": 120,
+                  "gaps": 0,
+                  "qseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "hseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "midline": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL"
+                }
+              ]
+            },
+            {
+              "num": 14,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|5",
+                  "accession": "5",
+                  "title": "btheta, partial [ ]",
+                  "taxid": 5002,
+                  "sciname": "Ctl\u0007 name"
+                }
+              ],
+              "len": 120,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 254.218,
+                  "score": 648,
+                  "evalue": 5.67711e-91,
+                  "identity": 120,
+                  "positive": 120,
+                  "query_from": 131,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 120,
+                  "align_len": 120,
+                  "gaps": 0,
+                  "qseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "hseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "midline": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL"
+                }
+              ]
+            },
+            {
+              "num": 15,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2",
+                  "accession": "2",
+                  "title": "beta2, partial [ ]",
+                  "taxid": 5001,
+                  "sciname": "Café sp."
+                }
+              ],
+              "len": 120,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 254.218,
+                  "score": 648,
+                  "evalue": 5.67711e-91,
+                  "identity": 120,
+                  "positive": 120,
+                  "query_from": 131,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 120,
+                  "align_len": 120,
+                  "gaps": 0,
+                  "qseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "hseq": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL",
+                  "midline": "LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCRDINVPFNLYDMNMGDFMTGCDYQCKPL"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 15,
+            "db_len": 1900,
+            "hsp_len": 36,
+            "eff_space": 291040,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/t5/pk5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "q2 two",
+          "query_len": 135,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|13",
+                  "accession": "13",
+                  "title": "hypothetical protein [ ]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|12",
+                  "accession": "12",
+                  "title": "alpha, partial [Homo sapiens]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|11",
+                  "accession": "11",
+                  "title": "chi, partial [ ]",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "nu, partial [Homo sapiens]",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|8",
+                  "accession": "8",
+                  "title": "mu, partial [ ]",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|6"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 7,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|4",
+                  "accession": "4",
+                  "title": "iota, partial [Homo sapiens]",
+                  "taxid": 5002,
+                  "sciname": "Ctl\u0007 name"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 8,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|3",
+                  "accession": "3",
+                  "title": "theta, partial [ ]",
+                  "taxid": 5002,
+                  "sciname": "Ctl\u0007 name"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 9,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "MAG: (plastid) [ ]",
+                  "taxid": 5001,
+                  "sciname": "Café sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            },
+            {
+              "num": 10,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "eta, partial [ ]",
+                  "taxid": 5001,
+                  "sciname": "Café sp."
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 262.307,
+                  "score": 669,
+                  "evalue": 5.74801e-96,
+                  "identity": 125,
+                  "positive": 125,
+                  "query_from": 1,
+                  "query_to": 125,
+                  "hit_from": 6,
+                  "hit_to": 130,
+                  "align_len": 125,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 15,
+            "db_len": 1900,
+            "hsp_len": 31,
+            "eff_space": 149240,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

@@ -703,7 +703,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // EXPERIMENT (LOSAT_X_BNPVONCE): a packed head's presence bits hold one bit
         // per cell, so its scan tests the word there only (`XPacked::x_present`), not
         // first in the coarser presence vector, whose bit stands for several cells;
-        // for a head whose bits fit the cache (`x_bn_pv_once`).
+        // for a head whose bits fit the cache (`x_bn_pv_once`). A larger packed head keeps the
+        // presence vector in front and tests its own bit after it, in the closure too, so a
+        // word that passes the vector without a run of its cell makes no call either.
         // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` a word's run is the one of the
         // head's element the ring hands over with it (`XHead::run_at`; a packed head's word is
         // ranked once, where it enters the ring), else the cell's run read again (`XHead::run`).
@@ -808,7 +810,10 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             Some(packed) if x_bn_pv_once(&packed) => {
                 x_scan_csr!(packed, |k| packed.x_present(k as usize))
             }
-            Some(packed) => x_scan_csr!(packed, |k| pv_view.has_hits(k)),
+            Some(packed) => {
+                x_scan_csr!(packed, |k| pv_view.has_hits(k)
+                    && packed.x_present(k as usize))
+            }
             None => x_scan_csr!(csr, |k| pv_view.has_hits(k)),
         }
     } else {
@@ -923,7 +928,10 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 /// 3.131 G -> 3.064 G, -2.2 %): a word the presence vector drops makes no call. A head that tests
 /// each word in its own bits (LOSAT_X_BNPVONCE) tests its presence bit there first
 /// (`XPacked::x_present`), so a word without hits makes no call either (ABRicate's resfinder:
-/// 84 % of 21.4 M words). The words, their order and every value are the same.
+/// 84 % of 21.4 M words); a packed head behind the presence vector tests the same bit after the
+/// vector's (mlst: 75 % of the 6.69 M words the vector passes have no run, 5.0 M calls fewer,
+/// the search 2.700 G -> 2.553 G instructions, -5.4 %). The words, their order and every value
+/// are the same.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1523-1536
 /// (`s_MBScanSubject_Any`: the presence test of each word in the scan's loop, the retrieve only for

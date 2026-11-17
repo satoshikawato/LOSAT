@@ -104,7 +104,7 @@
 //! (`x_word_finder_direct_sent`, never inlined); the loops without it keep their code.
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBYTE): the direct loop scans the standard table with tblastn's scan on
-//! presence bytes (`tblastn/x_scan_byte.rs` `x_scan_one_range_byte`, LOSAT_X_TBNSCANBYTE's code,
+//! presence bytes (`tblastx/x_scan_byte.rs` `x_scan_one_range_byte`, LOSAT_X_TBNSCANBYTE's code,
 //! whose header gives the exactness argument): the indexes of a block of 256 words made from the
 //! letters at once, the candidates listed from one byte per index, the hits of a block copied with
 //! one capacity test. It returns the pairs and `scan_range` values of
@@ -125,10 +125,10 @@ use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;
 use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
-use crate::algorithm::tblastn::x_scan_byte::{
+use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
+use crate::algorithm::tblastx::x_scan_byte::{
     x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
 };
-use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
 
@@ -155,7 +155,7 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 // No NCBI counterpart: the presence vector in another layout, kept with the table; it does not
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXSCANBYTE): a standard table's presence bytes and whether the table is
-/// sparse (`tblastn/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
+/// sparse (`tblastx/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
 /// with the table on presence bytes; `None` inside for a table they do not fit. It also carries the
 /// table's build number (`build`), which names the table for the choice of the loop
 /// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors
@@ -655,7 +655,7 @@ where
         while range[1] <= range[2] {
             let n = match (lookup, presence) {
                 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
-                // (`s_BlastAaScanSubject`; tblastn/x_scan_byte.rs gives the loop): the same pairs
+                // (`s_BlastAaScanSubject`; tblastx/x_scan_byte.rs gives the loop): the same pairs
                 // and `scan_range` on every call.
                 (Lookup::Standard(l, _), Some(presence)) => x_scan_one_range_byte(
                     scan_byte, l, presence, scanned, pairs, array_size, &mut range,

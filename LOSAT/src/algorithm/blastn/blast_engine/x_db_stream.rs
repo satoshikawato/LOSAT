@@ -81,7 +81,9 @@ use crate::seqdb::{BlockRange, SeqDb};
 use crate::utils::threading::SearchPool;
 
 use super::super::x_bnstream::{search_in_order_bounded, WaitingBound};
-use super::{block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes, BLOCK_BYTES};
+use super::{
+    block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes, XWorker, BLOCK_BYTES,
+};
 
 /// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBSTREAM is on (a strict-set switch:
 /// on unless it is `0`).
@@ -246,20 +248,24 @@ where
 {
     let stop = AtomicBool::new(false);
     let waiting_bytes = AtomicUsize::new(0);
-    let search_block = |scratch: &mut T, i: usize| -> Result<Vec<(u32, R)>> {
+    let search_block = |worker: &mut XWorker<T>, i: usize| -> Result<Vec<(u32, R)>> {
         if stop.load(Ordering::Relaxed) {
             return Ok(Vec::new());
         }
         let range = blocks[i];
-        let block = super::x_read_block(db, range).map_err(search_read_error)?;
+        let block = super::x_read_block(db, range, &mut worker.bytes).map_err(search_read_error)?;
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
-            if let Some(result) = search(scratch, ordinal, block_subject(&block, &range, j)?) {
+            if let Some(result) = search(
+                &mut worker.scratch,
+                ordinal,
+                block_subject(&block, &range, j)?,
+            ) {
                 kept.push((ordinal, result));
             }
         }
-        super::x_done_block(block);
+        super::x_done_kept_block(block, &mut worker.bytes);
         waiting_bytes.fetch_add(kept_bytes(&kept), Ordering::Relaxed);
         Ok(kept)
     };
@@ -306,7 +312,7 @@ where
             window,
             true,
             bound,
-            new_scratch,
+            &|| XWorker::new(new_scratch()),
             &search_block,
             &mut hand_over,
         )

@@ -1,6 +1,6 @@
 //! The scan on presence bytes in BLASTX's direct seed loop (`LOSAT_X_BXSCANBYTE`, in the strict
 //! set; `src/algorithm/blastx/x_seed_scan.rs` module header, tblastn's
-//! `src/algorithm/tblastn/x_scan_byte.rs` for the scan) on whole searches.
+//! `src/algorithm/tblastx/x_scan_byte.rs` for the scan) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c

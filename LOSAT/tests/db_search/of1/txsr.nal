@@ -1,0 +1,4 @@
+TITLE alias over txs OIDs 2 to 4
+DBLIST txs
+FIRST_OID 2
+LAST_OID 4

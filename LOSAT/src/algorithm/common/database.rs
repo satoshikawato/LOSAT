@@ -6575,7 +6575,7 @@ impl LoadOrder {
 ///   of a sequence loaded before gives (NCBI's reads by another id of that sequence, a superset);
 ///   and, after calls whose loads nothing recorded ([`PrefetchQueries::after_unrecorded_calls`]),
 ///   any such sequence whose own lookup does not fail (found in the LMDB files that have the
-///   accession table, [`crate::seqdb::SeqidLookup::in_indexed_files`]).
+///   accession table, [`crate::seqdb::lookup::SeqidLookup::in_indexed_files`]).
 ///
 /// The sequences that may then be given instead are each of those that hold such an id
 /// ([`StopUnsure::instead`]), loaded by the stopping id where the batch's loads go on to a later

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.47
+- Version: 1.48
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -149,11 +149,18 @@
   1.46 2026-11-17 (TBLASTN, the explicit rejection of the traceback of an alignment on a subject of
   fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3; line RG
   item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.47 2026-11-17 (approved exception 3 extended from BLASTP to TBLASTN and BLASTX: the window of a
+  1.47 2026-11-17 (outfmt 13 to 16 of a reported sequence whose lookup in a version 5 list fails
+  where the batch's prefetch is off are written as NCBI writes them: 15 and 16 post the exception
+  and leave the query's report out, 13 and 14 stop with `BLAST Database error`; the taxonomy
+  database's texts at the `Hit`s that NCBI loads, none of the throwing `Hit` or of those after it
+  in that report; the refusal of 1.31 narrowed to the other formats; line DBID item pfoff, review 1
+  fix included, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
+  1.48 2026-11-17 (approved exception 3 extended from BLASTP to TBLASTN and BLASTX: the window of a
   one-hit gapped start reads the letters past NCBI's buffers as the sentinel, and the explicit
   rejections of 1.18 and 1.22 there are removed, with a narrower rule-3 rejection of a TBLASTN
   `-in_pssm` gapped start past the NULLB after frame -3; decided by the Owner on 2026-11-17, line RG
-  DECISIONS.md OQ-1117, J2 = A, words 「A 広げる (推奨)」; line RG item J2A)
+  DECISIONS.md OQ-1117, J2 = A, words 「A 広げる (推奨)」; line RG item J2A; numbered after 1.47)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -261,7 +268,7 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    whose window stays inside the sequences and its sentinel match NCBI (fixture
    `e2e.blastp.one_hit_negative_width`).
 
-   TBLASTN and BLASTX (version 1.47, decided by the Owner on 2026-11-17, line RG item J2A): their
+   TBLASTN and BLASTX (version 1.48, decided by the Owner on 2026-11-17, line RG item J2A): their
    one-hit word finders give the same negative lengths (`aa_ungapped.c:1054,1083`), and the same
    window reads past NCBI's buffers: past the byte after the query batch's last NULLB
    (`calloc(buflen+1)`, `blast_setup_cxx.cpp:500-501`); for TBLASTN past the NULLB after frame -3
@@ -1057,9 +1064,13 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
   name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
   DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
-  `Unknown` for such a hit, and then outfmt 0 to 4, 13, 14 and 17 stop with that error, outfmt 6
-  crashes (`CCoreException`, exit 255), the JSON and XML2 documents 15 and 16 end with its trace
-  (exit 0), and 5, 7, 10 and 18 go on (exit 0).
+  `Unknown` for such a hit, and then outfmt 0 to 4 and 17 stop with that error, outfmt 6
+  crashes (`CCoreException`, exit 255), and 5, 7, 10 and 18 go on (exit 0). The JSON and XML2
+  reports throw at that `Hit` (`s_SeqAlignToXMLHit`: `GetBioseqHandle`, then `GetLength` outside
+  its catch): 15 and 16 catch it for the query (`BlastJSON_FormatReport`,
+  `BlastXML2_FormatReport`), post `Error: [<program>] ` with the exception's text and trace, leave
+  the query's report out (its `,` separator stays) and go on with the next query (exit 0); 13 and
+  14 leave the query's file empty and stop with that error (exit 2).
   Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
   with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
   NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
@@ -1079,7 +1090,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   their number and the others after them, and ends at the first lookup that fails. It refuses a
   run where the reports read such a Seq-id with the prefetch off (`... whose lookup in the
   database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
-  BLAST Database error, and where the prefetch is off its formatters fail to read it)`), a
+  BLAST Database error, and where the prefetch is off its formatters fail to read it)`) but
+  writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.47,
+  line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
+  `Hit`s after it in that report, and a text that NCBI writes once at its next load, a later `Hit` or
+  a later batch's prefetch), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more
@@ -1236,7 +1251,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `x.h_*nan*`, `nan_hit`, `nan_threshold` equal NCBI.
 
 - TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated;
-  version 1.47): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
+  version 1.48): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
   `Int4` length, which `BlastGetStartForGappedAlignment` reads as `Uint4`
   (`aa_ungapped.c:1054,1083`, `blast_gapalign.c:3393-3413`): it scores the first window of 11
   letters from the HSP's start, which may pass the end of its context and its frame. Inside NCBI's
@@ -1244,7 +1259,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   the subject's bytes as NCBI does (the next frames' letters, which a PSSM's '-' column can score)
   and the query's context followed by NULLBs: the matrix scores the context's NULLB
   `BLAST_SCORE_MIN`, so what follows it never changes the start, and a PSSM reads its rows, not the
-  query. Past the buffers LOSAT reads NULLBs (approved exception 3, version 1.47; 1.18 refused
+  query. Past the buffers LOSAT reads NULLBs (approved exception 3, version 1.48; 1.18 refused
   these searches): past the byte after the last context's NULLB of the query batch
   (`calloc(buflen+1)` with `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
   `blast_query_info.c:246-250`) and past the NULLB after frame -3 of the subject's translation
@@ -1255,7 +1270,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   - with `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (below), a gapped
     start that the window's sum puts past the NULLB after frame -3, where NCBI's preliminary gapped
     alignment reads the byte after that NULLB, which the buffer allocates and never sets, or past
-    the buffer (version 1.47; exception 3 covers the window's letters, not that alignment's;
+    the buffer (version 1.48; exception 3 covers the window's letters, not that alignment's;
     fixture `db.x2.tblastn.pssmpast.rej`).
 
   It also refuses a result of such a gapped start that NCBI does not finish: two gapped starts
@@ -1289,18 +1304,18 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   does not reproduce the reports of that alignment's column of the NULLB yet and refuses it where
   they would show it, as a gap of its own, not under this rule.
 
-  Version 1.47 extends BLASTP's approved exception 3, which reads the letters past a sequence as the
+  Version 1.48 extends BLASTP's approved exception 3, which reads the letters past a sequence as the
   sentinel, to TBLASTN's window (above).
 
 - BLASTX with `-window_size 0` (version 1.22, 2026-11-14, line RG item X2f, Owner-delegated;
-  version 1.47): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
+  version 1.48): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
   `Int4` length (`aa_ungapped.c:1054,1083`), which `BlastGetStartForGappedAlignment` reads as
   `Uint4`: it scores the first window of 11 letters from the HSP's start
   (`blast_gapalign.c:3394-3437`). A window that
   passes the end of its context or of its subject holds that NULLB, which scores
   `BLAST_SCORE_MIN` (`blast_stat.c:1559-1579`), so NCBI returns the HSP's start whatever bytes
   follow, and so does LOSAT. Where the window reads outside NCBI's buffers LOSAT reads NULLBs
-  (approved exception 3, version 1.47; 1.22 refused these searches, exit 1):
+  (approved exception 3, version 1.48; 1.22 refused these searches, exit 1):
   - past the byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with
     `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
     `blast_query_info.c:246-250`);
@@ -1322,7 +1337,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   of the page gave the same output in five runs and no invalid read under valgrind; one past the
   page of a 4,096-byte file made valgrind report an invalid read and crash; there LOSAT's output is
   NCBI's on the same volume with 16 zero bytes after that page (fixture `db.x2f.bx.page.6`).
-  With version 1.47 LOSAT runs all 400 searches: it equals NCBI under valgrind in the 115 that read
+  With version 1.48 LOSAT runs all 400 searches: it equals NCBI under valgrind in the 115 that read
   past a buffer (valgrind reports invalid reads in each) and NCBI's native output in the other 285
   (34 of them `-ungapped`, which both refuse with composition statistics); natively NCBI's report
   differs from LOSAT's in 2 of the 109 past ones it finishes.

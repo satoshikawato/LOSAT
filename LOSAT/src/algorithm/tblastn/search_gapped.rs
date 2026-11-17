@@ -302,7 +302,7 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
 /// column can make count (`TbnScore::GAPPED_START_PAST_FRAME`). The translation buffer is set up
 /// to the NULLB after frame -3 (the byte after it is allocated and never written); beyond it NCBI
 /// reads a byte it never set or memory that is not its own, and can crash, and the window reads
-/// every letter there as the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.47
+/// every letter there as the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.48
 /// extends from BLASTP to TBLASTN). The query's side is the context's letters and NULLBs past them
 /// (`gapped_start_window`, as BLASTP and BLASTX read it): with the matrix a window that passes its
 /// context holds the context's NULLB, which scores BLAST_SCORE_MIN, so the bytes after it never

@@ -86,7 +86,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      titles made only of punctuation stop at the end of the string (NCBI
      reads past it and crashes), and so does the tabular first word of such a
      title for an `lcl|Subject_N` id of a database (version 1.10). BLASTP,
-     TBLASTN and BLASTX (version 1.47 for the last two): a one-hit gapped
+     TBLASTN and BLASTX (version 1.48 for the last two): a one-hit gapped
      start whose window of 11 letters passes the end of a sequence reads the
      letters past it as the sentinel (NCBI reads past its buffer and can
      crash; in the searches LOSAT runs that NCBI finishes under valgrind,

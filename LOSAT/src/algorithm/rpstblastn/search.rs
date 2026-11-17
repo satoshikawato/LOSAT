@@ -194,11 +194,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     &mut |bytes| Ok(diagnostics.borrow_mut().write_all(bytes)?),
                     &mut |queries| take(&mut **diagnostics.borrow_mut(), queries, processed.get()),
                     &mut |queries, results| {
+                        // The window's searches are done: the pool is free to format the batch's
+                        // reports.
                         render(
                             &mut **diagnostics.borrow_mut(),
                             queries,
                             &mut vec![results],
                             processed.get(),
+                            Some(pool),
                         )?;
                         processed.set(processed.get() + queries.len());
                         Ok(())

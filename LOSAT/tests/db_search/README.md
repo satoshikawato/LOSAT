@@ -120,6 +120,15 @@ FASTA files:
   PSSM's rows of -6 but row 9 at -61, W +60 at row 10, V -60, K +1, S +4 at row 14, the motif MHYFREDQILTA at
   +25; subjects of random codons without another TGG or any CCA, so that no other frame holds a W).
 
+- The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
+  `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
+  whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's
+  frames for its traceback only from 12 bases (blast_hits.c:1161-1163); with `-window_size 0` the one-hit HSP on `w11`
+  reaches the traceback, which reads the translation never made (NCBI crashes, LOSAT refuses). `xs_*_s.fna` there:
+  the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
+  (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
+  `w11` followed by 21 A, searched in `-subject_loc` 1-11 and 1-12 (NCBI measures the range).
+
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
   one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)
@@ -2068,3 +2077,11 @@ reverse complement as `lcl|q<DEL>1` and `lcl|q<DEL>2`, and `qp.faa` the protein 
 The rows `db.dbtitle.blastn.qdel.8` and `db.dbtitle.blastx.qdel.9` write the title and, with `-parse_deflines`, the query ids
 with `#` and NCBI's 803.7 message for each byte; fasta_input's `blastp.seqannot_delid_s.*` searches `qp.faa` against
 `pdel.faa` (`-subject -parse_deflines`, its id `lcl|p<DEL>1`).
+
+A `pdb` Seq-id whose chain is an INTEGER outside 0-255 without a chain-id (line RG item K4j; rows `db.pdbchain.*`):
+`pdbchain/make_pdbchain.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb) writes the version 4 database
+`pdbchain/pdbchain` of five sequences without a title, each with a `gb|AB60000<n>.1|` Seq-id and a `pdb` one with the
+chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n>|<letter>` and a rewrite of the stored
+deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
+`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
+(with the pdb one alone it prints `Unknown` and `no longer exists in database`).

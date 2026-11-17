@@ -852,7 +852,12 @@ pub(super) fn write_pairwise(
     let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let mut windows = match pairwise_hits {
         Some(_) => vec![0..pairwise_queries.len()],
-        None => query_rows::row_windows(hit_lists, pairwise_queries.len(), x_pool),
+        None => query_rows::row_windows(
+            hit_lists,
+            pairwise_queries.len(),
+            x_pool,
+            pairwise_config.line_length,
+        ),
     };
     if windows.is_empty() {
         windows.push(0..0);
@@ -1132,11 +1137,26 @@ pub(super) fn write_custom_tabular(
         writer.flush()?;
         return Ok(());
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2955-2958
+    // ```c++
+    //     	if (args[kArgLineLength]) {
+    //    		 ERR_POST(Warning << "The parameter -line_length is not applicable for "
+    //    				    		 "output formats > 4 .");
+    //     	}
+    // ```
     // The rows of the queries' HSPs when a field shows them (and rpsblast's
-    // identities, `tabular::needs_rows`), a window at a time (`query_rows`).
+    // identities, `tabular::needs_rows`), a window at a time (`query_rows`). A tabular
+    // report has no lines: NCBI reads `-line_length` only for outfmt 0 to 4
+    // (blast_args.cpp:2939-2941) and keeps its default otherwise (`kDfltLineLength`,
+    // blast_args.hpp:1094), the line length that the windows' estimate takes here.
     let mut rows = tabular::needs_rows(needs.rows, spec, args.app).then(|| {
         query_rows::QueryRows::new(
-            query_rows::row_windows(hit_lists, hit_lists.len(), x_rows_pool),
+            query_rows::row_windows(
+                hit_lists,
+                hit_lists.len(),
+                x_rows_pool,
+                crate::report::pairwise::DEFAULT_LINE_LENGTH,
+            ),
             pairwise_hits.as_deref().map(Vec::as_slice),
             rows_of,
         )

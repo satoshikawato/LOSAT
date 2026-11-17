@@ -708,7 +708,8 @@ fn write_run(
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,
-                      queries_before: usize|
+                      queries_before: usize,
+                      pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
         if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
             scopes.add_batch_ids(
@@ -892,6 +893,7 @@ fn write_run(
                 xml_scan.stops_after == Some(queries_before + queries.len()),
                 documents[index].as_mut(),
                 xml_matrix,
+                pool,
                 Some(LocalReport {
                     probe: probe.as_mut(),
                     first_hsp,

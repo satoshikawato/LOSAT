@@ -1001,7 +1001,8 @@ fn run_inner(
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
                         results: &mut Vec<BatchResults>,
-                        queries_before: usize|
+                        queries_before: usize,
+                        pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
         // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
         // search strategy request holds (`take` below).
@@ -1101,6 +1102,7 @@ fn run_inner(
                     stops,
                     xml2.borrow_mut().as_mut(),
                     xml_matrix,
+                    pool,
                 )
                 .map_err(refused)
             }
@@ -1116,6 +1118,7 @@ fn run_inner(
                 stops,
                 xml2.borrow_mut().as_mut(),
                 xml_matrix,
+                pool,
             )
             .map_err(refused),
         }
@@ -1145,9 +1148,17 @@ fn run_inner(
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,
-                      queries_before: usize|
+                      queries_before: usize,
+                      pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
-        render_batch(&mut *writer, diagnostics, queries, results, queries_before)?;
+        render_batch(
+            &mut *writer,
+            diagnostics,
+            queries,
+            results,
+            queries_before,
+            pool,
+        )?;
         writer.flush().map_err(output_error)
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
@@ -1857,9 +1868,17 @@ pub(crate) type QueryBatchReader<'r> = dyn FnMut(
     + 'r;
 
 /// The render of a query batch's reports (`run_query_batches`): the diagnostics, the batch's
-/// records, its results and the number of queries reported before it.
-pub(crate) type BatchRender<'r> =
-    dyn FnMut(&mut dyn Write, &[FastaRecord], &mut Vec<BatchResults>, usize) -> Result<()> + 'r;
+/// records, its results, the number of queries reported before it, and the run's pool where no
+/// search runs on it while the batch is written (its threads are free to format the batch's
+/// reports, `x_pairwise_par::write`), else `None`.
+pub(crate) type BatchRender<'r> = dyn FnMut(
+        &mut dyn Write,
+        &[FastaRecord],
+        &mut Vec<BatchResults>,
+        usize,
+        Option<&crate::utils::threading::SearchPool<'_>>,
+    ) -> Result<()>
+    + 'r;
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with
@@ -1877,12 +1896,7 @@ pub(super) fn run_query_batches(
     read: &mut QueryBatchReader<'_>,
     diagnostics: &mut dyn Write,
     search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
-    render: &mut dyn FnMut(
-        &mut dyn Write,
-        &[FastaRecord],
-        &mut Vec<BatchResults>,
-        usize,
-    ) -> Result<()>,
+    render: &mut BatchRender<'_>,
     take: &mut dyn FnMut(&mut dyn Write, &[FastaRecord], usize) -> Result<()>,
 ) -> Result<usize> {
     use super::x_timing::Run as XRun;
@@ -2086,7 +2100,16 @@ pub(super) fn run_query_batches(
                             Err(error) => return Err(search_error(error)),
                         };
                         if let Some(mut results) = pending.add(start, last, results) {
-                            render(&mut **diagnostics.borrow_mut(), reader_batch, &mut results, processed)?;
+                            // The flow's searches of the batches after it run on the pool while
+                            // this one is written: its reports are formatted on this thread
+                            // (`BatchRender`).
+                            render(
+                                &mut **diagnostics.borrow_mut(),
+                                reader_batch,
+                                &mut results,
+                                processed,
+                                None,
+                            )?;
                             processed += reader_batch.len();
                         }
                         Ok(())
@@ -2199,11 +2222,13 @@ pub(super) fn run_query_batches(
                                 if let Some(mut results) =
                                     pending.add(unit.range.start, unit.last, results)
                                 {
+                                    // The queued batches are searched: the pool is free.
                                     render(
                                         &mut **diagnostics.borrow_mut(),
                                         &unit.batch,
                                         &mut results,
                                         processed,
+                                        Some(pool),
                                     )?;
                                     processed += unit.batch.len();
                                 }
@@ -2306,6 +2331,7 @@ pub(super) fn run_query_batches(
                         queries,
                         &mut results,
                         processed,
+                        x_pool,
                     )?;
                     super::x_timing::run(XRun::Render, x_t);
                     processed += queries.len();
@@ -3312,13 +3338,9 @@ mod archive_error_tests {
             write_blastx_pairwise_report(
                 std::slice::from_ref(&hit),
                 &mut out,
-                &mut io::sink(),
-                &[Vec::new()],
-                &[],
+                None,
                 &config,
                 std::slice::from_ref(&query),
-                &[true],
-                &[false],
                 &[std::sync::Arc::from(&b"s0"[..])],
                 &report,
                 &BlastxPairwiseOptions {
@@ -3333,6 +3355,7 @@ mod archive_error_tests {
                 &[],
                 None,
                 0,
+                None,
                 None,
             )
             .map(|()| out)

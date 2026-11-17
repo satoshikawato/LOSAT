@@ -34,7 +34,7 @@ pub struct QueryWarnings<'a> {
     /// The BLAST archive's handle, which saves each whole post as one message (`Posts::write`).
     archive: Option<&'a ArchiveHandle>,
     /// Standard error (the CLI) or the caller's diagnostics.
-    pub sink: &'a mut (dyn Write + Send),
+    pub sink: &'a mut dyn Write,
     /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
     /// how many of them are written.
     reads: Option<ReadCursor<'a>>,
@@ -942,8 +942,17 @@ impl<'a> QueryWarnings<'a> {
     /// The texts of the subjects' reads (`with_subject_reads`; `None` without a read that writes
     /// one) and the sink, apart: a writer that writes texts of its own to the sink between the
     /// reads places them with the cursor (`tax_report::write_report`).
-    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut (dyn Write + Send)) {
+    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut dyn Write) {
         (self.reads.as_mut(), &mut *self.sink)
+    }
+
+    /// The run ends at the error of a report's writer (NCBI's exception, its stream's failure):
+    /// NCBI loads nothing after it, so no text of a read that is not written yet is written, also
+    /// not when the warnings end (`ReadCursor::end_run`).
+    pub fn end_run(&mut self) {
+        if let Some(cursor) = self.reads.as_mut() {
+            cursor.end_run();
+        }
     }
 
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),
@@ -965,7 +974,7 @@ impl<'a> QueryWarnings<'a> {
     pub fn of_posts(
         before: &'a [Posts],
         archive: Option<&'a ArchiveHandle>,
-        sink: &'a mut (dyn Write + Send),
+        sink: &'a mut dyn Write,
     ) -> Self {
         Self {
             before,

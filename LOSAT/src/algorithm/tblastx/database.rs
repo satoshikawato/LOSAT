@@ -533,20 +533,24 @@ pub(crate) fn batch_prefetch(
 /// The stop of NCBI's prefetch of the query batch of `queries` whose reported hits are
 /// `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
 /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
-/// whose reported hits are `before` (by ordinal id; `before_prefetch` tells by query whether its
-/// batch prefetches), of the subjects that those reports load (`hit_loads` of the batches before
-/// alone, with `writes_thrown`), which TBLASTX writes after the stop (the XML formats are not
-/// streamed, `report_stream`).
+/// whose reported hits are `before` (by ordinal id; `before_queries` queries, those of each batch
+/// `before_spans`), of the subjects that those reports load (`hit_loads` of the batches before
+/// alone, of `batches_prefetch`, the reports' own answer, with `writes_thrown`; review 2 of line
+/// DBID pfoff-1, N-M2), which TBLASTX writes after the stop (the XML formats are not streamed,
+/// `report_stream`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
     before: &[TblastxHsp],
-    before_prefetch: &shared::BatchPrefetch,
+    before_queries: usize,
+    before_spans: &[std::ops::Range<usize>],
     writes_thrown: bool,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
-    let loads = hit_loads(before, before_prefetch, writes_thrown, titles);
+    let prefetch = batches_prefetch(before, before_queries, before_spans);
+    let loads = hit_loads(before, &prefetch, writes_thrown, titles);
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
@@ -710,13 +714,15 @@ fn hit_loads(
     )
 }
 
-/// Whether every format of `formats` writes a `Hit` whose subject's lookup throws as NCBI does
-/// (`Xml2Kind::every`, for `hit_loads`).
-pub(crate) fn writes_thrown(formats: &[super::report::TblastxOutputFormat]) -> bool {
+/// Whether every format of the run, `outfmts` as `-outfmt` gives them, writes a `Hit` whose
+/// subject's lookup throws as NCBI does (`Xml2Kind::every`, for `hit_loads`): the stop of a batch's
+/// prefetch (`batch_prefetch_stop`) and the reports (`reported_subjects`) ask it of the run's
+/// formats alike (review 2 of line DBID pfoff-1, N-M2).
+pub(crate) fn writes_thrown<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> bool {
     crate::report::blast_xml2::Xml2Kind::every(
-        formats
-            .iter()
-            .map(|format| super::report::TblastxOutputFormat::xml2_kind(*format)),
+        outfmts
+            .into_iter()
+            .map(|outfmt| super::report::output_format(outfmt).xml2_kind()),
     )
 }
 
@@ -737,6 +743,26 @@ pub(crate) fn query_hits(ordered: &[TblastxHsp], queries: std::ops::Range<usize>
     &ordered[from..to.max(from)]
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (quoted at
+// `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
+// results against `PRE_FETCH_SEQS_LIMIT`)
+/// Whether the batch of each query of the reported hits `ordered` (in report order, by query of
+/// `queries` queries, numbered from 0) prefetches (`shared::BatchPrefetch::of`): `spans` are the
+/// queries of each batch, whose Seq-aligns `seq_aligns_of` counts. The one producer of the
+/// prefetch that the reports' loads read (`hit_loads`), for both of its readers: the stop of a
+/// later batch, of the batches before it (`batch_prefetch_stop`), and the reports
+/// (`reported_subjects`), so the two cannot disagree on what the batches before loaded (review 2
+/// of line DBID pfoff-1, N-M2).
+fn batches_prefetch(
+    ordered: &[TblastxHsp],
+    queries: usize,
+    spans: &[std::ops::Range<usize>],
+) -> shared::BatchPrefetch {
+    shared::BatchPrefetch::of(queries, 0, spans, |span| {
+        seq_aligns_of(query_hits(ordered, span))
+    })
+}
+
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index
@@ -746,9 +772,9 @@ pub(crate) fn query_hits(ordered: &[TblastxHsp], queries: std::ops::Range<usize>
 /// report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
-/// prefetch is on reports it, `prefetch` by the hits' query index; `writes_thrown`: every format
-/// writes a `Hit` that throws as NCBI does, for the one answer of what the reports load,
-/// `hit_loads`).
+/// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
+/// each batch `spans`; `writes_thrown`: every format writes a `Hit` that throws as NCBI does, for
+/// the one answer of what the reports load, `hit_loads`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
@@ -758,11 +784,13 @@ pub(crate) fn reported_subjects(
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
     writes_thrown: bool,
-    prefetch: &shared::BatchPrefetch,
+    queries: usize,
+    spans: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
+    let prefetch = batches_prefetch(ordered, queries, spans);
     // What the batches read of each subject (`prefetch`: a batch whose Seq-aligns outnumber a
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them
     // one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
@@ -773,7 +801,7 @@ pub(crate) fn reported_subjects(
             .map(|hsp| (hsp.hit.q_idx as usize, hsp.hit.s_idx)),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
-    let loads = hit_loads(ordered, prefetch, writes_thrown, titles);
+    let loads = hit_loads(ordered, &prefetch, writes_thrown, titles);
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)

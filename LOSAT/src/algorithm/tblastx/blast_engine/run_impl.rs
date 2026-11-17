@@ -4272,28 +4272,16 @@ fn run_batch_loop(
                 )
             {
                 let scope = || batch_scope(input_start..input_end);
-                // Whether each query's batch before prefetches (`done.spans`, in the numbering of
+                // The batches before: their queries (`done.spans`, in the numbering of
                 // `done.hits`), for what their reports load (`database::batch_prefetch_stop`).
-                let before_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
-                    done.searched.len(),
-                    0,
-                    &done.spans,
-                    |span| {
-                        super::super::database::seq_aligns_of(super::super::database::query_hits(
-                            &done.hits, span,
-                        ))
-                    },
-                );
-                let formats: Vec<report::TblastxOutputFormat> = outputs
-                    .formats
-                    .iter()
-                    .map(|format| report::output_format(format.outfmt))
-                    .collect();
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
-                    &before_prefetch,
-                    super::super::database::writes_thrown(&formats),
+                    done.searched.len(),
+                    &done.spans,
+                    super::super::database::writes_thrown(
+                        outputs.formats.iter().map(|format| format.outfmt),
+                    ),
                     ordered,
                     &reports.titles.borrow(),
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
@@ -4725,18 +4713,8 @@ impl BatchReports<'_> {
                         && !crate::algorithm::common::database::prefetch_always_off(),
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
                 };
-                // Whether each query's batch prefetches (`done.spans`, in the numbering of
-                // `hits`), for the subjects that only the prefetch reads.
-                let prefetch = crate::algorithm::common::database::BatchPrefetch::of(
-                    done.searched.len(),
-                    0,
-                    &done.spans,
-                    |span| {
-                        super::super::database::seq_aligns_of(super::super::database::query_hits(
-                            &hits, span,
-                        ))
-                    },
-                );
+                // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
+                // prefetch decides the subjects that only the prefetch reads.
                 reported_subjects = super::super::database::reported_subjects(
                     database,
                     &self.titles.borrow(),
@@ -4744,8 +4722,11 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    super::super::database::writes_thrown(&formats),
-                    &prefetch,
+                    super::super::database::writes_thrown(
+                        outputs.formats.iter().map(|format| format.outfmt),
+                    ),
+                    done.searched.len(),
+                    &done.spans,
                 )?;
                 // The texts of the reads, made before the hits named the subjects by rank, by
                 // rank as the writers name them.

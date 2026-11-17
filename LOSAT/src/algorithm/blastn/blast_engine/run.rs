@@ -11157,6 +11157,23 @@ fn run_in_pool(
                 }
                 _ => crate::report::tabular::SubjectFetch::Every,
             };
+            // NCBI's scope at the batch's prefetch (`shared::PrefetchQueries`), made only where it
+            // stops (both forms of the prefetch below): the batch's input records (those that
+            // `-query_loc` drops included, each with its `Query_N` of the run,
+            // `FastaRecord::local_id`), in outfmt 5, whose scope the formatter keeps, those of the
+            // batches before too (outfmt 5 keeps the records read before the search, as
+            // `query_scopes` above).
+            let scope = || {
+                crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                    x_query_stream::Queries::Records { input, .. } if xml => &input[..input_end],
+                    _ => batch_records.input(),
+                })
+            };
+            // A call of the library's batches after the first (`api::run_batches`) searched the
+            // batches before with a database of its own, whose loads nothing here records.
+            let prefetch_queries =
+                crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                    .after_unrecorded_calls(args.first_query_ordinal > 0);
             let prefetch = if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
@@ -11212,24 +11229,6 @@ fn run_in_pool(
                     Ok(Vec::new())
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
-                // NCBI's scope at the batch's prefetch (`shared::PrefetchQueries`), made only where it
-                // stops: the batch's input records (those that `-query_loc` drops included, each with
-                // its `Query_N` of the run, `FastaRecord::local_id`), in outfmt 5, whose scope the
-                // formatter keeps, those of the batches before too (outfmt 5 keeps the records read
-                // before the search, as `query_scopes` above).
-                let scope = || {
-                    crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
-                        x_query_stream::Queries::Records { input, .. } if xml => {
-                            &input[..input_end]
-                        }
-                        _ => batch_records.input(),
-                    })
-                };
-                // A call of the library's batches after the first (`api::run_batches`) searched
-                // the batches before with a database of its own, whose loads nothing here records.
-                let prefetch_queries =
-                    crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                        .after_unrecorded_calls(args.first_query_ordinal > 0);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
                 // after the query's own warnings (`query_fetches`, added after them below), where
@@ -11334,39 +11333,17 @@ fn run_in_pool(
                 // batch's prefetch (where it is on and loads a sequence) only its stop
                 // (`BlastnDatabase::batch_prefetch_stop`).
                 let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
-                // NCBI's scope at the batch's prefetch, as above.
-                let scope = || {
-                    crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
-                        x_query_stream::Queries::Records { input, .. } if xml => {
-                            &input[..input_end]
-                        }
-                        _ => batch_records.input(),
-                    })
-                };
-                // Whether each query of the batches before prefetched, for what their reports
-                // loaded (`database::hit_loads`: a `Hit` whose lookup throws loads nothing, nor
-                // do the `Hit`s after it; the XML formats are not streamed, so the batches
-                // before are all held).
-                let before_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
-                    hit_lists.len(),
-                    0,
-                    &batch_spans,
-                    |span| database::seq_aligns_of(&hit_lists[span], !args.ungapped),
-                );
                 (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
                     .then(|| {
                         database
                             .batch_prefetch_stop(
                                 &titles,
                                 &hit_lists,
-                                &before_prefetch,
+                                &batch_spans,
                                 database::writes_thrown(&output_formats),
                                 &batch_hit_lists,
                                 !args.ungapped,
-                                &crate::algorithm::common::database::PrefetchQueries::new(
-                                    start, &scope,
-                                )
-                                .after_unrecorded_calls(args.first_query_ordinal > 0),
+                                &prefetch_queries,
                             )
                             .map(|()| Posts::new())
                     })
@@ -11996,14 +11973,8 @@ fn write_reports_untimed(
                     .iter()
                     .filter_map(|format| format.tabular_spec())
                     .any(|spec| spec.needs().rows);
-            // Whether each query's batch prefetches (`results.batches`: the batches of this
-            // call, or one), for the subjects that only the prefetch reads.
-            let prefetch = crate::algorithm::common::database::BatchPrefetch::of(
-                hit_lists.len(),
-                written.queries,
-                results.batches,
-                |span| database::seq_aligns_of(&hit_lists[span], !args.ungapped),
-            );
+            // `results.batches`: the batches of this call, or one, whose prefetch decides the
+            // subjects that only the prefetch reads.
             Some(database::reported_subjects(
                 database,
                 subjects.titles,
@@ -12011,8 +11982,9 @@ fn write_reports_untimed(
                 letters,
                 database::parsed_shown(output_formats),
                 database::writes_thrown(output_formats),
-                &prefetch,
+                results.batches,
                 written.queries,
+                !args.ungapped,
                 x_pool,
             )?)
         }

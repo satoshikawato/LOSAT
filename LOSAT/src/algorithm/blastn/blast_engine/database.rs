@@ -743,22 +743,24 @@ impl BlastnDatabase {
     /// `hit_lists`, for the XML2 and JSON formats, which write the taxonomy
     /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
     /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`;
-    /// the reports read every reported subject that they load: `prefetch` tells by query of
-    /// `before` whether its batch reads one by one, for `hit_loads`, which leaves out a subject
-    /// whose `Hit` throws and one shown only after it; review 1 of line DBID pfoff-1, H1), which
+    /// `spans`: the queries of each of those batches, numbered from 0, as BLASTN holds them all;
+    /// the reports read every reported subject that they load: `hit_loads` of `batches_prefetch`,
+    /// the reports' own answer, which leaves out a subject whose `Hit` throws and one shown only
+    /// after it, with `writes_thrown`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which
     /// BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn batch_prefetch_stop(
         &self,
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
-        prefetch: &shared::BatchPrefetch,
+        spans: &[std::ops::Range<usize>],
         writes_thrown: bool,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
-        let loads = hit_loads(before, prefetch, writes_thrown, |ordinal| {
+        let prefetch = batches_prefetch(before, 0, spans, gapped);
+        let loads = hit_loads(before, &prefetch, writes_thrown, |ordinal| {
             titled_parsed(titles, ordinal)
         });
         shared::held_batch_prefetch_stop(
@@ -1938,6 +1940,27 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
         .sum()
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (quoted at
+// `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
+// results against `PRE_FETCH_SEQS_LIMIT`)
+/// Whether the batch of each query of `hit_lists` (final hit lists by query) prefetches
+/// (`shared::BatchPrefetch::of`): `batches` are the queries of each batch, numbered from `first`
+/// (the query of `hit_lists[0]`), and `seq_aligns_of` counts a batch's Seq-aligns (`gapped`). The
+/// one producer of the prefetch that the reports' loads read (`hit_loads`), for both of its
+/// readers: the stop of a later batch, of the batches before it
+/// (`BlastnDatabase::batch_prefetch_stop`), and the reports (`reported_subjects`), so the two
+/// cannot disagree on what the batches before loaded (review 2 of line DBID pfoff-1, N-M2).
+fn batches_prefetch(
+    hit_lists: &[Option<BlastnHitList>],
+    first: usize,
+    batches: &[std::ops::Range<usize>],
+    gapped: bool,
+) -> shared::BatchPrefetch {
+    shared::BatchPrefetch::of(hit_lists.len(), first, batches, |span| {
+        seq_aligns_of(&hit_lists[span], gapped)
+    })
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
@@ -2039,10 +2062,11 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 /// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
 /// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`;
-/// `prefetch`: whether each query's batch prefetches, where only the prefetch reads a subject;
-/// `writes_thrown`: every format writes a `Hit` whose lookup throws, `writes_thrown`, for the one
-/// answer of the reports' loads, `hit_loads`, which the refusals take).
-/// The records are made on `pool` (`x_reported_records`).
+/// `batches`: the queries of each batch, numbered from `first_query`, whose prefetch, where only
+/// the prefetch reads a subject, is `batches_prefetch`'s, with the Seq-aligns of a `gapped`
+/// search or not; `writes_thrown`: every format writes a `Hit` whose lookup throws,
+/// `writes_thrown`, for the one answer of the reports' loads, `hit_loads`, which the refusals
+/// take). The records are made on `pool` (`x_reported_records`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
@@ -2051,8 +2075,9 @@ pub(super) fn reported_subjects(
     letters: bool,
     shown: ParsedShown,
     writes_thrown: bool,
-    prefetch: &shared::BatchPrefetch,
+    batches: &[std::ops::Range<usize>],
     first_query: usize,
+    gapped: bool,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
@@ -2068,6 +2093,7 @@ pub(super) fn reported_subjects(
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read
     // them one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
     // NCBI's warning (`BlastnDatabase::batch_prefetch`).
+    let prefetch = batches_prefetch(hit_lists, first_query, batches, gapped);
     let reads = prefetch.reads(
         hit_lists
             .iter()
@@ -2082,7 +2108,7 @@ pub(super) fn reported_subjects(
             }),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below).
-    let loads = hit_loads(hit_lists, prefetch, writes_thrown, |ordinal| {
+    let loads = hit_loads(hit_lists, &prefetch, writes_thrown, |ordinal| {
         titled_parsed(titles, ordinal)
     });
     let rank = |ordinal: u32| -> u32 {
@@ -3060,8 +3086,9 @@ mod tests {
             true,
             ParsedShown::default(),
             false,
-            &shared::BatchPrefetch::every(),
+            &[],
             0,
+            true,
             None,
         )
         .unwrap();
@@ -3116,8 +3143,9 @@ mod tests {
             false,
             ParsedShown::default(),
             false,
-            &shared::BatchPrefetch::every(),
+            &[],
             0,
+            true,
             None,
         )
         .unwrap();
@@ -3154,8 +3182,9 @@ mod tests {
             false,
             ParsedShown::default(),
             false,
-            &shared::BatchPrefetch::every(),
+            &[],
             0,
+            true,
             None,
         )
         .unwrap();
@@ -3169,8 +3198,9 @@ mod tests {
             false,
             ParsedShown::default(),
             false,
-            &shared::BatchPrefetch::every(),
+            &[],
             0,
+            true,
             None,
         )
         .err()

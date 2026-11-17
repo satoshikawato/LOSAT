@@ -58,6 +58,7 @@ use super::{
     OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
+use std::mem::MaybeUninit;
 
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
 /// (`ScanBatch`, or its copy per subject: the query block, the cutoffs, the scoring, word lengths,
@@ -692,14 +693,15 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // first in the coarser presence vector, whose bit stands for several cells;
         // for a head whose bits fit the cache (`x_bn_pv_once`). A larger packed head keeps the
         // presence vector in front and tests its own bit after it, in the closure too, so a
-        // word that passes the vector without a run of its cell makes no call either.
+        // word that passes the vector without a run of its cell is not kept either (the
+        // vector's test first: a word it drops reads no bit of the head).
         // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` a word's run is the one of the
         // head's element the ring hands over with it (`XHead::run_at`; a packed head's word is
         // ranked once, where it enters the ring), else the cell's run read again (`XHead::run`).
         // The ring's methods are called as `XRing`'s, not as those of `Ring` itself (a head of
         // one element per cell), whose `emit` gets the word only.
         // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
-        // takes a word `k` to the ring when `test` holds.
+        // keeps a word `k` for the ring when `test` holds (`XWordBatch`).
         let rank_once = x_bn_rank_once(true);
         macro_rules! x_scan_csr {
             ($head:expr, |$k:ident| $has:expr) => {{
@@ -759,8 +761,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 // the presence vector and its shift, or the packed head) and the places it
                 // writes as its own references, so the scan keeps them in registers across the
                 // calls instead of reading them again through references for every word.
-                let ring_ref = &mut ring;
-                let emit = &mut x_on_word_csr;
+                let mut words = XWordBatch::new(&mut ring, &mut x_on_word_csr);
+                let words_ref = &mut words;
                 let total_s_positions = &mut *dbg_total_s_positions;
                 scan_subject_kmers_with_ranges(
                     search_seq_packed,
@@ -775,21 +777,16 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         if debug_enabled {
                             *total_s_positions += 1;
                         }
-                        // A word goes to the ring out of line (`x_push_word`), so this closure
-                        // is the presence test and that call only and the scan inlines it: a
-                        // word the test drops makes no call.
+                        // A word that passes `test` joins the batch (`XWordBatch::keep`), which
+                        // goes to the ring out of line when it is full, so this closure makes no
+                        // call for a word and the scan inlines it.
                         let $k = current_lut_kmer;
                         if $has {
-                            x_push_word(
-                                &mut *ring_ref,
-                                kmer_start,
-                                s_range,
-                                current_lut_kmer,
-                                &mut *emit,
-                            );
+                            words_ref.keep((kmer_start, s_range, current_lut_kmer));
                         }
                     },
                 );
+                words.finish();
                 x_dc_csr::XRing::flush(&mut ring, |w| w.2 as usize, &mut x_on_word_csr);
             }};
         }
@@ -906,19 +903,24 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     }
 }
 
-/// No NCBI counterpart (call layout only): a word of the scan of a CSR table (`x_scan_csr!`) to
-/// its head's ring, out of line, with the word's three values as its arguments. The ring's push
-/// with the hand-over of the word that leaves the ring (`x_on_word_csr`) inlined made the scan's
-/// closure too large for the scan to inline, so every subject word cost a call; with the push here
-/// the closure is the presence vector's test and this call, and the scan inlines it (callgrind,
-/// mlst's 225,777 alleles: the scan's closure 689 M -> 221 M instructions, the whole search
-/// 3.131 G -> 3.064 G, -2.2 %): a word the presence vector drops makes no call. A head that tests
-/// each word in its own bits (LOSAT_X_BNPVONCE) tests its presence bit there first
-/// (`XPacked::x_present`), so a word without hits makes no call either (ABRicate's resfinder:
-/// 84 % of 21.4 M words); a packed head behind the presence vector tests the same bit after the
-/// vector's (mlst: 75 % of the 6.69 M words the vector passes have no run, 5.0 M calls fewer,
-/// the search 2.700 G -> 2.553 G instructions, -5.4 %). The words, their order and every value
-/// are the same.
+/// No NCBI counterpart (call layout only): how many words of a CSR scan (`x_scan_csr!`) its
+/// closure gathers before they go to the head's ring together (`XWordBatch`). A power of two.
+const X_WORD_BATCH: usize = 32;
+
+/// No NCBI counterpart (call layout only): the words of the scan of a CSR table (`x_scan_csr!`)
+/// that pass its test, gathered in order and taken to the head's ring `X_WORD_BATCH` at a time, out of
+/// line (`XWordBatch::push`). The ring's push with the hand-over of the word that leaves the ring
+/// (`x_on_word_csr`) inlined made the scan's closure too large for the scan to inline, so every
+/// subject word cost a call. A call for each word that passes the test (one word out of line) cost
+/// a table whose cells are nearly all filled almost one call per subject word, and the test a
+/// branch that follows the data (pyani: about 89 % of the 4^11 cells of a packed head that fits
+/// the cache, LOSAT_X_BNPVONCE; x1.012 in time on node 1 against the form without the test). Here
+/// the closure writes every word to the next free place and keeps it only when the test holds
+/// (`word`: a store and an add, no branch on the test where the test reads no memory the presence
+/// vector would skip), and makes a call for `X_WORD_BATCH` words that passed, on a sparse table
+/// (ABRicate's resfinder: 84 % of 21.4 M words without a run) as on a full one. The words, their
+/// order and every value are the same: the ring gets the words that pass in the scan's order, the
+/// last ones (`finish`) before the ring is flushed.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1523-1536
 /// (`s_MBScanSubject_Any`: the presence test of each word in the scan's loop, the retrieve only for
@@ -939,11 +941,126 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 ///                  s_off);
 ///          }
 /// ```
-#[inline(never)]
-fn x_push_word<R, E>(ring: &mut R, kmer_start: usize, s_range: usize, kmer: u64, emit: &mut E)
+struct XWordBatch<'a, R, E> {
+    /// `words[..n]`: the words that passed and have not gone to the ring, in the scan's order; a
+    /// place no word has reached since the last push is uninitialised (never read). (Not zeroed
+    /// for each subject: mlst's 225,777 alleles spent 29 M instructions, 1.2 %, zeroing them.)
+    words: [MaybeUninit<(usize, usize, u64)>; X_WORD_BATCH],
+    n: usize,
+    ring: &'a mut R,
+    emit: &'a mut E,
+}
+
+impl<'a, R, E> XWordBatch<'a, R, E>
 where
     R: x_dc_csr::XRing<(usize, usize, u64)>,
     E: FnMut((usize, usize, u64), usize),
 {
-    ring.push((kmer_start, s_range, kmer), |w| w.2 as usize, emit);
+    fn new(ring: &'a mut R, emit: &'a mut E) -> Self {
+        Self {
+            words: [MaybeUninit::uninit(); X_WORD_BATCH],
+            n: 0,
+            ring,
+            emit,
+        }
+    }
+
+    /// The word `w` of the scan, which passed its test, joins the batch; a full batch goes to the
+    /// ring.
+    #[inline(always)]
+    fn keep(&mut self, w: (usize, usize, u64)) {
+        // (`n < X_WORD_BATCH` here: a full batch goes at once, so the mask never wraps a word)
+        self.words[self.n & (X_WORD_BATCH - 1)] = MaybeUninit::new(w);
+        self.n += 1;
+        if self.n == X_WORD_BATCH {
+            self.push();
+        }
+    }
+
+    /// The words that passed go to the ring, in order (out of line, so the scan's closure stays
+    /// the store, the test and this call).
+    #[inline(never)]
+    fn push(&mut self) {
+        for m in 0..self.n {
+            // SAFETY: `m < n`, and `keep` wrote the places `0..n` since the last push.
+            let w = unsafe { self.words[m].assume_init() };
+            self.ring.push(w, |w| w.2 as usize, &mut *self.emit);
+        }
+        self.n = 0;
+    }
+
+    /// The words that passed after the last full batch go to the ring.
+    fn finish(&mut self) {
+        if self.n > 0 {
+            self.push();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type W = (usize, usize, u64);
+
+    /// A ring that keeps the words pushed to it, in order, and hands none over.
+    struct Kept(Vec<W>);
+
+    impl x_dc_csr::XRing<W> for Kept {
+        fn push(
+            &mut self,
+            w: W,
+            _cell: impl Fn(&W) -> usize,
+            _emit: &mut impl FnMut(W, usize),
+        ) -> bool {
+            self.0.push(w);
+            false
+        }
+
+        fn flush(&mut self, _cell: impl Fn(&W) -> usize, _emit: &mut impl FnMut(W, usize)) {}
+    }
+
+    /// `XWordBatch` hands the ring the words that pass, in the scan's order, the same as pushing
+    /// each passing word as it comes: across full batches and the last part (`finish`), with
+    /// none, every and every k-th word passing, and with pseudo-random words and passes.
+    #[test]
+    fn the_word_batch_pushes_the_passing_words_in_order() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let lens = [0, 1, 2, 31, 32, 33, 63, 64, 65, 96, 1000];
+        for len in lens {
+            for rule in 0..6u64 {
+                let words: Vec<(W, bool)> = (0..len)
+                    .map(|i| {
+                        let r = next();
+                        let pass = match rule {
+                            0 => false,
+                            1 => true,
+                            2 => i % 2 == 0,
+                            3 => i % X_WORD_BATCH == X_WORD_BATCH - 1,
+                            4 => r % 10 != 0,
+                            _ => r % 7 == 0,
+                        };
+                        ((i, (r >> 40) as usize, r), pass)
+                    })
+                    .collect();
+                let mut ring = Kept(Vec::new());
+                let mut emit = |_: W, _: usize| {};
+                let mut batch = XWordBatch::new(&mut ring, &mut emit);
+                for &(w, pass) in &words {
+                    if pass {
+                        batch.keep(w);
+                    }
+                }
+                batch.finish();
+                let want: Vec<W> = words.iter().filter(|w| w.1).map(|w| w.0).collect();
+                assert_eq!(ring.0, want, "len {len} rule {rule}");
+            }
+        }
+    }
 }

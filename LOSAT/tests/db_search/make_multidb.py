@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -114,6 +114,12 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   in ten replaced, seed 20261116 + 7): the first query of mix2_q.faa hits it after `lda`'s exact copy, so psiblast's
   traceback holds it beyond `-max_target_seqs 1`, which no report shows. `make_multidb.py --loadord7-only MAKEBLASTDB`
   builds only it (the databases before keep their dates).
+- Line DBID v4late (review 3 of line DBID loadord, H3): version 4 protein, `-parse_seqids`, taxid 9606, one record
+  each, beside `l5c` in a list whose later volume's string ISAM a test makes unreadable (mode 000, which git does not
+  keep): `l6o` holds `l5c`'s `ref|NP_000002.1|` with other letters (qp1 of ../ids/ids_q.faa), so NCBI's lookup of its
+  Seq-align id gives `l5c`'s record first and never opens `l6o`'s ISAM; `l6u` holds `ref|NP_000004.1|`, which only its
+  ISAM can hold, so NCBI's lookup opens it. `make_multidb.py --v4late-only MAKEBLASTDB` builds only these (the
+  databases before keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -533,6 +539,19 @@ def make_loadord7(binary):
     os.remove(os.path.join(HERE, "ldv.pjs"))
 
 
+def make_v4late(binary):
+    """Builds l6o and l6u (line DBID v4late)."""
+    qp1 = next("".join(line.strip() for line in lines)
+               for header, lines in read_fasta_path(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")))
+    for name, header in (("l6o", ">ref|NP_000002.1| v4late the accession of l5c with other letters, version 4"),
+                         ("l6u", ">ref|NP_000004.1| v4late an accession that only this volume holds, version 4")):
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            f.write(header + "\n" + "\n".join(qp1[at:at + 60] for at in range(0, len(qp1), 60)) + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", "prot", "-out", name, "-parse_seqids", "-blastdb_version",
+                    "4", "-taxid", "9606", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + ".pjs"))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -602,6 +621,8 @@ if __name__ == "__main__":
         make_loadord6(sys.argv[2])
     elif sys.argv[1] == "--loadord7-only":
         make_loadord7(sys.argv[2])
+    elif sys.argv[1] == "--v4late-only":
+        make_v4late(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -615,3 +636,4 @@ if __name__ == "__main__":
         make_loadord5(sys.argv[1])
         make_loadord6(sys.argv[1])
         make_loadord7(sys.argv[1])
+        make_v4late(sys.argv[1])

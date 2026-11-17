@@ -12495,7 +12495,12 @@ fn run_call(
                 let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
                 let mut windows = match pairwise_hits {
                     Some(_) => vec![0..pairwise_queries.len()],
-                    None => query_rows::row_windows(&hit_lists, pairwise_queries.len(), x_pool),
+                    None => query_rows::row_windows(
+                        &hit_lists,
+                        pairwise_queries.len(),
+                        x_pool,
+                        pairwise_config.line_length,
+                    ),
                 };
                 if windows.is_empty() {
                     windows.push(0..0);

@@ -1370,7 +1370,7 @@ fn write_alignment_with_sequences<W: Write>(
                     ' ' // Mismatch: show space
                 }
             });
-        write_chars(writer, middle)
+        write_buffered(writer, middle)
     };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1502,1535-1538
@@ -1600,19 +1600,16 @@ fn write_sequence_row<W: Write>(
 ) -> io::Result<()> {
     let empty = (j > 0 && end == prev_stop) || (j == 0 && start == 1 && end == 1);
     let (mut start_text, mut end_text) = (itoa_i32(start), itoa_i32(end));
-    let (start_text, digits, end_text): (&[u8], usize, &[u8]) = if empty {
-        (b"", 0, b"")
+    let (start_text, end_text): (&[u8], &[u8]) = if empty {
+        (b"", b"")
     } else {
-        (
-            start_text.text(),
-            digit_count(start.unsigned_abs() as usize),
-            end_text.text(),
-        )
+        (start_text.text(), end_text.text())
     };
+    // `startLen`: the length of the start's text (`NStr::IntToString(start).size()`), 0 without.
     write_joined(
         writer,
         &[label.as_bytes(), b"  ", start_text],
-        width + 2 - digits,
+        width + 2 - start_text.len(),
     )?;
     write_letters(writer)?;
     write_joined(writer, &[b"  ", end_text, b"\n"], 0)
@@ -1644,37 +1641,118 @@ fn write_joined<W: Write>(writer: &mut W, parts: &[&[u8]], spaces: usize) -> io:
 //     list<CRange<int> > actualSeqloc;
 //     string actualSeq = sequence.substr(start, len);
 // ```
-/// Writes `letters` (a chunk of a row kept as `char`s, or a middle line,
-/// `write_alignment_with_sequences`) in UTF-8, a buffer of them at a time.
-fn write_chars<W: Write>(
+/// A letter that `write_buffered` writes: a `char` of a row kept as `char`s (in UTF-8) or a byte
+/// of a middle line of rows kept as bytes.
+trait RowLetter: Copy {
+    /// The most bytes of one letter.
+    const MAX_LEN: usize;
+    /// Writes its bytes into `buffer` from `at` (`at + MAX_LEN` is at most its length) and gives
+    /// their number.
+    fn encode_at(self, buffer: &mut [u8], at: usize) -> usize;
+}
+
+impl RowLetter for char {
+    const MAX_LEN: usize = 4;
+
+    #[inline(always)]
+    fn encode_at(self, buffer: &mut [u8], at: usize) -> usize {
+        self.encode_utf8(&mut buffer[at..]).len()
+    }
+}
+
+impl RowLetter for u8 {
+    const MAX_LEN: usize = 1;
+
+    #[inline(always)]
+    fn encode_at(self, buffer: &mut [u8], at: usize) -> usize {
+        buffer[at] = self;
+        1
+    }
+}
+
+/// Writes `letters` (a chunk of a row kept as `char`s, `write_row_chars`, or a middle line,
+/// `write_alignment_with_sequences` and `write_protein_middle`) a buffer of 256 bytes at a time
+/// (written when a letter of the most bytes might not fit), in its caller's loop.
+#[inline(always)]
+fn write_buffered<W: Write, L: RowLetter>(
     writer: &mut W,
-    letters: impl IntoIterator<Item = char>,
+    letters: impl IntoIterator<Item = L>,
 ) -> io::Result<()> {
     let mut buffer = [0u8; 256];
     let mut used = 0;
     for letter in letters {
-        if used + letter.len_utf8() > buffer.len() {
+        if used > buffer.len() - L::MAX_LEN {
             writer.write_all(&buffer[..used])?;
             used = 0;
         }
-        used += letter.encode_utf8(&mut buffer[used..]).len();
+        used += letter.encode_at(&mut buffer, used);
     }
     writer.write_all(&buffer[..used])
 }
 
-/// Writes `bytes` (a middle line of rows kept as bytes) a buffer of them at a time.
-fn write_bytes<W: Write>(writer: &mut W, bytes: impl IntoIterator<Item = u8>) -> io::Result<()> {
-    let mut buffer = [0u8; 256];
-    let mut used = 0;
-    for byte in bytes {
-        if used == buffer.len() {
-            writer.write_all(&buffer)?;
-            used = 0;
-        }
-        buffer[used] = byte;
-        used += 1;
-    }
-    writer.write_all(&buffer[..used])
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2132-2155
+// ```c++
+//         if(sequence_standard[i]==sequence[i]){
+//             if(m_AlignOption & eShowMiddleLine){
+//                 if(m_MidLineStyle == eBar ) {
+//                     middle_line[i] = '|';
+//                 } else if (m_MidLineStyle == eChar){
+//                     middle_line[i] = sequence[i];
+//                 }
+//             }
+//             match ++;
+//         } else {
+//             if ((m_AlignType&eProt)
+//                 && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
+//                 positive ++;
+//                 if(m_AlignOption & eShowMiddleLine){
+//                     if (m_MidLineStyle == eChar){
+//                         middle_line[i] = '+';
+//                     }
+//                 }
+//             } else {
+//                 if (m_AlignOption & eShowMiddleLine){
+//                     middle_line[i] = ' ';
+//                 }
+//             }
+//         }
+// ```
+/// Writes the protein middle line of the columns `columns` of the rows of bytes `query` and
+/// `subject` (BLASTX's, TBLASTN's and TBLASTX's rows, `write_hsp_rows`): a column's residue where
+/// the rows' residues are equal, `+` where `matrix` scores them above 0 (`is_positive_match`),
+/// else a space. The rows may carry lower case, which NCBI applies only when it prints a row
+/// (showalign.cpp:2495-2521), so the residues are compared in upper case: the query row's (its
+/// masks), and the subject row's where `upper_subject` (BLASTX's row of letters: a `-subject`'s
+/// lower case with `-lcase_masking`, `blastx/x_soft_subject.rs`). TBLASTN's and TBLASTX's
+/// subject rows are translations (`tblastx::report::DisplayCode`), in upper case.
+#[inline(always)]
+fn write_protein_middle<W: Write>(
+    writer: &mut W,
+    query: &[u8],
+    subject: &[u8],
+    columns: std::ops::Range<usize>,
+    matrix: ScoringMatrix,
+    upper_subject: bool,
+) -> io::Result<()> {
+    let middle = query[columns.clone()]
+        .iter()
+        .zip(&subject[columns])
+        .map(|(&q, &s)| {
+            let q = q.to_ascii_uppercase();
+            let s = if upper_subject {
+                s.to_ascii_uppercase()
+            } else {
+                s
+            };
+            if q == s {
+                q
+            } else if is_positive_match(q as char, s as char, matrix) {
+                b'+'
+            } else {
+                b' '
+            }
+        });
+    write_buffered(writer, middle)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:340-359
@@ -1728,9 +1806,9 @@ fn write_row_chars<W: Write>(
     span: (usize, usize),
 ) -> io::Result<()> {
     if span.0 <= columns.start && columns.end <= span.1 {
-        return write_chars(writer, row[columns].iter().copied());
+        return write_buffered(writer, row[columns].iter().copied());
     }
-    write_chars(
+    write_buffered(
         writer,
         columns.map(|column| {
             if column < span.0 || column >= span.1 {
@@ -3382,6 +3460,10 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         self.report.num_alignments
     }
 
+    fn line_length(&self) -> usize {
+        self.config.line_length
+    }
+
     fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
         (self.config.sort, self.config.tblastx())
     }
@@ -4597,6 +4679,10 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         self.report.num_alignments
     }
 
+    fn line_length(&self) -> usize {
+        self.config.line_length
+    }
+
     fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
         (self.config.sort, self.config.tblastx())
     }
@@ -5032,26 +5118,7 @@ fn write_tblastx_alignment<W: Write>(
         q.len(),
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
-        |writer, columns| {
-            let middle = q[columns.clone()]
-                .iter()
-                .zip(&s[columns])
-                .map(|(&qc, &sc)| {
-                    let query_residue = qc.to_ascii_uppercase();
-                    if query_residue == sc {
-                        query_residue
-                    } else if is_positive_match(
-                        query_residue as char,
-                        sc as char,
-                        config.protein_matrix,
-                    ) {
-                        b'+'
-                    } else {
-                        b' '
-                    }
-                });
-            write_bytes(writer, middle)
-        },
+        |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
     )
 }
 
@@ -5321,6 +5388,10 @@ struct TblastxSections<'a> {
 impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
     fn num_alignments(&self) -> usize {
         self.report.num_alignments
+    }
+
+    fn line_length(&self) -> usize {
+        self.config.line_length
     }
 
     fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
@@ -6107,6 +6178,60 @@ mod tests {
         assert!(blastp_text(1431655766).starts_with("Query  1   MRKVL  5\n"));
     }
 
+    // `write_buffered` writes every letter once and in order across its buffer's ends, `char`s of
+    // two to four bytes included.
+    #[test]
+    fn buffered_letters_are_written_in_order_across_buffers() {
+        let chars: String = (0..1000).map(|i| ['A', 'é', '€', '𝄞'][i % 7 % 4]).collect();
+        let mut out = Vec::new();
+        write_buffered(&mut out, chars.chars()).unwrap();
+        assert_eq!(out, chars.as_bytes());
+        let bytes: Vec<u8> = (0..1000u32).map(|i| (i % 251) as u8).collect();
+        let mut out = Vec::new();
+        write_buffered(&mut out, bytes.iter().copied()).unwrap();
+        assert_eq!(out, bytes);
+    }
+
+    // The parallel writer's estimate of an HSP's text (`x_pairwise_par::hit_estimate`) holds at
+    // every line length: the rows of a 300-column HSP whose coordinates have 4 digits (55 bytes
+    // besides the letters per line) and about 300 bytes of its header lines fit in it, and it is
+    // at most a tenth more than the rows and its 400 bytes of header lines.
+    #[test]
+    fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
+        let hit = Hit {
+            length: 300,
+            q_start: 1001,
+            q_end: 1300,
+            s_start: 2001,
+            s_end: 2300,
+            gap_info: None,
+            ..make_hit()
+        };
+        let letters = "ACDEFGHIKLMNPQRSTVWY".repeat(15);
+        for line_length in [1, 2, 3, 7, 59, 60, 61, 299, 300, 1000, 2147483647] {
+            let mut rows = Vec::new();
+            write_alignment_with_sequences(
+                &mut rows,
+                &hit,
+                &letters,
+                &letters,
+                &[],
+                &PairwiseConfig {
+                    line_length,
+                    program: "blastp".into(),
+                    ..PairwiseConfig::default()
+                },
+            )
+            .unwrap();
+            let estimate = crate::report::x_pairwise_par::hit_estimate(300, line_length);
+            assert!(
+                rows.len() + 300 <= estimate && estimate <= rows.len() * 11 / 10 + 400,
+                "-line_length {line_length}: rows {} B, estimate {estimate} B",
+                rows.len()
+            );
+        }
+    }
+
     /// NCBI's `GetWholeAlnSeqString` (alnvec.cpp:199-397, quoted at
     /// `query_anchored::aln_vec::AlnMap::aln_seq_string`), a second transcription, for one row of
     /// `segments` (a 0-based Dense-seg start, -1 for a gap, and a length in columns), as
@@ -6592,6 +6717,10 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         self.report.num_alignments
     }
 
+    fn line_length(&self) -> usize {
+        self.config.line_length
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
     // ```c++
     //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
@@ -6915,29 +7044,7 @@ fn write_tblastn_alignment<W: Write>(
         q.len(),
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
-        |writer, columns| {
-            let middle = q[columns.clone()]
-                .iter()
-                .zip(&s[columns])
-                .map(|(&qc, &sc)| {
-                    // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
-                    // the displayed query preserves lowercase masking, while the
-                    // protein matrix comparison uses its uppercase residue.
-                    let query_residue = qc.to_ascii_uppercase();
-                    if query_residue == sc {
-                        query_residue
-                    } else if is_positive_match(
-                        query_residue as char,
-                        sc as char,
-                        config.protein_matrix,
-                    ) {
-                        b'+'
-                    } else {
-                        b' '
-                    }
-                });
-            write_bytes(writer, middle)
-        },
+        |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
     )
 }
 
@@ -7287,6 +7394,10 @@ impl BlastxSections<'_> {
 impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     fn num_alignments(&self) -> usize {
         self.options.num_alignments
+    }
+
+    fn line_length(&self) -> usize {
+        self.config.line_length
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
@@ -7809,25 +7920,7 @@ fn write_blastx_alignment(
         q.len(),
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
-        |writer, columns| {
-            // Both rows may carry lower case (the query's and, with `-lcase_masking`, a
-            // `-subject`'s, `blastx/x_soft_subject.rs`), which NCBI applies only when it prints a
-            // row (showalign.cpp:2495-2521), so the residues are compared in upper case.
-            let middle = q[columns.clone()]
-                .iter()
-                .zip(&s[columns])
-                .map(|(&qc, &sc)| {
-                    let (qu, su) = (qc.to_ascii_uppercase(), sc.to_ascii_uppercase());
-                    if qu == su {
-                        qu
-                    } else if is_positive_match(qu as char, su as char, config.protein_matrix) {
-                        b'+'
-                    } else {
-                        b' '
-                    }
-                });
-            write_bytes(writer, middle)
-        },
+        |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, true),
     )
 }
 
@@ -8507,8 +8600,10 @@ mod tblastx_tests {
     // (`x_pairwise_par::write`): a query's warning comes after the reports written before it,
     // also from a writer that holds its bytes until it is flushed (LOSAT's buffer of the command
     // line, `cli::NcbiOstream::buffered`); a query whose description table reads an HSP with empty
-    // rows stops after its `Length=` (`EmptyRowsStop::RowIsEmpty`), and no text of a read after it
-    // is written (`QueryWarnings::end_run`); the pool's writer writes the same bytes.
+    // rows stops after its `Length=` (`EmptyRowsStop::RowIsEmpty`): its error comes after the
+    // report's last bytes, and nothing is written after it, no text of a later read either
+    // (`QueryWarnings::end_run`); the parallel writer (`x_pairwise_par::write` given a pool, which
+    // `LOSAT_X_PAIRWISEPAR` does not turn off here) writes the same bytes.
     #[test]
     fn blastx_query_warnings_follow_the_reports_before_them() {
         use std::sync::{Arc as SyncArc, Mutex};
@@ -8609,9 +8704,19 @@ mod tblastx_tests {
                 pool,
             )
             .unwrap_err();
+            // The merged stream when the error comes back: the report's last bytes are there
+            // (written to the stream, or held by its writer until the flush that comes before the
+            // error's post, as `cerr`'s tie flushes `cout`).
+            let at_error = [log.0.lock().unwrap().as_slice(), held.0.as_slice()].concat();
             drop(warnings);
             held.flush().unwrap();
             let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+            assert_eq!(
+                text.as_bytes(),
+                at_error.as_slice(),
+                "bytes written after the error (pool {})",
+                pool.is_some()
+            );
             (text, error.to_string())
         };
         let (serial, error) = run(None);
@@ -8631,10 +8736,7 @@ mod tblastx_tests {
             "{serial}"
         );
         crate::utils::threading::x_with_search_pool_local(4, "test", |pool| {
-            assert_eq!(
-                run(super::super::x_pairwise_par::pool(pool)),
-                (serial.clone(), error.clone())
-            );
+            assert_eq!(run(Some(pool)), (serial.clone(), error.clone()));
             Ok(())
         })
         .unwrap();

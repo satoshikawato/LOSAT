@@ -14,8 +14,7 @@
 //! gets NCBI's hits whatever queries came before it.
 
 use super::scan::{
-    q_place, s_place, scan_subject, RpsBlockPool, RpsBuckets, RpsHits, RpsReadCursor, RpsTable,
-    MAX_SCAN_HITS,
+    q_place, s_place, scan_subject, RpsBlockPool, RpsBuckets, RpsHits, RpsTable, MAX_SCAN_HITS,
 };
 use super::RpsRows;
 use crate::algorithm::blastp::extension::BlastpUngappedData;
@@ -365,66 +364,74 @@ fn two_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        let mut cursor = RpsReadCursor::default();
-        while let Some(RpsHits {
-            entries,
-            q_base,
-            s_base,
-        }) = buckets.next_block(&mut cursor)
-        {
-            // Each hit as its places in the block (`RpsHits`): `query_offset - subject_offset` is
-            // `q - s + diag_base` and `subject_offset + diag_offset` is `s + s_diag_offset`, the
-            // same 32-bit values; the extension reads the offsets whole.
-            let (q_base, s_base) = (q_base as i32, s_base as i32);
-            let diag_base = q_base.wrapping_sub(s_base);
-            let s_diag_offset = diag_offset.wrapping_add(s_base);
-            // An index loop (the slice iterator's step took six instructions per hit here).
-            let mut next = 0;
-            while next < entries.len() {
-                let hit_entry = entries[next];
-                next += 1;
-                let q = q_place(hit_entry) as i32;
-                let s = s_place(hit_entry) as i32;
-                let diag_coord = (q.wrapping_sub(s).wrapping_add(diag_base) & diag_mask) as usize;
-                let entry = &mut table[diag_coord];
-                if entry.flag() {
-                    if s + s_diag_offset < entry.last_hit() {
-                        continue;
-                    }
-                    entry.set(s + s_diag_offset, false);
-                } else {
-                    // `last_hit - diag_offset` less the segment's first offset.
-                    let last_hit = entry.last_hit() - s_diag_offset;
-                    let diff = s - last_hit;
-                    if diff >= window {
-                        entry.set(s + s_diag_offset, entry.flag());
-                        continue;
-                    }
-                    if diff < wordsize {
-                        continue;
-                    }
-                    let query_offset = q_base + q;
-                    let subject_offset = s_base + s;
-                    let hit = pssm_extend_two_hit(
-                        &params.rows,
-                        subject,
-                        s_base + last_hit + wordsize,
-                        subject_offset,
-                        query_offset,
-                        params.dropoff,
-                        wordsize,
-                    );
-                    if hit.ungapped_data.score >= params.cutoff {
-                        init_hsps.push(RpsInitHsp {
-                            q_off: query_offset,
-                            s_off: subject_offset,
-                            ungapped: hit.ungapped_data,
-                        });
-                    }
-                    if hit.right_extend {
-                        entry.set(hit.s_last_off - (wordsize - 1) + diag_offset, true);
+        // The hits in passes of groups of buckets (`RpsBuckets::start_group`), each read as NCBI reads its
+        // buckets: the order of the hits is NCBI's whatever the grouping.
+        for group in 0..buckets.groups() {
+            if !buckets.needs_pass(group) {
+                continue;
+            }
+            let mut cursor = buckets.start_group(&params.table, subject, group);
+            while let Some(RpsHits {
+                entries,
+                q_base,
+                s_base,
+            }) = buckets.next_block(&mut cursor)
+            {
+                // Each hit as its places in the block (`RpsHits`): `query_offset - subject_offset` is
+                // `q - s + diag_base` and `subject_offset + diag_offset` is `s + s_diag_offset`, the
+                // same 32-bit values; the extension reads the offsets whole.
+                let (q_base, s_base) = (q_base as i32, s_base as i32);
+                let diag_base = q_base.wrapping_sub(s_base);
+                let s_diag_offset = diag_offset.wrapping_add(s_base);
+                // An index loop (the slice iterator's step took six instructions per hit here).
+                let mut next = 0;
+                while next < entries.len() {
+                    let hit_entry = entries[next];
+                    next += 1;
+                    let q = q_place(hit_entry) as i32;
+                    let s = s_place(hit_entry) as i32;
+                    let diag_coord =
+                        (q.wrapping_sub(s).wrapping_add(diag_base) & diag_mask) as usize;
+                    let entry = &mut table[diag_coord];
+                    if entry.flag() {
+                        if s + s_diag_offset < entry.last_hit() {
+                            continue;
+                        }
+                        entry.set(s + s_diag_offset, false);
                     } else {
-                        entry.set(s + s_diag_offset, entry.flag());
+                        // `last_hit - diag_offset` less the segment's first offset.
+                        let last_hit = entry.last_hit() - s_diag_offset;
+                        let diff = s - last_hit;
+                        if diff >= window {
+                            entry.set(s + s_diag_offset, entry.flag());
+                            continue;
+                        }
+                        if diff < wordsize {
+                            continue;
+                        }
+                        let query_offset = q_base + q;
+                        let subject_offset = s_base + s;
+                        let hit = pssm_extend_two_hit(
+                            &params.rows,
+                            subject,
+                            s_base + last_hit + wordsize,
+                            subject_offset,
+                            query_offset,
+                            params.dropoff,
+                            wordsize,
+                        );
+                        if hit.ungapped_data.score >= params.cutoff {
+                            init_hsps.push(RpsInitHsp {
+                                q_off: query_offset,
+                                s_off: subject_offset,
+                                ungapped: hit.ungapped_data,
+                            });
+                        }
+                        if hit.right_extend {
+                            entry.set(hit.s_last_off - (wordsize - 1) + diag_offset, true);
+                        } else {
+                            entry.set(s + s_diag_offset, entry.flag());
+                        }
                     }
                 }
             }
@@ -496,46 +503,54 @@ fn one_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        let mut cursor = RpsReadCursor::default();
-        while let Some(RpsHits {
-            entries,
-            q_base,
-            s_base,
-        }) = buckets.next_block(&mut cursor)
-        {
-            // (`two_hit`: `subject_offset - query_offset` is `s - q - diag_base`.)
-            let (q_base, s_base) = (q_base as i32, s_base as i32);
-            let diag_base = q_base.wrapping_sub(s_base);
-            let s_diag_offset = diag_offset.wrapping_add(s_base);
-            // An index loop (the slice iterator's step took six instructions per hit here).
-            let mut next = 0;
-            while next < entries.len() {
-                let hit_entry = entries[next];
-                next += 1;
-                let q = q_place(hit_entry) as i32;
-                let s = s_place(hit_entry) as i32;
-                let diag_coord = (s.wrapping_sub(q).wrapping_sub(diag_base) & diag_mask) as usize;
-                let entry = &mut table[diag_coord];
-                let diff = s - (entry.last_hit() - s_diag_offset);
-                if diff >= 0 {
-                    let query_offset = q_base + q;
-                    let subject_offset = s_base + s;
-                    let hit = pssm_extend_one_hit(
-                        &params.rows,
-                        subject,
-                        subject_offset,
-                        query_offset,
-                        params.dropoff,
-                        wordsize,
-                    );
-                    if hit.ungapped_data.score >= params.cutoff {
-                        init_hsps.push(RpsInitHsp {
-                            q_off: query_offset,
-                            s_off: subject_offset,
-                            ungapped: hit.ungapped_data,
-                        });
+        // The hits in passes of groups of buckets (`RpsBuckets::start_group`), each read as NCBI reads its
+        // buckets: the order of the hits is NCBI's whatever the grouping.
+        for group in 0..buckets.groups() {
+            if !buckets.needs_pass(group) {
+                continue;
+            }
+            let mut cursor = buckets.start_group(&params.table, subject, group);
+            while let Some(RpsHits {
+                entries,
+                q_base,
+                s_base,
+            }) = buckets.next_block(&mut cursor)
+            {
+                // (`two_hit`: `subject_offset - query_offset` is `s - q - diag_base`.)
+                let (q_base, s_base) = (q_base as i32, s_base as i32);
+                let diag_base = q_base.wrapping_sub(s_base);
+                let s_diag_offset = diag_offset.wrapping_add(s_base);
+                // An index loop (the slice iterator's step took six instructions per hit here).
+                let mut next = 0;
+                while next < entries.len() {
+                    let hit_entry = entries[next];
+                    next += 1;
+                    let q = q_place(hit_entry) as i32;
+                    let s = s_place(hit_entry) as i32;
+                    let diag_coord =
+                        (s.wrapping_sub(q).wrapping_sub(diag_base) & diag_mask) as usize;
+                    let entry = &mut table[diag_coord];
+                    let diff = s - (entry.last_hit() - s_diag_offset);
+                    if diff >= 0 {
+                        let query_offset = q_base + q;
+                        let subject_offset = s_base + s;
+                        let hit = pssm_extend_one_hit(
+                            &params.rows,
+                            subject,
+                            subject_offset,
+                            query_offset,
+                            params.dropoff,
+                            wordsize,
+                        );
+                        if hit.ungapped_data.score >= params.cutoff {
+                            init_hsps.push(RpsInitHsp {
+                                q_off: query_offset,
+                                s_off: subject_offset,
+                                ungapped: hit.ungapped_data,
+                            });
+                        }
+                        entry.set(hit.s_last_off - (wordsize - 1) + diag_offset, entry.flag());
                     }
-                    entry.set(hit.s_last_off - (wordsize - 1) + diag_offset, entry.flag());
                 }
             }
         }
@@ -770,5 +785,64 @@ mod tests {
         assert_eq!(scratch.diag.array.len(), 8192);
         assert_eq!(scratch.diag.offset, 40);
         assert!(scratch.diag.array.iter().all(|&entry| entry == 0));
+    }
+
+    // PS12m: the word finders read the hits in passes of buckets; the initial HSPs (and their
+    // order) are the same for one pass of every bucket and for passes of 1, 2 and 64 buckets, the
+    // two-hit and the one-hit finder, the diagonals of a long query sharing the table's entries.
+    #[test]
+    fn the_initial_hsps_do_not_depend_on_the_groups_of_buckets() {
+        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
+        let rows_count = 9_000usize;
+        let mut rows = vec![[-4i32; 28]; rows_count];
+        for row in rows.iter_mut().take(rows_count - 1) {
+            row[1] = 5;
+        }
+        rows[rows_count - 1] = [-32767; 28];
+        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
+        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
+        let w = (1 << 10) | (1 << 5) | 1;
+        // The word A A A hits every 37th row, in ascending order (five buckets, one overflow run).
+        let entries: Vec<i32> = (2..rows_count as i32 - 1).step_by(37).collect();
+        cells[w] = [entries.len() as i32, entries[0], 0, 0];
+        pv[w / 64] |= 1 << (w % 64);
+        let overflow = entries[1..].to_vec();
+        let mut query = Vec::new();
+        for run in [30usize, 12, 55, 9, 80] {
+            query.extend(std::iter::repeat_n(1u8, run));
+            query.extend([20u8, 20]);
+        }
+        let hits_of = |window: i32, group_buckets: usize| {
+            let params = RpsWordParams {
+                rows: RpsRows { rows: &rows },
+                table: RpsTable {
+                    cells: &cells,
+                    overflow: &overflow,
+                    pv: &pv,
+                },
+                window,
+                cutoff: 1,
+                dropoff: 20,
+            };
+            let mut scratch = RpsWordScratch {
+                diag: RpsDiagTable::new(),
+                buckets: RpsBuckets::with_group(rows_count, Default::default(), group_buckets),
+            };
+            scratch.diag.reset_for(rows_count as i32, window);
+            let mut hits = Vec::new();
+            word_finder(&params, &mut scratch, &query, &mut hits);
+            hits
+        };
+        for window in [40, 0] {
+            let whole = hits_of(window, usize::MAX / 2);
+            assert!(whole.len() > 10, "window {window}: {} HSPs", whole.len());
+            for group_buckets in [1, 2, 64] {
+                assert_eq!(
+                    hits_of(window, group_buckets),
+                    whole,
+                    "{window} {group_buckets}"
+                );
+            }
+        }
     }
 }

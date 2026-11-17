@@ -302,7 +302,7 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
 /// set up to the NULLB after frame -3 (the byte after it is allocated and never written). Beyond
 /// either NCBI reads bytes it never set or memory that is not its own, and can crash; the window
 /// reads every letter there as the sentinel NULLB, as it reads the NULLB right after a sequence
-/// (PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.46 extends from BLASTP to TBLASTN).
+/// (PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.47 extends from BLASTP to TBLASTN).
 pub(super) struct XOneHitBuffers<'a> {
     /// The query batch's contexts (`aa_seq`: a NULLB, the letters and their NULLB), which NCBI's
     /// `query->sequence` holds one after another from `context_offsets` on.
@@ -2338,7 +2338,7 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 // (blast_hits.c:2700-2705; LOSAT's TBLASTN refuses `-ungapped`). NCBI BLAST+ 2.17.0 dies there with
 // SIGSEGV (probes on ws, 2026-11-17: `-subject`, `-subject_loc` and `-db`, frames + and -, a matrix
 // query at `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS
-// 1.45, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or
+// 1.46, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or
 // the hit list; at the default word size 3, any of 9 or 10 bases in the probes; with `-word_size 2`
 // they reach it too) lets the search go on, in NCBI and LOSAT alike.
 /// The refusal of a read of the translation of a frame of a subject of fewer than 12 bases

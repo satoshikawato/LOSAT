@@ -596,7 +596,7 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
 /// Past those buffers NCBI reads memory that is not its own (the byte after the query batch's
 /// `calloc(buflen + 1)`, after a `-subject` protein's `malloc(len + 2)`, after the last memory page
 /// of a database volume's sequence file) and can crash; LOSAT reads every letter past the sequence
-/// as the sentinel (`gapped_start_window`; PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.46
+/// as the sentinel (`gapped_start_window`; PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.47
 /// extends from BLASTP to BLASTX). Out of line, so that the gapped stage of the other HSPs keeps its
 /// code.
 #[cold]

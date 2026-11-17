@@ -943,7 +943,7 @@ impl Indexer<'_> {
         if !info.is_feat {
             if let Some(loc) = info.table_loc {
                 let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
-                self.map_location(&map, Event::TableLocation)?;
+                self.map_location(&map, Event::TableLocation, loc)?;
                 self.handles.end_object();
             }
             return Ok(());
@@ -997,7 +997,7 @@ impl Indexer<'_> {
                         return Err(self.null_pointer());
                     };
                     let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
-                    self.map_location(&map, Event::Row)?;
+                    self.map_location(&map, Event::Row, loc)?;
                     // `key.m_Handle` takes each handle of a non-empty range (mapped).
                     if map.map.iter().any(|(_, hr)| !hr.overlapping().is_empty()) {
                         self.handles.set_key(None);

@@ -227,6 +227,12 @@ impl NcbiException {
         self.site
     }
 
+    /// `GetType()::GetErrCodeString()` of the exception: `CSeqDBException::eInvalid`, which
+    /// tells the class that the programs' `CATCH_ALL` reports apart (`cli::NativeError::exception`).
+    pub fn kind(&self) -> &'static str {
+        self.site.kind
+    }
+
     /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
     /// [`ThrowSite::generated`] names none).
     pub fn places_known(&self) -> bool {

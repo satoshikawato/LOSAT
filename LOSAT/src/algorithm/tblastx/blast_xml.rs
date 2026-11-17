@@ -302,6 +302,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             length: &subject_length,
             parsed: &database.reported.parsed,
             parsed_taxonomy: &taxa.parsed_taxonomy,
+            loads: &database.reported.loads,
         },
         None => XmlSubjects::Records {
             records: run.subjects,
@@ -398,7 +399,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                     }
                     end += 1;
                 }
-                let subject = cache.get(s_idx as usize, PROGRAM)?;
+                let subject = cache.get(s_idx as usize, PROGRAM)?.names()?;
                 let subject_record_length = subjects.length(s_idx as usize);
                 let hit = XmlHit::of(subject, subject_record_length);
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
@@ -470,8 +471,16 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             }
             Ok(())
         });
-        // A failed query leaves its partial bytes in `buf`, which the error return drops.
-        written?;
+        // A query whose report raised an exception that NCBI's report function catches
+        // (`CaughtException`: the `Hit` of a subject whose lookup throws, `HitNames`): the XML2 and
+        // JSON documents leave its report out (`Xml2Document::report`), and the post of the
+        // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
+        // query leaves its partial bytes in `buf`, which the error return drops.
+        if let Some(post) =
+            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.program)?
+        {
+            posts.caught(post);
+        }
         posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(
             &buf,

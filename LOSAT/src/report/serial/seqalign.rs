@@ -196,6 +196,28 @@ impl Strand {
             Strand::Unknown
         }
     }
+
+    /// The strand after `CDense_seg::Reverse` (outfmt 0's minus-strand query row,
+    /// `report::query_anchored::HspAlnVec::set`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:647-654
+    /// ```c++
+    ///     if (IsSetStrands()) {
+    ///         NON_CONST_ITERATE (CDense_seg::TStrands, i, SetStrands()) {
+    ///             switch (*i) {
+    ///             case eNa_strand_plus:  *i = eNa_strand_minus; break;
+    ///             case eNa_strand_minus: *i = eNa_strand_plus;  break;
+    ///             default:                    break;//do nothing if not + or -
+    ///             }
+    ///         }
+    /// ```
+    pub(crate) fn reversed(self) -> Self {
+        match self {
+            Strand::Plus => Strand::Minus,
+            Strand::Minus => Strand::Plus,
+            Strand::Unknown => Strand::Unknown,
+        }
+    }
 }
 
 /// The segments of one HSP: `starts` (2 per segment, query then subject, `GAP_VALUE` for a

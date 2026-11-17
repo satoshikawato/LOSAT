@@ -119,6 +119,10 @@ FASTA files:
   `x2d_b1_r0` (the word and one letter: the start one past the NULLB). Made by the line's `gen_x2d.py` (the
   PSSM's rows of -6 but row 9 at -61, W +60 at row 10, V -60, K +1, S +4 at row 14, the motif MHYFREDQILTA at
   +25; subjects of random codons without another TGG or any CCA, so that no other frame holds a W).
+  `x2d_m3_s.fna` there (rows `db.x2.tblastn.pssmpast.*`, line RG J2A, from its review 1) is the reverse complement of
+  `AA` and `x2d_b1_r0`: its frame -3, the last frame of NCBI's translation buffer, ends with the word and one letter.
+  `x2d_d50r.asn.gz` is `x2d_d50.asn.gz` with its `-` column at 50 on rows 16 to 20 too (title `x2d dash 50 rows
+  13-20`; `gzip -9n` of the text PSSM), so that the window's NULLBs past frame -3's NULLB sum above 0.
 
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
@@ -134,9 +138,25 @@ FASTA files:
   one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)
   or of the query batch. `x2f_in.faa` is `s1` (as `x2f_s1`) followed by a filler protein `x2f_f1`, and
   `x2f_last.faa` the same two in the other order, for the databases `x2f_in` and `x2f_last`.
-  `x2f_page.faa` is `x2f_f1` repeated to 4,075 letters, then `x2f_s1`, for the database `x2f_page`, whose
+  `x2f_page.faa` is a filler of 4,075 `X` (`x2f_f1`, no hits), then `x2f_s1`, for the database `x2f_page`, whose
   `.psq` file is exactly 4,096 bytes (1 + 4,076 + 19): a window past `s1`'s NULLB leaves the file's last
-  memory page.
+  memory page. `x2f_pagepad` (line RG J2A, row `db.x2f.bx.pagepad.6`, the expectation of `db.x2f.bx.page.6`) is
+  `x2f_page` with 16 zero bytes after its `.psq` file (4,112 bytes; `.pin` and `.phr` copied unchanged), so that
+  NCBI's window past `s1` reads zeros inside its mapping. `x2f_c0346_q.fna` / `x2f_c0346_s.faa` (case c0346 of the
+  survey, rows `db.x2f.bx.crash.*`; the database `x2f_c0346` of its subject, title `x2f c0346 subject`): windows past
+  the query batch's buffer, where NCBI BLAST+ 2.17.0 exits with SIGSEGV natively; the rows are frozen from NCBI
+  under valgrind.
+
+- The databases `x2_negwin` and `x2_negtail` (rows `db.x2.tblastn.qpast.db.6` and `db.x2.tblastn.frame.db.6`, line
+  RG J2A; titles `x2 negwin subject (VNV in frame 1)` and `x2 negtail subject (VNV at the end of frame -3)`,
+  `-dbtype nucl -blastdb_version 4`, only `.nin .nsq .nhr` kept) are `LOSAT/tests/fasta/outfmt0/x2_negwin_s.fna` and
+  `x2_negtail_s.fna`: the `-db` twins of the rows `db.x2.tblastn.qpast.6` (the query `x2_negpast_q.faa`, 15 letters,
+  whose one-hit windows pass the query batch's buffer) and `db.x2.tblastn.frame.6` (windows past the subject's
+  translation buffer).
+- `LOSAT/tests/fasta/outfmt0/j2a_bp_q.faa` / `j2a_bp_s.faa` (row `db.j2a.bp.past.6`, line RG J2A, from its review 1):
+  the round-2 audit's BLASTP case R2A2-2 (`docs/evidence/losat_web_e2e/audit/round2/a2_blastp.md`), a query of 37
+  letters and two subjects of 20 and 14, whose one-hit windows pass the query batch's buffer and a subject's,
+  where NCBI BLAST+ 2.17.0 reads past its buffers (natively it crashed in the audit's runs).
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
@@ -166,6 +186,10 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "a filler, then x2f_s1" -blastdb_version 4
     makeblastdb -in tests/db_search/x2f_page.faa -dbtype prot -out tests/db_search/x2f_page \
         -title "a filler of 4,075 letters, then x2f_s1" -blastdb_version 4
+    for x in pin phr; do cp tests/db_search/x2f_page.$x tests/db_search/x2f_pagepad.$x; done
+    { cat tests/db_search/x2f_page.psq; head -c 16 /dev/zero; } > tests/db_search/x2f_pagepad.psq
+    makeblastdb -in tests/db_search/x2f_c0346_s.faa -dbtype prot -out tests/db_search/x2f_c0346 \
+        -title "x2f c0346 subject" -blastdb_version 4
     makeblastdb -in tests/fasta/outfmt0/x2g_c0054_s.faa -dbtype prot -out tests/db_search/x2g_c0054 \
         -title "x2g c0054 subject" -blastdb_version 4
     for n in f0616:x2g_f0616_s.faa f3147:x2g_f3147_s.faa f1144:x2g_f1144_s.faa ms:x2g_ms.faa rk:x2g_rk.faa; do
@@ -260,6 +284,10 @@ Run from `LOSAT/`:
         -title "nucleotide slices of two shrimp viruses" -blastdb_version 4
     makeblastdb -in tests/db_search/tgc4.fna -dbtype nucl -out tests/db_search/tgc4 \
         -title "slices of a genetic code 4 genome" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2_negwin_s.fna -dbtype nucl -out tests/db_search/x2_negwin \
+        -title "x2 negwin subject (VNV in frame 1)" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2_negtail_s.fna -dbtype nucl -out tests/db_search/x2_negtail \
+        -title "x2 negtail subject (VNV at the end of frame -3)" -blastdb_version 4
     rm tests/db_search/tslice.njs tests/db_search/tgc4.njs
 
 TBLASTN tblastn-fast inputs (rows `tfast.*` of `outfmt0_manifest.tsv` and `db.tfast.*`, line DI4: AMRFinderPlus runs
@@ -2041,3 +2069,11 @@ reverse complement as `lcl|q<DEL>1` and `lcl|q<DEL>2`, and `qp.faa` the protein 
 The rows `db.dbtitle.blastn.qdel.8` and `db.dbtitle.blastx.qdel.9` write the title and, with `-parse_deflines`, the query ids
 with `#` and NCBI's 803.7 message for each byte; fasta_input's `blastp.seqannot_delid_s.*` searches `qp.faa` against
 `pdel.faa` (`-subject -parse_deflines`, its id `lcl|p<DEL>1`).
+
+A `pdb` Seq-id whose chain is an INTEGER outside 0-255 without a chain-id (line RG item K4j; rows `db.pdbchain.*`):
+`pdbchain/make_pdbchain.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb) writes the version 4 database
+`pdbchain/pdbchain` of five sequences without a title, each with a `gb|AB60000<n>.1|` Seq-id and a `pdb` one with the
+chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n>|<letter>` and a rewrite of the stored
+deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
+`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
+(with the pdb one alone it prints `Unknown` and `no longer exists in database`).

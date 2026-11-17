@@ -106,15 +106,60 @@ pub(crate) fn replaced_posts(
 //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
 //     }                                                                       \
 // ```
-/// An exception of NCBI's XML stream that ends the run (`CATCH_ALL`: `Error: `, `what()`, exit
-/// status 255; `cli::NativeError::exception`). What NCBI posted before it (the 803.7 posts of the
-/// object, the texts of the loads before it) is written to the run's diagnostics first, by the one
-/// writer of a document's posts (`report::query_warnings::write_hit_posts`), which hands this error
-/// back after them (`DocumentPosts::ends_run`).
+/// An exception of NCBI's XML stream, or of the making of a 13 or 14 side file's report, that ends
+/// the run (`CATCH_ALL`: `Error: `, `what()`, exit status 255; a `CSeqDBException` of a subject's
+/// lookup `BLAST Database error: `, its message, exit status 2; `cli::NativeError::exception`).
+/// What NCBI posted before it (the 803.7 posts of the object, the texts of the loads before it)
+/// is written to the run's diagnostics first, by the one writer of a document's posts
+/// (`report::query_warnings::write_hit_posts`), which hands this error back after them
+/// (`DocumentPosts::ends_run`).
 pub(crate) fn run_ending_exception(
     exception: &crate::ncbi_exception::NcbiException,
 ) -> anyhow::Error {
     crate::cli::NativeError::exception(exception).into()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778 (quoted at
+// `blast_xml2::Xml2Document::failed`), 877-888
+// ```c++
+// BlastJSON_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream )
+// {
+// 	blastxml2::CBlastOutput2 bxmlout;
+// 	try {
+// 		s_FillBlastOutput(bxmlout, data);
+// 		s_WriteJSONObjectNoHeader(bxmlout, out_stream);
+// 	}
+// 	catch(CException &e){
+// 	    ERR_POST(Error << e.GetMsg() << e.what() );
+// 	    return;
+// 	}
+// ```
+/// The outcome `written` of one query's structured report (`StructuredXml::query` of
+/// `document`): `Ok(None)` where the report is written; where it raised an exception that NCBI's
+/// report function catches (`CaughtException`: the stream forms of the XML2 and JSON documents,
+/// outfmt 16 and 15, leave the report out, `blast_xml2::Xml2Document::report`), `Ok(Some)` with
+/// the program's post of it (`ERR_POST(Error << ...)` after the prefix `[program] `,
+/// `StructuredXml::caught_message`), which comes after the posts of the loads that the report made
+/// before it (`query_warnings::HitPosts::caught`); any other error is returned, and the caller
+/// drops what the failed report left in its buffer.
+pub fn caught_post<D: StructuredXml + ?Sized>(
+    written: Result<()>,
+    document: &D,
+    program: &str,
+) -> Result<Option<Vec<u8>>> {
+    match written {
+        Ok(()) => Ok(None),
+        Err(error) => match error.downcast::<super::CaughtException>() {
+            Ok(super::CaughtException(exception)) => {
+                Ok(Some(crate::ncbi_exception::error_post_line(
+                    None,
+                    Some(program),
+                    document.caught_message(&exception).as_bytes(),
+                )))
+            }
+            Err(error) => Err(error),
+        },
+    }
 }
 
 /// What a document's writer hands its caller with the bytes it wrote since the last

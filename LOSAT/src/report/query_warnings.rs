@@ -34,7 +34,7 @@ pub struct QueryWarnings<'a> {
     /// The BLAST archive's handle, which saves each whole post as one message (`Posts::write`).
     archive: Option<&'a ArchiveHandle>,
     /// Standard error (the CLI) or the caller's diagnostics.
-    pub sink: &'a mut (dyn Write + Send),
+    pub sink: &'a mut dyn Write,
     /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
     /// how many of them are written.
     reads: Option<ReadCursor<'a>>,
@@ -626,6 +626,9 @@ pub struct HitPosts {
     document: Vec<crate::report::blast_xml::writer::DocumentPost>,
     /// The report made no read after its last marked `Hit` (`DocumentPosts::cut`).
     cut: bool,
+    /// The program's post of an exception that the report raised and NCBI's report function
+    /// caught (`blast_xml::writer::caught_post`), after every other post of the report.
+    caught: Vec<u8>,
     /// The exception that ends the run after these posts (`DocumentPosts::ends_run`).
     ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
     /// Where NCBI's insertions end in the report, and its regions and flushes
@@ -683,9 +686,23 @@ impl HitPosts {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:757-760
+    // ```c++
+    // 	catch(CException &e){
+    // 	    ERR_POST(Error << e.GetMsg() << e.what() );
+    // 	    return;
+    // 	}
+    // ```
+    /// The report raised an exception that NCBI's report function catches: its post `post`
+    /// (`blast_xml::writer::caught_post`) comes after the texts of the loads that the report made
+    /// before it and the document's posts (`write_posts_to`).
+    pub fn caught(&mut self, post: Vec<u8>) {
+        self.caught = post;
+    }
+
     /// Whether nothing of these posts goes to the diagnostics (no text, no document post).
     fn posts_nothing(&self) -> bool {
-        self.texts.is_empty() && self.document.is_empty()
+        self.texts.is_empty() && self.document.is_empty() && self.caught.is_empty()
     }
 
     /// Writes `report`, the query's output, to `writer`, and at each marked `Hit`, after the
@@ -785,8 +802,10 @@ pub fn write_hit_posts(
 /// their own cursor, calls it with that): `report` to `writer` with the posts of its `Hit`s and of
 /// its document (`HitPosts::write`) to `sink`, the reads' texts through `reads`. A report that made
 /// no read after its last `Hit` (`DocumentPosts::cut`) moves the texts of the later reads
-/// (`ReadCursor::cut`); an exception of NCBI's XML stream that ends the run is returned after the
-/// posts (`blast_xml::writer::run_ending_exception`), and no text of a read is written after it.
+/// (`ReadCursor::cut`); the post of an exception that the report function caught
+/// (`HitPosts::caught`) comes after them; an exception of NCBI's XML stream that ends the run is
+/// returned after the posts (`blast_xml::writer::run_ending_exception`), and no text of a read is
+/// written after it.
 /// A failed write of the report's stream that NCBI's writer catches
 /// (`ostream::is_caught_report_write_failure`: an `Iteration` of BLAST XML, whose post the stream
 /// made) ends the report there as a cut one (no later `Hit` is made, nor its subject loaded); the
@@ -821,9 +840,10 @@ pub fn write_posts_to(
         if hits.ends_run.is_some() && !caught {
             cursor.end_run();
         } else if hits.cut || caught {
-            cursor.cut(query, writer, sink)?;
+            cursor.cut(query, writer, &mut *sink)?;
         }
     }
+    write_after(writer, sink, &hits.caught)?;
     match &hits.ends_run {
         Some(thrown) if !caught => Err(crate::report::blast_xml::writer::run_ending_exception(
             thrown,
@@ -937,8 +957,17 @@ impl<'a> QueryWarnings<'a> {
     /// The texts of the subjects' reads (`with_subject_reads`; `None` without a read that writes
     /// one) and the sink, apart: a writer that writes texts of its own to the sink between the
     /// reads places them with the cursor (`tax_report::write_report`).
-    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut (dyn Write + Send)) {
+    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut dyn Write) {
         (self.reads.as_mut(), &mut *self.sink)
+    }
+
+    /// The run ends at the error of a report's writer (NCBI's exception, its stream's failure):
+    /// NCBI loads nothing after it, so no text of a read that is not written yet is written, also
+    /// not when the warnings end (`ReadCursor::end_run`).
+    pub fn end_run(&mut self) {
+        if let Some(cursor) = self.reads.as_mut() {
+            cursor.end_run();
+        }
     }
 
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),
@@ -960,7 +989,7 @@ impl<'a> QueryWarnings<'a> {
     pub fn of_posts(
         before: &'a [Posts],
         archive: Option<&'a ArchiveHandle>,
-        sink: &'a mut (dyn Write + Send),
+        sink: &'a mut dyn Write,
     ) -> Self {
         Self {
             before,
@@ -1631,6 +1660,37 @@ mod tests {
         let mut alone = Vec::new();
         write_hit_posts(b"<H5><H6>", &marks, 0, &mut alone, None).unwrap();
         assert_eq!(alone, b"<H5><H6>");
+    }
+
+    /// A JSON report that raised an exception its report function catches (line DBID pfoff-1: the
+    /// `Hit` of a subject whose lookup throws): the separator before it stays, the texts of the
+    /// loads of the `Hit`s before it come after it, the read of the subject that throws and those
+    /// after it are not written (`cut`: NCBI loads none of them), and the exception's post comes
+    /// last (blastp 2.17.0, outfmt 15 of `pP pU`, `R/mixdb2/review1/out/ncbi/bp.lim1.U2.15`).
+    #[test]
+    fn the_post_of_a_caught_exception_follows_the_loads_before_it() {
+        let reads: Vec<QueryReads> = vec![vec![
+            SubjectRead::of_text(1, b"R1\n"),
+            SubjectRead::of_text(2, b"R2\n"),
+        ]];
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
+        let mut posts = HitPosts::new(warnings.reads_with_texts(0));
+        posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+        posts.document(crate::report::blast_xml::DocumentPosts {
+            cut: true,
+            ..Default::default()
+        });
+        posts.caught(b"Error: [blastp] E\n".to_vec());
+        write_hit_posts(b",\n", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, ",\nR1\nT1\nError: [blastp] E\n");
+        // Without warnings the post would be lost: LOSAT's internal error.
+        let mut alone = HitPosts::new(false);
+        alone.caught(b"Error: [blastp] E\n".to_vec());
+        assert!(write_hit_posts(b"", &alone, 0, &mut Vec::new(), None).is_err());
     }
 
     /// A read with what its load looks up (`ReadLoad`), the run's texts `texts`.

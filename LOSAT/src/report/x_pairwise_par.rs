@@ -1,5 +1,6 @@
-//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0) of
-//! BLASTN, TBLASTX and BLASTP formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
+//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0, and the
+//! query-anchored 1 to 4) of BLASTN, TBLASTX, BLASTP, TBLASTN and BLASTX (RPSTBLASTN with BLASTX's
+//! writer) formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
 //! rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`; `algorithm/blastp/blast_engine.rs`,
 //! `build_pairwise_hits`) made on it.
 //!
@@ -10,7 +11,9 @@
 //! that thread at 8 and 16 threads (local, 2026-10-19), 0.26 s of it in the rows; TBLASTX's
 //! outfmt 0 text 0.41 s of the genome 3 x 3 input at 16 threads, after LOSAT_X_TBXRPTPAR.
 //!
-//! The three writers have one shape (`write`): after the prolog, for each query its warnings
+//! The writers of the five programs have one shape (`write`; TBLASTN gives it no pool, BLASTX
+//! the pool of a query batch whose searches are done, `write_blastx_pairwise_report`): after the
+//! prolog, for each query its warnings
 //! (`QueryWarnings`), then its head (`QuerySections::head`: `\n\n`, the query's header, and
 //! either "No hits found" with its footer or the description table and a blank line), the
 //! alignments of each of the first `num_alignments` subjects in the order of the table
@@ -50,7 +53,8 @@
 //!
 //! Memory: formatted text of at most `WINDOW_BYTES_PER_THREAD` x threads estimated bytes (16 MiB
 //! at 16 threads) plus one piece (`PIECE_BYTES` plus one HSP) at a time, also for one large
-//! query; the groups of one window of queries.
+//! query; the groups of one window of queries. The estimates count the report's lines
+//! (`hit_estimate` at its `-line_length`), so the budget holds at every line length.
 //!
 //! BLASTN's and TBLASTX's outfmt 0 make their rows a window of queries at a time (line DBID, ID4f
 //! and ID4t): the windows of `query_windows` over the queries' estimates (`query_estimate_of` of
@@ -422,6 +426,10 @@ pub(crate) trait QuerySections: Sync {
     /// The subjects with alignments per query (`QueryGroup::aligned`).
     fn num_alignments(&self) -> usize;
 
+    /// The columns of a line of the report's alignments (`-line_length`, `m_LineLen`), which the
+    /// estimates of its windows, chunks and pieces count (`hit_estimate`).
+    fn line_length(&self) -> usize;
+
     /// Whether the hits of subject `s_idx` that follow those of subject `previous` are shown in
     /// `previous`'s hit (`report::db_subject::joins_as_copy`; `QueryGroup::new`).
     fn joins(&self, _previous: u32, _s_idx: u32) -> bool {
@@ -463,6 +471,30 @@ pub(crate) trait QuerySections: Sync {
         false
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
+    // ```c++
+    //             const CBioseq_Handle& subj_handle =
+    //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
+    //             if(subj_handle){
+    //                 //need to convert to denseg for stdseg
+    //                 if((*alnIter)->GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
+    //                     CTypeConstIterator<CStd_seg> ss = ConstBegin(**alnIter);
+    //                     CRef<CSeq_align> convertedDs =
+    //                         (*alnIter)->CreateDensegFromStdseg();
+    // ```
+    /// Where `merges_alignments`: the merge's work on aligned subject `s_idx` of the query
+    /// (`group`) after it reads the subject and before it reads the next one, all before the
+    /// section's first byte. NCBI makes the Dense-segs of the subject's Std-segs there, which can
+    /// throw (BLASTX's `EmptyRowsStop::StdSegLengths`); nothing by default.
+    fn merged_subject<W: crate::report::ostream::ReportWrite>(
+        &self,
+        _writer: &mut W,
+        _group: &QueryGroup<'_>,
+        _s_idx: u32,
+    ) -> io::Result<()> {
+        Ok(())
+    }
+
     /// The one section of the alignments of the query's aligned subjects (`group`), where
     /// `merges_alignments`.
     fn alignments<W: crate::report::ostream::ReportWrite>(
@@ -484,9 +516,22 @@ pub(crate) trait QuerySections: Sync {
     ) -> io::Result<()>;
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-304 (each app's `Run`)
+// ```c++
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+//     ...
+//         formatter.PrintEpilog(opt);
+//     ...
+//     } CATCH_ALL(status)
+// ```
 /// Writes the per-query reports of `hits_by_query` (each query's hits with their indices in
 /// the report's hit list; the first is query `first_query`) between a writer's prolog and
-/// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer.
+/// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer. An error of the
+/// writer (NCBI's exception out of `PrintOneResultSet`, a failed write of its stream) ends the
+/// run: NCBI leaves its formatting loop for `CATCH_ALL` and loads no subject after it, so no text
+/// of a read is written after it (`QueryWarnings::end_run`), also not when the warnings end.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
@@ -495,37 +540,44 @@ pub(crate) fn write<S: QuerySections, W: ReportWrite>(
     hits_by_query: &[Vec<(HspIndex, &PairwiseHit)>],
     subject_titles: &[Arc<[u8]>],
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
     pool: Option<&SearchPool<'_>>,
 ) -> io::Result<()> {
-    let pool = match pool {
-        Some(pool) if probe.is_none() => pool,
+    let written = match pool {
+        Some(pool) if probe.is_none() => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
+            write_parallel(
+                writer,
+                sections,
+                first_query,
+                hits_by_query,
+                subject_titles,
+                warnings.as_deref_mut(),
+                pool,
+            )
+            .map(|_| ())
+        }
         _ => {
             if on() {
                 crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", false);
             }
-            return write_serial(
+            write_serial(
                 writer,
                 sections,
                 first_query,
                 hits_by_query,
                 subject_titles,
                 probe,
-                warnings,
-            );
+                warnings.as_deref_mut(),
+            )
         }
     };
-    crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
-    write_parallel(
-        writer,
-        sections,
-        first_query,
-        hits_by_query,
-        subject_titles,
-        warnings,
-        pool,
-    )?;
-    Ok(())
+    if written.is_err() {
+        if let Some(warnings) = warnings {
+            warnings.end_run();
+        }
+    }
+    written
 }
 
 /// The serial writer: each query's warnings and parts on `writer`, in order.
@@ -566,12 +618,14 @@ fn write_serial<S: QuerySections, W: ReportWrite>(
                 //             const CBioseq_Handle& subj_handle =
                 //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
                 // ```
-                // The merge loads every aligned subject before the section's first byte; without
-                // one (`-num_alignments 0`) there is no section (`DisplaySeqalign` returns at once).
+                // The merge loads every aligned subject before the section's first byte
+                // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
+                // no section (`DisplaySeqalign` returns at once).
                 let aligned = group.aligned(sections.num_alignments());
                 if !aligned.is_empty() {
                     for &s_idx in aligned {
                         read(s_idx, &mut *writer)?;
+                        sections.merged_subject(writer, group, s_idx)?;
                     }
                     display.enter(writer)?;
                     sections.alignments(writer, q_idx, group)?;
@@ -591,15 +645,35 @@ fn write_serial<S: QuerySections, W: ReportWrite>(
     Ok(())
 }
 
-/// The estimated bytes of a hit's alignment: its header lines and three rows of ~80 bytes per
-/// 60 columns. Only the windows', chunks' and pieces' sizes depend on the estimates.
-fn estimate(hit: &PairwiseHit) -> usize {
-    hit_estimate(hit.hit.length)
+/// The estimated bytes of a hit's alignment in a report of `line_length` columns a line
+/// (`hit_estimate`). Only the windows', chunks' and pieces' sizes depend on the estimates.
+fn estimate(hit: &PairwiseHit, line_length: usize) -> usize {
+    hit_estimate(hit.hit.length, line_length)
 }
 
-/// `estimate` of a hit of alignment length `length`.
-fn hit_estimate(length: usize) -> usize {
-    400 + 4 * length
+/// The estimated bytes of the alignment of a hit of alignment length `length` in a report of
+/// `line_length` columns a line (`alignments_estimate` of one hit).
+#[inline]
+pub(crate) fn hit_estimate(length: usize, line_length: usize) -> usize {
+    alignments_estimate(1, length as u64, line_length)
+}
+
+/// The estimated bytes of the alignments of `hits` hits of `columns` alignment columns in all, in
+/// a report of `line_length` columns a line (`-line_length`, `QuerySections::line_length`): 400
+/// per hit for its header lines, three letters per column (the query row, the middle line and the
+/// subject row) and about 60 bytes of labels, coordinates and margins per line of three rows,
+/// `columns / line_length` lines (a line's rows of coordinates of width `w` take `35 + 5 * w`
+/// bytes besides their letters, 60 at `w` = 5). It holds at every line length: about 63 bytes
+/// per column at `-line_length 1`, the 3 letters per column and one line of margins (in the 400)
+/// at the largest. At the default 60 it is `400 * hits + 4 * columns`, the estimate before the
+/// line length was counted, so the default reports' windows, chunks and pieces are as they were.
+/// The query-anchored reports (outfmt 1 to 4) write fewer rows per hit and are estimated by it
+/// too. Counted in `u64`, which no alignment length overflows (a 32-bit target's estimate above
+/// `usize::MAX` saturates); a line length of 0, which `-line_length` refuses, counts as 1.
+#[inline]
+fn alignments_estimate(hits: u64, columns: u64, line_length: usize) -> usize {
+    let bytes = 400 * hits + 3 * columns + 60 * columns / line_length.max(1) as u64;
+    usize::try_from(bytes).unwrap_or(usize::MAX)
 }
 
 /// The estimated bytes of a query's header with "No hits found" or the start of its table, and
@@ -609,16 +683,32 @@ const QUERY_BYTES: usize = 512;
 /// The estimated bytes of one row of a query's description table.
 const DESCRIPTION_BYTES: usize = 100;
 
-/// The estimated bytes of a query's report (windows of queries).
-fn query_estimate(query_hits: &[(HspIndex, &PairwiseHit)]) -> usize {
-    query_estimate_of(query_hits.iter().map(|&(_, hit)| hit.hit.length))
+/// The estimated bytes of a query's report of `line_length` columns a line (windows of queries).
+fn query_estimate(query_hits: &[(HspIndex, &PairwiseHit)], line_length: usize) -> usize {
+    query_estimate_of(
+        query_hits.iter().map(|&(_, hit)| hit.hit.length),
+        line_length,
+    )
 }
 
-/// `query_estimate` of a query whose hits have the alignment lengths `lengths`.
-pub(crate) fn query_estimate_of(lengths: impl IntoIterator<Item = usize>) -> usize {
-    lengths.into_iter().fold(QUERY_BYTES, |bytes, length| {
-        bytes + DESCRIPTION_BYTES + hit_estimate(length)
-    })
+/// `query_estimate` of a query whose hits have the alignment lengths `lengths`, in a report of
+/// `line_length` columns a line (the report's `-line_length`, as its sections give it,
+/// `QuerySections::line_length`): the one estimate of the writer's windows and of the windows of
+/// rows that its callers make before it (BLASTN's, BLASTP's and TBLASTX's). The lines are counted
+/// over the query's columns in all (`alignments_estimate`), one division per query.
+pub(crate) fn query_estimate_of(
+    lengths: impl IntoIterator<Item = usize>,
+    line_length: usize,
+) -> usize {
+    let (hits, columns) = lengths
+        .into_iter()
+        .fold((0u64, 0u64), |(hits, columns), length| {
+            (hits + 1, columns + length as u64)
+        });
+    let heads = QUERY_BYTES as u64 + DESCRIPTION_BYTES as u64 * hits;
+    usize::try_from(heads)
+        .unwrap_or(usize::MAX)
+        .saturating_add(alignments_estimate(hits, columns, line_length))
 }
 
 /// The estimated bytes of a window of queries: `WINDOW_BYTES_PER_THREAD` per thread of `pool`
@@ -637,7 +727,7 @@ pub(crate) fn query_windows(estimates: &[usize], budget: usize) -> Vec<std::ops:
         let mut end = first;
         let mut bytes = 0usize;
         while end < estimates.len() && (end == first || bytes < budget) {
-            bytes += estimates[end];
+            bytes = bytes.saturating_add(estimates[end]);
             end += 1;
         }
         windows.push(first..end);
@@ -674,6 +764,7 @@ fn pieces<S: QuerySections>(
     groups: &[Option<QueryGroup<'_>>],
     piece_bytes: usize,
 ) -> Vec<Piece> {
+    let line_length = sections.line_length();
     let mut pieces = Vec::new();
     for (offset, group) in groups.iter().enumerate() {
         let query = first + offset;
@@ -699,8 +790,9 @@ fn pieces<S: QuerySections>(
                     estimate: aligned
                         .iter()
                         .flat_map(|s_idx| &group.subject_hits[s_idx])
-                        .map(|hit| estimate(hit))
-                        .sum(),
+                        .fold(0usize, |bytes, hit| {
+                            bytes.saturating_add(estimate(hit, line_length))
+                        }),
                 });
             }
             pieces.push(Piece {
@@ -710,10 +802,10 @@ fn pieces<S: QuerySections>(
             });
             continue;
         }
-        let (mut start, mut bytes, mut end) = ((0, 0), 0, (0, 0));
+        let (mut start, mut bytes, mut end) = ((0, 0), 0usize, (0, 0));
         for (position, s_idx) in aligned.iter().enumerate() {
             for (hsp, hit) in group.subject_hits[s_idx].iter().enumerate() {
-                bytes += estimate(hit);
+                bytes = bytes.saturating_add(estimate(hit, line_length));
                 end = (position, hsp + 1);
                 if bytes >= piece_bytes {
                     pieces.push(Piece {
@@ -784,6 +876,7 @@ fn format_piece<S: QuerySections>(
             let group = group.expect("a query with a section has hits");
             for &s_idx in group.aligned(sections.num_alignments()) {
                 mark(s_idx, &mut buffer)?;
+                sections.merged_subject(&mut buffer, group, s_idx)?;
             }
             sections.alignments(&mut buffer, piece.query, group)
         }
@@ -874,7 +967,7 @@ fn write_parallel_with<S: QuerySections, W: ReportWrite>(
     let (mut chunks, mut pieces_written) = (0, 0);
     let estimates: Vec<usize> = hits_by_query
         .iter()
-        .map(|query_hits| query_estimate(query_hits))
+        .map(|query_hits| query_estimate(query_hits, sections.line_length()))
         .collect();
     let mut display = DisplaySeqalign::default();
     for window in query_windows(&estimates, budget) {
@@ -888,7 +981,7 @@ fn write_parallel_with<S: QuerySections, W: ReportWrite>(
             let mut to = at;
             let mut bytes = 0usize;
             while to < planned.len() && (to == at || bytes < budget) {
-                bytes += planned[to].estimate;
+                bytes = bytes.saturating_add(planned[to].estimate);
                 to += 1;
             }
             let chunk = &planned[at..to];
@@ -982,6 +1075,10 @@ mod tests {
     impl QuerySections for Marks {
         fn num_alignments(&self) -> usize {
             self.num_alignments
+        }
+
+        fn line_length(&self) -> usize {
+            crate::report::pairwise::DEFAULT_LINE_LENGTH
         }
 
         fn joins(&self, previous: u32, s_idx: u32) -> bool {
@@ -1233,7 +1330,8 @@ mod tests {
                 )
                 .unwrap(),
                 Some((budget, piece_bytes)) => {
-                    crate::utils::threading::with_search_pool(4, "test", |pool| {
+                    // The warnings' sink need not be `Send` (BLASTX's diagnostics are not).
+                    crate::utils::threading::x_with_search_pool_local(4, "test", |pool| {
                         write_parallel_with(
                             &mut report,
                             &marks,
@@ -1425,14 +1523,15 @@ mod tests {
         write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
         let estimates: Vec<usize> = by_query
             .iter()
-            .map(|query_hits| query_estimate(query_hits))
+            .map(|query_hits| query_estimate(query_hits, marks.line_length()))
             .collect();
         assert_eq!(
             estimates,
             [0, 1, 2].map(|q_idx| query_estimate_of(
                 hits.iter()
                     .filter(|hit| hit.hit.q_idx == q_idx)
-                    .map(|hit| hit.hit.length)
+                    .map(|hit| hit.hit.length),
+                60
             ))
         );
         crate::utils::threading::with_search_pool(4, "test", |pool| {
@@ -1533,5 +1632,44 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    // NCBI's default line length (`kDfltLineLength`, 60): the estimate is the one before the line
+    // length was counted, `400 + 4 * length`, so the default reports' windows, chunks and pieces
+    // do not move; other line lengths count their lines.
+    #[test]
+    fn the_estimate_at_the_default_line_length_is_400_plus_4_per_column() {
+        let default = crate::report::pairwise::DEFAULT_LINE_LENGTH;
+        for length in (0..20_000).chain([1 << 20, (1 << 28) + 7]) {
+            assert_eq!(
+                hit_estimate(length, default),
+                400 + 4 * length,
+                "length {length}"
+            );
+        }
+        // One line of 3 rows per column at `-line_length 1`; the letters alone (and the 400) at
+        // the largest line length.
+        assert_eq!(hit_estimate(1000, 1), 400 + 63 * 1000);
+        assert_eq!(hit_estimate(1000, 7), 400 + 3000 + 60_000 / 7);
+        assert_eq!(hit_estimate(1000, 2147483647), 400 + 3000);
+        assert_eq!(hit_estimate(1000, 0), hit_estimate(1000, 1));
+        assert_eq!(
+            query_estimate_of([10, 20], 1),
+            QUERY_BYTES + 2 * DESCRIPTION_BYTES + hit_estimate(10, 1) + hit_estimate(20, 1)
+        );
+        // A query's estimate at 60 is its header's and each hit's, as before.
+        let lengths = [7, 59, 60, 61, 1000, 12_345];
+        assert_eq!(
+            query_estimate_of(lengths, default),
+            lengths.iter().fold(QUERY_BYTES, |bytes, &length| bytes
+                + DESCRIPTION_BYTES
+                + 400
+                + 4 * length)
+        );
+        // Elsewhere the lines are counted over the query's columns in all.
+        assert_eq!(
+            query_estimate_of([10, 11], 7),
+            QUERY_BYTES + 2 * DESCRIPTION_BYTES + 800 + 3 * 21 + 60 * 21 / 7
+        );
     }
 }

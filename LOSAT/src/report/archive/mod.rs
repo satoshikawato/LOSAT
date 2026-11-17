@@ -837,6 +837,9 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     }
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
+    fn null(&mut self) {}
+    fn utf8_str(&mut self, _: &[u8]) {}
+    fn delayed(&mut self, _: &[u8]) {}
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
         None
     }
@@ -968,6 +971,23 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
             })
             .collect(),
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:351-355
+// ```c++
+//     } CATCH_ALL(status)
+//     if(!m_Bah.GetMessages().empty()) {
+//     	const CArgs & a = GetArgs();
+//     	PrintErrorArchive(a, m_Bah.GetMessages());
+//     }
+// ```
+/// The error lines of a run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
+/// the failed write of the object manager's message after its diagnostic stream failed, a PSSM
+/// file that ends after its header): none, and NCBI writes the error archive of the messages saved
+/// before when there are some (`PrintErrorArchive` whatever the status). The command line's and
+/// the library's ends of a run both read it after `error_lines`.
+pub fn silent_end_lines(handle: &ArchiveHandle, error: &anyhow::Error) -> Option<Vec<Message>> {
+    (crate::cli::is_silent_end(error) && handle.has_messages()).then(Vec::new)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332

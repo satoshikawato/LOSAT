@@ -20,7 +20,7 @@ use crate::algorithm::tblastx::report::DisplayCode;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::query_anchored::{
-    database_label, query_record_letters, record_label, ReportSequences,
+    database_label, query_record_letters, record_label, Mask, ReportSequences,
 };
 
 /// What the sections of a TBLASTN report read (module doc).
@@ -81,13 +81,13 @@ impl ReportSequences for AnchoredSequences<'_> {
         }
     }
 
-    fn query_masks(&self, q_idx: usize, out: &mut Vec<(u32, u32)>) {
+    fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>) {
         if let Some(masks) = self.query_masks.get(q_idx) {
-            out.extend_from_slice(masks);
+            out.extend(masks.iter().map(|&(from, to)| (from, to, 0)));
         }
     }
 
-    fn subject_masks(&self, _q_idx: usize, _s_idx: u32, _out: &mut Vec<(u32, u32)>) {}
+    fn subject_masks(&self, _q_idx: usize, _s_idx: u32, _out: &mut Vec<Mask>) {}
 
     fn subject_genetic_code(&self) -> Option<DisplayCode> {
         Some(self.code)

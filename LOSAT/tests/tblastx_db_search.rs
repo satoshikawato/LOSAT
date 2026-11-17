@@ -418,8 +418,9 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// Line DBID, ID4t fix 2b: the loop writes each query batch's reports when it takes the batch where
-// no refusal of LOSAT's can come after the first batch (`report_stream::check`, shown by
+// Line DBID, ID4t fix 2b (formats 1 to 4 too since line RG T3c fix 1): the loop writes each query
+// batch's reports when it takes the batch where no refusal of LOSAT's can come after the first
+// batch (`report_stream::check`, shown by
 // `[X_STATS] TBXRPTSTREAM off=`), and those reports are the bytes of the reports written after the
 // loop (here: a `LOSAT_DEBUG*` variable, which no code reads, keeps them after the loop; the
 // db_search rows db.id.tblastx.stream.* compare them with NCBI's). A refusal in the second batch
@@ -492,6 +493,10 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
         ("njoined", "6", &batches[..], "none"),
         ("njoined", "0", &batches[..], "database_joined"),
         ("nrefuse_v5", "6", &batches[..], "database_headers"),
+        // Formats 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1).
+        ("nucl_v5", "1", &batches[..], "none"),
+        ("nucl_v4", "4", &batches[..], "none"),
+        ("njoined", "2", &batches[..], "database_joined"),
         ("nucl_v5", "5", &batches[..], "format"),
         (
             "nucl_v5",

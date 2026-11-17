@@ -284,7 +284,8 @@ tblastx turn it on (`SetSumStatisticsMode()` in `tblastn_options.cpp`, `blastx_o
 ### The shape of the code
 
 blastp and tblastx run the stages inside one very large function each, with a closure
-`process_subject` for one subject, which calls helpers for some stages. blastn's `search_query_batch`
+`process_subject` for one subject, which calls helpers for some stages (blastp's calls the kernel
+`BlastpPrelimKernel::search_subject` of `blast_engine/prelim_kernel.rs`). blastn's `search_query_batch`
 sets a batch up, then calls the passes of `subject_passes.rs` and the functions of the two stages. blastx and
 tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`, `runtime.rs`; tblastn
 `search_init.rs`, `search_seed.rs`, `search_gapped.rs`, `stage_d_*.rs`).
@@ -303,7 +304,8 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
   block, or once per query and round of psiblast. It calls `run_call`, whose
-  `process_subject` does the preliminary search of a subject (the stage's drivers, the choice of the
+  `process_subject` does the preliminary search of a subject (its kernel, from the scan of its words to its
+  HSP lists, is `BlastpPrelimKernel::search_subject` in `blast_engine/prelim_kernel.rs`; the stage's drivers, the choice of the
   pool and the call's branch: the calls of RPS-BLAST's and the PSSM search's hooks, the query blocks,
   a database's blocks and the subject loops, are in `blast_engine/prelim_run.rs`); the traceback, the
   composition redo (its parameters, its plan and all its paths are in `blast_engine/redo_run.rs`)
@@ -329,7 +331,7 @@ loops of `run_preliminary` (blastp, `blast_engine/prelim_run.rs`); a database is
 `database::search_blocks` (`blastn/blast_engine/database.rs`, `blastp/blast_engine/database.rs`),
 and the sequences with hits are read again for the traceback (`traceback_listed`) or the
 composition redo (`ListedSubjects`). Both paths share the per-subject kernel (blastn `search_subject`,
-blastp `process_subject`), the hit lists and the report writers. `algorithm::common::database` holds what all `-db` programs share: opening a
+blastp `BlastpPrelimKernel::search_subject`), the hit lists and the report writers. `algorithm::common::database` holds what all `-db` programs share: opening a
 database by name, NCBI's error messages, titles, and the prefetch rule. After blastp lists the
 subjects of a `-db` search, a hit's subject index is its rank among the listed subjects, not its
 OID.

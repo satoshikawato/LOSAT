@@ -317,7 +317,7 @@ pub(crate) struct XReadFailure {
 }
 
 impl XReadFailure {
-    pub(crate) fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             first: AtomicUsize::new(usize::MAX),
             failed: Mutex::new(None),
@@ -336,6 +336,11 @@ impl XReadFailure {
             *failed = Some((oid, error));
             self.first.fetch_min(oid, Ordering::Relaxed);
         }
+    }
+
+    /// Whether a read failed (without the lock of `take`).
+    pub(crate) fn failed(&self) -> bool {
+        self.first.load(Ordering::Relaxed) != usize::MAX
     }
 
     /// The error of the failed read kept, if any, taken.

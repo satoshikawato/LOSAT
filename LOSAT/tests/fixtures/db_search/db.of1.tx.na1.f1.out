@@ -1,0 +1,86 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txs.fa).
+           5 sequences; 1,224 total letters
+
+
+
+Query= txq coding query
+
+Length=571
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+tx_pm plus then minus                                                 130     5e-35  1
+tx_c minus query frames                                               105     1e-27  1
+tx_two two subject frames                                             84.0    7e-23  2
+tx_mp minus then plus                                                 61.6    3e-14  1
+tx_far weak                                                           44.1    6e-09  1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    HPASQKWHIKIVIRVNLLRFMFGHLQLYHMPWQYYTKNEFPQNAGHRARK  150
+Subject_1  1    ................A.................................  150
+
+For reading frame +2 of query sequence:
+
+Query_1    62   CLDIFSYTTCPGNTTPRTNFHKMR  133
+Subject_1  62   ..VT..SI....S..R..S.P.T.  133
+
+For reading frame +3 of query sequence:
+
+Query_1    57   VHVWTSSAIPHALAILHQERISTKCGSPCSQMRVYMTLEEKIWLWRARTPVKRTIPRKGA  236
+Subject_1  57   IY..SP..LS....V..E..V.P.R.TS.AE                               149
+
+Query_1    237  nsnsnnnnsnsnnL*LAELPHTGCGSVDN*RFW*GL**KSGIL*WVTSLKLTCLLSCQQV  416
+Subject_1  62                                                       ..VTFSSI  85
+
+Query_1    417  SC  422
+Subject_1  86   T.  91
+
+For reading frame -1 of query sequence:
+
+Query_1    349  YHNPYQNR*LSTEPQPVWGNSASHKllllllllllllLAPFLGIVLFTGVRARHNQIFSS  170
+Subject_1  259  ..F.W.                                                        242
+
+Query_1    169  KVI*TRICEHGDPHFVEIRSWCSIARACGIAEDVQT*  59
+Subject_1  142           .DV.R.G.T..S..T....DR..GD..*  59
+
+For reading frame -2 of query sequence:
+
+Query_1    147  ASTVTRILWKFvlgvvlpghvv*LKMSKHEPKQIDSYDYFYMPFLASRV  1
+Subject_1  194  SG.A.CV.RE.IFCI...WK.IKCSVPE.KSQKYH.V..LDV...*G.M  340
+
+For reading frame -3 of query sequence:
+
+Query_1    146  RAR*PAFCGNSFLV*YCQGMWYS*RCPNMNLSRLTRMTIFICHFWLAG  3
+Subject_1  146  ...C...W....F.*.....**.*.*..I..RA...I..LM...*D..  3
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 54696
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/txs.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,224
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

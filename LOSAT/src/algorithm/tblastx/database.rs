@@ -36,7 +36,7 @@ use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHe
 use crate::algorithm::common::x_db_stream::XDbStream;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
@@ -254,9 +254,14 @@ impl TblastxDatabase {
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
     /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, and the taxonomy
-    /// database's refusals before any byte).
+    /// database's refusals before any byte). Only the ranks that the reports load are read
+    /// (`ReportedSubjects::loads`: not the subject of a `Hit` that throws, nor those after it in a
+    /// query's report, which NCBI never loads, so that the taxonomy database's one-time texts go
+    /// with the next `Hit` that it loads; review 1 of DBID pfoff-1, H1).
     pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
-        let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len()).collect();
+        let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len())
+            .filter(|rank| reported.loads.loaded(*rank))
+            .collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
@@ -528,19 +533,24 @@ pub(crate) fn batch_prefetch(
 /// The stop of NCBI's prefetch of the query batch of `queries` whose reported hits are
 /// `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
 /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
-/// whose reported hits are `before` (the reports read every reported subject), which TBLASTX
-/// writes after the stop (the XML formats are not streamed, `report_stream`).
+/// whose reported hits are `before` (by ordinal id; `before_prefetch` tells by query whether its
+/// batch prefetches), of the subjects that those reports load (`hit_loads` of the batches before
+/// alone, with `writes_thrown`), which TBLASTX writes after the stop (the XML formats are not
+/// streamed, `report_stream`).
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
     before: &[TblastxHsp],
+    before_prefetch: &shared::BatchPrefetch,
+    writes_thrown: bool,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
+    let loads = hit_loads(before, before_prefetch, writes_thrown, titles);
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
-        prefetch_subjects(before, titles),
+        prefetch_subjects(before, titles).filter(|subject| loads.loaded(subject.ordinal as usize)),
         std::iter::empty(),
         prefetch_subjects(ordered, titles),
         PROGRAM,
@@ -663,6 +673,51 @@ pub(crate) struct ReportedSubjects {
     /// The sources from which NCBI makes the empty stored titles of the others, by rank
     /// (`shared::StoredTitle::source`; empty when none has one).
     pub(crate) sources: Vec<crate::report::defline::SourceTaxname>,
+    /// What the XML2 and JSON reports do at each rank's `Hit` (`HitLoads`, the one answer, by
+    /// rank): the refusals, the names (`blast_xml`'s `XmlSubjects`) and the taxonomy reads
+    /// (`read_taxids`) take it.
+    pub(crate) loads: HitLoads,
+}
+
+/// What the XML2 and JSON reports of the reported hits `ordered` (in report order, subjects named
+/// by ordinal id) do at each subject's `Hit` (`HitLoads::of`, the one answer, by ordinal id):
+/// `prefetch` tells by the hits' query index whether its batch reads one by one
+/// (`BatchPrefetch::reads_one_by_one`), `writes_thrown` whether every format writes a `Hit` that
+/// throws as NCBI does (`Xml2Kind::every`); the `Hit`s are those that `blast_xml` makes (the HSPs
+/// of each query, a subject's following each other).
+fn hit_loads(
+    ordered: &[TblastxHsp],
+    prefetch: &shared::BatchPrefetch,
+    writes_thrown: bool,
+    titles: &DatabaseTitles,
+) -> HitLoads {
+    HitLoads::of(
+        writes_thrown,
+        ordered
+            .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx)
+            .map(|hits| {
+                (
+                    prefetch.reads_one_by_one(hits[0].hit.q_idx as usize),
+                    hits.iter()
+                        .map(|hsp| Some(hsp.hit.s_idx as usize))
+                        .collect(),
+                )
+            }),
+        |ordinal| match titles.get(&u32::try_from(ordinal).ok()?) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        },
+    )
+}
+
+/// Whether every format of `formats` writes a `Hit` whose subject's lookup throws as NCBI does
+/// (`Xml2Kind::every`, for `hit_loads`).
+pub(crate) fn writes_thrown(formats: &[super::report::TblastxOutputFormat]) -> bool {
+    crate::report::blast_xml2::Xml2Kind::every(
+        formats
+            .iter()
+            .map(|format| super::report::TblastxOutputFormat::xml2_kind(*format)),
+    )
 }
 
 /// The Seq-aligns of the hits `ordered` (in report order) that NCBI's prefetch counts against
@@ -691,7 +746,10 @@ pub(crate) fn query_hits(ordered: &[TblastxHsp], queries: std::ops::Range<usize>
 /// report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
-/// prefetch is on reports it, `prefetch` by the hits' query index).
+/// prefetch is on reports it, `prefetch` by the hits' query index; `writes_thrown`: every format
+/// writes a `Hit` that throws as NCBI does, for the one answer of what the reports load,
+/// `hit_loads`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
     titles: &DatabaseTitles,
@@ -699,6 +757,7 @@ pub(crate) fn reported_subjects(
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
+    writes_thrown: bool,
     prefetch: &shared::BatchPrefetch,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
@@ -713,6 +772,8 @@ pub(crate) fn reported_subjects(
             .iter()
             .map(|hsp| (hsp.hit.q_idx as usize, hsp.hit.s_idx)),
     );
+    // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
+    let loads = hit_loads(ordered, prefetch, writes_thrown, titles);
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -752,6 +813,7 @@ pub(crate) fn reported_subjects(
                     &database.db,
                     subject,
                     reads.shown(shown, ordinal),
+                    loads.load(ordinal as usize),
                     false,
                     taxdb,
                     ordinal,
@@ -820,6 +882,7 @@ pub(crate) fn reported_subjects(
             start = end;
         }
     }
+    let loads = loads.renamed(|ordinal| ordinals.binary_search(&u32::try_from(ordinal).ok()?).ok());
     Ok(ReportedSubjects {
         ordinals,
         records,
@@ -827,6 +890,7 @@ pub(crate) fn reported_subjects(
         stores: kept,
         parsed,
         sources,
+        loads,
     })
 }
 

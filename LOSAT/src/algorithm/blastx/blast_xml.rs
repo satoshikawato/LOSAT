@@ -263,18 +263,16 @@ fn subject_names(
             None => SubjectNames::of_record(subject.internal_id.as_bytes(), &subject.title, true),
         }
         .map_err(|refusal| refuse(refusal, "a subject title")),
-        // A subject whose lookup throws where its `Hit` loads it is the error `CaughtException`
-        // (`SubjectNames::of_parsed`).
-        ShownSubjects::Database { reported, .. } => match reported.parsed_subject(s_idx) {
+        ShownSubjects::Database { reported, .. } => Ok(match reported.parsed_subject(s_idx) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(s_idx)),
-            None => Ok(SubjectNames::of_database_sequence(
+            None => SubjectNames::of_database_sequence(
                 reported.oid(s_idx),
                 &reported.stored_titles()[s_idx],
                 // XML2 and JSON alone show the taxid (`ReportedSubjects` reads it for them only).
                 reported.taxid(s_idx),
                 reported.taxonomy(s_idx),
-            )),
-        },
+            ),
+        }),
     }
 }
 
@@ -1289,6 +1287,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     buf.clear();
     let mut texts: Vec<QueryText> = Vec::new();
     let mut subject_cache: HashMap<usize, HitNames> = HashMap::new();
+    // What the reports do at the `Hit` of each subject (`HitLoads`, the one answer of the batch:
+    // a subject whose `Hit` throws, one that no report loads); a subject set's are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = match shown {
+        ShownSubjects::Database { reported, .. } => reported.loads(),
+        ShownSubjects::Fasta { .. } => &every_loaded,
+    };
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             if texts.len() == reports {
@@ -1307,12 +1312,11 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     subject_cache.entry(list.oid)
                 {
                     // A subject whose lookup throws where its `Hit` loads it keeps the
-                    // exception for the `Hit` (`HitNames`).
-                    slot.insert(HitNames::of(subject_names(
-                        shown,
-                        &subjects[list.oid],
-                        list.oid,
-                    ))?);
+                    // exception for the `Hit`; one that no report loads gets no names
+                    // (`HitNames::of`).
+                    slot.insert(HitNames::of(loads, list.oid, || {
+                        subject_names(shown, &subjects[list.oid], list.oid)
+                    })?);
                 }
             }
         }

@@ -1714,6 +1714,14 @@ impl TblastxOutputFormat {
         )
     }
 
+    /// The document form of an XML2 or JSON format (13 to 16); `None` for the others.
+    pub(crate) fn xml2_kind(self) -> Option<crate::report::blast_xml2::Xml2Kind> {
+        match self {
+            Self::Xml2(kind) => Some(kind),
+            _ => None,
+        }
+    }
+
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
     /// are made from the same records and refuse the same names.
     pub(crate) fn is_structured_xml(self) -> bool {

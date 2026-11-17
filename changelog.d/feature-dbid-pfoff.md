@@ -4,5 +4,7 @@
   and `16` write `Error: [<program>] DB contains no accession info.` and NCBI BLAST+'s exception report, leave that
   query's report out and go on with the next query (exit status 0); `-outfmt 13` and `14` leave that query's file
   empty and stop with `BLAST Database error: DB contains no accession info.` (exit status 2). The messages of the
-  taxonomy database that the sequences shown before that hit write come first; LOSAT refused such a run. The other
-  formats keep the refusal.
+  taxonomy database that the sequences shown before that hit write come first, and a message that NCBI BLAST+ writes
+  once per run (opening the taxonomy database, a volume's first lookup of a tax id) comes with the next hit whose
+  sequence it reads, also when the first such read comes after the hit that fails; LOSAT refused such a run. The
+  other formats keep the refusal.

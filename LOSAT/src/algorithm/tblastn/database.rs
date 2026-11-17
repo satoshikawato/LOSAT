@@ -30,7 +30,7 @@ use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHe
 use crate::algorithm::common::x_db_stream::XDbStream;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
@@ -197,13 +197,18 @@ impl TblastnDatabase {
     /// database says about it, for the XML2 and JSON formats
     /// (`algorithm::common::database::read_reported_taxonomy`, with the definition lines of the
     /// sequences with parsed Seq-ids); the sequences of `hitlists` with HSPs are the reported
-    /// ones (their subject index is the rank, `reported_subjects`).
+    /// ones (their subject index is the rank, `reported_subjects`), and those that the reports
+    /// load are read (`ReportedSubjects::loads`: not the subject of a `Hit` that throws, nor those
+    /// after it in a query's report, which NCBI never loads, so that the taxonomy database's
+    /// one-time texts go with the next `Hit` that it loads; review 1 of DBID pfoff-1, H1).
     pub(super) fn read_taxids(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
     ) -> Result<XmlTaxa> {
-        let ranks: std::collections::BTreeSet<usize> = reported_ranks(hitlists).collect();
+        let ranks: std::collections::BTreeSet<usize> = reported_ranks(hitlists)
+            .filter(|rank| reported.loads.loaded(*rank))
+            .collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
@@ -360,7 +365,8 @@ impl TblastnDatabase {
     /// record of what NCBI's BLAST database data loader loaded for them, `LoadedBefore`).
     /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
-    /// before (as `read_taxids` reads them, every reported subject); TBLASTN writes those reports
+    /// before (as `read_taxids` reads them, the reported subjects that those reports load,
+    /// `ReportedSubjects::loads`, made of the batches before alone); TBLASTN writes those reports
     /// after the stop. The outfmt 5 reports before the batch are the queries'
     /// (`shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn prefetch_stop_error(
@@ -376,12 +382,14 @@ impl TblastnDatabase {
         });
         let stopped = if at_hits {
             let before = reported.into_iter().flat_map(|reported| {
-                reported_ranks(before.hits).map(|rank| {
-                    shared::PrefetchSubject::unflipped(
-                        reported.ordinals[rank],
-                        reported.parsed_subject(rank),
-                    )
-                })
+                reported_ranks(before.hits)
+                    .filter(|rank| reported.loads.loaded(*rank))
+                    .map(|rank| {
+                        shared::PrefetchSubject::unflipped(
+                            reported.ordinals[rank],
+                            reported.parsed_subject(rank),
+                        )
+                    })
             });
             shared::held_batch_prefetch_stop(
                 &self.db,
@@ -590,6 +598,10 @@ pub(super) struct ReportedSubjects {
     /// The sources from which NCBI makes the empty stored titles of the others, by rank
     /// (`shared::StoredTitle::source`; empty when none has one).
     pub(super) sources: Vec<crate::report::defline::SourceTaxname>,
+    /// What the XML2 and JSON reports do at each rank's `Hit` (`HitLoads`, the one answer, by
+    /// rank): the refusals, the names (`blast_xml::prepare`), the taxonomy reads (`read_taxids`)
+    /// and the stop's record of the loads (`prefetch_stop_error`) take it.
+    pub(super) loads: HitLoads,
 }
 
 impl ReportedSubjects {
@@ -715,7 +727,9 @@ pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList]) -> usize {
 /// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `shown` do
 /// not write as NCBI (`common::database::check_reported_parsed`, and with `shown.joined`
 /// `refuse_joined_hits`; where only the prefetch reads a subject, a batch of `batches`, the
-/// query ranges of the batches of `hitlists`, whose prefetch is on reports it). The packed
+/// query ranges of the batches of `hitlists`, whose prefetch is on reports it; `writes_thrown`:
+/// every format writes a `Hit` that throws as NCBI does, `Xml2Kind::every`, for the one answer of
+/// what the reports load, `hit_loads`). The packed
 /// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
 /// cloned from the copy.
 pub(super) fn reported_subjects(
@@ -725,6 +739,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     shown: ParsedShown,
+    writes_thrown: bool,
     batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -738,15 +753,22 @@ pub(super) fn reported_subjects(
     // What the batches read of each subject (a batch whose Seq-aligns outnumber a positive
     // `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them one by
     // one; `shared::BatchPrefetch`, `shared::BatchReads::shown`).
-    let reads = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
+    let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
         seq_aligns_of(&hitlists[span])
-    })
-    .reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
+    });
+    let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
         hitlist
             .lists()
             .iter()
             .map(move |list| (query, list.oid as u32))
     }));
+    // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
+    let loads = hit_loads(hitlists, &prefetch, writes_thrown, |ordinal| {
+        match titles.get(&u32::try_from(ordinal).ok()?) {
+            Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+            _ => None,
+        }
+    });
     ordinals.sort_unstable();
     ordinals.dedup();
     for hitlist in hitlists.iter_mut() {
@@ -792,6 +814,7 @@ pub(super) fn reported_subjects(
                     &database.db,
                     subject,
                     reads.shown(shown, ordinal),
+                    loads.load(ordinal as usize),
                     false,
                     taxdb,
                     ordinal,
@@ -858,6 +881,7 @@ pub(super) fn reported_subjects(
             )?;
         }
     }
+    let loads = loads.renamed(|ordinal| ordinals.binary_search(&u32::try_from(ordinal).ok()?).ok());
     Ok(ReportedSubjects {
         ordinals,
         records,
@@ -865,7 +889,39 @@ pub(super) fn reported_subjects(
         stores: kept,
         parsed,
         sources,
+        loads,
     })
+}
+
+/// What the XML2 and JSON reports of `hitlists` (the final hit lists by query, in the order of the
+/// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
+/// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by one
+/// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
+/// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs).
+fn hit_loads<'p>(
+    hitlists: &[KappaResultHitList],
+    prefetch: &shared::BatchPrefetch,
+    writes_thrown: bool,
+    parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
+) -> HitLoads {
+    HitLoads::of(
+        writes_thrown,
+        hitlists.iter().enumerate().map(|(query, hitlist)| {
+            (
+                prefetch.reads_one_by_one(query),
+                hitlist
+                    .lists()
+                    .iter()
+                    .map(|list| {
+                        (!list.hsps.hsps.is_empty())
+                            .then(|| usize::try_from(list.oid).ok())
+                            .flatten()
+                    })
+                    .collect(),
+            )
+        }),
+        parsed,
+    )
 }
 
 impl ReportedSubjects {
@@ -1007,6 +1063,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 letters,
                 ParsedShown::default(),
+                false,
                 &[],
             )
             .unwrap()
@@ -1062,6 +1119,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 true,
                 ParsedShown::default(),
+                false,
                 &[],
             )
             .unwrap();

@@ -1269,7 +1269,7 @@ pub(super) struct ReportedAsks {
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
     /// Whether every report is outfmt 13 to 16, which write a lookup that throws where a batch's
-    /// prefetch is off as NCBI does (`ParsedSubject::fetched`, `lookup_throws`).
+    /// prefetch is off as NCBI does (`Xml2Kind::every`, for `HitLoads::of`).
     writes_thrown: bool,
 }
 
@@ -1310,7 +1310,9 @@ impl ReportedAsks {
                 outfmt => i32::from(outfmt),
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
-            writes_thrown: matches!(options.outfmt, 13..=16),
+            writes_thrown: crate::report::blast_xml2::Xml2Kind::every([
+                super::blast_xml::xml2_kind(options.outfmt),
+            ]),
         }
     }
 
@@ -1327,9 +1329,11 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
-        asks.writes_thrown = options
-            .iter()
-            .all(|options| Self::of(options).writes_thrown);
+        asks.writes_thrown = crate::report::blast_xml2::Xml2Kind::every(
+            options
+                .iter()
+                .map(|options| super::blast_xml::xml2_kind(options.outfmt)),
+        );
         asks
     }
 
@@ -1346,6 +1350,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            // `Xml2Kind::every` of the two.
             writes_thrown: self.writes_thrown && other.writes_thrown,
         }
     }

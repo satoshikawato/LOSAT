@@ -139,8 +139,10 @@
   rule 3; line RG item X2d, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.45 2026-11-17 (outfmt 13 to 16 of a reported sequence whose lookup in a version 5 list fails
   where the batch's prefetch is off are written as NCBI writes them: 15 and 16 post the exception
-  and leave the query's report out, 13 and 14 stop with `BLAST Database error`; the refusal of
-  1.31 narrowed to the other formats; line DBID item pfoff, Owner-delegated, standing instruction
+  and leave the query's report out, 13 and 14 stop with `BLAST Database error`; the taxonomy
+  database's texts at the `Hit`s that NCBI loads, none of the throwing `Hit` or of those after it
+  in that report; the refusal of 1.31 narrowed to the other formats; line DBID item pfoff, review 1
+  fix included, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -992,7 +994,8 @@ masked). Line NP item M4a-2c.
   database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
   BLAST Database error, and where the prefetch is off its formatters fail to read it)`) but
   writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.45,
-  line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own), a
+  line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
+  `Hit`s after it in that report, and a text that NCBI writes once at the next `Hit` it loads), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

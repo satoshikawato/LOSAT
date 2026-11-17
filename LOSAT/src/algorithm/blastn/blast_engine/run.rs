@@ -6358,6 +6358,9 @@ struct BlastnReportInputs<'a> {
     /// their definition lines. Of a subject set, the records whose ids `-parse_deflines` read, by
     /// subject index (`db_subject::parsed_records`).
     database_parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// What the XML2 and JSON reports of a database search do at each subject's `Hit`, by rank
+    /// (`database::ReportedSubjects::loads`; every subject loaded for a subject set).
+    database_loads: &'a crate::report::db_subject::HitLoads,
     /// The sources from which NCBI makes the empty stored titles of the other reported sequences
     /// of a database search, by rank (`database::ReportedSubjects::sources`; empty without them
     /// and for a subject set).
@@ -11307,12 +11310,24 @@ fn run_in_pool(
                         _ => batch_records.input(),
                     })
                 };
+                // Whether each query of the batches before prefetched, for what their reports
+                // loaded (`database::hit_loads`: a `Hit` whose lookup throws loads nothing, nor
+                // do the `Hit`s after it; the XML formats are not streamed, so the batches
+                // before are all held).
+                let before_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+                    hit_lists.len(),
+                    0,
+                    &batch_spans,
+                    |span| database::seq_aligns_of(&hit_lists[span], !args.ungapped),
+                );
                 (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
                     .then(|| {
                         database
                             .batch_prefetch_stop(
                                 &titles,
                                 &hit_lists,
+                                &before_prefetch,
+                                database::writes_thrown(&output_formats),
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &crate::algorithm::common::database::PrefetchQueries::new(
@@ -11962,6 +11977,7 @@ fn write_reports_untimed(
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
+                database::writes_thrown(output_formats),
                 &prefetch,
                 written.queries,
                 x_pool,
@@ -12062,6 +12078,8 @@ fn write_reports_untimed(
         }
         None => results.reads.to_vec(),
     };
+    // A subject set's subjects are all loaded (`database_loads`).
+    let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
         query_reads: &query_reads,
         queries: query_records,
@@ -12109,6 +12127,9 @@ fn write_reports_untimed(
         database_sources: reported
             .as_ref()
             .map_or(&[][..], |reported| reported.sources.as_slice()),
+        database_loads: reported
+            .as_ref()
+            .map_or(&every_loaded, |reported| &reported.loads),
         finished_hit_lists: reported.is_some(),
         epilog,
         show_gis: args.show_gis,

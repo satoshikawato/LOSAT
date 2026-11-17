@@ -4268,9 +4268,28 @@ fn run_batch_loop(
                 )
             {
                 let scope = || batch_scope(input_start..input_end);
+                // Whether each query's batch before prefetches (`done.spans`, in the numbering of
+                // `done.hits`), for what their reports load (`database::batch_prefetch_stop`).
+                let before_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+                    done.searched.len(),
+                    0,
+                    &done.spans,
+                    |span| {
+                        super::super::database::seq_aligns_of(super::super::database::query_hits(
+                            &done.hits, span,
+                        ))
+                    },
+                );
+                let formats: Vec<report::TblastxOutputFormat> = outputs
+                    .formats
+                    .iter()
+                    .map(|format| report::output_format(format.outfmt))
+                    .collect();
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
+                    &before_prefetch,
+                    super::super::database::writes_thrown(&formats),
                     ordered,
                     &reports.titles.borrow(),
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
@@ -4701,9 +4720,6 @@ impl BatchReports<'_> {
                         .is_some_and(|format| format.prefetches_subjects())
                         && !crate::algorithm::common::database::prefetch_always_off(),
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-                    writes_thrown: formats
-                        .iter()
-                        .all(|format| matches!(format, report::TblastxOutputFormat::Xml2(_))),
                 };
                 // Whether each query's batch prefetches (`done.spans`, in the numbering of
                 // `hits`), for the subjects that only the prefetch reads.
@@ -4724,6 +4740,7 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
+                    super::super::database::writes_thrown(&formats),
                     &prefetch,
                 )?;
                 // The texts of the reads, made before the hits named the subjects by rank, by

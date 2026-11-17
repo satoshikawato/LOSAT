@@ -33,7 +33,7 @@ use super::subjects::Subjects;
 use crate::algorithm::common::database::{self as shared, PreliminaryReadError};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
@@ -317,6 +317,10 @@ pub(crate) struct ReportedSubjects {
     /// parsed Seq-ids, by rank (`shared::read_reported_taxonomy`; empty as `taxonomy`).
     parsed_taxonomy: Vec<Vec<HitTaxonomy>>,
     taxdb_notes: shared::TaxdbNotes,
+    /// What the batch's reports do at the `Hit` of each subject, by rank (`HitLoads`, the one
+    /// answer: a subject whose `Hit` throws, one that no report loads), which the refusals, the
+    /// names, the taxonomy reads and the run's record of the loads take.
+    loads: HitLoads,
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none): their
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
     /// holds the title of their first definition line.
@@ -503,7 +507,10 @@ impl ReportedSubjects {
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
     /// one by one (`shared::ParsedShown::one_by_one`). `writes_thrown`: every report is outfmt 13
-    /// to 16, which write a lookup that throws there as NCBI does (`ParsedSubject::fetched`).
+    /// to 16, which write a lookup that throws there as NCBI does (`HitLoads::of`: where
+    /// `one_by_one`, a report loads the subjects of its `Hit`s before the first whose lookup
+    /// throws, and none after it; the refusals, the names, the taxonomy reads and the run's
+    /// record of the loads, `note_loaded`, take that one answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -554,6 +561,24 @@ impl ReportedSubjects {
                 }
             }
         }
+        // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
+        // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
+        // of each query, `report::reported`).
+        let loads = HitLoads::of(
+            writes_thrown,
+            batches.iter().flat_map(|batch| {
+                batch.queries.iter().map(|lists| {
+                    (
+                        one_by_one,
+                        lists
+                            .iter()
+                            .map(|list| super::report::reported(list, gapped).then_some(list.oid))
+                            .collect(),
+                    )
+                })
+            }),
+            |oid| parsed.get(&oid).map(Arc::as_ref),
+        );
         let taxdb_found = database.db.taxdb_found();
         let mut reported = ReportedSubjects::default();
         for (&oid, title) in &listed {
@@ -574,7 +599,7 @@ impl ReportedSubjects {
                 let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
                     subject
-                        .fetched(taxonomy, one_by_one, writes_thrown)
+                        .fetched(taxonomy, one_by_one, loads.load(oid))
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -704,16 +729,21 @@ impl ReportedSubjects {
                 }
             }
         }
+        reported.loads = loads.renamed(|oid| rank.get(&oid).copied());
         if reports && taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
             // sequences with a title are the reported ones.
             // A sequence with parsed Seq-ids has the taxid of each definition line
-            // (`shared::read_reported_taxonomy`).
+            // (`shared::read_reported_taxonomy`). Of the reported ones, those that the reports
+            // load (`HitLoads::loaded`): the reads of a subject whose `Hit` throws, and of one
+            // shown only after it, are never made, so the texts of opening the taxonomy database
+            // and of a volume's first lookup of a taxid go to the loads that make them, in this
+            // batch or a later one (review 1 of line DBID pfoff-1, H1).
             let shown: std::collections::BTreeSet<usize> = listed
                 .iter()
                 .enumerate()
-                .filter(|(_, (_, title))| title.is_some())
+                .filter(|(rank, (_, title))| title.is_some() && reported.loads.loaded(*rank))
                 .map(|(rank, _)| rank)
                 .collect();
             // A taxonomy database LOSAT cannot read as NCBI does is LOSAT's refusal of the XML2
@@ -808,7 +838,11 @@ impl ReportedSubjects {
                             })
                     })
                     .flatten()
-                    .filter(move |list| super::report::reads_list(list, gapped, rows))
+                    // Not a subject that no report loads (`HitLoads::loaded`: one whose `Hit`
+                    // throws, or that is shown only after it).
+                    .filter(move |list| {
+                        super::report::reads_list(list, gapped, rows) && self.loads.loaded(list.oid)
+                    })
                     .map(|list| {
                         shared::PrefetchSubject::unflipped(
                             self.ordinals[list.oid],
@@ -1130,6 +1164,11 @@ impl ReportedSubjects {
     /// batch.
     pub(crate) fn taxdb_notes(&self) -> &shared::TaxdbNotes {
         &self.taxdb_notes
+    }
+
+    /// What the batch's reports do at the `Hit` of each subject, by rank (`for_batch`).
+    pub(crate) fn loads(&self) -> &HitLoads {
+        &self.loads
     }
 
     /// The tabular `sseqid`, `sacc` and `saccver` of rank `rank` (only with `tabular` in

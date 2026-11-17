@@ -249,6 +249,13 @@ pub(super) fn prepare(
     };
     subject_names.resize_with(count, || None);
     let mut subject_lengths = vec![0i32; count];
+    // What the reports do at each subject's `Hit` (`database::ReportedSubjects::loads`, the one
+    // answer; a subject set's records are always loaded).
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = match shown {
+        ShownSubjects::Fasta { .. } => &every_loaded,
+        ShownSubjects::Database { reported, .. } => &reported.loads,
+    };
     for list in hitlists[..reports]
         .iter()
         .flat_map(KappaResultHitList::lists)
@@ -263,27 +270,27 @@ pub(super) fn prepare(
         let record = subject_records
             .get(s_idx)
             .context("TBLASTN subject OID out of range")?;
-        // A subject whose lookup throws where its `Hit` loads it keeps the exception for the
-        // `Hit` (`HitNames`).
-        subject_names[s_idx] = Some(HitNames::of(match shown.oid(s_idx) {
+        // The `Hit` of a subject whose lookup throws keeps the exception, and no names are made
+        // for a subject that no report loads (`HitNames::of`).
+        subject_names[s_idx] = Some(HitNames::of(loads, s_idx, || match shown.oid(s_idx) {
             None => match record.believed() {
                 Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
                 None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a subject title")),
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(db_oid) => match shown.parsed_subject(s_idx) {
+            Some(db_oid) => Ok(match shown.parsed_subject(s_idx) {
                 Some(parsed) => SubjectNames::of_parsed(
                     parsed,
                     taxa.parsed_taxonomy.get(s_idx).map_or(&[], Vec::as_slice),
                 ),
-                None => Ok(SubjectNames::of_database_sequence(
+                None => SubjectNames::of_database_sequence(
                     db_oid,
                     record.title(),
                     taxa.taxids.get(s_idx).copied().unwrap_or(0),
                     taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
-                )),
-            },
+                ),
+            }),
         })?);
         // The whole record (`-subject_loc` searches part of it).
         subject_lengths[s_idx] =

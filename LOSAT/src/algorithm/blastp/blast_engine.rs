@@ -11637,7 +11637,7 @@ fn run_call(
     };
     let mut query_warning_lines = report_prep::query_warning_lines(&prep);
     let mut prefetch_posts = Vec::new();
-    let subject_reads = report_prep::prefetch_reported_subjects(
+    let (subject_reads, hit_loads) = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
         &mut prefetch_posts,
@@ -11977,6 +11977,7 @@ fn run_call(
         subject_accessions: &subject_accessions,
         subject_stitles: &subject_stitles,
         hit_lists: &hit_lists,
+        hit_loads: &hit_loads,
         engine_counts: &engine_counts,
         pairwise_hits: &pairwise_hits,
         psiblast_hits_found: &psiblast_hits_found,

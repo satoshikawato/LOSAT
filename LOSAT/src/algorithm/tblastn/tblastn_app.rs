@@ -2387,6 +2387,7 @@ fn search(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     parsed_shown(&outputs.formats),
+                    writes_thrown(&outputs.formats),
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2919,10 +2920,17 @@ fn parsed_shown(
             },
         )) && !crate::algorithm::common::database::prefetch_always_off(),
         one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-        writes_thrown: formats
-            .iter()
-            .all(|format| super::stage_e_report::xml2_kind(format.outfmt).is_some()),
     }
+}
+
+/// Whether every format of `formats` writes a `Hit` whose subject's lookup throws as NCBI does
+/// (`Xml2Kind::every`, for `database::reported_subjects`'s loads).
+fn writes_thrown(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> bool {
+    crate::report::blast_xml2::Xml2Kind::every(
+        formats
+            .iter()
+            .map(|format| super::stage_e_report::xml2_kind(format.outfmt)),
+    )
 }
 
 #[cfg(test)]

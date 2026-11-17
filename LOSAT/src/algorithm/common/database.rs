@@ -3047,11 +3047,6 @@ pub(crate) struct ParsedShown {
     /// (`ParsedSubject::fetched`, `WeakMatch`): the prefetch looks for the ids
     /// it has resolved, then loads the others by their own ids.
     pub(crate) one_by_one: bool,
-    /// Whether every format is outfmt 13 to 16, whose XML2 and JSON documents write a lookup that
-    /// throws where the subject is read one by one as NCBI does (they leave the query's report
-    /// out with the exception, `ParsedSubject::fetched`, `lookup_throws`); every other format
-    /// refuses it.
-    pub(crate) writes_thrown: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1773-1783
@@ -3123,11 +3118,15 @@ impl ParsedShown {
 /// does not write as NCBI (`check_shown_parsed_subject`), a tabular id that it does not
 /// write as NCBI (`ParsedSubject::tabular_ids`), and where only the prefetch reads the subject
 /// (`shown.prefetched`), what it cannot read as NCBI does (`check_prefetched_parsed`). `db` is
-/// the subject's database.
+/// the subject's database; `load`, what the reports do at the subject's `Hit`
+/// (`report::db_subject::HitLoads`, the one answer: its `Hit` throws, or no report loads it,
+/// `ParsedSubject::fetched`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_reported_parsed(
     db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
     shown: ParsedShown,
+    load: crate::report::db_subject::HitLoad,
     protein: bool,
     taxdb_found: bool,
     ordinal: u32,
@@ -3135,7 +3134,7 @@ pub(crate) fn check_reported_parsed(
 ) -> Result<()> {
     if shown.reads_bioseq() {
         subject
-            .fetched(shown.taxonomy, shown.one_by_one, shown.writes_thrown)
+            .fetched(shown.taxonomy, shown.one_by_one, load)
             .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {
         check_prefetched_parsed(db, subject, ordinal, program)?;
@@ -3409,10 +3408,12 @@ pub(crate) fn reports_may_refuse(
                 }
             }
             Ok(ReportedHeader::Parsed(subject)) => {
+                // Before the search no `Hit` is known: every subject is taken as loaded.
                 check_reported_parsed(
                     db,
                     &subject,
                     shown,
+                    crate::report::db_subject::HitLoad::Loaded,
                     protein,
                     shown.pairwise && taxdb_found,
                     ordinal,
@@ -8293,7 +8294,10 @@ mod taxdb_prepass_tests {
             else {
                 panic!("{name}: a sequence with parsed Seq-ids");
             };
-            match (subject.fetched(false, true, false), want) {
+            match (
+                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
@@ -8396,7 +8400,9 @@ mod taxdb_prepass_tests {
                 ),
                 got => panic!("{list} {ordinal}: {got:?}"),
             }
-            let refusal = subject.fetched(false, false, false).unwrap_err();
+            let refusal = subject
+                .fetched(false, false, crate::report::db_subject::HitLoad::Loaded)
+                .unwrap_err();
             assert!(refusal.contains(unknown), "{list} {ordinal}: {refusal}");
             assert_eq!(
                 refusal.contains("lookup gives database sequence 0 first"),
@@ -8527,7 +8533,10 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             for (taxonomy, want) in [(false, &without), (true, &with)] {
-                match (subject.fetched(taxonomy, true, false), want) {
+                match (
+                    subject.fetched(taxonomy, true, crate::report::db_subject::HitLoad::Loaded),
+                    want,
+                ) {
                     (Ok(()), None) => {}
                     (Err(error), Some(text)) => {
                         assert!(error.contains(text.as_str()), "{name} {ordinal}: {error}")
@@ -8608,7 +8617,10 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             assert!(!subject.unfetchable(), "{name} {ordinal}");
-            match (subject.fetched(false, true, false), want) {
+            match (
+                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => {
                     assert!(error.contains(&text), "{name} {ordinal}: {error}")
@@ -10293,11 +10305,13 @@ mod taxdb_prepass_tests {
                 };
                 // A batch whose prefetch is on loads the subject by its own id.
                 assert!(
-                    subject.fetched(false, false, false).is_ok(),
+                    subject
+                        .fetched(false, false, crate::report::db_subject::HitLoad::Loaded)
+                        .is_ok(),
                     "{name} {ordinal}"
                 );
                 match (
-                    subject.fetched(false, true, false),
+                    subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
                     want.filter(|_| prefetch_off),
                 ) {
                     (Ok(()), None) => {}
@@ -10346,12 +10360,16 @@ mod taxdb_prepass_tests {
                 (ReportedHeader::Stored(_), Ok(true)) => {}
                 (ReportedHeader::Parsed(subject), Ok(false)) => {
                     assert!(
-                        subject.fetched(false, true, false).is_ok(),
+                        subject
+                            .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                            .is_ok(),
                         "{name} {ordinal}"
                     )
                 }
                 (ReportedHeader::Parsed(subject), Err(id)) => {
-                    let error = subject.fetched(false, true, false).unwrap_err();
+                    let error = subject
+                        .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                        .unwrap_err();
                     assert!(
                         error.contains(&format!("the Seq-align id {id},")),
                         "{name} {ordinal}: {error}"

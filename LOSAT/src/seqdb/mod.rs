@@ -611,15 +611,16 @@ const DATABASE_ERROR_SITES: [(&str, ThrowSite); 6] = [
             "BLASTDB::ncbi::CSeqDBExtFile::CSeqDBExtFile",
         ),
     ),
-    (
-        "DB contains no ",
-        seqdb_site(
-            "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp",
-            142,
-            "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi",
-        ),
-    ),
+    ("DB contains no ", GET_DBI_SITE),
 ];
+
+/// The place of `CBlastLMDBManager::CBlastEnv::GetDbi`'s throw of a version 5 database's missing
+/// table (`DB contains no ...`).
+const GET_DBI_SITE: ThrowSite = seqdb_site(
+    "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp",
+    142,
+    "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi",
+);
 
 /// NCBI's alias reader.
 const SEQDBALIAS: &str = "src/objtools/blast/seqdb_reader/seqdbalias.cpp";
@@ -647,6 +648,25 @@ pub(crate) fn throw_site(message: &str) -> Option<ThrowSite> {
         .iter()
         .find(|(start, _)| message.starts_with(start))
         .map(|&(_, site)| site)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:167-172
+// ```c++
+// lmdb::env & CBlastLMDBManager::GetReadEnvAcc(const string & fname, MDB_dbi & db_acc, bool* opened)
+// {
+// 	CBlastEnv* p = GetBlastEnv(fname, eLMDB, opened);
+// 	db_acc = p->GetDbi(CBlastEnv::eDbiAcc2oid);
+// 	return p->GetEnv();
+// }
+// ```
+/// The place of NCBI's throw where its lookup of a Seq-align id fails with the message `message`
+/// (a text of `report::db_subject::LookupFailure::ncbi_message`), for the texts that NCBI's
+/// lookup was seen to throw: the accession table of a version 5 database (`GetReadEnvAcc`'s
+/// `GetDbi`, "DB contains no accession info.": blastp 2.17.0's outfmt 15 at a lookup of a list of
+/// version 5 databases with and without the table, DECISIONS 62 (1) and (2) of line DBID). `None`
+/// for every other text, also those of [`throw_site`], which no lookup was seen to throw.
+pub(crate) fn lookup_throw_site(message: &str) -> Option<ThrowSite> {
+    (message == tax_files::NO_ACCESSION_INFO).then_some(GET_DBI_SITE)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476

@@ -1,0 +1,571 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bxs.fa).
+           7 sequences; 542 total letters
+
+
+
+Query= bxq coding query in six frames
+
+Length=1229
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+bx_a frames +1 and -2                                                 122     3e-38
+bx_mins minus insertion and deletion                                  117     9e-37
+bx_ins plus insertion                                                 107     3e-33
+bx_rep two copies in frame +3                                         108     4e-33
+bx_ins2 plus insertion same place                                     89.7    1e-26
+bx_m6 frame -3                                                        85.1    3e-25
+bx_far weak                                                           51.6    3e-13
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    HHPMTMW  21
+Subject_1  1    HHPMTMW  7
+
+Query_1    22   ATHIIKI  42
+Subject_1  8    ATHIIKI  14
+
+Query_1    43   VIIWTQV  63
+Subject_1  15   VAIWTQV  21
+
+Query_1    64   NVKCIWQ  84
+Subject_1  22   NVKCIWQ  28
+
+Query_1    85   PRERHGI  105
+Subject_1  29   PRERHGI  35
+
+Query_1    106  WAAHPSG  126
+Subject_1  36   WAAHPSG  42
+
+Query_1    127  HFIVVIP  147
+Subject_1  43   HFIVVIP  49
+
+Query_1    148  EGWDHRH  168
+Subject_1  50   EGWDHRH  56
+
+Query_1    169  SAQEDTS  189
+Subject_1  57   SKQEAST  63
+
+Query_1    190  TTSYPV*  210
+
+Query_1    211  RVYVADS  231
+
+Query_1    232  TRASGVT  252
+
+Query_1    253  SLHN*YM  273
+
+Query_1    274  CRPYCGC  294
+
+Query_1    295  VYNDA*L  315
+
+Query_1    316  VSLaatr  336
+
+Query_1    337  sisaatt  357
+
+Query_1    358  ttaaatt  378
+
+Query_1    379  aatamaE  399
+
+Query_1    400  HNYG*L*  420
+
+Query_1    421  *VLPRAY  441
+
+Query_1    442  KFLLFSV  462
+
+Query_1    463  ATIPLYR  483
+
+Query_1    484  PYKHTQS  504
+
+Query_1    505  NGIHRKP  525
+
+Query_1    526  IVRTATI  546
+
+Query_1    547  TWPTVCA  567
+
+Query_1    568  RFYAERL  588
+
+Query_1    589  SAFHQ**  609
+
+Query_1    610  SFNGA*I  630
+
+Query_1    631  LPYLESQ  651
+
+Query_1    652  VLCHRIS  672
+
+Query_1    673  W*CSATg  693
+
+Query_1    694  wlal*ls  714
+
+Query_1    715  lng*lng  735
+
+Query_1    736  nchlqhl  756
+
+Query_1    757  hl*DIPR  777
+
+Query_1    778  NSSQVCI  798
+
+Query_1    799  RCLHAYK  819
+
+Query_1    820  PAIATIW  840
+
+Query_1    841  ALSIRTF  861
+
+Query_1    862  LQWIMLL  882
+
+Query_1    883  RAVAR*E  903
+
+Query_1    904  GHFSHAA  924
+
+Query_1    925  TWGAPFV  945
+Subject_6  16     GKPFN  20
+
+Query_1    946  VWVCS  960
+Subject_6  21   SYLCD  25
+
+For reading frame +2 of query sequence:
+
+Query_1    53   GLKLT*N  73
+Subject_1  93   GLKMSPN  99
+
+Query_1    74   AYGSRVR  94
+Subject_1  100  VY       101
+
+Query_1    95   GTAYGRL  115
+
+Query_1    116  IPPAIL*  136
+
+Query_1    137  S*YQKDG  157
+
+Query_1    158  TTGTQLR  178
+
+Query_1    179  RILQPHP  199
+
+Query_1    200  IPCNGYM  220
+Subject_2  1        GYM  3
+Subject_3  1        GYM  3
+
+Query_1    221  LQIPPER  241
+Subject_2  4    LQIPPER  10
+Subject_3  4    LQIPPER  10
+
+Query_1    242  VELPPYT  262
+Subject_2  11   VELPPYT  17
+Subject_3  11   TELPPYT  17
+
+Query_1    263  ISICADP  283
+Subject_2  18   IMICDDP  24
+Subject_3  18   ISICADP  24
+
+Query_1    284  IAGAYIM  304
+Subject_2  25   IAGAYIM  31
+Subject_3  25   IAGAYIM  31
+
+Query_1    305  MHNWCPW  325
+Subject_1  25       CIW  27
+Subject_2  32   MHNWMPW  43
+                   \   
+                   |   
+                WWWHH
+Subject_3  32   MHNWCPW  41
+                    \  
+                    |  
+                  KYC
+
+Query_1    326  LPQEAYq  346
+Subject_1  28   QPRERH   33
+Subject_2  44   LPLEAYH  50
+Subject_3  42   LAQMDYQ  48
+
+Query_1    347  qqqqqqq  367
+Subject_2  51   QQQQQQQ  57
+Subject_3  49   QQQQSQQ  55
+
+Query_1    368  qqqqqqq  388
+Subject_2  58   QQQQQQQ  64
+Subject_3  56   QQCQQQQ  62
+
+Query_1    389  qwqSITM  409
+Subject_2  65   QWQSMTM  71
+Subject_3  63   MWSSITM  69
+
+Query_1    410  DNCNKYC  430
+Subject_2  72   DNCNKYC  78
+Subject_3  70   DNCN     73
+
+Query_1    431  HERINFC  451
+Subject_2  79   HERINFC  85
+
+Query_1    452  SFLLLLY  472
+
+Query_1    473  PFIGPIN  493
+
+Query_1    494  TLNQMGY  514
+
+Query_1    515  TENQS*E  535
+
+Query_1    536  QQRLHGL  556
+
+Query_1    557  RFVRVSM  577
+
+Query_1    578  QNA*VRS  598
+
+Query_1    599  TNDNLSM  619
+
+Query_1    620  GHKFSPI  640
+
+Query_1    641  *NRRCFA  661
+
+Query_1    662  IGSRGNA  682
+
+Query_1    683  RQQVGSH  703
+
+Query_1    704  YNCH*TV  724
+
+Query_1    725  DSTEIAT  745
+
+Query_1    746  CNIYISE  766
+
+Query_1    767  IFQETPA  787
+
+Query_1    788  RYAYAAC  808
+
+Query_1    809  MHINPQ*  829
+
+Query_1    830  QQSGR*V  850
+
+Query_1    851  SERFYSG  871
+
+Query_1    872  SCYCVRW  892
+Subject_5  44    CKCCKW  49
+
+Query_1    893  QDERVIF  913
+Subject_5  50   Q-----F  51
+
+Query_1    914  PMLRLGV  934
+Subject_5  52   PL       53
+
+Query_1    935  HLLLFGF  955
+Subject_7  24      LFWF  27
+
+Query_1    956  AVRK  967
+Subject_7  28   LIRK  31
+
+For reading frame +3 of query sequence:
+
+Query_1    492  THSIKWD  512
+Subject_4  1    THSIKWD  7
+Subject_4  62       DWD  64
+Subject_7  1    THARKWD  7
+
+Query_1    513  TQKTNRE  533
+Subject_4  8    PQKHNRE  14
+Subject_4  65   TQKTNRE  71
+Subject_7  8    TGQTNRE  14
+
+Query_1    534  NSNDYMA  554
+Subject_4  15   NSNDYMA  21
+Subject_4  72   NSNDYPA  78
+Subject_7  15   NSRDYMA  21
+
+Query_1    555  YGLCAFL  575
+Subject_4  22   YGLCAFL  28
+Subject_4  79   YGLCAFL  85
+Subject_7  22   YGLFWFL  28
+
+Query_1    576  CRTPECV  596
+Subject_4  29   CRMPECV  35
+Subject_4  86   CRTPECD  92
+Subject_7  29   IRKMRC   34
+
+Query_1    597  PPMIIFQ  617
+Subject_4  36   PPMIIFQ  42
+Subject_4  93   PPMIIFQ  99
+
+Query_1    618  WGINSPL  638
+Subject_4  43   WGINSPL  49
+Subject_4  100  WGI      102
+
+Query_1    639  FRIAGAL  659
+Subject_4  50   FQASNEL  59
+                 \     
+                 |     
+                NSN
+
+Query_1    660  P*DLVVM  680
+Subject_4  60   PQDWDTQ  66
+
+Query_1    681  LGNR  692
+Subject_4  67   KTNR  70
+
+For reading frame -1 of query sequence:
+
+Query_1    878  NMIHCRN  858
+Subject_5  1    NMIHCRN  7
+
+Query_1    857  VLILNAQ  837
+Subject_5  8    VLILNDQ  14
+
+Query_1    836  IVAIAGL  816
+Subject_5  15   IVAIAGL  21
+
+Query_1    815  YACKQRM  795
+Subject_5  22   YACGQRM  28
+
+Query_1    794  HTWLEFL  774
+Subject_5  29   HTWLEFL  38
+                  \    
+                  |    
+                CFW
+
+Query_1    773  GISQRCK  753
+Subject_5  39   GIQQRCK  45
+
+Query_1    752  CCKWQFP  732
+Subject_5  46   CCKWQFP  52
+
+Query_1    731  LSQPFND  711
+Subject_5  53   LSQ----  55
+
+Query_1    710  NYSASQP  690
+Subject_5  56   --SASQP  60
+
+Query_1    689  VAEHYHE  669
+Subject_5  61   VAEHYHE  67
+
+Query_1    668  ILWQSTC  648
+
+Query_1    647  DSK*GRI  627
+
+Query_1    626  YAPLKDY  606
+
+Query_1    605  HWWNALR  585
+
+Query_1    584  RSA*KRA  564
+
+Query_1    563  QTVGHVI  543
+
+Query_1    542  VAVLTIG  522
+
+Query_1    521  FLCIPFD  501
+
+Query_1    500  *VCL*GL  480
+
+Query_1    479  *RGIVAT  459
+
+Query_1    458  EKSRNLY  438
+
+Query_1    437  ARGSTYY  417
+
+Query_1    416  SYP*LCS  396
+
+Query_1    395  aiavaav  375
+
+Query_1    374  vaaavvv  354
+
+Query_1    353  vaadmll  333
+
+Query_1    332  vaAKDTS  312
+
+Query_1    311  YASLYTH  291
+
+Query_1    290  PQ*GLHI  270
+
+Query_1    269  Y*LCREV  249
+
+Query_1    248  TPLARVE  228
+
+Query_1    227  SATYTRY  207
+
+Query_1    206  TG*DVVE  186
+
+Query_1    185  VSS*AEC  165
+
+Query_1    164  RWSHPSG  144
+Subject_1  38     AHPSG  42
+
+Query_1    143  ITTIKWP  123
+Subject_1  43   HFIVVIP  49
+
+Query_1    122  EG  117
+Subject_1  50   EG  51
+
+For reading frame -2 of query sequence:
+
+Query_1    1069  F*SHTML  1049
+Subject_1  73    FGAHTMY  79
+
+Query_1    1048  VKMNPEN  1028
+Subject_1  80    VKMNPER  86
+
+Query_1    1027  PDCYHNG  1007
+Subject_1  87    PDCYHNG  93
+
+Query_1    1006  LKMSPNV  986
+Subject_1  94    LKMSPNV  100
+
+Query_1    985   YCPTSAF  965
+Subject_1  101   YCPTSAF  107
+
+Query_1    964   PDCKPKQ  944
+Subject_1  108   PDCKPKQ  114
+
+Query_1    943   QKVHPKS  923
+Subject_1  115   QKVHPKS  121
+
+Query_1    922   QHGKNDP  902
+Subject_1  122   QHGK     125
+Subject_4  42    QWGINSP  48
+
+Query_1    901   LI  896
+Subject_4  49    LF  50
+
+For reading frame -3 of query sequence:
+
+Query_1    1209  YSSETRE  1189
+Subject_6  1     YSSETRE  7
+
+Query_1    1188  MCGLCTD  1168
+Subject_6  8     MCGLCTD  14
+
+Query_1    1167  AGKPFNS  1147
+Subject_6  15    AGKPFNS  21
+
+Query_1    1146  YLCDLVF  1126
+Subject_6  22    YLCDLVF  28
+
+Query_1    1125  DGATDVA  1105
+Subject_6  29    DGARDVA  35
+
+Query_1    1104  CLHQPSV  1084
+Subject_1  98        PNV  100
+Subject_6  36    CLHQP    40
+
+Query_1    1083  YSPNNSS  1063
+Subject_1  101   YCPTSA   106
+
+Query_1    1062  LIPCW*K  1042
+
+Query_1    1041  *ILKIRI  1021
+
+Query_1    1020  ATIMGLR  1000
+
+Query_1    999   CRQMFIV  979
+
+Query_1    978   QLQLFLT  958
+
+Query_1    957   ANPNNKR  937
+
+Query_1    936   CTPSRSM  916
+
+Query_1    915   GKMTLSS  895
+Subject_2  69      MTMDN  73
+
+Query_1    894   CHRTQ*H  874
+Subject_2  74    CNK      76
+
+Query_1    873   DPL*KRS  853
+
+Query_1    852   DT*RPDC  832
+
+Query_1    831   CYCGFIC  811
+
+Query_1    810   MQAAYAY  790
+
+Query_1    789   LAGVSWN  769
+
+Query_1    768   ISEM*ML  748
+
+Query_1    747   QVAISVE  727
+
+Query_1    726   STV**QL  706
+
+Query_1    705   *CEPTCC  685
+
+Query_1    684   RALPRDP  664
+
+Query_1    663   MAKHLRF  643
+
+Query_1    642   *IGENLC  622
+
+Query_1    621   PIERLSL  601
+
+Query_1    600   VERTQAF  580
+
+Query_1    579   CIEtrtn  559
+
+Query_1    558   rrpcnrc  538
+
+Query_1    537   CSHDWFS  517
+
+Query_1    516   VYPI*LS  496
+
+Query_1    495   VFIGPIK  475
+
+Query_1    474   GYSSNRK  454
+
+Query_1    453   EQKFIRS  433
+
+Query_1    432   WQYLLQL  412
+
+Query_1    411   SIVMLch  391
+
+Query_1    390   ccccccc  370
+
+Query_1    369   ccccccc  349
+
+Query_1    348   c*YASCG  328
+
+Query_1    327   SQGHQLC  307
+
+Query_1    306   IIIYAPA  286
+
+Query_1    285   IGSAHIL  265
+
+Query_1    264   IV*GGNS  244
+
+Query_1    243   TRSGGIC  223
+
+Query_1    222   NIYPLHG  202
+
+Query_1    201   IGCG*SI  181
+
+Query_1    180   LLS*VPV  160
+Subject_1  45        IVV  47
+
+Query_1    159   VPSFWYH  139
+Subject_1  48    IPEGWDH  54
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 125828
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bxs.fa).
+    Posted date:  Unknown
+  Number of letters in database: 542
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

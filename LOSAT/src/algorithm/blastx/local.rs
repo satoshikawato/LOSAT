@@ -190,10 +190,10 @@ fn search_records(
     // (`native::run_inner`).
     app::check_search_environment("BLASTX", true)?;
     let records_parsed = if args.parse_deflines {
-        // LOSAT's refusals of the records in outfmt 0, each such format's (`FormatRefusal`).
+        // LOSAT's refusals of the records in outfmt 0 to 4, each such format's (`FormatRefusal`).
         RecordsParsed::of(&subjects, args.show_gis, |parsed| {
             for (format, options) in outputs.formats.iter_mut().zip(&resolved) {
-                if options.outfmt == 0 {
+                if options.pairwise_view().is_some() {
                     format
                         .refusal
                         .check(crate::report::db_subject::check_pairwise_records(

@@ -174,12 +174,17 @@ impl FastaRecord {
         self.names().shown_id()
     }
 
-    /// The tabular subject id (`sseqid`, `sacc`, `saccver`) of a `-subject` record
-    /// (`RecordNames::subject_tabular_id` of a protein record), read by the reports for a record
-    /// without parsed ids (a record with them has its ids in `report::RecordsParsed`, which
-    /// refuses the ids LOSAT does not write): `None` where `GenerateDefline` throws
-    /// (`report::tabular::SubjectLookup::Failed`).
+    /// The tabular subject id (`sseqid`, `sacc`, `saccver`) of a `-subject` record read without
+    /// `-parse_deflines` (`RecordNames::subject_tabular_id` of a protein record): `None` where
+    /// `GenerateDefline` throws (`report::tabular::SubjectLookup::Failed`).
     pub fn subject_tabular_id(&self) -> Option<Vec<u8>> {
+        // A record with parsed ids has its tabular ids in `report::RecordsParsed`, made (or refused)
+        // when the subjects are read (`RecordsParsed::of`), and the reports read them there first:
+        // they never ask this of one. Without parsed ids the shared rule has no refusal (`Err`).
+        debug_assert!(
+            self.believed().is_none(),
+            "a record with parsed ids has its tabular ids in RecordsParsed"
+        );
         self.names().subject_tabular_id(true).ok().flatten()
     }
 
@@ -1571,6 +1576,40 @@ mod tests {
                 );
             }
         }
+        // The rules themselves, as NCBI writes them: a warning's id and title cut to 25 bytes and
+        // `.. ` past 35 (blast_setup_cxx.cpp:533-543), the tabular id the title's first word
+        // (tabular.cpp:474-504), a `Subject_` word's id the first word of the title
+        // `GenerateDefline` makes, none where it throws (showdefline.cpp:225-231).
+        let record = |title: &[u8], protein: bool| {
+            let mut data = b">".to_vec();
+            data.extend_from_slice(title);
+            data.extend_from_slice(b"\nACGT\n");
+            parse_fasta(&data, protein, false).unwrap().remove(0)
+        };
+        let long = b"q1 a title longer than thirty-five bytes \xe9 end";
+        assert_eq!(
+            record(long, false).names().warning_query_id(),
+            b"Query_1 q1 a title longer.. "
+        );
+        assert_eq!(
+            record(long, true).names().warning_query_id(),
+            b"Subject_1 q1 a title long.. "
+        );
+        assert_eq!(
+            record(b"q1 one\xe9", false).names().warning_query_id(),
+            b"Query_1 q1 one\xe9"
+        );
+        assert_eq!(&*record(b"q1 a\x81b z", false).query_line(), b"q1 a\x81b z");
+        assert_eq!(record(b"q1\xe9 rest", false).shown_id(), b"q1\xe9");
+        assert_eq!(record(b"\x01q1 ab z", false).shown_id(), b"\x01q1");
+        assert_eq!(
+            record(b"q1 a\xe9b z", true).subject_tabular_id(),
+            Some(b"q1".to_vec())
+        );
+        assert_eq!(
+            record(b"Subject_1\x81 rest", true).subject_tabular_id(),
+            None
+        );
         // A byte below 0x20 after the first ends the title.
         for (data, title) in [
             (&b">q1 a\x01b z\nACGT\n"[..], &b"q1 a"[..]),

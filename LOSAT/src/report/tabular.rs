@@ -5,8 +5,9 @@
 //! reads the field list, writes the comment lines of outfmt 7, the header line of outfmt 20 and
 //! the rows.
 //!
-//! The default reports (outfmt 6 and 7 with the `std` fields and a tab) keep each program's own
-//! writer: `TabularSpec::of` returns `None` for them.
+//! `TabularSpec::of` returns `None` for the default reports (outfmt 6 and 7 with the `std` fields
+//! and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with their
+//! own writers.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 //! ```c++
@@ -479,7 +480,7 @@ impl TabularNeeds {
 impl TabularSpec {
     /// The tabular report of `format` with the custom specification of `choice`, or `None` for
     /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
-    /// tab), which the programs write with their own writers.
+    /// tab), which BLASTX writes with `std`'s spec and the other programs with their own writers.
     pub fn of(format: ReportFormat, choice: &FormatChoice) -> Option<Self> {
         let (kind, default_delimiter) = match format {
             ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
@@ -512,27 +513,33 @@ impl TabularSpec {
         })
     }
 
-    /// The default report of outfmt 6 or 7 (`kind`): the `std` fields and a tab, which `of`
-    /// leaves to the programs (BLASTX writes it with the shared writer as any field list).
+    /// The default report of outfmt 6 or 7 (`commented`): the `std` fields and a tab, for which
+    /// `of` gives `None` (BLASTX writes it with this module as any field list,
+    /// `algorithm::blastx::args::ResolvedOptions::tabular_report`). Made once per process.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-79
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81
     /// ```c++
     ///     NStr::Split(format, " ", format_tokens);
     ///
     ///     if (format_tokens.empty())
     ///         x_AddDefaultFieldsToShow();
     /// ```
-    pub fn std(kind: TabularKind) -> &'static TabularSpec {
-        debug_assert!(matches!(
-            kind,
-            TabularKind::Tabular | TabularKind::Commented
-        ));
-        TabularSpec {
-            kind,
-            fields: STD_FIELDS.to_vec(),
-            delimiter: "\t".to_string(),
-        }
-        .intern()
+    pub fn std(commented: bool) -> &'static TabularSpec {
+        static TABULAR: std::sync::OnceLock<&'static TabularSpec> = std::sync::OnceLock::new();
+        static COMMENTED: std::sync::OnceLock<&'static TabularSpec> = std::sync::OnceLock::new();
+        let (cell, kind) = if commented {
+            (&COMMENTED, TabularKind::Commented)
+        } else {
+            (&TABULAR, TabularKind::Tabular)
+        };
+        cell.get_or_init(|| {
+            TabularSpec {
+                kind,
+                fields: STD_FIELDS.to_vec(),
+                delimiter: "\t".to_string(),
+            }
+            .intern()
+        })
     }
 
     /// The spec, kept for the rest of the process (one per distinct spec), so that the
@@ -3111,6 +3118,14 @@ mod tests {
             "3\t5\t3\tN/A\n"
         );
         assert_eq!(row(&positives, 1, Some((b"UJ", b"UI"))), "1\t1\t5\tN/A\n");
+        // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:444-449 and
+        // :482-485 (`ppos` and `positive` print the count of the positives, quoted at
+        // `TabularWriter::new`): either field alone keeps the matrix (U-C, C-U, J-J, *-*, A-A
+        // of 6; K-I is -3), so a writer that kept it for one of them only would print 50.00 / 3.
+        let percent = spec(ReportFormat::Tabular, "ppos");
+        assert_eq!(row(&percent, 1, Some((b"UCJ*KA", b"CUJ*IA"))), "83.33\n");
+        let count = spec(ReportFormat::Tabular, "positive");
+        assert_eq!(row(&count, 1, Some((b"UCJ*KA", b"CUJ*IA"))), "5\n");
         let commented = spec(ReportFormat::TabularWithComments, "qseqid");
         let writer = TabularWriter::new(
             &commented,

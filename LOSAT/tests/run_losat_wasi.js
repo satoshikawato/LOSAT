@@ -4,7 +4,7 @@
 
 const fs = require("fs");
 const { WASI } = require("wasi");
-const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 const { sharedFileTable, sharedFileImports } = require("./wasi_files");
 
 // NCBI reference:
@@ -52,7 +52,14 @@ const wasi = new WASI({
   // exports its memory, so the table reads it through the instance.
   let memory = null;
   const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
-  const local = unsignedWasiImports(wasi.wasiImport);
+  // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+  // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+  // The output to standard output and error waits for a full pipe as the native write blocks
+  // (blockingStdioWrite, wasi_artifact.js): require("wasi") above prints Node's ExperimentalWarning
+  // to process.stderr, which can leave a piped descriptor 1 or 2 non-blocking. Descriptors 1 and 2
+  // are not the table's, so the table's fd_write passes them to this one.
+  const unsigned = unsignedWasiImports(wasi.wasiImport);
+  const local = { ...unsigned, fd_write: blockingStdioWrite(unsigned.fd_write) };
   const instance = await WebAssembly.instantiate(module, {
     // The serial memory has no declared maximum, so it can pass 2 GiB.
     wasi_snapshot_preview1: { ...local, ...sharedFileImports(sharedFileTable(), guestMemory, local) },

@@ -9,7 +9,9 @@
 //! `Blast_HSPListGetBitScores`, c++/src/algo/blast/core/blast_hits.c:1907-1932), and
 //! c++/src/algo/blast/api/blast_seqalign.cpp:1397 (`BLASTUngappedHspListToSeqAlign`, which turns
 //! the HSPs into the report's alignments); for `report_subject_hits`,
-//! c++/src/algo/blast/core/blast_engine.c:1510-1554 (after `Blast_HSPListReevaluateUngapped`).
+//! c++/src/algo/blast/core/blast_engine.c:1515-1520 and 1539-1541 (after
+//! `Blast_HSPListReevaluateUngapped`; the write of the list at :1553-1554 is
+//! `SubjectEmit::emit`'s).
 //!
 //! This module is a child of `run_impl` for the timer it keeps private (`x_search_timing`). Its
 //! functions are made of statements of `process_subject` moved here in their order; they take the
@@ -296,8 +298,9 @@ pub(super) struct SubjectReportArgs<'a> {
 /// subject's final HSPs in `hits` (the worker's, sent at the end of the subject); then the `Emit`
 /// lap of LOSAT_TIMING.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1515-1520, 1539-1541 and
-/// 1553-1554 (after `Blast_HSPListReevaluateUngapped` in `BLAST_PreliminarySearchEngine`)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1515-1520 and 1539-1541
+/// (after `Blast_HSPListReevaluateUngapped` in `BLAST_PreliminarySearchEngine`; the write of the
+/// list that follows at :1553-1554 is `SubjectEmit::emit`'s)
 /// ```c
 ///                if (hit_params->link_hsp_params) {
 ///                    status =
@@ -309,9 +312,6 @@ pub(super) struct SubjectReportArgs<'a> {
 ///             /* Calculate and fill the bit scores, since there will be no
 ///                traceback stage where this can be done. */
 ///             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
-/// ...
-///          /* Save the results. */
-///          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 /// ```
 pub(super) fn report_subject_hits<S: TbxScore>(
     sc: S,
@@ -354,13 +354,6 @@ pub(super) fn report_subject_hits<S: TbxScore>(
                 .output_from_ungapped
                 .fetch_add(final_hits.len(), AtomicOrdering::Relaxed);
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
-        // ```c
-        // while (...) {
-        //    ...
-        //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-        // }
-        // ```
         // The subject's final HSPs, sent at the end of the subject (`SubjectEmit::emit`).
         debug_assert!(hits.is_empty());
         *hits = final_hits;

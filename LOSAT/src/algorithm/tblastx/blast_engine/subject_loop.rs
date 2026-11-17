@@ -15,7 +15,8 @@
 //! `x_batch_pipe`). Its functions are statements of `search_query_batch` moved here in their
 //! order; `process_subject` stays a closure of `search_query_batch`, which hands it to
 //! `run_subject_loop`. What the loop reads is a struct of references or `Copy` values, as is
-//! `SubjectEmit`, whose `emit` is the closure `process_subject` called at the end of a subject.
+//! `SubjectEmit`, whose `emit` (the closure `emit_subject_hits` before) `process_subject` calls at
+//! the end of a subject.
 
 use super::{
     x_batch_pipe, x_subject_next, DiagStruct, OffsetPair, Subjects, TblastxHsp, TbxScore,

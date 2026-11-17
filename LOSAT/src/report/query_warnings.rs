@@ -1339,17 +1339,79 @@ pub fn replaced_o_message(sequence: &[u8]) -> Option<String> {
         .filter(|(_, residue)| residue.eq_ignore_ascii_case(&b'O'))
         .map(|(position, _)| position)
         .collect();
+    let list = residue_positions(&positions)?;
+    Some(format!(
+        "One or more O characters replaced by X for alignment score calculations at positions {list}"
+    ))
+}
+
+/// The error of a protein query with residues that are no NCBIstdaa code (`positions`: their
+/// 0-based places in the query), or `None` without any. NCBI's `GetSequenceProtein` throws it;
+/// `SetupQueries_OMF` catches it as a warning of the query and invalidates the query's context,
+/// and when no context is valid the set-up throws the messages of all queries
+/// (`TSearchMessages::ToString`: each one with its severity and a space after it), which the
+/// application reports as `BLAST engine error: <that text>` (exit status 3).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:905-917
+/// ```c++
+///     if (invalid_residues.size() > 0) {
+///         string error("Invalid residues found at positions ");
+///         error += NStr::IntToString(invalid_residues[0]);
+///         for (i = 1; i < min(kMaxResiduesToWarnAbout, invalid_residues.size());
+///              i++) {
+///             error += ", " + NStr::IntToString(invalid_residues[i]);
+///         }
+///         if (invalid_residues.size() > kMaxResiduesToWarnAbout) {
+///             error += ",... (only first ";
+///             error += NStr::SizetToString(kMaxResiduesToWarnAbout) + " shown)";
+///         }
+///         NCBI_THROW(CBlastException, eInvalidCharacter, error);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639 and 650-651
+/// ```c++
+///         } catch (const CException& e) {
+///             ...
+///             CRef<CSearchMessage> m
+///                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+///             messages[index].push_back(m);
+///             s_InvalidateQueryContexts(qinfo, index);
+///         }
+///     ...
+///     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+///         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1020-1022 (`ToString`) and
+/// c++/include/algo/blast/api/blast_types.hpp:180-184 (`GetMessage(true)`)
+/// ```c++
+///         ITERATE(TQueryMessages, msg, *qm) {
+///             retval += (*msg)->GetMessage() + " ";
+///         }
+///     ...
+///     	if (withSeverity) {
+///     		return GetSeverityString() + ": " + m_Message;
+/// ```
+pub fn invalid_residues_error(positions: &[usize]) -> Option<String> {
+    let list = residue_positions(positions)?;
+    Some(format!(
+        "Warning: Invalid residues found at positions {list} "
+    ))
+}
+
+/// The list of residue positions of NCBI's `GetSequenceProtein` messages: the first, then up to
+/// 19 more after `, `, then `,... (only first 20 shown)` when there are more than 20
+/// (`kMaxResiduesToWarnAbout`, blast_setup_cxx.cpp:905-917 above and 920-932, quoted at
+/// `replaced_o_message`).
+fn residue_positions(positions: &[usize]) -> Option<String> {
     let first = *positions.first()?;
-    let mut message = format!(
-        "One or more O characters replaced by X for alignment score calculations at positions {first}"
-    );
+    let mut list = first.to_string();
     for position in positions.iter().take(20).skip(1) {
-        message.push_str(&format!(", {position}"));
+        list.push_str(&format!(", {position}"));
     }
     if positions.len() > 20 {
-        message.push_str(",... (only first 20 shown)");
+        list.push_str(",... (only first 20 shown)");
     }
-    Some(message)
+    Some(list)
 }
 
 /// The warning for a hit list size below 5.
@@ -1389,6 +1451,32 @@ mod tests {
     }
 
     use super::*;
+
+    // NCBI 2.17.0 (M4a-1b probes s19, s20; M4a-1c E): the list form of `GetSequenceProtein`'s errors.
+    #[test]
+    fn the_invalid_residues_error_lists_the_first_twenty_positions() {
+        assert_eq!(invalid_residues_error(&[]), None);
+        assert_eq!(
+            invalid_residues_error(&[26]).unwrap(),
+            "Warning: Invalid residues found at positions 26 "
+        );
+        let twenty: Vec<usize> = (0..20).collect();
+        let listed = (0..20)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert_eq!(
+            invalid_residues_error(&twenty).unwrap(),
+            format!("Warning: Invalid residues found at positions {listed} ")
+        );
+        let more: Vec<usize> = (0..22).collect();
+        assert_eq!(
+            invalid_residues_error(&more).unwrap(),
+            format!(
+                "Warning: Invalid residues found at positions {listed},... (only first 20 shown) "
+            )
+        );
+    }
 
     // Probes C31 and D01 of line DI-8: NCBI adds the empty-database message to the sorted
     // messages of the set-up, though "Sequence ..." sorts after "Filtering ...".

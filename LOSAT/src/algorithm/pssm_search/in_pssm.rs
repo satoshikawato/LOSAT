@@ -549,21 +549,111 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
     psi_search_and_object(pssm, PssmReader::PSIBLAST).map(|(search, _)| search)
 }
 
-/// The query's letters (`Seq-inst.seq-data`) as NCBIstdaa letters; none when the data is missing
-/// or holds a code or letter outside NCBIstdaa.
-fn query_letters(query: &crate::report::serial::pssm::PssmQuery) -> Vec<u8> {
-    match query.inst.seq_data.as_ref() {
+/// The query's residues as NCBI's query set-up reads them (`query_residues`).
+struct QueryResidues {
+    /// One letter per residue: the NCBIstdaa letter of its code (`-` for the gap code 0), `X` for
+    /// an invalid one (NCBI leaves it out of the query and stops, `invalid`, so no search reads it).
+    letters: Vec<u8>,
+    /// The 0-based positions of the residues whose code is no NCBIstdaa code.
+    invalid: Vec<usize>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:105-121
+// ```c++
+//     case CSeq_data::e_Ncbistdaa:
+//         m_SequenceData = const_cast< vector<char>& >
+//             (seq_data.GetNcbistdaa().Get());
+//         m_Encoding = CSeqUtil::e_Ncbistdaa;
+//         break;
+//     case CSeq_data::e_Ncbieaa:
+//         CSeqConvert::Convert(seq_data.GetNcbieaa().Get(),
+//                              CSeqUtil::e_Ncbieaa, 0, length,
+//                              m_SequenceData, CSeqUtil::e_Ncbistdaa);
+//         m_Encoding = CSeqUtil::e_Ncbistdaa;
+//         break;
+//     case CSeq_data::e_Iupacaa:
+//         CSeqConvert::Convert(seq_data.GetIupacaa().Get(),
+//                              CSeqUtil::e_Iupacaa, 0, length,
+//                              m_SequenceData, CSeqUtil::e_Ncbistdaa);
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1674-1707 (`CIupacaaToStdaa`)
+// and 1748-1781 (`CEaaToStdaa`): 0xff for every byte but these (rows 0x28-0x2f and 0x40-0x7f)
+// ```c++
+//     // CIupacaaToStdaa::scm_Table
+//     0xff, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,     // '@' 'A'..'G'
+//     0x8, 0x9, 0x1b, 0xa, 0xb, 0xc, 0xd, 0x1a,    // 'H'..'O'
+//     0xe, 0xf, 0x10, 0x11, 0x12, 0x18, 0x13, 0x14, // 'P'..'W'
+//     0x15, 0x16, 0x17, 0xff, 0xff, 0xff, 0xff, 0xff, // 'X' 'Y' 'Z'
+//     0xff, 0x1, 0x2, ...                          // '`' 'a'..'z': the same codes
+//     // CEaaToStdaa::scm_Table
+//     0xff, 0xff, 0x19, 0xff, 0xff, 0x0, 0xff, 0xff, // '(' ')' '*' '+' ',' '-' '.' '/'
+//     0xff, 0x1, 0x2, ...                          // '@' 'A'..'Z' as above; 'a'..'z' 0xff
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:867 and 894-904
+// ```c++
+// static inline bool s_IsValidResidue(Uint1 res) { return res < BLASTAA_SIZE; }
+// ...
+//     for (i = 0; i < sv.size(); i++) {
+//         // Change unsupported residues to X
+//         if (sv[i] == AMINOACID_TO_NCBISTDAA[(int)'O']) {
+//             replaced_residues.push_back(i);
+//             *buf_var++ = AMINOACID_TO_NCBISTDAA[(int)'X'];
+//         } else if (!s_IsValidResidue(sv[i])) {
+//             invalid_residues.push_back(i);
+//         } else {
+//             *buf_var++ = sv[i];
+//         }
+//     }
+// ```
+/// The query's residues (`Seq-inst.seq-data`) as NCBI's PSSM search sets the query up
+/// (`CBlastSeqVectorFromCSeq_data`, then `GetSequenceProtein`): each coding converts to NCBIstdaa
+/// with its own table, and a code of 28 or more is an invalid residue. `iupacaa` knows the 26
+/// letters of either case and neither `*` nor `-`; `ncbieaa` knows the 26 capital letters, `*`
+/// (25) and `-` (the gap code 0, a residue the search reads); `ncbistdaa` is its own code. The
+/// code of a letter is its capital's place in `NCBISTDAA_TO_AMINOACID` (the tables give every
+/// letter that code). No residues when the data is missing or of another coding (refused before,
+/// `psi_search_and_object`).
+fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
+    let code_of = |letter: u8| {
+        NCBISTDAA_TO_AMINOACID
+            .iter()
+            .position(|&known| known == letter)
+            .map(|code| code as u8)
+    };
+    let codes: Vec<Option<u8>> = match seq_data {
         Some(SeqData::Ncbistdaa(codes)) => codes
             .iter()
-            .map(|&code| NCBISTDAA_TO_AMINOACID.get(code as usize).copied())
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
+            .map(|&code| (usize::from(code) < BLASTAA_SIZE).then_some(code))
+            .collect(),
+        Some(SeqData::Iupacaa(text)) => text
             .iter()
-            .map(|&c| NCBISTDAA_TO_AMINOACID.contains(&c).then_some(c))
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
+            .map(|&c| {
+                c.is_ascii_alphabetic()
+                    .then(|| code_of(c.to_ascii_uppercase()))
+                    .flatten()
+            })
+            .collect(),
+        Some(SeqData::Ncbieaa(text)) => text
+            .iter()
+            .map(|&c| {
+                (c.is_ascii_uppercase() || c == b'*' || c == b'-')
+                    .then(|| code_of(c))
+                    .flatten()
+            })
+            .collect(),
         Some(SeqData::Other(_)) | None => Vec::new(),
+    };
+    QueryResidues {
+        letters: codes
+            .iter()
+            .map(|code| code.map_or(b'X', |code| NCBISTDAA_TO_AMINOACID[usize::from(code)]))
+            .collect(),
+        invalid: codes
+            .iter()
+            .enumerate()
+            .filter(|(_, code)| code.is_none())
+            .map(|(position, _)| position)
+            .collect(),
     }
 }
 
@@ -608,10 +698,15 @@ fn stopped_as_query_joins_scope(
         pssm: QueryPssm { rows: Vec::new() },
         freq_ratios: Vec::new(),
         stats: PssmStats::default(),
-        query: query_record_of(&query.ids, &title, &query_letters(query)),
+        query: query_record_of(
+            &query.ids,
+            &title,
+            &query_residues(query.inst.seq_data.as_ref()).letters,
+        ),
         query_ids: query.ids.clone(),
         validation_error: None,
         scores_error: None,
+        setup_error: None,
         setup_messages: Vec::new(),
         warning_title: Some(Vec::new()),
         request: None,
@@ -746,6 +841,36 @@ pub(crate) fn psi_search_and_object(
         _ => &[],
     };
     let ratios_only = validation_error.is_none() && scores.is_empty();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:466-473
+    // ```c++
+    // void PsiBlastComputePssmScores(CRef<objects::CPssmWithParameters> pssm,
+    //                                const CBlastOptions& opts)
+    // {
+    //     CConstRef<CBioseq> query(&pssm->GetQuery().GetSeq());
+    //     CRef<IQueryFactory> seq_fetcher(new CObjMgrFree_QueryFactory(query)); /* NCBI_FAKE_WARNING */
+    //
+    //     CRef<ILocalQueryData> query_data(seq_fetcher->MakeLocalQueryData(&opts));
+    //     BLAST_SequenceBlk* seqblk = query_data->GetSequenceBlk();
+    // ```
+    // The query's residues (`query_residues`) and NCBI's error of its invalid ones
+    // (`report::query_warnings::invalid_residues_error`), which the query set-up
+    // (`SetupQueries_OMF`) throws after NCBI's check of the PSSM: in `CPsiBlastImpl`'s constructor
+    // for a PSSM of frequency ratios only, whose PSSM engine reads the query's sequence block (the
+    // engine then never runs: `scores_error`), else where `CPsiBlast::Run` sets the search's query
+    // up (`setup_error`, `PsiSearch::stop_before_search`). Either way NCBI reads none of the PSSM's
+    // values but its check's: the refusals of those values below are for the runs that read them
+    // (`reads_values`).
+    let residues = query_residues(query.inst.seq_data.as_ref());
+    let invalid_residues = validation_error
+        .is_none()
+        .then(|| crate::report::query_warnings::invalid_residues_error(&residues.invalid))
+        .flatten();
+    let (mut scores_error, setup_error) = if ratios_only {
+        (invalid_residues, None)
+    } else {
+        (None, invalid_residues)
+    };
+    let reads_values = validation_error.is_none() && scores_error.is_none() && setup_error.is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:648-660
     // ```c++
     //     asn1_pssm.SetByRow(false);  // this is the default
@@ -759,7 +884,7 @@ pub(crate) fn psi_search_and_object(
     // The engine's scores are column by column, which NCBI's search then reads by the PSSM's
     // own `byRow` (`PsiBlastComputePssmScores` copies the scores, not `byRow`): a ratio-only
     // PSSM written row by row would be searched with its scores transposed.
-    if ratios_only && pssm.pssm.by_row == Some(true) {
+    if ratios_only && reads_values && pssm.pssm.by_row == Some(true) {
         return Err(reader.refuse(
             "a PSSM of frequency ratios only written by row (NCBI reads the scores it computes for it in the wrong order)",
         ));
@@ -901,11 +1026,27 @@ pub(crate) fn psi_search_and_object(
             query.inst.repr.0, query.inst.mol.0
         )));
     }
-    let letters = query_letters(query);
+    // A gap letter (`-` of ncbieaa, the code 0 of ncbistdaa) is a residue that NCBI's search
+    // reads (`query_residues`; NCBI BLAST+ 2.17.0 searches with it, M4a-1b probes `dash_eaa`,
+    // `r_std0`), and the record keeps it as `-`, which the search encodes as 0.
+    let letters = residues.letters;
     let length = query.inst.length.map_or(-1, i64::from);
-    if letters.is_empty() || letters.len() as i64 != length || letters.contains(&b'-') {
+    if letters.is_empty() || letters.len() as i64 != length {
         return Err(reader.refuse(
-            "a PSSM query whose letters are missing, of another length than its Seq-inst, or with a gap or a byte outside NCBIstdaa",
+            "a PSSM query whose letters are missing or of another length than its Seq-inst",
+        ));
+    }
+    // NCBI searches lower-case iupacaa letters as their capitals (`CIupacaaToStdaa`, quoted at
+    // `query_residues`), but its reports read the Bioseq's own letters: they show them in lower
+    // case and count no identity or positive on them (tabular.cpp:996-1022, NCBI BLAST+ 2.17.0,
+    // M4a-1c E probes `tk_low_iupac`, `ts_low_iupac`: pident 0.000). LOSAT's records hold lower
+    // case as a mask, so it refuses such a query where NCBI would search it.
+    if reads_values
+        && matches!(query.inst.seq_data, Some(SeqData::Iupacaa(ref text))
+            if text.iter().any(u8::is_ascii_lowercase))
+    {
+        return Err(reader.refuse(
+            "a PSSM query with lower-case iupacaa letters (NCBI's reports compare them as they are)",
         ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
@@ -933,7 +1074,7 @@ pub(crate) fn psi_search_and_object(
         .intermediate_data
         .as_ref()
         .map_or(0, |data| data.freq_ratios.len());
-    if validation_error.is_none()
+    if reads_values
         && (!(1..=BLASTAA_SIZE as i32).contains(&rows_n)
             || i64::from(columns_n) != letters.len() as i64
             || (!ratios_only && scores.len() as i64 != cells)
@@ -954,7 +1095,7 @@ pub(crate) fn psi_search_and_object(
     // 40,000 runs; one near `INT4_MAX` would overflow, undefined behaviour). LOSAT keeps the scores
     // to one letter's range and the sums of a search below 2^30 (below): range rules of LOSAT's,
     // not NCBI errors.
-    if validation_error.is_none() {
+    if reads_values {
         if let Some(score) = scores
             .iter()
             .find(|&&score| !(BLAST_SCORE_MIN..=BLAST_SCORE_MAX).contains(&score))
@@ -965,7 +1106,7 @@ pub(crate) fn psi_search_and_object(
         }
     }
     let by_row = pssm.pssm.by_row == Some(true);
-    let mut rows = if validation_error.is_none() {
+    let mut rows = if reads_values {
         convert_2_matrix(
             scores,
             rows_n as usize,
@@ -985,7 +1126,7 @@ pub(crate) fn psi_search_and_object(
     // PSSM whose sum reaches 2^30 (where NCBI's `Int4` sums can reach `MININT`'s distance from 0 and
     // overflow, undefined behaviour): every PSSM of fewer than 19,800 columns passes, and a PSSM of
     // NCBI's engine (scores of a few tens) up to millions of columns.
-    if validation_error.is_none() {
+    if reads_values {
         let sum: i64 = rows
             .iter()
             .map(|column| i64::from(column.iter().copied().max().unwrap_or(0).max(0)))
@@ -1015,7 +1156,7 @@ pub(crate) fn psi_search_and_object(
     // rows), which the position-based composition-based statistics read; none when the PSSM has
     // none (NCBI's then stay zero).
     let freq_ratios = match pssm.pssm.intermediate_data.as_ref() {
-        Some(data) if validation_error.is_none() && !data.freq_ratios.is_empty() => {
+        Some(data) if reads_values && !data.freq_ratios.is_empty() => {
             convert_2_matrix(
                 &data.freq_ratios,
                 rows_n as usize,
@@ -1037,8 +1178,7 @@ pub(crate) fn psi_search_and_object(
         h: stat(final_data.map(|data| data.h)),
     };
     let mut computed = None;
-    let mut scores_error = None;
-    if ratios_only {
+    if ratios_only && reads_values {
         match scores_from_freq_ratios(&letters, &freq_ratios, reader)? {
             Ok((scores, gapped)) => {
                 rows = scores;
@@ -1095,7 +1235,7 @@ pub(crate) fn psi_search_and_object(
     ]);
     if let (Some((name, _)), true, false) = (
         gapped_negative,
-        validation_error.is_none() && scores_error.is_none(),
+        validation_error.is_none() && scores_error.is_none() && setup_error.is_none(),
         ungapped_invalid,
     ) {
         return Err(reader.refuse(format!(
@@ -1130,6 +1270,7 @@ pub(crate) fn psi_search_and_object(
         query_ids: ids.to_vec(),
         validation_error,
         scores_error,
+        setup_error,
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
@@ -2395,6 +2536,146 @@ mod tests {
         data.scaling_factor = Some(2);
         data.scores[5] = i32::MAX;
         assert!(psi_search_of(scaled).unwrap().validation_error.is_some());
+    }
+
+    /// `rnd()` (30 letters of NCBIstdaa) with its query data replaced by `data(letters, codes)`.
+    fn rnd_with_query(data: impl Fn(Vec<u8>, Vec<u8>) -> SeqData) -> Result<PsiSearch> {
+        let mut pssm = rnd();
+        let inst = &mut pssm
+            .pssm
+            .query
+            .as_mut()
+            .and_then(SeqEntry::seq_mut)
+            .unwrap()
+            .inst;
+        let Some(SeqData::Ncbistdaa(codes)) = inst.seq_data.clone() else {
+            unreachable!("the rnd PSSM's query is NCBIstdaa");
+        };
+        let letters = codes
+            .iter()
+            .map(|&code| NCBISTDAA_TO_AMINOACID[usize::from(code)])
+            .collect();
+        inst.seq_data = Some(data(letters, codes));
+        psi_search_of(pssm)
+    }
+
+    fn put(mut bytes: Vec<u8>, at: usize, byte: u8) -> Vec<u8> {
+        bytes[at] = byte;
+        bytes
+    }
+
+    // NCBI blast_setup_cxx.cpp:894-917 and 632-651 (quoted at `query_residues` and
+    // `query_warnings::invalid_residues_error`): a residue without an NCBIstdaa code stops the
+    // search at its query set-up, after the strategy's request and psiblast's round-1 files
+    // (NCBI BLAST+ 2.17.0, M4a-1c E probes `*_star_iupac.inv.*`, `old_ps_bad_*`).
+    #[test]
+    fn a_residue_without_a_code_stops_the_search_at_its_set_up() {
+        let iupacaa: [u8; 4] = [b'*', b'#', 0xE9, b'-'];
+        let ncbieaa: [u8; 3] = [b'#', 0xE9, b'a'];
+        let ncbistdaa: [u8; 3] = [28, 30, 255];
+        let cases = iupacaa
+            .iter()
+            .map(|&byte| rnd_with_query(|letters, _| SeqData::Iupacaa(put(letters, 26, byte))))
+            .chain(ncbieaa.iter().map(|&byte| {
+                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, byte)))
+            }))
+            .chain(ncbistdaa.iter().map(|&code| {
+                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, code)))
+            }));
+        for search in cases {
+            let search = search.unwrap();
+            assert_eq!(
+                search.setup_error.as_deref(),
+                Some("Warning: Invalid residues found at positions 26 ")
+            );
+            assert!(search.validation_error.is_none() && search.scores_error.is_none());
+            let stop = search.stop_before_search(false, true).unwrap();
+            assert!(matches!(
+                stop,
+                crate::algorithm::pssm_search::PssmQueryStop::Setup(_)
+            ));
+            assert!(stop.after_request() && stop.after_round_files());
+            assert!(stop
+                .error()
+                .to_string()
+                .starts_with("BLAST engine error: Warning: Invalid residues found at positions 26 "));
+        }
+        let all = rnd_with_query(|letters, _| SeqData::Iupacaa(vec![b'#'; letters.len()])).unwrap();
+        assert_eq!(
+            all.setup_error.as_deref(),
+            Some(
+                "Warning: Invalid residues found at positions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, \
+                 11, 12, 13, 14, 15, 16, 17, 18, 19,... (only first 20 shown) "
+            )
+        );
+    }
+
+    // NCBI sequtil_tables.cpp:1748-1781 (`*` is 25 and `-` the gap 0 in ncbieaa) and
+    // blast_setup_cxx.cpp:867 (the code 0 is a residue): these search (NCBI BLAST+ 2.17.0, M4a-1c E
+    // probes `*_star_eaa`, `*_dash_eaa`, `*_std0*`).
+    #[test]
+    fn a_stop_or_gap_letter_with_a_code_is_searched() {
+        for (search, letter) in [
+            (
+                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'*'))),
+                b'*',
+            ),
+            (
+                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'-'))),
+                b'-',
+            ),
+            (
+                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, 0))),
+                b'-',
+            ),
+            (
+                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 0, 0))),
+                b'-',
+            ),
+        ] {
+            let search = search.unwrap();
+            assert!(search.setup_error.is_none() && search.stop_before_search(false, true).is_none());
+            assert!(search.query.seq().contains(&letter));
+            assert_eq!(search.query.seq().len(), 30);
+        }
+    }
+
+    // NCBI psiblast_aux_priv.cpp:466-473: a PSSM of frequency ratios only sets its query up as it
+    // computes the scores, so the stop comes there (before the request; no PSSM files).
+    #[test]
+    fn a_ratios_only_pssm_stops_at_its_scores_on_a_residue_without_a_code() {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+            "pssm/ps_ratios_std30.asn.gz",
+        ))
+        .unwrap();
+        let search = psi_search_of(pssm).unwrap();
+        assert_eq!(
+            search.scores_error.as_deref(),
+            Some("Warning: Invalid residues found at positions 5 ")
+        );
+        assert!(search.setup_error.is_none());
+        let stop = search.stop_before_search(false, true).unwrap();
+        assert!(stop.after_request() && !stop.after_round_files());
+    }
+
+    // NCBI tabular.cpp:996-1022 (quoted at `recount_shown_identities`): NCBI's reports compare the
+    // Bioseq's own letters; LOSAT refuses lower-case iupacaa where NCBI searches, and leaves a query
+    // that NCBI stops to NCBI's stop.
+    #[test]
+    fn lower_case_iupacaa_is_refused_where_ncbi_searches() {
+        let lower = rnd_with_query(|letters, _| SeqData::Iupacaa(letters.to_ascii_lowercase()));
+        assert!(lower
+            .unwrap_err()
+            .to_string()
+            .contains("lower-case iupacaa letters"));
+        let stopped = rnd_with_query(|letters, _| {
+            SeqData::Iupacaa(put(letters.to_ascii_lowercase(), 3, b'*'))
+        })
+        .unwrap();
+        assert_eq!(
+            stopped.setup_error.as_deref(),
+            Some("Warning: Invalid residues found at positions 3 ")
+        );
     }
 
     #[test]

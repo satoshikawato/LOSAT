@@ -77,6 +77,13 @@ pub struct PsiSearch {
     pub(crate) stats: PssmStats,
     /// The query record as the reports show it without `-parse_deflines` (`query_record`).
     pub(crate) query: FastaRecord,
+    /// The letters of the query's Bioseq as NCBI's reports read them where they are not the
+    /// record's (`query`): a PSSM query (`-in_pssm`) of iupacaa letters with one in lower case,
+    /// which the search reads as its capital (the record's letter) and the reports show and
+    /// compare as it is (`in_pssm::query_residues`, `report::row_letters::QueryLetters`). `None`
+    /// otherwise. The query source is fixed for the run: a PSSM query's later rounds keep it
+    /// (`blast_engine::psi_round`); a FASTA query's rounds have none.
+    pub(crate) bioseq_letters: Option<std::sync::Arc<[u8]>>,
     /// The Seq-ids of the PSSM's query Bioseq of `-in_pssm` (at least one), the one owner of them:
     /// the first is the id of the query's Seq-loc (psiblast_app.cpp:540, `GetFirstId()`), which
     /// its Seq-aligns, the later rounds' PSSMs and the warnings take; the reports show them as
@@ -575,6 +582,7 @@ impl PsiSearch {
                 h: stat(pssm.gapped.h),
             },
             query,
+            bioseq_letters: None,
             query_ids: Vec::new(),
             validation_error: None,
             scores_error: None,

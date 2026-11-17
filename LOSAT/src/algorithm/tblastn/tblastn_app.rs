@@ -2418,10 +2418,7 @@ fn search(
                     &titles,
                     &mut results,
                     search_letters,
-                    super::stage_e_report::reads_subject_letters(
-                        outputs.hits.is_some(),
-                        outputs.formats.iter().map(|format| format.outfmt),
-                    ),
+                    super::stage_e_report::reads_subject_letters(outputs, pssm.as_deref()),
                     parsed_shown(&outputs.formats),
                     &batch_spans,
                 )

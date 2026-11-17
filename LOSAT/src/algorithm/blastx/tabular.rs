@@ -794,6 +794,7 @@ pub(super) fn write_blastx_tabular(
                                 // inside its segment, not an end gap (alnvec.cpp:279-297,
                                 // `TabularHsp::end_gaps`).
                                 end_gaps: false,
+                                stored_gaps: [&[], &[]],
                                 qcovhsp: query_coverage_per_hsp(
                                     options.gapped,
                                     shown_count,
@@ -823,6 +824,7 @@ pub(super) fn write_blastx_tabular(
                                 s_frame: 0,
                                 rows: None,
                                 end_gaps: true,
+                                stored_gaps: [&[], &[]],
                                 qcovhsp: -1,
                             };
                             catch_ids = AlignQueryIds::of(query);
@@ -866,6 +868,7 @@ pub(super) fn write_blastx_tabular(
                                 s_frame: 0,
                                 rows,
                                 end_gaps: true,
+                                stored_gaps: [&[], &[]],
                                 qcovhsp: query_coverage_per_hsp(
                                     options.gapped,
                                     shown_count,

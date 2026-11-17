@@ -3896,7 +3896,7 @@ mod tests {
         final_list.update(list(3, 50));
         let final_lists = vec![None, Some(final_list)];
         // With `WithO`, the HSPs of a query with an O (query 0 here) keep every subject's residues.
-        for (residues, query_has_o, kept) in [
+        for (residues, query_recounted, kept) in [
             (XShownResidues::WithO, &[][..], [false, true, false, false]),
             (
                 XShownResidues::WithO,
@@ -3913,7 +3913,7 @@ mod tests {
                 shown.redo_subjects(&database).read(rank).unwrap();
             }
             shown
-                .x_read_shown(&database, &final_lists, residues, query_has_o)
+                .x_read_shown(&database, &final_lists, residues, query_recounted)
                 .unwrap();
             assert_eq!(shown.encoded.len(), 4, "{residues:?}");
             for (rank, kept) in kept.into_iter().enumerate() {

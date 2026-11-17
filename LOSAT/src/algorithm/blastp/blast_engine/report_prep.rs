@@ -21,9 +21,9 @@
 //! batch (`refuse_prefetch_environment`), the subjects that the reports show (`shown_of`), what
 //! the reports read of the final hit lists' Seq-aligns, psiblast's cut and PSSMs among them
 //! (`report_values`), and the labels of the reports (`report_labels`). They read `ReportSetup`,
-//! and of `blast_engine` also `ShownSubjects`, `BlastpSubjectSource`, `psiblast_pssms`,
-//! `recount_shown_identities`, `write_pairwise_prologs`, `write_request_posts`,
-//! `blastp_subject_tag` and `path_label`.
+//! and of `blast_engine` also `ShownSubjects`, `ShownQueries`, `ShownLetters`,
+//! `BlastpSubjectSource`, `psiblast_pssms`, `recount_shown_identities`, `write_pairwise_prologs`,
+//! `write_request_posts`, `blastp_subject_tag` and `path_label`.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -892,7 +892,7 @@ pub(super) fn refuse_unreportable(
 use super::{
     blastp_subject_tag, hit_list_to_seqalign_order, path_label, psiblast_pssms,
     recount_shown_identities, write_pairwise_prologs, write_request_posts, BlastpSubjectSource,
-    ShownSubjects,
+    ShownLetters, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -987,20 +987,15 @@ pub(super) fn read_shown_residues(
             database::XShownResidues::Final
         };
         // The query test of `recount_shown_identities`.
-        let query_has_o: Vec<bool> = if residues == database::XShownResidues::WithO {
-            query_records
-                .iter()
-                .map(|record| {
-                    record
-                        .seq()
-                        .iter()
-                        .any(|letter| letter.eq_ignore_ascii_case(&b'O'))
-                })
+        let query_recounted: Vec<bool> = if residues == database::XShownResidues::WithO {
+            let queries = ShownQueries::of(query_records, args);
+            (0..query_records.len())
+                .map(|q_idx| queries.letters(q_idx).is_some_and(ShownLetters::recounted))
                 .collect()
         } else {
             Vec::new()
         };
-        listed.x_read_shown(database, hit_lists, residues, &query_has_o)?;
+        listed.x_read_shown(database, hit_lists, residues, &query_recounted)?;
     }
     Ok(())
 }
@@ -1377,7 +1372,7 @@ pub(super) fn report_values(
     let mut engine_counts = EngineCounts::default();
     recount_shown_identities(
         hit_lists,
-        query_records,
+        ShownQueries::of(query_records, args),
         shown_subjects,
         args.scoring.matrix,
         psi_round::searched_other_letters(args),

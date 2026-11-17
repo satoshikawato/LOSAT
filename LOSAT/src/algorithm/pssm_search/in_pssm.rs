@@ -556,10 +556,9 @@ struct QueryResidues {
     letters: Vec<u8>,
     /// The 0-based positions of the residues whose code is no NCBIstdaa code.
     invalid: Vec<usize>,
-    /// Whether a residue is the gap residue (code 0).
-    gap: bool,
-    /// Whether an iupacaa letter is in lower case.
-    lower: bool,
+    /// The Bioseq's letters as NCBI's reports read them where they are not `letters`
+    /// (`PsiSearch::bioseq_letters`): iupacaa letters with one in lower case, as they are.
+    bioseq: Option<Vec<u8>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:105-121
@@ -617,20 +616,37 @@ struct QueryResidues {
 /// code of a letter is its capital's place in `NCBISTDAA_TO_AMINOACID` (the tables give every
 /// letter that code). No residues when the data is missing or of another coding (refused before,
 /// `psi_search_and_object`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:530-547,566-569
+/// ```c++
+///         TCoding dataCoding = data.Which();
+///         TCoding cacheCoding = x_GetCoding(m_Coding, dataCoding);
+///         ...
+///         const char* table = 0;
+///         if ( cacheCoding != dataCoding || reverse ||
+///              m_CaseConversion != eCaseConversion_none ) {
+///             table = sx_GetConvertTable(dataCoding, cacheCoding,
+///                                        reverse, m_CaseConversion);
+///         ...
+///         case CSeq_data::e_Iupacaa:
+///             copy_8bit_any(m_Cache, count, data.GetIupacaa().Get(), dataPos,
+///                           table, reverse);
+/// ```
+/// The reports read the Bioseq's letters through its `CSeqVector` in Iupac coding (alnvec.cpp:
+/// 116-121, quoted at `blastp::blast_engine::restore_displayed_o`): iupacaa data is copied as it
+/// is, so a lower-case letter, which the search reads as its capital, is shown and compared in
+/// lower case (`bioseq`); ncbieaa's and ncbistdaa's letters are the record's (`letters`: the
+/// capitals, `*`, and `-` for the gap residue).
 fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
     let mut residues = QueryResidues {
         letters: Vec::new(),
         invalid: Vec::new(),
-        gap: false,
-        lower: false,
+        bioseq: None,
     };
     // Each letter of iupacaa and ncbieaa that converts is its capital's place in
     // `NCBISTDAA_TO_AMINOACID`, which holds all 26 capitals: its letter is the capital itself.
     let push = |residues: &mut QueryResidues, position: usize, letter: Option<u8>| match letter {
-        Some(letter) => {
-            residues.gap |= letter == b'-';
-            residues.letters.push(letter);
-        }
+        Some(letter) => residues.letters.push(letter),
         None => {
             residues.letters.push(b'X');
             residues.invalid.push(position);
@@ -647,9 +663,11 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
         Some(SeqData::Iupacaa(text)) => {
             residues.letters.reserve(text.len());
             for (position, &c) in text.iter().enumerate() {
-                residues.lower |= c.is_ascii_lowercase();
                 let letter = c.is_ascii_alphabetic().then(|| c.to_ascii_uppercase());
                 push(&mut residues, position, letter);
+            }
+            if text.iter().any(u8::is_ascii_lowercase) {
+                residues.bioseq = Some(text.clone());
             }
         }
         Some(SeqData::Ncbieaa(text)) => {
@@ -710,6 +728,8 @@ fn stopped_as_query_joins_scope(
             &title,
             &query_residues(query.inst.seq_data.as_ref()).letters,
         ),
+        // No report reads the query of a run that stops as its query joins the scope.
+        bioseq_letters: None,
         query_ids: query.ids.clone(),
         validation_error: None,
         scores_error: None,
@@ -1035,32 +1055,14 @@ pub(crate) fn psi_search_and_object(
         )));
     }
     // A gap letter (`-` of ncbieaa, the code 0 of ncbistdaa) is a residue that NCBI's search
-    // reads (`query_residues`); the record keeps it as `-` (refused below where NCBI searches).
+    // reads (`query_residues`); the record keeps it as `-`, which the reports show and count as a
+    // residue (`report::row_letters`). Lower-case iupacaa letters are searched as their capitals,
+    // which the record holds; the reports read the Bioseq's own (`PsiSearch::bioseq_letters`).
     let letters = residues.letters;
     let length = query.inst.length.map_or(-1, i64::from);
     if letters.is_empty() || letters.len() as i64 != length {
         return Err(reader.refuse(
             "a PSSM query whose letters are missing or of another length than its Seq-inst",
-        ));
-    }
-    // NCBI searches lower-case iupacaa letters as their capitals (`CIupacaaToStdaa`, quoted at
-    // `query_residues`), but its reports read the Bioseq's own letters: they show them in lower
-    // case and count no identity or positive on them (tabular.cpp:996-1022, NCBI BLAST+ 2.17.0,
-    // M4a-1c E probes `tk_low_iupac`, `ts_low_iupac`: pident 0.000). LOSAT's records hold lower
-    // case as a mask, so it refuses such a query where NCBI would search it.
-    if reads_values && residues.lower {
-        return Err(reader.refuse(
-            "a PSSM query with lower-case iupacaa letters (NCBI's reports compare them as they are)",
-        ));
-    }
-    // NCBI searches the gap residue too (M4a-1c E probes `*_dash_eaa`, `*_std0*`), and its reports
-    // read it as a residue that shows as `-` (alnvec.cpp:116-121): the rows' coordinates count it,
-    // the identities count it against a gap of the subject (tabular.cpp:996-1022), and it is no
-    // end gap. LOSAT's report rows hold `-` for gaps alone, so it refuses such a query where NCBI
-    // would search it.
-    if reads_values && residues.gap {
-        return Err(reader.refuse(
-            "a PSSM query with the gap residue (- of ncbieaa, 0 of ncbistdaa), which NCBI's reports count as a residue,",
         ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
@@ -1279,6 +1281,7 @@ pub(crate) fn psi_search_and_object(
         freq_ratios,
         stats,
         query: query_record_of(ids, title, &letters),
+        bioseq_letters: residues.bioseq.map(std::sync::Arc::from),
         query_ids: ids.to_vec(),
         validation_error,
         scores_error,
@@ -2625,18 +2628,31 @@ mod tests {
 
     // NCBI sequtil_tables.cpp:1748-1781: `*` of ncbieaa is the stop residue (25), which NCBI
     // searches (M4a-1c E probes `*_star_eaa`); the gap residue (`-`, the code 0 of ncbistdaa) is
-    // a residue too, which LOSAT refuses where NCBI searches (its reports count it as a residue).
+    // a residue too, which NCBI searches and its reports show as `-` and count as a residue
+    // (M4a-1c E and LG probes `*_dash_eaa`, `*_std0*`): the record keeps it as `-`.
     #[test]
-    fn a_stop_letter_is_searched_and_a_gap_residue_refused() {
+    fn a_stop_letter_and_a_gap_residue_are_searched() {
         let star = rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'*'))).unwrap();
         assert!(star.setup_error.is_none() && star.stop_before_search(false, true).is_none());
         assert_eq!(star.query.seq()[26], b'*');
-        for gap in [
-            rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'-'))),
-            rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, 0))),
-            rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 0, 0))),
+        for (gap, position) in [
+            (
+                rnd_with_query(|letters, _| SeqData::Ncbieaa(put(letters, 26, b'-'))),
+                26,
+            ),
+            (
+                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 26, 0))),
+                26,
+            ),
+            (
+                rnd_with_query(|_, codes| SeqData::Ncbistdaa(put(codes, 0, 0))),
+                0,
+            ),
         ] {
-            assert!(gap.unwrap_err().to_string().contains("the gap residue"));
+            let gap = gap.unwrap();
+            assert!(gap.setup_error.is_none() && gap.stop_before_search(false, true).is_none());
+            assert_eq!(gap.query.seq()[position], b'-');
+            assert!(gap.bioseq_letters.is_none());
         }
         // With an invalid residue too, NCBI's stop comes first.
         let stopped =
@@ -2666,16 +2682,21 @@ mod tests {
         assert!(stop.after_request() && !stop.after_round_files());
     }
 
-    // NCBI tabular.cpp:996-1022 (quoted at `recount_shown_identities`): NCBI's reports compare the
-    // Bioseq's own letters; LOSAT refuses lower-case iupacaa where NCBI searches, and leaves a query
-    // that NCBI stops to NCBI's stop.
+    // NCBI seq_vector_ci.cpp:530-547,566-569 (quoted at `query_residues`) and tabular.cpp:996-1022
+    // (quoted at `recount_shown_identities`): NCBI searches lower-case iupacaa as its capitals and
+    // its reports read the Bioseq's own letters (`PsiSearch::bioseq_letters`); a query that NCBI
+    // stops keeps NCBI's stop.
     #[test]
-    fn lower_case_iupacaa_is_refused_where_ncbi_searches() {
-        let lower = rnd_with_query(|letters, _| SeqData::Iupacaa(letters.to_ascii_lowercase()));
-        assert!(lower
-            .unwrap_err()
-            .to_string()
-            .contains("lower-case iupacaa letters"));
+    fn lower_case_iupacaa_is_searched_as_capitals_and_shown_as_it_is() {
+        let lower =
+            rnd_with_query(|letters, _| SeqData::Iupacaa(letters.to_ascii_lowercase())).unwrap();
+        assert!(lower.setup_error.is_none() && lower.stop_before_search(false, true).is_none());
+        let bioseq = lower.bioseq_letters.as_deref().unwrap();
+        assert_eq!(bioseq.to_ascii_uppercase(), lower.query.seq());
+        assert!(bioseq.iter().all(|letter| !letter.is_ascii_uppercase()));
+        let capitals = rnd_with_query(|letters, _| SeqData::Iupacaa(letters)).unwrap();
+        assert!(capitals.bioseq_letters.is_none());
+        assert_eq!(capitals.query.seq(), lower.query.seq());
         let stopped = rnd_with_query(|letters, _| {
             SeqData::Iupacaa(put(letters.to_ascii_lowercase(), 3, b'*'))
         })

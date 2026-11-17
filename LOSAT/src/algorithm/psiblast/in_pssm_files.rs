@@ -141,22 +141,35 @@ fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> 
 //         CSeq_data ncbistdaa;
 //         CSeqportUtil::Convert(seq_data, &ncbistdaa, CSeq_data::e_Ncbistdaa);
 // ```
-// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:254-258, 3486-3487 and the
-// tables at 6621-6626 (iupacaa: num 26, start-at 65) and 6655-6658 (ncbieaa: num 49, start-at 42,
-// 255 for every byte of 42-90 but `*`, `-` and the capitals)
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:2045-2052
 // ```c++
-//         CWrapper_table(size_t size, size_t start)
-//         {
-//             m_Table   = new T[256];
-//     ...
-//         (*(i_out++)) =
-//             m_IupacaaNcbistdaa->m_Table[static_cast<unsigned char>(*i_in)];
+//     if ( in_str != 0 ) {
+//         string result;
+//         retval = CSeqConvert::Convert(*in_str, s_SeqDataToSeqUtil[from_code],
+//                                       uBeginIdx, uLength,
+//                                       result, s_SeqDataToSeqUtil[to_code]);
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:898-905 and the tables
+// of c++/src/util/sequtil/sequtil_tables.cpp:1674-1707 (`CIupacaaToStdaa`: the code of each
+// capital for it and for its lower case, 0xff for every other byte) and 1748-1781 (`CEaaToStdaa`:
+// the capitals, `*` and `-`, 0xff for every other byte)
+// ```c++
+// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToStdaa
+// (const char* src,
+//  TSeqPos pos,
+//  TSeqPos length,
+//  char *dst)
+// {
+//     return convert_1_to_1(src, pos, length, dst, CIupacaaToStdaa::GetTable());
+// }
 // ```
 /// Whether NCBI's ASCII PSSM prints a letter of NCBIstdaa for every query residue of `object`:
-/// the query's data converts through `CSeqportUtil`, whose tables hold the capitals of iupacaa,
-/// and the capitals, `*` and `-` of ncbieaa; any other byte reads an entry never set (`new
-/// T[256]`) or 255, and an NCBIstdaa code of 28 or more reads past `NCBISTDAA_TO_AMINOACID`
-/// (NCBI BLAST+ 2.17.0 printed a NUL byte, M4a-1c E probe `old_ps_bad_iupacaa.ps.files`).
+/// the query's data converts through `CSeqConvert`, whose tables give a code to the letters of
+/// iupacaa in either case (a lower-case letter prints its capital: M4a-1c LG probe
+/// `tk_low_iupac.files`), and to the capitals, `*` and `-` of ncbieaa; any other byte gives 0xff,
+/// whose `char` (-1) reads before `NCBISTDAA_TO_AMINOACID`, and an NCBIstdaa code of 28 or more
+/// reads past it (NCBI BLAST+ 2.17.0 printed a NUL byte, M4a-1c E probe
+/// `old_ps_bad_iupacaa.ps.files`).
 fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
     match object
         .pssm
@@ -168,7 +181,7 @@ fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
         Some(SeqData::Ncbistdaa(codes)) => {
             codes.iter().all(|&code| usize::from(code) < BLASTAA_SIZE)
         }
-        Some(SeqData::Iupacaa(text)) => text.iter().all(u8::is_ascii_uppercase),
+        Some(SeqData::Iupacaa(text)) => text.iter().all(u8::is_ascii_alphabetic),
         Some(SeqData::Ncbieaa(text)) => text
             .iter()
             .all(|&c| c.is_ascii_uppercase() || c == b'*' || c == b'-'),
@@ -250,7 +263,8 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
 }
 
 /// The query's letters as NCBIstdaa codes (`CPssm::GetQuerySequenceData`, which converts an
-/// IUPACaa or NCBIeaa `Seq-data`; `in_pssm` admits only letters of NCBIstdaa).
+/// IUPACaa or NCBIeaa `Seq-data`, an IUPACaa letter in either case: `ascii_letters_defined`;
+/// `in_pssm` admits only letters of NCBIstdaa).
 fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
     const LETTERS: &[u8; BLASTAA_SIZE] =
         crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID;
@@ -262,7 +276,14 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
         .and_then(|query| query.inst.seq_data.as_ref())
     {
         Some(SeqData::Ncbistdaa(codes)) => codes.clone(),
-        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
+        Some(SeqData::Iupacaa(text)) => text
+            .iter()
+            .map(|letter| {
+                let letter = letter.to_ascii_uppercase();
+                LETTERS.iter().position(|&c| c == letter).unwrap_or(0) as u8
+            })
+            .collect(),
+        Some(SeqData::Ncbieaa(text)) => text
             .iter()
             .map(|letter| LETTERS.iter().position(|c| c == letter).unwrap_or(0) as u8)
             .collect(),
@@ -524,9 +545,10 @@ mod tests {
         }
     }
 
-    // blastfmtutil.cpp:252-259, Pssm.cpp:88-93 (quoted at `ascii_letters_defined`): NCBI's ASCII
-    // PSSM prints a letter of NCBIstdaa only for the capitals of iupacaa, the capitals, `*` and
-    // `-` of ncbieaa and the codes below 28.
+    // blastfmtutil.cpp:252-259, Pssm.cpp:88-93, sequtil_tables.cpp:1674-1707 (quoted at
+    // `ascii_letters_defined`): NCBI's ASCII PSSM prints a letter of NCBIstdaa only for the letters
+    // of iupacaa (a lower-case one as its capital), the capitals, `*` and `-` of ncbieaa and the
+    // codes below 28.
     #[test]
     fn the_ascii_pssm_letters_are_defined_for_ncbistdaa_residues_only() {
         let with = |data: SeqData| {
@@ -540,7 +562,20 @@ mod tests {
         assert!(with(SeqData::Ncbistdaa(vec![0, 12, 27])));
         assert!(!with(SeqData::Ncbistdaa(vec![1, 28, 2])));
         assert!(with(SeqData::Iupacaa(b"MKV".to_vec())));
-        for bad in [b"M*V", b"M-V", b"M#V", b"MkV"] {
+        assert!(with(SeqData::Iupacaa(b"MkV".to_vec())));
+        // A lower-case letter prints as its capital (`CIupacaaToStdaa`: M4a-1c LG probe
+        // `tk_low_iupac.files`, the ASCII PSSM of the lower-case query is the capital one's).
+        let codes = |data: SeqData| {
+            let mut object = pssm(ObjectId::Id(1), 3, 28);
+            let Some(SeqEntry::Seq(query)) = object.pssm.query.as_mut() else {
+                unreachable!("the test's PSSM has a Bioseq");
+            };
+            query.inst.seq_data = Some(data);
+            query_codes(&object)
+        };
+        assert_eq!(codes(SeqData::Iupacaa(b"mkV".to_vec())), [12, 10, 19]);
+        assert_eq!(codes(SeqData::Iupacaa(b"MKV".to_vec())), [12, 10, 19]);
+        for bad in [b"M*V", b"M-V", b"M#V"] {
             assert!(!with(SeqData::Iupacaa(bad.to_vec())), "{bad:?}");
         }
         assert!(with(SeqData::Ncbieaa(b"M*-".to_vec())));

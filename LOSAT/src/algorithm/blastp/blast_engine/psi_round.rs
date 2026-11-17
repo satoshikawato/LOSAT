@@ -406,6 +406,12 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.warning_title.clone());
+                // So are the letters of its Bioseq that its reports read (`PsiSearch::
+                // bioseq_letters`): NCBI's reports of every round read the query's Bioseq.
+                search.bioseq_letters = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.bioseq_letters.clone());
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {
@@ -1134,7 +1140,10 @@ impl SubjectKeys<'_> {
     ) -> Result<Option<Vec<u8>>> {
         self.reads.letters(s_idx, || {
             let letters = match shown_subjects.letters(s_idx as usize) {
-                Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
+                // A subject's letters are never a query's Bioseq letters; they would read as these.
+                Some(ShownLetters::Ascii(letters) | ShownLetters::Bioseq(letters)) => {
+                    ncbistdaa_letters(letters)
+                }
                 Some(ShownLetters::Stored(residues)) => residues.to_vec(),
                 None => Vec::new(),
             };

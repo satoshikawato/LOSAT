@@ -131,6 +131,10 @@ pub(super) struct PreparedXml {
     xml2: Xml2Run,
     /// NCBI's messages about the taxonomy database (XML2 and JSON with `-db`).
     taxa_notes: crate::algorithm::common::database::TaxdbNotes,
+    /// The PSSM query's Bioseq letters where they are not its record's
+    /// (`PsiSearch::bioseq_letters`), which the rows show and the counts compare as they are
+    /// (`row_letters::QueryLetters`); a run of such a query has no other.
+    query_bioseq: Option<std::sync::Arc<[u8]>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
@@ -190,6 +194,7 @@ pub(super) fn prepare(
     xml2: bool,
     only_xml2: bool,
     taxa: XmlTaxa,
+    query_bioseq: Option<std::sync::Arc<[u8]>>,
 ) -> Result<PreparedXml> {
     ensure!(
         query_validity.len() == query_records.len()
@@ -348,6 +353,7 @@ pub(super) fn prepare(
         all_masks: xml2,
         xml2: xml2_run,
         taxa_notes: taxa.notes,
+        query_bioseq,
     })
 }
 
@@ -565,9 +571,14 @@ impl PreparedXml {
                                 let subject_len = i32::try_from(subject_seq.len())?;
                                 let (s_start, s_end) =
                                     super::stage_e_report::subject_endpoints(hsp, subject_len);
-                                // The rows, without the lower case of the masks.
+                                // The rows, without the lower case of the masks (a PSSM query's
+                                // Bioseq letters as they are: alnvec.cpp:116-121, quoted at
+                                // `in_pssm::query_residues`).
                                 aligned_sequences_into(
-                                    query_letters,
+                                    crate::report::row_letters::QueryLetters::new(
+                                        query_letters,
+                                        self.query_bioseq.as_deref(),
+                                    ),
                                     subject_seq,
                                     &mut x_window,
                                     &code,

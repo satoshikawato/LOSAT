@@ -69,7 +69,7 @@ impl ReportSequences for AnchoredSequences<'_> {
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
         query_record_letters(
-            &self.queries[q_idx],
+            crate::report::row_letters::QueryLetters::new(self.queries[q_idx].seq(), None),
             self.query_placements.offset(q_idx),
             from,
             to,

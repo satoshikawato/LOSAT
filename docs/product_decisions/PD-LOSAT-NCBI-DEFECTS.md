@@ -1402,9 +1402,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `seq_annot_info.cpp:761, 825, 898, 971, 1057, 1138`) prints a heap address;
   - a Seq-table row without a Seq-id or a location: NCBI's `CCoreException` NULL-pointer report
     holds a stack of addresses;
-  - two Seq-ids of one Seq-table row location that get different messages and that no gi,
-    accession or general id number orders: NCBI writes them in the order of its `CSeq_id_Handle`s,
-    which is then the address of their info (`seq_id_handle.hpp:207`);
+  - two Seq-ids of one location (a Seq-table row's, and since line RG item D3-2 also a feature's
+    or a Seq-table's, where one of them has an empty region and the other NCBI's `Failed to parse
+    location of` message) that get different messages and that no
+    gi, accession or general id number orders: NCBI writes them in the order of its
+    `CSeq_id_Handle`s, which is then the address of their info (`seq_id_handle.hpp:207`);
   - a Packed-seg with fewer `present`, `starts`, `ids` or `lens` than its `dim` and `numseg`
     (NCBI reads past its vectors);
   - a signed overflow that NCBI's build runs without a sign of it (undefined behaviour): the sums

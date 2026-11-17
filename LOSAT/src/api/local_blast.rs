@@ -755,7 +755,8 @@ impl ReportOutputs<'_> {
         let lines = match &result {
             // The errors of `Run`, the files' among them (`run_local_database` opens no file
             // that the argument handling opens).
-            Err(error) => crate::report::archive::error_lines(error, true),
+            Err(error) => crate::report::archive::error_lines(error, true)
+                .or_else(|| crate::report::archive::silent_end_lines(handle, error)),
             Ok(()) if no_query => None,
             Ok(()) => handle.has_messages().then(Vec::new),
         };

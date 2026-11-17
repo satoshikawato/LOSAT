@@ -427,13 +427,16 @@ impl TblastnArgs {
                     let in_run = super::in_pssm::file_error_in_run(error);
                     if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
-                    } else if crate::cli::is_silent_end(error) && handle.has_messages() {
-                        // An exception that `CATCH_ALL` ends without a post (the failed write of
-                        // the object manager's message after its diagnostic stream failed,
-                        // `CIOException::eWrite`; a PSSM file that ends after its header,
-                        // `CEofException`): the archive of the messages saved before it.
-                        let _ =
-                            crate::report::archive::write_error_archive(handle, &[], &mut stream);
+                    } else if let Some(lines) =
+                        crate::report::archive::silent_end_lines(handle, error)
+                    {
+                        // An exception that `CATCH_ALL` ends without a post: the archive of the
+                        // messages saved before it, with no text before it.
+                        let _ = crate::report::archive::write_error_archive(
+                            handle,
+                            &lines,
+                            &mut stream,
+                        );
                     }
                 }
                 Ok(()) => {

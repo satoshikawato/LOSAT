@@ -3,6 +3,8 @@
 // uvwasi: the threaded host (wasi_thread_host.js, every thread of a command) and the serial runner
 // (run_losat_wasi.js).
 const fs = require("fs");
+// The 1 ms wait for a full stream that the hosts' writes to descriptors 1 and 2 use too.
+const { waitForStream } = require("./wasi_artifact");
 // node:tty is loaded at its first use (an open that the table takes).
 const tty = { isatty: descriptor => require("tty").isatty(descriptor) };
 
@@ -66,9 +68,9 @@ const tty = { isatty: descriptor => require("tty").isatty(descriptor) };
 // thread's write at the OS's position and its count could leave the position past that write;
 // LOSAT does not seek a file that another thread writes.) An append leaves the position at the end
 // of the file. A device or FIFO is read and written at the OS's position, and a full one
-// (EAGAIN) is written again after 1 ms as blockingStdioWrite writes descriptors 1 and 2. A
-// character device that is not a terminal seeks and tells 0, preads and pwrites, as Linux's
-// /dev/null and /dev/zero do (LOSAT tells and seeks its FASTA inputs, LOSAT/src/blastinput/
+// (EAGAIN) is written again after 1 ms as blockingStdioWrite (wasi_artifact.js) writes descriptors
+// 1 and 2. A character device that is not a terminal seeks and tells 0, preads and pwrites, as
+// Linux's /dev/null and /dev/zero do (LOSAT tells and seeks its FASTA inputs, LOSAT/src/blastinput/
 // input_files.rs, so -query /dev/null finds it empty); a terminal or a FIFO is ESPIPE there.
 // Every other open (from another directory descriptor, with other flags, of a directory, a socket
 // or a block device, a symbolic link not followed, one that fails, with uvwasi's errno) stays with
@@ -86,7 +88,6 @@ const FILETYPE_CHARACTER_DEVICE = 2, FILETYPE_REGULAR_FILE = 4, FILETYPE_SOCKET_
 // the kind (the filetype, with KIND_APPEND for a file opened to append, KIND_OWN_POSITION once
 // the guest seeked or read a regular file and KIND_TERMINAL for a terminal).
 const KIND_APPEND = 0x100, KIND_OWN_POSITION = 0x200, KIND_TERMINAL = 0x400;
-const STREAM_WAIT = new Int32Array(new SharedArrayBuffer(4));
 const sharedFileViews = table => ({ os: new Int32Array(table, 0, SHARED_FDS),
   position: new BigInt64Array(table, 4 * SHARED_FDS, SHARED_FDS),
   rights: new BigUint64Array(table, 12 * SHARED_FDS, 2 * SHARED_FDS),
@@ -159,7 +160,7 @@ function sharedFileImports(table, memory, local) {
         return BigInt(fs.writevSync(descriptor, buffers, null));
       } catch (err) {
         if (!err || err.code !== "EAGAIN") throw err;
-        Atomics.wait(STREAM_WAIT, 0, 0, 1);
+        waitForStream();
       }
     }
   };

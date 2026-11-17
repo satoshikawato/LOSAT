@@ -19,7 +19,7 @@ import {
 import type { FastaParserKind } from 'losat/domain';
 import { INFLATED_TOO_LARGE } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
-import { EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
+import { ABI_VERSION, EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import { inflateFile } from '../../src/infra/data/inflate';
 import { PROGRAMS } from '../../src/domain/programs';
@@ -213,13 +213,13 @@ describe('loadReactor', () => {
 });
 
 describe('EngineRuntime.prepare', () => {
-  // A serial module whose ABI version export returns 2, as a reactor's does.
+  // A serial module whose ABI version export returns the host's version, as a reactor's does.
   function setup(use?: InstanceUse) {
     const calls = { serial: 0, threads: 0 };
     const runtime = new EngineRuntime({
       serial: async () => {
         calls.serial++;
-        return WebAssembly.compile(moduleBytes({ ...SERIAL, returns: 2 }) as BufferSource);
+        return WebAssembly.compile(moduleBytes({ ...SERIAL, returns: ABI_VERSION }) as BufferSource);
       },
       threads: async () => {
         calls.threads++;

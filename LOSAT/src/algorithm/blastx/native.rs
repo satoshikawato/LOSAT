@@ -606,7 +606,11 @@ fn run_inner(
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
-                [args.outfmt.as_str()],
+                // The command line's one format fails the call.
+                [(
+                    args.outfmt.as_str(),
+                    &mut crate::api::local_blast::FormatRefusal::FailsCall,
+                )],
                 program.upper,
             )?;
             Some(database)
@@ -789,6 +793,16 @@ fn run_inner(
     // 	return false;
     // ```
     let mut query_stream = query_settings.stream(query_file);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (quoted at
+    // `input::emit_fasta_batch`: the batch drops a record whose range starts past its end, after
+    // the reader added it to its scope)
+    // The records that `-query_loc` skips are kept for NCBI's scope of a batch's prefetch, which
+    // only a stop of the prefetch asks (`BatchScopes::of_batch`): where a prefetch of the run can
+    // stop (review 5 of line DBID loadord, L2; the gate opens the database's lookup files once).
+    query_stream.keep_skipped = query_range.is_some()
+        && database
+            .as_ref()
+            .is_some_and(|database| database.prefetch_can_stop());
     // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
     // read into a query row (`empty_rows::query_letters_around`): NCBI reads the subjects first.
     if args.db.is_none() {
@@ -882,7 +896,13 @@ fn run_inner(
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
-        report::RecordsParsed::of(&subjects, args.show_gis, options.pairwise_view().is_some())?
+        report::RecordsParsed::of(&subjects, args.show_gis, |parsed| {
+            if options.pairwise_view().is_some() {
+                crate::report::db_subject::check_pairwise_records(parsed, true, "BLASTX")
+            } else {
+                Ok(())
+            }
+        })?
     } else {
         report::RecordsParsed::default()
     };
@@ -975,6 +995,8 @@ fn run_inner(
             _ => Some(&subjects[..]),
         })
     });
+    // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
+    let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
@@ -1040,6 +1062,7 @@ fn run_inner(
         let stops = stops_after == Some(queries_before + queries.len());
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
+                let scope = || batch_scopes.of_batch(queries);
                 let reported = reported_batch(
                     database,
                     search_subjects,
@@ -1047,13 +1070,16 @@ fn run_inner(
                     &options,
                     asks,
                     results,
+                    queries,
                     query_scopes
                         .borrow()
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(queries_before)),
+                    &crate::algorithm::common::database::PrefetchQueries::new(0, &scope),
                     diagnostics,
                 )
                 .inspect_err(drop_held)?;
+                batch_scopes.reported(queries);
                 report::render_queries(
                     writer,
                     diagnostics,
@@ -1344,6 +1370,8 @@ pub(super) fn batch_titles(
 /// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, quoted at `reported_batch`) does
 /// with a query batch.
 pub(super) struct BatchPrefetch {
+    /// The batch's Seq-aligns, which `PRE_FETCH_SEQS_LIMIT` counts.
+    seq_aligns: usize,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
     /// It throws at an empty subject row before it loads anything and writes its warning
@@ -1383,7 +1411,94 @@ pub(super) fn batch_prefetch(
         && !options.gapped
         && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
         && super::empty_rows::prefetch_reads_empty_row(results, options.gapped, loc);
-    BatchPrefetch { off, fails }
+    BatchPrefetch {
+        seq_aligns,
+        off,
+        fails,
+    }
+}
+
+impl BatchPrefetch {
+    /// What NCBI's BLAST database data loader loaded for the batch, the run's record
+    /// (`ReportedSubjects::note_loaded`): `common::database::batch_loads` of its Seq-aligns (every
+    /// subject of its Seq-aligns where its prefetch is on, else what the first format's rows read,
+    /// `rows`), and those rows where its prefetch failed before it loaded anything (`fails`,
+    /// BLASTX's own: only its ungapped search leaves a subject row of length 0, whose reports then
+    /// read the subjects as with the prefetch off).
+    fn loads(
+        &self,
+        rows: crate::report::tabular::SubjectFetch,
+    ) -> crate::algorithm::common::database::BatchLoads {
+        if self.fails {
+            crate::algorithm::common::database::BatchLoads::Read(rows)
+        } else {
+            crate::algorithm::common::database::batch_loads(self.seq_aligns, rows)
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313 (quoted at
+// `common::database::stop_lookup_unsure`: the formatter keeps its scope after a batch in outfmt
+// 5 only)
+/// NCBI's scope of the query records at the prefetch of each query batch of a BLASTX run
+/// (`common::database::PrefetchQueries`), whose reader drops each batch once it is reported: the
+/// batch's records (those that the `-query_loc` range skipped included, `input::shown_ids`;
+/// `query_batch::QueryScope::of_shown`), and in outfmt 5, whose scope the formatter keeps, those
+/// of the batches before, which the run keeps as they are reported (`reported`), against a
+/// database whose prefetch can stop only (`BlastxDatabase::prefetch_can_stop`, asked at the first
+/// batch reported; review 3 of line DBID loadord, M1). `query_batch::QueryScopes`, the owner of the
+/// run's scopes, holds the ids that `-parse_deflines` reads only (it refuses two records of one
+/// id), where `refuse_id_of_a_query` refuses every reported sequence with an id of the run's
+/// scope before the prefetch; the scope kept here is that of the generated ids too, so it stays
+/// apart.
+pub(super) struct BatchScopes<'a> {
+    /// The run's database where its reports include outfmt 5.
+    database: Option<&'a BlastxDatabase>,
+    before: std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScope>>,
+    /// Whether the database's prefetch can stop, asked once.
+    keeps: std::cell::OnceCell<bool>,
+}
+
+impl<'a> BatchScopes<'a> {
+    /// The scopes of a run whose reports include outfmt 5 (`xml`) against `database` (none with
+    /// `-subject`).
+    pub(super) fn new(xml: bool, database: Option<&'a BlastxDatabase>) -> Self {
+        Self {
+            database: database.filter(|database| xml && database.parsed_seqids()),
+            before: Default::default(),
+            keeps: Default::default(),
+        }
+    }
+
+    /// The scope at the prefetch of the batch of the records `queries`.
+    pub(super) fn of_batch(
+        &self,
+        queries: &[FastaRecord],
+    ) -> crate::blastinput::query_batch::QueryScope {
+        let mut scope =
+            crate::blastinput::query_batch::QueryScope::of_shown(super::input::shown_ids(queries));
+        if let Some(before) = self.before.borrow().as_ref() {
+            scope.extend(before);
+        }
+        scope
+    }
+
+    /// The batch of the records `queries` was reported: in outfmt 5 its records stay in the scope
+    /// of the batches after it, where a prefetch of the run can stop.
+    pub(super) fn reported(&self, queries: &[FastaRecord]) {
+        let Some(database) = self.database else {
+            return;
+        };
+        if !*self.keeps.get_or_init(|| database.prefetch_can_stop()) {
+            return;
+        }
+        let batch =
+            crate::blastinput::query_batch::QueryScope::of_shown(super::input::shown_ids(queries));
+        self.before
+            .borrow_mut()
+            .get_or_insert_with(Default::default)
+            .extend(&batch);
+    }
 }
 
 /// The reported sequences of the query batch `results` of a `-db` search, with its hit lists
@@ -1392,7 +1507,12 @@ pub(super) fn batch_prefetch(
 /// batch, for the format of `options`: its prefetch and the values of a custom tabular field
 /// list. NCBI's reader error stops the run at this batch, with no epilog. A run that holds its
 /// document drops it on a refusal from here (`blast_xml::drops_held_document`: of the XML2
-/// document, of a subject with parsed Seq-ids, or of the taxonomy database).
+/// document, of a subject with parsed Seq-ids, or of the taxonomy database). The stop of the
+/// batch's prefetch asks `prefetch_queries` (its scope, `BatchScopes`; its error names query 0:
+/// each batch's reports are written before the next is searched, `reported_error`); a batch whose
+/// prefetch does not stop is recorded in the run (`ReportedSubjects::note_loaded`), without the
+/// loads of an outfmt 5 report that NCBI's XML stream cuts before its hits (`queries`, the reader
+/// batch's records: `XmlCuts`).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1400,18 +1520,18 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
+    queries: &[FastaRecord],
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
+    prefetch_queries: &crate::algorithm::common::database::PrefetchQueries<'_>,
     diagnostics: &mut dyn Write,
 ) -> Result<ReportedSubjects> {
     use super::x_timing::Run as XRun;
     let Some(titles) = titles else {
         return Ok(ReportedSubjects::default());
     };
-    let BatchPrefetch {
-        off: prefetch_off,
-        fails: prefetch_fails,
-    } = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
-    let unfetched = prefetch_off || prefetch_fails;
+    let prefetch = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
+    let prefetch_fails = prefetch.fails;
+    let unfetched = prefetch.off || prefetch_fails;
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
         database,
@@ -1530,7 +1650,7 @@ pub(super) fn reported_batch(
             // A lookup that fails on a file stops the run here, after the reports of the
             // batches before and this batch's reader messages (`shared::batch_prefetch`).
             let messages = reported
-                .batch_prefetch(database, results, options.gapped)
+                .batch_prefetch(database, results, options.gapped, prefetch_queries)
                 .map_err(reported_error)?;
             messages.write(diagnostics, None)?;
         }
@@ -1538,9 +1658,40 @@ pub(super) fn reported_batch(
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
         // prefetch only its stop (`ReportedSubjects::batch_prefetch_stop`).
         reported
-            .batch_prefetch_stop(database, results, options.gapped)
+            .batch_prefetch_stop(database, results, options.gapped, prefetch_queries)
             .map_err(reported_error)?;
     }
+    // The batch's prefetch (or its reports' reads one by one) did not stop: the run's record of
+    // what NCBI's data loader loaded for it, for a later batch's stop
+    // (`ReportedSubjects::note_loaded`, `BatchPrefetch::loads`): the subjects of its Seq-aligns
+    // where its prefetch read them, else those that the first format's rows read, of the reports
+    // that NCBI writes (outfmt 5: not one that its XML stream cuts before its hits, which loads
+    // nothing; `XmlCuts`, review 6 of line DBID loadord, H2).
+    let loads = prefetch.loads(
+        options
+            .tabular
+            .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
+                spec.subject_fetch(crate::blastinput::app::Program::Blastx)
+            }),
+    );
+    let xml_cut = |query: usize| {
+        queries.get(query).is_some_and(|record| {
+            crate::report::blast_xml::names::iteration_cut_before_hits(
+                record.internal_id.as_bytes(),
+                record.warning_id(),
+                record.believed(),
+                &record.title,
+                false,
+            )
+        })
+    };
+    reported.note_loaded(
+        database,
+        results,
+        options.gapped,
+        loads,
+        crate::algorithm::common::database::XmlCuts::of(options.outfmt == 5, &xml_cut),
+    );
     // The values of a custom tabular field list that reads more of the
     // definition lines than the default report (`sall*`) or the taxonomy
     // (`staxid`, `staxids`, the names), read before the batch's first byte so
@@ -3179,6 +3330,7 @@ mod reader_batch_tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         }
     }
 

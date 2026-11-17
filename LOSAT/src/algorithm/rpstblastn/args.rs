@@ -340,6 +340,7 @@ impl RpstblastnArgs {
             request_inputs,
             taxdb_setting: None,
             matrix_search: None,
+            first_query_ordinal: 0,
         })
     }
 

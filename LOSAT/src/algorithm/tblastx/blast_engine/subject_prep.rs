@@ -23,7 +23,7 @@ use super::x_seed_release::XSeedStage;
 use super::{
     GeneticCode, QueryContext, QueryFrame, Result, Subjects, TbxScore, UngappedHit, XStage,
 };
-use crate::algorithm::tblastx::subjects::XKept;
+use crate::algorithm::tblastx::subjects::{XKept, XReadFailure};
 use crate::algorithm::tblastx::x_work_board::{XBatch, XBoard};
 use crate::utils::threading::SearchPool;
 use std::sync::Arc;
@@ -127,6 +127,8 @@ pub(super) struct UnitPathArgs<'a> {
     pub(super) x_seed_end: Option<&'a XSeedEnd<'a>>,
     /// PAIRLUT: the batch's lookup table is a stub without entries.
     pub(super) x_pair_lut_is_stub: bool,
+    /// The search's failure, where the units' extensions refuse a search (extension/query_batch.rs).
+    pub(super) x_read_failure: &'a XReadFailure,
 }
 
 /// Dispatch points 2 and 3 of PAIRPAR and of the seed release (per subject): when the batch has a
@@ -162,6 +164,7 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
         x_board_batch,
         x_seed_end,
         x_pair_lut_is_stub,
+        x_read_failure,
     } = args;
     // The batch's unit path, borrowed from the subject's units stage (dispatch point 2 of the
     // seed release): it cannot be used after `x_units_stage.end()` (dispatch point 3).
@@ -210,6 +213,8 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
                 wordsize,
                 s_idx,
                 s_len,
+                failure: x_read_failure,
+                passed: None,
             };
             x_lap.lap(XStage::Prepare);
             let x_units = x.run_subject_units(&x_subject, parallel_pool);

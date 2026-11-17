@@ -81,6 +81,37 @@ fn test_reverse_complement_u_and_t() {
     assert_eq!(rc_u[0], b'-');
 }
 
+// `XHeadFifo` lets every word out once, in the order the words went in, through the pushes and
+// the flush, for counts below, at and past its depth; a push says whether a word left.
+#[test]
+fn the_head_fifo_emits_every_word_once_in_order() {
+    use crate::algorithm::blastn::lookup::{XHeadFifo, X_HEAD_FIFO};
+    for n in [
+        0usize,
+        1,
+        X_HEAD_FIFO - 1,
+        X_HEAD_FIFO,
+        X_HEAD_FIFO + 1,
+        2 * X_HEAD_FIFO + 1,
+        100,
+    ] {
+        let mut fifo: XHeadFifo<(u32, Option<u64>)> = XHeadFifo::new();
+        let mut out = Vec::new();
+        for i in 0..n {
+            let left = fifo.push((i as u32, Some(i as u64 * 3)), &mut |w| out.push(w));
+            assert_eq!(left, i >= X_HEAD_FIFO, "push {i} of {n}");
+        }
+        fifo.flush(&mut |w| out.push(w));
+        let want: Vec<_> = (0..n).map(|i| (i as u32, Some(i as u64 * 3))).collect();
+        assert_eq!(out, want, "{n} words");
+        // (a flushed FIFO starts again empty)
+        let mut again = Vec::new();
+        fifo.push((7, None), &mut |w| again.push(w));
+        fifo.flush(&mut |w| again.push(w));
+        assert_eq!(again, vec![(7, None)]);
+    }
+}
+
 /// No NCBI counterpart (a check of the loop's form): `x_range_words` gives the words, codes and
 /// ambiguity count of the loop the table fills used before it (one pass over the letters that
 /// counts each word's letters, `valid_bases`), for random letters with ambiguities (none, rare,

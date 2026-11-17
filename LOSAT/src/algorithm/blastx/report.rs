@@ -177,6 +177,21 @@ pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
     list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (quoted at
+// `report::tabular::TabularSpec::subject_fetch`)
+/// Whether a report whose batch's prefetch is off reads the subject of the hit list `list`: one
+/// of the HSPs that it shows (`has_seqalign`) has a row that reads it (`rows`, by the engine's
+/// identities, the Seq-align's `num_ident`); for `SubjectFetch::Every`, `reported`.
+pub(super) fn reads_list(
+    list: &super::results::HspList,
+    gapped: bool,
+    rows: crate::report::tabular::SubjectFetch,
+) -> bool {
+    list.hsps
+        .iter()
+        .any(|hsp| has_seqalign(hsp, gapped) && rows.reads(hsp.identity))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:162-176
 // ```c++
 //
@@ -816,17 +831,23 @@ impl RecordsParsed {
             .filter(|subject| !subject.shown_as_record())
     }
 
-    /// The records of `records`, with LOSAT's refusals of outfmt 0 with `pairwise`.
-    pub(crate) fn of(records: &[FastaRecord], show_gis: bool, pairwise: bool) -> Result<Self> {
+    /// The records of `records`. `pairwise` gets the parsed subjects first, for LOSAT's refusals of
+    /// them in outfmt 0 to 4 (`db_subject::check_pairwise_records`, each such format's), then come
+    /// the refusals of their tabular ids.
+    pub(crate) fn of(
+        records: &[FastaRecord],
+        show_gis: bool,
+        pairwise: impl FnOnce(
+            &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+        ) -> Result<()>,
+    ) -> Result<Self> {
         let subjects = crate::report::db_subject::parsed_records(
             records
                 .iter()
                 .map(|record| (record.believed(), record.title.as_slice())),
             show_gis,
-            true,
-            pairwise,
-            "BLASTX",
-        )?;
+        );
+        pairwise(&subjects)?;
         let refused = |subject: &crate::report::db_subject::ParsedSubject, problem: &str| {
             anyhow::anyhow!(
                 "the subject record {} has {problem}, which is not supported by LOSAT's BLASTX",

@@ -10,6 +10,11 @@ export interface BlockWriter {
    * can then only be discarded.
    */
   append(bytes: Uint8Array): void;
+  /**
+   * Drops every byte appended so far: the block stays open, empty, and gives the space back (a run
+   * output that the engine discards, docs/web/abi_v2.md §5).
+   */
+  clear(): void;
   /** Seals the block: it takes no more bytes and becomes readable. Resolves to its length. */
   seal(): Promise<number>;
   /** Drops the block, sealed or not. */

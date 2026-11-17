@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.39
+- Version: 1.43
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -111,7 +111,28 @@
   reproduced, rule 2, with the explicit rejection of a section whose merge NCBI frees a segment in,
   rule 3 (2026-11-16: the split of T3c after X2g, and `FillUnalignedRegions`'s free of T3c fix 3);
   Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10)
+  restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10);
+  1.40 2026-11-17 (TBLASTX's ungapped extension past the end of a query frame into the next frame
+  of the query batch: reproduced where it scores no higher there, rule 2, and an explicit
+  rejection where it does, rule 3, the Owner's decision of 2026-11-16 on line RG's question
+  Q-X2c; line RG item X2c, the reproduction Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; the TBLASTX one-hit merge refusal of 1.21 now also comes after the reports
+  of the batches before);
+  1.41 2026-11-17 (that refusal narrowed to the loads whose order NCBI takes from the addresses
+  of its Seq-id handles: the texts of the loads before the stopping lookup in the order of the
+  handles are written as NCBI writes them, and of several stopping ids the first that NCBI looks
+  up ends the loads; refused, a stopping id that NCBI may never look up, as its scope or its data
+  loader, which keeps the ids of what the run loaded, finds it first; a directory in place of a
+  version 4 ISAM file is no ISAM, as NCBI's; line DBID item loadord, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07);
+  1.42 2026-11-17 (a version 4 lookup returns at the first volume that holds the id, as NCBI's, so
+  an ISAM file of a later volume that does not open stops none of its lookups; refused, where
+  LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.43 2026-11-17 (the explicit rejections of a taxonomy record read past NCBI's mapping of
+  `taxdb.btd`, rule 3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, and
+  exception 14, LOSAT's output where NCBI may fault there, which the Owner decided on 2026-11-15;
+  line RG item T5b; written 2026-11-15 as 1.26 with exception 13)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -817,6 +838,37 @@ masked). Line NP item M4a-2c.
   LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
   NCBI ends it without reading that header.
 
+- TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.40,
+  2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and
+  `s_BlastAaExtendRight` count the letters of the query batch, not of the frame (`n = MIN(s_off,
+  q_off)` and `n = MIN(subject->length - s_off, query->length - q_off)` with offsets into the
+  batch, `aa_ungapped.c:841,897`). A walk that reaches the end of its frame without a break scores
+  the NULLB between it and the next frame (`BLAST_SCORE_MIN`, `blast_stat.c:1559-1576`; one NULLB
+  between two frames with letters, `blast_setup_cxx.cpp:65-88`) and, while that does not break it,
+  the next frame's letters, up to the batch's first letter or the end of its last frame. With a
+  raw X-drop of 32,768 or less (with BLOSUM62 below about 15,000 bits of `-xdrop_ungap`) the
+  NULLB always ends the walk with the values of a walk that stops at the frame's end. With a
+  larger one, a right walk that reaches the frame's end above 32,768 goes on; where it scores no
+  higher there, only its stop moves (`*s_last_off = s_off + i`), and the diagonal's `last_hit`
+  then covers the next frame's hits on that diagonal (`aa_ungapped.c:593-597`), which NCBI does
+  not extend: a pair of letters that a long similar pair just before the frame's end runs into is
+  not reported. A left walk that scores no higher past the NULLB changes nothing. (The one-hit
+  extension, `-window_size 0`, would start its right walk on the next frame's first letter after
+  a word at a frame's end whose running score never rises above 0, `aa_ungapped.c:1030-1031,
+  1073-1076`; such a word seeds only as an exact match of a subject word of the same letters,
+  `blast_aalookup.c:498-504`, and must start with `X`, the only letter that scores below 0 against
+  itself, while the seed stage's subject frames are translated from 2-bit bases,
+  `blast_engine.c:1403-1405`, and hold no `X`: no such seed is found; probes with query frames
+  ending in `XXX`, as `-subject` and from a database, gave the same output in NCBI BLAST+ 2.17.0
+  and LOSAT.) LOSAT's walks go on into the batch in the same way
+  (`tblastx::extension::QueryBatch`), in the reference frame loop and in the units; where a unit
+  of a query batch split into several context groups sees a right walk go on past a NULLB, the
+  subject's units run again in group order on one table of the batch's diagonals, so the hits it
+  covers in another group's frames are left out as in NCBI's one table, at every `-num_threads`
+  (`x_pair_par.rs`, module doc item 3). Fixture rows `x2c.tblastx.*` of
+  `tests/outfmt0_manifest.tsv`; the unit tests of
+  `LOSAT/src/algorithm/tblastx/extension/query_batch_tests.rs` compare the two-hit and one-hit
+  extensions with NCBI's functions on the batch's buffer.
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
@@ -854,12 +906,11 @@ masked). Line NP item M4a-2c.
   LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
   and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
   the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
-  (`docs/web/abi_v2.md` §7). That holds for these checks of the formats. A Web run still fails
-  as a whole, where the CLI completes the argv's format, in two more cases: (a) a format fails in
-  the middle of its report, `-sorthits` with a description total above 99999 bits in outfmt 0
-  (all programs), or an NCBI error of outfmt 0 alone such as BLASTX `Row is empty`; dev had both;
-  (b) a stream that the Web adds fails alone after it sent a chunk (BLASTX, a later query batch
-  with an undecodable `Subject_` title). These are current limits.
+  (`docs/web/abi_v2.md` §7). So does every error of one format's report, at a check before its
+  rows or in its middle (`-sorthits` with a description total above 99999 bits in outfmt 0, an
+  NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
+  after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
+  the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -917,14 +968,67 @@ masked). Line NP item M4a-2c.
   (without the epilog, in every format that prefetches, the JSON and XML2 documents and side
   files too), the batch's reader messages and the error (line DBID item mixdb2, probe of 4,800
   runs; psiblast's PSSM drops such a sequence's letters with `Failed to retrieve sequence`, as
-  NCBI's). It refuses a run where the reports read such a Seq-id with the prefetch off (`... whose
-  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch
-  stops with a BLAST Database error, and where the prefetch is off its formatters fail to read
-  it)`), and a stopping batch whose other sequences' loads write texts of the
-  taxonomy database (after the lookups of the batches before: their prefetch, or in the JSON and
-  XML2 formats their reports, since version 1.36) or whose other lookups throw on their ids
-  (NCBI's prefetch loads them in the order of its Seq-id handles, which decides what it writes
-  before the error).
+  NCBI's). Before the error come the taxonomy database's texts of the loads that the prefetch
+  makes before the stopping lookup (since version 1.41, line DBID item loadord, probe of 184
+  runs, all six programs): it loads a batch's Seq-align ids, up to 200 of them, in the order of
+  their Seq-id handles, those that its mapper packs (gi, an accession of a prefix and digits
+  without a name or release, a `general` id with an integer tag or a string tag of at least
+  three digits; a tag of 0 or less, such as `gnl|BL_ORD_ID|0`, after every positive number) by
+  their number and the others after them, and ends at the first lookup that fails. It refuses a
+  run where the reports read such a Seq-id with the prefetch off (`... whose lookup in the
+  database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch stops with a
+  BLAST Database error, and where the prefetch is off its formatters fail to read it)`), a
+  stopping batch where a load whose order to the stop NCBI takes from the addresses of its
+  handles (the same packed number as the stopping id's, or neither packed, which changes from
+  one command line to another; a Seq-align id of two sequences; every load of a batch of more
+  than 200 Seq-align ids, which NCBI sorts by `CSortableSeq_id` and loads in pieces of 100)
+  writes a text of the taxonomy database (after the lookups of the batches before: their
+  prefetch, or in the JSON and XML2 formats their reports, since version 1.36), one where
+  another lookup that throws on its id may come before the stop, and one whose stopping ids NCBI
+  may all never look up: another sequence of the database that holds an id of its Seq-id handle
+  may be loaded first (NCBI's data loader keeps the ids of every sequence it has loaded and
+  gives that sequence for them): `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|` in the
+  batch's order, or a sequence that the run loaded before (in a batch, a query or a psiblast
+  round before: every subject of its Seq-aligns where its prefetch is on, psiblast's whole
+  traceback beyond `-max_target_seqs` too, else, with `PRE_FETCH_SEQS_LIMIT`, the subjects that
+  the rows of the reports NCBI writes read, of the hits that they show after the formatter's cuts
+  to the hitlist size (`PruneSeqalign`: to `-max_target_seqs`; in the pairwise report, outfmt 0,
+  of its description lines to `-num_descriptions` and of its alignments to `-num_alignments`,
+  whose subjects it loads both, review 7 of item loadord; none for `6 qseqid evalue`, none of a
+  BLAST XML report whose iteration NCBI's XML stream cut at a query title or id outside US-ASCII,
+  review 6 of item loadord), and those that psiblast's PSSM includes) where the lookup of its
+  Seq-align id gives it first
+  (the loader loads the first sequence that the lookup gives: of two holders of one gi, the
+  first; review 4 of item loadord), or the first sequence that a lookup of an id of such a
+  sequence gives; not a sequence that no batch loaded (NCBI then stops), nor a copy with
+  the same Seq-align id, whose load is the same lookup; and, in a call of the library's query
+  batches after the first, which has no record of the calls before, any such sequence. Or a query that NCBI's scope holds at the prefetch has the stopping id, or one
+  that it matches weakly: the records that NCBI's reader read for the batch, a record that
+  `-query_loc` drops included (it keeps its number), by their generated ids (`lcl|Query_N`, the
+  numbers of the whole run, also in psiblast's rounds) or with `-parse_deflines` by the ids of
+  their deflines alone, or the query of a PSSM (`-in_pssm`, `lcl|myprot`); with outfmt 5, whose
+  report keeps the scope, also those of the batches before (reviews 1 and 2 of item loadord:
+  NCBI then searches to the end, exit 0, or blastx ends with its CSeqalign exception). Where a
+  batch has several stopping ids, NCBI's loads end at the first lookup that it makes, in the
+  order of the handles (review 3 of item loadord): a stopping id before it that NCBI may skip so
+  does not refuse the batch by itself, but the loads from the first stopping id to the one that
+  NCBI surely looks up, and the sequence that the skipped lookup is given instead, are loads that
+  NCBI makes only where it skips the lookups before them, which LOSAT does not know (refused
+  where one writes a text), and the stops that the loads may end at must fail with one message.
+  A volume of a version 4 database whose string ISAM (`.psi`/`.psd`, `.nsi`/`.nsd`) or PIG ISAM
+  (`.ppi`/`.ppd`) has a file that is not a regular file (a directory) has no such ISAM, as NCBI's
+  `CSeqDBIsam::IndexExists` (`CFile::Exists`, a regular file) says: the lookups find nothing in
+  that volume and go on to the next (review 4 of item loadord: NCBI exit 0 where a later volume
+  holds the id, 255 where none does; LOSAT stopped with NCBI's `Error: Could not open input
+  file`, which NCBI writes for a regular file that does not open). Where its index or data file
+  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses. NCBI's
+  lookup (`SeqidToOid`, `SeqidToOids` without `multi`) returns at the first OID it finds, in the
+  order of the volumes, so an ISAM file of a later volume that does not open (a regular file of
+  mode 000) stops a lookup only of an id that no volume before it holds in the search's list
+  (review 3 of item loadord, H3, and item v4late: NCBI exit 0 where LOSAT stopped with `Error:
+  Could not open input file`); LOSAT, which also lists the other sequences that hold the id,
+  refuses where that list fails on such a file and a report shows what it can change
+  (`PD-LOSAT-DATABASE-SEARCH`).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 
@@ -1101,7 +1205,9 @@ masked). Line NP item M4a-2c.
   both chunks find, or HSPs of lengths 2 and -2 or 1 and -1): the density is `+inf`, and the
   conversion `(int)` of its product, which sets the merged score, is undefined (C11 6.3.1.4;
   x86-64 gives `INT_MIN`, which the `MAX` with the old score then ignores). LOSAT refuses the
-  search (exit 1) where that merge would happen. Every other merge of such HSPs is NCBI's (`Int4`
+  search (exit 1) where that merge would happen, after the reports of the query batches before
+  (since version 1.40, as the refusal of an extension past a query frame's end; before, they were
+  written only where the reports were streamed). Every other merge of such HSPs is NCBI's (`Int4`
   lengths, a density that may be negative or raised by a negative length, an HSP of length 0
   that absorbs another and becomes positive).
 
@@ -1201,6 +1307,74 @@ masked). Line NP item M4a-2c.
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows.
+
+- TBLASTX, an ungapped extension that scores higher past the end of its query frame, in the frame
+  next to it in the query batch (version 1.40, 2026-11-17, line RG item X2c; the Owner's decision
+  of 2026-11-16 20:00 JST on line RG's question Q-X2c, 「ごめんAで」: refuse, the results of the query
+  batches before are written; line RG `DECISIONS.md` X2c-1 and X2c-Q; the walks are those of the
+  rule-2 item above): the HSP then spans two frames. NCBI keeps it in the frame of its seed with
+  query offsets outside that frame (`s_AdjustInitialHSPOffsets`, `blast_gapalign.c:2383-2392`: a
+  start before the frame fails its `ASSERT(init_hsp->ungapped_data == NULL ||
+  init_hsp->ungapped_data->q_start >= 0)`, compiled out of release builds; an end past the frame is
+  not tested), re-evaluates it on the batch (`Blast_HSPListReevaluateUngapped`,
+  `blast_hits.c:2609-2725`), and its formatters take its coordinates from those offsets
+  (`blast_seqalign.cpp:1344-1376`). One that starts in the frame before a minus frame is written
+  with query coordinates past the query and no identities (`0.000 7040 7040 0 42245 21126 1
+  21120` for a query of 21,122 bases, input `x2c_e7k`), one that ends in the frame after its own
+  with an end past the query (`14404 43206` of 28,803, `x2c_g48`), and one of a plus frame that
+  starts in the frame before is left out of every report (`x2c_d7k`; where the Seq-align layer
+  drops it was not found), while it takes its place among the HSPs and its extension covers the
+  hits it passed. LOSAT refuses the search (exit 1, "an ungapped extension that passes the end of
+  a query frame into the frame next to it in the query batch and scores higher there ... is not
+  supported by LOSAT's TBLASTX") where such an extension first scores higher: the reports of the
+  query batches before are written, then the failing batch's messages and the error, as after an
+  NCBI error of a batch, in every format and whether or not the reports are streamed, the same at
+  every `-num_threads` (`tests/tblastx_query_batch.rs`: 1, 4, 8 and 16 threads, the one-hit word
+  finder, and a run of two query batches). It takes a raw X-drop above 32,768 (with BLOSUM62 about
+  15,000 bits of `-xdrop_ungap` or more).
+
+## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
+
+`CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
+entry's (the last entry's: to the end of the file) without checking it against the file's size
+(`seqdbtax.cpp:258-298`). Past the end of the file NCBI reads the zero bytes of its mapping's last
+4,096-byte page, which LOSAT reproduces, and after that page memory that does not belong to the
+file. LOSAT refuses (exit 1, one line naming its program) only:
+
+- every lookup that reads a record of an empty `taxdb.btd`, which NCBI maps as a null pointer: it
+  faults for certain (SIGSEGV in every program; the loads of dustmasker, segmasker, blastdbcmd's
+  FASTA and the searches' prefetch included);
+- a name that the output writes and NCBI reads past the mapping: the super kingdom of a record
+  that reaches past it (`blastdbcmd -outfmt %K`, `-tax_info` with `%K`, `sskingdom` and
+  `sskingdoms`), and any name of a record whose third tab is past it (whether NCBI finds names at
+  all depends on that memory): a title made from the scientific name, `%S %L %B %C %N`, the
+  tabular name fields, the `sciname` of outfmt 13 to 16, outfmt 18. Line RG item T5b's review
+  measured NCBI 2.17.0 writing 4,835 bytes and more of other mappings as the kingdom of such a
+  record (`-tax_info -outfmt "%T|%K|%B"`), the same in two runs.
+
+## Approved exception (a taxonomy record past NCBI's mapping of `taxdb.btd`, version 1.43)
+
+Version 1.43. The Owner decided on 2026-11-15 (line RG `DECISIONS.md` T5b-6, Q1 = A, words
+「RG-T Q1=A」) the question of line RG item T5b's fix 2: LOSAT keeps writing NCBI's completed output
+here, as rule 1's approved exception, against rule 3's rejection of every lookup of such a record,
+which would also refuse runs that NCBI completes with the same bytes (44 runs of the item's probes).
+Numbered after exception 13 (version 1.35).
+
+14. **A record that NCBI reads past its mapping where the output writes nothing of the bytes
+    there.** Where NCBI reads such a record past its mapping and the output writes nothing of the
+    bytes there (the lookups of `GetBioseq`, whose names the maskers' and blastdbcmd's output do
+    not write, a stored title, the names before a third tab inside the mapping, the searches'
+    prefetch), LOSAT writes what NCBI writes when it completes, which is the result of the same run
+    with a `taxdb.btd` that holds those bytes (rule 1's valid result). Whether NCBI completes
+    depends on its memory map, not on the input: in the review of line RG item T5b, a record of a
+    266-byte `taxdb.btd` that ends at 5,000 bytes completed in `dustmasker`, `segmasker` and
+    `blastdbcmd`, one that ends at 9,000 or 20,000 bytes in `blastdbcmd -tax_info`, and one that
+    ends at 1 MiB faulted (SIGSEGV) in `dustmasker` and `blastdbcmd`. LOSAT writes the output in
+    all of them, as in the 20 of the item's 115 search runs and 2 of its 32 tool runs where NCBI
+    faulted.
+    This was LOSAT's behaviour for the maskers' and blastdbcmd's loads before line RG item T5b
+    (dev), and is now its behaviour in the searches as well. What the output writes from past the
+    mapping stays refused (the rejections above).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

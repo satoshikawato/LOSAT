@@ -299,11 +299,14 @@ their variables mean
   more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNREDOLPT` only where the
   composition-based redo runs on the pool (2 or more threads, 2 or more matches); `REDOCONTAINIDX` only where
   one query's list of kept alignments in a composition-based redo reaches 32; `TBNXLATESIMD` only
-  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
+  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `TBNXLATE128`
+  only where `TBNXLATESIMD`'s AVX2 loop does not run (`=2`: in its place); `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPDIAG` batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
-  vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
-  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
+  vector alignment only with AVX2, BMI1 and LZCNT, or with `BPGAP128` on wasm32 simd128 and with SSSE3 and
+  SSE4.1 (else the reference function); `BPGAP16` acts only
+  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPGAP128` only where the AVX2 rows do not run
+  (`=2`: in their place) and `BPGAP16` is on; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
   `run_local` call with several outputs, the hit records or an observer, with more than one block, and blastp's search of all queries
   (the other reports, `-query_loc`) runs its preliminary stage in the same blocks (see its entry);
   `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
@@ -371,6 +374,7 @@ export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
 export LOSAT_X_BPGAP=1
+export LOSAT_X_BPGAP128=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPGAPBAND=1
 export LOSAT_X_BPHITBF=1
@@ -384,6 +388,7 @@ export LOSAT_X_BPLKPFLAT=1
 export LOSAT_X_BPLKREUSE=1
 export LOSAT_X_BPMASKED=1
 export LOSAT_X_BPQBLOCK=50000
+export LOSAT_X_BPRECOUNTO=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
 export LOSAT_X_BPSEGWIN=4096
@@ -1679,9 +1684,10 @@ Rebuilding less:
   RSS (164-286 MiB) in both shapes (outside this switch); megablast stays below NCBI's.
 - `LOSAT_X_BNMAPPED=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
   (perf/bn-mapped-pool, evidence at the end of this entry): on unless it is `0`;
-  acts only with 64-bit glibc (Linux) and on buffers of 1 MiB or more) the large per-subject buffers of BLASTN are
+  acts only with 64-bit glibc (Linux) and on buffers of 1 MiB or more, except the block buffer of the preliminary
+  stage below) the large per-subject buffers of BLASTN are
   kept where glibc returns them to the system when they are dropped: the blocks and sequences read from a `-db`
-  (`seqdb` `x_read_block_mapped`, `x_read_sequence_mapped`), their BLASTNA letters (`blastn/blast_engine/database.rs`
+  (`seqdb` `x_read_block_into` from 1 MiB on, `x_read_sequence_mapped`), their BLASTNA letters (`blastn/blast_engine/database.rs`
   `x_blastna`), the ungapped hits of a subject as the seed stages push them (`run.rs` `x_push_ungapped`) and the
   scratch of their sort by score (`utils/x_mapped.rs` `x_sort_by_mapped`). Such a buffer gets a capacity above glibc's
   largest dynamic mmap threshold (32 MiB and one page) once it needs 1 MiB, so glibc maps it; its pages beyond its
@@ -1700,6 +1706,25 @@ Rebuilding less:
   sorted with `sort_by`, merged pairwise into the scratch and back, the left run first among equal elements), so the
   order is that of `sort_by`; its scratch is as long as the hits (a half-size scratch, the left run copied out before
   each merge, held no less at the peak).
+  The preliminary stage's blocks below 1 MiB (the usual block: at most 1 MiB at one thread, 256 KiB with
+  `LOSAT_X_BNDBSMALL` at more) are read, with every allocator, into one buffer per worker (the one-thread loop, the
+  rounds' `map_init`, the window of `LOSAT_X_BNDBSTREAM`) that the worker keeps from one block to the next
+  (`blastn/blast_engine/database.rs` `x_read_block`, `seqdb` `x_read_block_into` and `SequenceBlock::x_into_kept`,
+  `utils/x_mapped.rs` `x_filled_kept` and `x_keep`, the path of `LOSAT_X_BPDBKEEP`'s blocks): it is allocated once
+  per worker and grows only for a larger block, and only its bytes past the last block's length are zeroed. Before,
+  each block was a new buffer, zeroed and freed (BLASTN syn megablast at one thread: 54 `memset` calls, 14.1 M
+  instructions). A block of 1 MiB or more takes a buffer of `X_BYTES` and gives it back, so a worker keeps at most a
+  buffer below 1 MiB, freed when its stage (or the window's segment, or the `map_init` run) ends. NCBI reads the
+  sequences in place in the mapped volume (seqsrc_seqdb.cpp:375, seqdbvol.cpp:1817) and allocates each search
+  thread's structures once (blast_engine.c:1376-1378). With `=0` every block is a new buffer (`read_block`).
+  Measured on the workstation (line NP C4-3, dev bc182b374, node 1, 11 rounds, dev / null / head rotated; every output
+  equal to NCBI 2.17.0's): task-clock many40 megablast x0.991 (10/11 rounds faster), the mlst example x0.994 (10/11),
+  syn `-task blastn` x0.998 (10/11); syn megablast, many40 `-db_hard_mask`, SILVA at 1 and 16 threads and the zebrafish
+  genome at one thread within the null arm (x0.999-1.003; null x1.000-1.006). Callgrind: syn megablast -3.0 % instructions (block reads'
+  `memset` 14.1 M -> 2.1 M), mlst -1.7 % (54.5 M -> 2.1 M); perf counts glibc's `rep stosb` as few instructions, so
+  user-space instructions are flat. Max RSS (21 runs, 61 for syn at 16 threads): many40 at one thread +68 KiB
+  (+0.39 %; with `MALLOC_MMAP_THRESHOLD_` fixed equal: glibc raises its mmap threshold when the kept buffer is freed at
+  the end of the stage instead of after the first block), mlst -0.9 MiB, the others equal within the runs' spread.
   Every pooled buffer is written before it is read (zeroed and read into, or BLASTNA letters written whole), so values
   and order never change; it only chooses where the bytes live and when they are freed. Not mapped: the merge of the
   folded strips (`x_pair_seed_part.rs`) and the per-query sorts of `LOSAT_X_QGROUPPAR`. With other allocators (macOS,
@@ -1726,8 +1751,9 @@ Rebuilding less:
   of the 16S cells at 16 threads x1.000 (4). User-space instructions are equal; system time rises where buffers are
   mapped (D. melanogaster blastn at 16 threads 2.5 -> 3.3 s, inside the same wall).
 - `LOSAT_X_POOLIDLE=<MiB>` (tuning variable of `LOSAT_X_BNMAPPED`; not in the strict set, read once when the pool
-  first takes a buffer back) the bound of the bytes that the idle buffers of `X_BYTES` (the database's blocks,
-  sequences and BLASTNA letters) may have touched, 0 to 65,536. The oldest idle buffers beyond it are freed, and a
+  first takes a buffer back) the bound of the bytes that the idle buffers of `X_BYTES` (BLASTN's database blocks of
+  1 MiB or more, sequences and BLASTNA letters, BLASTP's database blocks of 1 MiB or more, TBLASTN's reads and frames)
+  may have touched, 0 to 65,536. The oldest idle buffers beyond it are freed, and a
   buffer that alone touched more is freed at once. Unset or any other value gives 64, without a message, as the value
   switches of `utils/xswitch.rs` give their built-in value. The output does not depend on it. D. melanogaster blastn
   at 16 threads (above): max RSS 273 MiB with 0, 317-331 with 64, 346-367 with 256; with 0 every reuse faults again
@@ -2219,7 +2245,9 @@ Rebuilding less:
   threshold. With the switch:
   (1) each worker of the pool keeps one scratch and one block buffer for the whole stage
   (`blastp/blast_engine/database/x_db_keep.rs`), and the blocks are cut to at most 96 KiB (`X_KEEP_BLOCK_BYTES`, at
-  one thread too), so that a kept buffer stays in its worker's arena instead of a mapping of its own beside it;
+  one thread too), so that a kept buffer stays in its worker's arena instead of a mapping of its own beside it (a
+  block of 1 MiB or more, a protein of a million residues or more, takes a buffer of `X_BYTES` and gives it back,
+  `SeqDb::x_read_block_into`, as BLASTN's blocks; the worker keeps its own buffer);
   (2) the workers take the blocks one at a time in ordinal order and put each block's results into a window of 8
   blocks per worker; the worker that ends the oldest block not yet merged merges it and the later blocks already
   ended, in ordinal order, and a worker takes block j only once the blocks before j - W are merged (W, the window).
@@ -3018,6 +3046,22 @@ Rebuilding less:
   (x0.972); Species0 x Species3 `-db` 14.204 -> 14.161 (x0.997) / 27.049 -> 26.852 (x0.993). Cycles x0.964-0.970
   (x0.993 on Species0 x Species3), instructions x0.989-0.991; the median of the per-round max RSS differences
   -5.2 to +1.5 MiB (no rise); one-thread instructions the same (the serial builder).
+- `LOSAT_X_BPRECOUNTO=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-28, on unless
+  it is `0`; acts on every blastp report's recount of the shown letters) tests each query's letters for a pyrrolysine (O), and
+  each subject's for an O or a gap character (`-`), once per call of `recount_shown_identities` (`blastp/blast_engine.rs`
+  `x_tested_once`), not once per HSP: the recount reads only the HSPs whose query or subject has one (or every HSP of
+  a search that read other letters than the query record's), and the test reads all the letters of a sequence
+  without one (the subject's when the query has none), so a query with many HSPs, or a subject in many of
+  them, was read again for each. The answers are those of the tests (the sequences do not change during the call);
+  memory: one byte per query and per subject up to the largest index asked. The recount runs on the search's thread
+  after the redo, between the query blocks of `LOSAT_X_BPQBLOCK`, where the pool waited for it: line BPF s12
+  (`REPORT.md` §17) found it in 86 of the 270 samples of that thread in the dips of the human x yeast
+  `-task blastp-fast` search at 16 threads (about 0.15 s of 4.8 s). ws node 1 (2026-11-17, 16 cores, siblings idle, 8 rounds of
+  dev 7e795fac4 / this build with `=0` / this build, arm order rotating, max RSS in the same runs), `-task blastp-fast
+  -outfmt 6 -evalue 0.001 -num_threads 16`: human x yeast `-subject` 4.501 / 4.500 / 4.370 s (x0.971 of dev, 8/8 rounds
+  faster), its first 3,000 queries 0.433 / 0.430 / 0.425 s (x0.978, 8/8), the same pair `-db` 4.809 / 4.824 / 4.753 s
+  (x0.988, 8/8), Arabidopsis x zebrafish `-db` 15.960 / 16.000 / 15.686 s (x0.983, 8/8); the median per-round max RSS
+  difference to dev +1.0, +0.3, -0.3 and +0.6 MiB (106, 76, 98, 96 MiB); outputs identical in every run.
 - `LOSAT_X_BNTABPAR=1` (BLASTN, all tasks, outfmt 6 / 7, two or more threads, speed; in the strict set since
   2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
   formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a
@@ -6202,8 +6246,9 @@ Scheduling (each value computed by one thread with the original function; order 
   its header): in the rows where no gap opens in A the cells depend on each other only through the
   X-drop test, whose `best_score` is a prefix maximum; in the other rows the row gap is a decayed
   prefix maximum. 32-bit values as in the reference, the matrix rows read from 16-bit tables built
-  from the reference's score function. Without AVX2 (other CPUs, aarch64, Wasm) the reference
-  function runs (the scalar loops on the same arrays were slower than it). A letter
+  from the reference's score function. Without AVX2 the reference function runs (the scalar loops
+  on the same arrays were slower than it), except where `LOSAT_X_BPGAP128` runs the sixteen-bit
+  rows in 128 bits (Wasm simd128, x86-64 with SSSE3 and SSE4.1); aarch64 runs it. A letter
   code of 28 or more, a negative gap cost, a gap cost above 65,536 or an X-drop above 2^28 leaves
   the call to the reference function. In the strict set since 2026-10-14 (`=0` turns it off). With
   `LOSAT_X_STATS=1` a `[X_STATS] BPGAP fast= not_taken=` line on stderr at the end.
@@ -6216,8 +6261,9 @@ Scheduling (each value computed by one thread with the original function; order 
   are at most 4,096, `gap_extend` at most 256 and the largest matrix entry at most 4,096 (every
   matrix and gap cost pair blastp supports); a row starts in 16 bits only while the best score is at
   most 32,767 - largest entry - 16 x `gap_extend` - 1 (32,739 for BLOSUM62 with 11/1), and past that
-  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT only:
-  aarch64 and WebAssembly keep the reference function (no AVX-512 on the default path).
+  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT; since
+  `LOSAT_X_BPGAP128` also WebAssembly simd128 and x86-64 without AVX2 (eight cells per step, see
+  its entry); aarch64 keeps the reference function (no AVX-512 on the default path).
   Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight,
   their HT siblings idle, warmed 3 s before every run, arm order reversed every other round, medians
   of the per-round ratios against dev 7cfec941, the binary before the switch; every report identical
@@ -6230,6 +6276,54 @@ Scheduling (each value computed by one thread with the original function; order 
   Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf
   record`). With `=0` the instruction counts equal dev's (x1.00006) at x1.002-1.003 of its time. Max
   RSS within the spread of repeated runs of one binary.
+- `LOSAT_X_BPGAP128=1` (BLASTP, speed; in the strict set from the pull request that added it,
+  2026-11-17, class platform, on by default; `=0` turns it off, `=2` runs it on any x86-64 CPU with
+  SSSE3 and SSE4.1, AVX2 or not, as a diagnostic; acts only where `LOSAT_X_BPGAP` and
+  `LOSAT_X_BPGAP16` are on; `restricted_rows16_w128` and `x_w128_16` in
+  `blastp/x_restricted_gap.rs`; one driver, `restricted_rows16`, runs both kernels of the
+  sixteen-bit rows) the sixteen-bit rows of the restricted gapped alignment
+  (`LOSAT_X_BPGAP16`) in 128 bits, eight cells per step, for the targets without the AVX2 rows: the
+  WebAssembly build (simd128) and x86-64 with SSSE3 and SSE4.1 but not AVX2, BMI1 and LZCNT, which
+  ran the reference function before. A step does for its eight cells what a block of the AVX2
+  rows does for sixteen, with the same lane operations and saturation; the exactness argument of
+  the module comment ("Sixteen-bit rows") does not depend on the cells per step, and the row gap's
+  lanes add at most 8 x `gap_extend`. Written differently, with the same values: the letters are
+  looked up sixteen at a time for two steps; the steps whose lanes are all cells take no lane mask
+  and only the first step of a row clears lane 0's diagonal (const parameters, so no test of them
+  runs per step); the lanes moved up across the vector take the lanes moved in from a second
+  vector (`palignr`; on wasm32 a window of two vectors, one `palignr` in V8); the row gap carried
+  between steps stays a vector; a step that raises the best score takes `b_offset` from the last
+  lane above the best before it (the first lane holding the step's maximum); the vector constants
+  are made once per alignment from values the compiler cannot see (`black_box`), since a wasm
+  engine builds a constant again at each use in a loop. The operations come from the 128-bit layer
+  of the X-drop kernel (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128,
+  which gained `subs16`, `up16_1`, `up16_2`, `up16_4` and `lut32k`; not the aarch64 layer: the rows
+  do not run there). They are the only rows of that build: where they do not take an alignment
+  (costs past `fits16`, which no matrix and gap cost pair blastp supports is, or a best score past
+  `limit16`, about 32,700) the reference function runs, as before the switch, and so it does with
+  `LOSAT_X_BPGAP16=0`. The rows return why they stopped (`XStop`): only where they reached the
+  letters `col` holds (`LOSAT_X_BPGAPBAND`) do the arrays double and the rows run again; a best
+  score past `limit16` or a letter code of 28 or more ends the try at once (before, it doubled the
+  arrays up to `full` and ran the rows again each time). The AVX2 rows compute as before: the
+  choice (`x_rows`, `restricted_fast`) and the stop reason are new, and `fill_col` has one
+  instance per row kernel (the AVX2 and the scalar 32-bit rows too:
+  with one shared instance fat LTO kept it out of line once `restricted_fast` took the 128-bit
+  rows, which changed `restricted_rows_avx2`). Tests: lib tests
+  `x_bpgap128_rows_match_the_reference_and_the_avx2_rows` (rows of 1 to 40 cells, every column
+  phase, X-drop 0 to 4,096, gap costs from 0, ties, long related pairs; the result of the
+  reference and of the AVX2 sixteen-bit rows), `x_bpgap128_layer_operations_match_their_definitions`,
+  `x_bpgap16_*` with both sixteen-bit rows, and every restricted-alignment test of `check()` with the
+  128-bit rows (their x86-64 SSSE3 / SSE4.1 build); `tests/blastp_restricted_gapped.rs` compares
+  NCBI BLAST+ 2.17.0's rows with `=0` and `=2` and counts the 128-bit rows' alignments with `=2`
+  (`[X_STATS] BPGAP fast=`); web.yml runs the lib tests of `x_restricted_gap` on wasm32-wasip1.
+  Measured (ws node 0, one core, 5 rounds; dev b59c21dc4 against 9be1d1d0e, the branch with that
+  dev merged; serial WASI command in one Node 26.8.2 process; blastp of the first 1,000 human
+  proteins against the 6,600 yeast proteins as `-subject`, `-evalue 0.001`, the same output): Wasm
+  18.024 -> 15.176 s (x0.844 [0.836-0.847], 5 of 5 rounds below 1); native cycles x1.0021
+  [0.9961-1.0076], instructions x1.00023. The AVX2 functions differ from dev's only in their stop
+  paths (`restricted_rows_avx2` +21 bytes, `restricted_rows16_avx2` +18); the build before the stop
+  reason, whose AVX2 functions were dev's machine code, measured native cycles x1.0023 in the same
+  setting.
 - `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
   v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
   restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the

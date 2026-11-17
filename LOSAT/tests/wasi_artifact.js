@@ -88,6 +88,36 @@ function unsignedWasiImports(wasiImport) {
   }
   return imports;
 }
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+// The native command's write to standard output or error blocks while the reader drains a
+// full pipe. Any use of process.stdout or process.stderr in Node opens that stream, and Node sets
+// a pipe there non-blocking: the ExperimentalWarning that require("wasi") prints to stderr, or a
+// Worker started with Node's default stdio. The flag belongs to the open file description, so
+// with `2>&1` a warning on stderr makes the piped stdout non-blocking too (and a caller may hand
+// over a pipe that is non-blocking already). The guest's fd_write (uvwasi) to a full pipe then
+// returns EAGAIN (WASI errno 6), and LOSAT stopped with "Resource temporarily unavailable (os
+// error 6)" after about 64 KiB of output. Node's uv_fs_write returns EAGAIN only when it wrote
+// nothing (a partial write returns its count), so every Node host of a LOSAT module waits 1 ms
+// (Atomics.wait, which Node allows on every thread) and repeats the same write to descriptors 1
+// and 2 until the pipe takes it; the table of files (wasi_files.js) waits the same way for the
+// devices and FIFOs it writes.
+const WASI_ERRNO_AGAIN = 6;
+const STREAM_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+function waitForStream() {
+  Atomics.wait(STREAM_WAIT, 0, 0, 1);
+}
+
+function blockingStdioWrite(fdWrite) {
+  return (fd, iovs, iovsLen, nwritten) => {
+    for (;;) {
+      const errno = fdWrite(fd, iovs, iovsLen, nwritten);
+      if (errno !== WASI_ERRNO_AGAIN || (fd !== 1 && fd !== 2)) return errno;
+      waitForStream();
+    }
+  };
+}
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host memory only. The module declares the largest shared memory it can use (65,535
@@ -120,7 +150,7 @@ function createSharedMemory(initial, maximum, stepDown, create = descriptor => n
   throw failure;
 }
 
-module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports, createSharedMemory };
+module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory };
 if (require.main === module) {
   try { console.log(JSON.stringify(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3]), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }

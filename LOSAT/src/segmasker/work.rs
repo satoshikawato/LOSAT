@@ -14,7 +14,9 @@ use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{iupacaa_letters, prints_title, BdbError, MaskBdbReader};
 use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
-use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
+use crate::seqmasks_io::run::{
+    finish, post_read_texts, serial_write_failure, write_failure, RunFailure,
+};
 use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::{SegMasker, SegParams};
@@ -198,6 +200,7 @@ fn run_masks(
     let mut out = Ostream::new(&mut output);
     let result = (|| {
         while let Some(record) = source.next_record()? {
+            post_read_texts::<Failure>(&record.texts, &mut out, diag)?;
             let masks = masker.seq_buffer_seg::<false>(&record.stdaa);
             let mask: Vec<(u32, u32)> = masks
                 .iter()
@@ -317,6 +320,9 @@ struct Record {
     has_source: bool,
     stdaa: Vec<u8>,
     iupacaa: Vec<u8>,
+    /// The taxonomy database's texts of reading a database sequence
+    /// (`seqmasks_io::bdb_reader::BdbRecord::texts`); none for a FASTA record.
+    texts: Vec<String>,
 }
 
 /// `CMaskReader::GetNextSequence` of the FASTA reader or the database reader.
@@ -411,6 +417,7 @@ impl Source<'_> {
                     ids: record.ids,
                     title: record.title,
                     taxname: None,
+                    texts: Vec::new(),
                     has_source: false,
                     // IUPACaa letters: the 20 of SEG's alphabet have their NCBIstdaa codes, and
                     // every other letter is one SEG counts as bogus, as NCBIstdaa's `*` and `-`
@@ -440,6 +447,7 @@ impl Source<'_> {
                     has_source: record.has_source,
                     iupacaa: iupacaa_letters(&record.residues),
                     stdaa: record.residues,
+                    texts: record.texts,
                 }))
             }
         }

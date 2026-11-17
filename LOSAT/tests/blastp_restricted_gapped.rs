@@ -5,8 +5,10 @@
 //! `LOSAT_X_BPGAP` is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
 //! variable is `0`. Every test states the
 //! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0`, with
-//! `LOSAT_X_BPGAP16=0` (the sixteen-bit rows, also in the set) and with `LOSAT_X_BPGAPBAND=0`
-//! (the rows' arrays sized for the subject letters instead of the band, also in the set).
+//! `LOSAT_X_BPGAP16=0` (the sixteen-bit rows, also in the set), with `LOSAT_X_BPGAPBAND=0`
+//! (the rows' arrays sized for the subject letters instead of the band, also in the set) and with
+//! `LOSAT_X_BPGAP128=0` and `=2` (the sixteen-bit rows in 128 bits, the rows of WebAssembly and of
+//! x86-64 without AVX2, also in the set; `=2` runs them in place of the AVX2 rows).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
@@ -345,13 +347,28 @@ fn run(
     )
 }
 
-/// The CPU runs the vector restricted alignment (`x_restricted_gap.rs`: AVX2, BMI1, LZCNT).
+/// The CPU runs the vector restricted alignment (`x_restricted_gap.rs`: the AVX2 rows with AVX2,
+/// BMI1 and LZCNT, else the 128-bit rows of `LOSAT_X_BPGAP128` with SSSE3 and SSE4.1).
 fn vector_kernel_runs() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        is_x86_feature_detected!("avx2")
+        (is_x86_feature_detected!("avx2")
             && is_x86_feature_detected!("bmi1")
-            && is_x86_feature_detected!("lzcnt")
+            && is_x86_feature_detected!("lzcnt"))
+            || w128_cpu()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+/// The CPU runs the 128-bit rows (`LOSAT_X_BPGAP128=2` takes them on any such CPU): SSSE3 and
+/// SSE4.1.
+fn w128_cpu() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        is_x86_feature_detected!("ssse3") && is_x86_feature_detected!("sse4.1")
     }
     #[cfg(not(target_arch = "x86_64"))]
     {
@@ -367,6 +384,8 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
             &[("LOSAT_X_BPGAP", "0")][..],
             &[("LOSAT_X_BPGAP16", "0")][..],
             &[("LOSAT_X_BPGAPBAND", "0")][..],
+            &[("LOSAT_X_BPGAP128", "0")][..],
+            &[("LOSAT_X_BPGAP128", "2")][..],
         ] {
             let (report, _) = blastp(threads, variables);
             assert_eq!(report, NCBI_ROWS, "{threads} threads, {variables:?}");
@@ -387,6 +406,27 @@ fn the_vector_kernel_computes_the_restricted_alignments_of_the_fixture() {
         assert!(fast > 0 && not_taken == 0, "{line}");
     } else {
         assert!(fast == 0 && not_taken > 0, "{line}");
+    }
+}
+
+/// `LOSAT_X_BPGAP128=2`: the 128-bit rows (the rows of the WebAssembly build, here in their x86-64
+/// SSSE3 / SSE4.1 build, taken in place of the AVX2 rows) compute every restricted alignment of the
+/// fixture where the CPU has SSSE3 and SSE4.1, and the report is NCBI's at one and four threads.
+#[test]
+fn the_128_bit_rows_compute_the_restricted_alignments_of_the_fixture() {
+    for threads in [1, 4] {
+        let (report, stderr) = blastp(
+            threads,
+            &[("LOSAT_X_STATS", "1"), ("LOSAT_X_BPGAP128", "2")],
+        );
+        assert_eq!(report, NCBI_ROWS, "{threads} threads");
+        let (fast, not_taken) = bpgap_counts(&stderr);
+        let line = format!("{threads} threads: fast={fast} not_taken={not_taken}");
+        if w128_cpu() {
+            assert!(fast > 0 && not_taken == 0, "{line}");
+        } else {
+            assert!(fast == 0 && not_taken > 0, "{line}");
+        }
     }
 }
 

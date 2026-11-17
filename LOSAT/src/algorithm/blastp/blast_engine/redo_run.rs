@@ -1215,19 +1215,14 @@ where
 }
 
 /// LOSAT's refusal of a query batch whose Smith-Waterman redo fails in NCBI
-/// (`kappa::smith_waterman::SwRedoFailed`): at the batch's last redone match, or at any match
-/// where NCBI's redo may run on several threads (`sw_ncbi_threads`). NCBI's redo keeps the status
-/// of each thread's last match (`status_code_tld`); a failure stops the other threads
-/// (`interrupt`), and a status other than 0 fails the batch's traceback ("BLAST engine error:
-/// Traceback failed", exit status 3), which LOSAT does not write yet.
+/// (`kappa::smith_waterman::SwRedoFailed`) at the batch's last redone match. LOSAT gives NCBI's
+/// one-thread output at every `-num_threads`, and NCBI's one-thread redo keeps the status of its
+/// last match (`status_code_tld[0]`): a failed earlier match is dropped, and a status other than
+/// 0 at the end fails the batch's traceback ("BLAST engine error: Traceback failed", exit
+/// status 3), which LOSAT does not write yet.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3756-3759,3774-3778
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
 /// ```c
-///                 if ((actual_num_threads > 1) &&
-///                 	(*pStatusCode != 0 || !seqSrc)) {
-/// #pragma omp critical(intrpt)
-///                     interrupt = TRUE;
-/// ...
 ///     for (i = 0; i < actual_num_threads; ++i) {
 ///         if (status_code_tld[i] != 0) {
 ///             status_code = status_code_tld[i];
@@ -1241,7 +1236,7 @@ where
 /// ```
 fn sw_traceback_failed() -> anyhow::Error {
     anyhow::anyhow!(
-        "a query batch whose Smith-Waterman redo (-use_sw_tback) fails in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold and the alignment of the first query letter with the subject's first letter scores 0 or less) at its last redone match, or at any match with -db and -num_threads above 1, with which NCBI's traceback fails (\"BLAST engine error: Traceback failed\"), is not supported by LOSAT's BLASTP yet"
+        "a query batch whose Smith-Waterman redo (-use_sw_tback) fails in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold and the alignment of the first query letter with the subject's first letter scores 0 or less) at its last redone match, with which NCBI's traceback fails (\"BLAST engine error: Traceback failed\"), is not supported by LOSAT's BLASTP yet"
     )
 }
 
@@ -1250,28 +1245,6 @@ fn sw_traceback_failed() -> anyhow::Error {
 fn sw_endless() -> anyhow::Error {
     anyhow::anyhow!(
         "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
-    )
-}
-
-/// LOSAT's refusal of a match of the Smith-Waterman redo that NCBI may split among threads
-/// (`sw_ncbi_threads`) when its query's heap is full (`-max_target_seqs` redone matches): NCBI's
-/// threads take contiguous parts of the batch's matches (`schedule(static)`), each with its own
-/// heaps (`redoneMatches_tld`), which the redo of a match asks before its first alignment
-/// (`BlastCompo_HeapWouldInsert`) and the early termination reads. While the query's heap is not
-/// full, every heap of a thread holds fewer matches and both answers are those of one thread; once
-/// it is full they depend on NCBI's split, which follows its thread count (`-num_threads`, reduced
-/// to the machine's CPUs) and its OpenMP runtime.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3449,3496
-/// ```c
-/// #pragma omp for schedule(static)
-///         for (b = 0; b < numMatches; ++b) {
-/// ...
-///                 redoneMatches        = redoneMatches_tld[tid];
-/// ```
-fn sw_thread_heaps() -> anyhow::Error {
-    anyhow::anyhow!(
-        "a match of the Smith-Waterman redo (-use_sw_tback) with -db and -num_threads above 1 whose query already has -max_target_seqs redone matches, where NCBI BLAST+ 2.17.0's result depends on how its threads split the matches (each thread asks its own hit lists), is not supported by LOSAT's BLASTP yet"
     )
 }
 
@@ -1374,9 +1347,6 @@ where
         .use_sw_tback
         .then(kappa::smith_waterman::SwMatchScratch::new);
     let mut sw_last_failed = false;
-    // NCBI's redo may run on several threads (`sw_thread_heaps`): `-subject` makes NCBI's thread
-    // count 1 (blast_args.cpp:3223-3235), `-db` keeps `-num_threads`.
-    let sw_ncbi_threads = args.use_sw_tback && args.db.is_some() && args.num_threads > 1;
 
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
@@ -1463,9 +1433,6 @@ where
             if kappa_preliminary_hits.is_empty() {
                 continue;
             }
-            if sw_ncbi_threads && redone_matches[q_idx].n >= redone_matches[q_idx].heap_threshold {
-                return Err(sw_thread_heaps());
-            }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
             // ```c
@@ -1549,9 +1516,6 @@ where
                         postprocessed
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
-                        if sw_ncbi_threads {
-                            return Err(sw_traceback_failed());
-                        }
                         sw_last_failed = true;
                         continue;
                     }

@@ -1,0 +1,4 @@
+Warning: [tblastn] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objmgr/seq_table_info.cpp", line 835: Error: (CAnnotException::eOtherError) ncbi::objects::CSeqTableInfo::x_Initialize() - Duplicate partial column
+

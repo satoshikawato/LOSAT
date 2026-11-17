@@ -5797,7 +5797,10 @@ fn open_search_database(
             }
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
-                outputs.formats.iter().map(|format| format.outfmt),
+                outputs
+                    .formats
+                    .iter_mut()
+                    .map(|format| (format.outfmt, &mut format.refusal)),
                 args.app.name(),
             )?;
             Some(database)
@@ -11654,15 +11657,24 @@ fn run_call(
                 .iter()
                 .map(|record| (record.believed(), record.title.as_slice())),
             args.show_gis,
-            true,
-            format_plans
-                .iter()
-                .any(|outfmt| matches!(outfmt, BlastpReport::Pairwise(_))),
-            args.app.name(),
-        )?
+        )
     } else {
         Vec::new()
     };
+    // LOSAT's refusals of these records in outfmt 0 to 4, each such format's (`FormatRefusal`).
+    if !records_parsed.is_empty() {
+        for (format, outfmt) in outputs.formats.iter_mut().zip(format_plans.iter()) {
+            if matches!(outfmt, BlastpReport::Pairwise(_)) {
+                format
+                    .refusal
+                    .check(crate::report::db_subject::check_pairwise_records(
+                        &records_parsed,
+                        true,
+                        args.app.name(),
+                    ))?;
+            }
+        }
+    }
     let subject_ids: std::borrow::Cow<'_, [crate::algorithm::common::tabular::SubjectId]> =
         if format_plans.iter().any(|outfmt| outfmt.is_tabular()) {
             match (listed_titles.as_ref(), x_meta) {
@@ -12665,7 +12677,9 @@ fn run_call(
                 "LOSAT internal error: outfmt 0 as a BLASTP tabular report"
             )),
         };
-        if let Err(error) = format_result {
+        // An error of the format's report fails the call, or this format alone (`FormatRefusal`):
+        // the formats after it are written then.
+        if let Err(error) = format.refusal.check(format_result) {
             output_result = Err(error);
             break;
         }

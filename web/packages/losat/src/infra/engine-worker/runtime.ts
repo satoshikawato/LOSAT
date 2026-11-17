@@ -6,7 +6,8 @@
 // -num_threads and validate that argv (ABI v2 §7), register the query and, unless the
 // instance holds it, the subject, compare the records that the engine read with the
 // record tables (plan §5.4; a difference stops the run before any output), run, and send
-// the output streams to the Data worker's port. A BLASTN search with -window_masker_db also
+// the output streams to the Data worker's port, with the engine's discards of an output that
+// failed alone (stream 9). A BLASTN search with -window_masker_db also
 // gives the engine the counts file, which the instance holds for later BLASTN searches. A search
 // with -conffile gives the engine the registry file for that search only, and the files that a
 // run makes besides its outputs (stream 8: the file of -logfile) come back with its result, or with
@@ -14,9 +15,12 @@
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';
-import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
+import { isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
+import type { RunOutput } from '../../domain/output-format.js';
 import {
+  discardedStream,
+  DISCARD_STREAM,
   EngineCallError,
   FILE_REGISTRY,
   FILE_WINDOW_MASKER_COUNTS,
@@ -211,6 +215,7 @@ export class EngineRuntime {
         abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
+          else if (stream === DISCARD_STREAM) writer.discard(discardedOutput(bytes));
           else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
         });
       } catch (error) {
@@ -418,6 +423,16 @@ function inUse<T>(use: InstanceUse | undefined, body: () => T): T {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The output that the engine's signal of stream 9 discards (ABI v2 §5): an output stream of the run
+ * that failed alone after some of its chunks were sent. Another number breaks the ABI.
+ */
+function discardedOutput(bytes: Uint8Array): RunOutput {
+  const stream = discardedStream(bytes);
+  if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
+  return stream;
 }
 
 /** The files of a run's archive (stream 8, in chunks); none when the run sent none. */

@@ -240,7 +240,7 @@ impl SubjectEmit<'_> {
     // length of 1 or more (those of length 0 or less, which read nothing in NCBI's, are dropped
     // after the first linking call, `subject_link::link_subject_hits_int4`), so NCBI dies at the
     // first HSP of every such list. The query batch fails with LOSAT's refusal
-    // (PD-LOSAT-NCBI-DEFECTS 1.49, rule 3) after the reports of the batches before
+    // (PD-LOSAT-NCBI-DEFECTS 1.50, rule 3) after the reports of the batches before
     // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).
     /// The end of subject `s_idx`, whose HSPs reach the re-evaluation's read of the translation of a
     /// subject of fewer than 12 bases: refused, then emitted without HSPs.

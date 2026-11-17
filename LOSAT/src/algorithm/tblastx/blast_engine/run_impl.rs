@@ -4923,7 +4923,7 @@ impl BatchReports<'_> {
 /// Q-X2c: "the results of the query batches before are written"), a one-hit merge of lengths that
 /// add up to 0 (`OneHitChunkMerge::refuse`) and the ungapped re-evaluation of HSPs on a subject (or
 /// its `-subject_loc` range) of fewer than 12 bases
-/// (`subject_loop::SubjectEmit::refuse_untranslated_frame`, PD-LOSAT-NCBI-DEFECTS 1.49). The run
+/// (`subject_loop::SubjectEmit::refuse_untranslated_frame`, PD-LOSAT-NCBI-DEFECTS 1.50). The run
 /// then writes the same bytes whether its reports are streamed or held (`report_stream`).
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);

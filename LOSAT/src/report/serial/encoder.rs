@@ -69,6 +69,11 @@ pub enum SerialError {
     /// An OCTET STRING in a stream that does not write one (the archive of outfmt 11 is the
     /// only document with one; JSON and the XML of outfmt 5 / 14 / 16 do not write it).
     OctetString,
+    /// A value of a PSSM file's members that only its ASN.1 text writes (`Encoder::null`,
+    /// `utf8_str`, `delayed`; `report::serial::asn_types::write`) in another stream: no BLAST
+    /// document that LOSAT writes in ASN.1 binary, XML or JSON holds one (psiblast and tblastn
+    /// `-in_pssm` refuse `-outfmt 11`).
+    Unwritten(&'static str),
 }
 
 impl std::fmt::Display for SerialError {
@@ -88,6 +93,9 @@ impl std::fmt::Display for SerialError {
             }
             SerialError::OctetString => {
                 f.write_str("an OCTET STRING in this serialized format is not supported by LOSAT")
+            }
+            SerialError::Unwritten(what) => {
+                write!(f, "{what} in this serialized format is not supported by LOSAT")
             }
         }
     }
@@ -309,6 +317,20 @@ pub trait Encoder {
     fn string_store_replacing(&mut self, value: &[u8]) {
         self.string_store(value);
     }
+    /// `WriteNull` of a NULL value (`Seq-loc` `null`, `Seq-loc` `empty`'s neighbours in a PSSM's
+    /// annotations; `report::serial::asn_types::write`): `NULL` in ASN.1 text, the tag 0x05 and the
+    /// length 0 in ASN.1 binary.
+    fn null(&mut self);
+    /// `WriteString(str, eStringTypeUTF8)` of a UTF8String: NCBI's stream writes it with
+    /// `eFNP_Allow` (no byte is replaced or reported; in ASN.1 text a zero byte is left out, a
+    /// `"` doubled and the line wrapped as a VisibleString's).
+    fn utf8_str(&mut self, value: &[u8]);
+    /// `WriteClassMember(id, const CDelayBuffer&)` of a member that NCBI's reader kept in a delay
+    /// buffer (`Auth-list.names`, `asn_types::DELAYED`): in ASN.1 text the bytes read, copied as
+    /// they are (`COStreamBuffer::Write(CByteSourceReader&)`, which leaves the line length as it
+    /// was). The other streams parse the buffer first (`CDelayBuffer::Update`), which LOSAT does
+    /// not: their error (`SerialError::Unwritten`).
+    fn delayed(&mut self, text: &[u8]);
     /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
     fn buffered(&self) -> usize {
         0
@@ -568,6 +590,19 @@ impl<E: Encoder, P> Traced<E, P> {
         )
     }
 
+    /// The bytes at the start of the document that NCBI's buffer held when it first wrote to its
+    /// output, `None` before (`out_buffer::OutBuffer::first_write`; `None` for an encoder that
+    /// `Traced` does not follow).
+    pub(crate) fn first_write(&self) -> Option<usize> {
+        self.buffer.as_ref().and_then(OutBuffer::first_write)
+    }
+
+    /// The bytes of the document that `inner` holds (`Encoder::held`, which `Traced` itself does
+    /// not forward: what it hands on is `flush_to`'s).
+    pub(crate) fn held_len(&self) -> usize {
+        self.inner.held().len()
+    }
+
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
     pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
         self.take_posted()
@@ -799,6 +834,15 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn string_store(&mut self, value: &[u8]) {
         self.string(value, |inner| inner.string_store_replacing(value));
+    }
+    fn null(&mut self) {
+        self.call(Piece::Bool, |inner| inner.null());
+    }
+    fn utf8_str(&mut self, value: &[u8]) {
+        self.string(value, |inner| inner.utf8_str(value));
+    }
+    fn delayed(&mut self, text: &[u8]) {
+        self.call(Piece::Raw, |inner| inner.delayed(text));
     }
     fn buffered(&self) -> usize {
         self.inner.buffered()

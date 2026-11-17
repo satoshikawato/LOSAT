@@ -380,13 +380,7 @@ pub(crate) fn read_in_pssm(
                 path.display()
             )))
         }
-        PssmFileFormat::Eof => {
-            return Err(crate::cli::NativeError {
-                exit: 0,
-                message: String::new(),
-            }
-            .into())
-        }
+        PssmFileFormat::Eof => return Err(crate::cli::NativeError::silent_end().into()),
         PssmFileFormat::Exception(exception) => {
             return Err(crate::cli::NativeError::exception(&exception).into())
         }
@@ -448,11 +442,7 @@ pub(crate) fn read_in_pssm(
             return Err(crate::cli::NativeError::std_exception(what).into())
         }
         Err(PssmReadError::Ncbi(ReadError::Eof)) => {
-            return Err(crate::cli::NativeError {
-                exit: 0,
-                message: String::new(),
-            }
-            .into())
+            return Err(crate::cli::NativeError::silent_end().into())
         }
         // The lexical reader's own limits (`read_pssm`): LOSAT's refusal, after NCBI's reader read
         // the file. (What NCBI reads and LOSAT's search does not take is refused after the object
@@ -1114,9 +1104,8 @@ pub(crate) fn psi_search_and_object(
     // `SaveSearchStrategy` serializes before `CPsiBlastImpl` computes the scores of a PSSM of
     // frequency ratios only (psiblast_app.cpp:340, tblastn_app.cpp:307): the object as read, kept
     // for a request that NCBI writes (a PSSM that NCBI's check refuses writes none; one whose
-    // scores the engine cannot compute is written first), with the members that the PSSM writer
-    // does not write yet (`PssmWithParameters::unwritten_members`, `PsiSearch::refuse_request_members`,
-    // refused once the database is opened).
+    // scores the engine cannot compute is written first), with every member it read (the PSSM
+    // writer writes them all, `report::serial::pssm`).
     let request = (super::pssm_request_written(reader.strategy, reader.database)
         && validation_error.is_none())
     .then(|| PssmQueryRequest {
@@ -1369,34 +1358,8 @@ pub(crate) fn convert_2_matrix<T: Copy>(
     rows
 }
 
-/// LOSAT's refusal of a PSSM file with members that the PSSM writer does not write yet
-/// (`PssmWithParameters::unwritten_members`: the descriptors of the query other than titles, its
-/// `annot`, the members of its `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, the
-/// `constraints` and `annotatedSites` of the parameters) where NCBI writes the object it read back
-/// (`option`): psiblast's `-out_pssm` (`SavePssmToFile` in round 1,
-/// `algorithm::psiblast::in_pssm_files::rounds_input`) and the search strategy's request
-/// (`-export_search_strategy`, `psi_search_and_object`). NCBI's object keeps such members and
-/// writes them (NCBI 2.17.0 probes of line PS PS5b, and `p9.pp.ps5_rnd_comment.db.f6`,
-/// `p9.pp.ps5_rnd_molinfo.db.f6` of line RG F1b); line RG item D3-2 writes them; `program` names
-/// LOSAT's program.
-pub(crate) fn refuse_unwritten_members(
-    pssm: &PssmWithParameters,
-    option: &str,
-    program: &str,
-) -> Result<()> {
-    let skipped = pssm.unwritten_members();
-    if !skipped.is_empty() {
-        bail!(
-            "a PSSM file with members that LOSAT's PSSM writer does not write yet ({}), which NCBI BLAST+ writes back with {option}, is not supported by LOSAT's {program}",
-            skipped.join(", ")
-        );
-    }
-    Ok(())
-}
-
 /// The PSSM file of `-in_pssm` as `read_in_pssm` reads it: the
-/// object after `CPsiBlastImpl`'s constructor (`unwritten_members` names what its writer does not
-/// write yet), whether the scores
+/// object after `CPsiBlastImpl`'s constructor, whether the scores
 /// were computed from the frequency ratios, and whether NCBI's constructor of the search passes
 /// (`CPsiBlastValidate::Pssm` and the PSSM engine's scores of a PSSM of frequency ratios only; it
 /// throws before any PSSM file is written otherwise).
@@ -1916,7 +1879,6 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
             assert!(search.annot.abort.is_some(), "{name}");
             assert!(search.request.is_none(), "{name}");
-            assert!(search.refuse_request_members("PSIBLAST").is_ok(), "{name}");
             assert!(!file.valid, "{name}");
         }
     }
@@ -2005,20 +1967,11 @@ mod tests {
             search.stop_before_search(true, false),
             Some(PssmQueryStop::Bl2seq)
         );
-        // Members the PSSM writer does not write yet: the request keeps them for the refusal made
-        // once the database is opened.
+        // A member that the search does not read (a comment descriptor): the request keeps the
+        // object as read, which the PSSM writer writes back whole.
         let comment = read("pssm/ps5_rnd_comment.asn.gz");
-        assert_eq!(comment.unwritten_members(), ["Seqdesc"]);
-        let (search, _) = psi_search_and_object(comment, reader("BLOSUM62", true)).unwrap();
-        let refusal = search
-            .refuse_request_members("TBLASTN")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            refusal.contains("writes back with -export_search_strategy")
-                && refusal.contains("LOSAT's TBLASTN"),
-            "{refusal}"
-        );
+        let (search, _) = psi_search_and_object(comment.clone(), reader("BLOSUM62", true)).unwrap();
+        assert!(search.request_pssm().is_some_and(|pssm| *pssm == comment));
     }
 
     // A PSSM of frequency ratios only (the tk PSSM without its scores) gets NCBI's engine's

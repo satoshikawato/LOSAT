@@ -6218,7 +6218,6 @@ fn search_pssm_query(
     xinclude: Option<&crate::blastinput::app::FormatChoice>,
 ) -> Result<()> {
     let program = resolved.app.name();
-    psi.refuse_request_members(program)?;
     // The PSSM files of round 1 (written back from the input PSSM, or the engine's), which a run
     // that never searches does not write (NCBI BLAST+ 2.17.0 leaves `-out_pssm` and
     // `-out_ascii_pssm` alone when the object manager ends the run: line RG D3-1 fix 3 S1, fix 4).

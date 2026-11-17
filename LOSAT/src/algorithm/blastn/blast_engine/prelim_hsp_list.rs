@@ -140,17 +140,17 @@ pub(super) fn ungapped_hsp_list(
             //                     ungapped_data->length+ungapped_data->s_start,
             // ```
             // NCBI's HSP of a hit that starts left of its context (`UngappedHit::saved`, a
-            // negative `qs`) starts at that negative offset: here its query start is the
-            // context's (`usize` offsets) with the letters before it in `prelim_q_left`, and its
-            // subject start NCBI's; `ungapped_subject_stage` re-evaluates it from NCBI's start.
-            let left = (-uh.qs).max(0) as usize;
+            // negative `qs`) starts at that negative offset: its query offsets are stored the
+            // letters before the context to the right, with that count in `prelim_q_left`
+            // (`PrelimHit::q_start`), and its subject start is NCBI's.
+            let left = (-uh.qs).max(0);
             PrelimHit {
                 context_idx: uh.context_idx,
                 query_idx: uh.query_idx,
                 query_frame: uh.query_frame,
                 query_context_offset: uh.query_context_offset,
-                prelim_qs: uh.qs.max(0) as usize,
-                prelim_qe: uh.qe as usize,
+                prelim_qs: (uh.qs + left) as usize,
+                prelim_qe: (uh.qe + left) as usize,
                 prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
                 prelim_se: (uh.se as usize).saturating_add(chunk.offset),
                 prelim_score: uh.score,

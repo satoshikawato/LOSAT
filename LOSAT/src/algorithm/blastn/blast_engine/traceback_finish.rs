@@ -47,6 +47,8 @@ pub(super) struct TracebackCtx<'a> {
     /// context.
     pub(super) encoded_queries_blastna: &'a Vec<&'a [u8]>,
     pub(super) encoded_queries_nomask: &'a [&'a [u8]],
+    /// The same letters concatenated (`TraceBatch::encoded_query_concat_nomask`).
+    pub(super) encoded_query_concat_nomask: &'a [u8],
     pub(super) query_contexts: &'a [QueryContext],
     /// The queries' lengths, by query.
     pub(super) query_lengths: &'a [usize],

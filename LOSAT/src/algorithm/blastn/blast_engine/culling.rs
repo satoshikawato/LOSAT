@@ -38,12 +38,13 @@ fn int4(length: usize) -> i32 {
 ///     	  A.end   = A.hsp->query.end;
 ///       }
 /// ```
-/// `query_offset` and `query_end` are the HSP's offsets within its context.
+/// `query_offset` and `query_end` are the HSP's offsets within its context, NCBI's `Int4` ones
+/// (an `-ungapped` HSP can lie left of its context, `PrelimHit::prelim_q_left`).
 fn cull_key(
     minus: bool,
     qlen: i32,
-    query_offset: usize,
-    query_end: usize,
+    query_offset: i64,
+    query_end: i64,
     score: i32,
     subject_offset: usize,
 ) -> CullKey {
@@ -132,8 +133,8 @@ impl PrelimCulling {
             let key = cull_key(
                 hit.context_idx % 2 == 1,
                 qlen,
-                hit.prelim_qs,
-                hit.prelim_qe,
+                hit.q_start() as i64,
+                hit.q_end() as i64,
                 hit.prelim_score,
                 hit.prelim_ss,
             );
@@ -292,8 +293,8 @@ pub(super) fn cull_traceback(
             let key = cull_key(
                 hsp.query_frame < 0,
                 qlen,
-                hsp.internal_q_offset_0,
-                hsp.internal_q_end_0,
+                hsp.q_offset_ncbi(),
+                hsp.q_end_ncbi(),
                 hsp.raw_score,
                 hsp.internal_s_offset_0,
             );

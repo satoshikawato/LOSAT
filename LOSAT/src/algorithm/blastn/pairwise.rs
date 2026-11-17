@@ -763,6 +763,7 @@ mod tests {
             internal_s_offset_0: s.0,
             internal_s_end_0: s.1,
             internal_query_context_offset: 0,
+            internal_q_left: 0,
             gap_info: ops,
             num_positives: 0,
         }

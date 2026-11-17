@@ -346,6 +346,13 @@ pub struct BlastnHsp {
     pub internal_s_offset_0: usize,
     pub internal_s_end_0: usize,
     pub internal_query_context_offset: i32,
+    /// An ungapped (`-ungapped`) HSP that NCBI keeps left of its context (with negative
+    /// context-relative `Int4` offsets, `PrelimHit::prelim_q_left`): the letters its offsets
+    /// are stored to the right (`internal_q_offset_0` is then 0); NCBI's offsets are
+    /// `q_offset_ncbi` and `q_end_ncbi`. 0 for every other HSP. NCBI's reports of such an HSP
+    /// stop with an exception, which LOSAT refuses where its report starts
+    /// (`blast_engine::run::post_process_hits_and_write`).
+    pub internal_q_left: u32,
     pub gap_info: Option<Vec<GapEditOp>>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
     // ```c
@@ -355,6 +362,20 @@ pub struct BlastnHsp {
     // } BlastHSP;
     // ```
     pub num_positives: usize,
+}
+
+impl BlastnHsp {
+    /// NCBI's `Int4` query offset of the HSP in its context (`internal_q_left`).
+    #[inline(always)]
+    pub fn q_offset_ncbi(&self) -> i64 {
+        self.internal_q_offset_0 as i64 - i64::from(self.internal_q_left)
+    }
+
+    /// NCBI's `Int4` query end of the HSP in its context (`internal_q_left`).
+    #[inline(always)]
+    pub fn q_end_ncbi(&self) -> i64 {
+        self.internal_q_end_0 as i64 - i64::from(self.internal_q_left)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -644,8 +665,9 @@ pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
     // }
     // ```
-    // ScoreCompareHSPs compares canonical internal offsets/endpoints directly.
-    let query_offsets = |h: &BlastnHsp| (h.internal_q_offset_0, h.internal_q_end_0);
+    // ScoreCompareHSPs compares canonical internal offsets/endpoints directly (NCBI's `Int4`
+    // offsets: an `-ungapped` HSP can lie left of its context, `BlastnHsp::internal_q_left`).
+    let query_offsets = |h: &BlastnHsp| (h.q_offset_ncbi(), h.q_end_ncbi());
     let (a_q_offset, a_q_end) = query_offsets(a);
     let (b_q_offset, b_q_end) = query_offsets(b);
     let (a_s_offset, a_s_end) = (a.internal_s_offset_0, a.internal_s_end_0);
@@ -1565,6 +1587,7 @@ mod tests {
             internal_s_offset_0: 0,
             internal_s_end_0: 1,
             internal_query_context_offset: 0,
+            internal_q_left: 0,
             gap_info: None,
             num_positives: 0,
         }

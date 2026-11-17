@@ -7,5 +7,9 @@
   start), and the word sizes 4 to 8 extend on the whole query block as NCBI does. Default searches
   are unchanged.
 - BLASTN `-ungapped`: an alignment whose re-evaluation keeps its part in an earlier query context,
-  which NCBI BLAST+ reports with a query start left of its context and on which its reports stop with
-  an exception, is refused (a result LOSAT does not reproduce yet; README, What LOSAT refuses).
+  which NCBI BLAST+ keeps with a query start left of its context, goes through the later steps as
+  NCBI's does (its e-value, percent identity, query coverage, `-max_hsps`, `-max_target_seqs` and
+  `-culling_limit` ranks), so a search whose limits drop it gives NCBI BLAST+'s report; where it
+  reaches the report, on which NCBI BLAST+ stops with an exception (plus strand) or shows query
+  coordinates outside the query (minus strand, or from a database), it is refused (a result LOSAT
+  does not reproduce yet; README, What LOSAT refuses).

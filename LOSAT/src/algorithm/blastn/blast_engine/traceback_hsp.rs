@@ -1103,6 +1103,7 @@ pub(super) fn trace_build_hsp(
         internal_s_offset_0: final_ss,
         internal_s_end_0: final_se,
         internal_query_context_offset: prelim.query_context_offset,
+        internal_q_left: 0,
         gap_info,
         num_positives: matches,
     });

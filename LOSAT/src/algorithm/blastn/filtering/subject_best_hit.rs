@@ -11,17 +11,18 @@ use super::super::hsp::BlastnHsp;
 /// Default range difference for subject best hit filtering
 /// NCBI reference: blast_options.h:1211-1212
 /// #define BLAST_SUBJECT_BESTHIT_DEFAULT_RANGE_DIFF 3
-const MAX_RANGE_DIFF: usize = 3;
+const MAX_RANGE_DIFF: i64 = 3;
 
 /// The fields of an HSP that `Blast_HSPListSubjectBestHit` reads: its context, the frame of
-/// the query, the query offsets within the context, and the length of the context.
+/// the query, the query offsets within the context (NCBI's `Int4` offsets: an `-ungapped` HSP
+/// can lie left of its context) and the length of the context.
 #[derive(Debug, Clone, Copy)]
 pub struct BestHitKey {
     pub context: u32,
     pub query_frame: i32,
-    pub query_offset: usize,
-    pub query_end: usize,
-    pub query_length: usize,
+    pub query_offset: i64,
+    pub query_end: i64,
+    pub query_length: i64,
 }
 
 /// Apply Subject Best Hit filtering to remove HSPs with overlapping query ranges.
@@ -51,9 +52,9 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
     subject_best_hit_by(hits, |h| BestHitKey {
         context: h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 },
         query_frame: h.query_frame,
-        query_offset: h.internal_q_offset_0,
-        query_end: h.internal_q_end_0,
-        query_length: query_len,
+        query_offset: h.q_offset_ncbi(),
+        query_end: h.q_end_ncbi(),
+        query_length: query_len as i64,
     });
 }
 
@@ -97,8 +98,8 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
 
         let hit_i_context = keys[i].context;
         let (i_q_offset, i_q_end) = (keys[i].query_offset, keys[i].query_end);
-        let o = i_q_offset.saturating_sub(MAX_RANGE_DIFF);
-        let e = i_q_end.saturating_add(MAX_RANGE_DIFF);
+        let o = i_q_offset - MAX_RANGE_DIFF;
+        let e = i_q_end + MAX_RANGE_DIFF;
 
         for j in (i + 1)..hits.len() {
             if to_remove[j] {
@@ -155,8 +156,8 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
         // NCBI: e = qlen - (query.offset - range_diff)
         // NCBI: o = qlen - (query.end + range_diff)
         let (i_q_offset, i_q_end) = (keys[i].query_offset, keys[i].query_end);
-        let flipped_o = query_len.saturating_sub(i_q_end.saturating_add(MAX_RANGE_DIFF));
-        let flipped_e = query_len.saturating_sub(i_q_offset.saturating_sub(MAX_RANGE_DIFF));
+        let flipped_o = query_len - (i_q_end + MAX_RANGE_DIFF);
+        let flipped_e = query_len - (i_q_offset - MAX_RANGE_DIFF);
 
         for j in (i + 1)..hits.len() {
             if to_remove[j] {
@@ -248,6 +249,7 @@ mod tests {
             internal_s_offset_0: s_start.min(s_end).saturating_sub(1),
             internal_s_end_0: s_start.max(s_end),
             internal_query_context_offset: 0,
+            internal_q_left: 0,
             gap_info: None,
             num_positives: q_end - q_start + 1,
         }

@@ -95,8 +95,8 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     /// aa_ungapped.c:1054,1083), which NCBI passes as Uint4 (blast_gapalign.c:3394): its window of
     /// HSP_MAX_WINDOW letters is scored. `query_window` and `subject_window` are the bytes NCBI
     /// reads there, from the query's `q_start` and the subject's `s_start` on, in NCBI's buffers
-    /// (past a context or a frame: its NULLB, then the next one's letters;
-    /// `search_gapped::XOneHitBuffers`).
+    /// (past a context or a frame: its NULLB, then the next one's letters), and past those buffers
+    /// the sentinel NULLB (PD-LOSAT-NCBI-DEFECTS exception 3; `search_gapped::XOneHitBuffers`).
     fn gapped_start_int4(
         self,
         query_window: &[u8; GAPPED_START_WINDOW],
@@ -524,9 +524,10 @@ impl<'a> TbnScore for PssmScore<'a> {
     // A negative length is not below HSP_MAX_WINDOW as Uint4, so the first window of
     // HSP_MAX_WINDOW positions is scored (`pssm_get_start_for_gapped_alignment` takes the Int4
     // length) on the bytes NCBI reads (`subject_window`: past the frame its NULLB, whose score is
-    // the PSSM's '-' column, then the next frame's letters). A window past the PSSM's last row
-    // reads past NCBI's matrix (`data` has one row per query position): no result to port, so the
-    // search stops (PD-LOSAT-NCBI-DEFECTS, rule 3).
+    // the PSSM's '-' column, then the next frame's letters, and past NCBI's buffer NULLBs, exception
+    // 3). A window past the PSSM's last row reads past NCBI's matrix (`data` has one row per query
+    // position, no sentinel row; exception 3 reads letters past a sequence, not rows past a matrix):
+    // no result to port, so the search stops (PD-LOSAT-NCBI-DEFECTS, rule 3).
     fn gapped_start_int4(
         self,
         _query_window: &[u8; GAPPED_START_WINDOW],

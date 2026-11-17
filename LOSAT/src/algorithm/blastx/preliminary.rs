@@ -9,29 +9,9 @@ use crate::algorithm::blastn::interval_tree::{
 use crate::algorithm::blastp::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
     gapped_start_int4, gapped_start_window, BlastpGappedAlignmentMode, GapAlignScratch,
-    GAPPED_START_WINDOW,
 };
 use crate::config::ScoringMatrix;
 use anyhow::Result;
-
-/// The bytes that NCBI's buffer of the searched subject holds after the sentinel byte that follows
-/// its residues, and the name of that buffer (`subjects::Subjects::buffer_after`), asked only where
-/// a one-hit gapped start's window passes the subject's sentinel.
-pub(crate) type SubjectAfter<'a> = &'a dyn Fn() -> Result<(usize, &'static str)>;
-
-/// LOSAT's refusal of a search whose one-hit gapped start reads past NCBI's buffers
-/// (`refuse_window_past_buffers`), not an error of NCBI's engine (`native::database_search_error`,
-/// `local::run`).
-#[derive(Debug)]
-pub(crate) struct OneHitWindowRefusal(String);
-
-impl std::fmt::Display for OneHitWindowRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for OneHitWindowRefusal {}
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-103
 // ```c++
@@ -400,7 +380,6 @@ pub(crate) fn gapped_observed(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    subject_after: SubjectAfter<'_>,
     initial: &[InitHsp],
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
@@ -411,7 +390,6 @@ pub(crate) fn gapped_observed(
         parameters,
         options,
         subject,
-        subject_after,
         initial,
         xdrop,
         observe,
@@ -428,21 +406,12 @@ pub(crate) fn gapped_observed_of<S: super::seed::BxScoring>(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    subject_after: SubjectAfter<'_>,
     initial: &[InitHsp],
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
 ) -> Result<Vec<PreliminaryHsp>> {
     gapped_observed_with(
-        scoring,
-        batch,
-        parameters,
-        options,
-        subject,
-        subject_after,
-        initial,
-        xdrop,
-        observe,
+        scoring, batch, parameters, options, subject, initial, xdrop, observe,
     )
 }
 
@@ -455,7 +424,6 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    subject_after: SubjectAfter<'_>,
     initial: &[InitHsp],
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
@@ -554,15 +522,12 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
         // aa_ungapped.c:1054,1083), which NCBI passes as `Uint4` (`gapped_start_negative`).
         let start = if init.length < 0 {
             gapped_start_negative(
-                batch,
-                c.offset,
                 query,
                 &subject[..subject.len() - 1],
                 h.q_start as usize,
                 h.s_start as usize,
                 scoring.matrix(),
-                subject_after,
-            )?
+            )
         } else {
             blastp_get_start_for_gapped_alignment(
                 query,
@@ -622,87 +587,33 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
 //     hsp_end = q_start + MIN(q_length, s_length);
 //     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
 // ```
-/// The gapped start of a one-hit HSP of negative length at `q_start` of the context at `offset`
-/// of the query batch (`query` its letters) and at `s_start` of `subject` (its letters). NCBI
-/// reads the length as `Uint4`, so it scores only the first window of `HSP_MAX_WINDOW` letters
-/// (`gapped_start_int4`). A window that passes the end of its context or of the subject holds the
-/// NULLB after it, so its sum is below 0 and the start is `q_start` whatever bytes follow; the
-/// window reads those bytes from NCBI's buffers, and past them it reads memory that is not NCBI's
-/// (`refuse_window_past_buffers`). Out of line, so that the gapped stage of the other HSPs keeps
-/// its code.
+/// The gapped start of a one-hit HSP of negative length at `q_start` of its context's letters
+/// (`query`) and at `s_start` of the subject's (`subject`). NCBI reads the length as `Uint4`, so it
+/// scores only the first window of `HSP_MAX_WINDOW` letters (`gapped_start_int4`). A window that
+/// passes the end of its context or of the subject holds the NULLB after it (`BLAST_SCORE_MIN`), so
+/// its sum is below 0 and the start is `q_start` whatever bytes follow: inside NCBI's buffers the
+/// next contexts' letters, the next database sequences or the zeros of the mapped file's last page.
+/// Past those buffers NCBI reads memory that is not its own (the byte after the query batch's
+/// `calloc(buflen + 1)`, after a `-subject` protein's `malloc(len + 2)`, after the last memory page
+/// of a database volume's sequence file) and can crash; LOSAT reads every letter past the sequence
+/// as the sentinel (`gapped_start_window`; PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.46
+/// extends from BLASTP to BLASTX). Out of line, so that the gapped stage of the other HSPs keeps its
+/// code.
 #[cold]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
 fn gapped_start_negative(
-    batch: &PreparedQueryBatch,
-    offset: usize,
     query: &[u8],
     subject: &[u8],
     q_start: usize,
     s_start: usize,
     matrix: ScoringMatrix,
-    subject_after: SubjectAfter<'_>,
-) -> Result<usize> {
-    refuse_window_past_buffers(
-        batch,
-        offset + q_start,
-        subject.len(),
-        s_start,
-        subject_after,
-    )?;
-    Ok(gapped_start_int4(
+) -> usize {
+    gapped_start_int4(
         &gapped_start_window(query, q_start),
         &gapped_start_window(subject, s_start),
         q_start,
         matrix,
-    ))
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,885-893 and
-// c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1802
-// ```c++
-//     int buflen = QueryInfo_GetSeqBufLen(qinfo);
-//     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
-// ...
-//     buflen = CalculateSeqBufferLength(sv.size(), eBlastEncodingProtein);
-//     _ASSERT(buflen != 0);
-//     buf = buf_var = (Uint1*) malloc(sizeof(Uint1)*buflen);
-// ...
-//     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
-// ...
-//         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
-// ```
-/// The refusal (PD-LOSAT-NCBI-DEFECTS, rule 3) of the window of `HSP_MAX_WINDOW` letters from
-/// `q_abs` of the query batch (`query->sequence`) and from `s_start` of a subject of `s_length`
-/// residues, where it reads past NCBI's buffers and NCBI's result is not defined: past the query
-/// batch's buffer (`calloc(buflen + 1)`, `PreparedQueryBatch::batch_buffer_length`), or past the
-/// subject's (`-subject`: `malloc(len + 2)`, its residues between two sentinel bytes; `-db`: the
-/// volume's sequence file, mapped whole, to the end of its last memory page, `subject_after`).
-/// Inside them the search gives NCBI's result. This is the search's one check for it, called by
-/// `gapped_start_negative` only: reading the bytes past NCBI's buffers as sentinels too, as
-/// BLASTP's exception 3 does (PD-LOSAT-NCBI-DEFECTS 1.3), would remove it.
-fn refuse_window_past_buffers(
-    batch: &PreparedQueryBatch,
-    q_abs: usize,
-    s_length: usize,
-    s_start: usize,
-    subject_after: SubjectAfter<'_>,
-) -> Result<()> {
-    let past = if q_abs + GAPPED_START_WINDOW > batch.batch_buffer_length() {
-        "query batch"
-    } else if s_start + GAPPED_START_WINDOW > s_length + 1 {
-        let (after, buffer) = subject_after()?;
-        if s_start + GAPPED_START_WINDOW <= s_length + 1 + after {
-            return Ok(());
-        }
-        buffer
-    } else {
-        return Ok(());
-    };
-    Err(OneHitWindowRefusal(format!(
-        "BLASTX -window_size 0: the gapped start of a one-hit alignment of negative length reads past the end of the {past} (NCBI BLAST+ reads past its buffer there), which LOSAT does not support"
-    ))
-    .into())
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4745-4777
@@ -1136,89 +1047,17 @@ mod tests {
         assert_eq!(hits, vec![h(30, 1), h(30, 5)]);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:245-250,
-    // c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,1236-1239 (quoted at
-    // `PreparedQueryBatch::batch_buffer_length`, `Subjects::buffer_after` and
-    // `refuse_window_past_buffers`)
-    /// A one-hit gapped start of negative length is refused exactly where its window of 11 letters
-    /// reads past NCBI's buffers: past calloc's byte after the query batch's last NULLB, past the
-    /// sentinel after a `-subject` record, past what NCBI's mapping of a database sequence's volume
-    /// holds after its sentinel (to the end of the file's last memory page); the subject's bytes
-    /// after its sentinel are asked for only when the window passes it.
-    #[test]
-    fn a_one_hit_window_is_refused_only_past_ncbis_buffers() {
-        let (_, batch, _) = super::super::stage_c_tests::fixture("S06_seed.fna");
-        let last = batch.contexts.last().unwrap();
-        assert!(last.length > 0);
-        let buflen = batch.batch_buffer_length();
-        // `query->sequence` is `calloc(buflen + 1)` from its first NULLB: the last context, its
-        // NULLB and calloc's byte.
-        assert_eq!(buflen, last.offset + last.length + 2);
-        assert_eq!(buflen, batch.sequence_start.len());
-        let fasta = || -> Result<(usize, &'static str)> { Ok((0, "subject")) };
-        let unasked = || -> Result<(usize, &'static str)> { panic!("asked for the bytes after") };
-        let refused = |result: Result<()>, buffer: &str| {
-            let error = result.unwrap_err();
-            assert!(error.is::<OneHitWindowRefusal>());
-            assert!(
-                error
-                    .to_string()
-                    .contains(&format!("reads past the end of the {buffer} ")),
-                "{error}"
-            );
-        };
-        // Query: the window's last letter on calloc's byte, or one past it.
-        refuse_window_past_buffers(&batch, buflen - 11, 30, 0, &unasked).unwrap();
-        refused(
-            refuse_window_past_buffers(&batch, buflen - 10, 30, 0, &unasked),
-            "query batch",
-        );
-        // A subject of 30 letters: its sentinel at 30 is the window's last byte from 20.
-        refuse_window_past_buffers(&batch, 0, 30, 20, &unasked).unwrap();
-        refused(
-            refuse_window_past_buffers(&batch, 0, 30, 21, &fasta),
-            "subject",
-        );
-        // A database sequence followed by 3 bytes in its volume's mapping.
-        let volume =
-            || -> Result<(usize, &'static str)> { Ok((3, "database volume's last memory page")) };
-        for s_start in 21..=23 {
-            refuse_window_past_buffers(&batch, 0, 30, s_start, &volume).unwrap();
-        }
-        refused(
-            refuse_window_past_buffers(&batch, 0, 30, 24, &volume),
-            "database volume's last memory page",
-        );
-        // The query's check comes first.
-        refused(
-            refuse_window_past_buffers(&batch, buflen, 30, 24, &volume),
-            "query batch",
-        );
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3437 (quoted at
     // `gapped_start_negative`)
-    /// The gapped start of a one-hit HSP of negative length inside NCBI's buffers: `q_start + 5`
-    /// for a window inside both sequences that sums above 0, `q_start` for one that sums to 0 or
-    /// less or holds a sequence's NULLB (whatever follows it).
+    /// The gapped start of a one-hit HSP of negative length: `q_start + 5` for a window inside both
+    /// sequences that sums above 0, `q_start` for one that sums to 0 or less or holds a sequence's
+    /// NULLB, whatever follows it, and so also for a window that reads past NCBI's buffers, whose
+    /// letters past the sequence read as the sentinel (PD-LOSAT-NCBI-DEFECTS exception 3).
     #[test]
     fn a_one_hit_gapped_start_of_negative_length_scores_its_first_window() {
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        let (_, batch, _) = super::super::stage_c_tests::fixture("S06_seed.fna");
-        assert!(batch.batch_buffer_length() > 40);
-        let fasta = || -> Result<(usize, &'static str)> { Ok((0, "subject")) };
         let start = |query: &[u8], subject: &[u8], q_start: usize, s_start: usize| {
-            gapped_start_negative(
-                &batch,
-                0,
-                query,
-                subject,
-                q_start,
-                s_start,
-                ScoringMatrix::Blosum62,
-                &fasta,
-            )
-            .unwrap()
+            gapped_start_negative(query, subject, q_start, s_start, ScoringMatrix::Blosum62)
         };
         let code = |letters: &[u8]| -> Vec<u8> {
             letters.iter().map(|&l| aa_char_to_ncbistdaa(l)).collect()
@@ -1237,5 +1076,19 @@ mod tests {
         assert_eq!(start(&query, &code(b"WWGGGGGGGGGG"), 2, 0), 2 + 5);
         // From s_start on the subject side.
         assert_eq!(start(&query, &code(b"GGWWGGGGGGGGGG"), 2, 2), 2 + 5);
+        // Windows whose letters lie past NCBI's buffers (the query batch's last context near its
+        // end, a `-subject` protein near its end, every matrix): the letters past the sequence read
+        // as NULLBs, as the first one past it does, and the start is the HSP's.
+        for matrix in ScoringMatrix::ALL {
+            let wide = code(b"WWWWWWWWWWWWWWWWWWWW");
+            for (q_start, s_start) in [(19, 0), (0, 19), (13, 9), (19, 19)] {
+                assert_eq!(
+                    gapped_start_negative(&wide, &wide, q_start, s_start, matrix),
+                    q_start,
+                    "{matrix:?} {q_start} {s_start}"
+                );
+            }
+            assert_eq!(gapped_start_negative(&wide, &wide, 9, 9, matrix), 9 + 5);
+        }
     }
 }

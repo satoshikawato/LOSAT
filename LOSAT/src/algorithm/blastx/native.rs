@@ -1710,7 +1710,6 @@ pub(super) fn reported_batch(
 pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
     error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
-        || error.is::<super::preliminary::OneHitWindowRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<NativeError>()
 }
@@ -2747,16 +2746,8 @@ impl XUnit {
         match (taken, &prep.layout) {
             (Some(unit), _) => Ok(Some(unit)),
             (None, Some(layout)) => {
-                // Phase 1 failed: a unit's preparation fails the reader batch, as NCBI's set-up
-                // fails it before any search (and as with one thread), so nothing of this unit's
-                // search is written. Its one-hit windows of `-window_size 0` are then not refused
-                // at the buffer's end (`preliminary::refuse_window_past_buffers`), whose bytes
-                // after this unit are not known here: a refusal must not take the batch's error's
-                // place.
                 super::split::split_sizes(layout.query_count)?;
-                let mut unit = prepare_unit(self.queries(), layout, options, subjects)?;
-                unit.prepared.reader_buffer_after = usize::MAX;
-                Ok(Some(unit))
+                prepare_unit(self.queries(), layout, options, subjects).map(Some)
             }
             (None, None) => Ok(None),
         }

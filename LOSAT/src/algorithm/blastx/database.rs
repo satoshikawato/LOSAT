@@ -402,13 +402,15 @@ impl ReportedSubjects {
     /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
-    /// the batch's reported sequences is `for_batch`.
+    /// the batch's reported sequences is `for_batch`. `scope_reads`: whether NCBI's scope resolves
+    /// the reported sequences at the batch (`shared::scope_reads_at_batch`).
     pub(crate) fn read_titles(
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
         pairwise: bool,
         earlier: shared::EarlierUtf8,
+        scope_reads: bool,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -418,6 +420,7 @@ impl ReportedSubjects {
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db);
         headers.note_earlier(earlier);
+        headers.scope_reads(scope_reads);
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -1297,9 +1300,15 @@ mod tests {
             let longest = database.x_check_stores().unwrap();
             let stream = super::super::x_db_stream::XStreamDb::new(&database.db, longest);
             let mut batches = one_query(lists);
-            let titles =
-                ReportedSubjects::read_titles(database, &batches, true, false, Default::default())
-                    .unwrap();
+            let titles = ReportedSubjects::read_titles(
+                database,
+                &batches,
+                true,
+                false,
+                Default::default(),
+                false,
+            )
+            .unwrap();
             let reported = ReportedSubjects::for_batch(
                 database,
                 Subjects::Stream(super::super::x_db_stream::XStream {
@@ -1367,9 +1376,15 @@ mod tests {
             let mut second = one_query(&[(1, 50), (0, 40)]);
             second[0].query_ordinal = 1;
             batches.append(&mut second);
-            let titles =
-                ReportedSubjects::read_titles(&database, &batches, true, false, Default::default())
-                    .unwrap();
+            let titles = ReportedSubjects::read_titles(
+                &database,
+                &batches,
+                true,
+                false,
+                Default::default(),
+                false,
+            )
+            .unwrap();
             let mut reported = ReportedSubjects::for_batch(
                 &database,
                 Subjects::Stream(super::super::x_db_stream::XStream {

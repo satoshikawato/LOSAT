@@ -10798,7 +10798,13 @@ fn run_in_pool(
             };
             // NCBI's warning of its first read of a UTF8String header follows the batch's reader
             // messages and request posts (`warnings[start]`), before its prefetch.
-            let read = database::read_titles(database, &batch_hit_lists, earlier, &mut titles);
+            let read = database::read_titles(
+                database,
+                &batch_hit_lists,
+                earlier,
+                database::parsed_shown(&output_formats).scope_reads_at_batch(),
+                &mut titles,
+            );
             if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
                 match &read {
                     Ok(read) => read.as_ref(),

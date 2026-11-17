@@ -1,0 +1,93 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "pdo_none; pds",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 659
+        },
+        {
+          id str "blast_score",
+          value int 659
+        },
+        {
+          id str "e_value",
+          value real { 813426253947937, 10, -110 }
+        },
+        {
+          id str "bit_score",
+          value real { 25845475280958, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 120
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 120
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          genbank {
+            accession "DUP00001",
+            version 1
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          120
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}

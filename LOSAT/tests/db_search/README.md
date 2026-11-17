@@ -611,7 +611,14 @@ match with a UTF8String title (hd2, a chance alignment of E-value about 6, or a 
 lists `*fx_neg1.txt` and `*fx_neg2.txt`, and the version 4 database `pva_utf8` (`gb|HDA<n>.1|`, the UTF8String title at
 OID 1) with `pva_batch.txt`: under a negative seqid list with ids NCBI's traceback and composition-based redo read the
 header of every subject they fetch (the redo only those its early termination test leaves), and blastdbcmd's version check
-of `HDA1.2` reads HDA1.1's. Probe: `remaining-gaps-20261112/T/fix2_t5d.md`.
+of `HDA1.2` reads HDA1.1's. Probe: `remaining-gaps-20261112/T/fix2_t5d.md`. NCBI's scope's read of another sequence
+that holds a reported sequence's Seq-align id (fix 3 of item T5d, rows `db.t5d.*.dup*`, blastdbcmd cases `T538`-`T540`):
+`make_t5.py NCBI_BIN --dup-only` writes the version 5 databases `pds`, `pda` (the subject `gb|DUP00001.1|`, hd0),
+`pdo_same` (that record, its title a UTF8String), `pdo_none` (`gb|DUP00001.1|`, hd1, a UTF8String title), their
+nucleotide `nds`, `ndo_same`, `ndo_none`, the version 4 `pds4` and `pdo4_same`, and `dup_batch.txt`. NCBI orders a
+list's volumes by path: `pdo_* pds` puts the other sequence first, whose header the data loader reads (`x_GetOid`)
+wherever the scope resolves the subject's id, with the warning; `pda pdo_none` the subject first, whose other holder
+is not read. Probe: `remaining-gaps-20261112/T/fix3_t5d.md`.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

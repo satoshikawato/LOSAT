@@ -13108,11 +13108,23 @@ fn run_call(
         .iter()
         .map(|batch| batch.searched.start)
         .collect();
+    // Whether NCBI's scope resolves the reported subjects at each batch, before its reports
+    // (`shared::scope_reads_at_batch`): a format reads their Bioseqs, or the first format's
+    // prefetch loads them.
+    let scope_reads = crate::algorithm::common::database::scope_reads_at_batch(
+        requested_formats
+            .iter()
+            .any(|outfmt| outfmt.reads_subjects()),
+        requested_formats
+            .first()
+            .is_some_and(|outfmt| outfmt.prefetches_subjects())
+            && !crate::algorithm::common::database::prefetch_always_off(),
+    );
     let listed_titles = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => Some(if x_listed_lean {
-            listed.x_read_titles_lean(database, &hit_lists, &batch_starts)?
+            listed.x_read_titles_lean(database, &hit_lists, &batch_starts, scope_reads)?
         } else {
-            listed.read_titles(database, &hit_lists, &batch_starts)?
+            listed.read_titles(database, &hit_lists, &batch_starts, scope_reads)?
         }),
         _ => None,
     };

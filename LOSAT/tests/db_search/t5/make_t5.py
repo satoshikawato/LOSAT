@@ -70,6 +70,9 @@ With `--fetch-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --fetch-onl
 T5d) it writes the databases of NCBI's other reads of a UTF8String header (`fetch_main`): the fetches of the
 traceback and of the composition-based redo under a negative seqid list, and blastdbcmd's version check.
 
+With `--dup-only` (fix 3 of line RG item T5d) it writes the databases of NCBI's scope's read of another
+sequence that holds a reported sequence's Seq-align id (`dup_main`).
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
@@ -511,6 +514,48 @@ def fetch_main(ncbi_bin):
     os.rmdir(work)
 
 
+def dup_main(ncbi_bin):
+    """`--dup-only` (line RG item T5d fix 3): databases whose lists hold `gb|DUP00001.1|` twice. `pds` and
+    `pda` (version 5, protein, `-parse_seqids`): the subject `gb|DUP00001.1| subject record`, hd0 of `hd.faa`
+    (which `hd_q0.faa` matches); `pdo_same`: that record with its title a UTF8String; `pdo_none`:
+    `gb|DUP00001.1| other record`, hd1 (no match), with its title a UTF8String. NCBI orders a list's volumes by
+    path, so `pdo_* pds` puts the other sequence at OID 0, whose header NCBI's scope reads where it resolves the
+    subject's Seq-align id (the data loader's `SeqidToOid` gives it first), and `pda pdo_*` the subject first.
+    `nds`, `ndo_same` and `ndo_none`: the same with their codons (nucleotide); `pds4` and `pdo4_same`: the
+    protein ones of version 4. `dup_batch.txt`: `DUP00001.1` (blastdbcmd `-entry_batch`)."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    subject = ("gb|DUP00001.1| subject record", 0)
+    for name, (title, letters), version, edit in (
+            ("pds", subject, 5, None), ("pda", subject, 5, None), ("pdo_same", subject, 5, utf8),
+            ("pdo_none", ("gb|DUP00001.1| other record", 1), 5, utf8),
+            ("nds", subject, 5, None), ("ndo_same", subject, 5, utf8),
+            ("ndo_none", ("gb|DUP00001.1| other record", 1), 5, utf8),
+            ("pds4", subject, 4, None), ("pdo4_same", subject, 4, utf8)):
+        kind = name[0]
+        fasta = os.path.join(work, f"{name}.fa")
+        with open(fasta, "w") as f:
+            f.write(f">{title}\n{(proteins if kind == 'p' else nucleotides)[letters]}\n")
+        out = os.path.join(here, name)
+        if version == 4:
+            makeblastdb(ncbi_bin, fasta, "prot", 9606, out, True)
+        else:
+            cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot" if kind == "p" else "nucl",
+                   "-blastdb_version", "5", "-taxid", "9606", "-title", name, "-out", out, "-parse_seqids"]
+            env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        if edit is not None:
+            patch_record_any(out, kind, 0, edit)
+    with open(os.path.join(here, "dup_batch.txt"), "w") as f:
+        f.write("DUP00001.1\n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
 def stored_main(ncbi_bin, prefix, stored):
     """The version 4 protein databases `<prefix>_<taxid>` of the titles `stored` (the letters of
     `pdup.faa`, `-taxid <taxid>`, none for `None`) and the alias `<prefix>` over them."""
@@ -702,6 +747,8 @@ if __name__ == "__main__":
         taxid_main(sys.argv[1])
     elif "--fetch-only" in sys.argv[2:]:
         fetch_main(sys.argv[1])
+    elif "--dup-only" in sys.argv[2:]:
+        dup_main(sys.argv[1])
     elif "--header-only" in sys.argv[2:]:
         header_main(sys.argv[1], [name for name in sys.argv[2:] if not name.startswith("--")])
     else:

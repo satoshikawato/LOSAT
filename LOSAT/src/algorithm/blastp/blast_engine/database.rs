@@ -1119,14 +1119,18 @@ impl ListedSubjects {
 
     /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
     /// start at the queries `batch_starts`, with the call's reads before them that took a
-    /// UTF8String for a VisibleString (`note_fetched`, `drop_unaligned`).
+    /// UTF8String for a VisibleString (`note_fetched`, `drop_unaligned`). `scope_reads`: whether
+    /// NCBI's scope resolves the reported sequences at each batch
+    /// (`shared::scope_reads_at_batch`).
     fn header_reader<'a>(
         &self,
         database: &'a BlastpDatabase,
         batch_starts: &[usize],
+        scope_reads: bool,
     ) -> shared::HeaderReader<'a> {
         let headers = shared::HeaderReader::new(&database.db);
         headers.batch_starts(batch_starts.to_vec());
+        headers.scope_reads(scope_reads);
         headers.note_earlier(
             *self
                 .earlier_utf8
@@ -1195,16 +1199,18 @@ impl ListedSubjects {
     /// Reads the definition lines of the subjects of the final hit lists (`hit_lists`,
     /// after the redo and before anything is dropped from them), in NCBI's order. A reader
     /// error of NCBI's own is a `HeaderReadError` that names the query whose hit list
-    /// reached it; LOSAT's refusals are errors of their own.
+    /// reached it; LOSAT's refusals are errors of their own. `scope_reads` as in
+    /// `header_reader`.
     pub(super) fn read_titles<'a>(
         &'a self,
         database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         batch_starts: &[usize],
+        scope_reads: bool,
     ) -> Result<ListedTitles<'a>> {
         let mut titles: Vec<Option<shared::StoredTitle>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
-        let headers = self.header_reader(database, batch_starts);
+        let headers = self.header_reader(database, batch_starts, scope_reads);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -4218,7 +4224,9 @@ mod tests {
         let mut hit_lists = vec![Some(first), None, Some(second)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
-        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+        let titles = listed
+            .read_titles(&database, &hit_lists, &[0], false)
+            .unwrap();
         let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
             let hit_list = hit_list.as_ref().unwrap();
             hit_list.hsplist_array[..hit_list.hsplist_count]
@@ -4294,9 +4302,11 @@ mod tests {
         let first = hit_lists[0].as_mut().unwrap();
         first.hsplist_array.retain(|hsp_list| hsp_list.oid == 1);
         first.hsplist_count = first.hsplist_array.len();
-        let records = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+        let records = listed
+            .read_titles(&database, &hit_lists, &[0], false)
+            .unwrap();
         let lean = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .x_read_titles_lean(&database, &hit_lists, &[0], false)
             .unwrap();
         let ListedShown::Lean(lean_titles) = &lean.shown else {
             panic!("lean titles");
@@ -4373,7 +4383,9 @@ mod tests {
         let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [1, 3]);
-        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+        let titles = listed
+            .read_titles(&database, &hit_lists, &[0], false)
+            .unwrap();
         assert_eq!(
             titles.records()[1].title(),
             b"p04 lower case and ambiguity codes"
@@ -4382,7 +4394,7 @@ mod tests {
         assert_eq!(titles.records()[0].seq(), b"I");
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles do not read it either.
         let lean = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .x_read_titles_lean(&database, &hit_lists, &[0], false)
             .unwrap();
         assert_eq!(lean.title(1), b"p04 lower case and ambiguity codes");
         assert_eq!(lean.title(0), b"");
@@ -4396,7 +4408,7 @@ mod tests {
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 1, 3, 9]);
         let error = listed
-            .read_titles(&database, &hit_lists, &[0])
+            .read_titles(&database, &hit_lists, &[0], false)
             .err()
             .expect("a missing header file")
             .downcast::<HeaderReadError>()
@@ -4410,7 +4422,7 @@ mod tests {
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are read in the same order, with
         // the same error.
         let lean_error = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .x_read_titles_lean(&database, &hit_lists, &[0], false)
             .err()
             .expect("a missing header file")
             .downcast::<HeaderReadError>()
@@ -4477,7 +4489,9 @@ mod tests {
         clean.update(list(0));
         let mut hit_lists = vec![Some(clean)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+        let titles = listed
+            .read_titles(&database, &hit_lists, &[0], false)
+            .unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
         // The subject with the bad byte: read as `#`, and rejected when it is reported.
         let mut bad = BlastpHitList::new(10);
@@ -4485,7 +4499,9 @@ mod tests {
         bad.update(list(0));
         let mut hit_lists = vec![Some(bad)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+        let titles = listed
+            .read_titles(&database, &hit_lists, &[0], false)
+            .unwrap();
         assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
         assert!(
@@ -4497,7 +4513,7 @@ mod tests {
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles hold the same title and flag, and
         // give the same refusal.
         let lean = listed
-            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .x_read_titles_lean(&database, &hit_lists, &[0], false)
             .unwrap();
         assert_eq!(lean.title(1), b"p10 l#st protein");
         let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();

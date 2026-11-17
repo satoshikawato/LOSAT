@@ -3617,6 +3617,19 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // Whether NCBI's scope resolves the reported sequences at each batch, before its reports
+    // (`common::database::scope_reads_at_batch`): a format reads their Bioseqs, or the first
+    // format's prefetch loads them.
+    let scope_reads = crate::algorithm::common::database::scope_reads_at_batch(
+        outputs.formats.iter().any(|format| {
+            let format = report::output_format(format.outfmt);
+            format.tabular_reads_subject()
+                || format == report::TblastxOutputFormat::Pairwise
+                || format.is_structured_xml()
+                || format.writes_taxonomy()
+        }),
+        prefetches && !crate::algorithm::common::database::prefetch_always_off(),
+    );
     // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
     // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
     let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
@@ -3986,6 +3999,7 @@ fn run_batch_loop(
                 ordered,
                 start,
                 earlier,
+                scope_reads,
                 &mut reports.titles.borrow_mut(),
             );
             match read {

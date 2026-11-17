@@ -350,16 +350,19 @@ pub(crate) fn drop_unaligned(
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
 /// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
 /// read of a record with a UTF8String where a VisibleString is expected is returned
-/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `scope_reads`: whether
+/// NCBI's scope resolves the reported sequences at the batch (`shared::scope_reads_at_batch`).
 pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
     earlier: shared::EarlierUtf8,
+    scope_reads: bool,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
     headers.note_earlier(earlier);
+    headers.scope_reads(scope_reads);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
     for hsp in ordered {
@@ -887,7 +890,15 @@ mod tests {
             let ordered: Vec<TblastxHsp> =
                 ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
             let mut titles = DatabaseTitles::new();
-            read_titles(database, &ordered, 0, Default::default(), &mut titles).unwrap();
+            read_titles(
+                database,
+                &ordered,
+                0,
+                Default::default(),
+                false,
+                &mut titles,
+            )
+            .unwrap();
             String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);

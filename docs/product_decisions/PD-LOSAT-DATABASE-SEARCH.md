@@ -604,7 +604,16 @@ search code with a different subject source.
   list with ids NCBI's traceback and composition-based redo read the header of each subject they
   fetch (the redo only those its early termination test leaves), also of one that no report shows
   (fix 2 of item T5d); a seqid list's Seq-aligns read every final hit, also one that gets no
-  Seq-align; the version check of an accession reads its candidates. In blastdbcmd before the
+  Seq-align; the version check of an accession reads its candidates. NCBI's scope reads the
+  header of the sequence that the lookup of a reported sequence's Seq-align id gives first, where
+  that is another one (the data loader's `x_GetOid`, fix 3 of item T5d): in every format that
+  reads the subject's Bioseq and where the batch's prefetch loads it (also a table of fields that
+  read nothing of it, and outfmt 8 with `PRE_FETCH_SEQS_LIMIT=2147483647`), not in the archive nor
+  the Seq-annots without the prefetch; another holder after the subject is not read. A sequence
+  that differs from the subject only by such a string is the subject to every report. Refused
+  there: a batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off (the warning comes inside the
+  report) or may turn off with a format that reads nothing of the subject, and a prefetch that
+  writes other texts or fails a lookup (the order of its loads). In blastdbcmd before the
   record's text, and before `Entry not found` where the version check of `-entry` or
   `-entry_batch` read it; segmasker and dustmasker write none. A tag in the long form is read
   with no message (`PeekLongTag`), or fails as NCBI's read does.

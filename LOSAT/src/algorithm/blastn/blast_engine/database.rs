@@ -1694,15 +1694,18 @@ pub(super) fn drop_unaligned(
 /// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
 /// of their own. The batch's first read of a record with a UTF8String where a VisibleString is
 /// expected, its fetches' and Seq-aligns' (`earlier`) or these, is returned
-/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `scope_reads`: whether
+/// NCBI's scope resolves the reported sequences at the batch (`shared::scope_reads_at_batch`).
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
     earlier: shared::EarlierUtf8,
+    scope_reads: bool,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
     headers.note_earlier(earlier);
+    headers.scope_reads(scope_reads);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -2767,7 +2770,7 @@ mod tests {
             None,
             hit_list(vec![(middle, 1e-9), (first_volume_ordinal, 1e-3)], 1),
         ];
-        read_titles(&database, &batch, Default::default(), &mut titles).unwrap();
+        read_titles(&database, &batch, Default::default(), false, &mut titles).unwrap();
         assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
         assert_eq!(
             titles[&middle].stored().title,
@@ -2780,7 +2783,7 @@ mod tests {
             hit_list(vec![(middle, 1e-9)], 1),
             hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
         ];
-        let error = read_titles(&database, &batch, Default::default(), &mut titles)
+        let error = read_titles(&database, &batch, Default::default(), false, &mut titles)
             .expect_err("a missing header file")
             .downcast::<HeaderReadError>()
             .expect("NCBI's error, with the query that reached it");
@@ -2818,7 +2821,14 @@ mod tests {
             hit_list(vec![(5, 1e-9), (11, 1e-5)], 2),
         ];
         let mut titles = DatabaseTitles::new();
-        read_titles(&database, &hit_lists, Default::default(), &mut titles).unwrap();
+        read_titles(
+            &database,
+            &hit_lists,
+            Default::default(),
+            false,
+            &mut titles,
+        )
+        .unwrap();
         // A list left without HSPs (its HSPs had score 0) is not reported.
         hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
         let reported = reported_subjects(
@@ -2912,7 +2922,7 @@ mod tests {
         let database = BlastnDatabase::open(&name, &ApplicationSettings::default()).unwrap();
         let mut titles = DatabaseTitles::new();
         let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
-        read_titles(&database, &clean, Default::default(), &mut titles).unwrap();
+        read_titles(&database, &clean, Default::default(), false, &mut titles).unwrap();
         reported_subjects(
             &database,
             &titles,
@@ -2925,7 +2935,7 @@ mod tests {
         )
         .unwrap();
         let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
-        read_titles(&database, &bad, Default::default(), &mut titles).unwrap();
+        read_titles(&database, &bad, Default::default(), false, &mut titles).unwrap();
         assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
         let error = reported_subjects(
             &database,

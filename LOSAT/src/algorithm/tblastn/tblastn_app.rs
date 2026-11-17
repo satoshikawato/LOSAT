@@ -2120,6 +2120,7 @@ fn search(
                     &batch_results,
                     range.start,
                     earlier,
+                    parsed_shown(&outputs.formats).scope_reads_at_batch(),
                     &mut titles,
                 );
                 match read {

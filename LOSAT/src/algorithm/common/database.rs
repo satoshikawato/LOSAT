@@ -1487,6 +1487,10 @@ pub(crate) struct HeaderReader<'a> {
     /// The query of the reader's last read of a reported sequence, whose report the scope's
     /// reads of other sequences serve (`Utf8Phase::Scope`).
     query: std::cell::Cell<usize>,
+    /// Whether NCBI's scope resolves the reported sequences' Seq-align ids at each batch, before
+    /// its reports (`scope_reads`): its read of the sequence that a lookup gives first, where
+    /// that is another one, is noted (`Utf8Phase::Scope`).
+    scope: std::cell::Cell<bool>,
     /// The first queries of NCBI's query batches among the reader's queries, ascending
     /// (`batch_starts`; none: one batch), which order its reads before their phases.
     batches: std::cell::OnceCell<Vec<usize>>,
@@ -1870,6 +1874,7 @@ impl<'a> HeaderReader<'a> {
             db,
             utf8: Default::default(),
             query: std::cell::Cell::new(0),
+            scope: std::cell::Cell::new(false),
             batches: std::cell::OnceCell::new(),
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
@@ -1908,6 +1913,13 @@ impl<'a> HeaderReader<'a> {
     /// Seq-aligns, before the next batch's (`Utf8Phase`).
     pub(crate) fn batch_starts(&self, starts: Vec<usize>) {
         let _ = self.batches.set(starts);
+    }
+
+    /// Sets whether NCBI's scope resolves the reported sequences' Seq-align ids at each batch,
+    /// before its reports ([`scope_reads_at_batch`]; none where unset): there NCBI reads the
+    /// header of the sequence that a lookup gives first (`found_instead`).
+    pub(crate) fn scope_reads(&self, reads: bool) {
+        self.scope.set(reads);
     }
 
     /// The place in NCBI's order of a read of `phase` by `query`: its batch's (`batches`), then
@@ -2154,10 +2166,13 @@ impl<'a> HeaderReader<'a> {
     /// lookup that fails: NCBI's handles never take another sequence for it, but its prefetch looks
     /// it up as a string id in every LMDB file of the list, which stops at a file without the
     /// accession table (review 1 of line DBID mixdb, H1); of a version 4 database never.
+    /// `scope_utf8` gets the sequence that the lookup gives first where that is another one
+    /// whose header holds a UTF8String where a VisibleString is expected (`scope_read`).
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
         ordinal: u32,
+        scope_utf8: &mut Option<crate::seqdb::DbSequence>,
     ) -> (
         Option<crate::report::db_subject::FoundInstead>,
         Option<crate::report::db_subject::WeakMatch>,
@@ -2203,6 +2218,9 @@ impl<'a> HeaderReader<'a> {
         };
         let own = self.db.oid(ordinal).get();
         let first = oids.first().copied();
+        if let Some(first) = first.filter(|&first| first != own) {
+            *scope_utf8 = self.scope_read(self.db.ordinal_of(first));
+        }
         // What the lookup gives instead, where the scan of the other holders goes on.
         let mut given = first.is_none().then_some(FoundInstead::Nothing);
         // The first other sequence found that only the reports of taxids show apart, and the
@@ -2418,6 +2436,41 @@ impl<'a> HeaderReader<'a> {
             .map(|other| WeakMatch::Held(self.db.sequence(other))))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393-406
+    // ```c++
+    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+    //         return -1;
+    //     }
+    //     ...
+    //     IBlastDbAdapter::TSeqIdList filtered = m_BlastDb->GetSeqIDs(oid);
+    // ```
+    // The data loader resolves a Seq-align id to the first OID of `SeqidToOid` (seqdb.cpp:903-916,
+    // `oids[0]`) and reads that sequence's header whatever it then keeps; it reads no other holder
+    // of the id. So the header of another sequence that the lookup gives first is read wherever
+    // the scope resolves the id: the prefetch and every format that reads the Bioseq, not the
+    // archive (outfmt 11) nor the Seq-annots without the prefetch, psiblast's PSSM also (probe of
+    // line RG item T5d fix 3, `T/t5d/fix3`: 580 NCBI runs; the other sequence after the subject
+    // is never read).
+    /// The read by NCBI's scope of the header of the sequence `other`, which the lookup of a
+    /// reported sequence's Seq-align id gives first: `other` where its record holds a UTF8String
+    /// where a VisibleString is expected and the run has not posted NCBI's warning, noted where
+    /// the scope resolves the ids at each batch (`scope_reads`; `Utf8Phase::Scope`).
+    #[cold]
+    #[inline(never)]
+    fn scope_read(&self, other: u32) -> Option<crate::seqdb::DbSequence> {
+        if self.db.utf8_posted() {
+            return None;
+        }
+        let at = self.db.location_of(other)?;
+        self.db.utf8_string_path_at(at)?;
+        if self.scope.get() {
+            self.note_scope_utf8(at);
+        }
+        self.db.note_scope_utf8();
+        Some(self.db.sequence(other))
+    }
+
     /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
     /// (`seqid::mask_handle::mask_handle_key`).
     fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
@@ -2508,7 +2561,10 @@ impl<'a> HeaderReader<'a> {
                 })
                 .collect()
         };
-        let copy = if set_a == set_b {
+        // A UTF8String where a VisibleString is expected reads as that string (`DeflineSet::utf8`):
+        // a record that differs in that alone is the same to every report (probe of line RG item
+        // T5d fix 3: NCBI writes the same bytes, with its warning).
+        let copy = if set_a.deflines == set_b.deflines {
             RecordCopy::Same
         } else if without_taxids(&set_a) == without_taxids(&set_b) {
             RecordCopy::OtherTaxids
@@ -2616,7 +2672,9 @@ fn reported_header(
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
                 .map(|subject| {
-                    let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
+                    let mut scope_utf8 = None;
+                    let (found, weak, also_held) =
+                        headers.found_instead(&subject, ordinal, &mut scope_utf8);
                     ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
                             .with_source(db.seqtype() == SeqType::Protein, |taxid| {
@@ -2626,7 +2684,8 @@ fn reported_header(
                             .under_positive_list(db.has_positive_list())
                             .found_instead(found)
                             .weak_match(weak)
-                            .also_held(also_held),
+                            .also_held(also_held)
+                            .scope_utf8(scope_utf8),
                     ))
                 })
         }
@@ -3171,6 +3230,23 @@ impl ParsedShown {
     pub(crate) fn reads_bioseq(self) -> bool {
         self.tabular || self.pairwise || self.structured || self.sam || self.taxonomy
     }
+
+    /// [`scope_reads_at_batch`] of these reports.
+    pub(crate) fn scope_reads_at_batch(self) -> bool {
+        scope_reads_at_batch(self.reads_bioseq(), self.prefetched)
+    }
+}
+
+/// Whether NCBI's scope resolves a run's reported sequences by their Seq-align ids at each
+/// batch, before its reports (`HeaderReader::scope_reads`): a report reads their Bioseqs
+/// (`reads_bioseq`: the batch's prefetch loads them, or where `PRE_FETCH_SEQS_LIMIT` turns it off
+/// the reports read them one by one, which `ParsedSubject::fetched` refuses where that read
+/// writes NCBI's warning), or the first format's prefetch loads them (`prefetched`,
+/// [`ParsedShown::prefetched`]) and no `PRE_FETCH_SEQS_LIMIT` can turn a batch's prefetch off
+/// (with one, [`check_prefetched_parsed`] refuses such a read). The archive and the Seq-annots
+/// without the prefetch resolve nothing.
+pub(crate) fn scope_reads_at_batch(reads_bioseq: bool, prefetched: bool) -> bool {
+    reads_bioseq || (prefetched && !prefetch_may_be_off())
 }
 
 /// LOSAT's refusals of the reported database sequence `ordinal` with parsed Seq-ids `subject` in
@@ -5342,12 +5418,21 @@ pub(crate) fn tabular_names<'t>(
 ///                     formatter.PrintOneResultSet(**result, query_batch);
 ///                 }
 /// ```
+///
+/// A batch whose loads write a text and that reports a subject whose Seq-align id the lookup
+/// gives first to another sequence with a UTF8String header (`ParsedSubject::scope_utf8`) is
+/// refused: NCBI's warning comes at the load that reads that header (`HeaderReader::scope_read`),
+/// after the texts of the loads before it, in an order that LOSAT does not reproduce
+/// ([`batch_prefetch`]).
 pub(crate) fn prefetch_messages<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
     program: &str,
 ) -> Result<Vec<u8>> {
+    if db.scope_utf8_seen() {
+        return scope_utf8_prefetch_messages(db, run, subjects, program);
+    }
     let reads = subject_read_texts(
         db,
         run,
@@ -5358,6 +5443,59 @@ pub(crate) fn prefetch_messages<'s>(
         program,
     )?;
     Ok(reads.into_iter().flat_map(|(_, text)| text).collect())
+}
+
+/// [`prefetch_messages`] of a run whose reader met a subject whose Seq-align id the lookup gives
+/// first to another sequence with a UTF8String header (`SeqDb::scope_utf8_seen`): the batch
+/// that reports such a subject is refused where its loads write a text.
+#[cold]
+#[inline(never)]
+fn scope_utf8_prefetch_messages<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    program: &str,
+) -> Result<Vec<u8>> {
+    let mut scope_utf8 = None;
+    let reads = subject_read_texts(
+        db,
+        run,
+        subjects.into_iter().map(|(ordinal, parsed)| {
+            if scope_utf8.is_none() {
+                scope_utf8 = parsed
+                    .and_then(|subject| subject.scope_utf8_read())
+                    .map(|other| (ordinal, other));
+            }
+            (0, ordinal, parsed)
+        }),
+        false,
+        program,
+    )?;
+    let text: Vec<u8> = reads.into_iter().flat_map(|(_, text)| text).collect();
+    if let Some((ordinal, other)) = scope_utf8.filter(|_| !text.is_empty()) {
+        return Err(scope_utf8_load_refusal(db, ordinal, other, program));
+    }
+    Ok(text)
+}
+
+/// LOSAT's refusal of the reported sequence `ordinal` whose Seq-align id the lookup gives first
+/// to the sequence `other`, whose header holds a UTF8String where a VisibleString is expected,
+/// where NCBI's prefetch of its batch writes other texts ([`prefetch_messages`], a failed lookup
+/// in [`batch_prefetch`]): the warning comes at the load that reads that header, in an order of
+/// the loads that LOSAT does not reproduce.
+fn scope_utf8_load_refusal(
+    db: &SeqDb,
+    ordinal: u32,
+    other: crate::seqdb::DbSequence,
+    program: &str,
+) -> anyhow::Error {
+    parsed_refusal(
+        db.oid(ordinal),
+        &format!(
+            "has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: NCBI BLAST+ 2.17.0's prefetch writes its warning (803.10) at the load that reads that header, among the other texts of the batch's loads, in an order that LOSAT does not reproduce"
+        ),
+        program,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
@@ -5623,6 +5761,17 @@ pub(crate) fn batch_prefetch<'s>(
             &format!("{reason}, and has a Seq-align on the query's minus strand and its plus strand, whose length NCBI BLAST+ 2.17.0's prefetch asks for"),
             program,
         ));
+    }
+    // The failed lookup ends the loads: whether the load that reads a UTF8String header comes
+    // before it is that order's too.
+    if failed_lookup.is_some() && db.scope_utf8_seen() {
+        if let Some((ordinal, other)) = loaded.iter().find_map(|&(ordinal, parsed)| {
+            parsed
+                .and_then(|subject| subject.scope_utf8_read())
+                .map(|other| (ordinal, other))
+        }) {
+            return Err(scope_utf8_load_refusal(db, ordinal, other, program));
+        }
     }
     let mut text = prefetch_messages(db, run, loaded, program)?;
     if let Some((ordinal, id)) = &failed_lookup {
@@ -6022,6 +6171,18 @@ pub(crate) fn check_prefetched_parsed(
     // NCBI's exception its stop (`batch_prefetch`).
     if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
         return Ok(());
+    }
+    // Where `PRE_FETCH_SEQS_LIMIT` may turn a batch's prefetch off, the reader notes no read of
+    // the prefetch (`scope_reads_at_batch`): this batch's prefetch reads the UTF8String header of
+    // the sequence that the lookup gives first, with NCBI's warning.
+    if let Some(other) = subject.scope_utf8_read().filter(|_| prefetch_may_be_off()) {
+        return Err(parsed_refusal(
+            db.oid(ordinal),
+            &format!(
+                "has a Seq-align id by which NCBI BLAST+'s lookup gives database sequence {other} first, whose header holds a UTF8String where a VisibleString is expected: with PRE_FETCH_SEQS_LIMIT, NCBI BLAST+ 2.17.0's prefetch of a batch reads that header with its warning (803.10) or not, as the batch's Seq-aligns count, which LOSAT does not reproduce"
+            ),
+            program,
+        ));
     }
     match prefetch_reads(db, ordinal, subject, false, program)? {
         Ok(_) => Ok(()),
@@ -8159,5 +8320,76 @@ mod utf8_read_tests {
         // Once the run has posted the warning, no read names its member.
         assert!(read.post(&db, "blastp").is_some());
         assert!(headers.first_utf8().is_none());
+    }
+
+    /// The list of `pdo_<other>` and `pds` of `make_t5.py --dup-only` (line RG item T5d fix 3):
+    /// `gb|DUP00001.1|` at OID 0, a UTF8String title, and the subject hd0 at OID 1.
+    fn dup_list(other: &str) -> SeqDb {
+        let t5 = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5");
+        let list = format!(
+            "{} {}",
+            t5.join(format!("pdo_{other}")).display(),
+            t5.join("pds").display()
+        );
+        SeqDb::open(&list, SeqType::Protein).unwrap()
+    }
+
+    /// NCBI's scope reads the header of the sequence that the lookup of a reported sequence's
+    /// Seq-align id gives first (the data loader's `x_GetOid`), with the warning of its
+    /// UTF8String: noted where the scope resolves the ids at the batch, never for the subject
+    /// that the lookup gives first; a copy of the record but for that string is the subject
+    /// to every report.
+    #[test]
+    fn the_scope_reads_the_sequence_the_lookup_gives_first() {
+        for other in ["same", "none"] {
+            let db = dup_list(other);
+            // The archive and the Seq-annots without the prefetch resolve nothing.
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
+            else {
+                panic!("parsed Seq-ids");
+            };
+            assert_eq!(headers.first_utf8(), None, "{other}");
+            assert_eq!(subject.scope_utf8_read(), Some(db.sequence(0)), "{other}");
+            if other == "same" {
+                assert_eq!(subject.found(), None);
+            } else {
+                assert!(matches!(
+                    subject.found(),
+                    Some(crate::report::db_subject::FoundInstead::Sequence(_))
+                ));
+            }
+            let headers = HeaderReader::new(&db);
+            headers.scope_reads(true);
+            read_header(&headers, 1, 2, "BLASTP").unwrap();
+            let read = headers.first_utf8().expect("the scope's read");
+            assert_eq!(read.query, 2);
+            assert_eq!(read.path, "Blast-def-line-set.E.title");
+            // Once posted, the scope's read of a later batch writes nothing.
+            assert!(read.post(&db, "blastp").is_some());
+            let headers = HeaderReader::new(&db);
+            headers.scope_reads(true);
+            let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
+            else {
+                panic!("parsed Seq-ids");
+            };
+            assert_eq!(headers.first_utf8(), None);
+            assert_eq!(subject.scope_utf8_read(), None);
+        }
+        // The subject first: the scope reads no other holder.
+        let t5 = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5");
+        let list = format!(
+            "{} {}",
+            t5.join("pda").display(),
+            t5.join("pdo_none").display()
+        );
+        let db = SeqDb::open(&list, SeqType::Protein).unwrap();
+        let headers = HeaderReader::new(&db);
+        headers.scope_reads(true);
+        let ReportedHeader::Parsed(subject) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
+            panic!("parsed Seq-ids");
+        };
+        assert_eq!(headers.first_utf8(), None);
+        assert_eq!(subject.scope_utf8_read(), None);
     }
 }

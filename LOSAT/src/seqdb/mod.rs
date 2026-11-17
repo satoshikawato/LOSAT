@@ -643,6 +643,9 @@ pub struct SeqDb {
     /// Whether the run posted NCBI's warning of a UTF8String read for a VisibleString
     /// (`SeqDb::take_utf8_post`).
     utf8_posted: AtomicBool,
+    /// Whether a reader met a reported sequence whose Seq-align id the lookup gives first to
+    /// another sequence with such a header (`SeqDb::note_scope_utf8`).
+    scope_utf8: AtomicBool,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1196,6 +1199,7 @@ impl SeqDb {
             lookup_isams: OnceLock::new(),
             mask_algorithms: OnceLock::new(),
             utf8_posted: AtomicBool::new(false),
+            scope_utf8: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2374,6 +2378,20 @@ impl SeqDb {
     /// its member again.
     pub fn utf8_posted(&self) -> bool {
         self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to
+    /// another sequence whose header holds a UTF8String where a VisibleString is expected
+    /// (`algorithm::common::database::HeaderReader`'s scope read, `ParsedSubject::scope_utf8`).
+    pub fn note_scope_utf8(&self) {
+        self.scope_utf8
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a reader noted such a sequence (`note_scope_utf8`): only then do the batches'
+    /// prefetches look for it among their subjects (`prefetch_messages`).
+    pub fn scope_utf8_seen(&self) -> bool {
+        self.scope_utf8.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The member of NCBI's warning of a read of the header at `at` that took a UTF8String for a

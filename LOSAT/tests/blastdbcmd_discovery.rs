@@ -236,6 +236,14 @@ const CASES: &[Case] = &[
     ("T535", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.2,HDA2.1", "-outfmt", "%a %t"], 1),
     ("T536", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry_batch", "../db_search/t5/pva_batch.txt", "-outfmt", "%a %t"], 1),
     ("T537", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.1", "-outfmt", "%a %t"], 0),
+    // RG-T5d fix 3 (`make_t5.py --dup-only`): a list that holds `gb|DUP00001.1|` twice, the other
+    // sequence's title a UTF8String. `-entry` writes both, with NCBI's warning at the other's
+    // read; `-entry_batch` without `-get_dups` of a version 5 list writes the lookup's last
+    // (`AccessionsToOids`): the other one (`pda pdo_none`, with the warning) or the subject
+    // (`pdo_none pds`, none).
+    ("T538", None, false, &["-db", "../db_search/t5/pdo_none ../db_search/t5/pds", "-entry", "DUP00001.1", "-outfmt", "%o %a %t"], 0),
+    ("T539", None, false, &["-db", "../db_search/t5/pda ../db_search/t5/pdo_none", "-entry_batch", "../db_search/t5/dup_batch.txt", "-outfmt", "%o %a %t"], 0),
+    ("T540", None, false, &["-db", "../db_search/t5/pdo_none ../db_search/t5/pds", "-entry_batch", "../db_search/t5/dup_batch.txt", "-outfmt", "%o %a %t"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

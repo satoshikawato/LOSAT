@@ -1277,6 +1277,16 @@ impl ReportedAsks {
         asks
     }
 
+    /// Whether NCBI's scope resolves the reported sequences at each batch, before its reports
+    /// (`common::database::scope_reads_at_batch`): a report reads their Bioseqs (the formats of
+    /// `ReportedSubjects::for_batch`'s `fetched`), or the first format's prefetch loads them.
+    pub(super) fn scope_reads_at_batch(self) -> bool {
+        crate::algorithm::common::database::scope_reads_at_batch(
+            self.tabular_reads || self.pairwise || self.structured || self.taxids || self.taxonomy,
+            self.prefetched,
+        )
+    }
+
     /// What two reports of one batch ask.
     pub(super) fn or(self, other: Self) -> Self {
         Self {
@@ -1341,7 +1351,14 @@ pub(super) fn batch_titles(
             .map(|at| (first_query, at)),
     };
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
+    let titles = ReportedSubjects::read_titles(
+        database,
+        results,
+        gapped,
+        asks.pairwise,
+        earlier,
+        asks.scope_reads_at_batch(),
+    );
     super::x_timing::run(XRun::Titles, x_t);
     if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
         match &titles {

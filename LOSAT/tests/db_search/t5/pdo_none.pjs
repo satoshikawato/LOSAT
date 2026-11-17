@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pdo_none",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pdo_none",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T13:26:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49540,
+  "bytes-to-cache": 226,
+  "files": [
+    "pdo_none.pdb",
+    "pdo_none.phr",
+    "pdo_none.pin",
+    "pdo_none.pog",
+    "pdo_none.pos",
+    "pdo_none.pot",
+    "pdo_none.psq",
+    "pdo_none.ptf",
+    "pdo_none.pto"
+  ]
+}

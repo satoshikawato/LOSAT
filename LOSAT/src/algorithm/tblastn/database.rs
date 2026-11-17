@@ -474,16 +474,19 @@ pub(super) fn drop_unaligned(
 /// index of the batch's first query. A reader error of NCBI's own is a `HeaderReadError` (it
 /// fails the batch); LOSAT's refusals are errors of their own. The first read of a record with a
 /// UTF8String where a VisibleString is expected (`shared::HeaderReader::first_utf8`) is returned:
-/// NCBI posts its warning there.
+/// NCBI posts its warning there. `scope_reads`: whether NCBI's scope resolves the reported
+/// sequences at the batch (`shared::scope_reads_at_batch`).
 pub(super) fn read_titles(
     database: &TblastnDatabase,
     hitlists: &[KappaResultHitList],
     first_query: usize,
     earlier: shared::EarlierUtf8,
+    scope_reads: bool,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
     headers.note_earlier(earlier);
+    headers.scope_reads(scope_reads);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
             let ordinal = u32::try_from(list.oid).context("negative TBLASTN subject OID")?;
@@ -938,7 +941,15 @@ mod tests {
         let of = |letters: bool| {
             let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
             let mut titles = DatabaseTitles::new();
-            read_titles(&database, &hitlists, 0, Default::default(), &mut titles).unwrap();
+            read_titles(
+                &database,
+                &hitlists,
+                0,
+                Default::default(),
+                false,
+                &mut titles,
+            )
+            .unwrap();
             reported_subjects(
                 &database,
                 &titles,
@@ -993,7 +1004,15 @@ mod tests {
             let mut hitlists: Vec<KappaResultHitList> =
                 queries.iter().map(|&lists| hitlist(lists)).collect();
             let mut titles = DatabaseTitles::new();
-            read_titles(database, &hitlists, 0, Default::default(), &mut titles).unwrap();
+            read_titles(
+                database,
+                &hitlists,
+                0,
+                Default::default(),
+                false,
+                &mut titles,
+            )
+            .unwrap();
             let reported = reported_subjects(
                 database,
                 &titles,

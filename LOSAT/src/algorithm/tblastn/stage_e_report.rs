@@ -200,6 +200,62 @@ pub(super) fn xml_matrix_failure(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653,
+// c++/src/algo/blast/api/blast_seqalign.cpp:181-182,201-204 and
+// c++/src/objects/seq/seq_align_mapper_base.cpp:1142-1151
+// ```c
+//     if (found_end == FALSE) {
+//         gap_align->query_stop = q_start - 1;
+//         gap_align->subject_stop = s_start - 1;
+// ...
+//     int start1 = hsp->query.offset;   // start of alignment on master sequence
+//     int start2 = hsp->subject.offset; // start of alignment on slave sequence
+// ...
+//         case eGapAlignSub:
+//             m_start =
+//                 s_GetAlignmentStart(start1, esp->num[esp_index], m_strand, translate1, length1,
+// ...
+//         if (!dl  &&  !dr) {
+//             // Copy scores if there's no truncation.
+// ...
+//         else {
+//             // Invalidate all scores related to the segment and all
+//             // parent's scores.
+//             x_InvalidateScores(&seg);
+// ```
+/// The refusal of a reported alignment whose traceback started on its frame's NULLB (TBLASTN
+/// `-in_pssm -window_size 0`, a PSSM whose '-' column scores above BLAST_SCORE_MIN): the only one
+/// whose edit script holds more query letters than its range, as NCBI's ends stop one letter
+/// before the start (the right extension did not run) while the left one holds the start's
+/// column, the NULLB. NCBI's Seq-align, made from the start and the edit script, places that
+/// column past the subject's last base: with `-db` the reports take their ends from it and read
+/// the subject past its end (C++ exceptions where the frame's last codon is not the subject's
+/// last), and with `-subject` the remapping onto the subject's location truncates it and drops
+/// every score of the alignment. LOSAT does not reproduce those reports yet (line RG item X2d-2).
+#[cold]
+#[inline(never)]
+fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()> {
+    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
+        for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+            let query_letters: u64 = payload
+                .edit_script
+                .iter()
+                .map(|op| match *op {
+                    GapEditOp::Sub(n) | GapEditOp::Ins(n) => u64::from(n),
+                    GapEditOp::Del(_) => 0,
+                })
+                .sum();
+            let range = i64::from(linked.hsp.q_end) - i64::from(linked.hsp.q_start);
+            if i64::try_from(query_letters)? != range {
+                bail!(
+                    "TBLASTN -in_pssm with -window_size 0: a reported alignment of a one-hit traceback that starts on the NULLB after its frame (the PSSM's '-' column scores it) holds a column of that NULLB, which NCBI BLAST+ reports past the end of the subject; LOSAT does not support it yet"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The ranges of a search as the reports use them: where the searched letters of each
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
 /// reports end with the epilog (a search that stops at a query batch writes none).
@@ -273,6 +329,12 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
+    // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
+    // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
+    // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
+    if pssm.is_some() {
+        x_refuse_a_column_of_the_nullb(hitlists)?;
+    }
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
     // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
     // (`-out` is already created, empty, as NCBI's).

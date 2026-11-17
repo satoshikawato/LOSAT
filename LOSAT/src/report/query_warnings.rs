@@ -671,7 +671,11 @@ impl HitPosts {
             ends_run,
             cuts,
         } = posts;
-        self.document.extend(posts);
+        if self.document.is_empty() {
+            self.document = posts;
+        } else {
+            self.document.extend(posts);
+        }
         self.cuts.extend(cuts);
         self.cut |= cut;
         if ends_run.is_some() {

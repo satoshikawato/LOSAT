@@ -124,25 +124,6 @@ pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
         None => input_error(error),
     }
 }
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
-pub(super) fn output_error(error: io::Error) -> anyhow::Error {
-    // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
-    if crate::report::ostream::is_report_write_failure(&error) {
-        return error.into();
-    }
-    NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
-}
 /// The error of writing one batch's archive: the encoder's refusal of a byte NCBI writes as `#`
 /// (`SerialError`; a document with such a byte is written through `Traced`, `write_archive`, so
 /// only a string that its check does not see reaches it) is LOSAT's refusal, not an error of
@@ -946,11 +927,11 @@ fn run_inner(
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.document_mut().start(&mut start);
-        writer.write_all(&start).map_err(output_error)?;
+        writer.write_all(&start)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
     // batch come after it when both streams go to one place.
-    writer.flush().map_err(output_error)?;
+    writer.flush()?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
     // The database's sequences, read in blocks where they are searched and checked where they are
@@ -1156,7 +1137,7 @@ fn run_inner(
                       queries_before: usize|
      -> Result<()> {
         render_batch(&mut *writer, diagnostics, queries, results, queries_before)?;
-        writer.flush().map_err(output_error)
+        writer.flush().map_err(Into::into)
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
     // ```c++
@@ -1229,7 +1210,7 @@ fn run_inner(
         xml_matrix,
     )
     .map_err(report_error)?;
-    writer.flush().map_err(output_error)?;
+    writer.flush()?;
     // The document a hold kept: written at the end of the run, with the epilog.
     if let Some(held) = &held {
         held.release().map_err(report_error)?;

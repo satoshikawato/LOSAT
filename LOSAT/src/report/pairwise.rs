@@ -2398,7 +2398,7 @@ pub fn write_blastp_pairwise_prolog<W: ReportWrite>(
 /// The `Database:` lines of the prolog for the database of a `-db` search: the titles of the
 /// databases of its list joined with `; ` (`PairwiseDatabase::new`), wrapped at 68, then the
 /// summed counts and one blank line.
-fn write_blast_database_header<W: Write>(
+fn write_blast_database_header<W: ReportWrite>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
@@ -2439,7 +2439,7 @@ fn write_blast_database_header<W: Write>(
 // ```
 /// The `Masked using:` line of a database searched with database masking (`indent` before it:
 /// none in the prolog, two spaces in the epilog), not wrapped; nothing without it.
-fn write_masked_using<W: Write>(
+fn write_masked_using<W: ReportWrite>(
     writer: &mut W,
     indent: &str,
     database: &DatabaseInfo,
@@ -2455,7 +2455,8 @@ fn write_masked_using<W: Write>(
     if !database.filt_algorithm_options.is_empty() {
         write!(writer, ", options: '{}'", database.filt_algorithm_options)?;
     }
-    writeln!(writer)
+    // `out << endl` (align_format_util.cpp:531, :551): a flush.
+    crate::report::ostream::ncbi_endl(writer)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:541-574
@@ -2495,7 +2496,7 @@ fn write_masked_using<W: Write>(
 // ```
 /// The database blocks of the epilog, one per database of the list, and the blank lines
 /// before the matrix line (as `write_final_database_report`).
-fn write_final_database_block<W: Write>(
+fn write_final_database_block<W: ReportWrite>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
@@ -2765,7 +2766,7 @@ fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
 // m_Outfile << "Window for multiple hits: "
 //         << options.GetWindowSize() << "\n";
 // ```
-fn write_blastp_final_footer<W: Write>(
+fn write_blastp_final_footer<W: ReportWrite>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
@@ -4370,7 +4371,7 @@ fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>
 // The word threshold and the window size are 0 for blastn (blast_format.cpp:2281-2288),
 // so those lines are not printed. The extension is a whole or half number, which the
 // C++ stream and Rust print alike (`2`, `2.5`).
-fn write_blastn_final_footer<W: Write>(
+fn write_blastn_final_footer<W: ReportWrite>(
     writer: &mut W,
     report: &BlastnPairwiseReport,
 ) -> io::Result<()> {

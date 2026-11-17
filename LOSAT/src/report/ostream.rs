@@ -930,6 +930,12 @@ impl Core {
         Ok(())
     }
 
+    /// The bytes that NCBI's buffer has written (those the device took and those pending).
+    #[cfg(test)]
+    fn ncbi_written(&self) -> u64 {
+        self.landed + self.out as u64
+    }
+
     /// NCBI's write at the stream's position now, in the region being written.
     fn write_here(&self, flushing: bool, object: Option<(NcbiBuffer, u64)>) -> NcbiWrite {
         NcbiWrite {
@@ -1236,10 +1242,28 @@ impl Core {
     /// The region of the insertions from here on (`ReportWrite::site`): each declaration starts a
     /// region (the next query's `Iteration` posts its failure again). NCBI's writes of a region
     /// whose failure does not end the run, or before one, are made at its ends.
+    /// Where those writes fail in a region whose failure NCBI's formatter catches, that region
+    /// ended there (its post made) and the new one starts all the same: the caught failure is
+    /// returned after the change (`is_caught_report_write_failure`).
     fn set_site(&mut self, site: Site) -> std::io::Result<()> {
-        if !(self.site.ends_run() && site.ends_run()) {
-            self.sync()?;
+        let synced = if self.site.ends_run() && site.ends_run() {
+            Ok(())
+        } else {
+            self.sync()
+        };
+        if let Err(error) = synced {
+            if !is_caught_report_write_failure(&error) {
+                return Err(error);
+            }
+            self.change_site(site);
+            return Err(error);
         }
+        self.change_site(site);
+        Ok(())
+    }
+
+    /// `set_site`'s change of the region.
+    fn change_site(&mut self, site: Site) {
         self.region_posted = false;
         self.site = site;
         let inserted = self.inserted;
@@ -1249,7 +1273,6 @@ impl Core {
             }
             _ => None,
         };
-        Ok(())
     }
 
     /// `cerr`'s tie: standard output writes what it holds before a text on standard error. A
@@ -1318,6 +1341,7 @@ static TIED_REPORT: std::sync::Mutex<Option<std::sync::Weak<std::sync::Mutex<Cor
 /// writes apart from the report (`write_side_file`).
 static RUN_PROGRAM: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
 
+#[inline]
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
@@ -1484,6 +1508,7 @@ impl ReportHandle {
         lock(&self.0).set_site(site)
     }
 
+    #[inline]
     fn insert(&self, buf: &[u8]) -> std::io::Result<()> {
         lock(&self.0).insert(buf)
     }
@@ -1707,9 +1732,15 @@ impl Cuts {
 
     /// The cuts of `other`, after these.
     pub fn extend(&mut self, other: Cuts) {
-        for (at, cut) in other.0 {
-            self.push(at, cut);
+        if self.0.is_empty() {
+            self.0 = other.0;
+            return;
         }
+        debug_assert!(other
+            .0
+            .first()
+            .is_none_or(|&(first, _)| { self.0.last().is_none_or(|&(last, _)| last <= first) }));
+        self.0.extend(other.0);
     }
 
     /// A cursor that writes the buffer from its start.
@@ -1842,9 +1873,9 @@ impl CutCursor<'_> {
                 Cut::Insertion => {}
                 Cut::Site(site) => {
                     if let Err(error) = writer.site(site) {
-                        // The region's writes, made at its end, failed: the region is done.
+                        // The region's writes, made at its end, failed where NCBI's formatter
+                        // catches it: that region is done, and the new one has started.
                         self.failed(writer, report, error)?;
-                        writer.site(site)?;
                         self.skipping = false;
                     }
                     self.region = (cut_at, site);
@@ -2436,10 +2467,12 @@ mod tests {
         buffer.write_all(&[b'x'; 8190]).unwrap();
         buffer.flush().unwrap();
         assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 0);
-        assert!(buffer.write_all(b"x").is_err());
-        // The bytes held are offered first (then the insertion's, which a full device does not
-        // reach): the write comes at the 8191st byte.
-        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8190);
+        // The 8191st byte makes NCBI's write, which LOSAT makes before anything else is written
+        // (here its own flush, `Core::sync`): all 8,191 bytes at once.
+        buffer.write_all(b"x").unwrap();
+        assert_eq!(lock(&buffer.0).ncbi_written(), 8191);
+        assert!(buffer.flush().is_err());
+        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8191);
         // What a buffer holds at the end is written, a failure unreported.
         let quiet = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut buffer = ReportStream::file(Box::new(Full(quiet.clone())), "blastn", Site::Report);
@@ -2486,7 +2519,7 @@ mod tests {
                     0 => lock(&buffer.0).flush().unwrap(),
                     n => buffer.write_all(&vec![b'x'; n]).unwrap(),
                 }
-                after.push(lock(&writes).iter().sum::<usize>());
+                after.push(lock(&buffer.0).ncbi_written() as usize);
             }
             drop(buffer);
             let total = lock(&writes).iter().sum::<usize>();
@@ -2524,7 +2557,7 @@ mod tests {
                 Ok(bytes) => buffer.write_all(bytes).unwrap(),
                 Err(()) => lock(&buffer.0).flush().unwrap(),
             }
-            after.push(lock(&writes).iter().sum::<usize>());
+            after.push(lock(&buffer.0).ncbi_written() as usize);
         }
         drop(buffer);
         let writes = lock(&writes);
@@ -2698,11 +2731,11 @@ mod tests {
                     );
                     let mut pieces = Vec::new();
                     std::io::Write::write_all(&mut buffer, &lead).unwrap();
-                    pieces.push(lock(&writes).iter().sum::<usize>());
+                    pieces.push(lock(&buffer.0).ncbi_written() as usize);
                     streamed(&mut buffer);
-                    pieces.push(lock(&writes).iter().sum::<usize>());
+                    pieces.push(lock(&buffer.0).ncbi_written() as usize);
                     std::io::Write::write_all(&mut buffer, after).unwrap();
-                    pieces.push(lock(&writes).iter().sum::<usize>());
+                    pieces.push(lock(&buffer.0).ncbi_written() as usize);
                     drop(buffer);
                     let total = lock(&writes).iter().sum::<usize>();
                     assert_eq!((pieces, total), (one.0, one.1), "{stream:?} {before}");
@@ -2772,7 +2805,9 @@ mod tests {
         let mut display = DisplaySeqalign::default();
         display.enter(&mut ostream).unwrap();
         ostream.write_all(b"> subject\n").unwrap();
-        assert!(display.leave(&mut ostream).is_err());
+        // `out2`'s flush is NCBI's write; LOSAT makes it before anything else is written.
+        let left = display.leave(&mut ostream).and_then(|()| ostream.flush());
+        assert!(left.is_err());
         drop(ostream);
         assert_eq!(native(stream.finish(Ok(()))), (6, post.to_string()));
         // Standard output: a failed insertion leaves glibc's buffer empty (no post); the flush
@@ -2801,7 +2836,8 @@ mod tests {
             Site::Alignments,
         );
         stream.write_all(b"> subject\n").unwrap();
-        assert!(lock(&stream.0).flush().is_err());
+        lock(&stream.0).flush().unwrap();
+        assert!(stream.flush().is_err());
         assert_eq!(native(stream.finish(Ok(()))).0, -6);
     }
 
@@ -2917,12 +2953,10 @@ mod tests {
         cuts.push(0, Cut::Site(Site::Report));
         cuts.push(5, Cut::Insertion);
         cuts.push(6, Cut::Flush);
-        let failed = cuts
-            .cursor()
-            .write(&mut ostream, b"<x/>\n\n", 0, 6)
-            .unwrap_err();
+        // The epilog's flush is NCBI's write, made at the stream's end at the latest.
+        let written = cuts.cursor().write(&mut ostream, b"<x/>\n\n", 0, 6);
         drop(ostream);
-        assert_eq!(native(stream.finish(Err(failed.into()))).0, 6);
+        assert_eq!(native(stream.finish(written.map_err(Into::into))).0, 6);
     }
 
     /// One Seq-annot written as `seqalign::write_query_to` writes it: whole, `Close`'s flush, and
@@ -3155,9 +3189,9 @@ mod tests {
         let mut skipping = false;
         for step in steps {
             let done = match step {
-                Step::Insert(bytes) if skipping => Ok(()),
+                Step::Insert(_) if skipping => Ok(()),
                 Step::Insert(bytes) => ostream.write_all(bytes),
-                Step::Run(bytes, ends) if skipping => Ok(()),
+                Step::Run(..) if skipping => Ok(()),
                 Step::Run(bytes, ends) => {
                     let mut cuts = Cuts::default();
                     for &end in ends {
@@ -3170,8 +3204,15 @@ mod tests {
                 Step::Sync => ostream.flush(),
                 Step::Site(site) => {
                     skipping = false;
-                    ostream.site(*site)
+                    match ostream.site(*site) {
+                        // The region before ended caught; the new one has started.
+                        Err(error) if is_caught_report_write_failure(&error) => Ok(()),
+                        other => other,
+                    }
                 }
+                // A post in a region whose failure was caught belongs to what NCBI no longer
+                // makes (the reads of the `Iteration`'s later `Hit`s).
+                Step::Post(_) if skipping => Ok(()),
                 Step::Post(text) => lock(&report.0).post(text),
             };
             match done {
@@ -3272,9 +3313,22 @@ mod tests {
                 for limit in limits.chain([0, 1, 8190, 8191, 8192, 4096]) {
                     let deferred = shown(&steps, stream, standard_output, limit, false);
                     let reference = shown(&steps, stream, standard_output, limit, true);
-                    assert_eq!(
-                        deferred, reference,
-                        "case {case} {stream:?} limit {limit}: {steps:?}"
+                    let brief = |shown: &(Vec<u8>, String, Result<(), (i32, String)>)| {
+                        (shown.0.len(), shown.1.clone(), shown.2.clone())
+                    };
+                    let steps: Vec<String> = steps
+                        .iter()
+                        .map(|step| match step {
+                            Step::Insert(bytes) => format!("I{}", bytes.len()),
+                            Step::Run(bytes, ends) => format!("R{}{ends:?}", bytes.len()),
+                            other => format!("{other:?}"),
+                        })
+                        .collect();
+                    assert!(
+                        deferred == reference,
+                        "case {case} {stream:?} limit {limit}: {:?} vs reference {:?}: {steps:?}",
+                        brief(&deferred),
+                        brief(&reference)
                     );
                 }
             }

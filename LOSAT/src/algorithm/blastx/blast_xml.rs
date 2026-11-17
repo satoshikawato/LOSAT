@@ -454,12 +454,30 @@ impl HeldState {
                         skipping = false;
                         region = (end, site);
                         if let Some(report) = &self.report {
-                            report.declare(site)?;
+                            // The writes of a caught region, made at its end, failed: that region
+                            // ended there (its post made), and this one has started.
+                            match report.declare(site) {
+                                Err(error)
+                                    if crate::report::ostream::is_caught_report_write_failure(
+                                        &error,
+                                    ) => {}
+                                declared => declared?,
+                            }
                         }
                     }
                     HeldEvent::Flush if !skipping => {
                         if let Some(report) = &self.report {
-                            report.ncbi_flush()?;
+                            match report.ncbi_flush() {
+                                Err(error)
+                                    if crate::report::ostream::is_caught_report_write_failure(
+                                        &error,
+                                    ) =>
+                                {
+                                    skipping = true;
+                                    report.declare(crate::report::ostream::Site::Report)?;
+                                }
+                                flushed => flushed?,
+                            }
                         }
                     }
                     HeldEvent::Flush => {}
@@ -485,16 +503,33 @@ impl HeldState {
             if skipping {
                 continue;
             }
-            self.inner.flush()?;
+            // NCBI's writes before the text are made; where they fail in a caught region, the
+            // region ends there and its texts are not written.
+            match self.inner.flush() {
+                Err(error) if crate::report::ostream::is_caught_report_write_failure(&error) => {
+                    skipping = true;
+                    if let Some(report) = &self.report {
+                        report.declare(crate::report::ostream::Site::Report)?;
+                    }
+                    continue;
+                }
+                flushed => flushed?,
+            }
             if let Some((stderr, _)) = self.stderr.as_mut() {
                 stderr.write_all(&text)?;
                 stderr.flush()?;
             }
         }
         if !skipping && held.len() > written {
-            self.inner.write_all(&held[written..])?;
+            match self.inner.write_all(&held[written..]) {
+                Err(error) if crate::report::ostream::is_caught_report_write_failure(&error) => {}
+                held => held?,
+            }
         }
-        self.inner.flush()
+        match self.inner.flush() {
+            Err(error) if crate::report::ostream::is_caught_report_write_failure(&error) => Ok(()),
+            flushed => flushed,
+        }
     }
 }
 
@@ -981,7 +1016,7 @@ impl<S: Write> HeldFormats<S> {
                     .and_then(|()| if flushed { sink.flush() } else { Ok(()) });
             if let Err(error) = written {
                 state.discarded = true;
-                return Err(super::native::output_error(error));
+                return Err(error.into());
             }
         }
         Ok(())
@@ -2394,8 +2429,9 @@ mod held_formats_tests {
     }
 
     /// A write of the release that fails stops it there: nothing held after it is written, then
-    /// or later, and the run ends with it in place of its own error (`end_document_with`: "BLAST
-    /// failed to write output", exit status 6).
+    /// or later, and the run ends with it in place of its own error (`end_document_with`: the
+    /// writer's error, as every program's library call ends; the command line's stream ends as
+    /// NCBI's, `ReportStream::finish`).
     #[test]
     fn a_failing_write_of_the_release_ends_the_run() {
         let log = Shared::default();
@@ -2410,10 +2446,9 @@ mod held_formats_tests {
         let error = hold
             .end_document_with(&ncbis_error(), &|_| false)
             .unwrap_err();
-        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
-        assert_eq!(
-            (native.exit, native.message.as_str()),
-            (6, "BLAST failed to write output\n")
+        assert!(
+            error.downcast_ref::<std::io::Error>().is_some(),
+            "{error:?}"
         );
         other.write_all(b"text 2 ").unwrap();
         assert_eq!(log.text(), "text 0 ");

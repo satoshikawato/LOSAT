@@ -22,6 +22,9 @@ pub const STREAM_INFLATED: u32 = 5;
 /// The files of a run besides its outputs (the file of `-logfile`): a ZIP archive, emitted after
 /// the run, also when it failed (docs/web/abi_v2.md §5).
 pub const STREAM_RUN_FILES: u32 = 8;
+/// The signal that the host discards what it received of an output stream, which failed alone
+/// after it sent a chunk (`discard`; docs/web/abi_v2.md §5).
+pub const STREAM_DISCARD: u32 = 9;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]
@@ -47,6 +50,13 @@ pub fn emit(stream: u32, bytes: &[u8]) {
         #[cfg(not(target_arch = "wasm32"))]
         EMITTED.with(|emitted| emitted.borrow_mut().push((stream, chunk.to_vec())));
     }
+}
+
+/// Tells the host to discard what it received of `stream` in this run: one `emit` on
+/// `STREAM_DISCARD` whose 4 bytes are the stream's number, little-endian. The run sends nothing
+/// more of that stream (docs/web/abi_v2.md §5).
+pub fn discard(stream: u32) {
+    emit(STREAM_DISCARD, &stream.to_le_bytes());
 }
 
 /// A stream that the engine writes one output to. It sends whole chunks as they fill

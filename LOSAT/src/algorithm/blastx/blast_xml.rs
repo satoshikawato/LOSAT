@@ -783,8 +783,9 @@ impl<S: Write> HeldFormats<S> {
     /// file`, exit status 1): the side files before it stay, and the streams and the side files of
     /// the later documents get nothing of what was held. A write or flush of a stream that fails
     /// stops the release there with its error (as the run would have stopped at it), and nothing
-    /// held after it is written then or later.
-    pub(crate) fn release(&self) -> Result<()> {
+    /// held after it is written then or later. The writes of a stream for which `refused` is true
+    /// (a format that failed alone, `FormatRefusal`) are dropped: its sink gets none of them.
+    pub(crate) fn release(&self, refused: &dyn Fn(usize) -> bool) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
         let held = std::mem::take(&mut state.held);
@@ -808,6 +809,9 @@ impl<S: Write> HeldFormats<S> {
             flushed,
         } in held
         {
+            if refused(sink) {
+                continue;
+            }
             let sink = &mut state.sinks[sink];
             let written =
                 sink.write_all(&bytes)
@@ -835,13 +839,17 @@ impl<S: Write> HeldFormats<S> {
     /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
     /// before it, as the run without a hold writes them, a write that fails then being the run's
     /// error in place of `error`: the run without the hold stopped there, before it), as the
-    /// command line's document (`blast_xml::HeldOutput`).
-    pub(crate) fn end_document_with(&self, error: &anyhow::Error) -> Result<()> {
+    /// command line's document (`blast_xml::HeldOutput`). `refused` as for `release`.
+    pub(crate) fn end_document_with(
+        &self,
+        error: &anyhow::Error,
+        refused: &dyn Fn(usize) -> bool,
+    ) -> Result<()> {
         if drops_held_document(error) {
             self.discard();
             Ok(())
         } else {
-            self.release()
+            self.release(refused)
         }
     }
 }
@@ -2084,8 +2092,17 @@ mod held_formats_tests {
     #[test]
     fn a_release_writes_the_side_files_and_every_stream_in_order() {
         let (hold, streams) = held_run();
-        hold.release().unwrap();
+        hold.release(&|_| false).unwrap();
         assert_eq!(written(&streams), ALL);
+    }
+
+    /// Review 3 N5 of line RG T7: a format that failed alone (`FormatRefusal`) gets nothing of
+    /// what was held, so that its writer (a LOSAT Web stream) never had a byte of it.
+    #[test]
+    fn a_release_drops_the_writes_of_a_stream_that_failed_alone() {
+        let (hold, streams) = held_run();
+        hold.release(&|sink| sink == 0).unwrap();
+        assert_eq!(written(&streams), ["", "b1 ", "1:one;2:two;"]);
     }
 
     /// NCBI's error of a side file that it cannot open (`CArgException`, exit status 1): no
@@ -2097,7 +2114,8 @@ mod held_formats_tests {
     #[test]
     fn the_documents_hold_drops_after_their_refusal_and_writes_after_any_other_error() {
         let (hold, streams) = held_run();
-        hold.end_document_with(&document_refusal()).unwrap();
+        hold.end_document_with(&document_refusal(), &|_| false)
+            .unwrap();
         assert_eq!(written(&streams), NOTHING);
         // The taxonomy database's refusal of the prefetch (outfmt 5) is one of them.
         let (hold, streams) = held_run();
@@ -2106,7 +2124,7 @@ mod held_formats_tests {
                 path: "taxdb.btd".into(),
                 message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
             });
-        hold.end_document_with(&prefetch).unwrap();
+        hold.end_document_with(&prefetch, &|_| false).unwrap();
         assert_eq!(written(&streams), NOTHING);
         for other in [
             ncbis_error(),
@@ -2114,7 +2132,7 @@ mod held_formats_tests {
             anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
         ] {
             let (hold, streams) = held_run();
-            hold.end_document_with(&other).unwrap();
+            hold.end_document_with(&other, &|_| false).unwrap();
             assert_eq!(written(&streams), ALL, "{other}");
         }
     }
@@ -2148,7 +2166,7 @@ mod held_formats_tests {
         first.write_file(1, b"one").unwrap();
         blocked.write_file(1, b"x").unwrap();
         last.write_file(1, b"late").unwrap();
-        let error = hold.release().unwrap_err();
+        let error = hold.release(&|_| false).unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
             native.message,
@@ -2189,7 +2207,7 @@ mod held_formats_tests {
         buffered.write_all(b"report 2 ").unwrap();
         unbuffered.write_all(b"text 2 ").unwrap();
         if held {
-            hold.release().unwrap();
+            hold.release(&|_| false).unwrap();
         }
         let after_texts = log.text();
         drop((buffered, unbuffered, hold));
@@ -2226,7 +2244,9 @@ mod held_formats_tests {
         full.write_all(b"report 1 ").unwrap();
         full.flush().unwrap();
         other.write_all(b"text 1 ").unwrap();
-        let error = hold.end_document_with(&ncbis_error()).unwrap_err();
+        let error = hold
+            .end_document_with(&ncbis_error(), &|_| false)
+            .unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
             (native.exit, native.message.as_str()),
@@ -2244,7 +2264,7 @@ mod held_formats_tests {
         hold.discard();
         late.write_all(b"late").unwrap();
         side.write_file(3, b"three").unwrap();
-        hold.release().unwrap();
+        hold.release(&|_| false).unwrap();
         assert_eq!(written(&streams), NOTHING);
     }
 }

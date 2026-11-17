@@ -19,6 +19,7 @@ import { TMP_DIRECTORY, type OpfsAccess, type SessionSpace } from './session';
 /** The part of FileSystemSyncAccessHandle that the store uses (worker-only API). */
 interface SyncAccessHandle {
   write(buffer: BufferSource, options?: { at?: number }): number;
+  truncate(size: number): void;
   flush(): void;
   close(): void;
 }
@@ -121,6 +122,14 @@ export class OpfsBlockStore implements BlockStore {
           block.state = 'full';
           throw new StorageFullError();
         }
+      },
+      clear: () => {
+        if (!live() || block.state !== 'open' || block.handle === undefined) {
+          throw new Error(`block ${path} is not open`);
+        }
+        block.handle.truncate(0);
+        this.used -= block.length;
+        block.length = 0;
       },
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError();

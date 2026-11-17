@@ -190,10 +190,19 @@ fn search_records(
     // (`native::run_inner`).
     app::check_search_environment("BLASTX", true)?;
     let records_parsed = if args.parse_deflines {
-        let pairwise = resolved
-            .iter()
-            .any(|options| options.pairwise_view().is_some());
-        RecordsParsed::of(&subjects, args.show_gis, pairwise)?
+        // LOSAT's refusals of the records in outfmt 0 to 4, each such format's (`FormatRefusal`).
+        RecordsParsed::of(&subjects, args.show_gis, |parsed| {
+            for (format, options) in outputs.formats.iter_mut().zip(&resolved) {
+                if options.pairwise_view().is_some() {
+                    format
+                        .refusal
+                        .check(crate::report::db_subject::check_pairwise_records(
+                            parsed, true, "BLASTX",
+                        ))?;
+                }
+            }
+            Ok(())
+        })?
     } else {
         RecordsParsed::default()
     };
@@ -529,13 +538,16 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
     // error: nothing after one of the documents' refusals and the bytes of the batches before
     // after any other error (`HeldFormats::end_document_with`), as the command line. A write that
-    // fails there is the run's error in place of the run's own, as without the hold.
+    // fails there is the run's error in place of the run's own, as without the hold. A format
+    // that failed alone (`FormatRefusal`) gets nothing of what was held: its bytes are dropped
+    // with the hold, so that its writer never had them.
+    let refused = |sink: usize| refusals[sink].refused();
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
-        (Some(hold), Ok(_)) => hold.release()?,
-        (Some(hold), Err(error)) => hold.end_document_with(error)?,
+        (Some(hold), Ok(_)) => hold.release(&refused)?,
+        (Some(hold), Err(error)) => hold.end_document_with(error, &refused)?,
         (None, _) => {}
     }
     let (run_hits, run_subjects) = written?;
@@ -837,7 +849,7 @@ fn write_run(
                             subjects,
                         ),
                     };
-                archive::write_blastx_archive(
+                let archived = archive::write_blastx_archive(
                     &archive::ArchiveCall {
                         handle,
                         batch: archive::CallBatch {
@@ -852,16 +864,20 @@ fn write_run(
                     writer,
                     &mut *diagnostics,
                 )
-                .map_err(archive_error)?;
-                writer.flush().map_err(output_error)?;
-                // The archive, as the first format, takes the place of the warnings' writer.
-                warned |= warns;
+                .map_err(archive_error)
+                .and_then(|()| writer.flush().map_err(output_error));
+                // An error of the format's report of the batch fails the call, or this format
+                // alone (`FormatRefusal`), which writes nothing in the later batches. The
+                // archive, as the first format, takes the place of the warnings' writer.
+                if refusal.check(archived)? {
+                    warned |= warns;
+                }
                 continue;
             }
             let mut probe = observer
                 .as_deref_mut()
                 .map(|observer| FormatProbe::new(observer, index));
-            report::render_queries_with(
+            let rendered = report::render_queries_with(
                 writer,
                 warnings,
                 options,
@@ -882,8 +898,11 @@ fn write_run(
                     refusal,
                 }),
             )
-            .map_err(report_error)?;
-            writer.flush().map_err(output_error)?;
+            .map_err(report_error)
+            .and_then(|()| writer.flush().map_err(output_error));
+            // An error of the format's report of the batch fails the call, or this format alone
+            // (`FormatRefusal`), which writes nothing in the later batches.
+            refusal.check(rendered)?;
             // A format refused by its checks wrote no warning (they come before its warnings and
             // rows, `report::render_queries_with`).
             warned |= warns && !refusal.refused();
@@ -941,7 +960,7 @@ fn write_run(
     for (index, ((writer, options), refusal)) in writers
         .iter_mut()
         .zip(resolved)
-        .zip(refusals.iter())
+        .zip(refusals.iter_mut())
         .enumerate()
     {
         if refusal.refused() {
@@ -953,7 +972,7 @@ fn write_run(
         } else {
             &mut quiet
         };
-        report::write_epilog(
+        let ended = report::write_epilog(
             writer,
             warnings,
             options,
@@ -963,8 +982,10 @@ fn write_run(
             documents[index].as_mut(),
             xml_matrix,
         )
-        .map_err(report_error)?;
-        writer.flush().map_err(output_error)?;
+        .map_err(report_error)
+        .and_then(|()| writer.flush().map_err(output_error));
+        // An error of the format's epilog fails the call, or this format alone (`FormatRefusal`).
+        refusal.check(ended)?;
     }
     Ok((run_hits, run_subjects))
 }
@@ -1076,7 +1097,10 @@ fn search_database(
     )?;
     crate::algorithm::common::database::check_formats_report_sums(
         || database.pairwise_database(),
-        outputs.formats.iter().map(|format| format.outfmt),
+        outputs
+            .formats
+            .iter_mut()
+            .map(|format| (format.outfmt, &mut format.refusal)),
         "BLASTX",
     )?;
     for options in &mut resolved {

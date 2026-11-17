@@ -184,7 +184,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             );
             for range in ranges {
                 let s_idx = lists[range.start].hsps[0].s_idx as usize;
-                let subject = subjects.get(s_idx, program)?;
+                let subject = subjects.get(s_idx, program)?.names()?;
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
@@ -226,9 +226,18 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             }
             Ok(())
         });
-        if let Err(error) = written {
-            buf.truncate(start);
-            return Err(error);
+        // A query whose report raised an exception that NCBI's report function catches
+        // (`CaughtException`: the `Hit` of a subject whose lookup throws, `HitNames`): the XML2 and
+        // JSON documents leave its report out (`Xml2Document::report`), and the post of the
+        // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
+        // query leaves its partial bytes in `buf`, which the error return drops.
+        match crate::report::blast_xml::writer::caught_post(written, &*document, xml.run.program) {
+            Ok(Some(post)) => posts.caught(post),
+            Ok(None) => {}
+            Err(error) => {
+                buf.truncate(start);
+                return Err(error);
+            }
         }
         posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(

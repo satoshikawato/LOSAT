@@ -2422,7 +2422,7 @@ fn search(
                         outputs.hits.is_some(),
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
-                    parsed_shown(&outputs.formats),
+                    &outputs.formats,
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2878,84 +2878,6 @@ fn search(
         return Err(error);
     }
     Ok(())
-}
-
-/// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
-/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
-/// 20) whose fields read the subject (`report::tabular::reads_subject`), outfmt 0, the
-/// structured documents (5, 13 to 16), the formats that join the alignments of following hits
-/// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
-/// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
-/// subjects.
-fn parsed_shown(
-    formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> crate::algorithm::common::database::ParsedShown {
-    let numbers: Vec<i32> = formats
-        .iter()
-        .map(|format| super::stage_e_report::format_number(format.outfmt))
-        .collect();
-    let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
-    crate::algorithm::common::database::ParsedShown {
-        stops_at_failed_lookup: formats.iter().any(|format| {
-            matches!(
-                super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 20
-            ) && crate::report::tabular::may_stop_at_failed_lookup(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            )
-        }),
-        tabular: formats.iter().any(|format| {
-            matches!(
-                super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 18 | 20
-            ) && crate::report::tabular::writes_rows(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            ) && crate::report::tabular::reads_subject(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-                crate::blastinput::app::Program::Tblastn,
-            )
-        }),
-        pairwise,
-        structured: formats
-            .iter()
-            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt)),
-        joined: pairwise
-            || formats.iter().any(|format| {
-                super::stage_e_report::is_structured_xml(format.outfmt)
-                    || super::tabular::tabular_spec(format.outfmt)
-                        .is_some_and(|spec| spec.needs().joins_subjects())
-            }),
-        sam: false,
-        taxonomy: formats.iter().any(|format| {
-            super::stage_e_report::xml2_kind(format.outfmt).is_some()
-                || super::tabular::tabular_spec(format.outfmt)
-                    .is_some_and(|spec| spec.needs().taxonomy)
-        }),
-        words: formats
-            .iter()
-            .filter(|format| {
-                matches!(
-                    super::stage_e_report::format_number(format.outfmt),
-                    6 | 7 | 10 | 20
-                )
-            })
-            .fold(
-                crate::report::tabular::PrintedIds::default(),
-                |words, format| {
-                    words.or(crate::report::tabular::PrintedIds::of(
-                        super::tabular::tabular_spec(format.outfmt).as_ref(),
-                    ))
-                },
-            ),
-        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
-        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
-            |&number| match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            },
-        )) && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-    }
 }
 
 #[cfg(test)]

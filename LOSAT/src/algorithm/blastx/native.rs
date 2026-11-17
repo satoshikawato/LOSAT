@@ -202,16 +202,30 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
             || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
+            || (e.exit == 2 && e.message.starts_with("BLAST Database error: "))
             || e.exit == 255
     }) {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
+        // ```c++
+        //     catch (const CSeqDBException& e) {                                      \
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-202
+        // ```c++
+        //         else {                                                              \
+        //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+        //         	exit_code = BLAST_DATABASE_ERROR;                               \
+        //         }                                                                   \
+        // ```
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
         // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
         // an exception of NCBI's XML stream, `blast_xml::writer::run_ending_exception`, or the
-        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
-        // an engine error.
+        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`) or through its
+        // `CSeqDBException` branch, which comes first (exit status 2: the lookup of a reported
+        // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
+        // not an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -1001,7 +1015,8 @@ fn run_inner(
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
                         results: &mut Vec<BatchResults>,
-                        queries_before: usize|
+                        queries_before: usize,
+                        pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
         // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
         // search strategy request holds (`take` below).
@@ -1096,6 +1111,7 @@ fn run_inner(
                     stops,
                     xml2.borrow_mut().as_mut(),
                     xml_matrix,
+                    pool,
                 )
                 .map_err(refused)
             }
@@ -1111,6 +1127,7 @@ fn run_inner(
                 stops,
                 xml2.borrow_mut().as_mut(),
                 xml_matrix,
+                pool,
             )
             .map_err(refused),
         }
@@ -1140,9 +1157,17 @@ fn run_inner(
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,
-                      queries_before: usize|
+                      queries_before: usize,
+                      pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
-        render_batch(&mut *writer, diagnostics, queries, results, queries_before)?;
+        render_batch(
+            &mut *writer,
+            diagnostics,
+            queries,
+            results,
+            queries_before,
+            pool,
+        )?;
         writer.flush().map_err(output_error)
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
@@ -1254,6 +1279,9 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
+    /// Whether every report is outfmt 13 to 16, which write a lookup that throws where a batch's
+    /// prefetch is off as NCBI does (`Xml2Kind::every`, for `HitLoads::of`).
+    writes_thrown: bool,
 }
 
 impl ReportedAsks {
@@ -1293,6 +1321,9 @@ impl ReportedAsks {
                 outfmt => i32::from(outfmt),
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
+            writes_thrown: crate::report::blast_xml2::Xml2Kind::every([
+                super::blast_xml::xml2_kind(options.outfmt),
+            ]),
         }
     }
 
@@ -1309,6 +1340,11 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
+        asks.writes_thrown = crate::report::blast_xml2::Xml2Kind::every(
+            options
+                .iter()
+                .map(|options| super::blast_xml::xml2_kind(options.outfmt)),
+        );
         asks
     }
 
@@ -1325,6 +1361,8 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            // `Xml2Kind::every` of the two.
+            writes_thrown: self.writes_thrown && other.writes_thrown,
         }
     }
 }
@@ -1550,6 +1588,7 @@ pub(super) fn reported_batch(
         asks.prefetched && !unfetched,
         asks.prefetch_runs && !unfetched,
         unfetched,
+        asks.writes_thrown,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -1819,9 +1858,17 @@ pub(crate) type QueryBatchReader<'r> = dyn FnMut(
     + 'r;
 
 /// The render of a query batch's reports (`run_query_batches`): the diagnostics, the batch's
-/// records, its results and the number of queries reported before it.
-pub(crate) type BatchRender<'r> =
-    dyn FnMut(&mut dyn Write, &[FastaRecord], &mut Vec<BatchResults>, usize) -> Result<()> + 'r;
+/// records, its results, the number of queries reported before it, and the run's pool where no
+/// search runs on it while the batch is written (its threads are free to format the batch's
+/// reports, `x_pairwise_par::write`), else `None`.
+pub(crate) type BatchRender<'r> = dyn FnMut(
+        &mut dyn Write,
+        &[FastaRecord],
+        &mut Vec<BatchResults>,
+        usize,
+        Option<&crate::utils::threading::SearchPool<'_>>,
+    ) -> Result<()>
+    + 'r;
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with
@@ -1839,12 +1886,7 @@ pub(super) fn run_query_batches(
     read: &mut QueryBatchReader<'_>,
     diagnostics: &mut dyn Write,
     search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
-    render: &mut dyn FnMut(
-        &mut dyn Write,
-        &[FastaRecord],
-        &mut Vec<BatchResults>,
-        usize,
-    ) -> Result<()>,
+    render: &mut BatchRender<'_>,
     take: &mut dyn FnMut(&mut dyn Write, &[FastaRecord], usize) -> Result<()>,
 ) -> Result<usize> {
     use super::x_timing::Run as XRun;
@@ -2048,7 +2090,16 @@ pub(super) fn run_query_batches(
                             Err(error) => return Err(search_error(error)),
                         };
                         if let Some(mut results) = pending.add(start, last, results) {
-                            render(&mut **diagnostics.borrow_mut(), reader_batch, &mut results, processed)?;
+                            // The flow's searches of the batches after it run on the pool while
+                            // this one is written: its reports are formatted on this thread
+                            // (`BatchRender`).
+                            render(
+                                &mut **diagnostics.borrow_mut(),
+                                reader_batch,
+                                &mut results,
+                                processed,
+                                None,
+                            )?;
                             processed += reader_batch.len();
                         }
                         Ok(())
@@ -2161,11 +2212,13 @@ pub(super) fn run_query_batches(
                                 if let Some(mut results) =
                                     pending.add(unit.range.start, unit.last, results)
                                 {
+                                    // The queued batches are searched: the pool is free.
                                     render(
                                         &mut **diagnostics.borrow_mut(),
                                         &unit.batch,
                                         &mut results,
                                         processed,
+                                        Some(pool),
                                     )?;
                                     processed += unit.batch.len();
                                 }
@@ -2268,6 +2321,7 @@ pub(super) fn run_query_batches(
                         queries,
                         &mut results,
                         processed,
+                        x_pool,
                     )?;
                     super::x_timing::run(XRun::Render, x_t);
                     processed += queries.len();
@@ -3274,13 +3328,9 @@ mod archive_error_tests {
             write_blastx_pairwise_report(
                 std::slice::from_ref(&hit),
                 &mut out,
-                &mut io::sink(),
-                &[Vec::new()],
-                &[],
+                None,
                 &config,
                 std::slice::from_ref(&query),
-                &[true],
-                &[false],
                 &[std::sync::Arc::from(&b"s0"[..])],
                 &report,
                 &BlastxPairwiseOptions {
@@ -3295,6 +3345,7 @@ mod archive_error_tests {
                 &[],
                 None,
                 0,
+                None,
                 None,
             )
             .map(|()| out)
@@ -3316,6 +3367,24 @@ mod archive_error_tests {
         assert_eq!(
             failure.downcast_ref::<NativeError>().map(|e| e.exit),
             Some(6)
+        );
+    }
+
+    // Line DBID pfoff-1: `CATCH_ALL`'s report of a `CSeqDBException` that an outfmt 13 or 14
+    // report raises (the lookup of a reported subject that throws) stays as it is, not an
+    // engine error.
+    #[test]
+    fn a_database_error_of_catch_all_is_no_engine_error() {
+        let thrown = crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::lookup_throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO).unwrap(),
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        );
+        let error = report_error(NativeError::exception(&thrown).into());
+        let error = error.downcast_ref::<NativeError>().unwrap();
+        assert_eq!(error.exit, 2);
+        assert_eq!(
+            error.message,
+            "BLAST Database error: DB contains no accession info.\n"
         );
     }
 }

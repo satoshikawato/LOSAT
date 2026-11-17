@@ -265,7 +265,7 @@ flowchart LR
 | input | `CBlastInput::GetNextSeqBatch`; subjects as a `BlastSeqSrc` (`MultiSeqBlastSeqSrcInit`, `SeqDbBlastSeqSrcInit`) | `read_cli_subjects` or `open_search_database`, then `search_cli` reads the queries | the same names in `blast_engine.rs` |
 | query batches | `CBatchSizeMixer` (blastn), `GetQueryBatchSize` | `run_in_pool` with the adaptive `BatchSizeMixer` (`blastinput/query_batch.rs`) | a fixed size: 10,000 letters unless `BATCH_SIZE` is set; psiblast one query |
 | masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`); the encoding in `batch_setup.rs` (`encode_query_block`) | SEG in `blastp/encoding.rs` |
-| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | `call_scoring` (`blast_engine/call_setup.rs`; the contexts' Karlin blocks with the lookup table in `call_lookup`; the database's length and number of subjects in `db_extent`, the search spaces in `call_search_spaces`, the preliminary cutoffs in `prelim_cutoffs`, the statistics of each subject in `subject_parameters` and the scan's X-drops and sizes in `scan_shape`) |
+| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs` (the encoding, the lookup tables, the preliminary stage's search spaces in `batch_spaces`, the cutoffs of the batch in `batch_cutoffs` and `batch_cutoff_set`, the statistics of one subject in `subject_statistics`), `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | `call_scoring` (`blast_engine/call_setup.rs`; the contexts' Karlin blocks with the lookup table in `call_lookup`; the database's length and number of subjects in `db_extent`, the search spaces in `call_search_spaces`, the preliminary cutoffs in `prelim_cutoffs`, the statistics of each subject in `subject_parameters` and the scan's X-drops and sizes in `scan_shape`) |
 | lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks; the call's choice among them in `call_lookup` (`blast_engine/call_setup.rs`) |
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`, or `s_BlastNaExtendDirect` for a table whose width is the word size (in LOSAT: a small or na table in `na_scan.rs`; megablast-kind and discontiguous tables of that width in `pair_extend.rs`); `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges`; for a two-stage table the scan that collects the offset pairs in `two_stage_scan.rs` (`scan_two_stage_lookup`) and their extension in `pair_extend.rs` (`extend_offset_pairs`, with the word extension `word_extend_pair` and the off-diagonal search `off_diagonal_found`), for the other tables the scan with the steps of each seed in `na_scan.rs` (`scan_na_lookup`); and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `prelim_hsp_list.rs` (`gapped_hsp_list`, its loop `gapped_score_list`, per subject chunk) with `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
@@ -273,7 +273,7 @@ flowchart LR
 | traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `search_subject` (`subject_passes.rs`, its second call per subject) calls `traceback_subject` (`traceback_subject.rs`), which calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
-| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Seqalign, Archive, Xml and Xml2, Pairwise, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
+| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4, the SAM writer and the XML, XML2 and JSON writer of outfmt 5 and 13 to 16 are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Seqalign, Archive, Xml and Xml2, Pairwise, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
 
 Neither blastn nor blastp links HSPs or uses sum statistics: NCBI's option handles start with
 sum statistics off (`api/blast_options_local_priv.cpp`), only those of tblastn, blastx and
@@ -361,14 +361,18 @@ the batch's matches with composition-based statistics is `runtime/kappa_batch.rs
 `stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
 sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its
 subject loop with `subject_loop.rs` and ends with `batch_finish.rs`; its `process_subject`
-prepares a subject with `subject_prep.rs` (the preliminary frames and the unit path), runs the
-frame loop of `frame_chunks.rs`, which drives the chunks of each frame and scans each with the
-word finder of `word_finder.rs` (the one-hit scan of `-window_size 0` and the two two-hit scans,
+prepares a subject with `subject_prep.rs` (the preliminary frames and the unit path),
+`context_cutoffs.rs` (the statistics it reads, `per_subject_cutoffs`) and `subject_link.rs` (its
+linking parameters, `subject_linking_params`), runs the frame loop of `frame_chunks.rs`, which
+drives the chunks of each frame and scans each with the word finder of `word_finder.rs` (the
+one-hit scan of `-window_size 0` and the two two-hit scans,
 NCBI's order and SEEDBUCKET's; all three share a chunk's start and end, and the two-hit ones also
 share its scan calls and the two-hit test and extension of each hit), and ends a subject with
 `subject_link.rs` (the seed stage's end, the linking calls, the reap and the re-evaluation),
-`subject_report.rs` (the report hits) and `subject_debug.rs` (their debugging output). rpsblast has
-no driver of its own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to
+`subject_report.rs` (the stages after the re-evaluation, `report_subject_hits`, and the report
+hits) and `subject_debug.rs` (their debugging output), and sends its final HSPs with
+`subject_loop.rs` (`SubjectEmit::emit`). rpsblast has no driver of its own: it runs blastp's
+(`BlastpApp::Rpsblast`), which hands the search to
 `rps_search` from `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the
 profiles are the "query" and the user's query is the "subject".
 

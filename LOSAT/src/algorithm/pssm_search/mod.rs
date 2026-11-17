@@ -24,6 +24,7 @@
 //!         sbp->kbp_gap = sbp->kbp_gap_psi;
 //! ```
 
+pub(crate) mod annot_index;
 pub(crate) mod evalue;
 pub(crate) mod gapalign;
 pub(crate) mod in_pssm;
@@ -99,6 +100,14 @@ pub struct PsiSearch {
     /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
     /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
     pub(crate) request: Option<PssmQueryRequest>,
+    /// What NCBI's object manager makes of the annotations of the PSSM's query when the query
+    /// joins the scope (`annot_index::index_entry`): its messages, the diagnostic stream it
+    /// leaves failed and its exception, which the run writes where NCBI posts them
+    /// (`annot_posts`, `annot_abort`); empty without annotations and for a FASTA query's rounds.
+    pub(crate) annot: annot_index::AnnotOutcome,
+    /// Whether NCBI's definition line of the query, which its XML and JSON reports make, reads
+    /// the query's annotations (`in_pssm::defline_reads_annot`).
+    pub(crate) defline_reads_annot: bool,
     /// The query that a later round of psiblast searches (`blast_engine::psi_round::RoundQuery`):
     /// the letters that the rounds before masked (X), filtered again without the lower-case mask
     /// that round 1 took; round 1's query for a query that NCBI splits into chunks
@@ -118,11 +127,11 @@ pub struct PsiSearch {
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
 /// scores of a PSSM of frequency ratios only), which the search strategy's request holds
 /// (`report::archive::requests::RunRequests::with_pssm_query`), and the members of the file that
-/// LOSAT's reader skipped, which NCBI writes back into it (`PsiSearch::refuse_request_members`).
+/// LOSAT's PSSM writer does not write yet, which NCBI writes back into it
+/// (`PsiSearch::refuse_request_members`).
 #[derive(Debug, Clone)]
 pub(crate) struct PssmQueryRequest {
     pub(crate) pssm: std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>,
-    pub(crate) skipped: Vec<&'static str>,
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:279-304
@@ -273,17 +282,16 @@ impl PsiSearch {
         self.request.as_ref().map(|request| request.pssm.clone())
     }
 
-    /// LOSAT's refusal of a request whose PSSM file has members that the reader skipped, which
-    /// NCBI writes back into the request (`in_pssm::refuse_skipped_members`, the predicate of
+    /// LOSAT's refusal of a request whose PSSM file has members that the PSSM writer does not
+    /// write yet, which NCBI writes back into the request (`in_pssm::refuse_unwritten_members`, the
+    /// predicate of
     /// `-out_pssm`'s refusal); `program` names LOSAT's program. Made after the database is opened
     /// (a database NCBI cannot open stops it first) and before the first byte of output.
     pub(crate) fn refuse_request_members(&self, program: &str) -> anyhow::Result<()> {
         match &self.request {
-            Some(request) => in_pssm::refuse_skipped_members(
-                &request.skipped,
-                "-export_search_strategy",
-                program,
-            ),
+            Some(request) => {
+                in_pssm::refuse_unwritten_members(&request.pssm, "-export_search_strategy", program)
+            }
             None => Ok(()),
         }
     }
@@ -400,18 +408,39 @@ impl PsiSearch {
     /// `query_record`, whose ids, when the reports show them, join the scope `scope` of the
     /// `-subject` records that `-parse_deflines` reads, as a FASTA query's do (NCBI's scope holds
     /// the PSSM's Bioseq, psiblast_app.cpp:537: a subject with one of its ids shows as the query, or
-    /// NCBI's tblastn fails; `IdScope::add_record` refuses it).
+    /// NCBI's tblastn fails; `IdScope::add_record` refuses it) in a run that searches (`searches`, of
+    /// `PsiSearch::searches`):
+    /// the subjects' Seq-ids matter to NCBI only in the reports, so a run that NCBI ends before the
+    /// search (the object manager's stop, the PSSM's checks, the PSSM engine's error) meets no
+    /// subject there and writes NCBI's stop (NCBI BLAST+ 2.17.0, line RG D3-1 review 4b S1 (c),
+    /// review 4c N1).
     pub(crate) fn query_record_in(
         &self,
         parse_deflines: bool,
         scope: Option<&crate::seqid::id_scope::IdScope>,
         program: &str,
+        searches: bool,
     ) -> anyhow::Result<FastaRecord> {
         let query = self.query_record(parse_deflines);
-        if let (Some(scope), Some(believed)) = (scope, query.believed()) {
+        if let (Some(scope), Some(believed), true) = (scope, query.believed(), searches) {
             scope.add_record(&believed.ids, None, "query", program)?;
         }
         Ok(query)
+    }
+
+    /// Whether the PSSM's query joins NCBI's scope: false where NCBI's object manager ends the run
+    /// as it adds the query's Seq-entry (`annot.abort`, `scope->AddTopLevelSeqEntry`, and
+    /// `GetSeq()` of a set, psiblast_app.cpp:537-540, tblastn_app.cpp:226-228). Such a run makes
+    /// nothing that NCBI makes after it (tblastn's formatter and prolog, the search strategy, the
+    /// search, its reports and PSSM files), so none of LOSAT's limits of those apply to it.
+    pub(crate) fn joins_scope(&self) -> bool {
+        self.annot.abort.is_none()
+    }
+
+    /// Whether the run searches the PSSM: its query joins the scope (`joins_scope`) and NCBI does
+    /// not stop before the search (`stop_before_search`, `strategy` and `database` as there).
+    pub(crate) fn searches(&self, strategy: bool, database: bool) -> bool {
+        self.joins_scope() && self.stop_before_search(strategy, database).is_none()
     }
 
     /// The query that NCBI's scope holds for the PSSM of `-in_pssm`: the PSSM's Bioseq, which
@@ -515,8 +544,50 @@ impl PsiSearch {
             setup_messages,
             warning_title: None,
             request: None,
+            annot: annot_index::AnnotOutcome::default(),
+            defline_reads_annot: false,
             round_query: None,
             split_setup: None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 and
+    // c++/src/app/blast/tblastn_app.cpp:226, 270 (psiblast posts the object manager's messages after
+    // its prolog, tblastn before it: `formatter.PrintProlog()` comes before
+    // `scope->AddTopLevelSeqEntry(pssm->SetQuery())` in psiblast, after it in tblastn)
+    /// The messages of NCBI's object manager about the PSSM query's annotations, written to
+    /// `diagnostics` (psiblast after its prolog, as the messages of its query batch,
+    /// `blast_engine::psiblast_stop_at_pssm_query`; tblastn before its prolog), each saved as one
+    /// message of its severity by the BLAST archive of the run (`archive`, outfmt 11: the error
+    /// archive of a run that the object manager's exception ends, NCBI BLAST+ 2.17.0 tblastn
+    /// `k02_failed_then_choice_exc`), after which a failed diagnostic stream silences the run's
+    /// later messages (`ncbi_exception::set_main_diag_failbit`).
+    pub(crate) fn write_annot_posts(
+        &self,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        self.annot.posts.write(diagnostics, archive)?;
+        self.fail_diag_stream();
+        Ok(())
+    }
+
+    /// Marks the main thread's diagnostic stream failed when the object manager's messages
+    /// failed it (`AnnotOutcome::muted`), once they are written.
+    pub(crate) fn fail_diag_stream(&self) {
+        if self.annot.muted {
+            crate::ncbi_exception::set_main_diag_failbit();
+        }
+    }
+
+    /// The exception with which NCBI's object manager ends the run (`CATCH_ALL`'s report).
+    pub(crate) fn annot_abort(&self) -> Option<anyhow::Error> {
+        self.annot.abort.as_ref().map(|abort| {
+            crate::cli::NativeError {
+                exit: abort.exit,
+                message: abort.message.clone(),
+            }
+            .into()
+        })
     }
 }

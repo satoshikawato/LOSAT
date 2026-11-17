@@ -1,24 +1,30 @@
 //! The report hits of a TBLASTX subject (`linked_hits_to_report`): its linked HSPs, reaped by
 //! E-value, with their bit scores and identities in report coordinates, as `TblastxHsp`s, with the
-//! stage dumps and the diagnostics of subject_debug.rs.
+//! stage dumps and the diagnostics of subject_debug.rs; and the stages after the subject's
+//! re-evaluation that end in them (`report_subject_hits`: the HSP-saving statistics, the second
+//! linking call, the report hits and the subject's final HSPs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1535-1541 (in
 //! `BLAST_PreliminarySearchEngine`: `s_Blast_HSPListReapByPrelimEvalue`, then
 //! `Blast_HSPListGetBitScores`, c++/src/algo/blast/core/blast_hits.c:1907-1932), and
 //! c++/src/algo/blast/api/blast_seqalign.cpp:1397 (`BLASTUngappedHspListToSeqAlign`, which turns
-//! the HSPs into the report's alignments).
+//! the HSPs into the report's alignments); for `report_subject_hits`,
+//! c++/src/algo/blast/core/blast_engine.c:1515-1520 and 1539-1541 (after
+//! `Blast_HSPListReevaluateUngapped`; the write of the list at :1553-1554 is
+//! `SubjectEmit::emit`'s).
 //!
 //! This module is a child of `run_impl` for the timer it keeps private (`x_search_timing`). Its
-//! function is made of statements of `process_subject` moved here in their order; it takes the
-//! linked list by value and reads a struct of references and `Copy` values.
+//! functions are made of statements of `process_subject` moved here in their order; they take the
+//! HSP list by value and read structs of references and `Copy` values.
 
 use super::subject_debug;
-use super::subject_link::SubjectStageArgs;
+use super::subject_link::{self, SubjectLinkArgs, SubjectStageArgs};
 use super::x_search_timing::XLap;
 use super::{
     calc_bit_score, convert_coords, stage_dump, trace_final_hit_if_match, AtomicOrdering, Hit,
     QueryFrame, TblastxHsp, TbxScore, UngappedHit, XStage,
 };
+use crate::algorithm::tblastx::x_link_timing::XLinkTimer;
 
 /// The report hits of the subject's linked HSPs (`linked`): the HSPs whose E-value passes
 /// `evalue_threshold`, with their identities (counted by the re-evaluation), bit scores and
@@ -269,4 +275,88 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
     }
 
     final_hits
+}
+
+/// What the stages after a subject's re-evaluation read besides its HSP list
+/// (`report_subject_hits`), made per subject by `process_subject`: the values of the linking
+/// calls and of the stages, the timer of the second linking call, the subject's frames
+/// (`s_frames` scored the HSPs, `s_frames_report` the report reads) and its length in
+/// nucleotides.
+pub(super) struct SubjectReportArgs<'a> {
+    pub(super) link: &'a SubjectLinkArgs<'a>,
+    pub(super) stage: &'a SubjectStageArgs<'a>,
+    pub(super) x_link_timer: &'a XLinkTimer,
+    pub(super) s_frames: &'a [QueryFrame],
+    pub(super) s_frames_report: &'a [QueryFrame],
+    pub(super) s_len: usize,
+}
+
+/// The stages of a subject after its re-evaluation, when HSPs are left (`ungapped_hits`): the
+/// HSP-saving statistics of a long subject (`hsp_saving`, `subject_debug::print_hsp_saving_stats`),
+/// the second linking call (`subject_link::relink_subject_hits`) and the report hits
+/// (`linked_hits_to_report`); when some are left, their LOSAT_DIAGNOSTICS counts and the
+/// subject's final HSPs in `hits` (the worker's, sent at the end of the subject); then the `Emit`
+/// lap of LOSAT_TIMING.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1515-1520 and 1539-1541
+/// (after `Blast_HSPListReevaluateUngapped` in `BLAST_PreliminarySearchEngine`; the write of the
+/// list that follows at :1553-1554 is `SubjectEmit::emit`'s)
+/// ```c
+///                if (hit_params->link_hsp_params) {
+///                    status =
+///                        BLAST_LinkHsps(program_number, hsp_list, query_info,
+///                                       seq_arg.seq->length, sbp,
+///                                       hit_params->link_hsp_params,
+///                                       gapped_calculation);
+/// ...
+///             /* Calculate and fill the bit scores, since there will be no
+///                traceback stage where this can be done. */
+///             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
+/// ```
+pub(super) fn report_subject_hits<S: TbxScore>(
+    sc: S,
+    ungapped_hits: Vec<UngappedHit>,
+    hsp_saving: subject_debug::HspSavingStats<'_>,
+    report: &SubjectReportArgs<'_>,
+    x_lap: &mut XLap<'_>,
+    hits: &mut Vec<TblastxHsp>,
+) {
+    let &SubjectReportArgs {
+        link,
+        stage,
+        x_link_timer,
+        s_frames,
+        s_frames_report,
+        s_len,
+    } = report;
+    let &SubjectStageArgs {
+        diag_enabled,
+        diagnostics,
+        ..
+    } = stage;
+    // DEBUG: the HSP-saving statistics of a long subject and LOSAT_DIAGNOSTICS'
+    // `hsps_before_chain` (`subject_debug::print_hsp_saving_stats`).
+    subject_debug::print_hsp_saving_stats(hsp_saving, &ungapped_hits, diag_enabled, diagnostics);
+
+    // The second linking call (`subject_link::relink_subject_hits`), then the subject's
+    // report hits (`subject_report::linked_hits_to_report`).
+    let linked = subject_link::relink_subject_hits(link, ungapped_hits, stage, x_link_timer, x_lap);
+    let final_hits =
+        linked_hits_to_report(sc, linked, (s_frames, s_frames_report), s_len, stage, x_lap);
+
+    if !final_hits.is_empty() {
+        if diag_enabled {
+            diagnostics
+                .base
+                .hsps_after_overlap_filter
+                .fetch_add(final_hits.len(), AtomicOrdering::Relaxed);
+            diagnostics
+                .output_from_ungapped
+                .fetch_add(final_hits.len(), AtomicOrdering::Relaxed);
+        }
+        // The subject's final HSPs, sent at the end of the subject (`SubjectEmit::emit`).
+        debug_assert!(hits.is_empty());
+        *hits = final_hits;
+    }
+    x_lap.lap(XStage::Emit);
 }

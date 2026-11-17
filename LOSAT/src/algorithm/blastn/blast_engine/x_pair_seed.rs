@@ -72,19 +72,29 @@
 
 use super::DiagStruct;
 use super::{
-    determine_scanning_offsets, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
+    extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, first_scan_range,
     mask_lookup_index, packed_kmer_at_seed_mask, scan_subject_kmers_range,
     scan_subject_kmers_range_mb_10_1, scan_subject_kmers_range_mb_10_2,
     scan_subject_kmers_range_mb_10_3, scan_subject_kmers_range_mb_11_1mod4,
     scan_subject_kmers_range_mb_11_2mod4, scan_subject_kmers_range_mb_11_3mod4,
     scan_subject_kmers_range_mb_9_1, scan_subject_kmers_range_mb_9_2,
-    scan_subject_kmers_range_mb_any, select_mb_scan_kind, type_of_word, BlastnTiming,
-    DiagHashTable, MbScanSubjectKind, QueryContext, QueryContextIndex, UngappedHit,
-    COMPRESSION_RATIO,
+    scan_subject_kmers_range_mb_any, scan_subject_kmers_with_offsets, select_mb_scan_kind,
+    type_of_word, BlastnTiming, DiagHashTable, MbScanSubjectKind, QueryContext, QueryContextIndex,
+    UngappedHit, COMPRESSION_RATIO,
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 #[path = "x_pair_seed_disc.rs"]
 mod disc;
@@ -497,59 +507,61 @@ pub(super) fn takes_owner_chunks(
 ///
 ///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
 /// ```
-/// The scan ranges `scan_subject_kmers_with_ranges` visits for an unmasked subject
-/// (`scan_range[1] = 0`, `scan_range[2] = subject->length - lut_word_length`), each cut into
-/// strips of at most `per` grid points; the last strip of a range ends at the range's end.
-/// `s_range` is the range's `scan_range[2] + lut_word_length`.
+/// The scan ranges `scan_subject_kmers_with_ranges` visits (from `first_scan_range`: the whole
+/// subject when it is unmasked, else its `seq_ranges` one by one), each cut into strips of at
+/// most `per` grid points; the last strip of a range ends at the range's end. `s_range` is the
+/// range's `scan_range[2] + lut_word_length`.
 fn plan_strips(
     seq_ranges: &[(i32, i32)],
     s_len: usize,
     word_length: usize,
     lut_word_length: usize,
     scan_step: usize,
+    subject_masked: bool,
     target_strips: usize,
 ) -> Vec<StripJob> {
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
     if seq_ranges.is_empty() || scan_step == 0 {
         return Vec::new();
     }
-    let mut scan_range = [0i32, 0i32, s_len as i32 - lut_word_length as i32];
-    while determine_scanning_offsets(
+    let first = first_scan_range(
         seq_ranges,
-        word_length as i32,
-        lut_word_length as i32,
-        &mut scan_range,
-    ) {
-        let start = scan_range[1];
-        let end = scan_range[2];
-        if start >= 0 && end >= 0 {
-            ranges.push((start as usize, end as usize));
-        }
-        scan_range[1] = scan_range[2] + 1;
-    }
-    let grid_points = |&(start, end): &(usize, usize)| {
+        s_len,
+        word_length,
+        lut_word_length,
+        subject_masked,
+    );
+    // the reference's loop over the ranges, walked again for each pass (no list of them)
+    let ranges = |f: &mut dyn FnMut(usize, usize)| {
+        scan_subject_kmers_with_offsets(seq_ranges, word_length, lut_word_length, first, |s, e| {
+            f(s, e)
+        })
+    };
+    let grid_points = |start: usize, end: usize| {
         if start > end {
             0
         } else {
             (end - start) / scan_step + 1
         }
     };
-    let total: usize = ranges.iter().map(grid_points).sum();
+    let mut total = 0usize;
+    ranges(&mut |start, end| total += grid_points(start, end));
     const MIN_STRIP: usize = 512;
     let per = total.div_ceil(target_strips.max(1)).max(MIN_STRIP);
-    let mut jobs = Vec::new();
-    for range in &ranges {
-        let (start, end) = *range;
+    // a range without grid points still has its strip (the kernel is called and returns at
+    // once, start > end)
+    let mut count = 0usize;
+    ranges(&mut |start, end| count += grid_points(start, end).div_ceil(per).max(1));
+    let mut jobs = Vec::with_capacity(count);
+    ranges(&mut |start, end| {
         let s_range = end.saturating_add(lut_word_length);
-        let n = grid_points(range);
+        let n = grid_points(start, end);
         if n == 0 {
-            // the kernel is called and returns at once (start > end)
             jobs.push(StripJob {
                 start,
                 end,
                 s_range,
             });
-            continue;
+            return;
         }
         let mut k = 0usize;
         while k < n {
@@ -565,7 +577,8 @@ fn plan_strips(
             });
             k = k2;
         }
-    }
+    });
+    debug_assert_eq!(jobs.len(), count);
     jobs
 }
 
@@ -1326,7 +1339,12 @@ fn fold_t<const PT: bool, const TRACK: bool>(
 /// strip order. `taken` counts the strips the owner has taken; with `ahead > 0` a helper
 /// claims a strip only while fewer than `ahead` strips past `taken` are claimed (a bound on
 /// the results waiting for the owner, up to one strip per helper over it), and the buffers
-/// the owner has consumed go back to `spare` for the next strips.
+/// the owner has consumed go back to `spare` for the next strips. Only a pool's stage has
+/// them: on one thread `run_strips` scans and consumes each strip in turn into one buffer.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Strips<T> {
     cursor: AtomicUsize,
     taken: AtomicUsize,
@@ -1339,11 +1357,19 @@ struct Strips<T> {
 
 // No NCBI counterpart: marks the strips as failed if a scan unwinds, so that the owner stops
 // waiting for its result.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Producing<'a, T> {
     strips: &'a Strips<T>,
     done: bool,
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<T> Drop for Producing<'_, T> {
     fn drop(&mut self) {
         if !self.done {
@@ -1370,6 +1396,10 @@ impl<T> Drop for Closing<'_, T> {
     }
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<T> Strips<T> {
     fn new(n: usize, ahead: usize) -> Self {
         Self {
@@ -1523,7 +1553,9 @@ impl<T> Strips<T> {
 /// No NCBI counterpart (scheduling only): runs `produce` for strips `0..n` on this thread
 /// and `helpers` other threads of its pool, and `consume` on this thread for strips
 /// `0, 1, ..., n - 1` in that order, each as soon as its result is there. `ahead` (0: no
-/// bound) bounds how far the helpers scan past the strip being consumed.
+/// bound) bounds how far the helpers scan past the strip being consumed. Without helpers (or
+/// outside a pool) this thread scans and consumes the strips in turn through one buffer, with
+/// no per-strip slots: a masked subject's chunk has a strip for every scan range.
 #[allow(clippy::too_many_arguments)]
 fn run_strips<T: Send>(
     n: usize,
@@ -1535,12 +1567,12 @@ fn run_strips<T: Send>(
     wait_ns: &mut u64,
     timed: bool,
 ) {
-    let strips = Strips::new(n, ahead);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if helpers > 0 && rayon::current_thread_index().is_some() {
+        let strips = Strips::new(n, ahead);
         let strips = &strips;
         rayon::in_place_scope(|scope| {
             for _ in 0..helpers.min(n) {
@@ -1555,11 +1587,16 @@ fn run_strips<T: Send>(
         });
         return;
     }
-    let _ = helpers;
+    let _ = (helpers, ahead, &wait_ns);
+    let mut out = Vec::new();
     for i in 0..n {
-        let out = strips.take(i, produce, scan_ns, wait_ns, timed);
+        out.clear();
+        let t0 = timed.then(std::time::Instant::now);
+        produce(i, &mut out);
+        if let Some(t0) = t0 {
+            *scan_ns += t0.elapsed().as_nanos() as u64;
+        }
         consume(i, &out);
-        strips.recycle(out);
     }
 }
 
@@ -1675,6 +1712,7 @@ fn seed_stage_of(
         x.two_stage.word_length(),
         x.two_stage.lut_word_length(),
         x.scan_step,
+        x.subject_masked,
         strips_per_thread * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip(x, &jobs[i], out);

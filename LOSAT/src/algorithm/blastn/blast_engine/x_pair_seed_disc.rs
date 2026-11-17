@@ -51,13 +51,14 @@
 //!
 //! Scope (anything else returns `false`, and the reference code runs): a discontiguous
 //! megablast table (one or two templates), `window_size > 0` (two hits), the diagonal hash
-//! (query block longer than 8000), `scan_range == 0`, an unmasked subject, no small-query
-//! word extension, no debug, trace or window diagnostics, a subject searched by the owner of a
-//! pool of two threads or more by itself (one subject, or several one at a time under
-//! LOSAT_X_BNFEWSUBJ), or with LOSAT_X_BNDCONE by a search on one thread (no pool: the strips are
-//! scanned and folded in order on that thread). A
-//! contiguous table in two-hit mode stays with the reference (the parent module takes one-hit
-//! contiguous tables only).
+//! (query block longer than 8000), `scan_range == 0`, no small-query word extension, no debug,
+//! trace or window diagnostics, a subject searched by the owner of a pool of two threads or
+//! more by itself (one subject, or several one at a time under LOSAT_X_BNFEWSUBJ), or with
+//! LOSAT_X_BNDCONE by a search on one thread (no pool: the strips are scanned and folded in
+//! order on that thread). A masked subject is scanned in its `seq_ranges` as the reference
+//! scans it, the words of each range with that range's `s_range`. A contiguous table in
+//! two-hit mode stays with the reference (the parent module takes one-hit contiguous tables
+//! only).
 //!
 //! EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the same scope
 //! with the diagonal array instead of the hash (a query block of at most 8000 letters) runs
@@ -186,7 +187,6 @@ fn in_scope(x: &Inputs<'_>) -> bool {
             x.small_na_word,
             x.diagnostics,
         )
-        && !x.subject_masked
         && x.one_subject_owner
 }
 
@@ -204,7 +204,6 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
             x.small_na_word,
             x.diagnostics,
         )
-        && !x.subject_masked
         && x.one_subject_owner
 }
 
@@ -982,9 +981,9 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
 ///    }
 /// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
-/// its pool): the scan ranges of `scan_subject_disc_words_with_ranges` (an unmasked
-/// subject: `scan_range[2] = subject->length - template_length`, stride 1) cut into strips
-/// scanned by any thread, folded here in strip order into `hash` and `hits`. With `fold_part`
+/// its pool): the scan ranges of `scan_subject_disc_words_with_ranges` (the whole subject, or
+/// a masked subject's `seq_ranges` one by one; stride 1) cut into strips scanned by any
+/// thread, folded here in strip order into `hash` and `hits`. With `fold_part`
 /// (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the fold is split by diagonal-hash bucket over
 /// the threads instead.
 ///
@@ -1045,6 +1044,7 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
         disc.template_length,
         disc.template_length,
         1,
+        x.subject_masked,
         STRIPS_PER_THREAD * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_disc(x, disc, &jobs[i], out);
@@ -1783,6 +1783,7 @@ fn seed_stage_array_of<const LEAN: bool>(
         disc.template_length,
         disc.template_length,
         1,
+        x.subject_masked,
         STRIPS_PER_THREAD * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_disc(x, disc, &jobs[i], out);
@@ -2089,7 +2090,8 @@ mod tests {
         concat_sentinels: Vec<u8>,
         packed: Vec<u8>,
         s_len: usize,
-        seq_ranges: [(i32, i32); 1],
+        seq_ranges: Vec<(i32, i32)>,
+        masked: bool,
         score_matrix: [i32; 256],
         nucl_score_table: [i32; 256],
     }
@@ -2176,10 +2178,37 @@ mod tests {
             concat_sentinels,
             packed,
             s_len,
-            seq_ranges: [(0, s_len as i32)],
+            seq_ranges: vec![(0, s_len as i32)],
+            masked: false,
             score_matrix: build_blastna_matrix(2, -3),
             nucl_score_table: build_nucl_score_table(2, -3),
         }
+    }
+
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    /// `c` as a masked subject: its scan ranges (NCBI's `seq_ranges`, right end exclusive) cover
+    /// most of it with gaps of 1 to 120 bases between them; some are shorter than any template
+    /// (the scan skips them) and the last may end at the subject's end.
+    fn mask_case(rng: &mut Lcg, mut c: Case) -> Case {
+        let mut ranges = Vec::new();
+        let mut at = rng.below(30) as usize;
+        while at < c.s_len {
+            let len = if rng.below(10) == 0 {
+                1 + rng.below(20) as usize
+            } else {
+                30 + rng.below(2000) as usize
+            };
+            let end = (at + len).min(c.s_len);
+            ranges.push((at as i32, end as i32));
+            at = end + 1 + rng.below(120) as usize;
+        }
+        assert!(ranges.len() > 10);
+        c.seq_ranges = ranges;
+        c.masked = true;
+        c
     }
 
     fn ctx_refs(c: &Case) -> Vec<&[u8]> {
@@ -2197,7 +2226,7 @@ mod tests {
             search_seq_packed: &c.packed,
             s_len: c.s_len,
             subject_seq_ranges: &c.seq_ranges,
-            subject_masked: false,
+            subject_masked: c.masked,
             scan_step: 1,
             query_context_index: &c.index,
             query_contexts: &c.contexts,
@@ -2232,10 +2261,11 @@ mod tests {
     // type picks one of the scan kernels, two templates the two-template kernel): the pairs
     // of the reference wrapper `scan_subject_disc_words_with_ranges` (one scan of the whole
     // range) folded in one go, against `seed_stage` on 1..8 threads (strips planned for each
-    // thread count, so the kernels restart at many offsets). Hit lists and diagonal hashes
-    // must be the same, and the serial fold must have taken every branch: the `last_hit`
-    // rejection, the first hit of a window (insert with `hit_ready` 0), the second hit
-    // (ungapped extension) both below and above the cutoff.
+    // thread count, so the kernels restart at many offsets). Every second case is a masked
+    // subject (`mask_case`): the reference scans its ranges one by one, each with its own
+    // `s_range`. Hit lists and diagonal hashes must be the same, and the serial fold must have
+    // taken every branch: the `last_hit` rejection, the first hit of a window (insert with
+    // `hit_ready` 0), the second hit (ungapped extension) both below and above the cutoff.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2253,6 +2283,12 @@ mod tests {
                 for template_length in [16usize, 18, 21] {
                     case_no += 1;
                     let c = make_case(&mut rng, 30_000);
+                    // every second case: a masked subject, scanned in its ranges
+                    let c = if case_no % 2 == 0 {
+                        mask_case(&mut rng, c)
+                    } else {
+                        c
+                    };
                     let lookup = build_disc_mb_lookup(
                         &ctx_refs(&c),
                         &c.offsets,
@@ -2279,7 +2315,7 @@ mod tests {
                         c.s_len,
                         disc,
                         &c.seq_ranges,
-                        false,
+                        c.masked,
                         |s_off, s_range, index, index2| {
                             lookup.for_each_hit(index, |q_off_1| {
                                 if q_off_1 != 0 {
@@ -2671,6 +2707,12 @@ mod tests {
                     case_no += 1;
                     let q_len = 1500 + rng.below(2400) as usize;
                     let c = make_case_with(&mut rng, 30_000, q_len);
+                    // every second case: a masked subject, scanned in its ranges
+                    let c = if case_no % 2 == 0 {
+                        mask_case(&mut rng, c)
+                    } else {
+                        c
+                    };
                     let lookup = build_disc_mb_lookup(
                         &ctx_refs(&c),
                         &c.offsets,
@@ -2698,7 +2740,7 @@ mod tests {
                         c.s_len,
                         disc,
                         &c.seq_ranges,
-                        false,
+                        c.masked,
                         |s_off, s_range, index, index2| {
                             lookup.for_each_hit(index, |q_off_1| {
                                 if q_off_1 != 0 {
@@ -2854,7 +2896,8 @@ mod tests {
             scan_range: 1,
             ..inputs(&c, &disc, 40, 40)
         }));
-        assert!(!in_scope(&Inputs {
+        // a masked subject is scanned in its ranges by the stage (the stage tests compare both)
+        assert!(in_scope(&Inputs {
             subject_masked: true,
             ..inputs(&c, &disc, 40, 40)
         }));
@@ -2895,7 +2938,7 @@ mod tests {
             scan_range: 1,
             ..inputs(&c, &disc, 40, 40)
         })));
-        assert!(!in_scope_array(&array(Inputs {
+        assert!(in_scope_array(&array(Inputs {
             subject_masked: true,
             ..inputs(&c, &disc, 40, 40)
         })));

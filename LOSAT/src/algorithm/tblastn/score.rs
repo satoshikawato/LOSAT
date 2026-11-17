@@ -57,6 +57,12 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     /// (`matrix->data[*query_var][*subject_var]`), a PSSM's reads its rows instead
     /// (`pssm->data[index1][*subject_var]`, blast_gapalign.c:3413-3416).
     const WINDOW_READS_QUERY: bool;
+    /// Whether the gapped start of a one-hit HSP of negative length can lie on or after its
+    /// frame's NULLB: only a PSSM's '-' column can score that byte above BLAST_SCORE_MIN (a
+    /// hand-made PSSM: NCBI's PSSM engine scores it BLAST_SCORE_MIN, blast_psi_priv.c:2435-2436),
+    /// the matrix's never does (blast_stat.c:1559-1562), so only a PSSM's window of
+    /// HSP_MAX_WINDOW letters can sum above 0 over it (blast_gapalign.c:3405-3439).
+    const GAPPED_START_PAST_FRAME: bool;
 
     /// A traceback's memory, made where the traceback of an HSP makes it.
     fn traceback_scratch() -> Self::TracebackScratch;
@@ -192,6 +198,7 @@ impl TbnScore for MatrixScore {
     type Walks = std::convert::Infallible;
     type TracebackScratch = GapAlignScratch;
     const WINDOW_READS_QUERY: bool = true;
+    const GAPPED_START_PAST_FRAME: bool = false;
 
     #[inline(always)]
     fn traceback_scratch() -> Self::TracebackScratch {
@@ -464,6 +471,7 @@ impl<'a> TbnScore for PssmScore<'a> {
     type Walks = XPssmWalks<'a>;
     type TracebackScratch = PssmGapScratch;
     const WINDOW_READS_QUERY: bool = false;
+    const GAPPED_START_PAST_FRAME: bool = true;
 
     fn traceback_scratch() -> Self::TracebackScratch {
         PssmGapScratch::new()

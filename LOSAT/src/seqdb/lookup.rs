@@ -800,9 +800,13 @@ impl SeqidLookup<'_> {
     // ```
     /// `CSeqDB::SeqidToOid`: the OID that NCBI's lookup of the Seq-id `seqid` gives first, the
     /// one whose Bioseq NCBI's BLAST database data loader serves for it
-    /// (`CBlastDbDataLoader::x_GetOid`; the search's own database, so its list's OIDs only).
-    /// `None`: not found (`seqid_to_oids`).
-    #[cfg(test)]
+    /// (`CBlastDbDataLoader::x_GetOid`, bdbloader.cpp:393; the search's own database, so its
+    /// list's OIDs only), and its exception: the one lookup of NCBI's prefetch and formatters
+    /// (`common::database::HeaderReader::found_instead`, `stop_lookup_unsure`). Without `multi`
+    /// the ISAMs of the volumes return at the first OID found, so a volume after the first one
+    /// that holds the id is never opened (an ISAM there that does not open stops none of them;
+    /// review 3 of line DBID loadord, H3), where `seqid_to_oids` with `multi`, LOSAT's list of
+    /// every holder, fails on it. `None`: not found (`seqid_to_oids`).
     pub fn seqid_to_oid(&self, seqid: &ParsedSeqId) -> Result<Option<u32>, SeqDbError> {
         Ok(self.seqid_to_oids(seqid, false)?.first().copied())
     }

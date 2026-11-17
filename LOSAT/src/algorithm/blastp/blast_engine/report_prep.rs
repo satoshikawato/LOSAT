@@ -169,16 +169,30 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
+pub(super) struct ReportedPrefetch {
+    /// The texts of the subjects that a query's report reads one by one where its batch's
+    /// prefetch is off, where the first format places them (`ReportFormat::places_subject_reads`).
+    pub(super) subject_reads: SubjectReads,
+    /// The posts of each batch's prefetch, by the batch's first query, which go after the
+    /// reader's messages of the batch (`query_warnings::query_posts`).
+    pub(super) posts: Vec<(usize, crate::report::diag_log::Posts)>,
+    /// What the XML2 and JSON reports do at each subject's `Hit` (`ListedTitles::hit_loads`), for
+    /// the writer.
+    pub(super) hit_loads: crate::report::db_subject::HitLoads,
+}
+
 /// Check the reported subjects before any format is written and read each query batch's prefetch
 /// of them: the database titles and the subjects with parsed Seq-ids that the reports of the
 /// batches before a prefetch's stop show and LOSAT does not write as NCBI does are refused, and
 /// the stopping batch's prefetch returns NCBI's error. The texts of a batch's prefetch go to the
-/// warning lines of its first query, after the reader's messages of the batch; where a batch's
-/// prefetch is off, the texts of the subjects that a query's report reads go to the query's
-/// warning lines, or to the returned `SubjectReads` where the first format places them
-/// (`ReportFormat::places_subject_reads`), and the texts of the loads of a query's PSSM go to the
-/// PSSM files' read messages (`psiblast_pssms`) or to the round's outcome. Also returned: what the
-/// XML2 and JSON reports do at each subject's `Hit` (`ListedTitles::hit_loads`), for the writer.
+/// returned posts (`ReportedPrefetch::posts`), with its first query, after the reader's messages
+/// of the batch; where a batch's prefetch is off, the texts of the subjects that a query's report
+/// reads go to the query's warning lines, or to the returned `ReportedPrefetch::subject_reads`
+/// where the first format places them (`ReportFormat::places_subject_reads`), and the texts of
+/// the loads of a query's PSSM go to the PSSM files' read messages (`psiblast_pssms`) or to the
+/// round's outcome. Also returned: what the XML2 and JSON reports do at each subject's `Hit`
+/// (`ListedTitles::hit_loads`), for the writer.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-772
 /// ```c++
@@ -192,9 +206,8 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
 pub(super) fn prefetch_reported_subjects(
     prep: &ReportPrep<'_, '_>,
     query_warning_lines: &mut [Vec<u8>],
-    prefetch_posts: &mut Vec<(usize, crate::report::diag_log::Posts)>,
     psiblast_pssms: &mut Option<PssmFiles>,
-) -> Result<(SubjectReads, crate::report::db_subject::HitLoads)> {
+) -> Result<ReportedPrefetch> {
     let ReportPrep {
         args,
         outputs,
@@ -353,6 +366,8 @@ pub(super) fn prefetch_reported_subjects(
     // read one by one, by query, where the first format places them
     // (`ReportFormat::places_subject_reads`).
     let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
+    // The posts of each batch's prefetch, by the batch's first query.
+    let mut prefetch_posts: Vec<(usize, crate::report::diag_log::Posts)> = Vec::new();
     let first_report = outputs
         .formats
         .first()
@@ -694,7 +709,11 @@ pub(super) fn prefetch_reported_subjects(
             titles.note_loaded(database, || loaded(hit_lists.len()));
         }
     }
-    Ok((subject_reads, hit_loads))
+    Ok(ReportedPrefetch {
+        subject_reads,
+        posts: prefetch_posts,
+        hit_loads,
+    })
 }
 
 /// Refuse, before any format of the call is written, what LOSAT does not report as NCBI does:

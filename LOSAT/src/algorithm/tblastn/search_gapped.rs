@@ -2286,6 +2286,37 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
     usize::try_from(position as isize - base).ok()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
+// c++/src/algo/blast/core/blast_hits.c:1161-1163,1233-1234
+// ```c
+//       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
+// ...
+//     /* skip translation if full translation has already been done */
+//     if (target_t->partial && (start ||
+//         (stop < target_t->subject_blk->length / CODON_LENGTH -3)))
+// ...
+//     /* +1 as the first byte is a sentinel. */
+//     return target_t->translations[context] - target_t->range[2*context] + 1;
+// ```
+// NCBI skips the translation of a subject of fewer than 12 bases (`0 < n / 3 - 3` is false) and
+// returns the frame's translation that was never made: NULL + 1. Every caller reads it next: the
+// traceback's gapped start and ALIGN_EX (blast_traceback.c:429-436,509-512), the identities after
+// the composition-based redo (blast_kappa.c:527-528), the ungapped re-evaluation
+// (blast_hits.c:2700-2705). NCBI BLAST+ 2.17.0 dies there with SIGSEGV (probes on ws, 2026-11-17:
+// `-subject` and `-db`, frames + and -, a matrix query with and without composition-based
+// statistics, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS, rule 3). A subject of 9 or
+// 10 bases leaves no HSP to that point at these settings in NCBI and LOSAT alike, so the search
+// goes on; an HSP dropped before it (contained, cut by the hit list) leaves it too.
+/// The refusal of a read of the translation of a frame of a subject of fewer than 12 bases
+/// (`TargetTranslation::get`): NCBI BLAST+ never makes that translation and reads address 1 there.
+#[cold]
+#[inline(never)]
+fn x_traceback_of_an_untranslated_frame() -> anyhow::Error {
+    anyhow::anyhow!(
+        "TBLASTN: an HSP on a subject of fewer than 12 bases reaches the traceback, which reads the translation of its frame that NCBI BLAST+ never makes for such a subject (it reads address 1 and crashes), which LOSAT does not support"
+    )
+}
+
 pub(super) struct TargetTranslation<'a> {
     subject: SubjectNt<'a>,
     code: &'a GeneticCode,
@@ -2435,6 +2466,8 @@ impl<'a> TargetTranslation<'a> {
                     0
                 };
             }
+        } else if target.sequence.is_empty() {
+            return Err(x_traceback_of_an_untranslated_frame());
         }
         Ok((&target.sequence, target.stop, target.base))
     }
@@ -2471,7 +2504,8 @@ impl<'a> TargetTranslation<'a> {
     /// the translation's ends), as (residues, the whole translation's length, the subject position
     /// of the first byte). The residues end as the whole translation does where the window
     /// reaches its ends (no byte before its first residue, a 0 after its last) and with a fence
-    /// elsewhere. A subject of fewer than 12 letters gives what `get(frame, -1, end)` gives.
+    /// elsewhere. A subject of fewer than 12 letters gives what `get(frame, -1, end)` gives (its
+    /// refusal, `x_traceback_of_an_untranslated_frame`).
     pub(super) fn x_whole_window(
         &mut self,
         frame: i8,
@@ -2482,7 +2516,7 @@ impl<'a> TargetTranslation<'a> {
         debug_assert!(margin >= HSP_MAX_WINDOW, "margin {margin}");
         let n = self.subject.len();
         // `get` translates nothing for a subject of fewer than 12 letters (`stop < n / 3 - 3` is
-        // `0 < 0`) and gives an empty window, as it did after a fence.
+        // `0 < 0`) and refuses the read, as after a fence.
         if n / 3 <= 3 {
             return self.get(frame, -1, end);
         }
@@ -5719,16 +5753,36 @@ mod tests {
         for frame in [1, 2, 3, -1, -2, -3] {
             let mut whole = TargetTranslation::new(&short, &code);
             let mut windows = TargetTranslation::new(&short, &code);
-            let expected = whole
-                .get(frame, -1, 2)
-                .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
-                .unwrap();
+            let expected = whole.get(frame, -1, 2).map(|_| ()).unwrap_err().to_string();
             let got = windows
                 .x_whole_window(frame, 0, 2, HSP_MAX_WINDOW)
-                .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
-                .unwrap();
+                .map(|_| ())
+                .unwrap_err()
+                .to_string();
             assert_eq!(got, expected, "frame {frame}");
-            assert_eq!(got, (Vec::new(), 0, 0), "frame {frame}");
+            assert_eq!(
+                got,
+                x_traceback_of_an_untranslated_frame().to_string(),
+                "frame {frame}"
+            );
+            // A partial window of the HSP refuses too (NCBI's `subject.offset >= 0` takes the same
+            // skip).
+            let partial = windows
+                .get(frame, 0, 2)
+                .map(|_| ())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(partial, expected, "frame {frame}");
+        }
+        // The bound: NCBI translates a subject of 12 bases (`0 < 12 / 3 - 3`), none shorter.
+        for n in 1..=12 {
+            let subject = vec![b'A'; n];
+            for frame in [1, 2, 3, -1, -2, -3] {
+                let read = TargetTranslation::new(&subject, &code)
+                    .get(frame, 0, 1)
+                    .is_ok();
+                assert_eq!(read, n == 12, "{n} bases, frame {frame}");
+            }
         }
     }
 

@@ -476,6 +476,35 @@ impl HeldState {
                                     skipping = true;
                                     report.declare(crate::report::ostream::Site::Report)?;
                                 }
+                                // `Close`'s flush of a report that LOSAT held in writes of its own:
+                                // NCBI's pieces of the report decide where NCBI's writes failed.
+                                Err(error)
+                                    if crate::report::ostream::is_undecided_report_write_failure(
+                                        &error,
+                                    ) =>
+                                {
+                                    let (start, site) = region;
+                                    let stop = region_ends
+                                        .iter()
+                                        .copied()
+                                        .find(|&at| at > start)
+                                        .unwrap_or(held.len());
+                                    let pieces = crate::report::ostream::report_pieces(
+                                        site,
+                                        &held[start..stop],
+                                    );
+                                    match report.resolve(&pieces) {
+                                        Err(error)
+                                            if crate::report::ostream::is_caught_report_write_failure(
+                                                &error,
+                                            ) =>
+                                        {
+                                            skipping = true;
+                                            report.declare(crate::report::ostream::Site::Report)?;
+                                        }
+                                        resolved => resolved?,
+                                    }
+                                }
                                 flushed => flushed?,
                             }
                         }

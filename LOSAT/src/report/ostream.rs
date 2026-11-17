@@ -1339,6 +1339,21 @@ impl Drop for Core {
     }
 }
 
+/// The process's standard output as the command line's report device: unbuffered (a duplicate of
+/// its descriptor), so that each write is one write of the device and the bytes that a failed
+/// write left are known (`Core::write_failed`; `std::io::Stdout` keeps a line's tail until its
+/// flush and counts it as taken). Where the descriptor cannot be duplicated, `std::io::stdout`.
+fn standard_output_device() -> Box<dyn std::io::Write + Send> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsFd;
+        if let Ok(fd) = std::io::stdout().as_fd().try_clone_to_owned() {
+            return Box::new(std::fs::File::from(fd));
+        }
+    }
+    Box::new(std::io::stdout())
+}
+
 /// The run's report stream, which a write to standard error makes NCBI's writes of first
 /// (`tie_standard_output`): standard output (the process's, tied to standard error) or the
 /// command line's `-out` file.
@@ -1405,11 +1420,9 @@ impl ReportStream {
             .map_or(0, |choice| choice.number);
         let stream = match out_file {
             Some(file) => Self::file(Box::new(file), program, Site::of_format(number)),
-            None => Self::standard_output(
-                Box::new(std::io::stdout()),
-                program,
-                Site::of_format(number),
-            ),
+            None => {
+                Self::standard_output(standard_output_device(), program, Site::of_format(number))
+            }
         };
         if crate::cli::is_command_line_run() {
             *lock(&RUN_PROGRAM) = Some(program);

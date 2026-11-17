@@ -102,7 +102,8 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
         let volumes = RpsVolumeSet::of(database.x_seqdb());
-        let mut setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        let mut setup = RpsVolumeSetup::new(PROGRAM, options.window_size)
+            .with_database(database.name(), volumes.volumes.len());
         let mut faulty_files = false;
         for &index in &volumes.order {
             if setup.check(&volumes.volumes[index], false)?.is_err() {

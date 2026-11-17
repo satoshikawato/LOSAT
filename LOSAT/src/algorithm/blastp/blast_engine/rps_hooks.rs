@@ -476,7 +476,8 @@ pub(super) fn rps_search(
         }
     }
     let mut gapped_k = Vec::new();
-    let mut setup = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32);
+    let mut setup = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32)
+        .with_database(database.name(), db_volumes.len());
     // The workers' scratch, kept from volume to volume (`RpsWorkers`).
     let workers = RpsWorkers::new(pool.threads());
     // The first failing batch (its number and error) of the volumes searched so far.

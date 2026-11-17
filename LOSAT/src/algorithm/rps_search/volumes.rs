@@ -226,6 +226,9 @@ pub(crate) struct RpsVolumeSetup {
     /// `reopen` regroups them again without reading every hit. This set-up is the one owner of the
     /// fact: a run that reopens volumes keeps the set-up that checked them.
     regrouped: std::collections::BTreeSet<String>,
+    /// The `-db` value of a database of one volume, which NCBI's error of a missing `.freq`
+    /// names (`with_database`); `None`: each volume's path.
+    database_name: Option<String>,
 }
 
 impl RpsVolumeSetup {
@@ -235,7 +238,26 @@ impl RpsVolumeSetup {
             window,
             first_costs: None,
             regrouped: std::collections::BTreeSet::new(),
+            database_name: None,
         }
+    }
+
+    /// The set-up of the volumes of the database `name` (the `-db` value as NCBI keeps it) of
+    /// `num_volumes` volumes: NCBI searches a database of one volume by its name, so that the
+    /// error of a missing `.freq` names it as given, and each volume of several by its path.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346, 380-386
+    /// ```c++
+    /// 	CSeqDB::FindVolumePaths(db, CSeqDB::eProtein, m_rps_databases, NULL, true, true);
+    /// 	m_num_of_dbs = static_cast<unsigned int>(m_rps_databases.size());
+    /// 	...
+    /// 		if(1 == m_num_of_dbs)
+    /// 		{
+    /// 			return s_RunLocalRpsSearch(m_db_name, *m_query_vector, m_opt_handle);
+    /// ```
+    pub(crate) fn with_database(mut self, name: &str, num_volumes: usize) -> Self {
+        self.database_name = (num_volumes == 1).then(|| name.to_string());
+        self
     }
 
     /// The files of `volume` (with its frequency ratios when `cbs`, composition-based
@@ -331,7 +353,7 @@ impl RpsVolumeSetup {
             Err(RpsVolumeFault::NoMatrix) => return Ok(Err(RpsVolumeError::NoMatrix)),
         };
         if cbs {
-            match files.open_freq(volume.base(), self.program) {
+            match files.open_freq(volume.base(), self.program, self.database_name.as_deref()) {
                 Ok(()) => {}
                 Err(RpsOpenError::Refused(text)) => bail!(text),
                 Err(RpsOpenError::Ncbi(text)) => return Ok(Err(RpsVolumeError::Files(text))),

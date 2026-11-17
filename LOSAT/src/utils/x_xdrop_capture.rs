@@ -233,10 +233,7 @@ pub(super) fn record(
     FILE.with(|cell| {
         let mut file = cell.borrow_mut();
         if file.is_none() {
-            #[cfg(not(target_family = "wasm"))]
-            let pid = std::process::id();
-            #[cfg(target_family = "wasm")]
-            let pid = 0u32;
+            let pid = crate::utils::process_id::process_id();
             let k = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
             let path = cfg.dir.join(format!("xdp-{pid}-t{k:03}.xdp"));
             let opened = std::fs::create_dir_all(&cfg.dir).and_then(|()| {

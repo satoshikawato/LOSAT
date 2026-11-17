@@ -130,8 +130,15 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   pfoff-1, L1): `na`'s HBB record (`ENST00000335295.4`; `pfo_qft.faa` its longest ORF, translated), then the query of
   mix2_q.fna (mix2_qt.faa) that hits `nnp`/`nut` alone, so that the first query's first `Hit` is a parsed subject of
   `na` whose lookup throws and no subject of `nut` (with a taxid) comes before it, where pfo_q.fna's first query
-  shows `nut`'s copy of HBA1 (`ENSTTEST0001.1`) first. `make_multidb.py --pfoff-only MAKEBLASTDB` writes only these
-  (no database; MAKEBLASTDB is not run).
+  shows `nut`'s copy of HBA1 (`ENSTTEST0001.1`) first. `pfo_qs.faa`, `pfo_qsx.fna`, `pfo_qs.fna`, `pfo_qst.faa`,
+  `pfo_qss.fna` (rows `.taxstop.`, the same review): a first query whose report throws at its first `Hit` and shows a
+  subject of `put`/`nut` (with a taxid) after it, which NCBI never loads, with more Seq-aligns than the second, whose
+  batch's prefetch (on below the rows' `PRE_FETCH_SEQS_LIMIT`) loads such a subject and then stops at one whose lookup
+  throws: BLASTP's and BLASTX's first query the letters of mix2_q's (mix2_qx's) parsed query, then half of its other
+  query's, twice; the nucleotide programs' `na`'s HBB twice (its ORF for TBLASTN), then half of the query that hits
+  `nnp`; the second query that query's letters, then the parsed one's (TBLASTX: a third of them, then the first 200
+  of the parsed one's). `make_multidb.py --pfoff-only MAKEBLASTDB` writes only these (no database; MAKEBLASTDB is not
+  run).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -584,8 +591,8 @@ def longest_orf(letters):
 
 
 def make_pfoff(_binary):
-    """Writes the queries pfo_q*.f* (line DBID pfoff): those of mix2_q*.f* in the other order, and pfo_qf.fna and
-    pfo_qft.faa (na's HBB record, its ORF, then the query that hits nnp alone)."""
+    """Writes the queries pfo_q*.f* (line DBID pfoff): those of mix2_q*.f* in the other order, pfo_qf.fna and
+    pfo_qft.faa (na's HBB record, its ORF, then the query that hits nnp alone), and pfo_qs*.f* (the rows .taxstop.)."""
     for source, name in (("mix2_q.faa", "pfo_q.faa"), ("mix2_qx.fna", "pfo_qx.fna"), ("mix2_q.fna", "pfo_q.fna"),
                          ("mix2_qt.faa", "pfo_qt.faa")):
         records = read_fasta_path(os.path.join(HERE, source))
@@ -606,6 +613,39 @@ def make_pfoff(_binary):
             for at in range(0, len(query), 60):
                 f.write(query[at:at + 60] + "\n")
             f.write(unparsed[0] + "".join(unparsed[1]))
+
+    def letters_of(source, unparsed):
+        """The letters of the query of `source` that hits nnp/noacc_v5 alone (`unparsed`) or of the other one."""
+        for header, lines in read_fasta_path(os.path.join(HERE, source)):
+            if header.startswith(">mix2_u ") == unparsed:
+                return "".join(line.strip() for line in lines)
+
+    def write_queries(name, queries):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, query in queries:
+                f.write(header + "\n")
+                for at in range(0, len(query), 60):
+                    f.write(query[at:at + 60] + "\n")
+
+    for source, name in (("mix2_q.faa", "pfo_qs.faa"), ("mix2_qx.fna", "pfo_qsx.fna")):
+        parsed, unparsed = letters_of(source, False), letters_of(source, True)
+        first = parsed + unparsed[:len(unparsed) // 2]
+        write_queries(name, ((">pfo_s1 twice the letters of the parsed query of " + source + ", then half of the other",
+                              first + first),
+                             (">pfo_s2 the letters of the other query of " + source + ", then those of the parsed one",
+                              unparsed + parsed)))
+    for source, name, hbb in (("mix2_q.fna", "pfo_qs.fna", letters), ("mix2_qt.faa", "pfo_qst.faa", longest_orf(letters))):
+        parsed, unparsed = letters_of(source, False), letters_of(source, True)
+        write_queries(name, ((">pfo_s1 twice multidb/na's ENST00000335295.4 (HBB" + (", its ORF" if hbb != letters else "")
+                              + "), then half of the query of " + source + " that hits nnp", hbb + hbb +
+                              unparsed[:len(unparsed) // 2]),
+                             (">pfo_s2 the letters of the query of " + source + " that hits nnp, then those of the other",
+                              unparsed + parsed)))
+    parsed, unparsed = letters_of("mix2_q.fna", False), letters_of("mix2_q.fna", True)
+    write_queries("pfo_qss.fna", ((">pfo_s1 twice multidb/na's ENST00000335295.4 (HBB), then half of the query of "
+                                   "mix2_q.fna that hits nnp", letters + letters + unparsed[:len(unparsed) // 2]),
+                                  (">pfo_s3 a third of the query of mix2_q.fna that hits nnp, then 200 letters of the "
+                                   "other", unparsed[:len(unparsed) // 3] + parsed[:200])))
 
 
 def main(binary):

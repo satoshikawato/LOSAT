@@ -995,7 +995,8 @@ masked). Line NP item M4a-2c.
   BLAST Database error, and where the prefetch is off its formatters fail to read it)`) but
   writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.45,
   line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
-  `Hit`s after it in that report, and a text that NCBI writes once at the next `Hit` it loads), a
+  `Hit`s after it in that report, and a text that NCBI writes once at its next load, a later `Hit` or
+  a later batch's prefetch), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

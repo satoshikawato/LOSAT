@@ -7,27 +7,30 @@
 //! label (`'a`) is not a literal. Then each `fn` item's parameter list and body braces are matched;
 //! a declaration without a body has no length. Closures and nested functions count in the function
 //! around them, and a nested function is also measured on its own. Test code is left out:
-//! `#[cfg(test)]` modules, the files they declare (with or without `#[path]`, and the modules those
-//! files declare), files under a `tests` directory, files with `#![cfg(test)]`, and items with a
-//! `#[test]` attribute or a `#[cfg(..)]` that holds only under `test` (`all(test, ..)`; not
-//! `any(test, ..)` or `not(test)`). These are the rules, and the counts, of the scanner of line
-//! SW's audit (`rust_fns.py`, outside the repository).
+//! `#[cfg(test)]` modules, the files they declare and the files those declare (found as rustc finds
+//! them), files under a `tests` directory or with `#![cfg(test)]`, and items with `#[test]` or a
+//! `#[cfg(..)]` that holds only under `test` (not `not(test)` or `any(..)` with a part that does not
+//! need `test`). These are the rules, the counts and the blind spots of line SW's audit scanner
+//! (`rust_fns.py`, outside the repository): a function made by a macro (`fn $name`), with a
+//! non-ASCII name or with a brace in its signature (`-> [u8; { N }]`) is not measured, and a test
+//! attribute on a macro call with a path (`crate::m! { .. }`) covers the code up to the next `;`.
 //!
 //! No NCBI counterpart: the test reads LOSAT's own source; NCBI BLAST+ has no such check.
-//! Standard library only.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-/// The functions over 1,000 lines, each capped at its length when this test was added:
-/// (path below `LOSAT/src`, function name, cap in lines). The Owner decided on 2026-11-17 (answer a
-/// to line SW's question Q12) that these functions may not grow and that no other function may
-/// pass 1,000 lines; line SW's pull requests lower a cap when they shorten its function. When the
-/// test fails, move the new code into a function of its own (the preferred way: one owner per
-/// concept, AGENTS.md), or, when the growth is intended, raise that function's number here in the
-/// same pull request. A new function over 1,000 lines is split, or gets a row here with a comment
-/// that gives the reason. A name that occurs twice in one file has the cap on each.
+/// The functions over 1,000 lines, capped as the Owner decided on 2026-11-17 (answer a to line
+/// SW's question Q12; row 2026-11-17 of docs/decisions/OWNER_DECISIONS.md): these functions may
+/// not grow past their caps, and no other function may pass 1,000 lines. A row is (path below
+/// `LOSAT/src`, function name, cap in lines), the cap being the function's length when its cap was
+/// last set; line SW's pull requests lower a cap when they shorten its function. When the test
+/// fails, move the new code into a function of its own (the preferred way), or, when the growth is
+/// intended, raise that function's number here in the same pull request. A new function over 1,000
+/// lines is split, or gets a row here with a comment that gives the reason. A cap holds only the
+/// longest function of that name in that file; any other function of the same name is held at the
+/// limit.
 #[rustfmt::skip]
 const CAPS: &[(&str, &str, usize)] = &[
     ("algorithm/blastn/blast_engine/run.rs", "run_in_pool", 1516),
@@ -48,22 +51,31 @@ fn functions_stay_within_their_caps() {
         "functions longer than allowed:\n{}\nTo fix: move the new code into a function of its own \
          (preferred), or, when the growth is intended, raise the function's cap in CAPS of \
          LOSAT/tests/function_size_limit.rs in the same pull request (a new function over the \
-         limit: split it, or add a row with a reason)",
+         limit: split it, or add a row with a reason; a renamed or moved function: change its row)",
         offenders.join("\n")
     );
 }
 
-/// Each function outside test code that is longer than its cap, or than `LIMIT` without one.
+/// Each function outside test code that is longer than its cap, or than `LIMIT` without one. A cap
+/// holds the longest function of its name in its file (the last of equal ones).
 fn offenders(functions: &[Function], caps: &[(&str, &str, usize)]) -> Vec<String> {
+    let counted: Vec<&Function> = functions.iter().filter(|f| !f.test).collect();
     let mut found = Vec::new();
-    for f in functions.iter().filter(|f| !f.test) {
+    for f in &counted {
+        let same = |g: &Function| g.file == f.file && g.name == f.name;
+        let longest = || {
+            !counted
+                .iter()
+                .any(|g| same(g) && (g.lines, g.line) > (f.lines, f.line))
+        };
         let (most, bound) = match caps.iter().find(|c| c.0 == f.file && c.1 == f.name) {
-            Some(&(_, _, cap)) => (cap, format!("cap {cap}")),
-            None => (LIMIT, format!("limit {LIMIT}")),
+            Some(&(_, _, cap)) if longest() => (cap, format!("cap {cap}")),
+            _ => (LIMIT, format!("limit {LIMIT}")),
         };
         if f.lines > most {
             let (file, line, name, lines) = (&f.file, f.line, &f.name, f.lines);
-            found.push(format!("src/{file}:{line} {name} {lines} lines ({bound})"));
+            let row = format!("LOSAT/src/{file}:{line} {name} {lines} lines ({bound})");
+            found.push(row);
         }
     }
     found
@@ -88,23 +100,29 @@ fn scan_tree(src: &Path) -> Vec<Function> {
 
 /// The `.rs` files below `dir`: (path below `src`, text).
 fn read_rust_files(dir: &Path, rel: &str, out: &mut Vec<(String, Vec<u8>)>) {
-    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-    for entry in entries.map(Result::unwrap) {
+    for entry in or_panic(fs::read_dir(dir), dir) {
+        let entry = or_panic(entry, dir);
         let (path, rel) = (
             entry.path(),
             format!("{rel}{}", entry.file_name().to_string_lossy()),
         );
-        if entry.file_type().unwrap().is_dir() {
+        if or_panic(entry.file_type(), &path).is_dir() {
             read_rust_files(&path, &format!("{rel}/"), out);
         } else if rel.ends_with(".rs") {
-            out.push((rel, fs::read(&path).unwrap()));
+            out.push((rel, or_panic(fs::read(&path), &path)));
         }
     }
+}
+
+/// The value of a file system call, or a panic that names the path.
+fn or_panic<T>(result: std::io::Result<T>, path: &Path) -> T {
+    result.unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
 /// The functions of the given files (path below `src`, text), with test code marked.
 fn scan_sources(files: &[(String, Vec<u8>)]) -> Vec<Function> {
     let scans: Vec<FileScan> = files.iter().map(|(_, text)| scan_file(text)).collect();
+    let own = own_dirs(files, &scans);
     // Test files: under a `tests` directory, with `#![cfg(test)]`, declared with a test attribute
     // or inside a test item, and every file that a test file declares.
     let mut queue = Vec::new();
@@ -121,7 +139,7 @@ fn scan_sources(files: &[(String, Vec<u8>)]) -> Vec<Function> {
         }
         for decl in scan.decls.values() {
             if decl.test || in_spans(&scan.spans, decl.pos) {
-                queue.extend(resolve(files, k, decl));
+                queue.extend(resolve(files, &own, k, decl));
             }
         }
     }
@@ -129,7 +147,7 @@ fn scan_sources(files: &[(String, Vec<u8>)]) -> Vec<Function> {
     while let Some(k) = queue.pop() {
         if !std::mem::replace(&mut test_file[k], true) {
             for decl in scans[k].decls.values() {
-                queue.extend(resolve(files, k, decl));
+                queue.extend(resolve(files, &own, k, decl));
             }
         }
     }
@@ -163,13 +181,15 @@ struct FileScan {
     whole_test: bool,
 }
 
-/// A `mod name;` declaration: the offset of `mod`, the name, its `#[path]`, and whether a test
-/// attribute is on it.
+/// A `mod name;` declaration: the offset of `mod`, the name, its `#[path]`, whether a test
+/// attribute is on it, and the inline modules around it (`mod a { .. }`, outermost first).
+#[derive(Default)]
 struct Decl {
     pos: usize,
     name: String,
     path: Option<String>,
     test: bool,
+    inline: Vec<String>,
 }
 
 fn in_spans(spans: &[(usize, usize)], pos: usize) -> bool {
@@ -181,7 +201,7 @@ fn scan_file(src: &[u8]) -> FileScan {
     let close = closers(&m);
     let newlines: Vec<usize> = (0..src.len()).filter(|&i| src[i] == b'\n').collect();
     let line = |pos: usize| newlines.partition_point(|&nl| nl < pos) + 1;
-    let mut scan = FileScan::default();
+    let (mut scan, mut blocks) = (FileScan::default(), Vec::new());
     for i in (0..m.len()).filter(|&i| !word_before(&m, i)) {
         if m[i..].starts_with(b"fn") {
             if let Some((name, end)) = fn_item(&m, &close, i) {
@@ -191,20 +211,25 @@ fn scan_file(src: &[u8]) -> FileScan {
         } else if m[i..].starts_with(b"mod") {
             let k = skip_ws(&m, i + 3);
             let name = string(ident(&m, k));
-            let semi = skip_ws(&m, k + name.len());
-            if k > i + 3 && !name.is_empty() && at(&m, semi) == b';' {
-                let (pos, path, test) = (i, None, false);
-                scan.decls.insert(
-                    semi + 1,
-                    Decl {
-                        pos,
-                        name,
-                        path,
-                        test,
-                    },
-                );
+            let next = skip_ws(&m, k + name.len());
+            if k == i + 3 || name.is_empty() {
+                continue;
+            }
+            if at(&m, next) == b';' {
+                let decl = Decl {
+                    pos: i,
+                    name,
+                    ..Decl::default()
+                };
+                scan.decls.insert(next + 1, decl);
+            } else if at(&m, next) == b'{' {
+                blocks.extend(closer(&close, next).map(|end| (next, end, name)));
             }
         }
+    }
+    for decl in scan.decls.values_mut() {
+        let around = blocks.iter().filter(|b| b.0 < decl.pos && decl.pos < b.1);
+        decl.inline = around.map(|b| b.2.clone()).collect();
     }
     for a in 0..m.len() {
         let Some((mut end, inner, attr)) = attribute(src, &m, &close, a) else {
@@ -233,18 +258,55 @@ fn scan_file(src: &[u8]) -> FileScan {
     scan
 }
 
-/// The files that a `mod` declaration of file `k` loads.
-fn resolve(files: &[(String, Vec<u8>)], k: usize, decl: &Decl) -> Vec<usize> {
+/// Whether each file looks for the files of its `mod x;` in its own directory, as rustc does for
+/// the crate roots `lib.rs` and `main.rs`, a `mod.rs` and a file loaded through `#[path]`; another
+/// `a.rs` looks in `a/`. Walked down from the crate roots; a file they do not reach is not compiled
+/// and is judged by its name.
+fn own_dirs(files: &[(String, Vec<u8>)], scans: &[FileScan]) -> Vec<bool> {
+    let base = |k: usize| files[k].0.rsplit('/').next().unwrap_or_default();
+    let mut own: Vec<bool> = (0..files.len())
+        .map(|k| matches!(base(k), "mod.rs" | "lib.rs" | "main.rs"))
+        .collect();
+    let mut stack: Vec<usize> = (0..files.len())
+        .filter(|&k| matches!(files[k].0.as_str(), "lib.rs" | "main.rs"))
+        .collect();
+    let mut reached = vec![false; files.len()];
+    for &k in &stack {
+        reached[k] = true;
+    }
+    while let Some(k) = stack.pop() {
+        for decl in scans[k].decls.values() {
+            for t in resolve(files, &own, k, decl) {
+                if !std::mem::replace(&mut reached[t], true) {
+                    own[t] = decl.path.is_some() || base(t) == "mod.rs";
+                    stack.push(t);
+                }
+            }
+        }
+    }
+    own
+}
+
+/// The files that a `mod name;` of file `k` loads, as rustc finds them: with `#[path]`, the path
+/// from the file's directory (inside `mod a { .. }`, from the inline module's directory); without,
+/// `name.rs` or `name/mod.rs` in the directory of the file's modules (see `own_dirs`), below it
+/// the names of the inline modules around the declaration.
+fn resolve(files: &[(String, Vec<u8>)], own: &[bool], k: usize, decl: &Decl) -> Vec<usize> {
     let rel = &files[k].0;
     let dir = &rel[..rel.rfind('/').map_or(0, |p| p + 1)];
-    let own = match &rel[dir.len()..] {
-        "mod.rs" | "lib.rs" | "main.rs" => dir.to_string(),
-        base => format!("{dir}{}/", base.strip_suffix(".rs").unwrap_or(base)),
+    let mut here = if own[k] {
+        dir.to_string()
+    } else {
+        format!("{}/", rel.strip_suffix(".rs").unwrap_or(rel))
     };
+    for module in &decl.inline {
+        here = format!("{here}{module}/");
+    }
     let name = &decl.name;
     let candidates = match &decl.path {
-        Some(path) => vec![normalize(&format!("{dir}{path}"))],
-        None => vec![format!("{own}{name}.rs"), format!("{own}{name}/mod.rs")],
+        Some(path) if decl.inline.is_empty() => vec![normalize(&format!("{dir}{path}"))],
+        Some(path) => vec![normalize(&format!("{here}{path}"))],
+        None => vec![format!("{here}{name}.rs"), format!("{here}{name}/mod.rs")],
     };
     let index = |c: &String| files.iter().position(|f| f.0 == *c);
     candidates.iter().filter_map(index).collect()
@@ -396,11 +458,12 @@ fn string(bytes: &[u8]) -> String {
 /// The `fn` item whose keyword is at `i`: its name and the offset of its body's closing brace.
 fn fn_item<'m>(m: &'m [u8], close: &[u32], i: usize) -> Option<(&'m [u8], usize)> {
     let j = skip_ws(m, i + 2);
-    let name = ident(m, j);
+    let raw = 2 * usize::from(m[j..].starts_with(b"r#"));
+    let name = ident(m, j + raw);
     if j == i + 2 || name.is_empty() {
         return None;
     }
-    let mut k = skip_ws(m, j + name.len());
+    let mut k = skip_ws(m, j + raw + name.len());
     if at(m, k) == b'<' {
         k = skip_ws(m, skip_angle(m, k)?);
     }
@@ -574,6 +637,7 @@ const LITERALS: &str = r##"fn a<'a>(x: &'a str) -> &'a str {
     let s = "}\"}";
     let r = r#"}"}"#;
     let c = ('}', b'{', '\'', b"{", '\u{7d}');
+    let d = (br#"{"#, c"{", cr#"}"#);
     'b: { break 'b; }
     x
 }
@@ -581,13 +645,13 @@ fn b() {}"##;
 
 #[test]
 fn braces_in_comments_and_literals_do_not_count() {
-    let expected = ["lib.rs:1 a 9", "lib.rs:10 b 1"];
+    let expected = ["lib.rs:1 a 10", "lib.rs:11 b 1"];
     assert_eq!(found(&[("lib.rs", LITERALS)]), expected);
 }
 
 const ITEMS: &str = r#"trait T {
     fn declared(&self);
-    fn provided(&self) {}
+    fn provided(&self, f: fn(u8) -> u8, g: impl Fn(u8), h: extern "C" fn()) {}
 }
 pub(crate) const unsafe fn outer() {
     fn inner() {
@@ -596,37 +660,50 @@ pub(crate) const unsafe fn outer() {
 #[test]
 #[ignore = "slow"]
 fn unit() {}
-#[cfg(all(test, unix))]
+#[cfg(all(test,
+    unix))]
 fn helper() {}
 #[cfg(any(test, unix))]
 fn shared() {}
 #[cfg(test)]
-mod tests {
+mod checks {
     fn in_module() {}
+    mod helpers;
+    #[path = "../x_tests.rs"]
+    mod x;
 }
-#[cfg(test)]
-#[path = "../x_tests.rs"]
-mod x;"#;
+mod a;
+fn r#match() {}"#;
 
 #[test]
 fn nested_functions_and_test_code() {
+    // rustc's module files: `a.rs` has its modules in `a/`, inline modules add their names, and a
+    // file loaded through `#[path]` has them beside it.
     let files = [
-        ("a/lib.rs", ITEMS),
+        ("lib.rs", ITEMS),
+        ("a.rs", "#[cfg(test)]\nmod t {\n    mod h;\n}"),
+        ("a/t/h.rs", "fn in_inline_module() {}"),
+        ("checks/helpers.rs", "fn in_inline_test_module() {}"),
         ("x_tests.rs", "mod deep;\nfn in_file() {}"),
-        ("x_tests/deep.rs", "fn deeper() {}"),
+        ("deep.rs", "fn beside_path_file() {}"),
+        ("inner.rs", "#![cfg(test)]\nfn whole() {}"),
         ("writedb/tests/b.rs", "fn in_dir() {}"),
         ("plain.rs", "#[cfg(not(test))]\nfn plain() {}"),
     ];
     let expected = [
-        "a/lib.rs:3 provided 1",
-        "a/lib.rs:5 outer 4",
-        "a/lib.rs:6 inner 2",
-        "a/lib.rs:11 unit 1 test",
-        "a/lib.rs:13 helper 1 test",
-        "a/lib.rs:15 shared 1",
-        "a/lib.rs:18 in_module 1 test",
+        "lib.rs:3 provided 1",
+        "lib.rs:5 outer 4",
+        "lib.rs:6 inner 2",
+        "lib.rs:11 unit 1 test",
+        "lib.rs:14 helper 1 test",
+        "lib.rs:16 shared 1",
+        "lib.rs:19 in_module 1 test",
+        "lib.rs:25 match 1",
+        "a/t/h.rs:1 in_inline_module 1 test",
+        "checks/helpers.rs:1 in_inline_test_module 1 test",
         "x_tests.rs:2 in_file 1 test",
-        "x_tests/deep.rs:1 deeper 1 test",
+        "deep.rs:1 beside_path_file 1 test",
+        "inner.rs:2 whole 1 test",
         "writedb/tests/b.rs:1 in_dir 1 test",
         "plain.rs:2 plain 1",
     ];
@@ -636,12 +713,23 @@ fn nested_functions_and_test_code() {
 #[test]
 fn offenders_name_their_cap_or_the_limit() {
     let body = "\n".repeat(LIMIT);
-    let text = format!("fn long() {{{body}}}\nfn capped() {{\n}}\n#[test]\nfn unit() {{{body}}}");
+    let text = format!(
+        "fn long() {{{body}}}\nfn capped() {{\n}}\n#[test]\nfn unit() {{{body}}}\n\
+         fn twice() {{{body}}}\nfn twice() {{\n{body}}}"
+    );
     let functions = scan_sources(&[("a.rs".to_string(), text.into_bytes())]);
     let expected = [
-        "src/a.rs:1 long 1001 lines (limit 1000)",
-        "src/a.rs:1002 capped 2 lines (cap 1)",
+        "LOSAT/src/a.rs:1 long 1001 lines (limit 1000)",
+        "LOSAT/src/a.rs:1002 capped 2 lines (cap 1)",
+        "LOSAT/src/a.rs:2006 twice 1001 lines (limit 1000)",
     ];
-    assert_eq!(offenders(&functions, &[("a.rs", "capped", 1)]), expected);
-    assert!(offenders(&functions, &[("a.rs", "long", 1001), ("a.rs", "capped", 2)]).is_empty());
+    let caps = [("a.rs", "capped", 1), ("a.rs", "twice", 1002)];
+    assert_eq!(offenders(&functions, &caps), expected);
+    // The cap of `twice` holds its longer function; the other one is held at the limit.
+    let caps = [
+        ("a.rs", "long", 1001),
+        ("a.rs", "capped", 2),
+        ("a.rs", "twice", 1002),
+    ];
+    assert_eq!(offenders(&functions, &caps), expected[2..]);
 }

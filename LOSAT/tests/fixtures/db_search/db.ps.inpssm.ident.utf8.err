@@ -1,0 +1,7 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.identifier.str
+Bad char [0xC3] in string at line 4
+myé
+Error: (803.7) [psiblast] PssmWithParameters.pssm.identifier.str
+Bad char [0xA9] in string at line 4
+myé
+Warning: [psiblast] Query_1 rnd random: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 

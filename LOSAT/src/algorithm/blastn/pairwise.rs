@@ -128,13 +128,15 @@ pub(crate) fn pairwise_hits(
 }
 
 /// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
-/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
-/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`).
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths in a report
+/// of `line_length` columns a line, the report's `PairwiseConfig::line_length`, before any row is
+/// made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`).
 #[inline(never)]
 pub(crate) fn pairwise_windows(
     hit_lists: &[Option<BlastnHitList>],
     num_queries: usize,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    line_length: usize,
 ) -> Vec<std::ops::Range<usize>> {
     use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
     let estimates: Vec<usize> = (0..num_queries)
@@ -147,6 +149,7 @@ pub(crate) fn pairwise_windows(
                     .flat_map(|hit_list| &hit_list.hsplist_array)
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.length),
+                line_length,
             )
         })
         .collect();

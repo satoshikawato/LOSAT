@@ -1544,14 +1544,63 @@ impl NativeError {
     //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+    // ```c++
+    //     catch (const CSeqDBException& e) {                                      \
+    // 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {         \
+    // 			string err_msg =                                                \
+    //                 "Too many open files, please raise the open file limit";    \
+    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
+    //             exit_code = BLAST_DATABASE_ERROR;                               \
+    // 		}                                                                   \
+    // 		else if (e.GetErrCode() == CSeqDBException::eMemoryMappingFailure){ \
+    // 			string err_msg = "Database memory map file error";              \
+    //             if (!e.GetMsg().empty())                                        \
+    //                 err_msg += " - " + e.GetMsg();                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
+    //             exit_code = BLAST_DATABASE_ERROR;                               \
+    // 		}                                                                   \
+    //         else {                                                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+    //         	exit_code = BLAST_DATABASE_ERROR;                               \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
     /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
-    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
-    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
+    /// `CATCH_ALL` catches before (its branch comes first), `BLAST Database error: ` and its
+    /// message, exit status 2 (`BLAST_DATABASE_ERROR`). Every place of a `CSeqDBException` that
+    /// LOSAT raises reports the code `eInvalid` (`seqdb::throw_site`), so the texts of that
+    /// branch for `eTooManyOpenFiles` and `eMemoryMappingFailure` do not arise here (the reader's
+    /// errors of those codes are `common::database::database_error`'s). The one producer of these
+    /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        if e.kind().starts_with("CSeqDBException::") {
+            return NativeError {
+                exit: 2,
+                message: format!("BLAST Database error: {}\n", e.get_msg()),
+            };
+        }
         NativeError {
             exit: 255,
             message: format!("Error: {}\n", e.what()),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
+    // ```c++
+    //     catch (const std::exception& e) {                                       \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    /// `CATCH_ALL`'s report of a `std::exception` (one that is neither a `CException` nor
+    /// `bad_alloc` nor `ios::failure`) whose `what()` is `what`: exit status 255.
+    pub(crate) fn std_exception(what: &str) -> NativeError {
+        NativeError {
+            exit: 255,
+            message: format!("Error: {what}\n"),
         }
     }
 
@@ -2391,12 +2440,40 @@ pub(crate) fn create_out_file(
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            eprint!("{}", e.message);
+            eprint!("{}", catch_all_text(&e.message));
         }
         if e.exit < 0 {
             std::process::abort();
         }
         std::process::exit(e.exit);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176 (`CATCH_ALL`'s one clause
+// of two posts; every other clause posts once)
+// ```c++
+//     catch (const blast::CInputException& e) {                               \
+//         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+//         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+//         exit_code = BLAST_INPUT_ERROR;                                      \
+//     }                                                                       \
+// ```
+/// The text that `CATCH_ALL` writes for the `NativeError` text `message`: the text, or, after the
+/// main thread's diagnostic stream failed (`ncbi_exception::main_diag_failbit`), the line feed of
+/// each of its `LOG_POST`s (two for the query/options error of
+/// `blastinput::app::options_error`, one for the others; NCBI BLAST+ 2.17.0, line RG D3-1 `om/`
+/// cases k02, k03, k06 and `om/mute/` e05, e11). A text without a post (the end of the PSSM file
+/// directly in its root object, exit status 0) stays empty.
+pub(crate) fn catch_all_text(message: &str) -> std::borrow::Cow<'_, str> {
+    if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
+        return std::borrow::Cow::Borrowed(message);
+    }
+    if message.starts_with("BLAST query/options error: ")
+        && message.ends_with("\nPlease refer to the BLAST+ user manual.\n")
+    {
+        std::borrow::Cow::Borrowed("\n\n")
+    } else {
+        std::borrow::Cow::Borrowed("\n")
     }
 }
 
@@ -2457,7 +2534,10 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(&mut std::io::stderr(), native.message.as_bytes());
+        let _ = std::io::Write::write_all(
+            &mut std::io::stderr(),
+            catch_all_text(&native.message).as_bytes(),
+        );
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
@@ -2485,6 +2565,34 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    // Line DBID pfoff-1 (DECISIONS 62): `CATCH_ALL` reports a `CSeqDBException` (blastp 2.17.0,
+    // outfmt 13 of `pP pU` with the prefetch off: `BLAST Database error: DB contains no accession
+    // info.`, exit 2) before any other `CException` (`Error: ` and `what()`, exit 255).
+    #[test]
+    fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
+        use crate::ncbi_exception::{NcbiException, ThrowSite};
+        let site = crate::seqdb::lookup_throw_site("DB contains no accession info.").unwrap();
+        let error =
+            NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
+        assert_eq!(error.exit, 2);
+        assert_eq!(
+            error.message,
+            "BLAST Database error: DB contains no accession info.\n"
+        );
+        let other = NcbiException::new(
+            ThrowSite {
+                file: "src/corelib/ncbistr.cpp",
+                line: 852,
+                kind: "CStringException::eConvert",
+                function: Some("ncbi::NStr::StringToInt8"),
+            },
+            "x",
+        );
+        let error = NativeError::exception(&other);
+        assert_eq!(error.exit, 255);
+        assert_eq!(error.message, format!("Error: {}\n", other.what()));
     }
 
     #[test]

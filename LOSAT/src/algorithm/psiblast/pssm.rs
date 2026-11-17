@@ -21,7 +21,7 @@ use crate::report::diag_log::Posts;
 use crate::report::serial::encoder::ReplacedChar;
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
-    PssmQuery, PssmWithParameters, SeqData, SeqInst,
+    PssmQuery, PssmWithParameters, SeqData, SeqEntry, SeqInst, Seqdesc,
 };
 use crate::seqid::ParsedSeqId;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
@@ -722,16 +722,17 @@ fn pssm_with_parameters(
             num_columns: letters.len() as i32,
             row_labels: None,
             by_row: Some(false),
-            query: Some(PssmQuery {
+            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
                 ids: vec![query.id.clone()],
-                titles: Some(vec![query.title.to_vec()]),
-                inst: SeqInst {
-                    repr: ("raw", 2),
-                    mol: ("aa", 3),
-                    length: Some(letters.len() as i32),
-                    seq_data: Some(SeqData::Ncbistdaa(letters.to_vec())),
-                },
-            }),
+                descr: Some(vec![Seqdesc::Title(query.title.to_vec())]),
+                inst: SeqInst::new(
+                    ("raw", 2),
+                    ("aa", 3),
+                    Some(letters.len() as u32),
+                    Some(SeqData::Ncbistdaa(letters.to_vec())),
+                ),
+                annot: None,
+            }))),
             intermediate_data: Some(intermediate_data),
             final_data: Some(PssmFinalData {
                 scores: pssm.scores.iter().flatten().copied().collect(),
@@ -752,8 +753,7 @@ fn pssm_with_parameters(
                 gap_open: Some(scoring.gap_open),
                 gap_extend: Some(scoring.gap_extend),
             }),
-            bit_score_thresh: None,
-            bit_score_reporting_thresh: None,
+            ..PssmParameters::default()
         }),
     }
 }
@@ -2028,7 +2028,8 @@ impl PssmFiles {
     }
 
     /// Writes `bytes` to a new staging file `.losat-<pid>-<n>` in the target's `directory`; its
-    /// path and owner.
+    /// path and owner. The pid is `utils::process_id` (0 on the Wasm targets, which have none:
+    /// `std::process::id()` panics there).
     fn write_staging(
         &mut self,
         directory: &std::path::Path,
@@ -2038,7 +2039,7 @@ impl PssmFiles {
             self.staging_count += 1;
             let staging = directory.join(format!(
                 ".losat-{}-{}",
-                std::process::id(),
+                crate::utils::process_id::process_id(),
                 self.staging_count
             ));
             let mut file = match std::fs::OpenOptions::new()

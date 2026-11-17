@@ -24,6 +24,8 @@ mod blastdbcmd_several_names;
 mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
+#[path = "../compressed_clut_pairs.rs"]
+mod compressed_clut_pairs;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
@@ -36,6 +38,8 @@ mod default_bundle;
 mod entry_names;
 #[path = "../export_search_strategy.rs"]
 mod export_search_strategy;
+#[path = "../function_size_limit.rs"]
+mod function_size_limit;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]

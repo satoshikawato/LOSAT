@@ -1300,6 +1300,8 @@ impl ShownSubjects<'_> {
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
 /// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
+/// `pool`: the run's pool where no search runs on it while the batch is written
+/// (`native::BatchRender`), whose threads format the pairwise reports (`x_pairwise_par::write`).
 pub(crate) fn render_queries(
     writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
@@ -1312,6 +1314,7 @@ pub(crate) fn render_queries(
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     render_queries_with(
         writer,
@@ -1325,6 +1328,7 @@ pub(crate) fn render_queries(
         stops,
         xml2,
         xml_matrix,
+        pool,
         None,
     )
 }
@@ -1416,6 +1420,7 @@ pub(super) fn render_queries_with(
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
@@ -1473,7 +1478,8 @@ pub(super) fn render_queries_with(
     }
     if options.pairwise_view().is_some() {
         return write_pairwise(
-            writer, stderr, options, queries, subjects, shown, batches, made_hits, probe, first_hsp,
+            writer, stderr, options, queries, subjects, shown, batches, made_hits, probe,
+            first_hsp, pool,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
@@ -1907,13 +1913,13 @@ fn write_pairwise(
     made_hits: Option<&[crate::report::pairwise::PairwiseHit]>,
     probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     use crate::report::pairwise::{
         write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
     };
     let mut qinfo = Vec::new();
-    let mut valid = Vec::new();
-    let mut skipped = Vec::new();
+    // The posts before each query's report (`QueryWarnings`: after the report written so far).
     let mut warnings = Vec::new();
     // The texts of the subjects that each query's report reads one by one, which the writer
     // places where it reads each (`ShownSubjects::query_reads`).
@@ -1925,8 +1931,9 @@ fn write_pairwise(
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
             qinfo.push(BlastpPairwiseQuery {
-                valid: true,
-                batch_skipped: false,
+                // The footer's Karlin blocks (`write_blastx_query_footer`).
+                valid: first.is_some(),
+                batch_skipped: batch.search_skipped,
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
                 // ```c++
                 // CAlignFormatUtil::GetSeqIdString(const list<CRef<CSeq_id> > & ids, bool believe_local_id)
@@ -1966,10 +1973,8 @@ fn write_pairwise(
             // ```
             let mut query_warnings = query_warning(options, query, batch.search_skipped);
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
-            warnings.push(query_warnings);
+            warnings.push(crate::report::diag_log::Posts::of_lines(query_warnings));
             reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
-            valid.push(first.is_some());
-            skipped.push(batch.search_skipped);
         }
     }
     let made;
@@ -2131,16 +2136,17 @@ fn write_pairwise(
             ),
         }
     });
+    // The warnings of each query and the texts of its subjects' reads, at the shared writer's places
+    // (`QueryWarnings::before_query`, `subject_read`).
+    let mut warnings =
+        crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
+            .with_subject_reads(&reads);
     write_blastx_pairwise_report(
         hits,
         writer,
-        stderr,
-        &warnings,
-        &reads,
+        Some(&mut warnings),
         &config,
         &qinfo,
-        &valid,
-        &skipped,
         &ids,
         &report,
         &BlastxPairwiseOptions {
@@ -2158,6 +2164,7 @@ fn write_pairwise(
         anchored
             .as_ref()
             .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
+        pool.and_then(crate::report::x_pairwise_par::pool),
     )
     .map_err(empty_rows_stop)?;
     Ok(())
@@ -2391,7 +2398,7 @@ fn pairwise_metadata(
             lookup_protein_gumbel_params(&scoring, total as i64)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
-        // BLASTX writes its own description table and alignments (`write_blastx_report`).
+        // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     }

@@ -609,11 +609,17 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs
 
 /// What `search_cli` and `run_local_database` do after the options are processed and before the
 /// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
-/// search without `-db`), and what the requested reports ask of it.
+/// search without `-db`), and what the requested reports and requests ask of it, which a run whose
+/// PSSM query never joins NCBI's scope does not make (`joins_scope`, `PsiSearch::joins_scope`:
+/// NCBI's tblastn makes its formatter and its search strategy after `AddTopLevelSeqEntry`,
+/// tblastn_app.cpp:226, 241-270, 307; NCBI BLAST+ 2.17.0 writes the object manager's stop with
+/// `-dbsize` and a list that keeps no sequence, with a database list whose lengths overflow, with
+/// a database named `n/a`: line RG D3-1 fix 4).
 fn open_search_database(
     args: &mut TblastnArgs,
     list: Option<&crate::seqdb::DbList>,
     settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    joins_scope: bool,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<Option<TblastnDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
@@ -635,6 +641,9 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
+            if !joins_scope {
+                return Ok(Some(database));
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -658,6 +667,9 @@ fn open_search_database(
         }
         None => None,
     };
+    if !joins_scope {
+        return Ok(database);
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++
     // void CBlastTabularInfo::x_CheckTaxDB()
@@ -749,7 +761,11 @@ fn search_cli(
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let resolved = args.check_options(outputs.diagnostics)?;
-    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?;
+    let joins_scope = resolved
+        .pssm
+        .as_deref()
+        .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
+    let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:194-196,225-238
     // ```c++
     //         /*** Get the query sequence(s) or PSSM (these two options are mutually
@@ -920,9 +936,11 @@ fn search_cli(
 /// search of the PSSM, tblastn_app.cpp:305-327). A request whose PSSM file has members that the
 /// reader skipped is refused here, once the database is opened (NCBI's error of a database it
 /// cannot open comes first) and before any output, and so are LOSAT's limits of the PSSM search for
-/// each requested format (`outfmts`, `in_pssm::check_limits`); then the formatter's set-up of the
-/// subjects (a subject without letters) and the XInclude formats without a file, as for a FASTA
-/// query (`before_prolog`, `xinclude_checks`).
+/// each requested format (`outfmts`, `in_pssm::check_limits`), and the query record's refusals;
+/// then the messages of NCBI's object manager about the query's annotations and its exception
+/// (`PsiSearch::write_annot_posts`, `annot_abort`), the formatter's set-up of the subjects (a
+/// subject without letters) and the XInclude formats without a file, as for a FASTA query
+/// (`before_prolog`, `xinclude_checks`).
 ///
 /// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
 /// `-parse_deflines` its ids join `scope`, the scope of the `-subject` records (`IdScope::
@@ -947,6 +965,19 @@ fn search_pssm_query(
     for &outfmt in outfmts {
         super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
     }
+    // The query record's refusal comes before any output, in a run that searches.
+    let searches = psi.searches(args.strategy.is_some(), database.is_some());
+    let records = vec![psi.query_record_in(args.parse_deflines, scope, "TBLASTN", searches)?];
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (the query's
+    // Bioseq joins the scope, quoted at `PsiSearch::write_annot_posts`, before the formatter is
+    // made and its prolog written)
+    // The messages of NCBI's object manager about the query's annotations, after the database
+    // and the subjects, before the formatter's warnings and anything on the standard output;
+    // its exception ends the run there (`PsiSearch::write_annot_posts`, `annot_abort`).
+    psi.write_annot_posts(outputs.diagnostics, args.archive.as_ref())?;
+    if let Some(abort) = psi.annot_abort() {
+        return Err(abort);
+    }
     crate::blastinput::input_files::write_empty_subject_warnings_by_length(
         subjects,
         |index| x_subject_stores.map_or(subjects[index].seq().len(), |stores| stores[index].len()),
@@ -954,7 +985,6 @@ fn search_pssm_query(
         outputs.diagnostics,
     )?;
     xinclude_checks(outputs, args.out.as_deref())?;
-    let records = vec![psi.query_record_in(args.parse_deflines, scope, "TBLASTN")?];
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.pssm_query(&records[0]);
     }
@@ -1208,7 +1238,11 @@ fn search_database(
     outputs.open_out()?;
     let outfmts = read_formats(outputs, args.out.as_deref())?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
-    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
+    let joins_scope = resolved
+        .pssm
+        .as_deref()
+        .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
+    let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     // `-in_pssm` (the library API's `Inputs::pssm_database`): the query is the PSSM's. No subject
     // record holds an id (the database's sequences are checked against the query's,
@@ -1627,10 +1661,12 @@ fn search(
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
     }
-    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
-    // that stops at its first batch gives NCBI's error.
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
+    // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
+    // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.
     if batches.searched_done > 0 {
         super::args::check_identity_compressed_lookup_of(&resolved)?;
+        super::args::check_search_limits(&resolved)?;
     }
     // The search strategy's requests of the batches (`-export_search_strategy`), with every
     // `-subject` record: written in the loop below, and for the batch that stops the run (every
@@ -2386,7 +2422,7 @@ fn search(
                         outputs.hits.is_some(),
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
-                    parsed_shown(&outputs.formats),
+                    &outputs.formats,
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2842,84 +2878,6 @@ fn search(
         return Err(error);
     }
     Ok(())
-}
-
-/// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
-/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
-/// 20) whose fields read the subject (`report::tabular::reads_subject`), outfmt 0, the
-/// structured documents (5, 13 to 16), the formats that join the alignments of following hits
-/// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
-/// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
-/// subjects.
-fn parsed_shown(
-    formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> crate::algorithm::common::database::ParsedShown {
-    let numbers: Vec<i32> = formats
-        .iter()
-        .map(|format| super::stage_e_report::format_number(format.outfmt))
-        .collect();
-    let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
-    crate::algorithm::common::database::ParsedShown {
-        stops_at_failed_lookup: formats.iter().any(|format| {
-            matches!(
-                super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 20
-            ) && crate::report::tabular::may_stop_at_failed_lookup(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            )
-        }),
-        tabular: formats.iter().any(|format| {
-            matches!(
-                super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 18 | 20
-            ) && crate::report::tabular::writes_rows(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            ) && crate::report::tabular::reads_subject(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-                crate::blastinput::app::Program::Tblastn,
-            )
-        }),
-        pairwise,
-        structured: formats
-            .iter()
-            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt)),
-        joined: pairwise
-            || formats.iter().any(|format| {
-                super::stage_e_report::is_structured_xml(format.outfmt)
-                    || super::tabular::tabular_spec(format.outfmt)
-                        .is_some_and(|spec| spec.needs().joins_subjects())
-            }),
-        sam: false,
-        taxonomy: formats.iter().any(|format| {
-            super::stage_e_report::xml2_kind(format.outfmt).is_some()
-                || super::tabular::tabular_spec(format.outfmt)
-                    .is_some_and(|spec| spec.needs().taxonomy)
-        }),
-        words: formats
-            .iter()
-            .filter(|format| {
-                matches!(
-                    super::stage_e_report::format_number(format.outfmt),
-                    6 | 7 | 10 | 20
-                )
-            })
-            .fold(
-                crate::report::tabular::PrintedIds::default(),
-                |words, format| {
-                    words.or(crate::report::tabular::PrintedIds::of(
-                        super::tabular::tabular_spec(format.outfmt).as_ref(),
-                    ))
-                },
-            ),
-        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
-        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
-            |&number| match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            },
-        )) && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-    }
 }
 
 #[cfg(test)]

@@ -162,11 +162,13 @@ jobs:
         run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
       # The lib tests of the 128-bit SIMD kernels on the target that ships them (simd128: the
       # wasm32 layer of utils/xdrop_simd.rs and the kernels written over it); the native
-      # `cargo test` runs them only in their x86-64 SSE form. Also the scan on presence bytes
-      # (tblastx/x_scan_byte.rs, and through it x_scan_bf.rs): its plain loops are the Web's scan
-      # for sparse tables, with the index loop vectorized to simd128 and 32-bit pointer and room
-      # arithmetic, which the native `cargo test` runs only in 64 bits. Same build as the step
-      # above; the added tests take about 2 s (2026-11-17).
+      # `cargo test` runs them only in their x86-64 SSE form. Same build as the step above.
+      # x_seed_fused::tests and x_seed_diag::tests: blastx's 128-bit cross-cell batches
+      # (LOSAT_X_BXCROSS128) against the per-hit test, and the fused loop with them on real tables.
+      # tblastx::x_scan_byte::tests and x_scan_bf::tests: the scan on presence bytes, whose plain
+      # loops are the Web's scan for sparse tables, with the index loop vectorized to simd128 and
+      # 32-bit pointer and room arithmetic, which the native `cargo test` runs only in 64 bits
+      # (about 2 s more, 2026-11-17).
       - name: SIMD kernel tests on wasm32-wasip1
         working-directory: LOSAT
         env:
@@ -175,6 +177,7 @@ jobs:
           cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
           x_restricted_gap::tests xdrop_simd::x_w128::tests
           x_w128_loops_write_the_residues_of_the_word_loop x_same_matrix
+          x_seed_fused::tests x_seed_diag::tests
           tblastx::x_scan_byte::tests tblastx::x_scan_bf::tests
 
   # The engine adapter (web/adapter) over five jobs that run side by side: the build identity

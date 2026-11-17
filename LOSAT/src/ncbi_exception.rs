@@ -130,7 +130,10 @@ impl ThrowSite {
 
 /// An exception of NCBI's C++ Toolkit (`CException`): where it was thrown, its message, the
 /// extra text of its class, and the exception it was thrown for (`NCBI_RETHROW`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The chain of predecessors is as long as the frames an error leaves (`rethrow_same`: one for
+/// each value open in a PSSM nested to any depth), so it is dropped, cloned, compared and
+/// shown link by link, never by a recursion as deep as the chain (below).
 pub struct NcbiException {
     site: ThrowSite,
     message: String,
@@ -162,19 +165,17 @@ impl NcbiException {
     /// `NCBI_THROW2(CStringException, code, message, pos)` at `site`: the report adds the
     /// position.
     pub fn with_pos(site: ThrowSite, message: impl Into<String>, pos: usize) -> Self {
-        NcbiException {
-            extra: Some(format!("m_Pos = {pos}")),
-            ..Self::new(site, message)
-        }
+        let mut exception = Self::new(site, message);
+        exception.extra = Some(format!("m_Pos = {pos}"));
+        exception
     }
 
     /// `NCBI_RETHROW(self, class, code, message)` at `site`: a new exception whose predecessor
     /// is `self`.
     pub fn rethrow(self, site: ThrowSite, message: impl Into<String>) -> Self {
-        NcbiException {
-            predecessor: Some(Box::new(self)),
-            ..Self::new(site, message)
-        }
+        let mut exception = Self::new(site, message);
+        exception.predecessor = Some(Box::new(self));
+        exception
     }
 
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
@@ -196,8 +197,10 @@ impl NcbiException {
     //     x_Init(info, message, 0, severity);
     // ```
     /// `NCBI_RETHROW_SAME(self, message)` in `function` at `line` of `file`: the same exception
-    /// (its class, code and extra text) with the new place and message, the old one its
-    /// predecessor (the serial object frames' `END_OBJECT_FRAME`, `report::serial::xml`).
+    /// (its class, code and extra text, such as a `CStringException`'s position) with the new
+    /// place and message, the old one its predecessor: NCBI's serial object stack adds one for
+    /// each frame it leaves (`END_OBJECT_FRAME`: the writer's `report::serial::xml`, the reader's
+    /// `report::serial::asn_types::read`).
     pub fn rethrow_same(
         self,
         file: &'static str,
@@ -222,6 +225,12 @@ impl NcbiException {
     #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
         self.site
+    }
+
+    /// `GetType()::GetErrCodeString()` of the exception: `CSeqDBException::eInvalid`, which
+    /// tells the class that the programs' `CATCH_ALL` reports apart (`cli::NativeError::exception`).
+    pub fn kind(&self) -> &'static str {
+        self.site.kind
     }
 
     /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
@@ -447,6 +456,127 @@ impl NcbiException {
         ));
         out
     }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:580-584, 755-757
+    // ```c++
+    // #define NCBI_CATCH(message)                                   \
+    //     catch (NCBI_NS_NCBI::CException& e) {                     \
+    //         NCBI_REPORT_EXCEPTION(message, e);                    \
+    //     }                                                         \
+    //     STD_CATCH(message)
+    // ...
+    // #define NCBI_REPORT_EXCEPTION(title, ex)                        \
+    //     NCBI_NS_NCBI::CExceptionReporter::ReportDefault             \
+    //         (DIAG_COMPILE_INFO, title, ex, NCBI_NS_NCBI::eDPF_Default)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:670-674
+    // ```c++
+    // void CExceptionReporter::ReportDefault(const CDiagCompileInfo& info,
+    //     const string& title,const exception& ex, TDiagPostFlags flags)
+    // {
+    //     ReportDefaultEx(0, 0, info, title, ex, flags);
+    // }
+    // ```
+    /// `NCBI_CATCH(title)` of this exception in an application whose diagnostic prefix is
+    /// `prefix` (`ReportDefaultEx` without an error code, quoted at `report_default_ex`): `Error:
+    /// (<class>::<code>) [<prefix>] <message>` for each exception of the chain, oldest first, then
+    /// `Error: [<prefix>] <title> (<class>::<code>) <message>` of the newest (NCBI BLAST+ 2.17.0,
+    /// line RG D3-1 `om/` cases t08, t10, t76: the Seq-table checks of the object manager).
+    pub(crate) fn report_default(&self, prefix: &str, title: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        for e in self.chain().iter().rev() {
+            out.extend(error_post_line(
+                Some(e.site.kind),
+                Some(prefix),
+                e.text().as_bytes(),
+            ));
+        }
+        out.extend(error_post_line(
+            None,
+            Some(prefix),
+            format!("{title} ({}) {}", self.site.kind, self.text()).as_bytes(),
+        ));
+        out
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:259-265 (each exception deletes its
+// predecessor: the chain goes with the newest)
+// ```c++
+// CException::~CException(void) throw()
+// {
+//     if (m_Predecessor) {
+//         delete m_Predecessor;
+//         m_Predecessor = 0;
+//     }
+// }
+// ```
+/// The chain is dropped link by link (the drop of each link inside the one that holds it would
+/// recurse as deep as the chain).
+impl Drop for NcbiException {
+    fn drop(&mut self) {
+        let mut next = self.predecessor.take();
+        while let Some(mut link) = next {
+            next = link.predecessor.take();
+        }
+    }
+}
+
+/// A copy of the chain, made from its oldest link.
+impl Clone for NcbiException {
+    fn clone(&self) -> Self {
+        let mut copy: Option<Box<NcbiException>> = None;
+        for link in self.chain().into_iter().rev() {
+            copy = Some(Box::new(NcbiException {
+                site: link.site,
+                message: link.message.clone(),
+                extra: link.extra.clone(),
+                predecessor: copy,
+            }));
+        }
+        *copy.expect("the chain holds the exception itself")
+    }
+}
+
+/// Two chains are equal when each link is (its place, message and extra text).
+impl PartialEq for NcbiException {
+    fn eq(&self, other: &Self) -> bool {
+        let (mut a, mut b) = (Some(self), Some(other));
+        loop {
+            match (a, b) {
+                (None, None) => return true,
+                (Some(x), Some(y)) => {
+                    if x.site != y.site || x.message != y.message || x.extra != y.extra {
+                        return false;
+                    }
+                    a = x.predecessor.as_deref();
+                    b = y.predecessor.as_deref();
+                }
+                _ => return false,
+            }
+        }
+    }
+}
+
+impl Eq for NcbiException {}
+
+/// The links of the chain, newest first, each with its place, message and extra text.
+impl std::fmt::Debug for NcbiException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct Link<'a>(&'a NcbiException);
+        impl std::fmt::Debug for Link<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("NcbiException")
+                    .field("site", &self.0.site)
+                    .field("message", &self.0.message)
+                    .field("extra", &self.0.extra)
+                    .finish()
+            }
+        }
+        f.debug_list()
+            .entries(self.chain().into_iter().map(Link))
+            .finish()
+    }
 }
 
 /// `what()` ([`NcbiException::what`]).
@@ -498,16 +628,178 @@ fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
 /// NCBI's object streams replace (`report::serial::encoder::ReplacedChar::post`) and the
 /// applications' `ERR_POST(Error << ...)` (`ncbi_app::Diag::err_post_bytes`).
 pub(crate) fn error_post_line(id: Option<&str>, prefix: Option<&str>, message: &[u8]) -> Vec<u8> {
-    let mut line = b"Error: ".to_vec();
+    post_line(Severity::Error, id, prefix, message)
+}
+
+/// The severity of a post (`CNcbiDiag::SeverityName`: `Warning`, `Error`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Severity {
+    Warning,
+    Error,
+}
+
+/// A post of severity `severity` from NCBI's main thread (`error_post_line`'s line, of any
+/// severity): after the main thread's diagnostic stream failed (`main_diag_failbit`), the header
+/// alone.
+pub(crate) fn post_line(
+    severity: Severity,
+    id: Option<&str>,
+    prefix: Option<&str>,
+    message: &[u8],
+) -> Vec<u8> {
+    post_line_in(severity, id, prefix, message, main_diag_failbit())
+}
+
+/// `post_line` with the state of the stream given: `failed` drops the message (the post's header,
+/// `<severity>: (<id>) [<prefix>] `, and its line feed stay; see `main_diag_failbit`).
+pub(crate) fn post_line_in(
+    severity: Severity,
+    id: Option<&str>,
+    prefix: Option<&str>,
+    message: &[u8],
+    failed: bool,
+) -> Vec<u8> {
+    let mut line = match severity {
+        Severity::Warning => b"Warning: ".to_vec(),
+        Severity::Error => b"Error: ".to_vec(),
+    };
     if let Some(id) = id {
         line.extend_from_slice(format!("({id}) ").as_bytes());
     }
     if let Some(prefix) = prefix {
         line.extend_from_slice(format!("[{prefix}] ").as_bytes());
     }
-    line.extend_from_slice(message);
+    if !failed {
+        line.extend_from_slice(message);
+    }
     line.push(b'\n');
     line
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697
+// ```c++
+//         CNcbiOstrstream s;
+//         ...
+//         ERR_POST_X(6, "Failed to parse location of "<<s.rdbuf()<<" in "<<GetDescription());
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4389, 4423-4433 (`CDiagBuffer::Flush`)
+// ```c++
+//     string message = CNcbiOstrstreamToString(*m_Stream);
+//     ...
+//     // reset flags to initial value
+//     m_Stream->flags(m_InitialStreamFlags);
+// #  ifdef NCBI_SHUN_OSTRSTREAM
+//     // m_Stream->rdbuf()->PUBSEEKOFF(0, IOS_BASE::beg);
+//     m_Stream->str(kEmptyStr);
+// #  endif
+// #endif
+//
+//     Reset(*m_Diag);
+// ```
+// `s` is an output string stream: its buffer gives nothing to read, so `<< s.rdbuf()` inserts no
+// character and sets `failbit` on the thread's diagnostic stream (`CDiagBuffer::m_Stream`), which
+// `Flush` empties and gives its flags back but never `clear()`s. Every later message of that
+// thread is lost: its post prints the header alone, and `CATCH_ALL`'s `LOG_POST` (no header) its
+// line feed (NCBI BLAST+ 2.17.0, line RG D3-1 `om/` cases k01-k06 and `om/mute/` e01-e16: the query
+// warning line, the taxonomy database warning, the engine error, with 1 to 4 threads).
+// The flag is NCBI's for one run (one application, one main thread), and each LOSAT run owns
+// its own (`MainDiag`): the command line's process is one run (`COMMAND_LINE`); a library call
+// (`api::start::CallStart`) holds a stream of its own, which the call's code reads on the threads
+// that run it (`MainDiag::enter` where the call runs, `utils::threading::with_search_pool` for the
+// workers of its searches). Two calls in one process, one after the other, at once on several
+// threads, or as two `run_batches` iterators that one thread advances in turn, never see each
+// other's stream (line RG D3-1 review 4 B1).
+static COMMAND_LINE: MainDiag = MainDiag::new();
+
+thread_local! {
+    /// The stream of the library call whose code this thread runs (`MainDiag::enter`).
+    static CURRENT: std::cell::RefCell<Option<std::sync::Arc<MainDiag>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The diagnostic stream of NCBI's main thread of one run: whether it has failed.
+#[derive(Debug, Default)]
+pub(crate) struct MainDiag {
+    failed: std::sync::atomic::AtomicBool,
+}
+
+impl MainDiag {
+    pub(crate) const fn new() -> MainDiag {
+        MainDiag {
+            failed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// The stream fails.
+    pub(crate) fn fail(&self) {
+        self.failed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the stream has failed.
+    pub(crate) fn failed(&self) -> bool {
+        self.failed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The stream of the run whose code this thread runs: the library call's that this thread
+    /// entered (`enter`), else the command line's.
+    fn with_current<R>(read: impl FnOnce(&MainDiag) -> R) -> R {
+        CURRENT.with(|current| match current.borrow().as_deref() {
+            Some(diag) => read(diag),
+            None => read(&COMMAND_LINE),
+        })
+    }
+
+    /// The library call's stream that this thread runs for (`None`: the command line's), to hand to
+    /// the threads that work for the same run (`utils::threading::with_search_pool`, which a build
+    /// without threads does not have).
+    #[cfg(feature = "parallel")]
+    pub(crate) fn current() -> Option<std::sync::Arc<MainDiag>> {
+        CURRENT.with(|current| current.borrow().clone())
+    }
+
+    /// A thread made for one search of a run (a worker of its pool, `with_search_pool`) takes
+    /// that run's stream (`current` on the thread that made it) for the rest of its life.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn adopt(diag: Option<std::sync::Arc<MainDiag>>) {
+        CURRENT.with(|current| *current.borrow_mut() = diag);
+    }
+
+    /// This thread runs `diag`'s run (a library call) until the guard is dropped, which gives
+    /// the thread back the stream it had.
+    pub(crate) fn enter(diag: Option<std::sync::Arc<MainDiag>>) -> MainDiagGuard {
+        MainDiagGuard {
+            before: CURRENT.with(|current| current.replace(diag)),
+        }
+    }
+}
+
+/// The guard of `MainDiag::enter`.
+pub(crate) struct MainDiagGuard {
+    before: Option<std::sync::Arc<MainDiag>>,
+}
+
+impl Drop for MainDiagGuard {
+    fn drop(&mut self) {
+        let before = self.before.take();
+        CURRENT.with(|current| *current.borrow_mut() = before);
+    }
+}
+
+/// Whether the diagnostic stream of NCBI's main thread has failed in this run (`ERR_POST_X(6,
+/// "Failed to parse location of " << s.rdbuf() ...)` of the object manager,
+/// `algorithm::pssm_search::annot_index`): the run's later posts print their header only
+/// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast
+/// or tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`;
+/// each call is a run with a stream of its own, `MainDiag`); LOSAT Web refuses `-in_pssm`.
+pub(crate) fn main_diag_failbit() -> bool {
+    MainDiag::with_current(MainDiag::failed)
+}
+
+/// Marks NCBI's main-thread diagnostic stream failed for the rest of the run
+/// (`main_diag_failbit`); called where the run writes the post that fails it.
+pub(crate) fn set_main_diag_failbit() {
+    MainDiag::with_current(MainDiag::fail);
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
@@ -554,6 +846,77 @@ pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A chain of 1,000,000 rethrows (the frames that an error at the bottom of a PSSM nested
+    /// 500,000 deep leaves, `NCBI_RETHROW_SAME` in each) is dropped, and one of 100,000 is
+    /// cloned, compared, shown and reported, on a thread of 256 KiB (line RG D3-1 review 7 B1).
+    #[test]
+    fn a_chain_of_any_length_is_handled_link_by_link() {
+        let chain = |links: usize| {
+            let mut chain = NcbiException::new(ThrowSite::generated("CSerialException"), "");
+            for _ in 0..links {
+                chain = chain.rethrow_same("src/serial/objistrasn.cpp", 1, "f", String::new());
+            }
+            chain
+        };
+        /// The bytes that a format writes.
+        struct Count(usize);
+        impl std::fmt::Write for Count {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0 += s.len();
+                Ok(())
+            }
+        }
+        std::thread::Builder::new()
+            .stack_size(256 << 10)
+            .spawn(move || {
+                drop(chain(1_000_000));
+                let long = chain(100_000);
+                let copy = long.clone();
+                assert!(copy == long);
+                let other = copy.clone().rethrow_same("x", 2, "g", "one more");
+                assert!(other != long);
+                assert_eq!(long.what().lines().count(), 1 + 100_001);
+                let mut shown = Count(0);
+                std::fmt::write(&mut shown, format_args!("{long:?}")).expect("shown");
+                assert!(shown.0 > 100_000);
+            })
+            .expect("a thread")
+            .join()
+            .expect("no overflow");
+    }
+
+    // Each run's stream is its own (line RG D3-1 review 4 B1): a library call entered on a thread
+    // reads its stream there, another call entered in turn on the same thread reads its own, and
+    // leaving a call gives the thread back the stream it had; a thread that runs no call reads
+    // the command line's.
+    #[test]
+    fn each_run_has_a_diagnostic_stream_of_its_own() {
+        let a = std::sync::Arc::new(MainDiag::new());
+        let b = std::sync::Arc::new(MainDiag::new());
+        {
+            let _a = MainDiag::enter(Some(a.clone()));
+            assert!(!main_diag_failbit());
+            set_main_diag_failbit();
+            assert!(main_diag_failbit());
+            {
+                let _b = MainDiag::enter(Some(b.clone()));
+                assert!(!main_diag_failbit());
+            }
+            assert!(main_diag_failbit());
+        }
+        assert!(a.failed());
+        assert!(!b.failed());
+        assert!(!COMMAND_LINE.failed());
+        let entered = || CURRENT.with(|current| current.borrow().is_some());
+        assert!(!entered());
+        let _b = MainDiag::enter(Some(b.clone()));
+        assert!(!main_diag_failbit());
+        // Another thread runs no call until it enters one.
+        std::thread::scope(|scope| {
+            scope.spawn(|| assert!(!entered()));
+        });
+    }
 
     // makeblastdb 2.17.0 (the official Linux x64 release) with `MAX_LMDB_TXN_ENTRY=-1x` and two
     // sequences (probe of 2026-11-08, case txn_endptr_2seq): a report with the position.

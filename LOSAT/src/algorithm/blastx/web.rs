@@ -315,6 +315,8 @@ pub(crate) fn run_pair(
                                 false,
                                 None,
                                 xml_matrix,
+                                // The queued batches are searched: the pool is free.
+                                Some(pool),
                             )?;
                             processed += queries.len();
                         }
@@ -402,6 +404,7 @@ pub(crate) fn run_pair(
                     false,
                     None,
                     xml_matrix,
+                    x_pool,
                 )?;
                 processed += queries.len();
                 Ok(())

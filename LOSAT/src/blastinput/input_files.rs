@@ -193,7 +193,7 @@ fn unnamed_temporary_file(
     for attempt in 0u32..64 {
         let path = directory.join(format!(
             ".losat-{role}-{}-{stamp}-{attempt}.inflated",
-            process_id()
+            crate::utils::process_id::process_id()
         ));
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
@@ -226,20 +226,6 @@ fn unnamed_temporary_file(
         std::io::ErrorKind::AlreadyExists,
         format!("no free temporary file name in {}", directory.display()),
     ))
-}
-
-/// The process id in the temporary file's name: `std::process::id()`.
-#[cfg(not(target_os = "wasi"))]
-fn process_id() -> u32 {
-    std::process::id()
-}
-
-/// 0 on WASI, which has no process id (Rust's `std::process::id()` panics there,
-/// "unsupported", `library/std/src/sys/pal/wasip1/os.rs:131` of 1.92); `create_new` and the
-/// time stamp keep the names apart.
-#[cfg(target_os = "wasi")]
-fn process_id() -> u32 {
-    0
 }
 
 /// Standard input as a file that shares its position, as `cin` does.
@@ -392,18 +378,24 @@ pub fn write_empty_subject_warnings_by_length(
 ) -> std::io::Result<()> {
     for (index, record) in records.iter().enumerate() {
         if length(index) == 0 {
-            let mut warning = match record.believed() {
+            let mut text = match record.believed() {
                 Some(ids) => {
-                    let mut warning = format!("Warning: [{program}] ").into_bytes();
-                    warning.extend_from_slice(&ids.warning_id);
-                    warning.push(b' ');
-                    warning
+                    let mut text = ids.warning_id.clone();
+                    text.push(b' ');
+                    text
                 }
-                None => format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes(),
+                None => format!("Subject_{} ", index + 1).into_bytes(),
             };
-            warning.extend_from_slice(&record.title);
-            warning.extend_from_slice(b": Subject sequence contains no data\n");
-            diagnostics.write_all(&warning)?;
+            text.extend_from_slice(&record.title);
+            text.extend_from_slice(b": Subject sequence contains no data");
+            // A post of NCBI's main thread (`ncbi_exception::post_line`; tblastn's formatter, which
+            // makes it, comes after the PSSM query's annotations are indexed).
+            diagnostics.write_all(&crate::ncbi_exception::post_line(
+                crate::ncbi_exception::Severity::Warning,
+                None,
+                Some(program),
+                &text,
+            ))?;
         }
     }
     Ok(())

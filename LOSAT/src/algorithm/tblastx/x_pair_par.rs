@@ -6932,7 +6932,7 @@ mod tests {
         thresholds: [i32; 4],
         wide: bool,
     ) -> XMaskedSeen {
-        use crate::algorithm::tblastx::scoring::{MatrixScore, MatrixScores};
+        use crate::algorithm::tblastx::scoring::MatrixScore;
         let mut rng = Rng(seeds.0);
         let alphabets = [
             aa("AW"),
@@ -6940,14 +6940,14 @@ mod tests {
             aa("ACDEKW"),
             aa("ACDEFGHIKLMNPQRSTVWY"),
         ];
-        let tables: Vec<MatrixScores> = [
+        let tables: Vec<MatrixScore> = [
             ScoringMatrix::Blosum62,
             ScoringMatrix::Pam30,
             ScoringMatrix::Blosum45,
             ScoringMatrix::Identity,
         ]
         .into_iter()
-        .map(|matrix| MatrixScores::with_word(matrix, word))
+        .map(|matrix| MatrixScore::with_word(matrix, word))
         .collect();
         // LOSAT_X_TBXUNGAPSENT is on (the batches' contexts have their sentinels).
         let on = x_tbx_sent_contexts(std::iter::empty());
@@ -6970,7 +6970,7 @@ mod tests {
             let threshold_no = knobs.below(4) as usize;
             let masked = knobs.below(2) == 1;
             settings.insert((matrix_no, alphabet_no, window_no, threshold_no, masked));
-            let sc = tables[matrix_no].scorer();
+            let sc = tables[matrix_no];
             assert_eq!(sc.word(), word);
             let alphabet = &alphabets[alphabet_no];
             // The batched extensions only where their rule allows them (`x_tbx_extbatch::active`:

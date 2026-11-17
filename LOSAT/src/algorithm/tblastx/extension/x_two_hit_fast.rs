@@ -16,13 +16,16 @@
 //! (right walk; the left walk, aa_ungapped.c:886-921, counts `i` down from `n`, has no
 //! `score <= 0` test, and returns `n - best_i + 1`.)
 //!
-//! The walks of `two_hit.rs` call `get_score` for every step, which tests both codes against the
-//! matrix size, branches to the sentinel and the rare codes, and multiplies for the row: 22
-//! instructions and five branches a step on the left, about 30 and six on the right (whose
-//! bounds are reloaded from the stack; release build of dev 7cdcd4a7). A step here loads the two
-//! codes, forms `q << 8 | s`, loads one signed byte from the table and makes the reference's
-//! update and exit tests; the statements, their order and the exit tests are those of the
-//! reference walks. Each walk is a function of its own, so that its loop has the registers to
+//! When these walks were written, the walks of `two_hit.rs` called `get_score` for every step,
+//! which tests both codes against the matrix size, branches to the sentinel and the rare codes,
+//! and multiplies for the row: 22 instructions and five branches a step on the left, about 30 and
+//! six on the right (whose bounds are reloaded from the stack; release build of dev 7cdcd4a7).
+//! Since line RG item X2c-s they read the matrix's rows (`TbxScore::score`, `ScoreRows`: a row and
+//! its score, two loads), for the X-drops and the one-hit extension that these walks do not
+//! cover: 16 to 19 instructions a step (the walks inlined into `word_finder` and `x_tbx_qslice`,
+//! release builds of X2c-s). A step here loads the two codes, forms `q << 8 | s`, loads one signed
+//! byte from the table and makes the reference's update and exit tests; the statements, their
+//! order and the exit tests are those of the reference walks. Each walk is a function of its own, so that its loop has the registers to
 //! itself (inlined into the caller, the X-drop and the sequence pointers were reloaded from the
 //! stack at every step).
 //!
@@ -998,7 +1001,7 @@ unsafe fn two_hit_sent_on<const SHIFT: u32, const W: usize>(
 mod tests {
     use super::super::query_batch::InBatch;
     use super::*;
-    use crate::algorithm::tblastx::scoring::{Blosum62Score, MatrixScores, TbxScore};
+    use crate::algorithm::tblastx::scoring::{Blosum62Score, MatrixScore, TbxScore};
 
     struct Rng(u64);
     impl Rng {
@@ -1165,8 +1168,8 @@ mod tests {
     #[test]
     fn every_matrix_keeps_its_walk_table_at_every_word_length() {
         for matrix in ScoringMatrix::ALL {
-            let scores = MatrixScores::new(matrix);
-            let sc = scores.scorer();
+            let scores = MatrixScore::new(matrix);
+            let sc = scores;
             for q in 0..MATRIX_LETTERS as u8 {
                 for s in 0..MATRIX_LETTERS as u8 {
                     let v = sc.score(q, s);
@@ -1189,14 +1192,14 @@ mod tests {
             assert!(t.x_sentinels_stop(), "{matrix:?}");
             let q = vec![5u8; 50];
             for word in 2..=MAX_MATRIX_WORD {
-                let scores = MatrixScores::with_word(matrix, word);
-                let sc = scores.scorer();
+                let scores = MatrixScore::with_word(matrix, word);
+                let sc = scores;
                 assert!(sc.x_sent_walks(), "{matrix:?} {word}");
                 assert!(sc.table_two_hit(&q, &q, 10, 20, 20, 16).is_some());
             }
             for word in [1, 5, 7] {
-                let scores = MatrixScores::with_word(matrix, word);
-                let sc = scores.scorer();
+                let scores = MatrixScore::with_word(matrix, word);
+                let sc = scores;
                 assert!(!sc.x_sent_walks(), "{matrix:?} {word}");
                 assert!(sc.table_two_hit(&q, &q, 10, 20, 20, 16).is_none());
             }
@@ -1384,12 +1387,12 @@ mod tests {
     }
 
     /// The table walks and the sentinel walks of `matrix` with words of `W` letters against the
-    /// reference with `MatrixScores::with_word(matrix, W)`, directly and through the search's
+    /// reference with `MatrixScore::with_word(matrix, W)`, directly and through the search's
     /// dispatch (`TbxScore::table_two_hit`, `TbxScore::sent_two_hit`); the calls they leave to the
     /// reference (X-drops outside 1..=127, a word that does not fit) are left.
     fn matrix_walks_equal_the_reference<const W: usize>(matrix: ScoringMatrix, rng: &mut Rng) {
-        let scores = MatrixScores::with_word(matrix, W);
-        let sc = scores.scorer();
+        let scores = MatrixScore::with_word(matrix, W);
+        let sc = scores;
         assert_eq!(sc.word(), W);
         assert!(sc.x_sent_walks(), "{matrix:?}");
         let t = matrix_walk_table(matrix, |a, b| sc.score(a, b)).expect("the matrix fits");

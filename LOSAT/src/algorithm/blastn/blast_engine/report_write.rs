@@ -1,10 +1,10 @@
 //! Parts of `post_process_hits_and_write` (the report of one call): the refusals of the query-anchored
-//! formats (outfmt 1 to 4), the SAM writer (outfmt 17) and the subjects' names that the Seq-align,
-//! archive and SAM writers take.
+//! formats (outfmt 1 to 4), the SAM writer (outfmt 17), the structured documents (outfmt 5, 13 to 16)
+//! and the subjects' names that the Seq-align, archive and SAM writers take.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755 (the SAM branch of
-//! `CBlastFormat::x_PrintStructuredReport`, quoted in `write_sam`). The refusals have no NCBI
-//! counterpart (see `refuse_anchored_reports`).
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-755 (the XML, XML2 and
+//! SAM branches of `CBlastFormat::x_PrintStructuredReport`, quoted in `write_structured_xml` and
+//! `write_sam`). The refusals have no NCBI counterpart (see `refuse_anchored_reports`).
 //!
 //! This module is a child of `run` for what `run` keeps private (the types `BlastnReportInputs` and
 //! `SamTarget`, the module `database`). Each function holds the statements of one part of
@@ -13,7 +13,10 @@
 use super::{
     database, BlastnHitList, BlastnOutputFormat, BlastnReportInputs, SamTarget, SubjectLetters,
 };
+use crate::algorithm::blastn::pairwise::shown_query_masks;
 use crate::algorithm::blastn::sam;
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::query_batch::NO_DATA_MESSAGE;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::record::{QueryNames, SubjectNames};
 use anyhow::Result;
@@ -246,6 +249,247 @@ pub(super) fn write_sam(
     }
     if target.finish {
         target.document.finish(writer)?;
+    }
+    Ok(())
+}
+
+/// What one structured document of the call (outfmt 5, 13 to 16) is: its kind and what the call's
+/// other formats and the caller give it.
+pub(super) struct XmlDocument<'a> {
+    /// The XML2 / JSON kind of outfmt 13 to 16; `None` for outfmt 5 (BLAST XML).
+    pub(super) kind: Option<crate::report::blast_xml2::Xml2Kind>,
+    /// Every structured format of the call is an XML2 one: a `-subject` document holds back
+    /// (`blast_xml::write_blastn_xml`).
+    pub(super) only_xml2: bool,
+    /// The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
+    pub(super) side_sink: Option<&'a crate::report::blast_xml2::SideFileSink>,
+}
+
+/// Outfmt 5 (BLAST XML) and 13 to 16 (the XML2 and JSON documents): the structured report of the
+/// queries of the call (`blast_xml::write_blastn_xml`), the side files of outfmt 13 and 14 into the
+/// caller's receiver where it gives one. `unsearched` marks the queries of the batches that were
+/// not searched; `subject_title` is the database's title.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-710
+/// ```c++
+///     } else if (m_FormatType == CFormattingArgs::eXml) {
+///         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+///         res->TrimSeqAlign(m_HitlistSize);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:745-749
+/// ```c++
+///     else if(m_FormatType == CFormattingArgs::eXml2 || m_FormatType == CFormattingArgs::eJson ||
+///             m_FormatType == CFormattingArgs::eXml2_S || m_FormatType == CFormattingArgs::eJson_S) {
+///     	x_PrintXML2Report(results, queries);
+///     	return;
+///     }
+/// ```
+/// The BLAST XML, XML2 and JSON branches of `CBlastFormat::x_PrintStructuredReport`.
+pub(super) fn write_structured_xml(
+    document: XmlDocument<'_>,
+    report: &BlastnReportInputs<'_>,
+    hit_lists: &[Option<BlastnHitList>],
+    query_lengths: &[usize],
+    unsearched: &[bool],
+    subject_title: &str,
+    writer: &mut crate::cli::NcbiOstream<'_>,
+    format_warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+) -> Result<()> {
+    // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
+    // per-query records, written by another writer.
+    let XmlDocument {
+        kind: xml2_kind,
+        only_xml2: xml_only_xml2,
+        side_sink,
+    } = document;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //       || m_FormatType == CFormattingArgs::eAsnBinary
+    //       || m_FormatType == CFormattingArgs::eXml
+    //       ...
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    // ```
+    // The CBlastOutput document of the queries (`blast_xml`).
+    let is_database = report.database.is_some();
+    let xml_stats = super::blastn_xml_stats(report, query_lengths)?;
+    let xml_messages: Vec<Vec<String>> = report
+        .queries
+        .iter()
+        .enumerate()
+        .map(|(q_idx, query)| {
+            let mut messages = Vec::new();
+            if report.context_karlin[2 * q_idx + report.first_context].is_none() {
+                messages.push(if query.seq().is_empty() {
+                    NO_DATA_MESSAGE.to_string()
+                } else {
+                    crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
+                });
+            }
+            if !unsearched[q_idx]
+                && report
+                    .database_reader
+                    .is_some_and(|database| database.filtered_empty())
+            {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
+            }
+            messages
+        })
+        .collect();
+    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
+    let filter = crate::report::blast_xml::filter::filter_string(
+        report.dust,
+        None,
+        report.window_masker,
+        report.soft_masking,
+    );
+    let subject_records = report.subjects.records();
+    let database_length = |rank: usize| report.subjects.len(rank);
+    let record_length = |s_idx: usize| {
+        report
+            .ranges
+            .subjects
+            .placements
+            .length(s_idx, report.subjects.len(s_idx))
+    };
+    // The taxids of the reported sequences and the taxonomy database's names, read for
+    // the XML2 and JSON formats only.
+    let (xml_taxids, xml_taxonomy, xml_parsed_taxonomy, xml_taxdb_notes): (
+        Vec<i32>,
+        Vec<crate::report::blast_xml::HitTaxonomy>,
+        Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
+        crate::algorithm::common::database::TaxdbNotes,
+    ) = match (xml2_kind, report.database_ordinals, report.database_reader) {
+        (Some(_), Some(ordinals), Some(database)) if is_database => {
+            database.read_taxids(ordinals, report.database_parsed, hit_lists)?
+        }
+        _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
+    };
+    // The masked regions of the queries in record coordinates and the queries of the
+    // batches that were not searched, which only XML2 shows (outfmt 5 shows neither).
+    let (xml_masks, xml_searched): (Vec<Vec<crate::report::blast_xml::QueryMask>>, Vec<bool>) =
+        if xml2_kind.is_some() {
+            (
+                (0..report.queries.len())
+                    .map(|q_idx| {
+                        shown_query_masks(
+                            &report.query_masks[q_idx],
+                            query_lengths[q_idx],
+                            report.ranges.queries.placements.offset(q_idx),
+                        )
+                        .iter()
+                        .map(|mask| crate::report::blast_xml::QueryMask {
+                            from: mask.start as i32,
+                            to: mask.end as i32 - 1,
+                            frame: 0,
+                        })
+                        .collect()
+                    })
+                    .collect(),
+                unsearched.iter().map(|&skipped| !skipped).collect(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+    let xml_subjects = match (report.database_ordinals, report.database_reader) {
+        (Some(ordinals), Some(reader)) if is_database => {
+            crate::report::blast_xml::XmlSubjects::Database {
+                ordinals,
+                oids: reader.oid_map(),
+                titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
+                // Only XML2 shows the taxid.
+                taxids: &xml_taxids,
+                taxonomy: &xml_taxonomy,
+                length: &database_length,
+                parsed: report.database_parsed,
+                parsed_taxonomy: &xml_parsed_taxonomy,
+            }
+        }
+        _ => crate::report::blast_xml::XmlSubjects::Records {
+            records: subject_records,
+            length: &record_length,
+            protein: false,
+        },
+    };
+    let xml = crate::algorithm::blastn::blast_xml::BlastnXml {
+        run: crate::report::blast_xml::XmlRun {
+            program: "blastn",
+            version: &version,
+            reference: if report.megablast {
+                crate::report::blast_xml::REFERENCE_MEGABLAST
+            } else {
+                crate::report::blast_xml::REFERENCE_GAPPED_BLAST
+            },
+            db_name: if is_database { subject_title } else { "" },
+            matrix: None,
+            expect: report.expect,
+            gap_open: report.gap_open,
+            gap_extend: report.gap_extend,
+            reward_penalty: Some((report.reward, report.penalty)),
+            filter: &filter,
+            db_num: report.database.map_or(0, |database| database.num_sequences),
+            db_len: report.database.map_or(0, |database| database.total_letters),
+            db_len_overflow: report
+                .database
+                .is_some_and(|database| database.total_letters_overflow),
+            positives: None,
+            mask_char: b'N',
+        },
+        queries: report.queries,
+        searched_lengths: query_lengths,
+        stats: xml_stats,
+        messages: xml_messages,
+        masks: xml_masks,
+        searched: xml_searched,
+        subjects: xml_subjects,
+        taxdb_notes: xml_taxdb_notes,
+        letters: report.subjects,
+        epilog: report.epilog,
+        only_xml2: xml_only_xml2,
+    };
+    match xml2_kind {
+        None => crate::algorithm::blastn::blast_xml::write_blastn_xml(
+            &xml,
+            &mut crate::report::blast_xml::BlastXmlWriter::new(report.queries_before),
+            hit_lists,
+            writer,
+            format_warnings,
+        )?,
+        Some(kind) => {
+            // The gap costs are written for a gapped search (NCBI reads them from
+            // the options when `GetGappedMode()`); `cbs` and the genetic codes
+            // are not those of a nucleotide search (blastxml2_format.cpp:531-546).
+            let params = crate::report::blast_xml2::Xml2Run {
+                target: if is_database {
+                    crate::report::blast_xml2::Xml2Target::Database
+                } else {
+                    crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
+                },
+                subject_names: if is_database {
+                    None
+                } else {
+                    crate::report::blast_xml2::subject_names(
+                        subject_records.iter().map(FastaRecord::believed),
+                    )
+                },
+                gapped: !report.ungapped,
+                cbs: 0,
+                query_gencode: None,
+                db_gencode: None,
+            };
+            let mut document =
+                crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);
+            crate::algorithm::blastn::blast_xml::write_blastn_xml(
+                &xml,
+                &mut document,
+                hit_lists,
+                writer,
+                format_warnings,
+            )?;
+        }
     }
     Ok(())
 }

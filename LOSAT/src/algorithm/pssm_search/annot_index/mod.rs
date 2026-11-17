@@ -34,6 +34,7 @@ use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
 use crate::report::diag_log::Posts;
+use crate::report::serial::asn_types::{resolved, table::named, write::failed_stream_text};
 use crate::report::serial::pssm::SeqEntry;
 
 /// What NCBI's object manager made of the query's annotations: its messages in order, each one
@@ -78,9 +79,6 @@ impl Abort {
 pub(crate) enum Refusal {
     /// `Empty region in <address> ...` (1204.1-.4, .7, .8) before the stream failed.
     EmptyRegion,
-    /// An empty region of a feature, graph, alignment, location set or table location after the
-    /// stream failed: NCBI prints the annotation's ASN.1 text, cut at its 4096-byte buffer.
-    MutedDump,
     /// A null Seq-id handle or location of a table row before the stream failed.
     NullPointer,
     /// A Dense-seg whose division by `numseg` is by zero (SIGFPE).
@@ -95,8 +93,8 @@ pub(crate) enum Refusal {
     ScaledOverflow,
     /// A `field-id` whose difference with the column group's base overflows `int`.
     FieldIdOverflow,
-    /// Two Seq-ids of one table row's location with different messages whose order is that of
-    /// memory addresses (one `m_Packed`).
+    /// Two Seq-ids of one location (a feature's, a table's or a table row's) with different
+    /// messages whose order is that of memory addresses (one `m_Packed`).
     IdOrder,
     /// A feature table of more rows than `table::ROWS_LIMIT`.
     TableRows,
@@ -114,7 +112,6 @@ impl Refusal {
     pub(crate) fn text(self) -> &'static str {
         match self {
             Refusal::EmptyRegion => "a PSSM query whose annot has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)",
-            Refusal::MutedDump => "a PSSM query whose annot has an empty location after NCBI's 'Failed to parse location' message (NCBI then prints the annotation's ASN.1 text, which LOSAT's writer does not write yet)",
             Refusal::NullPointer => "a PSSM query whose annot has a Seq-table row without a Seq-id or a location (NCBI's object manager stops with a NULL pointer report of memory addresses)",
             Refusal::DivideByZero => "a PSSM query whose annot has a Dense-seg of no segments with starts or strands (NCBI's object manager divides by zero and crashes)",
             Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector that NCBI's object manager reads (BitMagic data decoded without checks)",
@@ -122,7 +119,7 @@ impl Refusal {
             Refusal::DeltaOverflow => "a PSSM query whose annot has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)",
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",
             Refusal::FieldIdOverflow => "a PSSM query whose annot has a Seq-table column field-id below -2147483638 (a signed overflow in NCBI's object manager)",
-            Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
+            Refusal::IdOrder => "a PSSM query whose annot has a location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
             Refusal::DuplicateIdInScope => "a PSSM query entry with a Seq-id twice in a search of -subject records, when the entry's Bioseqs have a Seq-id that NCBI's duplicate Bioseq id exception may write as a subject record spelled it (a GenBank, EMBL or DDBJ accession alone, a name or a patent with a letter, more than 64 letters in a local or general id or an accession)",
@@ -132,12 +129,14 @@ impl Refusal {
 
 /// What stops the index: an exception of NCBI's (`CException`, a `std::exception`), the null
 /// pointer of a table row (`Refusal::NullPointer` before the stream failed, a report of nothing
-/// after it), or LOSAT's refusal.
+/// after it), the failed write of an object's ASN.1 text to the failed stream
+/// (`Indexer::empty_region`), or LOSAT's refusal.
 #[derive(Debug)]
 pub(super) enum Stop {
     Exception(NcbiException),
     Std(&'static str),
     NullPointer,
+    FailedWrite,
     Refuse(Refusal),
 }
 
@@ -198,7 +197,7 @@ pub(crate) fn index_entry(
         caches: table::Caches::default(),
         handles: LiveHandles::default(),
     };
-    let abort = match ix.run(&tse, ids_known) {
+    let error = match ix.run(&tse, ids_known) {
         Ok(()) => None,
         Err(Stop::Refuse(refusal)) => return Err(refusal),
         Err(Stop::Exception(e)) => Some(crate::cli::NativeError::exception(&e)),
@@ -208,6 +207,27 @@ pub(crate) fn index_entry(
             message: String::new(),
         }),
         Err(Stop::NullPointer) => return Err(Refusal::NullPointer),
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+        // ```c++
+        //     catch (const CIOException& e) {                                         \
+        //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+        //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+        //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+        //         }                                                                   \
+        //     }                                                                       \
+        // ```
+        // The failed write (`CIOException::eWrite`) ends the run with nothing more written and
+        // its exit status unchanged, 0 (`om/` cases f33, k04, k07, k08, k09, k13, k16, k17).
+        Err(Stop::FailedWrite) => {
+            return Ok(AnnotOutcome {
+                posts: ix.posts,
+                muted: ix.muted,
+                abort: Some(Abort {
+                    exit: 0,
+                    message: String::new(),
+                }),
+            })
+        }
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251, 260-263
     // ```c++
@@ -223,7 +243,7 @@ pub(crate) fn index_entry(
     // ```
     // After the stream failed, the `LOG_POST` writes its line feed alone (`cli::catch_all_text`,
     // which the run applies once the stream is failed; the text kept here is that line feed).
-    let abort = abort.map(|error| Abort::of(error, ix.muted));
+    let abort = error.map(|error| Abort::of(error, ix.muted));
     Ok(AnnotOutcome {
         posts: ix.posts,
         muted: ix.muted,
@@ -330,7 +350,7 @@ impl Indexer<'_> {
                     for graph in graphs.items() {
                         let loc = graph.field("loc");
                         let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
-                        self.refuse_empty(std::slice::from_ref(&map), Event::Graph)?;
+                        self.refuse_empty(std::slice::from_ref(&map), Event::Graph, graph)?;
                         self.handles.end_object();
                     }
                 }
@@ -402,7 +422,7 @@ impl Indexer<'_> {
             .flatten()
         {
             let map = HandleRangeMap::of_location(loc, mode, &mut self.handles);
-            self.map_location(&map, Event::Feature)?;
+            self.map_location(&map, Event::Feature, feat)?;
         }
         self.handles.end_object();
         Ok(())
@@ -476,14 +496,14 @@ impl Indexer<'_> {
                 }
             }
             if total.iter().any(|(_, range)| range.is_empty()) {
-                return Err(self.empty_region());
+                return Err(self.empty_region(Event::Align, align));
             }
             self.handles.mapped_all(all.iter().flatten());
         } else {
             let mut rows = Vec::new();
             align::process_align(self, &mut rows, align)?;
             for map in &rows {
-                self.refuse_empty(std::slice::from_ref(map), Event::Align)?;
+                self.refuse_empty(std::slice::from_ref(map), Event::Align, align)?;
             }
         }
         self.handles.end_object();
@@ -536,36 +556,60 @@ impl Indexer<'_> {
         });
         if let Some(region) = region {
             let map = HandleRangeMap::of_location(region, Mode::None, &mut self.handles);
-            self.refuse_empty(std::slice::from_ref(&map), Event::Locs)?;
+            // The message writes the location set's one location (`info.GetLocs()`), not the
+            // region.
+            let loc = locs.item(0).expect("one location");
+            self.refuse_empty(std::slice::from_ref(&map), Event::Locs, loc)?;
             self.handles.end_object();
         }
         Ok(())
     }
 
     /// An empty region of an annotation whose index maps only non-empty ranges (a graph, an
-    /// alignment's row, a location set; `event` names its message): refused, in any order of the
-    /// Seq-ids.
-    fn refuse_empty(&mut self, maps: &[HandleRangeMap], event: Event) -> Result<(), Stop> {
+    /// alignment's row, a location set; `event` names its message, `object` what it writes):
+    /// the same in any order of the Seq-ids (`empty_region`).
+    fn refuse_empty(
+        &mut self,
+        maps: &[HandleRangeMap],
+        event: Event,
+        object: V<'_>,
+    ) -> Result<(), Stop> {
         debug_assert!(matches!(event, Event::Graph | Event::Align | Event::Locs));
         let empty =
             |map: &HandleRangeMap| map.map.iter().any(|(_, hr)| hr.overlapping().is_empty());
         if maps.iter().any(empty) {
-            return Err(self.empty_region());
+            return Err(self.empty_region(event, object));
         }
         self.handles.mapped_all(maps);
         Ok(())
     }
 
-    /// `ERR_POST_X(n, "Empty region in " << GetDescription() ...)` of an empty region: before the stream
-    /// failed, a message with the TSE's memory address (`CTSE_Info::GetDescription`,
-    /// tse_info.cpp:2049-2056); after it, NCBI's ASN.1 text of the object (refused both), or for a
-    /// table row its header alone (`Indexer::map_location`).
-    fn empty_region(&self) -> Stop {
-        Stop::Refuse(if self.muted {
-            Refusal::MutedDump
-        } else {
-            Refusal::EmptyRegion
-        })
+    /// `ERR_POST_X(n, "Empty region in " << GetDescription() << " " << MSerial_AsnText <<
+    /// object)` of an empty region of `object` (`event`, not a table row: `map_location`): before
+    /// the stream failed, a message with the TSE's memory address (`CTSE_Info::GetDescription`,
+    /// tse_info.cpp:2049-2056), refused. After it, the post's header and what the failed stream
+    /// gets of the object's ASN.1 text (`asn_types::write::failed_stream_text`: the text without
+    /// its last end of line, or its start where NCBI's buffer of 4096 bytes first flushed), whose
+    /// write throws (`Stop::FailedWrite`; `om/SPEC.md` §3 rule 3).
+    fn empty_region(&mut self, event: Event, object: V<'_>) -> Stop {
+        if !self.muted {
+            return Stop::Refuse(Refusal::EmptyRegion);
+        }
+        let (id, root) = match event {
+            Event::Feature => ("1204.1", named::SEQ_FEAT),
+            Event::Graph => ("1204.2", named::SEQ_GRAPH),
+            Event::Align => ("1204.3", named::SEQ_ALIGN),
+            Event::Locs => ("1204.4", named::SEQ_LOC),
+            Event::TableLocation => ("1204.7", named::SEQ_LOC),
+            Event::Row => unreachable!("a table row's empty region writes no object"),
+        };
+        debug_assert!(std::ptr::eq(resolved(object.ty), resolved(root)));
+        let mut line = post_line_in(Severity::Error, Some(id), Some(self.program), b"", true);
+        line.pop();
+        line.extend_from_slice(&failed_stream_text(root, object.value));
+        line.push(b'\n');
+        self.posts.post(crate::report::diag_log::ERROR, line);
+        Stop::FailedWrite
     }
 
     /// The null pointer of a table row (`Stop::NullPointer`).
@@ -579,17 +623,23 @@ impl Indexer<'_> {
     // <<GetDescription()<< " Seq-table row "<<row)`)
     // Each Seq-id of the map in NCBI's order (`HandleRangeMap::ncbi_order`): its overlapping range,
     // or for a circular one its two ranges, mapped (`x_map`); an empty one posts "Empty region"
-    // (refused: a memory address, or after the stream failed the object's ASN.1 text), except for
-    // a table row after the stream failed, whose post is its header alone, `Error: (1204.8)`.
-    // Where NCBI's order is that of memory addresses (Seq-ids of one `m_Packed`: `m_Info <
-    // handle.m_Info`, seq_id_handle.hpp:207, quoted at `HandleRangeMap::ncbi_order`), only such a
-    // row's order changes the messages: its empty Seq-id's post (`Error: (1204.8)` after the
-    // stream failed, "Empty region in <address>" before) and another's "Failed to parse location"
-    // (`Error: (1204.6)`) in one group are refused (`om/` cases `s_o09_tie_gi5_acc5_u` and
-    // `s_o10_tie_acc5v1_acc5v2_u`: psiblast and tblastn wrote them in different orders); any other
-    // messages of a group are the same in every order (the 1204.6 messages differ only by how many
-    // came before, an empty region of another kind is refused in every order).
-    fn map_location(&mut self, map: &HandleRangeMap, event: Event) -> Result<(), Stop> {
+    // (`empty_region`: refused before the stream failed, a memory address; after it the object's
+    // ASN.1 text, which ends the run), except for a table row after the stream failed, whose post
+    // is its header alone, `Error: (1204.8)`. Where NCBI's order is that of memory addresses
+    // (Seq-ids of one `m_Packed`: `m_Info < handle.m_Info`, seq_id_handle.hpp:207, quoted at
+    // `HandleRangeMap::ncbi_order`), the order changes the messages only when an empty Seq-id's
+    // post and another's "Failed to parse location" (`Error: (1204.6)`) are in one group: refused
+    // (`om/` cases `s_o09_tie_gi5_acc5_u` and `s_o10_tie_acc5v1_acc5v2_u`: psiblast and tblastn
+    // wrote a row's in different orders; in another kind of annotation the 1204.6 message comes
+    // before the object's text, or the run stops on the empty region before it). Any other
+    // messages of a group are the same in every order (the 1204.6 messages differ only by how
+    // many came before, the object's text is that of the object, not of a Seq-id).
+    fn map_location(
+        &mut self,
+        map: &HandleRangeMap,
+        event: Event,
+        object: V<'_>,
+    ) -> Result<(), Stop> {
         let empty = |hr: &range::HandleRange| hr.overlapping().is_empty();
         let fails = |hr: &range::HandleRange| {
             !empty(hr)
@@ -598,17 +648,17 @@ impl Indexer<'_> {
                 && (hr.circular_start().is_empty() || hr.circular_end().is_empty())
         };
         for group in map.ncbi_order() {
-            if event == Event::Row
-                && group.iter().any(|(_, hr)| empty(hr))
-                && group.iter().any(|(_, hr)| fails(hr))
-            {
+            if group.iter().any(|(_, hr)| empty(hr)) && group.iter().any(|(_, hr)| fails(hr)) {
                 return Err(Stop::Refuse(Refusal::IdOrder));
             }
             for (handle, hr) in group {
                 let range = hr.overlapping();
                 if range.is_empty() {
-                    if event != Event::Row || !self.muted {
-                        return Err(self.empty_region());
+                    if event != Event::Row {
+                        return Err(self.empty_region(event, object));
+                    }
+                    if !self.muted {
+                        return Err(Stop::Refuse(Refusal::EmptyRegion));
                     }
                     // After the stream failed: the header alone.
                     self.post(Severity::Error, "1204.8", b"");

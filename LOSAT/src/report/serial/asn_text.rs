@@ -597,18 +597,18 @@ impl Encoder for AsnTextEncoder<'_> {
     /// A byte outside 0x20..0x7E (`GoodVisibleChar`, include/serial/impl/objistr.inl:456-459)
     /// is NCBI's replacement with an error message: here an error (`write_string`).
     fn visible_str(&mut self, value: &[u8]) {
-        self.write_string::<false>(value);
+        self.write_string::<CHECK>(value);
     }
 
     /// `visible_str` that writes NCBI's `#` for a byte outside 0x20..0x7E and records it
     /// (`replace`).
     fn visible_str_replacing(&mut self, value: &[u8]) {
-        self.write_string::<true>(value);
+        self.write_string::<REPLACE>(value);
     }
 
     /// `string_store` (`visible_str`) that writes NCBI's `#` (`visible_str_replacing`).
     fn string_store_replacing(&mut self, value: &[u8]) {
-        self.write_string::<true>(value);
+        self.write_string::<REPLACE>(value);
     }
 
     /// `WriteDouble2(data, DBL_DIG)` (`real::write_asn_text_double`).
@@ -675,6 +675,63 @@ impl Encoder for AsnTextEncoder<'_> {
         self.visible_str(value);
     }
 
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:315-318
+    /// ```c++
+    /// void CObjectOStreamAsn::WriteNull(void)
+    /// {
+    ///     m_Output.PutString("NULL");
+    /// }
+    /// ```
+    fn null(&mut self) {
+        self.put(b"NULL");
+    }
+
+    /// `WriteString` with `eFNP_Allow` (`write_string`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:459-467
+    /// ```c++
+    /// void CObjectOStreamAsn::WriteString(const string& str, EStringType type)
+    /// {
+    ///     EFixNonPrint fix = x_FixCharsMethod();
+    ///     if (type == eStringTypeUTF8) {
+    ///         FixNonPrint( eFNP_Allow );
+    ///     }
+    ///     WriteString(str.data(), str.size());
+    ///     FixNonPrint( fix );
+    /// }
+    /// ```
+    fn utf8_str(&mut self, value: &[u8]) {
+        self.write_string::<ALLOW>(value);
+    }
+
+    /// The member's name was written (`member`); the bytes follow as they were read, and the line
+    /// length stays what it was (`COStreamBuffer::Write` counts no byte of the line).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733
+    /// ```c++
+    /// bool CObjectOStreamAsn::WriteClassMember(const CMemberId& memberId,
+    ///                                          const CDelayBuffer& buffer)
+    /// {
+    ///     if ( !buffer.HaveFormat(eSerial_AsnText) )
+    ///         return false;
+    ///
+    ///     NextElement();
+    ///
+    ///     BEGIN_OBJECT_FRAME2(eFrameClassMember, memberId);
+    ///
+    ///     WriteMemberId(memberId);
+    ///
+    ///     Write(buffer.GetSource());
+    ///
+    ///     END_OBJECT_FRAME();
+    ///
+    ///     return true;
+    /// }
+    /// ```
+    fn delayed(&mut self, text: &[u8]) {
+        self.out.extend_from_slice(text);
+    }
+
     fn buffered(&self) -> usize {
         self.out.len() - self.start
     }
@@ -728,17 +785,31 @@ impl Encoder for AsnTextEncoder<'_> {
     }
 }
 
+/// `write_string`'s handling of a byte that NCBI's stream replaces in a VisibleString: the error
+/// `NonVisibleChar` (`visible_str`), `#` and its record (`visible_str_replacing`), or the byte
+/// as it is (`utf8_str`, `eFNP_Allow`).
+const CHECK: u8 = 0;
+const REPLACE: u8 = 1;
+const ALLOW: u8 = 2;
+
 impl AsnTextEncoder<'_> {
-    /// The loop of `WriteString` (quoted at `visible_str`): without `REPLACE` a byte outside
-    /// 0x20..0x7E is the error `NonVisibleChar` and is not written, with it the byte is
-    /// recorded at its line (before its wrap, `replace`) and `#` is written in its place.
+    /// The loop of `WriteString` (quoted at `visible_str`): with `CHECK` a byte outside
+    /// 0x20..0x7E is the error `NonVisibleChar` and is not written, with `REPLACE` the byte is
+    /// recorded at its line (before its wrap, `replace`) and `#` is written in its place, with
+    /// `ALLOW` it is written as it is (a zero byte left out).
     #[inline(always)]
-    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+    fn write_string<const MODE: u8>(&mut self, value: &[u8]) {
         self.put(b"\"");
         for &byte in value {
-            let byte = if !Stream::AsnText.replaces(byte) {
+            let byte = if MODE == ALLOW {
+                // `if (c == 0) continue;` (objostrasn.cpp:436-438).
+                if byte == 0 {
+                    continue;
+                }
                 byte
-            } else if REPLACE {
+            } else if !Stream::AsnText.replaces(byte) {
+                byte
+            } else if MODE == REPLACE {
                 self.replace(byte);
                 b'#'
             } else {

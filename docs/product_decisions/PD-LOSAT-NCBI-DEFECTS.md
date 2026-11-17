@@ -1420,14 +1420,15 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided
   by the Owner on 2026-11-16 (「推奨通り」): Q1 to Q3 refuse their cases, as built, and Q-BM ports BitMagic
-  in a later item (refused until then, below). Not rule-3 items but refusals until LOSAT writes NCBI's ASN.1
-  text of the values it reads (line RG item D3-2): the annotation's text that NCBI prints after its
-  `Failed to parse location of` message (1204.6), and with `-out_pssm`, `-export_search_strategy`
-  or psiblast `-outfmt 11` a PSSM with members that LOSAT's PSSM writer does not write yet; nor
-  the XML and JSON reports of an untitled query whose annotations hold features (NCBI's
-  definition line reads them; not ported). The rest is NCBI's (rules 2 and 4): the index's
-  messages (`Invalid 'lens' size in denseg`, the Seq-table column messages, `Failed to parse
-  location of`, after which NCBI's later messages print their headers only) and exceptions
+  in a later item (refused until then, below). Not a rule-3 item but a refusal: the XML and JSON
+  reports of an untitled query whose annotations hold features (NCBI's definition line reads them;
+  not ported). Since line RG item D3-2 LOSAT writes NCBI's ASN.1 text of the values it reads: the
+  annotation's text that NCBI prints after its `Failed to parse location of` message (1204.6) is
+  written, and with `-out_pssm` and `-export_search_strategy` every member of the PSSM. The rest is
+  NCBI's (rules 2 and 4): the index's messages (`Invalid 'lens' size in denseg`, the Seq-table
+  column messages, `Failed to parse location of`, after which NCBI's later messages print their
+  headers only and an empty region the object's ASN.1 text as far as NCBI's 4096-byte output
+  buffer writes it to the failed stream, exit status 0) and exceptions
   (`Error: NCBI C++ Exception:`, `Error: vector::reserve` of a Dense-seg or Seq-table reserve), the
   reader's format errors, number-range and member-tag reports, its `#` for a byte outside the
   visible ASCII range and the deprecated members of a `Variation-ref`; where the index's

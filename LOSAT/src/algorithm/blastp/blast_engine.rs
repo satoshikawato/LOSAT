@@ -5448,12 +5448,19 @@ pub fn run(
     // `-` is standard input and standard output.
     input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
     // NCBI opens the query file inside `Run` too: its error is saved and an error archive
-    // follows.
-    let query_file = match input_files::open_input(&args.query, "query", args.app.name()) {
-        Ok(file) => file,
-        Err(error) => {
-            write_run_error_archive(&args, archive.as_ref(), &error);
-            return Err(error);
+    // follows. psiblast's `-in_pssm` reads no query, and its `-query` is the default `-`
+    // (`-in_pssm` excludes `-query`, blast_args.cpp:1242-1244): NCBI's `AsInputFile()` of `-` is
+    // `cin`, which opens nothing, so LOSAT opens no standard input for it either (a platform
+    // without one, the Web, runs the PSSM).
+    let query_file = if pssm_query(&args) && args.query.as_os_str() == "-" {
+        None
+    } else {
+        match input_files::open_input(&args.query, "query", args.app.name()) {
+            Ok(file) => Some(file),
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
         }
     };
     let out_file = open_out_file(&args)?;
@@ -5886,7 +5893,7 @@ fn subject_taxonomy(
 fn search_cli(
     args: BlastpArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_file: Option<std::fs::File>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
     choice: crate::blastinput::app::FormatChoice,
@@ -5931,6 +5938,7 @@ fn search_cli(
             choice_to_standard_output.then_some(&choice),
         );
     }
+    let query_file = query_file.expect("the query of a search that is not a PSSM's is open");
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -6182,7 +6190,6 @@ fn search_pssm_query(
     xinclude: Option<&crate::blastinput::app::FormatChoice>,
 ) -> Result<()> {
     let program = resolved.app.name();
-    psi.refuse_request_members(program)?;
     // The PSSM files of round 1 (written back from the input PSSM, or the engine's), which a run
     // that never searches does not write (NCBI BLAST+ 2.17.0 leaves `-out_pssm` and
     // `-out_ascii_pssm` alone when the object manager ends the run: line RG D3-1 fix 3 S1, fix 4).

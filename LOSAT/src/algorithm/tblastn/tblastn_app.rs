@@ -961,7 +961,6 @@ fn search_pssm_query(
     database: Option<&TblastnDatabase>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    psi.refuse_request_members("TBLASTN")?;
     for &outfmt in outfmts {
         super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
     }

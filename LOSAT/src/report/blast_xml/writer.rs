@@ -150,11 +150,13 @@ pub fn caught_post<D: StructuredXml + ?Sized>(
     match written {
         Ok(()) => Ok(None),
         Err(error) => match error.downcast::<super::CaughtException>() {
-            Ok(super::CaughtException(exception)) => Ok(Some(crate::ncbi_exception::error_post_line(
-                None,
-                Some(program),
-                document.caught_message(&exception).as_bytes(),
-            ))),
+            Ok(super::CaughtException(exception)) => {
+                Ok(Some(crate::ncbi_exception::error_post_line(
+                    None,
+                    Some(program),
+                    document.caught_message(&exception).as_bytes(),
+                )))
+            }
             Err(error) => Err(error),
         },
     }

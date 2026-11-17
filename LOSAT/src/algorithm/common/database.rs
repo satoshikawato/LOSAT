@@ -10042,8 +10042,14 @@ mod taxdb_prepass_tests {
                     panic!("{name} {ordinal}: no parsed Seq-ids");
                 };
                 // A batch whose prefetch is on loads the subject by its own id.
-                assert!(subject.fetched(false, false, false).is_ok(), "{name} {ordinal}");
-                match (subject.fetched(false, true, false), want.filter(|_| prefetch_off)) {
+                assert!(
+                    subject.fetched(false, false, false).is_ok(),
+                    "{name} {ordinal}"
+                );
+                match (
+                    subject.fetched(false, true, false),
+                    want.filter(|_| prefetch_off),
+                ) {
                     (Ok(()), None) => {}
                     (Err(error), Some(Some(other))) => assert!(
                         error.contains(&format!("match an id of database sequence {other} weakly")),
@@ -10089,7 +10095,10 @@ mod taxdb_prepass_tests {
             match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
                 (ReportedHeader::Stored(_), Ok(true)) => {}
                 (ReportedHeader::Parsed(subject), Ok(false)) => {
-                    assert!(subject.fetched(false, true, false).is_ok(), "{name} {ordinal}")
+                    assert!(
+                        subject.fetched(false, true, false).is_ok(),
+                        "{name} {ordinal}"
+                    )
                 }
                 (ReportedHeader::Parsed(subject), Err(id)) => {
                     let error = subject.fetched(false, true, false).unwrap_err();

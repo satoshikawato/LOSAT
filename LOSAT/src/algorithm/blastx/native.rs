@@ -202,16 +202,30 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
             || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
+            || (e.exit == 2 && e.message.starts_with("BLAST Database error: "))
             || e.exit == 255
     }) {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
+        // ```c++
+        //     catch (const CSeqDBException& e) {                                      \
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-202
+        // ```c++
+        //         else {                                                              \
+        //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+        //         	exit_code = BLAST_DATABASE_ERROR;                               \
+        //         }                                                                   \
+        // ```
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
         // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
         // an exception of NCBI's XML stream, `blast_xml::writer::run_ending_exception`, or the
-        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
-        // an engine error.
+        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`) or through its
+        // `CSeqDBException` branch, which comes first (exit status 2: the lookup of a reported
+        // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
+        // not an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -1313,7 +1327,9 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
-        asks.writes_thrown = options.iter().all(|options| Self::of(options).writes_thrown);
+        asks.writes_thrown = options
+            .iter()
+            .all(|options| Self::of(options).writes_thrown);
         asks
     }
 
@@ -3323,6 +3339,24 @@ mod archive_error_tests {
         assert_eq!(
             failure.downcast_ref::<NativeError>().map(|e| e.exit),
             Some(6)
+        );
+    }
+
+    // Line DBID pfoff-1: `CATCH_ALL`'s report of a `CSeqDBException` that an outfmt 13 or 14
+    // report raises (the lookup of a reported subject that throws) stays as it is, not an
+    // engine error.
+    #[test]
+    fn a_database_error_of_catch_all_is_no_engine_error() {
+        let thrown = crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO).unwrap(),
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        );
+        let error = report_error(NativeError::exception(&thrown).into());
+        let error = error.downcast_ref::<NativeError>().unwrap();
+        assert_eq!(error.exit, 2);
+        assert_eq!(
+            error.message,
+            "BLAST Database error: DB contains no accession info.\n"
         );
     }
 }

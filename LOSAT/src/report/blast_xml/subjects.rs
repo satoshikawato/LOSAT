@@ -329,9 +329,7 @@ impl HitNames {
     pub fn names(&self) -> Result<&SubjectNames> {
         match self {
             HitNames::Names(names) => Ok(names),
-            HitNames::Throws(exception) => {
-                Err(super::CaughtException(exception.clone()).into())
-            }
+            HitNames::Throws(exception) => Err(super::CaughtException(exception.clone()).into()),
         }
     }
 }

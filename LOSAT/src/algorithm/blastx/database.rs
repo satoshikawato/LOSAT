@@ -573,9 +573,15 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
-                    subject.fetched(taxonomy, one_by_one, writes_thrown).map_err(|reason| {
-                        shared::parsed_refusal(database.db.oid(ordinal), &reason, database.program)
-                    })?;
+                    subject
+                        .fetched(taxonomy, one_by_one, writes_thrown)
+                        .map_err(|reason| {
+                            shared::parsed_refusal(
+                                database.db.oid(ordinal),
+                                &reason,
+                                database.program,
+                            )
+                        })?;
                 } else if reports && prefetched {
                     shared::check_prefetched_parsed(
                         &database.db,

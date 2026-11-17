@@ -2730,9 +2730,11 @@ mod tests {
         );
         // LOSAT's own error, and NCBI's text of a place that LOSAT does not know (the text of
         // `CATCH_ALL` for `eTooManyOpenFiles`): no exception.
-        assert!(LookupFailure::losat("byte range 0..9 passes the end of the file")
-            .exception()
-            .is_none());
+        assert!(
+            LookupFailure::losat("byte range 0..9 passes the end of the file")
+                .exception()
+                .is_none()
+        );
         assert!(
             LookupFailure::ncbi("Too many open files, please raise the open file limit")
                 .exception()
@@ -2871,7 +2873,10 @@ mod tests {
                 .fetched(true, false, false)
                 .unwrap_err()
                 .contains("other taxids"));
-            assert!(copy.fetched(false, true, false).unwrap_err().contains("weakly"));
+            assert!(copy
+                .fetched(false, true, false)
+                .unwrap_err()
+                .contains("weakly"));
         }
         let other =
             subject.found_instead(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4))));

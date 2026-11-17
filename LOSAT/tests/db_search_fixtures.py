@@ -36,6 +36,13 @@ LOSAT/tests/db_search (README.md there says how they were built).
   and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
   that the stack limit, the environment and the stack's random start move; its output with a stack large enough
   is the expectation (PD-LOSAT-NCBI-DEFECTS exception 15). `check` runs LOSAT with the caller's limit.
+- a `ncbi` row whose `covers` cell has `device: MODE` (Linux only; line RG item T6a): the run's report goes to a
+  device that fails, and the expectation is NCBI's exit status and stderr and the bytes that reached the device,
+  frozen as <row_id>.out. MODE `stdout-full`: standard output is /dev/full (nothing reaches it); `out-full`:
+  `-out /dev/full`; `fsize=N`: `-out` a file of a temporary directory under `RLIMIT_FSIZE` N with SIGXFSZ ignored
+  (the write past N bytes fails with EFBIG, as `prlimit --fsize`), whose bytes are frozen. Standard output must be
+  empty in the last two (`run_on_device`). `check --library` skips these rows (`library-skip`): the library's
+  writers have no NCBI stream.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -399,6 +406,53 @@ def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:
     return unlimited
 
 
+def device_mode(row: dict[str, str]) -> str | None:
+    """`device: MODE` in the covers cell of `row` (the module's docstring), or None."""
+    _, marker, rest = row["covers"].partition("device: ")
+    return rest.split(" | ")[0].split()[0] if marker else None
+
+
+def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
+                  preexec: Callable[[], None] | None = None) -> subprocess.CompletedProcess:
+    """The run of `command` with its report on the failing device of `row` (`device_mode`): its `stdout` is the bytes
+    that reached the device (the file of `fsize=N`, else none), or a marker and the bytes where the run wrote to its
+    standard output although the device is `-out`."""
+    import resource  # POSIX: the device rows run on Linux
+    import signal
+
+    mode = device_mode(row)
+    if mode == "stdout-full":
+        with open("/dev/full", "wb") as full:
+            run = subprocess.run(command, cwd=ENGINE, stdout=full, stderr=subprocess.PIPE, timeout=TIMEOUT,
+                                 env=env, preexec_fn=preexec)
+        run.stdout = b""
+        return run
+    if mode == "out-full":
+        run = subprocess.run([*command, "-out", "/dev/full"], cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                             env=env, preexec_fn=preexec)
+        landed = b""
+    elif mode is not None and mode.startswith("fsize="):
+        limit = int(mode.removeprefix("fsize="))
+
+        def limited() -> None:
+            if preexec is not None:
+                preexec()
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+
+        with tempfile.TemporaryDirectory(prefix="db_search_device_") as directory:
+            path = Path(directory) / "device.out"
+            run = subprocess.run([*command, "-out", str(path)], cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                                 env=env, preexec_fn=limited, restore_signals=False)
+            landed = path.read_bytes() if path.exists() else b""
+    else:
+        raise SystemExit(f"{row['row_id']}: unknown device {mode!r}")
+    if run.stdout:
+        landed = b"STANDARD OUTPUT:\n" + run.stdout
+    run.stdout = landed
+    return run
+
+
 def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
     return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
 
@@ -445,6 +499,10 @@ def freeze(args: argparse.Namespace) -> int:
             run = pssms.run
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
             out = frozen_stdout(row, run.stdout)
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+        elif device_mode(row):
+            run = run_on_device(row, command, row_env(row, env), ncbi_stack(row))
+            out = run.stdout
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
@@ -519,7 +577,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call.
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
-                    or ("-query" in argv and "-in_pssm" in argv)):
+                    or ("-query" in argv and "-in_pssm" in argv) or device_mode(row)):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
@@ -540,6 +598,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                        env=row_env(row, env), timeout=TIMEOUT)
         run = pssms.run
+    elif device_mode(row):
+        run = run_on_device(row, command, row_env(row, env))
     else:
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":

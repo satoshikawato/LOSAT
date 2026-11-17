@@ -1,0 +1,3151 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/dev_psubj.faa).
+           10 sequences; 801 total letters
+
+
+
+Query= pb1 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb2 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb3 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb4 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb5 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb6 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb7 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb8 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb9 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb10 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb11 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb12 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb13 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb14 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb15 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb16 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb17 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb18 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb19 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb20 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb21 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb22 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb23 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb24 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb25 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb26 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb27 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb28 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb29 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb30 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb31 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb32 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb33 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb34 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb35 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb36 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb37 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb38 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb39 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb40 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb41 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb42 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb43 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb44 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb45 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb46 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb47 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb48 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb49 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb50 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb51 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+> p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+Query= pb52 copy
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     4e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    1.1  
+
+
+> p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMW

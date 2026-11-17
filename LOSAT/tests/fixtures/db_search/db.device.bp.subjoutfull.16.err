@@ -1,0 +1,6 @@
+Error: (802.4) [blastp] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+Error: (802.4) [blastp] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+Error: [blastp] XML format failed
+Error: (802.4) [blastp] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+Error: [blastp] XML format failed
+BLAST failed to write output

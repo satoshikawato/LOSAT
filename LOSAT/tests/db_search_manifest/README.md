@@ -22,6 +22,18 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
 - `kind ncbi` with `ncbi-stack: unlimited` in covers: `freeze` runs NCBI with no stack limit, where its default 8 MiB
   stack overflows on a PSSM's values nested thousands of levels deep (PD-LOSAT-NCBI-DEFECTS exception 15); `check`
   runs LOSAT as for any row.
+- `kind ncbi` with `device: MODE` in covers (Linux only; line RG item T6a fix 1; the rows `db.device.*` of
+  `<program>.device.tsv`): the report goes to a device that fails, and the expectation is NCBI's exit status and
+  stderr and the bytes that reached the device (`<row_id>.out`). MODE `stdout-full`: standard output is /dev/full;
+  `out-full`: `-out /dev/full`; `fsize=N`: `-out` a temporary file under `RLIMIT_FSIZE` N, SIGXFSZ ignored (the
+  write past N bytes fails with EFBIG). Inputs: each program's base search (blastn nslice, blastp prot_v5, tblastn
+  tslice, blastx bslice, tblastx xslice; formats 0, 5-12, 15-18 where LOSAT dev and NCBI agree without a device; SAM
+  only for blastn) with stdout-full, out-full and `fsize` of half the report (at most 100000) and of its size minus 1
+  (where the report is at most 100001 bytes), and for outfmt 0 inside the last query footer, and just inside and 20
+  bytes after the epilog's flushed line feeds; `dev_nw.fna` (a warning for an all-N query between two queries, also
+  with BATCH_SIZE=1; outfmt 6, 7, 10); `dev_pblk.faa` (1000 copies of p3.faa's first record, 61,000 letters) against
+  `-subject dev_psubj.faa` (prot_v5 as FASTA; outfmt 0, 5, 8, 9, 12 with `fsize` 100000); and outfmt 16 with
+  `-subject` (`dev_nsubj.fna`, `dev_psubj.faa`; out-full and half). Frozen files stay at or below 100 KB.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
   (to a ` | ` or the end); the hash columns are empty.
 - `db`: path relative to LOSAT/ (an empty cell is `-db ""`; `subject:PATH` runs `-subject PATH` in place of `-db`, for a

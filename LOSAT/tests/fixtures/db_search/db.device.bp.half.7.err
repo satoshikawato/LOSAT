@@ -1,0 +1,3 @@
+Warning: [blastp] Query_2 p03 every letter .. : One or more O characters replaced by X for alignment score calculations at positions 24 
+terminate called after throwing an instance of 'std::__ios_failure'
+  what():  basic_ios::clear: iostream error

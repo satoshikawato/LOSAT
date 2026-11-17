@@ -1,0 +1,1 @@
+Error: (802.4) [tblastn] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error

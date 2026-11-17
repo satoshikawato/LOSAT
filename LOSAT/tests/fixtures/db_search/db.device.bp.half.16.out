@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/seqdb/db/prot_v5</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>p01 first protein [Test organism]</query-title>
+              <query-len>61</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|0</id>
+                      <accession>0</accession>
+                      <title>p01 first protein [Test organism]</title>
+                    </HitDescr>
+                  </description>
+                  <len>61</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>127.102</bit-score>
+                      <score>318</score>
+                      <evalue>4.42102e-45</evalue>
+                      <identity>61</identity>
+                      <positive>61</positive>
+                      <query-from>1</query-from>
+                      <query-to>61</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>61</hit-to>
+                      <align-len>61</align-len>
+                      <gaps>0</gaps>
+                      <qseq>QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTKD</qseq>
+                      <hseq>QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTKD</hseq>
+                      <midline>QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTKD</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|5</id>
+                      <accession>5</accession>
+                      <title>p06 a title longer than 255 bytes token000 token001 token002 token003 token004 token005 token006 token007 token008 token009 token010 token011 token012 token013 token014 token015 token016 token017 token018 token019 token020 token021 token022 token023 token024 token025 token026 token027 token028 token029 token030 token031 token032 token033 token034 token035 token036 token037 token038 token039</title>
+                    </HitDescr>
+                  </description>
+                  <len>88</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>14.6234</bit-score>
+                      <score>26</score>
+                      <evalue>1.06032</evalue>
+                      <identity>4</identity>
+                      <positive>9</positive>
+                      <query-from>24</query-from>
+                      <query-to>35</query-to>
+                      <hit-from>48</hit-from>
+                      <hit-to>59</hit-to>
+                      <align-len>12</align-len>
+                      <gaps>0</gaps>
+                      <qseq>FDMKYWRYDLED</qseq>
+                      <hseq>YDLVYYRYTVDG</hseq>
+                      <midline>+D+ Y+RY ++ </midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>13.0826</bit-score>
+                      <score>22</score>
+                      <evalue>4.08612</evalue>
+                      <identity>5</identity>
+                      <positive>5</positive>
+                      <query-from>27</query-from>
+                      <query-to>33</query-to>
+                      <hit-from>44</hit-from>
+                      <hit-to>50</hit-to>
+                      <align-len>7</align-len>
+                      <gaps>0</gaps>
+                      <qseq>KYWRYDL</qseq>
+                      <hseq>KYSHYDL</hseq>
+                      <midline>KY  YDL</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>10</db-num>
+                  <db-len>801</db-len>
+                  <hsp-len>19</hsp-len>
+                  <eff-space>25662</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/seqdb/db/prot_v5</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>p03 every letter of NCBIstdaa but the gap</query-title>
+              <query-len>33</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|2</id>
+                      <accession>2</accession>
+                      <title>p03 every letter of NCBIstdaa but the gap</title>
+                    </HitDescr>
+                  </description>
+                  <len>33</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>68.5514</b

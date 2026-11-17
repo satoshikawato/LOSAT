@@ -30,8 +30,6 @@ use crate::report::serial::asn_text_reader::{
 };
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 
-use super::ncbi_stack::{Depth, NcbiStack};
-
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Post {
@@ -287,14 +285,13 @@ const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
 
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
-/// the messages posted, refusing the values that NCBI's stack `ncbi_stack` may not hold.
-pub(crate) fn read_document(text: &[u8], root: u16, ncbi_stack: NcbiStack) -> Read<Value> {
+/// the messages posted.
+pub(crate) fn read_document(text: &[u8], root: u16) -> Read<Value> {
     let mut reader = TypedReader {
         r: Reader::new(SliceSource::new(text), "PSSM", "PSSM reader"),
         frames: Vec::new(),
         posts: Vec::new(),
         open: Vec::new(),
-        depth: Depth::new(ncbi_stack),
     };
     let value = reader.document(root);
     (value, reader.posts)
@@ -307,19 +304,12 @@ struct TypedReader<'a> {
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
     /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
     open: Vec<Open>,
-    /// The values of NCBI's recursive types open, against NCBI's stack (`ncbi_stack::Depth`).
-    depth: Depth,
 }
 
 /// A value being read that waits for a value inside it (`TypedReader::value`).
 enum Open {
-    /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip),
-    /// and the recursive value closed (`recursive`).
-    Value {
-        target: u16,
-        skip: bool,
-        recursive: bool,
-    },
+    /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip).
+    Value { target: u16, skip: bool },
     /// A SEQUENCE reading the member at `reading` (`members`).
     Sequence {
         ty: u16,
@@ -467,10 +457,9 @@ impl TypedReader<'_> {
     }
 
     /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the hooks
-    /// of NCBI's classes that a read runs and LOSAT's refusal of a value that NCBI's stack may not
-    /// hold (`Depth`). The values inside it are read in turn from the list of the values being read
-    /// (`open`), as NCBI's functions recurse; an error leaves NCBI's frames from the innermost out
-    /// (`pop`), as it passes `END_OBJECT_FRAME` of each.
+    /// of NCBI's classes that a read runs. The values inside it are read in turn from the list of
+    /// the values being read (`open`), as NCBI's functions recurse; an error leaves NCBI's frames
+    /// from the innermost out (`pop`), as it passes `END_OBJECT_FRAME` of each.
     fn value(&mut self, ty: u16, skip: bool) -> R<Value> {
         let (open, frames) = (self.open.len(), self.frames.len());
         let mut step = self.start(ty, skip);
@@ -501,12 +490,7 @@ impl TypedReader<'_> {
     fn start(&mut self, ty: u16, skip: bool) -> R<Step> {
         let info = resolved(ty);
         let target = alias_target(ty);
-        let recursive = self.depth.open(target).map_err(ReadError::Unsupported)?;
-        self.open.push(Open::Value {
-            target,
-            skip,
-            recursive,
-        });
+        self.open.push(Open::Value { target, skip });
         let value = match info.kind {
             Kind::Sequence(members) => {
                 self.push_object(FrameKind::Class, target, info.name(), skip);
@@ -538,14 +522,7 @@ impl TypedReader<'_> {
     /// A value read is given to the value being read that holds it (`held`).
     fn resume(&mut self, held: Open, value: Value) -> R<Step> {
         match held {
-            Open::Value {
-                target,
-                skip,
-                recursive,
-            } => {
-                if recursive {
-                    self.depth.close();
-                }
+            Open::Value { target, skip } => {
                 if skip {
                     return Ok(Step::Done(value));
                 }

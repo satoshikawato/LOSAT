@@ -37,7 +37,6 @@
 //! serial/typeinfo.cpp:249-252), which the reader's stack names in NCBI's exception reports.
 
 mod hooks;
-mod ncbi_stack;
 pub(crate) mod read;
 // Generated (`scripts/asn_spec_gen.py`), checked byte for byte by `scripts/asn_spec_check.py`.
 #[rustfmt::skip]
@@ -46,7 +45,6 @@ pub(crate) mod table;
 #[cfg(test)]
 mod read_tests;
 
-pub(crate) use ncbi_stack::{NcbiStack, PSIBLAST_STACK, TBLASTN_STACK};
 pub(crate) use read::{read_document, Post, ReadError};
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
@@ -273,7 +271,7 @@ pub enum Value {
 
 /// A value is dropped with the values nested in it from a list on the heap: the drop of each one
 /// inside the one that holds it would recurse as deep as the values nest (the reader reads any
-/// depth that NCBI's stack holds, `ncbi_stack`).
+/// depth).
 impl Drop for Value {
     fn drop(&mut self) {
         let mut nested = Vec::new();

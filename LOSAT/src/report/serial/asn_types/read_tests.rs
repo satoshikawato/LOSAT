@@ -10,7 +10,7 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// The value of the document `text` of the root type `root`, or the error, with the posts.
 fn read(root: u16, text: impl AsRef<[u8]>) -> (Result<Value, ReadError>, Vec<Post>) {
-    read_document(text.as_ref(), root, super::PSIBLAST_STACK)
+    read_document(text.as_ref(), root)
 }
 
 fn value(root: u16, text: &str) -> Value {
@@ -724,77 +724,93 @@ fn a_value_is_small() {
     );
 }
 
-/// NCBI's stack (`ncbi_stack`): the reader refuses a value that would fill it, from the bytes of one
-/// type nested in itself or of several types together (in a room of a test that holds 2 Bioseq-sets
-/// or 3 Seq-loc mixes; NCBI's 8 MiB hold thousands, line RG D3-1 fix rounds 5 and 6).
+/// Every recursive type of the PSSM, along each of its paths, nests to any depth (NCBI BLAST+
+/// 2.17.0 crashes from a few thousand levels with its default 8 MiB stack and reads them with a
+/// larger one: PD-LOSAT-NCBI-DEFECTS exception 14): 20,000 levels of each are read on a thread of
+/// 256 KiB, with the hooks of their classes.
 #[test]
-fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
-    let read = |root: u16, room: i64, text: &str| {
-        read_document(
-            text.as_bytes(),
-            root,
-            super::NcbiStack::with_room(false, room),
-        )
-        .0
-    };
-    // psiblast's bases and bytes per value (`ncbi_stack::PSIBLAST`).
-    let sets_room = 13072 + 2 * 1648;
-    let bioseq = "seq { id { local id 1 }, inst { repr raw, mol aa } }";
-    let sets = |n: usize| {
-        let mut entry = bioseq.to_string();
-        for _ in 0..n {
-            entry = format!("set {{ seq-set {{ {entry} }} }}");
-        }
-        format!("Seq-entry ::= {entry}")
-    };
-    assert!(read(named::SEQ_ENTRY, sets_room, &sets(2)).is_ok());
-    match read(named::SEQ_ENTRY, sets_room, &sets(3)) {
-        Err(ReadError::Unsupported(what)) => {
-            assert!(
-                what.contains("(3 Bioseq-set values open at once)"),
-                "{what}"
-            )
-        }
-        other => panic!("{other:?}"),
-    }
-    // Two sets side by side are never open at once.
-    let wide = format!(
-        "Seq-entry ::= set {{ seq-set {{ {0}, {0} }} }}",
-        sets(1).trim_start_matches("Seq-entry ::= ")
-    );
-    assert!(read(named::SEQ_ENTRY, sets_room, &wide).is_ok());
-    let mixes = |n: usize, inner: &str| {
-        let mut loc = inner.to_string();
-        for _ in 0..n {
-            loc = format!("mix {{ {loc} }}");
-        }
-        format!("Seq-loc ::= {loc}")
-    };
-    let mixes_room = 11920 + 3 * 1216;
-    let int = "int { from 0, to 1, id local id 1 }";
-    assert!(read(named::SEQ_LOC, mixes_room, &mixes(3, int)).is_ok());
-    assert!(matches!(
-        read(named::SEQ_LOC, mixes_room, &mixes(4, int)),
-        Err(ReadError::Unsupported(_))
-    ));
-    // Mixes and equivs open at once add their bytes.
-    let equivs = |n: usize| {
-        let mut loc = int.to_string();
-        for _ in 0..n {
-            loc = format!("equiv {{ {loc} }}");
-        }
-        loc
-    };
-    assert!(read(named::SEQ_LOC, mixes_room, &mixes(2, &equivs(1))).is_ok());
-    assert!(matches!(
-        read(named::SEQ_LOC, mixes_room, &mixes(2, &equivs(2))),
-        Err(ReadError::Unsupported(_))
-    ));
+fn every_recursive_type_nests_to_any_depth() {
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(|| {
+            let int = "int { from 0, to 1, id local id 1 }";
+            let align = format!(
+                "{{ type global, dim 2, segs std {{ {{ dim 2, loc {{ {int}, {int} }} }} }} }}"
+            );
+            let user = "{ type str \"t\", data { { label str \"a\", data str \"x\" } } }";
+            // (root type, its innermost value, the value around a value: `{}`)
+            let nests: [(u16, &str, &str); 13] = [
+                (
+                    named::SEQ_ENTRY,
+                    "seq { id { local id 1 }, inst { repr raw, mol aa } }",
+                    "set { seq-set { {} } }",
+                ),
+                (named::SEQ_LOC, int, "mix { {} }"),
+                (named::SEQ_LOC, int, "equiv { {} }"),
+                (named::SEQ_LOC, int, "mix { equiv { {} } }"),
+                (
+                    named::USER_OBJECT,
+                    user,
+                    "{ type str \"t\", data { { label str \"a\", data object {} } } }",
+                ),
+                (
+                    named::USER_OBJECT,
+                    user,
+                    "{ type str \"t\", data { { label str \"a\", data objects { {} } } } }",
+                ),
+                (
+                    named::USER_FIELD,
+                    "{ label str \"a\", data str \"x\" }",
+                    "{ label str \"a\", data fields { {} } }",
+                ),
+                (named::SEQ_ALIGN, &align, "{ type disc, segs disc { {} } }"),
+                (named::PUB, "gen { cit \"x\" }", "equiv { {} }"),
+                (
+                    named::VARIATION_REF,
+                    "{ data unknown NULL }",
+                    "{ data set { type unknown, variations { {} } } }",
+                ),
+                (
+                    named::VARIATION_REF,
+                    "{ data unknown NULL }",
+                    "{ data unknown NULL, consequence { variation {} } }",
+                ),
+                (named::SEQTABLE_MULTI_DATA, "int { 0 }", "int-delta {}"),
+                (
+                    named::ORGNAME,
+                    "{ name binomial { genus \"A\" } }",
+                    "{ name hybrid { {} } }",
+                ),
+            ];
+            let depth = 20_000;
+            for (root, inner, around) in nests {
+                let (before, after) = around.split_once("{}").expect("a place for the value");
+                let mut text = format!("{} ::= ", super::type_info(root).name());
+                text.push_str(&before.repeat(depth));
+                text.push_str(inner);
+                text.push_str(&after.repeat(depth));
+                let (value, posts) = read_document(text.as_bytes(), root);
+                assert!(posts.is_empty(), "{around}: {posts:?}");
+                assert!(value.is_ok(), "{around}: {value:?}");
+            }
+            let scaled = format!(
+                "SeqTable-multi-data ::= {}int {{ 0 }}{}",
+                "int-scaled { mul 1, add 0, data ".repeat(depth),
+                " }".repeat(depth)
+            );
+            assert!(read_document(scaled.as_bytes(), named::SEQTABLE_MULTI_DATA)
+                .0
+                .is_ok());
+        })
+        .expect("a thread")
+        .join()
+        .expect("no overflow");
 }
 
 /// The reader keeps the values it reads in a list on the heap, and a value drops its nested values
 /// from one: 100,000 nested Seq-loc mixes (NCBI's stack holds them with a stack limit of about
-/// 116 MiB) are read and dropped on a thread of 256 KiB, as on the main thread of every target.
+/// 116 MiB) are read, cloned and dropped on a thread of 256 KiB, as on the main thread of every
+/// target.
 #[test]
 fn a_nest_of_any_depth_is_read_without_recursion() {
     std::thread::Builder::new()
@@ -805,11 +821,7 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             text.push_str(&"mix { ".repeat(depth));
             text.push_str("int { from 0, to 1, id local id 1 }");
             text.push_str(&" }".repeat(depth));
-            let (value, posts) = read_document(
-                text.as_bytes(),
-                named::SEQ_LOC,
-                super::NcbiStack::with_room(false, i64::MAX),
-            );
+            let (value, posts) = read_document(text.as_bytes(), named::SEQ_LOC);
             assert!(posts.is_empty());
             let value = value.expect("read");
             let (mut at, mut levels) = (&value, 0);
@@ -844,11 +856,7 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             drop(copy);
             // An error deep inside: NCBI's frames are left one by one.
             let broken = text.replacen("int {", "int [", 1);
-            let (value, _) = read_document(
-                broken.as_bytes(),
-                named::SEQ_LOC,
-                super::NcbiStack::with_room(false, i64::MAX),
-            );
+            let (value, _) = read_document(broken.as_bytes(), named::SEQ_LOC);
             assert!(matches!(value, Err(ReadError::Serial(_))), "{value:?}");
         })
         .expect("a thread")

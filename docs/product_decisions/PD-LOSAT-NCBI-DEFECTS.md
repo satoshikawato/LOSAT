@@ -112,14 +112,15 @@
   rule 3 (2026-11-16: the split of T3c after X2g, and `FillUnalignedRegions`'s free of T3c fix 3);
   Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10;
-  1.40 2026-11-16 (the explicit rejections of psiblast and tblastn `-in_pssm` where NCBI's object
+  1.40 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-1: exception 14, a PSSM whose
+  values nest deeper than NCBI's stack holds, read to any depth, rule 1, its approval pending the
+  Owner's answer to Q-DEPTH (asked 2026-11-17); the explicit rejections where NCBI's object
   manager or format guess prints addresses, reads outside its data, overflows a signed integer or
-  depends on the machine's memory, and of a PSSM nested so deep that NCBI's stack may overflow with
-  the run's stack limit and environment, rule 3, and of well-formed BitMagic data and of a
-  `-subject` duplicate-id message that may spell a subject's Seq-id, rule 2, line RG item
-  D3-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; no rule-1
-  exception; the Owner decided D3-1's questions on 2026-11-16 (「推奨通り」: Q1 to Q3 refused, Q-BM
-  to port BitMagic); written 2026-11-15, numbered after 1.39)
+  depends on the machine's memory, rule 3, and of well-formed BitMagic data and of a `-subject`
+  duplicate-id message that may spell a subject's Seq-id, rule 2, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; the Owner decided D3-1's questions Q1 to Q3 and
+  Q-BM on 2026-11-16 (「推奨通り」: Q1 to Q3 refused, Q-BM to port BitMagic); written 2026-11-15,
+  numbered after 1.39)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -691,6 +692,47 @@ masked). Line NP item M4a-2c.
     and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
+## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.40)
+
+Version 1.40, line RG item D3-1. Approval: pending the Owner's answer to Q-DEPTH (asked 2026-11-17).
+Built under the maintainer's standing delegation (standing instruction 2026-09-29, restated
+2026-10-07) as that question's recommended option B, in a pull request that stays a draft until
+the Owner answers. Not taken: option A, refusing the depths at which NCBI may crash, from NCBI's
+stack bytes per nested value computed for the run (D3-1 fix round 6): those bytes differ with the
+path of each recursion and with the types open together, so such a rule refuses depths that NCBI
+reads at every start and reads depths at which NCBI crashes at every start.
+
+14. **A PSSM whose values nest deeper than NCBI's stack holds.** NCBI's reader of the `-in_pssm`
+    ASN.1 text (`CObjectIStreamAsn`) reads a value whose type holds values of its own type by
+    recursion: `ReadObject` and `SkipObject` (`serial/objistr.cpp:1097`, `:1102`) and the class,
+    choice and container functions between them take some hundreds to about 2,100 bytes of the main
+    thread's stack for each value open. The PSSM's types nest in themselves through Bioseq-sets
+    (`seq-set`), Seq-locs (`mix`, `equiv`), User-objects and User-fields (`data object`, `data
+    objects`, `data fields`), Seq-aligns (`segs disc`), Pubs (`equiv`), Variation-refs (`data set
+    { variations }`, `consequence { variation }`), SeqTable-multi-data (`int-scaled`, `int-delta`,
+    `real-scaled`) and OrgNames (`name hybrid`). With the default stack limit of 8 MiB NCBI BLAST+
+    2.17.0 overflows its stack from some thousands of levels and ends with SIGSEGV (exit status 139,
+    no output): psiblast with the most stack it gets (a minimal environment, no random start) crashes
+    from 2,976 User-objects nested through `data objects`, 5,082 Bioseq-sets, 6,888 Seq-loc mixes
+    and 9,519 SeqTable-multi-data through `int-scaled`, for example. The depth is not the input's: the
+    stack limit, the lengths of the command line and of the environment (which the kernel lays out
+    at the stack's end) and a random start of 0 to 8,191 bytes at each run move it, and each
+    recursion path and each combination of the types open takes its own bytes, so one PSSM is read
+    in one run and crashes in the next. With a stack large enough (`ulimit -s unlimited`) NCBI reads
+    every such PSSM and writes its normal output: the search, or for a query Seq-entry set its
+    `CSeq_entry::GetSeq()` exception. LOSAT keeps the values it reads, and the object manager's walks
+    over them, on the heap, so it reads every depth on every target as far as memory allows and
+    writes NCBI's output with a stack large enough. No PSSM that psiblast writes nests this way.
+    Evidence: `docs/evidence/pssm_nest_depth/` (for each kind of nest, NCBI's run with 8 MiB, a
+    crash, and with no stack limit, the same bytes as LOSAT's; the generator of the inputs). Fixture
+    rows `db.ps.inpssm.d3.om.r6.nest_*`, `db.ps.inpssm.d3.om.r7.nest_*`, `db.tbn.inpssm.d3.om.r6.nest_*`
+    and `db.tbn.inpssm.d3.om.r7.nest_*` of `LOSAT/tests/db_search_manifest/` (those marked
+    `ncbi-stack: unlimited` frozen from NCBI's run with no stack limit, `LOSAT/tests/db_search_fixtures.py`).
+    Unit tests `every_recursive_type_nests_to_any_depth` and
+    `a_nest_of_any_depth_is_read_without_recursion` (`LOSAT/src/report/serial/asn_types/read_tests.rs`),
+    `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
+    (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
+
 ## Reproduced as NCBI (rule 2)
 
 - TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.39, 2026-11-15, line RG item T3c,
@@ -1240,25 +1282,6 @@ masked). Line NP item M4a-2c.
     sparse index) in a stream that NCBI reads past or crashes on (well-formed data, which NCBI
     decodes deterministically, is a rule-2 rejection below). A `bit-bvector`'s size, which NCBI
     reads without a decode, is NCBI's;
-  - a PSSM whose values nest so deep that NCBI's reader may overflow its stack ("a PSSM whose
-    values nest so deep that NCBI BLAST+ may overflow its stack and crash with this run's stack
-    limit and environment"). NCBI's reader recurses once per open value on the main thread's
-    stack, which holds the stack limit (`RLIMIT_STACK`, whole pages) less what the kernel lays out
-    above the program's start (the command line, the environment, the auxiliary vector) less a
-    random 0 to 8,191 bytes at each start (`arch_align_stack`): from the depth at which its values
-    no longer fit with the lowest start NCBI crashes (SIGSEGV, exit status 139, no output) or reads
-    by its start, and deeper it always crashes. LOSAT takes that room from its own run (its stack
-    limit, command line and environment; with no stack limit, the kernel's own bound; on WASI the
-    default 8 MiB and the arguments and environment the program gets), and NCBI's bytes from each
-    recursive type's bytes per open value and its base, measured on NCBI 2.17.0 for psiblast and
-    tblastn (to 16 bytes, the stack's alignment); it refuses from the depth at which NCBI may crash
-    with the lowest start and reads every shallower one. The bytes are NCBI's for each type
-    nested in itself where it was measured (a Bioseq-set as the query entry, a feature's location,
-    a descriptor, an annotation's alignment, a feature's Variation-ref, a Seq-table column), for
-    those nests inside Bioseq-sets, and for Seq-loc mixes inside an alignment's `std` segments; a
-    nest elsewhere in the PSSM, or a message or exception of the reader at the deepest value,
-    takes NCBI more or fewer bytes, which LOSAT does not model, and NCBI's command line differs from
-    LOSAT's by the words before the program and the path of NCBI's binary (tens of bytes).
 
   The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
   tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line
@@ -1289,9 +1312,9 @@ masked). Line NP item M4a-2c.
   first as it indexes them) and at which NCBI then stops (`CSeq_entry::GetSeq()`), and a Seq-id
   twice in the query's entry (the attach's `duplicate Bioseq id` exception, before the index, for
   every two Seq-ids that NCBI's Seq-id handles take as one, with NCBI's spelling of each; with
-  `-subject`, where a subject record's spelling may show in the message, a rule-2 rejection below);
-  and every depth of nested values that NCBI's stack holds with the lowest start (fixture rows
-  `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`, `db.tbn.inpssm.fg.*`).
+  `-subject`, where a subject record's spelling may show in the message, a rule-2 rejection below)
+  (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`, `db.tbn.inpssm.fg.*`).
+  Values nested deeper than NCBI's stack holds are read to any depth: exception 14 (rule 1, above).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -30,6 +30,11 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
   2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject). The row has no frozen files of its own; `freeze` does not run NCBI
   for it and copies ROW_ID's columns (`near_row_id`).
+- a `ncbi` row whose `covers` cell has `ncbi-stack: unlimited`: `freeze` runs NCBI with no stack limit
+  (`RLIMIT_STACK` infinity). NCBI's reader of a PSSM recurses once per nested value on its main thread's stack,
+  and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
+  that the stack limit, the environment and the stack's random start move; its output with a stack large enough
+  is the expectation (PD-LOSAT-NCBI-DEFECTS exception 14). `check` runs LOSAT with the caller's limit.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -78,6 +83,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -326,6 +332,21 @@ def frozen_id(row: dict[str, str]) -> str:
     return near_row_id(row) or row["row_id"]
 
 
+def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:
+    """The `preexec_fn` of `freeze`'s NCBI run of `row`: with `ncbi-stack: unlimited` in its covers cell, the run's
+    stack limit is its hard limit (`RLIMIT_STACK` infinity by default, as `prlimit --stack=unlimited`); else None,
+    the caller's limit."""
+    if "ncbi-stack: unlimited" not in row["covers"]:
+        return None
+    import resource  # POSIX: NCBI's runs of `freeze` are on Linux
+
+    def unlimited() -> None:
+        _, hard = resource.getrlimit(resource.RLIMIT_STACK)
+        resource.setrlimit(resource.RLIMIT_STACK, (hard, hard))
+
+    return unlimited
+
+
 def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
     return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
 
@@ -344,10 +365,10 @@ def freeze(args: argparse.Namespace) -> int:
             # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
-                                             timeout=TIMEOUT, env=row_env(row, env)).run
+                                             timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
             else:
                 run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                     env=row_env(row, env))
+                                     env=row_env(row, env), preexec_fn=ncbi_stack(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
             row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
             print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
@@ -361,18 +382,18 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         if files:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
-                                              timeout=TIMEOUT, env=row_env(row, env))
+                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = written.run
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
             pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
-                                           timeout=TIMEOUT, env=row_env(row, env))
+                                           timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = pssms.run
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                 env=row_env(row, env))
+                                 env=row_env(row, env), preexec_fn=ncbi_stack(row))
             (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
@@ -542,26 +563,7 @@ def check(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
-# The stack limit of every run of both programs: the default 8 MiB, whatever the caller's. psiblast's
-# and tblastn's `-in_pssm` refuse a PSSM nested deeper than NCBI's stack holds with the run's limit
-# (`asn_types::ncbi_stack`; rows `*.inpssm.d3.om.r6.nest_*`, whose depths NCBI reads, or not, with any
-# environment below about 290 KB at this limit).
-STACK_LIMIT = 8 << 20
-
-
-def pin_stack_limit() -> None:
-    """Sets this process's (and so its children's) stack limit to `STACK_LIMIT` (POSIX only)."""
-    try:
-        import resource
-    except ImportError:
-        return
-    _, hard = resource.getrlimit(resource.RLIMIT_STACK)
-    if hard == resource.RLIM_INFINITY or hard >= STACK_LIMIT:
-        resource.setrlimit(resource.RLIMIT_STACK, (STACK_LIMIT, hard))
-
-
 def main() -> int:
-    pin_stack_limit()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     fz = sub.add_parser("freeze", help="run NCBI and write the frozen bytes and the manifest columns")

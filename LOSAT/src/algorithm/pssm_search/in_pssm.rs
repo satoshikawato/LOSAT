@@ -310,15 +310,6 @@ impl PssmReader<'static> {
 }
 
 impl PssmReader<'_> {
-    /// NCBI's stack as the program's reader of a PSSM fills it in this run.
-    fn ncbi_stack(&self) -> crate::report::serial::asn_types::NcbiStack {
-        if self.program == "TBLASTN" {
-            crate::report::serial::asn_types::TBLASTN_STACK
-        } else {
-            crate::report::serial::asn_types::PSIBLAST_STACK
-        }
-    }
-
     /// The refusal of the PSSM search's limits ("... is not supported by LOSAT's PSIBLAST").
     fn refuse(&self, what: impl std::fmt::Display) -> anyhow::Error {
         anyhow::anyhow!("{what} is not supported by LOSAT's {}", self.program)
@@ -429,10 +420,13 @@ pub(crate) fn read_in_pssm(
     // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
     // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
     // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
-    // NCBI's reader lets the PSSM's values nest until its own stack is full: LOSAT's reader and
-    // the object manager's step keep the values they are in on the heap, and LOSAT refuses the
-    // depths at which NCBI's stack may overflow in this run (`asn_types::NcbiStack`).
-    let read = crate::blastinput::pssm_text::read_pssm(text, reader.ncbi_stack());
+    // NCBI's reader recurses once per value on the main thread's stack and crashes when a PSSM's
+    // values nest deeper than that stack holds (NCBI BLAST+ 2.17.0 with 8 MiB: from a few thousand
+    // levels, by the stack limit, the command line, the environment and the stack's random start).
+    // LOSAT's reader and the object manager's step keep the values they are in on the heap, so
+    // every depth is read, and the output is NCBI's with a stack large enough
+    // (PD-LOSAT-NCBI-DEFECTS exception 14).
+    let read = crate::blastinput::pssm_text::read_pssm(text);
     let program = reader.program.to_ascii_lowercase();
     let mut posts = crate::report::diag_log::Posts::new();
     for post in &read.posts {

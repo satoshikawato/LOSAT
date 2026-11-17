@@ -90,11 +90,7 @@ fn a_handle_range_becomes_circular() {
 }
 
 fn location(text: &str) -> Value {
-    let (value, posts) = read_document(
-        format!("Seq-loc ::= {text}").as_bytes(),
-        named::SEQ_LOC,
-        crate::report::serial::asn_types::PSIBLAST_STACK,
-    );
+    let (value, posts) = read_document(format!("Seq-loc ::= {text}").as_bytes(), named::SEQ_LOC);
     assert!(posts.is_empty());
     value.unwrap()
 }

@@ -362,6 +362,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXUNITCAP",
     "LOSAT_X_BXW4CAP",
     "LOSAT_X_CHAINRUN",
+    "LOSAT_X_CLUTPAIRS",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DCSEEDLEAN",

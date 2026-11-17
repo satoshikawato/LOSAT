@@ -7556,8 +7556,9 @@ Scheduling (each value computed by one thread with the original function; order 
   128-bit layer of the X-drop kernel (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128;
   new there: `sub32`, `eq32`, `shl32`, `sra32`, `set32`, `mask32`, `any_set`, `rot32_1/2/3`, `zext_lo16/hi16`); on
   x86-64 it asks for SSSE3 as that layer does, though none of its operations needs it. The AVX2 kernel keeps its
-  instructions, not all of its machine code: in the release build of rustc 1.92.0 the functions of the seed loops,
-  the scans, the X-drop kernels and the rest of BLASTX (880) disassemble as `dev`'s but for the AVX2 drain with the
+  instructions, not all of its machine code: in the release build of rustc 1.92.0 (v4-W W2 s3 build bx6 against
+  `dev` b59c21dc4; the review fixes left every seed-loop function as bx6's, build bx8) the functions of the seed
+  loops, the scans, the X-drop kernels and the rest of BLASTX (880) disassemble as `dev`'s but for the AVX2 drain with the
   deferral (`x_cross_drain` with `DEFER`, the default: the same instructions, its blocks laid out otherwise and its
   frame 16 bytes smaller; its cycles are in the timings below), the closures that choose the cell test
   (`x_word_finder_fused*`) and the timing line's writer; rustc marks `#[inline(never)]` of a `#[target_feature]`

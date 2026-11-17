@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.46
+- Version: 1.49
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -148,7 +148,14 @@
   numbered after 1.44);
   1.46 2026-11-17 (TBLASTN, the explicit rejection of the traceback of an alignment on a subject of
   fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3; line RG
-  item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.49 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-2: exception 15 also for NCBI's
+  ASN.1 text writer, which crashes writing back with `-out_pssm` the nests it read; the refusals of
+  the annotation's text after `Failed to parse location of` (1204.6) and of the PSSM members that
+  LOSAT did not write removed; the rule-3 rejection of Seq-ids in the order of addresses widened to
+  a feature's and a Seq-table's location; the PSSM's most negative Int4 and Int8 values written as
+  their digits; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.47 and 1.48 of lines DBID and RG D1a-3)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -720,7 +727,7 @@ masked). Line NP item M4a-2c.
     and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
-## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.45)
+## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.45; its writer 1.49)
 
 Version 1.45, line RG item D3-1. The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117,
 words 「B 深さに関係なく読む (推奨)」) question Q-DEPTH of D3-1 (PR #1262): option B, reading every depth and

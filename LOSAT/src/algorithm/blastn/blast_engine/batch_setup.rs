@@ -9,7 +9,7 @@
 //! c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`) and
 //! :830-994 (`BlastHitSavingParametersUpdate`);
 //! c++/src/algo/blast/api/prelim_stage.cpp:219-221 (the preliminary stage's option spaces) and
-//! c++/src/algo/blast/core/blast_setup.c:1001-1025 (`BLAST_OneSubjectUpdateParameters`).
+//! c++/src/algo/blast/core/blast_setup.c:1001-1027 (`BLAST_OneSubjectUpdateParameters`).
 //!
 //! This module is a child of `run` for the types it keeps private (`QueryContext`,
 //! `QueryContextIndex`, `SubjectSource`). The functions are statements of
@@ -524,8 +524,9 @@ pub(super) fn batch_spaces(inputs: &SpaceInputs<'_>) -> Result<BatchSpaces> {
     })
 }
 
-/// What `batch_cutoffs` reads. The set of the batch, of its preliminary stage and of one subject differ in
-/// `query_eff_searchsp` and `subject_length` only (`CutoffInputs { query_eff_searchsp: spaces, ..inputs }`).
+/// What `batch_cutoffs` reads. The sets of the batch, of its preliminary stage and of one subject
+/// differ in `query_eff_searchsp` and `subject_length` only
+/// (`CutoffInputs { query_eff_searchsp: spaces, ..inputs }`).
 #[derive(Clone, Copy)]
 pub(super) struct CutoffInputs<'a> {
     pub(super) subjects: SubjectSource<'a>,
@@ -729,13 +730,16 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
 
 /// The cutoffs of the batch and of its preliminary stage.
 pub(super) struct BatchCutoffSet {
-    /// The cutoffs of the batch's contexts with the setup's spaces (`CutoffInputs::query_eff_searchsp`).
+    /// The cutoffs of the batch's contexts with the setup's spaces
+    /// (`CutoffInputs::query_eff_searchsp`).
     pub(super) batch: BatchCutoffs,
     /// The cutoffs of the preliminary stage's own spaces where they differ (`prelim_eff_searchsp`),
     /// `None` where they are the batch's.
     pub(super) prelim: Option<BatchCutoffs>,
 }
 
+/// The cutoffs of the batch and of the preliminary stage's own spaces.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
 /// ```c
 /// if (!gapped_calculation || sbp->matrix_only_scoring) {
@@ -760,15 +764,16 @@ pub(super) struct BatchCutoffSet {
 /// ...
 /// curr_cutoffs->cutoff_score = new_cutoff;
 /// ```
+///
 /// NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
-/// and GAPPED params (kbp_gap) for cutoff_score_max calculation
-/// The cutoffs of every context of the batch (`batch_setup::batch_cutoffs`): they depend on
+/// and GAPPED params (kbp_gap) for cutoff_score_max calculation.
+/// The cutoffs of every context of the batch (`batch_cutoffs`): they depend on
 /// the context only (the gapped calculation's branch above: gap_trigger capped by
 /// cutoff_score_max), so the batch computes them once, and both stages read them from their
 /// batch (`PrelimBatch`, `TraceBatch`).
 ///
-/// The preliminary stage's own spaces `prelim_eff_searchsp` give the second set (the batch's cutoffs
-/// are computed first: both can fail with the same refusal).
+/// The preliminary stage's own spaces `prelim_eff_searchsp` give the second set. The batch's
+/// cutoffs are computed first; both can fail with the same refusal (`ungapped_cutoff_limit_error`).
 pub(super) fn batch_cutoff_set<const UNGAPPED: bool>(
     inputs: &CutoffInputs<'_>,
     prelim_eff_searchsp: Option<&[i64]>,
@@ -791,11 +796,11 @@ pub(super) fn batch_cutoff_set<const UNGAPPED: bool>(
 /// initial values). The traceback of a list reads the subject's hit-saving cutoffs
 /// (`Blast_HSPReevaluateWithAmbiguitiesGapped`, its `hit_params` being thread 0's in NCBI's one
 /// thread, blast_traceback.c:1598-1650) and the e-values of the setup's spaces. `inputs` are the
-/// batch's (`query_eff_searchsp` and `subject_length` are replaced for each subject); `db_length` is
-/// `-dbsize`.
+/// batch's (`query_eff_searchsp` and `subject_length` are replaced for each subject);
+/// `db_length` is `-dbsize`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1022 (quoted in full at
-/// `stats::setup::subject_eff_lengths`)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1022 (the function's first
+/// lines, 1001-1014, are quoted at `stats::setup::subject_eff_lengths`)
 /// ```c
 ///    eff_len_params->real_db_length = subject_length;
 ///    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,

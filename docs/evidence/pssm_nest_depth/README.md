@@ -6,8 +6,10 @@ psiblast and tblastn `-in_pssm`.
 ## What NCBI does
 
 NCBI's reader of a PSSM in ASN.1 text (`CObjectIStreamAsn`) reads a value whose type holds values of its own
-type by recursion on the main thread's stack (`ReadObject`, `SkipObject`, `c++/src/serial/objistr.cpp:1097`,
-`:1102`, with the class, choice and container functions between them). A PSSM query whose values nest some
+type by recursion on the main thread's stack: `ReadObject` and `SkipObject` of each value
+(`c++/include/serial/impl/objistr.inl:93-96`, `:99`), entered from each member and variant
+(`c++/src/serial/member.cpp:710`, `c++/src/serial/variant.cpp:471`), with the class, choice and container
+functions between them. A PSSM query whose values nest some
 thousands of levels deep fills the stack, and NCBI ends with SIGSEGV: exit status 139, nothing written.
 
 The depth at which it crashes is not the input's. Psiblast, with the default stack limit of 8 MiB, the most room

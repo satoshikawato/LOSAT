@@ -209,7 +209,9 @@ fn int_scaled_values() {
 }
 
 /// The multi-data inside multi-data are read from a list on the heap: 50,000 nested `int-scaled`
-/// (each adding 1) and 2,000 nested `int-delta` values give their rows on a thread of 256 KiB.
+/// (each adding 1), 50,000 nested `int-delta` values and 25,000 `int-scaled` around `int-delta`
+/// give their rows on a thread of 256 KiB, the sizes found once for each value (line RG D3-1
+/// review 7 S1: NCBI walks to the bottom at each level).
 #[test]
 fn nested_multi_data_are_read_without_recursion() {
     std::thread::Builder::new()
@@ -246,9 +248,19 @@ fn nested_multi_data_are_read_without_recursion() {
             // `int-delta` of `int-delta`s: the sums of the sums.
             let delta = read(format!(
                 "SeqTable-column ::= {{ header {{ field-id 3 }}, data {} }}",
-                wrap(2_000, "int-delta ", "int { 4, 9 }", "")
+                wrap(50_000, "int-delta ", "int { 4, 9 }", "")
             ));
-            assert_eq!(rows(&delta), ["Some(4)", "Some(8009)", "None"]);
+            assert_eq!(rows(&delta), ["Some(4)", "Some(200009)", "None"]);
+            let both = read(format!(
+                "SeqTable-column ::= {{ header {{ field-id 3 }}, data {} }}",
+                wrap(
+                    25_000,
+                    "int-scaled { mul 1, add 0, data int-delta ",
+                    "int { 4, 9 }",
+                    " }"
+                )
+            ));
+            assert_eq!(rows(&both), ["Some(4)", "Some(100009)", "None"]);
         })
         .expect("a thread")
         .join()

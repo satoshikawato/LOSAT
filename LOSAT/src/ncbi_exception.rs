@@ -130,7 +130,10 @@ impl ThrowSite {
 
 /// An exception of NCBI's C++ Toolkit (`CException`): where it was thrown, its message, the
 /// extra text of its class, and the exception it was thrown for (`NCBI_RETHROW`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The chain of predecessors is as long as the frames an error leaves (`rethrow_same`: one for
+/// each value open in a PSSM nested to any depth), so it is dropped, cloned, compared and
+/// shown link by link, never by a recursion as deep as the chain (below).
 pub struct NcbiException {
     site: ThrowSite,
     message: String,
@@ -162,19 +165,17 @@ impl NcbiException {
     /// `NCBI_THROW2(CStringException, code, message, pos)` at `site`: the report adds the
     /// position.
     pub fn with_pos(site: ThrowSite, message: impl Into<String>, pos: usize) -> Self {
-        NcbiException {
-            extra: Some(format!("m_Pos = {pos}")),
-            ..Self::new(site, message)
-        }
+        let mut exception = Self::new(site, message);
+        exception.extra = Some(format!("m_Pos = {pos}"));
+        exception
     }
 
     /// `NCBI_RETHROW(self, class, code, message)` at `site`: a new exception whose predecessor
     /// is `self`.
     pub fn rethrow(self, site: ThrowSite, message: impl Into<String>) -> Self {
-        NcbiException {
-            predecessor: Some(Box::new(self)),
-            ..Self::new(site, message)
-        }
+        let mut exception = Self::new(site, message);
+        exception.predecessor = Some(Box::new(self));
+        exception
     }
 
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
@@ -493,6 +494,85 @@ impl NcbiException {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:259-265 (each exception deletes its
+// predecessor: the chain goes with the newest)
+// ```c++
+// CException::~CException(void) throw()
+// {
+//     if (m_Predecessor) {
+//         delete m_Predecessor;
+//         m_Predecessor = 0;
+//     }
+// }
+// ```
+/// The chain is dropped link by link (the drop of each link inside the one that holds it would
+/// recurse as deep as the chain).
+impl Drop for NcbiException {
+    fn drop(&mut self) {
+        let mut next = self.predecessor.take();
+        while let Some(mut link) = next {
+            next = link.predecessor.take();
+        }
+    }
+}
+
+/// A copy of the chain, made from its oldest link.
+impl Clone for NcbiException {
+    fn clone(&self) -> Self {
+        let mut copy: Option<Box<NcbiException>> = None;
+        for link in self.chain().into_iter().rev() {
+            copy = Some(Box::new(NcbiException {
+                site: link.site,
+                message: link.message.clone(),
+                extra: link.extra.clone(),
+                predecessor: copy,
+            }));
+        }
+        *copy.expect("the chain holds the exception itself")
+    }
+}
+
+/// Two chains are equal when each link is (its place, message and extra text).
+impl PartialEq for NcbiException {
+    fn eq(&self, other: &Self) -> bool {
+        let (mut a, mut b) = (Some(self), Some(other));
+        loop {
+            match (a, b) {
+                (None, None) => return true,
+                (Some(x), Some(y)) => {
+                    if x.site != y.site || x.message != y.message || x.extra != y.extra {
+                        return false;
+                    }
+                    a = x.predecessor.as_deref();
+                    b = y.predecessor.as_deref();
+                }
+                _ => return false,
+            }
+        }
+    }
+}
+
+impl Eq for NcbiException {}
+
+/// The links of the chain, newest first, each with its place, message and extra text.
+impl std::fmt::Debug for NcbiException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct Link<'a>(&'a NcbiException);
+        impl std::fmt::Debug for Link<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("NcbiException")
+                    .field("site", &self.0.site)
+                    .field("message", &self.0.message)
+                    .field("extra", &self.0.extra)
+                    .finish()
+            }
+        }
+        f.debug_list()
+            .entries(self.chain().into_iter().map(Link))
+            .finish()
+    }
+}
+
 /// `what()` ([`NcbiException::what`]).
 impl std::fmt::Display for NcbiException {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -760,6 +840,45 @@ pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A chain of 1,000,000 rethrows (the frames that an error at the bottom of a PSSM nested
+    /// 500,000 deep leaves, `NCBI_RETHROW_SAME` in each) is dropped, and one of 100,000 is
+    /// cloned, compared, shown and reported, on a thread of 256 KiB (line RG D3-1 review 7 B1).
+    #[test]
+    fn a_chain_of_any_length_is_handled_link_by_link() {
+        let chain = |links: usize| {
+            let mut chain = NcbiException::new(ThrowSite::generated("CSerialException"), "");
+            for _ in 0..links {
+                chain = chain.rethrow_same("src/serial/objistrasn.cpp", 1, "f", String::new());
+            }
+            chain
+        };
+        /// The bytes that a format writes.
+        struct Count(usize);
+        impl std::fmt::Write for Count {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0 += s.len();
+                Ok(())
+            }
+        }
+        std::thread::Builder::new()
+            .stack_size(256 << 10)
+            .spawn(move || {
+                drop(chain(1_000_000));
+                let long = chain(100_000);
+                let copy = long.clone();
+                assert!(copy == long);
+                let other = copy.clone().rethrow_same("x", 2, "g", "one more");
+                assert!(other != long);
+                assert_eq!(long.what().lines().count(), 1 + 100_001);
+                let mut shown = Count(0);
+                std::fmt::write(&mut shown, format_args!("{long:?}")).expect("shown");
+                assert!(shown.0 > 100_000);
+            })
+            .expect("a thread")
+            .join()
+            .expect("no overflow");
+    }
 
     // Each run's stream is its own (line RG D3-1 review 4 B1): a library call entered on a thread
     // reads its stream there, another call entered in turn on the same thread reads its own, and

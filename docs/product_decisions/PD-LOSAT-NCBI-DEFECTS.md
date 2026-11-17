@@ -705,7 +705,7 @@ masked). Line NP item M4a-2c.
     and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
-## Approved exception (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.42)
+## Exception pending the Owner's approval (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.42)
 
 Version 1.42, line RG item D3-1. Approval: pending the Owner's answer to Q-DEPTH (asked 2026-11-17).
 Built under the maintainer's standing delegation (standing instruction 2026-09-29, restated
@@ -717,9 +717,10 @@ reads at every start and reads depths at which NCBI crashes at every start.
 
 14. **A PSSM whose values nest deeper than NCBI's stack holds.** NCBI's reader of the `-in_pssm`
     ASN.1 text (`CObjectIStreamAsn`) reads a value whose type holds values of its own type by
-    recursion: `ReadObject` and `SkipObject` (`serial/objistr.cpp:1097`, `:1102`) and the class,
-    choice and container functions between them take some hundreds to about 2,100 bytes of the main
-    thread's stack for each value open. The PSSM's types nest in themselves through Bioseq-sets
+    recursion: `ReadObject` and `SkipObject` of each value (`include/serial/impl/objistr.inl:93-96`,
+    `:99`), entered from each member and variant (`src/serial/member.cpp:710`,
+    `src/serial/variant.cpp:471`), with the class, choice and container functions between them, take
+    some hundreds to about 2,100 bytes of the main thread's stack for each value open. The PSSM's types nest in themselves through Bioseq-sets
     (`seq-set`), Seq-locs (`mix`, `equiv`), User-objects and User-fields (`data object`, `data
     objects`, `data fields`), Seq-aligns (`segs disc`), Pubs (`equiv`), Variation-refs (`data set
     { variations }`, `consequence { variation }`), SeqTable-multi-data (`int-scaled`, `int-delta`,

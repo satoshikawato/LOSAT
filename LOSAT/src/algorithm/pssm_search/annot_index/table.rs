@@ -178,6 +178,10 @@ pub(super) struct Caches {
     int_delta: HashMap<usize, Vec<i64>>,
     index_delta: HashMap<usize, Vec<u64>>,
     bit_set: HashMap<usize, Vec<u64>>,
+    /// `GetSize()` of each multi-data value asked (`Index::multi_size`).
+    size: HashMap<usize, u64>,
+    /// `GetIntSize()` of each `int-delta`'s data asked (`Index::int_size`).
+    int_size: HashMap<usize, u64>,
 }
 
 fn address(value: V<'_>) -> usize {
@@ -1286,7 +1290,7 @@ impl Indexer<'_> {
             }
         }
         if let Some(data) = column.data() {
-            if index < multi_size(data) {
+            if index < self.multi_size(data) {
                 return Ok(true);
             }
         }
@@ -1465,7 +1469,7 @@ impl Indexer<'_> {
                 .map(|&byte| i64::from(byte as i8)),
             "int2" | "int" | "int8" => element(value),
             "int-delta" => {
-                if row >= multi_size(value) {
+                if row >= self.multi_size(value) {
                     return Ok(Get::Value(None));
                 }
                 return Ok(Get::Delta(value));
@@ -1657,8 +1661,8 @@ impl Indexer<'_> {
     fn delta_sum<'v>(&mut self, deltas: V<'v>, row: u64) -> Result<DeltaSum<'v>, Stop> {
         const BLOCK: u64 = 128;
         let key = address(deltas);
-        let size = multi_size(deltas);
-        let int4 = int_size(deltas)? <= 4;
+        let size = self.multi_size(deltas);
+        let int4 = self.int_size(deltas) <= 4;
         let want = if int4 { Want::Int4 } else { Want::Int8 };
         let end = ((row / BLOCK + 1) * BLOCK).min(size);
         let sums = self.caches.int_delta.remove(&key).unwrap_or_default();
@@ -1672,6 +1676,45 @@ impl Indexer<'_> {
             sum: sums.last().copied().unwrap_or(0),
             sums,
         })
+    }
+
+    /// `GetSize()` of the multi-data `data` (`multi_size_step`), found once for each value: NCBI
+    /// walks an `int-delta`'s, `int-scaled`'s or `real-scaled`'s data to the bottom again at each
+    /// of their levels where it asks (`x_TryGetInt8`, the sums' cache), the same size each time.
+    fn multi_size(&mut self, data: V<'_>) -> u64 {
+        Self::chain_size(&mut self.caches.size, data, multi_size_step)
+    }
+
+    /// `GetIntSize()` of the multi-data `data` (`int_size_step`), found once for each value (as
+    /// `multi_size`).
+    fn int_size(&mut self, data: V<'_>) -> u64 {
+        Self::chain_size(&mut self.caches.int_size, data, int_size_step)
+    }
+
+    /// The size that `step` gives at the bottom of the values it passes to from `data` (its
+    /// `Err`), from `cache` where a value of the way has one, kept for each value of the way.
+    fn chain_size<'v>(
+        cache: &mut HashMap<usize, u64>,
+        data: V<'v>,
+        step: fn(V<'v>) -> Result<u64, V<'v>>,
+    ) -> u64 {
+        let mut way = Vec::new();
+        let mut at = data;
+        let size = loop {
+            let key = address(at);
+            if let Some(&size) = cache.get(&key) {
+                break size;
+            }
+            way.push(key);
+            match step(at) {
+                Ok(size) => break size,
+                Err(inner) => at = inner,
+            }
+        };
+        for key in way {
+            cache.insert(key, size);
+        }
+        size
     }
 
     /// `delta_sum`'s next delta to read (`DeltaSum::add`), or the row's sum once the sums reach
@@ -1836,24 +1879,17 @@ impl Indexer<'_> {
 // The size of a bit-bvector is its `size` member (a Uint4), read without decoding BitMagic's data
 // (`bm/` probes p01, p03: NCBI is silent where only the size is asked); only a value decodes
 // (`x_try_get_int8`, `sparse_index_at`, refused).
-fn multi_size(mut data: V<'_>) -> u64 {
-    loop {
-        let (variant, value) = data.choice();
-        return match variant {
-            "common-string" | "common-bytes" => value.field("indexes").len() as u64,
-            "bit" => value.octets().len() as u64 * 8,
-            "bit-bvector" => value.field("size").int() as u32 as u64,
-            "int-delta" => {
-                data = value;
-                continue;
-            }
-            "int-scaled" | "real-scaled" => {
-                data = value.field("data");
-                continue;
-            }
-            _ => value.len() as u64,
-        };
-    }
+/// One level of `GetSize()`: the size, or the multi-data whose size it is (`Err`).
+fn multi_size_step(data: V<'_>) -> Result<u64, V<'_>> {
+    let (variant, value) = data.choice();
+    Ok(match variant {
+        "common-string" | "common-bytes" => value.field("indexes").len() as u64,
+        "bit" => value.octets().len() as u64 * 8,
+        "bit-bvector" => value.field("size").int() as u32 as u64,
+        "int-delta" => return Err(value),
+        "int-scaled" | "real-scaled" => return Err(value.field("data")),
+        _ => value.len() as u64,
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:363-385
@@ -1892,14 +1928,11 @@ fn multi_size(mut data: V<'_>) -> u64 {
 //     return sizeof(int);
 // }
 // ```
-fn int_size(mut data: V<'_>) -> Result<u64, Stop> {
-    let (variant, value) = loop {
-        match data.choice() {
-            ("int-delta", value) => data = value,
-            choice => break choice,
-        }
-    };
+/// One level of `GetIntSize()`: the size, or the multi-data whose size it is (`Err`).
+fn int_size_step(data: V<'_>) -> Result<u64, V<'_>> {
+    let (variant, value) = data.choice();
     Ok(match variant {
+        "int-delta" => return Err(value),
         "int" => 4,
         "int1" | "bit" | "bit-bvector" => 1,
         "int2" => 2,

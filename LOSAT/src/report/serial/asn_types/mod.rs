@@ -235,8 +235,9 @@ pub(crate) fn member_index(ty: u16, name: &str) -> usize {
 }
 
 /// A value read under the table: the shape of its type, the members of a SEQUENCE by their
-/// position in the module (those set, in order).
-#[derive(Debug, PartialEq)]
+/// position in the module (those set, in order). Values nest to any depth, so a value is dropped,
+/// cloned, compared and shown from a list on the heap, never by a recursion as deep as the nest
+/// (below).
 pub enum Value {
     /// INTEGER of any storage.
     Int(i64),
@@ -361,6 +362,115 @@ impl Clone for Value {
                 });
             }
         }
+    }
+}
+
+/// Two values are equal when they have the same shape and leaves (the derived equality's), compared
+/// from a list on the heap (as `Drop`).
+impl PartialEq for Value {
+    fn eq(&self, other: &Value) -> bool {
+        let mut pairs = vec![(self, other)];
+        while let Some(pair) = pairs.pop() {
+            let same = match pair {
+                (Value::Sequence(a), Value::Sequence(b)) => {
+                    let same = a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0);
+                    pairs.extend(a.iter().zip(b).map(|(x, y)| (&x.1, &y.1)));
+                    same
+                }
+                (Value::Choice(a, x), Value::Choice(b, y)) => {
+                    pairs.push((x, y));
+                    a == b
+                }
+                (Value::List(a), Value::List(b)) => {
+                    pairs.extend(a.iter().zip(b));
+                    a.len() == b.len()
+                }
+                (Value::Int(a), Value::Int(b)) => a == b,
+                (Value::Enum(a), Value::Enum(b)) => a == b,
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                (Value::Null, Value::Null) => true,
+                (Value::Real(a), Value::Real(b)) => a == b,
+                (Value::Str(a), Value::Str(b)) => a == b,
+                (Value::Octets(a), Value::Octets(b)) => a == b,
+                (Value::Int4s(a), Value::Int4s(b)) => a == b,
+                (Value::Ints(a), Value::Ints(b)) => a == b,
+                (Value::Reals(a), Value::Reals(b)) => a == b,
+                (Value::Delayed(a), Value::Delayed(b)) => a == b,
+                (Value::SeqId(a), Value::SeqId(b)) => a == b,
+                _ => false,
+            };
+            if !same {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// A value shown in the derived form (`Choice(1, List([Int(3)]))`), written from a list on the
+/// heap (as `Drop`).
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// What is left to write: a value, a fixed text, or a member's position and its comma.
+        enum Item<'a> {
+            Value(&'a Value),
+            Text(&'static str),
+            Position(u16),
+        }
+        let mut todo = vec![Item::Value(self)];
+        while let Some(item) = todo.pop() {
+            let value = match item {
+                Item::Text(text) => {
+                    f.write_str(text)?;
+                    continue;
+                }
+                Item::Position(position) => {
+                    write!(f, "{position}, ")?;
+                    continue;
+                }
+                Item::Value(value) => value,
+            };
+            match value {
+                Value::Sequence(members) => {
+                    f.write_str("Sequence([")?;
+                    todo.push(Item::Text("])"));
+                    for (at, (position, value)) in members.iter().enumerate().rev() {
+                        todo.push(Item::Text(")"));
+                        todo.push(Item::Value(value));
+                        todo.push(Item::Position(*position));
+                        todo.push(Item::Text(if at == 0 { "(" } else { ", (" }));
+                    }
+                }
+                Value::Choice(position, value) => {
+                    write!(f, "Choice({position}, ")?;
+                    todo.push(Item::Text(")"));
+                    todo.push(Item::Value(value));
+                }
+                Value::List(items) => {
+                    f.write_str("List([")?;
+                    todo.push(Item::Text("])"));
+                    for (at, value) in items.iter().enumerate().rev() {
+                        todo.push(Item::Value(value));
+                        if at > 0 {
+                            todo.push(Item::Text(", "));
+                        }
+                    }
+                }
+                Value::Int(n) => write!(f, "Int({n:?})")?,
+                Value::Enum(n) => write!(f, "Enum({n:?})")?,
+                Value::Bool(b) => write!(f, "Bool({b:?})")?,
+                Value::Null => f.write_str("Null")?,
+                Value::Real(r) => write!(f, "Real({r:?})")?,
+                Value::Str(text) => write!(f, "Str({text:?})")?,
+                Value::Octets(bytes) => write!(f, "Octets({bytes:?})")?,
+                Value::Int4s(numbers) => write!(f, "Int4s({numbers:?})")?,
+                Value::Ints(numbers) => write!(f, "Ints({numbers:?})")?,
+                Value::Reals(numbers) => write!(f, "Reals({numbers:?})")?,
+                Value::Delayed(text) => write!(f, "Delayed({text:?})")?,
+                Value::SeqId(id) => write!(f, "SeqId({id:?})")?,
+            }
+        }
+        Ok(())
     }
 }
 

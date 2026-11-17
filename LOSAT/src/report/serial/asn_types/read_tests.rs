@@ -793,14 +793,19 @@ fn every_recursive_type_nests_to_any_depth() {
                 assert!(posts.is_empty(), "{around}: {posts:?}");
                 assert!(value.is_ok(), "{around}: {value:?}");
             }
-            let scaled = format!(
-                "SeqTable-multi-data ::= {}int {{ 0 }}{}",
-                "int-scaled { mul 1, add 0, data ".repeat(depth),
-                " }".repeat(depth)
-            );
-            assert!(read_document(scaled.as_bytes(), named::SEQTABLE_MULTI_DATA)
-                .0
-                .is_ok());
+            // The scaled values' data (their own braces).
+            for around in [
+                "int-scaled { mul 1, add 0, data ",
+                "real-scaled { mul { 1, 10, 0 }, add { 0, 10, 0 }, data ",
+            ] {
+                let scaled = format!(
+                    "SeqTable-multi-data ::= {}int {{ 0 }}{}",
+                    around.repeat(depth),
+                    " }".repeat(depth)
+                );
+                let (value, posts) = read_document(scaled.as_bytes(), named::SEQTABLE_MULTI_DATA);
+                assert!(posts.is_empty() && value.is_ok(), "{around}");
+            }
         })
         .expect("a thread")
         .join()
@@ -835,8 +840,11 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
                 }
             }
             assert_eq!(levels, depth);
-            // A clone is made from a list on the heap too.
+            // A clone is made from a list on the heap too, and so are a comparison and the
+            // value's debug form.
             let copy = value.clone();
+            assert!(copy == value);
+            assert!(format!("{copy:?}").starts_with("Choice("));
             drop(value);
             let (mut at, mut levels) = (&copy, 0);
             while let Value::Choice(_, inner) = at {
@@ -858,6 +866,25 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             let broken = text.replacen("int {", "int [", 1);
             let (value, _) = read_document(broken.as_bytes(), named::SEQ_LOC);
             assert!(matches!(value, Err(ReadError::Serial(_))), "{value:?}");
+            // A number that overflows at the bottom: NCBI rethrows its `CUtilException` in each
+            // frame it leaves (`NCBI_RETHROW_SAME`, a chain of one link per frame), reported,
+            // cloned, compared and dropped link by link (line RG D3-1 review 7 B1).
+            let overflow = text.replacen("from 0", "from 99999999999999999999", 1);
+            let (value, _) = read_document(overflow.as_bytes(), named::SEQ_LOC);
+            let Err(ReadError::Exception(exception)) = value else {
+                panic!("an exception");
+            };
+            let report = exception.what();
+            assert!(
+                report.lines().count() > 2 * depth,
+                "{}",
+                report.lines().count()
+            );
+            assert!(report.contains("NumberOverflow"));
+            let copy = exception.clone();
+            assert!(copy == exception);
+            drop(copy);
+            drop(exception);
         })
         .expect("a thread")
         .join()

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.45
+- Version: 1.46
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -139,7 +139,11 @@
   rule 3; line RG item X2d, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.45 2026-11-17 (TBLASTN, the explicit rejection of the traceback of an alignment on a subject of
   fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3; line RG
-  item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  item X-short, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.46 2026-11-17 (approved exception 3 extended from BLASTP to TBLASTN and BLASTX: the window of a
+  one-hit gapped start reads the letters past NCBI's buffers as the sentinel, and the explicit
+  rejections of 1.18 and 1.22 there are removed; decided by the Owner on 2026-11-17, line RG
+  DECISIONS.md OQ-1117, J2 = A, words 「A 広げる (推奨)」; line RG item J2A)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -231,7 +235,8 @@ Version 1.2, accepted by the maintainer on 2026-10-03 in Session S08b (E2b), pla
 Version 1.3, accepted by the maintainer on 2026-10-05 in Session S08+b (E2e), plan DW-19:
 the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as recommended.
 
-3. **Approved exception (BLASTP): a one-hit gapped start that reads past a sequence.**
+3. **Approved exception (BLASTP, TBLASTN and BLASTX): a one-hit gapped start that reads past a
+   sequence.**
    With `-window_size 0` (one-hit) and a low `-threshold`, NCBI's ungapped extension can
    give a negative `Int4` length that `BlastGetStartForGappedAlignment` receives as
    `Uint4` (`aa_ungapped.c:1054,1083`, `blast_gapalign.c:3393-3437`): it scores only the
@@ -245,6 +250,36 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    (`docs/evidence/losat_web_e2e/audit/round2/a2_blastp.md`, `a3_blastp.md`). Searches
    whose window stays inside the sequences and its sentinel match NCBI (fixture
    `e2e.blastp.one_hit_negative_width`).
+
+   TBLASTN and BLASTX (version 1.46, decided by the Owner on 2026-11-17, line RG item J2A): their
+   one-hit word finders give the same negative lengths (`aa_ungapped.c:1054,1083`), and the same
+   window reads past NCBI's buffers: past the byte after the query batch's last NULLB
+   (`calloc(buflen+1)`, `blast_setup_cxx.cpp:500-501`); for TBLASTN past the NULLB after frame -3
+   of the subject's translation, the last byte NCBI's buffer sets (`2*(nucl_length+1)+2` bytes,
+   `blast_util.c:1058,1063,1098-1101`); for BLASTX past a `-subject` protein's `malloc(len+2)`
+   (`blast_setup_cxx.cpp:885-893`) and past the last memory page of a database volume's sequence
+   file (`seqdbatlas.cpp:114-127`). LOSAT reads every letter past those buffers as the sentinel, as
+   for BLASTP; inside them it reads the bytes NCBI reads (the next contexts', frames' or database
+   sequences' letters, the zeros of a mapped file's last page). In 450 random TBLASTN searches with
+   this setting (300 with `-subject`, 150 with `-db`; one to three queries of 12 to 120 letters, one
+   to three subjects of 36 to 360 bases, word sizes 2 to 5, `-threshold` 1 to 4), 129 read past a
+   buffer (106 first past the query batch, 23 past the subject's translation); NCBI crashed
+   (SIGSEGV) in 23 of them, in each of three runs, and no output varied between runs. NCBI under
+   valgrind, which reports the invalid reads in `BlastGetStartForGappedAlignment`, finishes all
+   129 with LOSAT's output byte for byte; the 106 that NCBI finishes natively and the 321 searches
+   inside the buffers equal NCBI's native output. For BLASTX, in the 400 random searches of the
+   BLASTX item of version 1.22 below, LOSAT equals NCBI under valgrind in the 115 that read past a
+   buffer (6 of them crash natively) and NCBI's native output in the other 285; natively NCBI's
+   report differs from LOSAT's in 2 of the 109 past ones it finishes. LOSAT's output is the same
+   at 1 and 4 threads in all 850. Fixtures
+   `db.x2.tblastn.qpast.*`, `db.x2.tblastn.frame.*` and `db.x2f.bx.*` of
+   `LOSAT/tests/db_search_manifest/` (`-subject` and `-db`, the query and the subject side), frozen
+   from NCBI under valgrind where NCBI reads past its buffers. Not covered, and still refused: with
+   TBLASTN `-in_pssm`, a window past the PSSM's last position (`pssm->data` holds one row per
+   position and no sentinel row: the read is past a matrix, not past a sequence), and a gapped start
+   that a PSSM whose '-' column scores above `BLAST_SCORE_MIN` puts past the subject's translation
+   buffer, where NCBI's preliminary gapped alignment then reads from (the TBLASTN item of version
+   1.18 below).
 
 Explicit rejections (rule 3):
 
@@ -1140,20 +1175,25 @@ masked). Line NP item M4a-2c.
     permutations of 86 NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows
     `x.h_*nan*`, `nan_hit`, `nan_threshold` equal NCBI.
 
-- TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated): with
-  a low `-threshold`, NCBI's one-hit ungapped extension can give a negative `Int4` length, which
-  `BlastGetStartForGappedAlignment` reads as `Uint4` (`aa_ungapped.c:1054,1083`,
-  `blast_gapalign.c:3393-3413`): it scores the first window of 11 letters from the HSP's start,
-  which may pass the end of its context and its frame. Inside NCBI's buffers the window reads the
-  NULLB and then the next contexts' or frames' letters, and LOSAT reads the same bytes. LOSAT
-  refuses (exit 1) where the window reads outside them:
-  - past the byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with
-    `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
-    `blast_query_info.c:246-250`);
-  - past the NULLB after frame -3 of the subject's translation (`BLAST_GetAllTranslations` writes
-    frames 1, 2, 3, -1, -2, -3 into `2*(nucl_length+1)+2` bytes and leaves the last one unset,
-    `blast_util.c:1058,1063,1098-1101`);
-  - with `-in_pssm`, past the PSSM's last position (`pssm->data` holds one row per position).
+- TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated;
+  version 1.46): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
+  `Int4` length, which `BlastGetStartForGappedAlignment` reads as `Uint4`
+  (`aa_ungapped.c:1054,1083`, `blast_gapalign.c:3393-3413`): it scores the first window of 11
+  letters from the HSP's start, which may pass the end of its context and its frame. Inside NCBI's
+  buffers the window reads the NULLB and then the next contexts' or frames' letters, and LOSAT
+  reads the same bytes. Past them
+  LOSAT reads NULLBs (approved exception 3, version 1.46; 1.18 refused these searches): past the
+  byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with `buflen` from
+  `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`, `blast_query_info.c:246-250`) and past
+  the NULLB after frame -3 of the subject's translation (`BLAST_GetAllTranslations` writes frames
+  1, 2, 3, -1, -2, -3 into `2*(nucl_length+1)+2` bytes and leaves the last one unset,
+  `blast_util.c:1058,1063,1098-1101`). LOSAT refuses (exit 1):
+  - with `-in_pssm`, a window past the PSSM's last position (`pssm->data` holds one row per
+    position and no sentinel row);
+  - with `-in_pssm` and a PSSM whose '-' column scores above BLAST_SCORE_MIN (below), a gapped start
+    that the window's sum puts past the NULLB after frame -3, where NCBI's preliminary gapped
+    alignment reads from past its translation buffer (version 1.46; exception 3 covers the window's
+    letters, not that alignment's).
 
   It also refuses a result of such a gapped start that NCBI does not finish: two gapped starts
   past the end of their chunk of the frame (the window of a chunk that is not the frame's last),
@@ -1186,20 +1226,21 @@ masked). Line NP item M4a-2c.
   does not reproduce the reports of that alignment's column of the NULLB yet and refuses it where
   they would show it, as a gap of its own, not under this rule.
 
-  BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
-  extended to TBLASTN.
+  Version 1.46 extends BLASTP's approved exception 3, which reads the letters past a sequence as the
+  sentinel, to TBLASTN's window (above).
 
-- BLASTX with `-window_size 0` (version 1.22, 2026-11-14, line RG item X2f, Owner-delegated): with
-  a low `-threshold`, NCBI's one-hit ungapped extension can give a negative `Int4` length
-  (`aa_ungapped.c:1054,1083`), which `BlastGetStartForGappedAlignment` reads as `Uint4`: it scores
-  the first window of 11 letters from the HSP's start (`blast_gapalign.c:3394-3437`). A window that
+- BLASTX with `-window_size 0` (version 1.22, 2026-11-14, line RG item X2f, Owner-delegated;
+  version 1.46): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
+  `Int4` length (`aa_ungapped.c:1054,1083`), which `BlastGetStartForGappedAlignment` reads as
+  `Uint4`: it scores the first window of 11 letters from the HSP's start
+  (`blast_gapalign.c:3394-3437`). A window that
   passes the end of its context or of its subject holds that NULLB, which scores
   `BLAST_SCORE_MIN` (`blast_stat.c:1559-1579`), so NCBI returns the HSP's start whatever bytes
-  follow, and so does LOSAT. LOSAT refuses (exit 1) where the window reads outside NCBI's buffers:
+  follow, and so does LOSAT. Where the window reads outside NCBI's buffers LOSAT reads NULLBs
+  (approved exception 3, version 1.46; 1.22 refused these searches, exit 1):
   - past the byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with
     `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
-    `blast_query_info.c:246-250`); a batch that LOSAT searches in parts (with `BATCH_SIZE` above
-    10002) is one buffer, and each chunk of a split query has its own;
+    `blast_query_info.c:246-250`);
   - past the NULLB after a `-subject` protein (`malloc(len+2)`, `blast_setup_cxx.cpp:885-893,
     1236-1239`);
   - past the last memory page of a database volume's sequence file. NCBI maps the file whole from
@@ -1216,9 +1257,12 @@ masked). Line NP item M4a-2c.
   Under valgrind the 13 such searches checked (the 8 above among them) finish, with the output of
   reading those bytes as NULLBs. With `-db`, a window past the volume's last sequence into the rest
   of the page gave the same output in five runs and no invalid read under valgrind; one past the
-  page of a 4,096-byte file made valgrind report an invalid read and crash. BLASTP's
-  approved exception 3 (version 1.3), which reads such letters as the sentinel, is not extended to
-  BLASTX.
+  page of a 4,096-byte file made valgrind report an invalid read and crash; there LOSAT's output is
+  NCBI's on the same volume with 16 zero bytes after that page (fixture `db.x2f.bx.page.6`).
+  With version 1.46 LOSAT runs all 400 searches: it equals NCBI under valgrind in the 115 that read
+  past a buffer (valgrind reports invalid reads in each) and NCBI's native output in the other 285
+  (34 of them `-ungapped`, which both refuse with composition statistics); natively NCBI's report
+  differs from LOSAT's in 2 of the 109 past ones it finishes.
 
 - TBLASTX with `-window_size 0` (version 1.21, 2026-11-14, line RG item X2b, Owner-delegated): with
   a low `-threshold`, NCBI's one-hit word finder saves ungapped HSPs of length 0 or less

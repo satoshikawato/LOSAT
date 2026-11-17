@@ -38,7 +38,7 @@
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
   E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-17 (exception 3
-  narrowed to a closed pipe: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; exception 7
+  withdrawn: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; exception 7
   withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; exception 5 for every
   format of the search programs, the Owner's answer A to line RG's T6-Q1 of 2026-11-17; line RG item
   T6a, RG DECISIONS T6-1, T6-2 and T6-3, Owner-delegated, the same standing instruction)
@@ -110,11 +110,14 @@ BLAST+.
    question T6-Q1, 2026-11-17: no crate and no native call; RG DECISIONS T6-3). A write to a
    closed pipe (`EPIPE`; the Rust runtime ignores SIGPIPE) is a failed write of the report's
    stream like any other (`report::ostream::ReportStream`, line RG item T6a), and the run ends as
-   NCBI ends that format's failed write: outfmt 0 to 4, 5, 8, 9, 11, 12, 15, 16 and 18 with their
-   posts and `BLAST failed to write output`, exit code 6; outfmt 6, 7 and 10 with libstdc++'s
-   `terminate` text and an abort (exit status 134); SAM (17) with exit code 0; where NCBI is
-   ended by SIGPIPE (141, no text). The timing of version 1.2 stays: a pipe that only the
-   writes after the formatter reach is not reported (exit code 0).
+   NCBI's run ends when that format's write to its standard output fails, where NCBI is ended by
+   SIGPIPE (141, no text): outfmt 0 to 4 and 18 with `BLAST failed to write output`, exit code 6
+   (outfmt 0 to 4 abort, exit status 134, where the flush at the end of the alignments fails:
+   its 802.4 post's `cerr` flushes the failed `cout`); outfmt 5, 8, 9, 11, 12, 15 and 16 (whose
+   failures post, and each post's `cerr` flushes the failed `cout`) and outfmt 6, 7 and 10 with
+   libstdc++'s `terminate` text and an abort (exit status 134); SAM (17) with exit code 0. A pipe
+   that only the writes after the formatter reach (`~CBlastFormat`'s flush and the exit's) is not
+   reported (exit code 0), as NCBI does not report a failed device there.
 6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
    2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
    closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to

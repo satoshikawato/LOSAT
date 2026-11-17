@@ -33,8 +33,6 @@ const CAPS: &[(&str, &str, usize)] = &[
     ("algorithm/blastn/blast_engine/run.rs", "run_in_pool", 1516),
     ("algorithm/blastp/blast_engine.rs", "run_call", 1794),
     ("algorithm/tblastn/tblastn_app.rs", "search", 1451),
-    // removed when tx-7 merges
-    ("algorithm/tblastx/blast_engine/run_impl.rs", "search_query_batch", 1053),
     ("algorithm/tblastx/sum_stats_linking/linking.rs", "link_hsp_group_ncbi", 1422),
 ];
 

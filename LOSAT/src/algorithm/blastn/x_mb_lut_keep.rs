@@ -92,9 +92,11 @@
 //! packed CSR wrote, less), except in the loop's last batch, whose traceback runs without it (no
 //! build is left to take it: the traceback of NCBI's last batch holds no table either); the
 //! peaks above are measured with the kept table resident. A search of one batch (a `-subject`
-//! search of one genome) has the table only in its preliminary stage: blastn of E. coli EDL933 x
-//! Sakai `-subject`, whose peak at 16 to 64 threads is at the end of its traceback, no longer
-//! holds the 16 MiB of 4^11 cells there (2026-11-17, line EB s29).
+//! search of one genome) has the table only in its preliminary stage, and a peak in its traceback
+//! falls by the table's resident pages (2026-11-17, line EB s29, E. coli Sakai x EDL933
+//! `-subject`, VmHWM: blastn at one thread 95.8 -> 90.3 MiB, a packed CSR's start; dc-megablast at
+//! 16 threads 147.9 -> 129.0 MiB, the chain heads of 4^11 cells). Megablast's peak is in its scan,
+//! where the table is read, and does not move.
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= csr= zero= released=` gives the
 //! loop's builds of a hashtable or chain heads on the kept table, its builds on a fresh one (of

@@ -118,8 +118,10 @@
 //! cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64 (not timed); `=2`
 //! the plain loops for every table, `=3` for sparse tables, on any CPU. Where it does not act the
 //! branch-free scan of BXSCANBF (graduated, always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
-//! its candidate loop. On x86-64 with AVX2 and POPCNT the direct loop scans the subjects of batches
-//! with few hits per used cell (BXDIAGMIN: short queries); elsewhere every batch.
+//! its candidate loop. Where LOSAT_X_BXDIAG's fused loop runs by default (x86-64 with AVX2 and
+//! POPCNT, LOSAT_X_BXCROSS; the WebAssembly build and x86-64 with SSSE3, SSE4.1 and POPCNT,
+//! LOSAT_X_BXCROSS128) the direct loop scans the subjects of batches with few hits per used cell
+//! (BXDIAGMIN: short queries); elsewhere every batch.
 
 use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;

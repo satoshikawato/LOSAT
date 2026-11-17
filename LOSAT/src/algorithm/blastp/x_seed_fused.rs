@@ -138,8 +138,9 @@
 //! hit-by-hit order itself, and every batch ends (stores and calls) before the next one loads.
 //! `LOSAT_X_BXCROSS` is a switch of the strict set (since 2026-10-23): on unless it is `0`; on,
 //! it is the cell test of every table blastx's fused loop takes where the CPU has AVX2 and POPCNT
-//! (`blastx/x_seed_diag.rs`); off, or without POPCNT, blastx takes the direct loop, or with a value
-//! of LOSAT_X_BXDIAG or LOSAT_X_BXDIAGSHADOW the masked batch. blastp's loops never take it: it is not a cell test of
+//! (`blastx/x_seed_diag.rs`), and elsewhere LOSAT_X_BXCROSS128's (below) where that runs; off, or
+//! without either, blastx takes the direct loop, or with a value of LOSAT_X_BXDIAG or
+//! LOSAT_X_BXDIAGSHADOW the masked batch (the per-hit loop without AVX2). blastp's loops never take it: it is not a cell test of
 //! [`XDiagMode`], the choice that blastp's loops share ([`x_scan_two_hit_in_with`]), but blastx's
 //! [`XCellTest::Cross`], which blastx's [`x_scan_two_hit_with`] runs, and every function of it is
 //! its own. The chunk is a constant of each instance; the program runs
@@ -175,6 +176,37 @@
 //! `DEFER`, whose functions are those before the switch). It acts only where LOSAT_X_BXCROSS's
 //! cell test runs, and is a field of blastx's [`XCellTest::Cross`], so blastp's loops keep their
 //! code.
+//!
+//! EXPERIMENT (LOSAT_X_BXCROSS128, blastx's switch): LOSAT_X_BXCROSS's batches in 128-bit vectors,
+//! for the targets without its AVX2 kernel: the WebAssembly build (simd128) and x86-64 with SSSE3,
+//! SSE4.1 and POPCNT but without AVX2 ([`XCellTest::Cross128`], [`x_scan_cells_w128_cross`]). Both
+//! kernels run one driver, generic over [`XCrossKernel`]: the scan's stage ([`x_cross_scan`],
+//! [`x_cross_cell`]), the drain ([`x_cross_drain_with`]), its batches, units and windows
+//! ([`x_cross_batch`], [`x_cross_unit`], [`x_cross_window`], [`x_cross_window_defer`]) and
+//! the deferred records ([`x_cross_defer`]); a kernel gives a piece's stage, the conflict test and
+//! the test of eight lanes, and each kernel's out-of-line functions are compiled for its
+//! instructions. The 128-bit kernel ([`XCrossW128`], over `utils/xdrop_simd.rs` `arch`, one source
+//! for x86-64 SSE and wasm32 simd128) holds the eight lanes of a window in two vectors of four. Its
+//! conflict test compares each half with itself one and two lanes round (the six pairs within it)
+//! and the low half with the high one zero to three lanes round (the sixteen pairs across), so it
+//! sees all 28 pairs of lanes, as the AVX2 test does. Its batch reads and stores the entries by
+//! lane, as the AVX2 batch does, and computes the AVX2 batch's lane formulas (the same wrapping
+//! 32-bit operations) on each half. A piece of a cell is staged as six vectors of four lanes
+//! (`XHit::x_load24_w128`: `u16` hits by three 16-byte loads, the reads of the AVX2 stage; `i32`
+//! hits by a 16-byte load for each four hits inside the list and scalar loads for the rest, as SSE
+//! and simd128 have no masked load). So every window, part, unit and call is the AVX2 kernel's, and
+//! the argument above holds as it stands. The 128-bit kernel calls each unit's candidates at once
+//! (the drain without `DEFER`; LOSAT_X_BXCROSSDEFER does not act on it): in the WebAssembly build
+//! the deferral was slower (the bx case of v4-W W2 s3, a 50-kb piece of the fly genome x the fly
+//! proteome at one thread: x0.780 of `dev` with it, x0.749 without), while on x86-64 with `=2` it
+//! was 3 % faster, which a CPU without AVX2 forgoes so that the kernel has one form.
+//! `LOSAT_X_BXCROSS128` is a switch of the strict set (class platform): on unless it is `0`; on,
+//! where LOSAT_X_BXCROSS is on and its AVX2 kernel does not run, the 128-bit kernel is the cell test
+//! of every table blastx's fused loop takes (`blastx/x_seed_diag.rs`; LOSAT_X_BXDIAGMIN chooses the
+//! tables, as for the AVX2 kernel); `=2` (diagnostic) runs it in place of the AVX2 kernel on any
+//! x86-64 CPU with SSSE3, SSE4.1 and POPCNT (the tests); `=0`, or LOSAT_X_BXCROSS=0, leaves the
+//! choice before the switch (the direct loop, or with a value of LOSAT_X_BXDIAG the per-hit loop).
+//! The timing line names `mode=w128-cross` and counts `cross_splits=` as for the AVX2 kernel.
 //!
 //! BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
 //! finds the cells with hits by the candidate loop of tblastn's branch-free scan
@@ -2910,6 +2942,96 @@ where
     x_cross_batch::<XCrossAvx2, CHUNK, F>(cross, b, table, test, candidate)
 }
 
+// No NCBI counterpart: the bodies of LOSAT's windows tested in parts, written once.
+/// EXPERIMENT (LOSAT_X_BXCROSS): the body of a kernel's [`x_cross_window`] (the staged hits
+/// `b..b + 8`, two of which name one entry, in parts: from lane `start`, 0 first, the part is the
+/// lanes before the first one that repeats an entry of the part, [`x_cross_part_end`], so its
+/// entries are distinct; the batch's lanes past the part repeat the part's first hit, and only the
+/// part's candidate bits are kept and called in lane order, [`x_cross_calls`], before the next
+/// part loads; returns the number of candidates), with the kernel `$kernel`'s test of eight lanes
+/// ([`x_batch_lanes`]). A macro, expanded in each kernel's cold window function, so that its
+/// closures are written there and have the kernel's target features (as [`x_cross_scan`]'s).
+/// `$chunk` and `$f` are that function's `CHUNK` and `F`, and the other arguments its parameters.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+macro_rules! x_cross_window {
+    ($kernel:ty, $chunk:ident, $f:ident, ($cross:ident, $b:ident, $table:ident, $test:ident, $candidate:ident)) => {{
+        let (cross, b, table, test, candidate) = ($cross, $b, $table, $test, $candidate);
+        let coords: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.coord().add(b + i));
+        let subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.subject().add(b + i));
+        let mut candidates = 0;
+        let mut start = 0;
+        while start < X_DIAG_LANES {
+            let end = x_cross_part_end(&coords, start);
+            // Batch lane i: window lane start + i inside the part, else the part's first lane.
+            let lane = |i: usize| if start + i < end { start + i } else { start };
+            let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| coords[lane(i)] as u32);
+            debug_assert!(x_batch_coords_distinct(
+                &lane_coords.map(|c| c as usize)[..end - start]
+            ));
+            let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
+            let s = <$kernel as XCrossKernel>::load8(lane_subjects.as_ptr());
+            let lanes = x_batch_lanes::<$kernel>(lane_coords, s, table, test)
+                & ((1u32 << (end - start)) - 1);
+            x_cross_calls(cross, b + start, lanes, table, test, candidate);
+            candidates += lanes.count_ones();
+            start = end;
+        }
+        candidates
+    }};
+}
+
+// No NCBI counterpart: as `x_cross_window`.
+/// EXPERIMENT (LOSAT_X_BXCROSSDEFER): the body of a kernel's [`x_cross_window_defer`]
+/// ([`x_cross_window`]'s parts, each unit's candidates deferred by [`x_cross_unit`]: a part that
+/// repeats a deferred candidate's entry meets the marker, and the deferred calls are made before it
+/// is tested; returns the number of candidates and the drain's count of records), with the kernel
+/// `$kernel`. A macro for the reason of [`x_cross_window`]'s.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+macro_rules! x_cross_window_defer {
+    ($kernel:ty, $chunk:ident, $f:ident, ($cross:ident, $b:ident, $pending:ident, $table:ident, $test:ident, $candidate:ident)) => {{
+        let (cross, b, mut pending, table, test, candidate) =
+            ($cross, $b, $pending, $table, $test, $candidate);
+        let coords: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.coord().add(b + i));
+        let subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.subject().add(b + i));
+        let mut candidates = 0;
+        let mut start = 0;
+        while start < X_DIAG_LANES {
+            let end = x_cross_part_end(&coords, start);
+            // Batch lane i: window lane start + i inside the part, else the part's first lane.
+            let lane = |i: usize| if start + i < end { start + i } else { start };
+            let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| coords[lane(i)] as u32);
+            debug_assert!(x_batch_coords_distinct(
+                &lane_coords.map(|c| c as usize)[..end - start]
+            ));
+            let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
+            let s = <$kernel as XCrossKernel>::load8(lane_subjects.as_ptr());
+            let part = (1u32 << (end - start)) - 1;
+            let lanes = x_cross_unit::<$kernel, $chunk, $f>(
+                cross,
+                &mut pending,
+                b + start,
+                lane_coords,
+                s,
+                part,
+                table,
+                test,
+                candidate,
+            );
+            candidates += lanes.count_ones();
+            start = end;
+        }
+        (candidates, pending)
+    }};
+}
+
 /// EXPERIMENT (LOSAT_X_BXCROSS): the staged hits `b..b + 8`, two of which name one entry (hits of
 /// different cells on one diagonal), in parts (module header). From lane `start` (0 first), the
 /// part is the lanes before the first one that repeats an entry of the part
@@ -2940,7 +3062,7 @@ unsafe fn x_cross_window<const CHUNK: usize, F>(
 where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_cross_window_with::<XCrossAvx2, CHUNK, F>(cross, b, table, test, candidate)
+    x_cross_window!(XCrossAvx2, CHUNK, F, (cross, b, table, test, candidate))
 }
 
 /// EXPERIMENT (LOSAT_X_BXCROSSDEFER): [`x_cross_window`] with the parts' candidates deferred
@@ -2967,7 +3089,12 @@ unsafe fn x_cross_window_defer<const CHUNK: usize, F>(
 where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_cross_window_defer_with::<XCrossAvx2, CHUNK, F>(cross, b, pending, table, test, candidate)
+    x_cross_window_defer!(
+        XCrossAvx2,
+        CHUNK,
+        F,
+        (cross, b, pending, table, test, candidate)
+    )
 }
 
 // ---- EXPERIMENT (LOSAT_X_BXCROSS128): LOSAT_X_BXCROSS's batches in 128-bit vectors ----
@@ -3044,7 +3171,12 @@ trait XCrossKernel: Sized {
         test: XDiagTest,
     ) -> Option<(u32, Self::Lanes)>;
 
-    /// The kernel's [`x_cross_drain_with`], out of line.
+    /// The kernel's [`x_cross_drain_with`], out of line. A kernel's forwarding methods to its
+    /// out-of-line functions are compiled for its instructions (`#[target_feature]` with
+    /// `#[inline]`, not `#[inline(always)]`): rustc marks a call of a `#[target_feature]`
+    /// function's `#[inline(never)]` only at call sites in functions with those features, so a
+    /// call written in a function without them (the generic driver) loses it once inlined into
+    /// the kernel's function, and LLVM then inlined the drain without `DEFER` into the AVX2 scan.
     ///
     /// # Safety
     /// As [`x_cross_drain_with`].
@@ -3061,10 +3193,10 @@ trait XCrossKernel: Sized {
     where
         F: FnMut(i32, i32, i32, i32, &mut DiagStruct);
 
-    /// The kernel's [`x_cross_window_with`], cold and out of line.
+    /// The kernel's [`x_cross_window`], cold and out of line.
     ///
     /// # Safety
-    /// As [`x_cross_window_with`].
+    /// As [`x_cross_window`].
     unsafe fn window<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3075,13 +3207,13 @@ trait XCrossKernel: Sized {
     where
         F: FnMut(i32, i32, i32, i32, &mut DiagStruct);
 
-    /// The kernel's [`x_cross_window_defer_with`], cold and out of line in a kernel whose drain
+    /// The kernel's [`x_cross_window_defer`], cold and out of line in a kernel whose drain
     /// defers its calls (LOSAT_X_BXCROSSDEFER: the AVX2 kernel's [`x_cross_window_defer`]). The
     /// default, the body itself, is for a kernel whose scans do not defer (LOSAT_X_BXCROSS128's,
     /// which no drain with `DEFER` runs).
     ///
     /// # Safety
-    /// As [`x_cross_window_defer_with`].
+    /// As [`x_cross_window_defer`].
     #[inline(always)]
     unsafe fn window_defer<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
@@ -3094,7 +3226,7 @@ trait XCrossKernel: Sized {
     where
         F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
     {
-        x_cross_window_defer_with::<Self, CHUNK, F>(cross, b, pending, table, test, candidate)
+        x_cross_window_defer!(Self, CHUNK, F, (cross, b, pending, table, test, candidate))
     }
 
     /// The kernel's [`x_cross_batch`] for a batch that met a stored value equal to the marker
@@ -3476,40 +3608,6 @@ where
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
 ))]
-#[inline(always)]
-unsafe fn x_cross_window_with<Kn: XCrossKernel, const CHUNK: usize, F>(
-    cross: XCross<'_, CHUNK>,
-    b: usize,
-    table: &mut XDiagTable<'_>,
-    test: XDiagTest,
-    candidate: &mut F,
-) -> u32
-where
-    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
-{
-    let coords: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.coord().add(b + i));
-    let subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.subject().add(b + i));
-    let mut candidates = 0;
-    let mut start = 0;
-    while start < X_DIAG_LANES {
-        let end = x_cross_part_end(&coords, start);
-        // Batch lane i: window lane start + i inside the part, else the part's first lane.
-        let lane = |i: usize| if start + i < end { start + i } else { start };
-        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| coords[lane(i)] as u32);
-        debug_assert!(x_batch_coords_distinct(
-            &lane_coords.map(|c| c as usize)[..end - start]
-        ));
-        let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
-        let s = Kn::load8(lane_subjects.as_ptr());
-        let lanes =
-            x_batch_lanes::<Kn>(lane_coords, s, table, test) & ((1u32 << (end - start)) - 1);
-        x_cross_calls(cross, b + start, lanes, table, test, candidate);
-        candidates += lanes.count_ones();
-        start = end;
-    }
-    candidates
-}
-
 /// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_window_defer`] with the kernel `Kn`.
 ///
 /// # Safety
@@ -3519,50 +3617,6 @@ where
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
 ))]
-#[inline(always)]
-unsafe fn x_cross_window_defer_with<Kn: XCrossKernel, const CHUNK: usize, F>(
-    cross: XCross<'_, CHUNK>,
-    b: usize,
-    mut pending: usize,
-    table: &mut XDiagTable<'_>,
-    test: XDiagTest,
-    candidate: &mut F,
-) -> (u32, usize)
-where
-    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
-{
-    let coords: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.coord().add(b + i));
-    let subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| *cross.subject().add(b + i));
-    let mut candidates = 0;
-    let mut start = 0;
-    while start < X_DIAG_LANES {
-        let end = x_cross_part_end(&coords, start);
-        // Batch lane i: window lane start + i inside the part, else the part's first lane.
-        let lane = |i: usize| if start + i < end { start + i } else { start };
-        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| coords[lane(i)] as u32);
-        debug_assert!(x_batch_coords_distinct(
-            &lane_coords.map(|c| c as usize)[..end - start]
-        ));
-        let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
-        let s = Kn::load8(lane_subjects.as_ptr());
-        let part = (1u32 << (end - start)) - 1;
-        let lanes = x_cross_unit::<Kn, CHUNK, F>(
-            cross,
-            &mut pending,
-            b + start,
-            lane_coords,
-            s,
-            part,
-            table,
-            test,
-            candidate,
-        );
-        candidates += lanes.count_ones();
-        start = end;
-    }
-    (candidates, pending)
-}
-
 // No NCBI counterpart: the vector kernel of LOSAT's cell test; it holds no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXCROSS): the kernel of one AVX2 register of eight lanes per batch: the
 /// conflict test [`x_cross_conflict`], the batch [`x_batch_avx2_lanes_mark`], and three registers
@@ -3647,7 +3701,8 @@ impl XCrossKernel for XCrossAvx2 {
         x_batch_avx2_lanes_mark::<MARK>(lane_coords, s, table, test)
     }
 
-    #[inline(always)]
+    #[target_feature(enable = "avx2,popcnt")]
+    #[inline]
     unsafe fn drain<const DEFER: bool, const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         staged: usize,
@@ -3663,7 +3718,8 @@ impl XCrossKernel for XCrossAvx2 {
         x_cross_drain::<DEFER, CHUNK, F>(cross, staged, end, table, test, candidate, counts)
     }
 
-    #[inline(always)]
+    #[target_feature(enable = "avx2,popcnt")]
+    #[inline]
     unsafe fn window<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3677,7 +3733,8 @@ impl XCrossKernel for XCrossAvx2 {
         x_cross_window(cross, b, table, test, candidate)
     }
 
-    #[inline(always)]
+    #[target_feature(enable = "avx2,popcnt")]
+    #[inline]
     unsafe fn window_defer<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3692,7 +3749,8 @@ impl XCrossKernel for XCrossAvx2 {
         x_cross_window_defer(cross, b, pending, table, test, candidate)
     }
 
-    #[inline(always)]
+    #[target_feature(enable = "avx2,popcnt")]
+    #[inline]
     unsafe fn batch_cold<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3843,7 +3901,8 @@ impl XCrossKernel for XCrossW128 {
         Some((lanes, old))
     }
 
-    #[inline(always)]
+    #[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+    #[inline]
     unsafe fn drain<const DEFER: bool, const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         staged: usize,
@@ -3859,7 +3918,8 @@ impl XCrossKernel for XCrossW128 {
         x_cross_drain_w128::<DEFER, CHUNK, F>(cross, staged, end, table, test, candidate, counts)
     }
 
-    #[inline(always)]
+    #[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+    #[inline]
     unsafe fn window<const CHUNK: usize, F>(
         cross: XCross<'_, CHUNK>,
         b: usize,
@@ -3972,7 +4032,7 @@ unsafe fn x_cross_window_w128<const CHUNK: usize, F>(
 where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_cross_window_with::<XCrossW128, CHUNK, F>(cross, b, table, test, candidate)
+    x_cross_window!(XCrossW128, CHUNK, F, (cross, b, table, test, candidate))
 }
 
 /// EXPERIMENT (LOSAT_X_BXCROSS128): [`x_cross_window_defer`] with the 128-bit kernel, cold and

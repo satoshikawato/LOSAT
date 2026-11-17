@@ -29,14 +29,16 @@
 //! (`-word_size` 3, the default, and 2 and 4); elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
 //! switch of the strict set: on unless it is `0`. When it
 //! is not set (or empty) it acts only where the cell test is LOSAT_X_BXCROSS's (an x86-64 CPU with
-//! AVX2 and POPCNT), the cell test its rule was timed with; set to a value, it runs on any CPU. With
-//! a value the cell test is LOSAT_X_BXCROSS's where that runs, otherwise the masked AVX2 batch on an
-//! x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
+//! AVX2 and POPCNT), the cell test its rule was timed with, or LOSAT_X_BXCROSS128's (the same
+//! batches in 128 bits: the WebAssembly build, and x86-64 with SSSE3, SSE4.1 and POPCNT but no AVX2);
+//! set to a value, it runs on any CPU. With a value the cell test is one of those where it runs,
+//! otherwise the masked AVX2 batch on an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as
+//! LOSAT_X_BPDIAG chooses;
 //! `LOSAT_X_BXDIAG=per-hit` and `LOSAT_X_BXDIAG=scalar` force the per-hit loop or the scalar batch
 //! (diagnostics; the tests use them). `LOSAT_X_BXDIAGSHADOW` (any value) also runs the reference on
 //! a copy of the diagonal table for every subject and stops (panics) if the hit lists or the tables
 //! differ, and prints a summary at exit. With `LOSAT_TIMING=1` a run prints
-//! `[TIMING] blastx_diag: mode=<avx2-cross-defer|avx2-cross|avx2-defer-masked|scalar|per-hit> subjects=N cells=N
+//! `[TIMING] blastx_diag: mode=<avx2-cross-defer|avx2-cross|w128-cross|avx2-defer-masked|scalar|per-hit> subjects=N cells=N
 //! batched_hits=N candidates=N` (the subjects the fused loop scanned, the cells it tested in
 //! batches, their hits, and the hits passed to the closure; zeros but the subjects with `per-hit`).
 //!
@@ -92,8 +94,9 @@
 //! so `mask` is at least every query offset of the batch's lookup
 //! (`x_seed_fused::x_scan_cells_cross` asserts it per subject). A
 //! switch of the strict set (since 2026-10-23): on unless it is `0`. On, it is the cell test
-//! of every table the fused loop takes where the CPU has AVX2 and POPCNT; `LOSAT_X_BXCROSS=0`, or a
-//! CPU without POPCNT, leaves the direct loop on every table (with a value of `LOSAT_X_BXDIAG` or
+//! of every table the fused loop takes where the CPU has AVX2 and POPCNT, and in 128 bits
+//! (LOSAT_X_BXCROSS128, below) where it does not; `LOSAT_X_BXCROSS=0`, or a CPU without either,
+//! leaves the direct loop on every table (with a value of `LOSAT_X_BXDIAG` or
 //! `LOSAT_X_BXDIAGSHADOW`, the masked AVX2 batch above). `LOSAT_X_BXDIAGMIN` still chooses the tables (above), and `LOSAT_X_BXDIAGSHADOW`
 //! compares it with the reference like the other cell tests. The batches run at 1,024 staged
 //! hits. The timing line names `mode=avx2-cross` (`mode=avx2-cross-defer` with
@@ -107,6 +110,16 @@
 //! table are unchanged). A switch of the strict set (since 2026-10-25): on unless it is `0`;
 //! `LOSAT_X_BXCROSSDEFER=0` gives LOSAT_X_BXCROSS's drain with the calls at once. It acts only
 //! where LOSAT_X_BXCROSS's cell test runs; the timing line then names `mode=avx2-cross-defer`.
+//!
+//! EXPERIMENT (LOSAT_X_BXCROSS128): `XCellTest::Cross128`: LOSAT_X_BXCROSS's batches in two 128-bit
+//! vectors of four lanes, each unit's calls at once, where the AVX2 batches do not run (the
+//! WebAssembly build; x86-64 with SSSE3, SSE4.1 and POPCNT but no AVX2); `x_seed_fused`'s module
+//! header has the form and why the calls, their order and the table are those of the AVX2 batches.
+//! A switch of the strict set (class platform): on unless it is `0`; `2` runs it in place of the
+//! AVX2 batches on any x86-64 CPU with SSSE3, SSE4.1 and POPCNT (diagnostic; the tests). With it the
+//! fused loop runs by default in the WebAssembly build too (`x_bxdiag_mode`), on the tables
+//! `LOSAT_X_BXDIAGMIN` gives it, and they take 16-bit hits there as on x86-64. The timing line then
+//! names `mode=w128-cross` and ends with `cross_splits=N`.
 //!
 //! LOSAT_X_BXSCANBF (`x_seed_scan.rs`; graduated 2026-10-26, no variable, always on): the fused
 //! loop finds the cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`

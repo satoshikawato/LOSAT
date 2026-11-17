@@ -160,6 +160,17 @@ jobs:
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
+      # The lib tests of the 128-bit SIMD kernels on the target that ships them (simd128: the
+      # wasm32 layer of utils/xdrop_simd.rs and the kernels written over it); the native
+      # `cargo test` runs them only in their x86-64 SSE form. Same build as the step above.
+      - name: SIMD kernel tests on wasm32-wasip1
+        working-directory: LOSAT
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
+        run: >-
+          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
+          x_restricted_gap::tests xdrop_simd::x_w128::tests
+          x_w128_loops_write_the_residues_of_the_word_loop x_same_matrix
 
   # The engine adapter (web/adapter) over five jobs that run side by side: the build identity
   # with the certified engine builds (plan TD-6) and the index-scan property tests (TD-8) here;

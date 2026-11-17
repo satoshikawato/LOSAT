@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { expect, type BrowserContext } from '@playwright/test';
 import type { OutputFormat } from 'losat/domain';
 import { test } from './support/test';
+import { RUN_OUTPUT_CASES } from '../contract/run-output.contract';
 import type { RetentionResult, SearchCase, SearchResult } from './harness/engine';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
@@ -155,7 +156,9 @@ test('run output contract: the writer in the Engine worker, the real Data worker
   const { results } = await page.evaluate(() => window.losatHarness!.engine.runOutputEngine());
   const withoutQuota = results.filter((result) => !result.name.startsWith('storage full'));
   expect(failures(withoutQuota)).toEqual([]);
-  expect(withoutQuota).toHaveLength(10);
+  expect(withoutQuota.map((result) => result.name)).toEqual(
+    RUN_OUTPUT_CASES.filter((c) => !c.name.startsWith('storage full')).map((c) => c.name),
+  );
 });
 
 /** Runs V-BR searches (each case at each of its thread counts), checks them, and returns the record's rows. */

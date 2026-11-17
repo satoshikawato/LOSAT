@@ -606,7 +606,11 @@ fn run_inner(
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
-                [args.outfmt.as_str()],
+                // The command line's one format fails the call.
+                [(
+                    args.outfmt.as_str(),
+                    &mut crate::api::local_blast::FormatRefusal::FailsCall,
+                )],
                 program.upper,
             )?;
             Some(database)
@@ -892,7 +896,13 @@ fn run_inner(
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
-        report::RecordsParsed::of(&subjects, args.show_gis, options.pairwise_view().is_some())?
+        report::RecordsParsed::of(&subjects, args.show_gis, |parsed| {
+            if options.pairwise_view().is_some() {
+                crate::report::db_subject::check_pairwise_records(parsed, true, "BLASTX")
+            } else {
+                Ok(())
+            }
+        })?
     } else {
         report::RecordsParsed::default()
     };

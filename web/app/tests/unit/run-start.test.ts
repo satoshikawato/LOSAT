@@ -18,6 +18,8 @@ import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/r
 import type { EngineCommand, EngineEvent, WorkerRun } from '../../../packages/losat/src/infra/engine-worker/protocol';
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import {
+  discardedStream,
+  DISCARD_STREAM,
   EngineCallError,
   EngineStoppedError,
   FILE_CHUNK_BYTES,
@@ -425,9 +427,10 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
  * A binding with no engine behind it that records the calls of a search; its run sends outfmt 6 and
  * the archive of `runFiles` on stream 8 (in two chunks), and then fails with `fail`, or stops.
  * `heldName` is the name of a file that the instance holds (a WindowMasker counts file): `file_begin`
- * refuses it, as the adapter does.
+ * refuses it, as the adapter does. `discard`: after outfmt 6, the signal of stream 9 that discards
+ * it (its bytes), then outfmt 7 (ABI v2 §5).
  */
-function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string } = {}) {
+function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array } = {}) {
   const calls: string[] = [];
   let handle = 100;
   let stopped: EngineStoppedError | undefined;
@@ -458,6 +461,10 @@ function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean
     run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
       calls.push('run');
       sink(6, encode('q\ts\n'));
+      if (options.discard !== undefined) {
+        sink(DISCARD_STREAM, options.discard);
+        sink(7, encode('# 0 hits found\n'));
+      }
       if (options.runFiles !== undefined) {
         const half = options.runFiles.length >> 1;
         sink(RUN_FILES_STREAM, options.runFiles.subarray(0, half));
@@ -564,6 +571,27 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect('runFiles' in (await runtimeWith(plain.abi).run(next.run, () => undefined))).toBe(false);
     expect(plain.calls.some((call) => call.startsWith('begin') || call.startsWith('file release'))).toBe(false);
     next.close();
+  });
+
+  it("forwards the engine's discard of an output (stream 9) to the Data worker, between the chunks in their order", async () => {
+    const { abi } = fakeAbi({ discard: new Uint8Array([6, 0, 0, 0]) });
+    const { run, delivered, close } = workerRun([]);
+    await runtimeWith(abi).run(run, () => undefined);
+    expect(await delivered()).toEqual([
+      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+      { type: 'discard', stream: 6 },
+      { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
+      { type: 'end', chunks: 2, bytes: 19 },
+    ]);
+    close();
+    expect(discardedStream(new Uint8Array([7, 0, 0, 0]))).toBe(7);
+    expect(() => discardedStream(new Uint8Array([6, 0]))).toThrow('a signal of stream 9 has 2 bytes, not 4');
+    // A signal that names a stream which is not an output of a run breaks the ABI: the run fails.
+    for (const signal of [new Uint8Array([1, 0, 0, 0]), new Uint8Array([6, 0, 0, 1])]) {
+      const broken = workerRun([]);
+      await expect(runtimeWith(fakeAbi({ discard: signal }).abi).run(broken.run, () => undefined)).rejects.toThrow('which is not an output of a run');
+      broken.close();
+    }
   });
 
   it("gives a failed run's files with its error, releases what it registered, and sends no end", async () => {

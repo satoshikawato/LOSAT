@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.42
+- Version: 1.43
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -125,7 +125,11 @@
   loader, which keeps the ids of what the run loaded, finds it first; a directory in place of a
   version 4 ISAM file is no ISAM, as NCBI's; line DBID item loadord, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07);
-  1.42 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-1: exception 14, a PSSM whose
+  1.42 2026-11-17 (a version 4 lookup returns at the first volume that holds the id, as NCBI's, so
+  an ISAM file of a later volume that does not open stops none of its lookups; refused, where
+  LOSAT's list of the other holders fails on such a file; line DBID item v4late, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.43 2026-11-17 (psiblast and tblastn `-in_pssm`, line RG item D3-1: exception 14, a PSSM whose
   values nest deeper than NCBI's stack holds, read to any depth, rule 1, its approval pending the
   Owner's answer to Q-DEPTH (asked 2026-11-17); the explicit rejections where NCBI's object
   manager or format guess prints addresses, reads outside its data, overflows a signed integer or
@@ -133,7 +137,7 @@
   duplicate-id message that may spell a subject's Seq-id, rule 2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the Owner decided D3-1's questions Q1 to Q3 and
   Q-BM on 2026-11-16 (「推奨通り」: Q1 to Q3 refused, Q-BM to port BitMagic); written 2026-11-15,
-  numbered after 1.41)
+  numbered after 1.42)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -705,9 +709,9 @@ masked). Line NP item M4a-2c.
     and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
     (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
-## Exception pending the Owner's approval (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.42)
+## Exception pending the Owner's approval (psiblast and tblastn `-in_pssm`, values nested deeper than NCBI's stack holds, version 1.43)
 
-Version 1.42, line RG item D3-1. Approval: pending the Owner's answer to Q-DEPTH (asked 2026-11-17).
+Version 1.43, line RG item D3-1. Approval: pending the Owner's answer to Q-DEPTH (asked 2026-11-17).
 Built under the maintainer's standing delegation (standing instruction 2026-09-29, restated
 2026-10-07) as that question's recommended option B, in a pull request that stays a draft until
 the Owner answers. Not taken: option A, refusing the depths at which NCBI may crash, from NCBI's
@@ -949,12 +953,11 @@ reads at every start and reads depths at which NCBI crashes at every start.
   LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
   and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
   the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
-  (`docs/web/abi_v2.md` §7). That holds for these checks of the formats. A Web run still fails
-  as a whole, where the CLI completes the argv's format, in two more cases: (a) a format fails in
-  the middle of its report, `-sorthits` with a description total above 99999 bits in outfmt 0
-  (all programs), or an NCBI error of outfmt 0 alone such as BLASTX `Row is empty`; dev had both;
-  (b) a stream that the Web adds fails alone after it sent a chunk (BLASTX, a later query batch
-  with an undecodable `Subject_` title). These are current limits.
+  (`docs/web/abi_v2.md` §7). So does every error of one format's report, at a check before its
+  rows or in its middle (`-sorthits` with a description total above 99999 bits in outfmt 0, an
+  NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
+  after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
+  the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -1065,7 +1068,14 @@ reads at every start and reads depths at which NCBI crashes at every start.
   that volume and go on to the next (review 4 of item loadord: NCBI exit 0 where a later volume
   holds the id, 255 where none does; LOSAT stopped with NCBI's `Error: Could not open input
   file`, which NCBI writes for a regular file that does not open). Where its index or data file
-  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses.
+  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses. NCBI's
+  lookup (`SeqidToOid`, `SeqidToOids` without `multi`) returns at the first OID it finds, in the
+  order of the volumes, so an ISAM file of a later volume that does not open (a regular file of
+  mode 000) stops a lookup only of an id that no volume before it holds in the search's list
+  (review 3 of item loadord, H3, and item v4late: NCBI exit 0 where LOSAT stopped with `Error:
+  Could not open input file`); LOSAT, which also lists the other sequences that hold the id,
+  refuses where that list fails on such a file and a report shows what it can change
+  (`PD-LOSAT-DATABASE-SEARCH`).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 
@@ -1344,7 +1354,7 @@ reads at every start and reads depths at which NCBI crashes at every start.
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows.
-- psiblast and tblastn `-in_pssm` (version 1.42, 2026-11-16, line RG item D3-1, Owner-delegated,
+- psiblast and tblastn `-in_pssm` (version 1.43, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations
   as NCBI's object manager does when the PSSM's Bioseq joins the scope
@@ -1441,7 +1451,7 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last two entries (version 1.42, line RG item D3-1) are not of these: they concern a
+would port. The last two entries (version 1.43, line RG item D3-1) are not of these: they concern a
 PSSM query's annotations and Seq-ids, not a database; they are Owner-delegated (standing instruction
 2026-09-29, restated 2026-10-07), not under the acceptance of 2026-11-02; they have no row in
 PD-LOSAT-DATABASE-SEARCH; and the first is a refusal until a port lands, which the Owner decided on
@@ -1467,14 +1477,14 @@ PD-LOSAT-DATABASE-SEARCH; and the first is a refusal until a port lands, which t
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- psiblast and tblastn `-in_pssm` (version 1.42, line RG item D3-1, Owner-delegated, standing
+- psiblast and tblastn `-in_pssm` (version 1.43, line RG item D3-1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): well-formed BitMagic data of a Seq-table of the
   PSSM query's annotations that NCBI's object manager decodes (`bit-bvector` values, a
   `bit-set-bvector`'s sparse index). NCBI's decode is deterministic; LOSAT refuses it ("a PSSM
   query whose annot has ... is not supported") until that port lands: the Owner decided on 2026-11-16 (「推奨通り」, Q-BM) to
   port BitMagic in a later item. Streams that NCBI reads past or crashes on are rule-3
   rejections (above).
-- psiblast and tblastn `-in_pssm` with `-subject` (version 1.42, line RG item D3-1,
+- psiblast and tblastn `-in_pssm` with `-subject` (version 1.43, line RG item D3-1,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): a Seq-id twice in the
   PSSM query's entry whose `duplicate Bioseq id` message may spell a subject record's Seq-id (NCBI
   reads the subjects into its scope first, so the handle's spelling can be the subject's: a

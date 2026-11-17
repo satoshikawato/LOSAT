@@ -961,22 +961,25 @@ fn prints_report_sums(outfmt: i32) -> bool {
     (0..=4).contains(&outfmt)
 }
 
-/// [`check_report_sums`] for each report format of `outfmts` (`-outfmt` values), with the
-/// database's report made by `shown` once, only where a format prints its sums.
-pub(crate) fn check_formats_report_sums<'f>(
+/// [`check_report_sums`] for each report format of `formats` (its `-outfmt` value and its
+/// refusal), with the database's report made by `shown` once, only where a format prints its
+/// sums: each format's refusal goes to that format's `FormatRefusal::check`, which fails the call
+/// (the command line's format) or that format alone, as a program's other checks of a format
+/// before its rows.
+pub(crate) fn check_formats_report_sums<'f, 'r>(
     shown: impl FnOnce() -> PairwiseDatabase,
-    outfmts: impl IntoIterator<Item = &'f str>,
+    formats: impl IntoIterator<Item = (&'f str, &'r mut crate::api::local_blast::FormatRefusal)>,
     program: &str,
 ) -> Result<()> {
     let mut shown = Some(shown);
     let mut made = None;
-    for outfmt in outfmts {
+    for (outfmt, refusal) in formats {
         let number = crate::blastinput::app::parse_formatting_string(outfmt)?.number;
-        if !prints_report_sums(number) {
+        if !prints_report_sums(number) || refusal.refused() {
             continue;
         }
         let database = made.get_or_insert_with(|| (shown.take().expect("made once"))());
-        check_report_sums(database, number, program)?;
+        refusal.check(check_report_sums(database, number, program))?;
     }
     Ok(())
 }
@@ -2056,8 +2059,14 @@ impl<'a> HeaderReader<'a> {
     /// What NCBI's lookup of the Seq-align id of the sequence `ordinal`, `subject`, finds in the
     /// database where that is not the sequence (`ParsedSubject::found_instead`): NCBI's
     /// formatters look it up in the search's own database, list included
-    /// (`SeqidLookup::seqid_to_oids`), and its scope can show another sequence that holds an id it
-    /// takes for the Seq-align id (`defline_set::scope_keys`) where both are reported. Another
+    /// (`SeqidLookup::seqid_to_oid`, which returns at the first OID found), and its scope can show
+    /// another sequence that holds an id it takes for the Seq-align id (`defline_set::scope_keys`)
+    /// where both are reported, which LOSAT lists by every OID of the lookup
+    /// (`SeqidLookup::seqid_to_oids` with `multi`) and the keys in another letter case: where its
+    /// list fails on a file that NCBI's lookup does not read (an ISAM of a volume after the first
+    /// one that holds the id: a version 4 string ISAM that does not open; in version 5 the pages
+    /// of the other keys), the other holders are unknown (`FoundInstead::HoldersUnknown`, with
+    /// the sequence the lookup gives where it is another one). Another
     /// sequence that holds the same definition lines and letters is shown as the subject itself
     /// (the same record in two volumes or two databases of an alias), one that differs only in
     /// their taxids as the subject but by the reports that write taxids
@@ -2111,9 +2120,9 @@ impl<'a> HeaderReader<'a> {
             },
         };
         let id = subject.alignment_id();
-        let oids = match lookup.seqid_to_oids(id, true) {
+        let first = match lookup.seqid_to_oid(id) {
             Ok(_) if giim => return (None, None, None),
-            Ok(oids) => oids,
+            Ok(first) => first,
             Err(error) => {
                 return match lookup.throws_on_id(id) {
                     Some(message) => (Some(FoundInstead::ThrowsOnId(message)), None, None),
@@ -2122,7 +2131,6 @@ impl<'a> HeaderReader<'a> {
             }
         };
         let own = self.db.oid(ordinal).get();
-        let first = oids.first().copied();
         // What the lookup gives instead, where the scan of the other holders goes on.
         let mut given = first.is_none().then_some(FoundInstead::Nothing);
         // The first other sequence found that only the reports of taxids show apart, and the
@@ -2159,22 +2167,56 @@ impl<'a> HeaderReader<'a> {
                 None => {}
             }
         }
+        // Where LOSAT's lists of the other holders below fail on a file that NCBI's lookup did not
+        // read, the other holders are unknown, and what the lookup gives is kept.
+        let instead = match &given {
+            Some(FoundInstead::Sequence(other)) => Some(*other),
+            _ => None,
+        };
+        let unknown = |why: String, error: SeqDbError| {
+            (
+                Some(FoundInstead::HoldersUnknown {
+                    instead,
+                    why: format!(
+                        "{why} ({})",
+                        error.ncbi_message().unwrap_or_else(|| error.to_string())
+                    ),
+                }),
+                None,
+                None,
+            )
+        };
+        // Every holder: the lookup goes on to the ISAMs of the volumes after the first one that
+        // holds the id, which NCBI's never opens (review 3 of line DBID loadord, H3: a version 4
+        // string ISAM that does not open).
+        let oids = match lookup.seqid_to_oids(id, true) {
+            Ok(oids) => oids,
+            Err(error) => {
+                return unknown(
+                    "the other sequences that hold it, as a file of a volume after the first one that holds it, which NCBI BLAST+'s lookup does not read, fails".to_owned(),
+                    error,
+                )
+            }
+        };
+        // LOSAT's own searches of the keys in another letter case (version 5: the upper-case key
+        // of an id without a text accession, the other keys of a name or a `pir` or `prf` id):
+        // where one fails, NCBI's exact lookup, which read the files before, still succeeds, so the
+        // holders are unknown (review 1 of line DBID pircase, L1; review 1 of line DBID v4late, L2).
         let folded = match lookup.case_folded_oids(id) {
             Ok(oids) => oids,
-            Err(error) => return failed(error),
+            Err(error) => {
+                return unknown(
+                    "the sequences that hold it in another letter case".to_owned(),
+                    error,
+                )
+            }
         };
-        // LOSAT's own search of the keys in another letter case (version 5, a name or a `pir` or
-        // `prf` id): where it fails, NCBI's exact lookup may still succeed, so the holders are
-        // unknown (review 1 of line DBID pircase, L1).
         let variants = match lookup.case_variant_oids(id) {
             Ok(oids) => oids,
             Err(error) => {
-                return (
-                    Some(FoundInstead::CaseUnknown(
-                        error.ncbi_message().unwrap_or_else(|| error.to_string()),
-                    )),
-                    None,
-                    None,
+                return unknown(
+                    "the sequences that hold it in another letter case".to_owned(),
+                    error,
                 )
             }
         };
@@ -3951,6 +3993,64 @@ mod tests {
         for outfmt in [0, 13, 15, 6] {
             assert!(!refused(&int64_min, outfmt), "{outfmt}");
         }
+    }
+
+    // The report-sum check of the prolog of outfmt 0 to 4 at open goes through each format's
+    // refusal (`FormatRefusal::check`, line RG T7-W): the command line's format fails the call, a
+    // format of LOSAT Web's that fails alone is refused and the others stay; the database's
+    // report is made once, only where a format prints its sums.
+    #[test]
+    fn the_report_sums_of_each_format_go_to_its_refusal() {
+        use crate::api::local_blast::FormatRefusal;
+        let info = |total_letters: i64| DatabaseInfo {
+            definition: b"t".to_vec(),
+            date: String::new(),
+            num_sequences: 23,
+            total_letters,
+            filt_algorithm_name: String::new(),
+            filt_algorithm_options: String::new(),
+        };
+        let made = std::cell::Cell::new(0);
+        let overflow = || {
+            made.set(made.get() + 1);
+            PairwiseDatabase::new(vec![
+                info(5_000_000_000_000_000_000),
+                info(5_000_000_000_000_000_000),
+            ])
+        };
+        let mut call = FormatRefusal::FailsCall;
+        let error = check_formats_report_sums(overflow, [("0", &mut call)], "BLASTN").unwrap_err();
+        assert!(error.is::<ReportSumRefusal>());
+        let (mut pairwise, mut tabular, mut query_anchored) = (
+            FormatRefusal::FailsAlone,
+            FormatRefusal::FailsCall,
+            FormatRefusal::FailsAlone,
+        );
+        check_formats_report_sums(
+            overflow,
+            [
+                ("0", &mut pairwise),
+                ("6", &mut tabular),
+                ("3", &mut query_anchored),
+            ],
+            "BLASTN",
+        )
+        .unwrap();
+        assert!(pairwise.refused() && query_anchored.refused());
+        assert!(matches!(tabular, FormatRefusal::FailsCall));
+        assert!(pairwise
+            .take_refused()
+            .is_some_and(|error| error.is::<ReportSumRefusal>()));
+        assert_eq!(made.get(), 2);
+        let mut alone = FormatRefusal::FailsAlone;
+        check_formats_report_sums(overflow, [("6", &mut alone), ("5", &mut call)], "BLASTN")
+            .unwrap();
+        assert!(!alone.refused());
+        assert_eq!(
+            made.get(),
+            2,
+            "no format printing the prolog's sums: not made"
+        );
     }
     use crate::utils::matrix::BLASTAA_SIZE;
 
@@ -6624,10 +6724,7 @@ fn stop_lookup_unsure(
             continue;
         }
         let given = match subject.parsed {
-            Some(parsed) => lookup
-                .seqid_to_oids(parsed.alignment_id(), true)
-                .ok()
-                .and_then(|oids| oids.first().copied()),
+            Some(parsed) => lookup.seqid_to_oid(parsed.alignment_id()).ok().flatten(),
             None => Some(db.oid(subject.ordinal).get()),
         };
         if let Some(oid) = given.filter(|&oid| holds(oid)) {
@@ -6685,13 +6782,14 @@ fn stop_lookup_unsure(
     //         return -1;
     //     }
     // ```
-    // (`SeqidToOid`, quoted at `SeqidLookup::seqid_to_oid`, gives the first OID of the lookup.)
+    // (`SeqidToOid`, quoted at `SeqidLookup::seqid_to_oid`, gives the first OID of the lookup,
+    // which every lookup of NCBI's loads here is.)
     // A sequence of a call before whose reports LOSAT has no record of: its own Seq-align id's
     // lookup does not fail (a load of it by that id may be made).
     let own_lookup_ok = |oid: u32| {
         ids_of(db.ordinal_of(oid)).is_none_or(|set| {
             set.alignment_id()
-                .is_none_or(|id| lookup.seqid_to_oids(id, true).is_ok())
+                .is_none_or(|id| lookup.seqid_to_oid(id).is_ok())
         })
     };
     // A load of the recorded sequence `oid` by its own Seq-align id loads `oid` itself: the
@@ -6702,8 +6800,8 @@ fn stop_lookup_unsure(
         ids_of(db.ordinal_of(oid)).is_none_or(|set| {
             set.alignment_id().is_none_or(|id| {
                 lookup
-                    .seqid_to_oids(id, true)
-                    .is_ok_and(|oids| oids.first() == Some(&oid))
+                    .seqid_to_oid(id)
+                    .is_ok_and(|first| first == Some(oid))
             })
         })
     };
@@ -6740,10 +6838,7 @@ fn stop_lookup_unsure(
                     continue;
                 };
                 for id in set.deflines.iter().flat_map(|defline| &defline.ids) {
-                    let first = lookup
-                        .seqid_to_oids(id, true)
-                        .ok()
-                        .and_then(|oids| oids.first().copied());
+                    let first = lookup.seqid_to_oid(id).ok().flatten();
                     if let Some(oid) = first.filter(|&oid| holder(oid)) {
                         give(oid, &|| registered(oid));
                     }
@@ -7140,10 +7235,18 @@ pub(crate) fn prefetch_reads(
     program: &str,
 ) -> Result<std::result::Result<Option<u32>, String>> {
     use crate::report::db_subject::Prefetched;
-    let (other, or_itself, reason) = match subject.prefetched() {
+    let (other, or_itself, or_none, reason) = match subject.prefetched() {
         Prefetched::Itself => return Ok(Ok(Some(ordinal))),
         Prefetched::Nothing => return Ok(Ok(None)),
         Prefetched::Failed(reason) => return Ok(Err(reason)),
+        // The subject's own blob, or none where another holder's Bioseq read before stands for it
+        // (review 1 of line DBID v4late, H2).
+        Prefetched::ItselfOrNothing { reason } => {
+            if texts && lookup_texts_differ(db, &[&subject.volume_taxids(), &[]]) {
+                return Ok(Err(reason));
+            }
+            return Ok(Ok(Some(ordinal)));
+        }
         Prefetched::Another {
             other: None,
             reason,
@@ -7152,8 +7255,9 @@ pub(crate) fn prefetch_reads(
         Prefetched::Another {
             other: Some(other),
             or_itself,
+            or_none,
             reason,
-        } => (other, or_itself, reason),
+        } => (other, or_itself, or_none, reason),
     };
     let other = other.ordinal();
     let set = db
@@ -7185,7 +7289,7 @@ pub(crate) fn prefetch_reads(
     }
     match read {
         // Another holder's Bioseq that the scope read before stands for it without a load.
-        Some(_) if subject.other_holder().is_some() => {
+        Some(_) if or_none => {
             if lookup_texts_differ(db, &[&other_taxids, &[]]) {
                 return Ok(Err(reason));
             }
@@ -7283,6 +7387,18 @@ fn prefetch_gets_no_bioseq(
             "has the Seq-align id {}, by which NCBI BLAST+'s scope gets no sequence unless it read database sequence {holder}, which also holds that id, before: NCBI BLAST+ 2.17.0's prefetch of a minus-strand alignment then writes Error pre-fetching sequence data or not, as its reads decide",
             id()
         ))),
+        // Another holder that LOSAT cannot list (review 1 of line DBID v4late, L1).
+        None if read.blob.is_none()
+            && matches!(
+                subject.found(),
+                Some(crate::report::db_subject::FoundInstead::HoldersUnknown { .. })
+            ) =>
+        {
+            Ok(Err(format!(
+                "has the Seq-align id {}, by which NCBI BLAST+'s scope gets no sequence unless it read before another sequence that holds that id, which LOSAT cannot list: NCBI BLAST+ 2.17.0's prefetch of a minus-strand alignment then writes Error pre-fetching sequence data or not, as its reads decide",
+                id()
+            )))
+        }
         _ => Ok(Ok(!read.bioseq)),
     }
 }
@@ -7438,7 +7554,13 @@ pub(crate) fn scope_bioseq(
         instead,
     };
     match subject.found() {
-        Some(FoundInstead::Sequence(other)) => {
+        Some(
+            FoundInstead::Sequence(other)
+            | FoundInstead::HoldersUnknown {
+                instead: Some(other),
+                ..
+            },
+        ) => {
             let set = db
                 .defline_set(other.ordinal())
                 .map_err(|error| database_error(error, program))?;
@@ -7450,7 +7572,7 @@ pub(crate) fn scope_bioseq(
         None
         | Some(
             FoundInstead::AlsoHeld(_)
-            | FoundInstead::CaseUnknown(_)
+            | FoundInstead::HoldersUnknown { instead: None, .. }
             | FoundInstead::OtherTaxids(_)
             | FoundInstead::CopyApart(..),
         ) => Ok(ScopeBioseq {
@@ -7923,6 +8045,146 @@ mod taxdb_prepass_tests {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1447-1455 (quoted
+    // at `SeqidLookup::seqid_to_oids`): without `multi`, `if (! multi) return;` at the first OID.
+    /// Line DBID v4late (review 3 of line DBID loadord, H3): in a list of version 4 volumes whose
+    /// later volume's string ISAM index does not open (mode 000), NCBI's lookup of an id that an
+    /// earlier volume holds returns there (NCBI BLAST+ 2.17.0: exit status 0, probe
+    /// `blastdb-ids-20261021/R/v4late`), where LOSAT's list of every holder fails: the other
+    /// holders are unknown, with what the lookup gives (the subject, the same record, another one).
+    /// An id that only the later volume can hold, or any id where that volume comes first, opens
+    /// it: NCBI's stop. What the prefetch reads (review 1 of the item, H1 and H2): what the lookup
+    /// gives, whose definition line `GetBioseq` may reject (NCBI then stops), or nothing where a
+    /// holder that LOSAT cannot list was read before: with a taxonomy database, the same texts of
+    /// both, or LOSAT's refusal.
+    #[cfg(unix)]
+    #[test]
+    fn a_later_volume_whose_isam_does_not_open_leaves_the_other_holders_unknown() {
+        use crate::report::db_subject::FoundInstead;
+        use std::os::unix::fs::PermissionsExt;
+        // Made empty: a file of mode 000 left by a run before cannot be copied over.
+        let cwd = empty_cwd("v4late");
+        std::fs::remove_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+        let source = root().join("db_search/multidb");
+        // `l5a`: a copy of l5e, whose name sorts before l5c's (the volumes of a list are in the order
+        // of their names, as NCBI's).
+        for (stem, from) in [
+            ("l5c", "l5c"),
+            ("l5e", "l5e"),
+            ("l5a", "l5e"),
+            ("l5b", "l5b"),
+            ("l6o", "l6o"),
+            ("l6u", "l6u"),
+        ] {
+            for ext in ["phr", "pin", "pog", "psd", "psi", "psq"] {
+                let to = cwd.join(format!("{stem}.{ext}"));
+                std::fs::copy(source.join(format!("{from}.{ext}")), &to).unwrap();
+                if ext == "psi" && !matches!(stem, "l5b" | "l5c") {
+                    std::fs::set_permissions(&to, std::fs::Permissions::from_mode(0o000)).unwrap();
+                }
+            }
+        }
+        if std::fs::File::open(cwd.join("l5e.psi")).is_ok() {
+            // A user that reads every file (root): nothing fails to open.
+            std::fs::remove_dir_all(&cwd).unwrap();
+            return;
+        }
+        let unknown = "for which LOSAT cannot list the other sequences that hold it, as a file of a volume after the first one that holds it, which NCBI BLAST+'s lookup does not read, fails (Error: Could not open input file (";
+        let open = |list: &str, taxdb: Option<&str>| {
+            let names = list
+                .split(' ')
+                .map(|stem| cwd.join(stem).to_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
+            let search =
+                SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
+            SeqDb::open_in(&names, SeqType::Protein, &search).unwrap()
+        };
+        let subject_of = |db: &SeqDb, ordinal: u32| {
+            let headers = HeaderReader::new(db);
+            match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                ReportedHeader::Parsed(subject) => subject,
+                _ => panic!("{ordinal}: a sequence with parsed Seq-ids"),
+            }
+        };
+        for (list, ordinal, instead, stops) in [
+            // The subject's own record first, then the same record, then another one.
+            ("l5c l5e", 0, None, false),
+            ("l5c l5e", 1, None, false),
+            ("l5c l6o", 1, Some(0), false),
+            // `ref|NP_000004.1|`, which l5c does not hold, and l5c's id behind l5a.
+            ("l5c l6u", 1, None, true),
+            ("l5c l5a", 1, None, true),
+        ] {
+            let db = open(list, None);
+            let subject = subject_of(&db, ordinal);
+            if stops {
+                assert!(
+                    subject.prefetch_stops().is_some_and(
+                        |message| message.starts_with("Error: Could not open input file (")
+                    ),
+                    "{list} {ordinal}: {:?}",
+                    subject.found()
+                );
+                continue;
+            }
+            assert!(subject.prefetch_stops().is_none(), "{list} {ordinal}");
+            match subject.found() {
+                Some(FoundInstead::HoldersUnknown { instead: got, .. }) => assert_eq!(
+                    got.map(|other| other.ordinal()),
+                    instead,
+                    "{list} {ordinal}"
+                ),
+                got => panic!("{list} {ordinal}: {got:?}"),
+            }
+            let refusal = subject.fetched(false, false).unwrap_err();
+            assert!(refusal.contains(unknown), "{list} {ordinal}: {refusal}");
+            assert_eq!(
+                refusal.contains("lookup gives database sequence 0 first"),
+                instead.is_some(),
+                "{list} {ordinal}: {refusal}"
+            );
+            assert!(subject.pssm_read(false).is_err(), "{list} {ordinal}");
+        }
+        // l5b, which the lookup of l5e's `ref|NP_000002.1|` gives first, holds it after
+        // `ref|NP_000999.1|` in one definition line: NCBI's prefetch reads it and stops.
+        let db = open("l5b l5e", None);
+        let subject = subject_of(&db, 1);
+        assert!(matches!(
+            subject.found(),
+            Some(FoundInstead::HoldersUnknown { instead: Some(other), .. }) if other.ordinal() == 0
+        ));
+        let thrown = prefetch_reads(&db, 1, &subject, false, "BLASTP")
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            thrown.contains("oid headers do not contain target gi/seq_id"),
+            "{thrown}"
+        );
+        // The subject's own blob (taxid 9606) or nothing: the same texts with a whole taxonomy
+        // database, other texts with one of a wrong magic number (its texts of opening).
+        for (taxdb, refused) in [("good", false), ("bad_magic", true)] {
+            let db = open("l5c l5e", Some(taxdb));
+            for ordinal in [0, 1] {
+                match prefetch_reads(&db, ordinal, &subject_of(&db, ordinal), true, "BLASTP")
+                    .unwrap()
+                {
+                    Ok(blob) => {
+                        assert!(!refused, "{taxdb} {ordinal}");
+                        assert_eq!(blob, Some(ordinal), "{taxdb} {ordinal}");
+                    }
+                    Err(reason) => {
+                        assert!(refused, "{taxdb} {ordinal}: {reason}");
+                        assert!(reason.contains(unknown), "{taxdb} {ordinal}: {reason}");
+                    }
+                }
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();

@@ -5751,6 +5751,23 @@ fn search_query_batch<S: TbxScore>(
             &stage_args,
             &mut x_lap,
         );
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
+        // ```c
+        //       if (kTranslateSubject)
+        //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+        //       if (kNucleotideSubject) {
+        //          delete_hsp =
+        //              Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+        //                 subject_start, word_params, sbp, kTranslateSubject);
+        // ```
+        // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
+        // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`).
+        if !prelinked_ungapped_hits.is_empty()
+            && crate::core::blast_hits::target_translation_never_made(s_len)
+        {
+            subject_emit.refuse_untranslated_frame(st, s_idx);
+            return;
+        }
 
         // A subject with ambiguous bases gets the frames of its letters here, after its
         // preliminary frames were freed, when HSPs are left for the re-evaluation (none are read

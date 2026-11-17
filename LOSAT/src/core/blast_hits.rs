@@ -3,7 +3,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 //!
 //! The filters of `s_FilterBlastResults` that every program shares (`-max_hsps`,
-//! `-qcov_hsp_perc`), and `Blast_HSPTest` (NCBI's `Int4` counts, widened to `i64`).
+//! `-qcov_hsp_perc`), `Blast_HSPTest` (NCBI's `Int4` counts, widened to `i64`), and the frames
+//! that `Blast_HSPGetTargetTranslation` never translates, with their refusal (TBLASTN, TBLASTX).
 
 /// Whether an HSP fails NCBI's percent identity or minimal hit length test (`Blast_HSPTest`,
 /// `s_HSPTest`: the HSP is deleted), for every program. The counts are NCBI's `Int4`s widened to
@@ -176,6 +177,42 @@ pub fn trim_by_max_hsps<T>(hsps: &mut Vec<T>, max_hsps: usize) {
     hsps.truncate(max_hsps);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
+// c++/src/algo/blast/core/blast_hits.c:1161-1163,1233-1234
+// ```c
+//       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
+// ...
+//     /* skip translation if full translation has already been done */
+//     if (target_t->partial && (start ||
+//         (stop < target_t->subject_blk->length / CODON_LENGTH -3)))
+// ...
+//     /* +1 as the first byte is a sentinel. */
+//     return target_t->translations[context] - target_t->range[2*context] + 1;
+// ```
+/// Whether NCBI's `Blast_HSPGetTargetTranslation` never translates a frame of a subject of
+/// `subject_length` bases (the searched range, `-subject_loc`: NCBI's `subject_blk->length`): its
+/// test is false at the first call (`start` and `stop` 0) for fewer than 12 bases and stays so,
+/// and it returns the translation it never made (`calloc`'d to NULL) plus 1, from which every
+/// caller reads next. TBLASTN's traceback reads (`tblastn::search_gapped::TargetTranslation`) and
+/// TBLASTX's ungapped re-evaluation (`blast_hits.c:2700-2705`) refuse there
+/// (`x_untranslated_frame_refusal`).
+#[inline]
+pub(crate) fn target_translation_never_made(subject_length: usize) -> bool {
+    subject_length / 3 <= 3
+}
+
+/// The refusal of `program`'s `step` (the NCBI step that reads the translation) of an alignment
+/// on a subject whose frames NCBI never translates (`target_translation_never_made`): NCBI BLAST+
+/// 2.17.0 reads from address 1 on (NULL + 1) and dies with SIGSEGV (PD-LOSAT-NCBI-DEFECTS 1.46 for
+/// TBLASTN, 1.49 for TBLASTX, rule 3).
+#[cold]
+#[inline(never)]
+pub(crate) fn x_untranslated_frame_refusal(program: &str, step: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{program}: {step} of an alignment on a subject (or its -subject_loc range) of fewer than 12 bases, where NCBI BLAST+ reads the translation of the subject's frame, which it never makes for a subject this short, and crashes; LOSAT does not support it"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +294,26 @@ mod tests {
         assert!(hsp_test(long - 1, long, 100.0, 0));
         assert!(!hsp_test(0, long, 0.0, long));
         assert!(hsp_test(0, long - 1, 0.0, long));
+    }
+
+    /// NCBI's test `stop < length/3 - 3` with `stop` 0 (an `Int4` division, negative below 9
+    /// bases) holds from 12 bases on.
+    #[test]
+    fn a_target_translation_is_never_made_below_12_bases() {
+        for length in 0..60usize {
+            let ncbi_translates = 0 < length as i32 / 3 - 3;
+            assert_eq!(
+                target_translation_never_made(length),
+                !ncbi_translates,
+                "{length}"
+            );
+        }
+        assert!(target_translation_never_made(11));
+        assert!(!target_translation_never_made(12));
+        assert_eq!(
+            x_untranslated_frame_refusal("TBLASTX", "the ungapped re-evaluation").to_string(),
+            "TBLASTX: the ungapped re-evaluation of an alignment on a subject (or its -subject_loc range) of fewer than 12 bases, where NCBI BLAST+ reads the translation of the subject's frame, which it never makes for a subject this short, and crashes; LOSAT does not support it"
+        );
     }
 
     #[test]

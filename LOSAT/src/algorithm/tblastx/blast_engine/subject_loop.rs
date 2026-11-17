@@ -206,6 +206,60 @@ impl SubjectEmit<'_> {
                 .push(s_idx, hits);
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2659-2662,2674-2677,2700
+    // ```c
+    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    // ...
+    //    if (kTranslateSubject) {
+    // ...
+    //       BlastTargetTranslationNew(subject_blk, gen_code_string, program,
+    //                    score_params->options->is_ooframe, &target_t);
+    // ...
+    //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+    // ```
+    // NCBI's re-evaluation of a subject's HSPs fetches the subject first: one that the negative
+    // seqid list excludes there loses its HSPs and is not read (`FetchExcluded`; a header the
+    // fetch cannot read is its refusal, as in `emit`); a failed read does not stop it (its
+    // `status` is still 0). Then it reads the translation of the first HSP's frame, which it
+    // never makes for a subject (its `-subject_loc` range) of fewer than 12 bases
+    // (`core::blast_hits::target_translation_never_made`): NULL + 1, from which
+    // `Blast_HSPReevaluateWithAmbiguitiesUngapped` reads the HSP's letters (blast_hits.c:692-700),
+    // and NCBI BLAST+ 2.17.0 dies with SIGSEGV. Every HSP that reaches LOSAT's re-evaluation has a
+    // length of 1 or more (those of length 0 or less, which read nothing in NCBI's, are dropped
+    // after the first linking call, `subject_link::link_subject_hits_int4`), so NCBI dies at the
+    // first HSP of every such list. The query batch fails with LOSAT's refusal
+    // (PD-LOSAT-NCBI-DEFECTS 1.49, rule 3) after the reports of the batches before
+    // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).
+    /// The end of subject `s_idx`, whose HSPs reach the re-evaluation on a subject of fewer than
+    /// 12 bases: refused unless the re-evaluation's fetch excludes it, then emitted without HSPs.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn refuse_untranslated_frame<S>(&self, st: &mut WorkerState<S>, s_idx: usize) {
+        st.hits.clear();
+        let excluded = match (self.fetch_excluded, u32::try_from(s_idx)) {
+            (Some(excluded), Ok(ordinal)) => {
+                excluded.excludes(ordinal).map_err(|error| (ordinal, error))
+            }
+            _ => Ok(false),
+        };
+        match excluded {
+            Ok(true) => {}
+            Ok(false) => self.x_read_failure.fail(
+                s_idx,
+                anyhow::Error::new(super::ErrorAfterBatchReports(
+                    crate::core::blast_hits::x_untranslated_frame_refusal(
+                        "TBLASTX",
+                        "the ungapped re-evaluation",
+                    ),
+                )),
+            ),
+            Err(read) => self
+                .x_read_failure
+                .fail(s_idx, FetchExcluded::refusal(read, "TBLASTX")),
+        }
+        self.emit(st, s_idx);
+    }
 }
 
 /// What `run_subject_loop` reads.

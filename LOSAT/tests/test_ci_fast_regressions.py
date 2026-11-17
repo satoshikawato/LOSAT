@@ -63,6 +63,21 @@ class SamClRuleTests(unittest.TestCase):
             changed = self.WITH.replace(old, new)
             self.assertNotEqual(db_fixtures.strip_sam_cl(changed), self.WITHOUT, (old, new))
 
+    def test_a_freeze_keeps_a_frozen_sam_file_that_differs_in_the_command_line_only(self):
+        # A freeze with another NCBI build (another argv[0] in CL) must leave the frozen file and its cells
+        # unchanged, so the release's set E (freeze into a clean checkout, then `git status`) stays clean.
+        other_build = self.WITH.replace(b"/x/blastn -a ", b"/opt/ncbi/bin/blastn -a ")
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(db_fixtures, "FROZEN", Path(tmp)):
+            (Path(tmp) / "r.17.out").write_bytes(self.WITH)
+            sam = {"row_id": "r.17", "outfmt": "17 SQ"}
+            self.assertEqual(db_fixtures.frozen_stdout(sam, other_build), self.WITH)
+            changed = other_build.replace(b"r\t0", b"r\t1")
+            self.assertEqual(db_fixtures.frozen_stdout(sam, changed), changed)
+            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "new.17", "outfmt": "17"}, other_build),
+                             other_build)
+            (Path(tmp) / "t.6.out").write_bytes(self.WITH)
+            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "t.6", "outfmt": "6"}, other_build), other_build)
+
     def test_the_rule_applies_to_outfmt_17_only(self):
         for outfmt in ("17", "17 SQ", " 17 SR ", "17 SQ SR"):
             self.assertTrue(db_fixtures.is_sam_outfmt(outfmt), outfmt)

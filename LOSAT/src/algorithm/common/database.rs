@@ -857,8 +857,8 @@ pub(crate) fn pairwise_database_masked(
 // probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3): LOSAT refuses these (DECISIONS D1a3-2 of
 // line RG: Q2 = A, rule 3). The serial XML writer's `-n` of INT64_MIN is signed overflow too (it
 // writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT writes the digits of a summed length of
-// exactly -2^63 (`big_int`; PD-LOSAT-NCBI-DEFECTS approved exception 16, the Owner's Q1 = A of
-// 2026-11-17, DECISIONS OQ-1117 of line RG).
+// exactly -2^63 (`big_int`; PD-LOSAT-NCBI-DEFECTS approved exception 16 (Int8 -2^63 written as
+// digits), the Owner's Q1 = A of 2026-11-17, DECISIONS OQ-1117 of line RG).
 /// What LOSAT refuses of the database counts that the report of `outfmt` (NCBI's format number)
 /// would print where NCBI's arithmetic overflows (`num_sequences` is the `PairwiseDatabase` sum
 /// over the names of the `-db` list, `total_letters_overflow` whether its lengths' sum passes
@@ -3113,11 +3113,15 @@ impl ParsedShown {
 /// does not write as NCBI (`check_shown_parsed_subject`), a tabular id that it does not
 /// write as NCBI (`ParsedSubject::tabular_ids`), and where only the prefetch reads the subject
 /// (`shown.prefetched`), what it cannot read as NCBI does (`check_prefetched_parsed`). `db` is
-/// the subject's database.
+/// the subject's database; `load`, what the reports do at the subject's `Hit`
+/// (`report::db_subject::HitLoads`, the one answer: its `Hit` throws, or no report loads it,
+/// `ParsedSubject::fetched`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_reported_parsed(
     db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
     shown: ParsedShown,
+    load: crate::report::db_subject::HitLoad,
     protein: bool,
     taxdb_found: bool,
     ordinal: u32,
@@ -3125,7 +3129,7 @@ pub(crate) fn check_reported_parsed(
 ) -> Result<()> {
     if shown.reads_bioseq() {
         subject
-            .fetched(shown.taxonomy, shown.one_by_one)
+            .fetched(shown.taxonomy, shown.one_by_one, load)
             .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {
         check_prefetched_parsed(db, subject, ordinal, program)?;
@@ -3399,10 +3403,12 @@ pub(crate) fn reports_may_refuse(
                 }
             }
             Ok(ReportedHeader::Parsed(subject)) => {
+                // Before the search no `Hit` is known: every subject is taken as loaded.
                 check_reported_parsed(
                     db,
                     &subject,
                     shown,
+                    crate::report::db_subject::HitLoad::Loaded,
                     protein,
                     shown.pairwise && taxdb_found,
                     ordinal,
@@ -3939,7 +3945,7 @@ mod tests {
 
     // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
     // wrapped sums and `-0`): the report counts LOSAT refuses, by format (not -2^63, whose digits
-    // it writes: approved exception 16); the prolog's (outfmt 0 to
+    // it writes: approved exception 16, Int8 -2^63 written as digits); the prolog's (outfmt 0 to
     // 4) at open (`check_report_sums`), the documents' when they are written (`report_sum_refusal`,
     // after NCBI's own errors of the search: p5_pr_sum2#6).
     #[test]
@@ -3993,7 +3999,7 @@ mod tests {
         // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
         assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
         // A length of exactly -2^63 is written as its digits (PD-LOSAT-NCBI-DEFECTS approved
-        // exception 16: NCBI's XML writer prints -0).
+        // exception 16, Int8 -2^63 written as digits: NCBI's XML writer prints -0).
         let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
         for outfmt in [0, 5, 6, 13, 14, 15, 16] {
             assert!(!refused(&int64_min, outfmt), "{outfmt}");
@@ -8285,7 +8291,10 @@ mod taxdb_prepass_tests {
             else {
                 panic!("{name}: a sequence with parsed Seq-ids");
             };
-            match (subject.fetched(false, true), want) {
+            match (
+                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
@@ -8388,7 +8397,9 @@ mod taxdb_prepass_tests {
                 ),
                 got => panic!("{list} {ordinal}: {got:?}"),
             }
-            let refusal = subject.fetched(false, false).unwrap_err();
+            let refusal = subject
+                .fetched(false, false, crate::report::db_subject::HitLoad::Loaded)
+                .unwrap_err();
             assert!(refusal.contains(unknown), "{list} {ordinal}: {refusal}");
             assert_eq!(
                 refusal.contains("lookup gives database sequence 0 first"),
@@ -8519,7 +8530,10 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             for (taxonomy, want) in [(false, &without), (true, &with)] {
-                match (subject.fetched(taxonomy, true), want) {
+                match (
+                    subject.fetched(taxonomy, true, crate::report::db_subject::HitLoad::Loaded),
+                    want,
+                ) {
                     (Ok(()), None) => {}
                     (Err(error), Some(text)) => {
                         assert!(error.contains(text.as_str()), "{name} {ordinal}: {error}")
@@ -8600,7 +8614,10 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             assert!(!subject.unfetchable(), "{name} {ordinal}");
-            match (subject.fetched(false, true), want) {
+            match (
+                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => {
                     assert!(error.contains(&text), "{name} {ordinal}: {error}")
@@ -10284,8 +10301,16 @@ mod taxdb_prepass_tests {
                     panic!("{name} {ordinal}: no parsed Seq-ids");
                 };
                 // A batch whose prefetch is on loads the subject by its own id.
-                assert!(subject.fetched(false, false).is_ok(), "{name} {ordinal}");
-                match (subject.fetched(false, true), want.filter(|_| prefetch_off)) {
+                assert!(
+                    subject
+                        .fetched(false, false, crate::report::db_subject::HitLoad::Loaded)
+                        .is_ok(),
+                    "{name} {ordinal}"
+                );
+                match (
+                    subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                    want.filter(|_| prefetch_off),
+                ) {
                     (Ok(()), None) => {}
                     (Err(error), Some(Some(other))) => assert!(
                         error.contains(&format!("match an id of database sequence {other} weakly")),
@@ -10331,10 +10356,17 @@ mod taxdb_prepass_tests {
             match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
                 (ReportedHeader::Stored(_), Ok(true)) => {}
                 (ReportedHeader::Parsed(subject), Ok(false)) => {
-                    assert!(subject.fetched(false, true).is_ok(), "{name} {ordinal}")
+                    assert!(
+                        subject
+                            .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                            .is_ok(),
+                        "{name} {ordinal}"
+                    )
                 }
                 (ReportedHeader::Parsed(subject), Err(id)) => {
-                    let error = subject.fetched(false, true).unwrap_err();
+                    let error = subject
+                        .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                        .unwrap_err();
                     assert!(
                         error.contains(&format!("the Seq-align id {id},")),
                         "{name} {ordinal}: {error}"

@@ -87,7 +87,16 @@
   faults for certain (a record of an empty `taxdb.btd`, which NCBI maps as a null pointer) and
   where a report writes a name whose bytes come from past the mapping, and wrote the others as NCBI
   writes them where it completes, which lines DBID and RG item T5 refused at every lookup
-  (approved exception 14 of PD-LOSAT-NCBI-DEFECTS, which the Owner decided on 2026-11-15))
+  (approved exception 14 of PD-LOSAT-NCBI-DEFECTS, which the Owner decided on 2026-11-15); on
+  2026-11-17 line DBID item v4late looked a Seq-align id up in a version 4 search's ISAM files in
+  the volumes' order up to the first one that holds it, never a later one, as NCBI's lookup
+  returns there, where LOSAT stopped with NCBI's `Error: Could not open input file` at a later
+  volume's ISAM file that does not open, and line DBID item pfoff wrote outfmt 13 to 16 where a
+  batch's prefetch is off and a query's report reaches a `Hit` whose Seq-align id's lookup throws
+  (`DB contains no accession info.`, a version 5 database without the accession table in the
+  search's list) as NCBI writes them, with the taxonomy database's texts at the loads that NCBI
+  makes (none of the throwing `Hit` or of the `Hit`s after it in that report; a later `Hit` or a
+  later batch's prefetch makes them), in every program, which version 1.3 refused)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -250,7 +259,8 @@ where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases
 `Int8` (outfmt 0 to 5 and 13 to 16) and their numbers of sequences summed past `int` (outfmt 5).
 A summed length of exactly 2^63 (NCBI's Int8 -2^63), which NCBI's serial writer prints as `-0` in
 BLAST XML and XML2 (outfmt 5, 14, 16), the strategy and the archive, is written as
-`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 16, the Owner's answer Q1 = A of
+`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits,
+the Owner's answer Q1 = A of
 2026-11-17 to D1a-3's question, DECISIONS OQ-1117 of line RG; refused before). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
 (the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
@@ -291,7 +301,8 @@ profile that they leave out among the profiles the reports show (those of the fi
 `-max_target_seqs` subjects of a query's hit list, following profiles of one Seq-id counting as one
 subject, as NCBI's formatter counts them) is written as the included copy of its record that holds
 its Seq-id where there is one (NCBI's lookup by Seq-id finds it; fix round 2), and is refused where
-NCBI's report does not find it (`Unknown`, or a null pointer exception: PD-LOSAT-NCBI-DEFECTS 1.47)
+NCBI's report does not find it (`Unknown`, or a null pointer exception: the D1a-4 entry of
+PD-LOSAT-NCBI-DEFECTS)
 or finds another record, RPSBLAST before any output and RPSTBLASTN after the reports of
 the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
 HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
@@ -299,7 +310,8 @@ plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's ro
 diagonal table, bounds the ungapped extensions to the right and ends the gapped stage's interval
 tree, below the profiles, above them or negative, as in NCBI (blast_engine.c:1129-1149; part B); at
 the rows plus 1 the extensions read the row after the profiles as NCBI does (the zeros of the
-`.rps` file's last memory page: DECISIONS D1a4-9). Refused (PD-LOSAT-NCBI-DEFECTS 1.47, rule 3): a
+`.rps` file's last memory page: DECISIONS D1a4-9). Refused (the D1a-4 entry of PD-LOSAT-NCBI-DEFECTS,
+rule 3): a
 sum `LENGTH` plus `NSEQ` above 2,147,483,647 (NCBI frees the profiles twice and aborts), an `Lc` whose
 diagonal table passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), both
 where NCBI's engine meets them (the unit's search of the first query batch NCBI searches: an empty
@@ -313,7 +325,8 @@ where a query is searched: SIGFPE; a run without a valid query is reported as NC
 round 3, review C MF1; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
 first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
 `STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
-`-9223372036854775808` (approved exception 16; with one query batch NCBI's only request holds no
+`-9223372036854775808` (approved exception 16, Int8 -2^63 written as digits; with one query batch
+NCBI's only request holds no
 `DbLength`: fix round 1, review A MF4; refused until fix round 2). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
@@ -1010,7 +1023,7 @@ a result that LOSAT does not reproduce.
 | A Seq-align id that another sequence also holds, in any letter case, where the lookup finds the sequence itself (or the same record) first: `lcl|555` and `gb|X.1|` with `lcl|555` in a second definition line, `lcl|abc` and `lcl|ABC`, `bbs|123` in two databases of an alias, `pir||PIRNAME` and `pir||pirname`, `prf||PRFNAME` and `prf||prfname` or the names alone `gb||locusy` and `gb||LOCUSY` in two databases (version 5 keys these in their own letter case; LOSAT looks up the other keys of their letters and keeps the sequences that hold an id of the same handle: not `gb||locusy` and `emb||LOCUSY`, nor `sp||NAMEY` and `tr||namey`). Not the same record in two volumes or databases (with other tax ids: the row below) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | Where both are reported (also for different queries), its scope, which reads them in the order of its prefetch and compares ids without case, can write the other sequence's names, in every program but BLASTN also its identities; for `pdb|1ABC|A` and `pdb|1abc|A` in two databases it stops (exit 2) | 2, 3 |
 | A Seq-align id for which LOSAT cannot list the other sequences that hold it, where NCBI's lookup does not read what fails: in version 4 an ISAM file of a volume after the first one that holds the id in the search's list that does not open (a regular file of mode 000; NCBI's lookup returns at the first volume that holds the id and never opens the later ones, since line DBID item v4late: LOSAT stopped there with NCBI's `Error: Could not open input file` before), in version 5 a page of the other keys of its letters (the row above) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below); where only the prefetch reads it, the formats whose taxonomy database's texts differ between the sequence that the lookup gives and none (another holder's Bioseq that its scope read before stands for it without a load) | Goes on (exit 0) with the names and letters that its lookup or its scope gives, as in the two rows above, or stops where the sequence the lookup gives is another one whose definition lines `GetBioseq` rejects for the id (`oid headers do not contain target gi/seq_id`); an id that only such a volume can hold, or any id where it comes first in the order of the volumes' names, opens it and stops (exit 2, `BLAST Database error: Error: Could not open input file`), which LOSAT writes where it knows what the batch's prefetch writes before the stop | 2 |
 | The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In the formats that show a title made from the tax ids (outfmt 0 for an empty title whose tax id the taxonomy database names or a protein title ending in `]` where a definition line has no title; the tabular formats where a printed id is the first word of the title that replaces an `lcl|Subject_N` id, for a nucleotide or a protein title ending in `]`), and in every format where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; for such a title the formats named; for the texts 0, 5, 6, 7, 10, 13 to 17, 20, and 8, 9, 12 with `PRE_FETCH_SEQS_LIMIT=2147483647` | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
-| A Seq-align id whose lookup fails (an LMDB file without the accession table where the batch's prefetch is off, or in a batch whose prefetch loads other sequences that write texts of the taxonomy database or throw on their ids, above; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0 to 7, 10, 13 to 18, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255); with the prefetch off writes `Unknown` for it, then outfmt 0 to 4, 13, 14 and 17 stop (exit 2), outfmt 6 crashes (exit 255), the JSON and XML2 documents 15 and 16 end with a trace (exit 0), and 5, 7, 10 and 18 go on (exit 0) | 3 |
+| A Seq-align id whose lookup fails (an LMDB file without the accession table where the batch's prefetch is off, or in a batch whose prefetch loads other sequences that write texts of the taxonomy database or throw on their ids, above; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0 to 7, 10, 17, 18, 20; 13 to 16 where the batch's prefetch is on, for the text tag, or where the run writes another format too | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255); with the prefetch off writes `Unknown` for it, then outfmt 0 to 4 and 17 stop (exit 2), outfmt 6 crashes (exit 255), and 5, 7, 10 and 18 go on (exit 0). Outfmt 13 to 16 with the prefetch off, which LOSAT writes as NCBI does since line DBID item pfoff, in BLASTP, BLASTN, BLASTX, TBLASTN and TBLASTX: the query's report throws at that `Hit` (`DB contains no accession info.`) and loads nothing of it or of the `Hit`s after it, so the taxonomy database's texts are those of the loads before it, and a text that NCBI writes once (opening the taxonomy database, a volume's first lookup of a tax id) comes at the next load that NCBI makes, a later query's `Hit` or a later batch's prefetch (and its stop); 15 and 16 post `Error: [<program>] ` with the exception, leave the query's report out and go on (exit 0), 13 and 14 leave the query's file empty and stop with `BLAST Database error` (exit 2) | 3 |
 | Following hits of a query whose Seq-align ids `Match` but that are not copies of one record: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj` | 0, 5, 13 to 16; tabular `qcovs` and `qcovus` | Shows them as one hit; writes the coverage of both on the first row and `N/A` on the other | 2 |
 | In `psiblast`, two sequences whose Seq-align ids differ but that NCBI's Seq-id handles can take for one, where NCBI compares them: one with an alignment below `-inclusion_ethresh` and one of the previous round's inclusion set (convergence); two such, where the round makes a PSSM (`-save_pssm_after_last_round` with `-out_pssm` or `-out_ascii_pssm`, a round that makes the next round's PSSM); in outfmt 0, a reported sequence and one of the previous round's set (LOSAT checks every reported sequence, a superset of the `-num_descriptions` first that NCBI's two-part table looks up). Such ids: ids that differ only in letter case (`gb|ABC1.1|` and `gb|abc1.1|`), one accession under `gb`, `emb` and `dbj` (`gb|ABC1.1|` and `emb|ABC1.1|`, one handle where the accession packs), and ids that LOSAT does not tell apart as the handles do (an integer tag and the same digits as a string, a patent's number and application number, PDB ids that differ only in their release or the case of the molecule's first letter). Also a `giim` id (`gim|123`) with an alignment below `-inclusion_ethresh` where the round makes a PSSM | every format | Takes them for one sequence in its inclusion sets (convergence, the two-part description table) and counts them as one row of the PSSM's multiple alignment (`CSeq_id_Handle`); never takes a `giim` id for one handle with an equal id (its tree's search for an equal id is inverted), so it counts each of its alignments as a row and cannot read its letters | 2 |
 | In `psiblast` where the run makes a PSSM, two copies of one record with another hit between them in the hit list before the cut, both with an alignment below `-inclusion_ethresh` | every format | Counts one row for the copies (`x_CountAndSelectQualifyingAlignments`) but moves to a new row at each (`x_ExtractAlignmentData`) and writes past the last row: it crashes (SIGSEGV, exit 139) | 3 |

@@ -292,7 +292,8 @@ fn blastn_parameters_and_the_statistics_without_a_valid_context() {
     assert!(text.contains("<Statistics_db-num>3</Statistics_db-num>\n      <Statistics_db-len>10000000000</Statistics_db-len>\n      <Statistics_hsp-len>0</Statistics_hsp-len>\n      <Statistics_eff-space>0</Statistics_eff-space>\n      <Statistics_kappa>-1</Statistics_kappa>\n      <Statistics_lambda>-1</Statistics_lambda>\n      <Statistics_entropy>-1</Statistics_entropy>"));
 }
 
-// PD-LOSAT-NCBI-DEFECTS approved exception 16 (review C of line RG D1a-4, SF1): a summed
+// PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits (review C of line RG
+// D1a-4, SF1): a summed
 // `LENGTH` of exactly -2^63 (an alias file's `LENGTH` 2^63), which NCBI's serial XML writes as
 // `-0` (probe q13 of review C), is written as its digits.
 #[test]

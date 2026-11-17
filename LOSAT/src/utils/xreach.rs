@@ -168,10 +168,7 @@ pub fn write_report() {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());
-    #[cfg(not(target_os = "wasi"))]
-    let pid = std::process::id();
-    #[cfg(target_os = "wasi")]
-    let pid = 0;
+    let pid = crate::utils::process_id::process_id();
     let path = directory.join(format!("reach-{pid}-{nanos}.tsv"));
     let written = std::fs::create_dir_all(directory).and_then(|()| std::fs::write(&path, text));
     if let Err(error) = written {

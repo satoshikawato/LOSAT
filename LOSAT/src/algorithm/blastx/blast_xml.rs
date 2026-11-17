@@ -77,7 +77,7 @@ use crate::common::GapEditOp;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
-use crate::report::blast_xml::subjects::SubjectNames;
+use crate::report::blast_xml::subjects::{HitNames, SubjectNames};
 use crate::report::blast_xml::CaughtException;
 use crate::report::blast_xml::{
     filter, hit_ranges, written_queries, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp,
@@ -1285,7 +1285,14 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     writer.write_all(&buf)?;
     buf.clear();
     let mut texts: Vec<QueryText> = Vec::new();
-    let mut subject_cache: HashMap<usize, SubjectNames> = HashMap::new();
+    let mut subject_cache: HashMap<usize, HitNames> = HashMap::new();
+    // What the reports do at the `Hit` of each subject (`HitLoads`, the one answer of the batch:
+    // a subject whose `Hit` throws, one that no report loads); a subject set's are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = match shown {
+        ShownSubjects::Database { reported, .. } => reported.loads(),
+        ShownSubjects::Fasta { .. } => &every_loaded,
+    };
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             if texts.len() == reports {
@@ -1303,7 +1310,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 if let std::collections::hash_map::Entry::Vacant(slot) =
                     subject_cache.entry(list.oid)
                 {
-                    slot.insert(subject_names(shown, &subjects[list.oid], list.oid)?);
+                    // A subject whose lookup throws where its `Hit` loads it keeps the
+                    // exception for the `Hit`; one that no report loads gets no names
+                    // (`HitNames::of`).
+                    slot.insert(HitNames::of(loads, list.oid, || {
+                        subject_names(shown, &subjects[list.oid], list.oid)
+                    })?);
                 }
             }
         }
@@ -1391,7 +1403,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     let first = lists[range.start].oid;
                     let names = subject_cache
                         .get(&first)
-                        .context("names of a subject with hits")?;
+                        .context("names of a subject with hits")?
+                        .names()?;
                     let hit = XmlHit::of(names, i32::try_from(subjects[first].placement().length)?);
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every

@@ -735,7 +735,8 @@ pub fn write_archive<A: AlignSource>(
     let encoding = handle.encoding();
     // A big integer of -2^63 (`-dbsize`), which NCBI's ASN.1 text and XML writers print as `-0` (a
     // signed overflow of `COStreamBuffer::PutInt8`), is written as its digits: PD-LOSAT-NCBI-DEFECTS
-    // approved exception 16 (the Owner's Q1 = A of 2026-11-17, `big_int`).
+    // approved exception 16, Int8 -2^63 written as digits (the Owner's Q1 = A of 2026-11-17,
+    // `big_int`).
     let messages = handle.take_messages();
     let params = handle.options().database_params();
     let as_is = request_written_as_is(encoding, request, &batch.request, &sets, &params);

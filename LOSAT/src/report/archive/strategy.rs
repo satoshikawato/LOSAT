@@ -435,7 +435,7 @@ impl StrategyExport {
                 let sets = shared.options.request_sets(&state.carry);
                 // A big integer of -2^63 (RPS-BLAST's `DbLength` that a batch before set,
                 // `-dbsize`), which NCBI writes as `-0`, is written as its digits
-                // (PD-LOSAT-NCBI-DEFECTS approved exception 16).
+                // (PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits).
                 // A sink that cannot be cut gets the request where the run reaches its batch.
                 let mut held = Vec::new();
                 let mut counted = Counted {
@@ -913,8 +913,8 @@ mod tests {
         assert!(!docs[0].contains("ident"));
     }
 
-    /// PD-LOSAT-NCBI-DEFECTS approved exception 16 (review C of line RG D1a-4, SF1): a big
-    /// integer of -2^63 in a request, which NCBI writes as `big-integer -0` (probes q1-q12 of
+    /// PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits (review C of
+    /// line RG D1a-4, SF1): a big integer of -2^63 in a request, which NCBI writes as `big-integer -0` (probes q1-q12 of
     /// review C), is written as its digits: BLASTP's `-dbsize` in every request, RPS-BLAST's
     /// `DbLength` (`x_AdjustDbSize`, `rps_search::volumes::search_sets`) in the requests after the
     /// first.

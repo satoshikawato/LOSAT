@@ -437,8 +437,8 @@ impl RpsUnits {
     /// requests after the first hold it (the first is written before the first batch's set-up);
     /// a `D` of exactly -2^63 (an alias file's `LENGTH` or `STATS_TOTLEN` of 2^63), which NCBI's
     /// serial writer prints as `-0` (a signed overflow), is written as its digits
-    /// (PD-LOSAT-NCBI-DEFECTS approved exception 16: the Owner's answer to D1a-3's Q1, A, of
-    /// 2026-11-17, DECISIONS OQ-1117 of line RG).
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits: the Owner's
+    /// answer to D1a-3's Q1, A, of 2026-11-17, DECISIONS OQ-1117 of line RG).
     pub(crate) fn strategy_db_length(&self) -> Option<i64> {
         self.adjusted.map(|(length, _)| length)
     }
@@ -672,8 +672,9 @@ pub(crate) fn search_sets(
 /// each query's list (the hit list size, `PruneSeqalign` with `m_HitlistSize`, which counts
 /// following profiles of one Seq-align id as one subject: `formatter_kept`; outfmt 0's
 /// descriptions and alignments are within it), after outfmt 7 has counted the HSPs of the whole
-/// list. A profile left out among them is LOSAT's refusal of the batch (PD-LOSAT-NCBI-DEFECTS
-/// 1.47, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of line RG), one
+/// list. A profile left out among them is LOSAT's refusal of the batch (the D1a-4 entry of
+/// PD-LOSAT-NCBI-DEFECTS, the classes of 1.10 and 1.37: reported sequences; DECISIONS D1a4-4 of
+/// line RG), one
 /// text for `rpsblast` and `rpstblastn` (`program`). A profile left out past the cut (several
 /// volumes, whose merged lists are longer than the hit list size) leaves its list: nothing reads
 /// it again but its header, which NCBI's Seq-aligns read by OID (a header file that fails there
@@ -1487,7 +1488,7 @@ mod tests {
 
     /// The strategy's `DbLength`: `D` of any sign where `x_AdjustDbSize` runs, -2^63 too, which the
     /// requests write as its digits where NCBI writes `-0` (PD-LOSAT-NCBI-DEFECTS approved
-    /// exception 16; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
+    /// exception 16, Int8 -2^63 written as digits; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
     /// the request's bytes: `report::archive::strategy`'s test
     /// `a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits`).
     #[test]

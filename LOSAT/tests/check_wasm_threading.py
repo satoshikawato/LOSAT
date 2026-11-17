@@ -6,6 +6,7 @@ import json
 import os
 import platform
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -179,6 +180,38 @@ def main():
                 assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(row_id, "-db raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:448-453
+    # ```c++
+    #         /*** Get the query sequence(s) or PSSM (these two options are mutually
+    #          * exclusive) ***/
+    #         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
+    #         CRef<CBlastInput> input;
+    #
+    #         if (pssm.Empty()) {  // FASTA input
+    # ```
+    # psiblast through each WASI command, at -num_threads 1: every psiblast row of the frozen NCBI
+    # -subject fixtures (outfmt0_manifest.tsv, 95 rows), compared by the checker of the native gates
+    # (docs/evidence/losat_web_e2a/check_losat.py: stdout, stderr, the PSSM files), which runs a
+    # wrapper that starts the command's runner in the place of the binary. Its PSSM queries (-in_pssm)
+    # open no query input, as NCBI reads none (WASI cannot copy the standard input's descriptor), and
+    # its ASN.1 PSSM files are staged under a name without a process id, which WASI does not have
+    # (LOSAT/src/utils/process_id.rs). The -db rows (db_search_manifest/psiblast*.tsv) are not run
+    # here: in 14 of them the ASN.1 PSSM's informationContent differs in its last printed digit, the
+    # bytes of NCBI BLAST+ 2.17.0 with glibc's FMA variant of log() off, which the frozen bytes had on.
+    for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+        wrapper = out / "psiblast-fixtures" / kind / "losat"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(str(x)) for x in prefixes[kind]) + ' "$@"\n')
+        wrapper.chmod(0o755)
+        label = f"psiblast-fixtures/{kind}/outfmt0"
+        try:
+            execute(label, [sys.executable, ROOT / "docs/evidence/losat_web_e2a/check_losat.py", "--losat", wrapper,
+                            "--programs", "psiblast", "--threads", "1"], timeout=3600)
+        except AssertionError:
+            lines = (out / label / "stdout").read_text(errors="replace").splitlines()
+            print("\n".join(line for line in lines if "\tDIFF\t" in line or line.startswith("# ")), flush=True)
+            raise
+        print(label, (out / label / "stdout").read_text().splitlines()[-1], flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

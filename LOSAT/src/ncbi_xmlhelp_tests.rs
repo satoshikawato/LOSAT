@@ -117,8 +117,8 @@ fn the_xml_keeps_the_arguments_that_the_parser_reads() {
 #[test]
 fn run_refusals_name_the_argument_and_the_program() {
     assert_eq!(
-        run_refusal("BLASTP", "use_sw_tback"),
-        "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP"
+        run_refusal("PSIBLAST", "use_sw_tback"),
+        "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's PSIBLAST"
     );
     assert_eq!(
         run_refusal("TBLASTN", "ungapped"),

@@ -209,7 +209,14 @@ impl RedoParamsBuilder<'_> {
             //                          localScalingFactor);
             // ```
             score_divisor: local_scaling_factor,
-            smith_waterman: false,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
+            // ```c
+            //     Boolean smithWaterman =
+            //         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
+            // ```
+            // `-use_sw_tback` (item X4): the one-thread loop redoes each match with NCBI's
+            // Smith-Waterman redo (`one_thread_redo`).
+            smith_waterman: args.use_sw_tback,
             near_identical_cutoff: blastp_redo_near_identical_cutoff(scaled_gapped_lambda),
             position_based: false,
             ccat_query_length: contexts[q_idx].aa_len as i32,
@@ -369,6 +376,10 @@ pub(super) enum RedoPath {
 /// NCBI chooses only the number of threads of its one loop (`actual_num_threads`); it has no
 /// counterpart of the choice among LOSAT's paths, each of which gives the output of the one loop.
 ///
+/// With `-use_sw_tback` (item X4) the one-thread loop runs: the Smith-Waterman redo of a match
+/// asks the query's heap before its first alignment (`BlastCompo_HeapWouldInsert`), so a match's
+/// redo reads the heap that the matches before it in the loop's order leave.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3079-3082
 /// ```c
 ///     int actual_num_threads = 1;
@@ -431,6 +442,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         // The query-parallel redo below relies on a heap that no match has reached not being
         // filled to its cutoff (hitlist_size >= 1); otherwise the one-thread loop is used.
         kappa_parallel_query_indices.len() > 1
+            && !args.use_sw_tback
             && !BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh)
                 .filled_to_cutoff()
             && blastp_should_parallelize_stage(
@@ -458,7 +470,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         // #pragma omp for schedule(static)
         // for (b = 0; b < numMatches; ++b) {
         // ```
-        if use_parallel_kappa_redo || kappa_parallel_query_indices.len() != 1 {
+        if use_parallel_kappa_redo || kappa_parallel_query_indices.len() != 1 || args.use_sw_tback {
             None
         } else {
             let q_idx = kappa_parallel_query_indices[0];
@@ -514,6 +526,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let x_redo_par_on = x_redo_par_switch
+        && !args.use_sw_tback
         && blastp_should_parallelize_stage(
             "kappa-redo-par",
             args.num_threads,
@@ -1201,6 +1214,67 @@ where
     Ok(())
 }
 
+/// LOSAT's refusal of a query batch whose Smith-Waterman redo fails in NCBI
+/// (`kappa::smith_waterman::SwRedoFailed`): at the batch's last redone match, or at any match
+/// where NCBI's redo may run on several threads (`sw_ncbi_threads`). NCBI's redo keeps the status
+/// of each thread's last match (`status_code_tld`); a failure stops the other threads
+/// (`interrupt`), and a status other than 0 fails the batch's traceback ("BLAST engine error:
+/// Traceback failed", exit status 3), which LOSAT does not write yet.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3756-3759,3774-3778
+/// ```c
+///                 if ((actual_num_threads > 1) &&
+///                 	(*pStatusCode != 0 || !seqSrc)) {
+/// #pragma omp critical(intrpt)
+///                     interrupt = TRUE;
+/// ...
+///     for (i = 0; i < actual_num_threads; ++i) {
+///         if (status_code_tld[i] != 0) {
+///             status_code = status_code_tld[i];
+///         }
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
+/// ```c++
+///     if (status) {
+///         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");
+/// ```
+fn sw_traceback_failed() -> anyhow::Error {
+    anyhow::anyhow!(
+        "a query batch whose Smith-Waterman redo (-use_sw_tback) fails in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold and the alignment of the first query letter with the subject's first letter scores 0 or less) at its last redone match, or at any match with -db and -num_threads above 1, with which NCBI's traceback fails (\"BLAST engine error: Traceback failed\"), is not supported by LOSAT's BLASTP yet"
+    )
+}
+
+/// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
+/// (`kappa::smith_waterman::SwRedoEndless`; RPS-BLAST's refusal, PD-LOSAT-NCBI-DEFECTS 1.30).
+fn sw_endless() -> anyhow::Error {
+    anyhow::anyhow!(
+        "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
+    )
+}
+
+/// LOSAT's refusal of a match of the Smith-Waterman redo that NCBI may split among threads
+/// (`sw_ncbi_threads`) when its query's heap is full (`-max_target_seqs` redone matches): NCBI's
+/// threads take contiguous parts of the batch's matches (`schedule(static)`), each with its own
+/// heaps (`redoneMatches_tld`), which the redo of a match asks before its first alignment
+/// (`BlastCompo_HeapWouldInsert`) and the early termination reads. While the query's heap is not
+/// full, every heap of a thread holds fewer matches and both answers are those of one thread; once
+/// it is full they depend on NCBI's split, which follows its thread count (`-num_threads`, reduced
+/// to the machine's CPUs) and its OpenMP runtime.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3449,3496
+/// ```c
+/// #pragma omp for schedule(static)
+///         for (b = 0; b < numMatches; ++b) {
+/// ...
+///                 redoneMatches        = redoneMatches_tld[tid];
+/// ```
+fn sw_thread_heaps() -> anyhow::Error {
+    anyhow::anyhow!(
+        "a match of the Smith-Waterman redo (-use_sw_tback) with -db and -num_threads above 1 whose query already has -max_target_seqs redone matches, where NCBI BLAST+ 2.17.0's result depends on how its threads split the matches (each thread asks its own hit lists), is not supported by LOSAT's BLASTP yet"
+    )
+}
+
 /// The one-thread loop: the queries redone in order on the calling thread, each query's matches
 /// in stream order, each query's compact list expanded when the loop reaches it and its preliminary
 /// list freed after its redo (counted in `x_prelim_freed`). It is the only path of a build without
@@ -1294,9 +1368,21 @@ where
     let x_block_seg_store = x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
     let mut kappa_subject_range_cache =
         BlastpKappaSubjectRangeCache::new(x_block_seg_store.clone());
+    // `-use_sw_tback` (item X4): the Smith-Waterman redo's memory, and whether the last match
+    // that the redo of the query batch has reached failed (NCBI's `status_code_tld`).
+    let mut sw_scratch = args
+        .use_sw_tback
+        .then(kappa::smith_waterman::SwMatchScratch::new);
+    let mut sw_last_failed = false;
+    // NCBI's redo may run on several threads (`sw_thread_heaps`): `-subject` makes NCBI's thread
+    // count 1 (blast_args.cpp:3223-3235), `-db` keeps `-num_threads`.
+    let sw_ncbi_threads = args.use_sw_tback && args.db.is_some() && args.num_threads > 1;
 
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
+        if batch.start == q_idx {
+            sw_last_failed = false;
+        }
         let redo_align_params = build_redo_align_params(q_idx)?;
 
         let ctx = &contexts[q_idx];
@@ -1307,6 +1393,9 @@ where
             preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
+            if sw_last_failed && q_idx + 1 == batch.end {
+                return Err(sw_traceback_failed());
+            }
             continue;
         };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
@@ -1374,6 +1463,9 @@ where
             if kappa_preliminary_hits.is_empty() {
                 continue;
             }
+            if sw_ncbi_threads && redone_matches[q_idx].n >= redone_matches[q_idx].heap_threshold {
+                return Err(sw_thread_heaps());
+            }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
             // ```c
@@ -1420,21 +1512,71 @@ where
             // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
             let subject = subjects.read(s_idx)?;
             let subject_raw = subject.residues();
-            let postprocessed = postprocess_preliminary_hits(
-                &kappa_preliminary_hits,
-                &query_workspace,
-                &mut composition_workspace,
-                query_nomask,
-                subject_raw,
-                args.scoring.matrix,
-                gapped_params,
-                gapped_gumbel.as_ref(),
-                &redo_align_params,
-                args.evalue,
-                &mut kappa_gap_scratch,
-                &mut kappa_subject_range_cache,
-                needs.seqalign,
-            )?;
+            let postprocessed = if let Some(sw_scratch) = sw_scratch.as_mut() {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3640-3643,3730-3733
+                // ```c
+                //                     if (*pStatusCode != 0) {
+                //                         goto match_loop_cleanup;
+                //                     }
+                // ...
+                // match_loop_cleanup:
+                //                 if (seqSrc) {
+                //                     localMatch = Blast_HSPListFree(localMatch);
+                // ```
+                // The Smith-Waterman redo (item X4). A failed redo leaves the match without HSPs
+                // and its status until the next match that the redo reaches; a redo that does not
+                // end in NCBI is refused.
+                let redone_match = &mut redone_matches[q_idx];
+                match kappa::postprocess_preliminary_hits_smith_waterman(
+                    &kappa_preliminary_hits,
+                    &query_workspace,
+                    &mut composition_workspace,
+                    query_nomask,
+                    subject_raw,
+                    args.scoring.matrix,
+                    gapped_params,
+                    gapped_gumbel.as_ref(),
+                    &redo_align_params,
+                    args.evalue,
+                    &mut kappa_gap_scratch,
+                    &mut kappa_subject_range_cache,
+                    needs.seqalign,
+                    sw_scratch,
+                    &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
+                ) {
+                    Ok(postprocessed) => {
+                        sw_last_failed = false;
+                        postprocessed
+                    }
+                    Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
+                        if sw_ncbi_threads {
+                            return Err(sw_traceback_failed());
+                        }
+                        sw_last_failed = true;
+                        continue;
+                    }
+                    Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
+                        return Err(sw_endless());
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                postprocess_preliminary_hits(
+                    &kappa_preliminary_hits,
+                    &query_workspace,
+                    &mut composition_workspace,
+                    query_nomask,
+                    subject_raw,
+                    args.scoring.matrix,
+                    gapped_params,
+                    gapped_gumbel.as_ref(),
+                    &redo_align_params,
+                    args.evalue,
+                    &mut kappa_gap_scratch,
+                    &mut kappa_subject_range_cache,
+                    needs.seqalign,
+                )?
+            };
             let best_score = postprocessed.best_score;
             let best_evalue = postprocessed.best_evalue;
             let Some(hsp_list) = postprocessed.hsp_list else {
@@ -1449,6 +1591,21 @@ where
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
         *x_prelim_freed += 1;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3780
+        // ```c
+        //     for (i = 0; i < actual_num_threads; ++i) {
+        //         if (status_code_tld[i] != 0) {
+        //             status_code = status_code_tld[i];
+        //         }
+        //     }
+        //     for (i = 0; i < actual_num_threads; ++i) {
+        //         if (seqSrc  &&  status_code == 0) {
+        // ```
+        // A failed Smith-Waterman redo of the batch's last match fails NCBI's traceback of the
+        // batch (`Traceback failed`, traceback_stage.cpp:251-252).
+        if sw_last_failed && q_idx + 1 == batch.end {
+            return Err(sw_traceback_failed());
+        }
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as
     // LOSAT_X_BPSEGWIN keeps it for the next window (`x_redo_par.rs` `x_redo`).

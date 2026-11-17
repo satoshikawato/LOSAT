@@ -85,7 +85,7 @@ impl Default for SwRedoScratch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwEndless;
 
-/// `s_EvalueFromScore`.
+/// `s_EvalueFromScore` (also BLASTP's Smith-Waterman redo's, `blastp::kappa::smith_waterman`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:943-947
 /// ```c
@@ -95,7 +95,7 @@ pub(crate) struct SwEndless;
 ///     return searchsp * exp(-(Lambda * score) + logK);
 /// }
 /// ```
-fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
+pub(crate) fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
     searchsp * (-(lambda * f64::from(score)) + log_k).exp()
 }
 

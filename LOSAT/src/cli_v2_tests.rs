@@ -1228,15 +1228,24 @@ fn numeric_values_are_validated_before_io() {
 
 #[test]
 fn flags_and_value_tokens_are_not_reinterpreted() {
-    // NCBI blast_args.cpp:803-806: -use_sw_tback is a flag; LOSAT's BLASTP does not
-    // implement the Smith-Waterman traceback and rejects it where the search starts.
+    // NCBI blast_args.cpp:803-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
+    // Smith-Waterman redo with composition-based statistics (item X4) and rejects it with
+    // `-comp_based_stats 0` where the search starts.
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
+        panic!()
+    };
+    assert!(a.use_sw_tback);
+    crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback", "-comp_based_stats", "0"])
+        .unwrap()
+        .command
+    else {
         panic!()
     };
     assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
         .unwrap_err()
         .to_string()
-        .contains("not supported by LOSAT's BLASTP"));
+        .contains("-use_sw_tback with -comp_based_stats 0"));
     for value in [
         "-use_sw_tback=true",
         "-use_sw_tback=false",

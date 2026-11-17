@@ -2642,12 +2642,37 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         true,
         program,
     )?;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // ```c
-    // const string kArgUseSWTraceback(\"use_sw_tback\");
+    //     } else if (ext_params->options->compositionBasedStats > 0 ||
+    //                ext_params->options->eTbackExt == eSmithWatermanTbck) {
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+    // ```c
+    //     if ((Blast_QueryIsProtein(program) || Blast_QueryIsPssm(program)) &&
+    //         extn_opts->compositionBasedStats != 0) {
+    //         hsp_stream->sort_by_score =
+    //             (SSortByScoreStruct*)calloc(1, sizeof(SSortByScoreStruct));
+    //         hsp_stream->sort_by_score->sort_on_read = sort_on_read;
+    //         hsp_stream->sort_by_score->first_query_index = 0;
+    //     } else {
+    //         hsp_stream->sort_by_score = NULL;
+    //     }
+    // ```
+    // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
+    // statistics 1 to 3 (`kappa::smith_waterman`). With `-comp_based_stats 0` NCBI runs the redo
+    // too, without an adjustment, on the preliminary lists in subject order (the stream is not
+    // sorted by score), which LOSAT's redo loop does not read yet. psiblast's redo of a PSSM keeps
+    // its refusal (the position-based Smith-Waterman redo).
     if args.use_sw_tback {
-        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
+        if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
+            bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
+        }
+        if !args.comp_based_stats.is_enabled() {
+            bail!(
+                "-use_sw_tback with -comp_based_stats 0 (the Smith-Waterman redo without composition-based statistics) is not supported by LOSAT's {program} yet"
+            );
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // ```c

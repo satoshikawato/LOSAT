@@ -200,6 +200,62 @@ pub(super) fn xml_matrix_failure(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653,
+// c++/src/algo/blast/api/blast_seqalign.cpp:181-182,201-204 and
+// c++/src/objects/seq/seq_align_mapper_base.cpp:1142-1151
+// ```c
+//     if (found_end == FALSE) {
+//         gap_align->query_stop = q_start - 1;
+//         gap_align->subject_stop = s_start - 1;
+// ...
+//     int start1 = hsp->query.offset;   // start of alignment on master sequence
+//     int start2 = hsp->subject.offset; // start of alignment on slave sequence
+// ...
+//         case eGapAlignSub:
+//             m_start =
+//                 s_GetAlignmentStart(start1, esp->num[esp_index], m_strand, translate1, length1,
+// ...
+//         if (!dl  &&  !dr) {
+//             // Copy scores if there's no truncation.
+// ...
+//         else {
+//             // Invalidate all scores related to the segment and all
+//             // parent's scores.
+//             x_InvalidateScores(&seg);
+// ```
+/// The refusal of a reported alignment whose traceback started on its frame's NULLB (TBLASTN
+/// `-in_pssm -window_size 0`, a PSSM whose '-' column scores above BLAST_SCORE_MIN): the only one
+/// whose edit script holds more query letters than its range, as NCBI's ends stop one letter
+/// before the start (the right extension did not run) while the left one holds the start's
+/// column, the NULLB. NCBI's Seq-align, made from the start and the edit script, places that
+/// column past the subject's last base: with `-db` the reports take their ends from it and read
+/// the subject past its end (C++ exceptions where the frame's last codon is not the subject's
+/// last), and with `-subject` the remapping onto the subject's location truncates it and drops
+/// every score of the alignment. LOSAT does not reproduce those reports yet (line RG item X2d-2).
+#[cold]
+#[inline(never)]
+fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()> {
+    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
+        for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+            let query_letters: u64 = payload
+                .edit_script
+                .iter()
+                .map(|op| match *op {
+                    GapEditOp::Sub(n) | GapEditOp::Ins(n) => u64::from(n),
+                    GapEditOp::Del(_) => 0,
+                })
+                .sum();
+            let range = i64::from(linked.hsp.q_end) - i64::from(linked.hsp.q_start);
+            if i64::try_from(query_letters)? != range {
+                bail!(
+                    "TBLASTN -in_pssm with -window_size 0: a reported alignment of a one-hit traceback that starts on the NULLB after its frame (the PSSM's '-' column scores it) holds a column of that NULLB, which NCBI BLAST+ reports past the end of the subject; LOSAT does not support it yet"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The ranges of a search as the reports use them: where the searched letters of each
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
 /// reports end with the epilog (a search that stops at a query batch writes none).
@@ -273,6 +329,12 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
+    // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
+    // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
+    // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
+    if pssm.is_some() {
+        x_refuse_a_column_of_the_nullb(hitlists)?;
+    }
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
     // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
     // (`-out` is already created, empty, as NCBI's).
@@ -642,172 +704,179 @@ pub(super) fn render(
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
-        match format_number(format.outfmt) {
-            // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
-            // (`tabular`); never the default 6 and 7 below.
-            6 | 7 | 10 | 18 | 20 if custom_tabular.is_some() => {
-                super::tabular::write_tblastn_tabular(
-                    &super::tabular::TblastnTabular {
-                        spec: custom_tabular.as_ref().expect("a custom tabular report"),
-                        inputs: tabular,
-                        queries: query_records,
-                        letters: subject_letters,
-                        subject_ids: &subject_ids,
-                        subject_records,
-                        shown,
-                        query_batch_skipped,
-                        ranges,
-                        genetic_code,
-                        matrix: scoring.matrix,
-                        program_version: super::tabular::program_version(pssm.is_some()),
-                    },
-                    hitlists,
+        // The format's report, whose error goes to its refusal (below).
+        let written = (|| -> Result<()> {
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+            match format_number(format.outfmt) {
+                // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
+                // (`tabular`); never the default 6 and 7 below.
+                6 | 7 | 10 | 18 | 20 if custom_tabular.is_some() => {
+                    super::tabular::write_tblastn_tabular(
+                        &super::tabular::TblastnTabular {
+                            spec: custom_tabular.as_ref().expect("a custom tabular report"),
+                            inputs: tabular,
+                            queries: query_records,
+                            letters: subject_letters,
+                            subject_ids: &subject_ids,
+                            subject_records,
+                            shown,
+                            query_batch_skipped,
+                            ranges,
+                            genetic_code,
+                            matrix: scoring.matrix,
+                            program_version: super::tabular::program_version(pssm.is_some()),
+                        },
+                        hitlists,
+                        &mut writer,
+                        warnings.as_mut(),
+                        probe.as_mut(),
+                    )?
+                }
+                6 | 7 => write_tabular(
                     &mut writer,
-                    warnings.as_mut(),
-                    probe.as_mut(),
-                )?
-            }
-            6 | 7 => write_tabular(
-                &mut writer,
-                program,
-                format_number(format.outfmt) == 7,
-                query_records,
-                subject_records,
-                subject_letters,
-                &subject_ids,
-                shown,
-                hitlists,
-                query_batch_skipped,
-                ranges,
-                probe.as_mut(),
-                warnings.as_mut(),
-            )?,
-            number @ 0..=4 => write_pairwise(
-                &mut writer,
-                pairwise_hits
-                    .as_deref()
-                    .expect("pairwise hits prepared for TBLASTN outfmt 0 to 4"),
-                query_records,
-                subject_records,
-                subject_letters,
-                shown,
-                subject_set,
-                parameters,
-                ungapped_karlin,
-                query_validity,
-                query_batch_skipped,
-                scoring,
-                matrix_name,
-                report_counts,
-                formatting,
-                ranges,
-                probe.as_mut(),
-                warnings.as_mut(),
-                pssm,
-                crate::report::pairwise::PairwiseView::of(
-                    crate::blastinput::app::ReportFormat::from_number(number)
-                        .expect("a format number 0 to 4"),
-                )
-                .expect("a pairwise view of formats 0 to 4"),
-                anchored.as_ref(),
-            )?,
-            // BLAST XML: one document per run, a header before the first query and a
-            // trailer after the last (`blast_xml`).
-            5 => xml
-                .as_ref()
-                .expect("XML prepared for TBLASTN outfmt 5")
-                .write(
-                    &mut crate::report::blast_xml::BlastXmlWriter::new(0),
-                    &mut writer,
+                    program,
+                    format_number(format.outfmt) == 7,
                     query_records,
+                    subject_records,
                     subject_letters,
+                    &subject_ids,
+                    shown,
                     hitlists,
-                    genetic_code,
-                    seg,
-                    mask_lowercase,
+                    query_batch_skipped,
                     ranges,
+                    probe.as_mut(),
                     warnings.as_mut(),
                 )?,
-            // The XML2 and JSON documents (outfmt 16 and 15, and 14 and 13 as side files next to
-            // `out` with this output as the master file): the same records, written by
-            // `Xml2Writer`.
-            13..=16 => {
-                let kind = xml2_kind(format.outfmt).expect("a checked XML2 or JSON format");
-                let xml = xml
+                number @ 0..=4 => write_pairwise(
+                    &mut writer,
+                    pairwise_hits
+                        .as_deref()
+                        .expect("pairwise hits prepared for TBLASTN outfmt 0 to 4"),
+                    query_records,
+                    subject_records,
+                    subject_letters,
+                    shown,
+                    subject_set,
+                    parameters,
+                    ungapped_karlin,
+                    query_validity,
+                    query_batch_skipped,
+                    scoring,
+                    matrix_name,
+                    report_counts,
+                    formatting,
+                    ranges,
+                    probe.as_mut(),
+                    warnings.as_mut(),
+                    pssm,
+                    crate::report::pairwise::PairwiseView::of(
+                        crate::blastinput::app::ReportFormat::from_number(number)
+                            .expect("a format number 0 to 4"),
+                    )
+                    .expect("a pairwise view of formats 0 to 4"),
+                    anchored.as_ref(),
+                )?,
+                // BLAST XML: one document per run, a header before the first query and a
+                // trailer after the last (`blast_xml`).
+                5 => xml
                     .as_ref()
-                    .expect("XML prepared for TBLASTN outfmt 13 to 16");
-                xml.write(
-                    &mut crate::report::blast_xml2::Xml2Writer::for_run(
-                        kind,
-                        xml.xml2_run(),
-                        out,
-                        side_sink.as_ref(),
-                    ),
+                    .expect("XML prepared for TBLASTN outfmt 5")
+                    .write(
+                        &mut crate::report::blast_xml::BlastXmlWriter::new(0),
+                        &mut writer,
+                        query_records,
+                        subject_letters,
+                        hitlists,
+                        genetic_code,
+                        seg,
+                        mask_lowercase,
+                        ranges,
+                        warnings.as_mut(),
+                    )?,
+                // The XML2 and JSON documents (outfmt 16 and 15, and 14 and 13 as side files next to
+                // `out` with this output as the master file): the same records, written by
+                // `Xml2Writer`.
+                13..=16 => {
+                    let kind = xml2_kind(format.outfmt).expect("a checked XML2 or JSON format");
+                    let xml = xml
+                        .as_ref()
+                        .expect("XML prepared for TBLASTN outfmt 13 to 16");
+                    xml.write(
+                        &mut crate::report::blast_xml2::Xml2Writer::for_run(
+                            kind,
+                            xml.xml2_run(),
+                            out,
+                            side_sink.as_ref(),
+                        ),
+                        &mut writer,
+                        query_records,
+                        subject_letters,
+                        hitlists,
+                        genetic_code,
+                        seg,
+                        mask_lowercase,
+                        ranges,
+                        warnings.as_mut(),
+                    )?;
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+                // ```c++
+                //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+                //         if (results.HasAlignments()) {
+                //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+                //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+                //             if(m_FormatType == CFormattingArgs::eAsnText)
+                //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+                //             else
+                //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+                //         }
+                // ```
+                // (`eAsnBinary` is the same pruning and `MSerial_AsnBinary`,
+                // blast_format.cpp:699-705.) The Seq-annot of each query with alignments.
+                number @ (8 | 9 | 12) => super::seqalign::write_tblastn_seqalign(
+                    match number {
+                        8 => crate::report::serial::SerialFormat::AsnText,
+                        9 => crate::report::serial::SerialFormat::AsnBinary,
+                        _ => crate::report::serial::SerialFormat::Json,
+                    },
                     &mut writer,
                     query_records,
+                    subject_records,
                     subject_letters,
+                    shown,
                     hitlists,
-                    genetic_code,
-                    seg,
-                    mask_lowercase,
                     ranges,
-                    warnings.as_mut(),
-                )?;
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
-            // ```c++
-            //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
-            //         if (results.HasAlignments()) {
-            //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
-            //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
-            //             if(m_FormatType == CFormattingArgs::eAsnText)
-            //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-            //             else
-            //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-            //         }
-            // ```
-            // (`eAsnBinary` is the same pruning and `MSerial_AsnBinary`,
-            // blast_format.cpp:699-705.) The Seq-annot of each query with alignments.
-            number @ (8 | 9 | 12) => super::seqalign::write_tblastn_seqalign(
-                match number {
-                    8 => crate::report::serial::SerialFormat::AsnText,
-                    9 => crate::report::serial::SerialFormat::AsnBinary,
-                    _ => crate::report::serial::SerialFormat::Json,
-                },
-                &mut writer,
-                query_records,
-                subject_records,
-                subject_letters,
-                shown,
-                hitlists,
-                ranges,
-                warnings
-                    .as_mut()
-                    .expect("a Seq-annot writes its posts to the diagnostics"),
-            )?,
-            // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
-            // ```c++
-            //                 if (fmt_args->ArchiveFormatRequested(args)) {
-            //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-            //                     m_Bah.ResetMessages();
-            // ```
-            // One BLAST archive per query batch (`archive`).
-            ARCHIVE_FORMAT => {
-                let render = archive.expect("a BLAST archive request has its handle");
-                super::archive::write_tblastn_archives(
-                    render.handle,
-                    render,
-                    &archive_data(),
                     warnings
                         .as_mut()
-                        .expect("the BLAST archive writes its posts to the diagnostics"),
-                    &mut writer,
-                )?
+                        .expect("a Seq-annot writes its posts to the diagnostics"),
+                )?,
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
+                // ```c++
+                //                 if (fmt_args->ArchiveFormatRequested(args)) {
+                //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+                //                     m_Bah.ResetMessages();
+                // ```
+                // One BLAST archive per query batch (`archive`).
+                ARCHIVE_FORMAT => {
+                    let render = archive.expect("a BLAST archive request has its handle");
+                    super::archive::write_tblastn_archives(
+                        render.handle,
+                        render,
+                        &archive_data(),
+                        warnings
+                            .as_mut()
+                            .expect("the BLAST archive writes its posts to the diagnostics"),
+                        &mut writer,
+                    )?
+                }
+                _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
             }
-            _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
-        }
-        writer.flush()?;
+            writer.flush()?;
+            Ok(())
+        })();
+        // An error of the format's report fails the call, or this format alone (`FormatRefusal`):
+        // the formats after it are written then.
+        format.refusal.check(written)?;
     }
     // The messages that `search` writes after the formats (the stop messages) are the archive's
     // again, whichever format came last (as in blastn and blastp).

@@ -115,13 +115,16 @@ pub(super) fn search_rounds(
             // do the search strategy's request without a database and the PSSM engine's scores
             // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
             // rounds).
+            // The object manager's exception (`PsiSearch::annot_abort`) stops before round 1 too.
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
                 && args.psi_search.as_deref().is_some_and(|psi| {
-                    psi.stop_before_search(
-                        args.strategy.is_some(),
-                        subject_source.database().is_some(),
-                    )
-                    .is_none()
+                    psi.annot.abort.is_none()
+                        && psi
+                            .stop_before_search(
+                                args.strategy.is_some(),
+                                subject_source.database().is_some(),
+                            )
+                            .is_none()
                 });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
@@ -253,8 +256,26 @@ fn run_queries(
     };
     // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
     let mut calls = 0usize;
-    for &(_, query) in &batches.starts {
+    for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
         let records = std::slice::from_ref(&searched_queries[query]);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
+        // (quoted at `seq_range::cut_queries`: a record whose range starts past its end is
+        // dropped from the batch after its reader added it to the scope)
+        // NCBI's scope at each round's prefetch (`BlastpReports::prefetch_scope`), made only where
+        // it stops: the input records that NCBI's reader read for the query's batch (those that
+        // `-query_loc` drops before the query included; each with its `Query_N` of the run,
+        // `FastaRecord::local_id`), which every round of the query keeps; with `-in_pssm` the
+        // PSSM's query (`PsiSearch::query_scope`; a later round's PSSM has no ids of its own).
+        let input_end = batches
+            .starts
+            .get(batch + 1)
+            .map_or(batches.input_done, |&(input, _)| input);
+        let batch_records = &query_records[input_start..input_end];
+        let pssm_query = args.psi_search.as_deref();
+        let prefetch_scope = || match pssm_query {
+            Some(psi) => psi.query_scope(),
+            None => crate::blastinput::query_batch::QueryScope::of_shown_records(batch_records),
+        };
         // The query as round 1 searches it, in every round: with `-query_loc` its range of the
         // record (`placement`; the PSSM is made of the whole record, `next_pssm`, and searched
         // at the range's offsets, `PsiSearch::from_engine`). A psiblast batch holds one searched
@@ -479,7 +500,7 @@ fn run_queries(
                         .query_scopes
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(query)),
-
+                    prefetch_scope: Some(&prefetch_scope),
                     strategy_next: None,
                     call_requests: None,
                     x_plan_blocks: false,
@@ -1141,12 +1162,15 @@ impl SubjectKeys<'_> {
     ) {
         for &s_idx in unread {
             if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                let mut line = Vec::new();
-                line.extend_from_slice(b"Warning: [");
-                line.extend_from_slice(program.as_bytes());
-                line.extend_from_slice(b"] Failed to retrieve sequence ");
-                line.extend_from_slice(&subject.alignment_fasta());
-                line.push(b'\n');
+                let mut text = b"Failed to retrieve sequence ".to_vec();
+                text.extend_from_slice(&subject.alignment_fasta());
+                // A post of NCBI's main thread (`ncbi_exception::post_line`).
+                let line = crate::ncbi_exception::post_line(
+                    crate::ncbi_exception::Severity::Warning,
+                    None,
+                    Some(program),
+                    &text,
+                );
                 out.push(s_idx, line);
             }
         }

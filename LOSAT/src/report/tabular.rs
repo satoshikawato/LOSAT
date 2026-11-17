@@ -1096,10 +1096,16 @@ pub fn failed_database_title(oid: impl std::fmt::Display) -> String {
 
 /// The warning of `x_CheckTaxDB` (`TabularSpec::checks_taxdb`), as NCBI's `ERR_POST` writes it
 /// for `program` (lower case).
+/// The post's header alone after NCBI's main-thread diagnostic stream failed
+/// (`ncbi_exception::post_line`; line RG D3-1 `om/mute/` e09).
 pub fn taxdb_warning_line(program: &str) -> String {
-    format!(
-        "Warning: [{program}] Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz\n"
-    )
+    String::from_utf8(crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        Some(program),
+        b"Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz",
+    ))
+    .expect("ASCII")
 }
 
 /// A query of the report.
@@ -1289,7 +1295,9 @@ pub struct TabularNames {
 impl TabularNames {
     /// The lookups of the rows of the subjects `taxonomies` (in any order, repeats allowed) for
     /// the fields of `spec`, through `taxdb`; `program` names the messages' program. An open or a
-    /// lookup that the reader refuses (`SeqDbError::Unsupported`) is the error.
+    /// lookup that the reader refuses (`SeqDbError::Unsupported`) is the error, and so is a super
+    /// kingdom that a field of `spec` writes and that NCBI reads past its mapping of `taxdb.btd`
+    /// (`TaxNames::super_kingdom`).
     pub fn look_up<'t>(
         spec: &TabularSpec,
         taxdb: &crate::seqdb::taxdb::LazyTaxDb,
@@ -1304,24 +1312,35 @@ impl TabularNames {
             report: None,
         };
         let (plural, singular) = (spec.checks_taxdb(), spec.has_singular_names());
-        let mut asked: Vec<i32> = Vec::new();
+        // Each lookup, and whether a field writes its super kingdom.
+        let (plural_kingdom, singular_kingdom) = (
+            spec.has(SubjectSuperKingdoms),
+            spec.has(SubjectSuperKingdom),
+        );
+        let mut asked: Vec<(i32, bool)> = Vec::new();
         for taxonomy in taxonomies {
             if plural {
-                asked.extend(&taxonomy.taxids);
+                asked.extend(taxonomy.taxids.iter().map(|&taxid| (taxid, plural_kingdom)));
             }
             if singular && taxonomy.taxid != 0 {
-                asked.push(taxonomy.taxid);
+                asked.push((taxonomy.taxid, singular_kingdom));
             }
         }
         if asked.is_empty() {
             return Ok(names);
         }
         names.open = taxdb.open()?;
-        for taxid in asked {
-            if let std::collections::hash_map::Entry::Vacant(entry) = names.answers.entry(taxid) {
-                let mut messages = Vec::new();
-                let found = taxdb.names(taxid, &mut messages)?;
-                entry.insert((found, messages));
+        for (taxid, kingdom) in asked {
+            let (found, _) = match names.answers.entry(taxid) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let mut messages = Vec::new();
+                    let found = taxdb.names(taxid, &mut messages)?;
+                    entry.insert((found, messages))
+                }
+            };
+            if let (true, Some(Err(past))) = (kingdom, found.as_ref().map(|f| &f.super_kingdom)) {
+                return Err(past.error("super kingdom"));
             }
         }
         Ok(names)
@@ -2358,8 +2377,12 @@ impl<'a> RowNames<'a> {
                         if valid_name(&found.blast_name) {
                             names.blasts.push(&found.blast_name);
                         }
-                        if valid_name(&found.super_kingdom) {
-                            names.kingdoms.push(&found.super_kingdom);
+                        // A kingdom past NCBI's mapping of taxdb.btd is not written
+                        // (`TabularNames::look_up` refuses a field that writes it).
+                        if let Ok(kingdom) = found.super_kingdom.as_deref() {
+                            if valid_name(kingdom) {
+                                names.kingdoms.push(kingdom);
+                            }
                         }
                     }
                     None if fillers => {
@@ -2383,8 +2406,10 @@ impl<'a> RowNames<'a> {
                     if valid_name(&found.blast_name) {
                         names.blast = &found.blast_name;
                     }
-                    if valid_name(&found.super_kingdom) {
-                        names.kingdom = &found.super_kingdom;
+                    if let Ok(kingdom) = found.super_kingdom.as_deref() {
+                        if valid_name(kingdom) {
+                            names.kingdom = kingdom;
+                        }
                     }
                 }
                 None if fillers => {
@@ -2880,7 +2905,7 @@ mod tests {
                 scientific_name: sci.into(),
                 common_name: common.into(),
                 blast_name: blast.into(),
-                super_kingdom: kingdom.into(),
+                super_kingdom: Ok(kingdom.into()),
             };
             (taxid, (Some(names), Vec::new()))
         };

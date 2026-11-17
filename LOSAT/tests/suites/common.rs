@@ -36,6 +36,8 @@ mod default_bundle;
 mod entry_names;
 #[path = "../export_search_strategy.rs"]
 mod export_search_strategy;
+#[path = "../function_size_limit.rs"]
+mod function_size_limit;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]
@@ -124,6 +126,8 @@ mod seqalign_samples;
 mod suite_layout;
 #[path = "../tax_report_streams.rs"]
 mod tax_report_streams;
+#[path = "../taxdb_tool_texts.rs"]
+mod taxdb_tool_texts;
 #[path = "../taxonomy_read_order.rs"]
 mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]

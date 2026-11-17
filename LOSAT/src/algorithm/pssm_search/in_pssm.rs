@@ -45,11 +45,15 @@ use anyhow::{bail, Result};
 use super::rows::QueryPssm;
 use super::{PsiSearch, PssmQueryRequest, PssmStats};
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::pssm_text::PssmReadError;
 use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
-use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData};
+use crate::ncbi_exception::NcbiException;
+use crate::report::serial::asn_types::{ReadError, Value};
+use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::ParsedSeqId;
+use crate::utils::format_guess::{Format, FormatGuess, Stop};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-118
 // ```c
@@ -67,184 +71,208 @@ const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 /// (`read_in_pssm`'s range rule), half of `Int4`'s range as NCBI's `MININT`.
 const PSSM_SCORE_SUM_LIMIT: i64 = 1 << 30;
 
-/// What `CFormatGuess::Format` makes of the file, as far as `-in_pssm` reads it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What `-in_pssm` makes of the file: the `switch` on `CFormatGuess().Format(in)` and the first steps of the
+/// reader it picks.
+#[derive(Debug)]
 enum PssmFileFormat {
-    /// `eTextASN`.
-    TextAsn,
-    /// A format that the `switch` sends to "Unsupported format for PSSM".
+    /// `eTextASN`: the text reader reads the stream from `start` (the start of the file, or its end after
+    /// `TestFormatNewick` read a NEXUS file through).
+    TextAsn { start: usize },
+    /// A format that the `switch` sends to "Unsupported format for PSSM" (`eUnknown` and every format but the
+    /// three).
     Unsupported,
-    /// Binary ASN.1 (`eBinaryASN`), XML (`eXml`) or a text that LOSAT does not classify as NCBI
-    /// does: refused (binary and XML PSSMs are item PS9's).
-    NotText,
+    /// `eBinaryASN` whose first tag is not the SEQUENCE `PssmWithParameters`: NCBI's binary reader stops there with a
+    /// `CSerialException`, "Unrecognized format for PSSM" (`ber_first_tag`).
+    Unrecognized,
+    /// `eBinaryASN` whose first tag runs into the end of the file: the reader's `CEofException`, which leaves the
+    /// handler and ends the run without a word (exit status 0).
+    Eof,
+    /// The guess threw (`TestFormatGlimmer3`'s `NStr::StringToInt`): `CATCH_ALL`'s report (exit status 255).
+    Exception(NcbiException),
+    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): a binary ASN.1 PSSM (its first tag
+    /// is a SEQUENCE's; item PS9), an XML PSSM, or a file whose guess reads memory the file does not decide.
+    Refused {
+        what: &'static str,
+        detail: &'static str,
+    },
 }
 
-/// `CFormatGuess::GuessFormat` for the formats a PSSM file can have. The compressed formats
-/// come first in NCBI's order (`sm_CheckOrder`: eBam, eZip, eZstd, eGZip, eBZip2, eLzo), each
-/// tested by its magic bytes; a file starting with `>` is never `eTextASN` (and NCBI's earlier
-/// `eFasta` test takes it); `eTextASN` is `TestFormatTextAsn` on the test buffer. Of the other
-/// files, those with only printing bytes and white space are taken as NCBI's unsupported formats
-/// (they cannot be `eBinaryASN`, whose test is a non-printing byte, nor `eXml`, whose test is a
-/// leading `<?xml`, `<!DOCTYPE` or `<Blast4-request>`); the rest are refused.
-///
-/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1162-1183
-/// ```c++
-///     //
-///     //  Criterion: Presence of any non-printing characters
-///     //
-///     EConfidence conf = eNo;
-///     for (int i = 0;  i < m_iTestDataSize;  ++i) {
-///         if ( !isgraph((unsigned char) m_pTestBuffer[i])  &&
-///              !isspace((unsigned char) m_pTestBuffer[i]) )
-///         {
-///             if (m_pTestBuffer[i] == '\1') {
-///                 conf = eMaybe;
-///             } else {
-///                 return true;
-///             }
-///         }
-///     }
-///     return (conf == eYes);
-/// ```
+/// The refusal of a PSSM file that the binary or the XML reader reads.
+const NOT_TEXT: &str = "a PSSM file that is not ASN.1 text";
+/// The refusal of a guess that reads memory its file does not decide.
+const UNDECIDED_GUESS: &str =
+    "a PSSM file whose format NCBI's format guess decides by reading memory past the file";
+
+/// `CFormatGuess().Format(in)` (`utils::format_guess`, the whole order of `sm_CheckOrder` without hints) and
+/// the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when the formats it
+/// could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); the binary
+/// reader's first tag decides `eBinaryASN` (`ber_first_tag`); `eXml` is refused (the XML reader's first failure
+/// is its file header: `CObjectIStreamXml::ReadFileHeader`, objistrxml.cpp:582-660, with the declaration's
+/// attributes and encodings, comments, `DOCTYPE` and namespace prefixes, not ported).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
-    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:640-652
-    // ```c++
-    //     const streamsize k_TestBufferGranularity = 8096;
-    //     ...
-    //         m_iTestBufferSize = Multiplier * k_TestBufferGranularity;
-    //         m_pTestBuffer = new char[ m_iTestBufferSize ];
-    //         m_Stream.read( m_pTestBuffer, m_iTestBufferSize );
-    //         m_iTestDataSize = m_Stream.gcount();
-    //         if (m_iTestDataSize == 0) {
-    //             ...
-    //             return false; //empty file
-    // ```
-    if bytes.is_empty() {
-        return PssmFileFormat::Unsupported;
-    }
-    // gzip (and BAM, gzip too), zip, zstd, bzip2: NCBI's magic-byte tests.
-    const MAGICS: [&[u8]; 4] = [b"\x1f\x8b", b"PK\x03\x04", b"\x28\xb5\x2f\xfd", b"BZh"];
-    if MAGICS.iter().any(|magic| bytes.starts_with(magic)) {
-        return PssmFileFormat::Unsupported;
-    }
-    let buffer = &bytes[..bytes.len().min(8096)];
-    if text_asn(buffer) {
-        return PssmFileFormat::TextAsn;
-    }
-    let printing = buffer
-        .iter()
-        .all(|&c| c.is_ascii_graphic() || matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'));
-    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1285-1286
-    // ```c++
-    //     string input( m_pTestBuffer, (size_t)m_iTestDataSize );
-    //     NStr::TruncateSpacesInPlace( input, NStr::eTrunc_Begin );
-    // ```
-    // `eTrunc_Begin` drops C's `isspace` bytes, the vertical tab included.
-    let trimmed = crate::ncbi_str::truncate_spaces_begin(buffer);
-    let xml = [b"<?xml".as_slice(), b"<!doctype"].iter().any(|prefix| {
-        trimmed.len() >= prefix.len() && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix)
-    }) || trimmed.starts_with(b"<Blast4-request>");
-    if printing && !xml {
-        PssmFileFormat::Unsupported
-    } else {
-        PssmFileFormat::NotText
+    let guessed = match FormatGuess::over(bytes).guess_format() {
+        Ok(guessed) => guessed,
+        Err(Stop::Exception(exception)) => return PssmFileFormat::Exception(exception),
+        Err(Stop::Undecided(detail)) => {
+            return PssmFileFormat::Refused {
+                what: UNDECIDED_GUESS,
+                detail,
+            }
+        }
+    };
+    match guessed.format {
+        Format::TextAsn | Format::BinaryAsn if guessed.fasta_undecided => PssmFileFormat::Refused {
+            what: UNDECIDED_GUESS,
+            detail: "TestFormatFasta searches for '|' past a buffer of 10 bytes or fewer",
+        },
+        Format::TextAsn => PssmFileFormat::TextAsn {
+            start: guessed.stream_pos,
+        },
+        Format::BinaryAsn => ber_first_tag(&bytes[guessed.stream_pos..]),
+        Format::Xml => PssmFileFormat::Refused {
+            what: NOT_TEXT,
+            detail: "XML",
+        },
+        _ => PssmFileFormat::Unsupported,
     }
 }
 
-/// `TestFormatTextAsn`: at least 80 % of the test buffer letters, digits, white space (C's
-/// `isspace`, the vertical tab included) or braces (counted line by line, each non-empty line
-/// with one line end, as `EnsureStats` counts), and
-/// the first line that is not blank or a comment of the form `Name ::= ...` with a letter first.
+/// The binary reader's first steps on `bytes` (`in >> MSerial_AsnBinary >> *m_Pssm`): the file header (a byte to
+/// peek at), then `BeginClass` of `PssmWithParameters`, `ExpectTag(eUniversal, eConstructed, eSequence)`. A first
+/// byte whose class and form bits are not those of a universal constructed tag (0x20), or whose tag number is not
+/// 16, is a `CSerialException`; a long tag (0x3F) reads its number from the next bytes (a number of 2^24 or more is
+/// `fOverflow`, the end of the file a `CEofException`, which `HandleEOF` passes on at the root, NCBI BLAST+ 2.17.0:
+/// exit status 0 and nothing written). Tag 16 (0x30, or 0x3F with the number 16) begins a binary PSSM: refused.
 ///
-/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1679-1726
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1121-1126
 /// ```c++
-///     // reject obvious misfits:
-///     if ( m_iTestDataSize == 0 || m_pTestBuffer[0] == '>' ) {
-///         return false;
+/// string CObjectIStream::ReadFileHeader(void)
+/// {
+///     // this is to check if the file is empty or not
+///     m_Input.PeekChar();
+///     return NcbiEmptyString;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1029-1041
+/// ```c++
+/// void CObjectIStreamAsnBinary::BeginClass(const CClassTypeInfo* classType)
+/// {
+/// #if USE_OLD_TAGS
+///     ExpectContainer(classType->RandomOrder());
+/// #else
+///     _ASSERT(classType->HasTag());
+///     _ASSERT(classType->IsTagConstructed());
+///     bool need_eoc = !m_SkipNextTag;
+///     if (!m_SkipNextTag) {
+///         ExpectTag(classType->GetTagClass(), eConstructed, classType->GetTag());
+///         ExpectIndefiniteLength();
 ///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:167-219
+/// ```c++
+/// void CObjectIStreamAsnBinary::ExpectTagClassByte(TByte first_tag_byte,
+///                                                  TByte expected_class_byte)
+/// {
+///     if ( GetTagClassAndConstructed(first_tag_byte) != expected_class_byte ) {
+///         UnexpectedTagClassByte(first_tag_byte, expected_class_byte);
+///     }
+/// }
 ///
-///     // criteria:
-///     // at least 80% text-ish,
-///     // 1st field of the first non-blank not comment line must start with letter.
-///     // "::=" as the 2nd field of the first non-blank non comment line.
-///     //
-///     double dAlNumFraction = (double)(m_iStatsCountAlNumChars+m_iStatsCountBraces) /
-///                             (double)m_iTestDataSize;
-///     if ( dAlNumFraction < 0.80 ) {
-///         return false;
+/// inline
+/// CObjectIStreamAsnBinary::TLongTag
+/// CObjectIStreamAsnBinary::PeekTag(TByte first_tag_byte)
+/// {
+///     TByte byte = StartTag(first_tag_byte);
+///     ETagValue sysTag = GetTagValue(byte);
+///     if ( sysTag == eLongTag ) {
+///         return PeekLongTag();
 ///     }
 ///     ...
-///     while ( ! TestBuffer.fail() ) {
-///         vector<string> Fields;
-///         NcbiGetline(TestBuffer, strLine, "\n\r");
-///         NStr::Split(strLine, " \t", Fields, NStr::fSplit_Tokenize);
-///         if ( IsAsnComment( Fields  ) ) {
-///             continue;
-///         }
-///         return ( Fields.size() >= 2 && Fields[1] == "::=" && isalpha(Fields[0][0]));
+///     return sysTag;
+/// }
+/// ...
+/// void CObjectIStreamAsnBinary::ExpectTag(TByte first_tag_byte,
+///     ETagClass tag_class, ETagConstructed tag_constructed, TLongTag tag_value)
+/// {
+///     ExpectTagClassByte(first_tag_byte,
+///                        MakeTagClassAndConstructed(tag_class, tag_constructed));
+///     TLongTag tag = PeekTag(first_tag_byte);
+///     if (tag != tag_value) {
+///         UnexpectedTagValue( tag_class, tag, tag_value);
 ///     }
-///     return false;
+/// }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:276-283
+/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:150-171
 /// ```c++
-///         for ( int c = 1; c < 256; ++c ) {
-///             if ( isalpha((unsigned char)c) )
-///                 symbol_type_table[c] |= fAlpha;
-///             if ( isdigit((unsigned char)c) )
-///                 symbol_type_table[c] |= fDigit;
-///             if ( isspace((unsigned char)c) )
-///                 symbol_type_table[c] |= fSpace;
+/// CObjectIStreamAsnBinary::TLongTag
+/// CObjectIStreamAsnBinary::PeekLongTag(void)
+/// {
+///     TLongTag tag = 0;
+///     size_t i = 1;
+///     const size_t KBitsInByte = 8; // ?
+///     const size_t KTagBits = sizeof(tag) * KBitsInByte - 1;
+///     TByte byte;
+///     do {
+///         if ( tag >= (1 << (KTagBits - 7)) ) {
+///             ThrowError(fOverflow,
+///                        "tag number is too big: "+NStr::IntToString(tag));
 ///         }
+///         byte = PeekTagByte(i++);
+///         tag = (tag << 7) | (byte & 0x7f);
+///     } while ( (byte & 0x80) != 0 );
 /// ```
-/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:714-733
+/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:174-216 (`UnexpectedTagClassByte`,
+/// `UnexpectedTagValue`: `ThrowError(fFormatError, ...)`)
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
 /// ```c++
-///     while ( ! TestBuffer.fail() ) {
-///         NcbiGetline( TestBuffer, strLine, "\r\n" );
-/// // code in CFormatGuess::Format counts line ends
-/// // so, we will count them here as well
-///         if (!strLine.empty()) {
-///             strLine += '\n';
-///         }
-///         size_t size = strLine.size();
-///         ...
-///             if ( type & (fAlpha | fDigit | fSpace) ) {
-///                 ++m_iStatsCountAlNumChars;
-///             }
-///             else if (c == '{'  ||  c == '}') {
-///                 ++m_iStatsCountBraces;
-///             }
+/// void CObjectIStream::HandleEOF(CEofException& expt)
+/// {
+///     string msg(TopFrame().GetFrameInfo());
+///     PopFrame();
+///     if (GetStackDepth() < 2) {
+///         NCBI_RETHROW_SAME(expt,msg);
+///     } else {
+///         ThrowError(fEOF, msg);
+///     }
+/// }
 /// ```
-fn text_asn(buffer: &[u8]) -> bool {
-    if buffer.is_empty() || buffer[0] == b'>' {
-        return false;
+fn ber_first_tag(bytes: &[u8]) -> PssmFileFormat {
+    const UNIVERSAL_CONSTRUCTED: u8 = 0x20;
+    const LONG_TAG: u8 = 0x1f;
+    const SEQUENCE: u32 = 16;
+    let Some(&first) = bytes.first() else {
+        return PssmFileFormat::Eof;
+    };
+    if first & 0xe0 != UNIVERSAL_CONSTRUCTED {
+        return PssmFileFormat::Unrecognized;
     }
-    let mut counted = 0usize;
-    for line in buffer.split(|&c| c == b'\n' || c == b'\r') {
-        if line.is_empty() {
-            continue;
+    let tag = if first & LONG_TAG != LONG_TAG {
+        u32::from(first & LONG_TAG)
+    } else {
+        let mut tag: u32 = 0;
+        let mut i = 1;
+        loop {
+            if tag >= 1 << 24 {
+                return PssmFileFormat::Unrecognized;
+            }
+            let Some(&byte) = bytes.get(i) else {
+                return PssmFileFormat::Eof;
+            };
+            i += 1;
+            tag = (tag << 7) | u32::from(byte & 0x7f);
+            if byte & 0x80 == 0 {
+                break tag;
+            }
         }
-        counted += line
-            .iter()
-            .filter(|&&c| {
-                c.is_ascii_alphanumeric() || crate::ncbi_str::is_space(c) || c == b'{' || c == b'}'
-            })
-            .count()
-            + 1;
-    }
-    if (counted as f64) / (buffer.len() as f64) < 0.80 {
-        return false;
-    }
-    for line in buffer.split(|&c| c == b'\n' || c == b'\r') {
-        let fields: Vec<&[u8]> = line
-            .split(|&c| c == b' ' || c == b'\t')
-            .filter(|field| !field.is_empty())
-            .collect();
-        if fields.is_empty() || fields[0].starts_with(b"--") {
-            continue;
+    };
+    if tag == SEQUENCE {
+        PssmFileFormat::Refused {
+            what: NOT_TEXT,
+            detail: "binary ASN.1 that starts with a SEQUENCE tag",
         }
-        return fields.len() >= 2 && fields[1] == b"::=" && fields[0][0].is_ascii_alphabetic();
+    } else {
+        PssmFileFormat::Unrecognized
     }
-    false
 }
 
 /// Who reads `-in_pssm`: the program that LOSAT's refusals name, the options' matrix, with
@@ -265,6 +293,9 @@ pub(crate) struct PssmReader<'a> {
     /// copy); with the strategy alone NCBI stops before any report (`PsiSearch::stop_before_search`).
     pub(crate) strategy: bool,
     pub(crate) database: bool,
+    /// The run's BLAST archive (outfmt 11), which saves each of the reader's posts as one message
+    /// of its severity (`diag_log::Posts::write`); `None` without one.
+    pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
 }
 
 impl PssmReader<'static> {
@@ -274,6 +305,7 @@ impl PssmReader<'static> {
         matrix_name: "BLOSUM62",
         strategy: false,
         database: true,
+        archive: None,
     };
 }
 
@@ -284,11 +316,15 @@ impl PssmReader<'_> {
     }
 }
 
-/// Reads `-in_pssm path`: NCBI's errors for a file it cannot read or guess, LOSAT's refusals of
-/// what it does not read, then the PSSM search's query, rows and values, and the PSSM as NCBI's
-/// object holds it when the search starts (`InPssmFile`, which psiblast's rounds
-/// and PSSM files write back).
-pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSearch, InPssmFile)> {
+/// Reads `-in_pssm path`: NCBI's errors for a file it cannot read or guess, the messages of NCBI's
+/// reader (to `diagnostics`), LOSAT's refusals of what it does not read, then the PSSM search's
+/// query, rows and values, and the PSSM as NCBI's object holds it when the search starts
+/// (`InPssmFile`, which psiblast's rounds and PSSM files write back).
+pub(crate) fn read_in_pssm(
+    path: &Path,
+    reader: PssmReader<'_>,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
     // ```c++
     // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
@@ -331,42 +367,105 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
         })
     }
     .map_err(|_| crate::cli::inaccessible("in_pssm", path))?;
-    match guess_format(&bytes) {
-        PssmFileFormat::TextAsn => {}
+    let text = match guess_format(&bytes) {
+        PssmFileFormat::TextAsn { start } => &bytes[start..],
         PssmFileFormat::Unsupported => {
             return Err(crate::blastinput::app::options_error(
                 "Unsupported format for PSSM",
             ))
         }
-        PssmFileFormat::NotText => {
-            return Err(reader.refuse(format!(
-                "a PSSM file that is not ASN.1 text (binary ASN.1, XML or another format; {})",
+        PssmFileFormat::Unrecognized => {
+            return Err(crate::blastinput::app::options_error(&format!(
+                "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
                 path.display()
             )))
         }
+        PssmFileFormat::Eof => {
+            return Err(crate::cli::NativeError {
+                exit: 0,
+                message: String::new(),
+            }
+            .into())
+        }
+        PssmFileFormat::Exception(exception) => {
+            return Err(crate::cli::NativeError::exception(&exception).into())
+        }
+        PssmFileFormat::Refused { what, detail } => {
+            return Err(reader.refuse(format!("{what} ({detail}; {})", path.display())))
+        }
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-251 (the clauses of
+    // `CATCH_ALL` that an error of the reader other than its `CSerialException` reaches)
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    // NCBI's reader posts its messages as it reads (`Post`), before its error when it stops. Its
+    // `CSerialException` is the handler's "Unrecognized format"; a `CUtilException` of a number
+    // or a `CStringException` of a tag leaves the handler and `CATCH_ALL` reports it with the
+    // lines of the reader's stack (exit status 255), and so does a `std::length_error` of
+    // Dense-seg's reserve hook (`Error: vector::reserve`); a `CEofException` (a `CIOException`, the
+    // text ending directly in the root object) is caught without a word and the run ends with
+    // exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters ::=` alone; line RG D3-1 probe e01).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+    // (`CBlastAppDiagHandler::Post`, quoted in `report::diag_log`): the BLAST archive saves each post as one message of its
+    // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
+    // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
+    // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
+    // NCBI's reader recurses once per value on the main thread's stack and crashes when a PSSM's
+    // values nest deeper than that stack holds (NCBI BLAST+ 2.17.0 with 8 MiB: from a few thousand
+    // levels, by the stack limit, the command line, the environment and the stack's random start).
+    // LOSAT's reader and the object manager's step keep the values they are in on the heap, so
+    // every depth is read, and the output is NCBI's with a stack large enough
+    // (PD-LOSAT-NCBI-DEFECTS exception 15).
+    let read = crate::blastinput::pssm_text::read_pssm(text);
+    let program = reader.program.to_ascii_lowercase();
+    let mut posts = crate::report::diag_log::Posts::new();
+    for post in &read.posts {
+        posts.post(crate::report::diag_log::ERROR, post.line(&program));
     }
-    let (pssm, skipped) =
-        match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
-            Ok(read) => read,
-            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type):
-            // LOSAT's refusal, where NCBI reads the file.
-            Err(error) if error.message.contains("is not supported by LOSAT") => {
-                return Err(reader.refuse(format!(
-                    "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
-                    path.display(),
-                    error.line,
-                    error.message
-                )))
+    posts.write(diagnostics, reader.archive)?;
+    let pssm = match read.result {
+        Ok(pssm) => pssm,
+        Err(PssmReadError::Ncbi(ReadError::Serial(_))) => {
+            return Err(crate::blastinput::app::options_error(&format!(
+                "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
+                path.display()
+            )))
+        }
+        Err(PssmReadError::Ncbi(ReadError::Exception(exception))) => {
+            return Err(crate::cli::NativeError::exception(&exception).into())
+        }
+        Err(PssmReadError::Ncbi(ReadError::Std(what))) => {
+            return Err(crate::cli::NativeError::std_exception(what).into())
+        }
+        Err(PssmReadError::Ncbi(ReadError::Eof)) => {
+            return Err(crate::cli::NativeError {
+                exit: 0,
+                message: String::new(),
             }
-            // NCBI's `CSerialException`.
-            Err(_) => {
-                return Err(crate::blastinput::app::options_error(&format!(
-                    "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
-                    path.display()
-                )))
-            }
-        };
-    psi_search_and_object(pssm, skipped, reader)
+            .into())
+        }
+        // The lexical reader's own limits (`read_pssm`): LOSAT's refusal, after NCBI's reader read
+        // the file. (What NCBI reads and LOSAT's search does not take is refused after the object
+        // manager's step, `psi_search_and_object`.)
+        Err(PssmReadError::Refused(what))
+        | Err(PssmReadError::Ncbi(ReadError::Unsupported(what))) => {
+            return Err(reader.refuse(format!(
+                "a PSSM that LOSAT's reader does not read ({}: {what})",
+                path.display()
+            )))
+        }
+    };
+    psi_search_and_object(pssm, reader)
 }
 
 /// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
@@ -444,73 +543,106 @@ fn validation_error(pssm: &PssmWithParameters) -> Option<String> {
     None
 }
 
-/// A string that NCBI's text reader would change: a byte outside the visible range
-/// (0x20..0x7E), which NCBI replaces by `#` with an error message (`FixVisibleChars`).
-fn visible(bytes: &[u8]) -> bool {
-    bytes.iter().all(|&c| (0x20..=0x7e).contains(&c))
-}
-
-/// Whether every string of the Seq-id `id` is `visible` (and a local id is not empty, which NCBI's
-/// reports show as no id).
-fn seq_id_strings_visible(id: &ParsedSeqId) -> bool {
-    use crate::seqid::model::{Date, PatentNumber};
-    let object = |tag: &ObjectId| match tag {
-        ObjectId::Str(text) => visible(text),
-        ObjectId::Id(_) => true,
-    };
-    let text = |value: &Option<Vec<u8>>| value.as_deref().is_none_or(visible);
-    match id {
-        ParsedSeqId::Local(ObjectId::Str(name)) => !name.is_empty() && visible(name),
-        ParsedSeqId::Local(ObjectId::Id(_))
-        | ParsedSeqId::Gi(_)
-        | ParsedSeqId::Gibbsq(_)
-        | ParsedSeqId::Gibbmt(_) => true,
-        ParsedSeqId::Giim(giim) => text(&giim.db) && text(&giim.release),
-        ParsedSeqId::General(dbtag) => visible(&dbtag.db) && object(&dbtag.tag),
-        ParsedSeqId::Patent(patent) => {
-            let number = match &patent.cit.id {
-                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
-            };
-            visible(&patent.cit.country) && visible(number) && text(&patent.cit.doc_type)
-        }
-        ParsedSeqId::Pdb(pdb) => {
-            let rel = match &pdb.rel {
-                Some(Date::Str(date)) => visible(date),
-                Some(Date::Std(date)) => text(&date.season),
-                None => true,
-            };
-            visible(&pdb.mol) && text(&pdb.chain_id) && rel
-        }
-        ParsedSeqId::Genbank(id)
-        | ParsedSeqId::Embl(id)
-        | ParsedSeqId::Pir(id)
-        | ParsedSeqId::Swissprot(id)
-        | ParsedSeqId::Other(id)
-        | ParsedSeqId::Ddbj(id)
-        | ParsedSeqId::Prf(id)
-        | ParsedSeqId::Tpg(id)
-        | ParsedSeqId::Tpe(id)
-        | ParsedSeqId::Tpd(id)
-        | ParsedSeqId::Gpipe(id)
-        | ParsedSeqId::NamedAnnotTrack(id) => {
-            text(&id.name) && text(&id.accession) && text(&id.release)
-        }
-    }
-}
-
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
-    psi_search_and_object(pssm, Vec::new(), PssmReader::PSIBLAST).map(|(search, _)| search)
+    psi_search_and_object(pssm, PssmReader::PSIBLAST).map(|(search, _)| search)
 }
+
+/// The query's letters (`Seq-inst.seq-data`) as NCBIstdaa letters; none when the data is missing
+/// or holds a code or letter outside NCBIstdaa.
+fn query_letters(query: &crate::report::serial::pssm::PssmQuery) -> Vec<u8> {
+    match query.inst.seq_data.as_ref() {
+        Some(SeqData::Ncbistdaa(codes)) => codes
+            .iter()
+            .map(|&code| NCBISTDAA_TO_AMINOACID.get(code as usize).copied())
+            .collect::<Option<Vec<u8>>>()
+            .unwrap_or_default(),
+        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
+            .iter()
+            .map(|&c| NCBISTDAA_TO_AMINOACID.contains(&c).then_some(c))
+            .collect::<Option<Vec<u8>>>()
+            .unwrap_or_default(),
+        Some(SeqData::Other(_)) | None => Vec::new(),
+    }
+}
+
+/// The query record of the PSSM's Bioseq (`PsiSearch::query`, the reasons in
+/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), other ids are
+/// believed; a Bioseq without one (only where the object manager stops the run first,
+/// `stopped_as_query_joins_scope`) has no id.
+fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRecord {
+    match ids {
+        [] => FastaRecord::new(String::new(), title, letters),
+        [ParsedSeqId::Local(ObjectId::Str(id))] => {
+            FastaRecord::new(String::from_utf8_lossy(id).into_owned(), title, letters)
+        }
+        [ParsedSeqId::Local(ObjectId::Id(id))] => FastaRecord::new(id.to_string(), title, letters),
+        _ => FastaRecord::new(String::new(), title, letters).believing(ids.to_vec()),
+    }
+}
+
+/// The PSSM search of a PSSM whose query NCBI's object manager stops at as it joins the scope
+/// (`AnnotOutcome::abort`, `psi_search_and_object`): the query record, the object manager's
+/// messages and exception; no rows, values, request or PSSM files (NCBI reads none of them).
+fn stopped_as_query_joins_scope(
+    pssm: PssmWithParameters,
+    annot: super::annot_index::AnnotOutcome,
+    defline_reads_annot: bool,
+) -> (PsiSearch, InPssmFile) {
+    // A query Seq-entry set has no Bioseq of its own: an empty record.
+    let empty = crate::report::serial::pssm::PssmQuery {
+        ids: Vec::new(),
+        descr: None,
+        inst: crate::report::serial::pssm::SeqInst::new(("raw", 2), ("aa", 3), None, None),
+        annot: None,
+    };
+    let query = pssm
+        .pssm
+        .query
+        .as_ref()
+        .and_then(SeqEntry::seq)
+        .unwrap_or(&empty);
+    let title = query.titles().first().copied().unwrap_or(&[]).to_vec();
+    let search = PsiSearch {
+        pssm: QueryPssm { rows: Vec::new() },
+        freq_ratios: Vec::new(),
+        stats: PssmStats::default(),
+        query: query_record_of(&query.ids, &title, &query_letters(query)),
+        query_ids: query.ids.clone(),
+        validation_error: None,
+        scores_error: None,
+        setup_messages: Vec::new(),
+        warning_title: Some(Vec::new()),
+        request: None,
+        annot,
+        defline_reads_annot,
+        round_query: None,
+        split_setup: None,
+    };
+    let file = InPssmFile {
+        object: pssm,
+        computed: false,
+        valid: false,
+    };
+    (search, file)
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqset/Seq_entry_.cpp (generated by datatool: the
+// `CInvalidChoiceSelection` of `CSeq_entry_Base::GetSeq()` of another variant; NCBI BLAST+ 2.17.0
+// `Seq_entry_.cpp", line 99`)
+const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exception::ThrowSite {
+    file: "src/objects/seqset/Seq_entry_.cpp",
+    line: 99,
+    kind: "CInvalidChoiceSelection::eFail",
+    function: None,
+};
 
 /// The PSSM search of `pssm` and the PSSM as NCBI's `CPsiBlastImpl` leaves it before the first
 /// round: a PSSM of frequency ratios only gets the scores and gapped values that the PSSM engine
-/// computes for it (`with_computed_scores`). `skipped` names the members the reader
-/// skipped (`blastinput::pssm_text::read_pssm_with_parameters_and_skips`).
+/// computes for it (`with_computed_scores`).
 pub(crate) fn psi_search_and_object(
     pssm: PssmWithParameters,
-    skipped: Vec<&'static str>,
     reader: PssmReader<'_>,
 ) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-540
@@ -522,12 +654,90 @@ pub(crate) fn psi_search_and_object(
     // 		CRef<CSeq_loc> sl(new CSeq_loc());
     // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
     // ```
-    // NCBI's application takes the query's Bioseq here (a PSSM without one ends with a C++
-    // exception of the release build); the reader has refused a Seq-entry set.
-    let Some(query) = pssm.pssm.query.as_ref() else {
+    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here (a PSSM
+    // without one ends with a C++ exception of the release build).
+    let Some(entry) = pssm.pssm.query.as_ref() else {
         return Err(reader
             .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (tblastn_app.cpp:226)
+    // ```c++
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    // ```
+    // The query's Seq-entry joins NCBI's scope with its annotations, which NCBI's object manager
+    // checks and indexes, and with its Bioseqs' ids (`annot_index::index_entry`: its messages, the
+    // diagnostic stream it can leave failed, its exceptions), after the reader and the subjects and
+    // before NCBI reads anything else of the PSSM; the run writes them where NCBI does
+    // (`PsiSearch::write_annot_posts`). What NCBI does not do the same way on every run (memory
+    // addresses, crashes, undefined behaviour) is refused here, before any output. With `-db` no
+    // other sequence is in NCBI's scope before the query (`PssmReader::database`).
+    let program = reader.program.to_ascii_lowercase();
+    let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
+        .map_err(|refusal| reader.refuse(refusal.text()))?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (tblastn_app.cpp:228)
+    // ```c++
+    // 		CRef<CSeq_loc> sl(new CSeq_loc());
+    // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+    // ```
+    // A query Seq-entry set that the object manager took ends the run here: `GetSeq()` of a set is
+    // NCBI's `CInvalidChoiceSelection` (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 `r4/probe` s06, s07,
+    // s11: after the object manager's messages, psiblast after its prolog).
+    let query = match entry {
+        SeqEntry::Seq(query) => Some(query.as_ref()),
+        SeqEntry::Set(_) => {
+            if annot.abort.is_none() {
+                annot.abort = Some(super::annot_index::Abort::of(
+                    crate::cli::NativeError::exception(&NcbiException::new(
+                        SEQ_ENTRY_GET_SEQ,
+                        "CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.set",
+                    )),
+                    annot.muted,
+                ));
+            }
+            None
+        }
+    };
+    let defline_reads_annot = query.is_some_and(defline_reads_annot);
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537, 548 and
+    // c++/src/app/blast/tblastn_app.cpp:226, 307, 324
+    // ```c++
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    // ...
+    //         retval = DoIterations(opts_hndl, query, pssm, db_adapter, scope, formatter);
+    // ```
+    // ```c++
+    //             scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    // ...
+    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+    // ...
+    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
+    // ```
+    // The object manager's exception ends the run as the query joins the scope, before NCBI reads
+    // any other value of the PSSM (its check, scores, sizes, statistics, letters and ids; its
+    // search strategy's request and the PSSM files): NCBI BLAST+ 2.17.0 writes plain t04's stop
+    // for every such PSSM (line RG D3-1 review 4 S2 and `r3/s2/`: a local id among other ids, the
+    // sizes, a score outside one letter's range, the scores' sum, a negative lambda, no Seq-id, a
+    // `BL_ORD_ID` or `giim` id, an id without an accession or a name, an empty local id, a
+    // nucleotide Seq-inst, letters of another length, frequency ratios only, by row). LOSAT's
+    // refusals of those values are for the runs that read them: also of a query Seq-entry set (it
+    // ends at `GetSeq()`, above) and of Seq-data that LOSAT's search does not read (NCBI's object
+    // manager does not read it, line RG D3-1 review 4b S1).
+    let Some(query) = query.filter(|_| annot.abort.is_none()) else {
+        return Ok(stopped_as_query_joins_scope(
+            pssm,
+            annot,
+            defline_reads_annot,
+        ));
+    };
+    if let Some(SeqData::Other(Value::Choice(variant, _))) = &query.inst.seq_data {
+        let name = crate::report::serial::asn_types::members(
+            crate::report::serial::asn_types::table::named::SEQ_DATA,
+        )[usize::from(*variant)]
+        .name();
+        return Err(reader.refuse(format!(
+            "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
+        )));
+    }
     let validation_error = validation_error(&pssm);
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
     // (`x_CreatePssmScoresFromFrequencyRatios`, below).
@@ -589,56 +799,30 @@ pub(crate) fn psi_search_and_object(
             "a PSSM query with a local Seq-id among other Seq-ids (NCBI's reports show it as no FASTA query is shown)",
         ));
     }
-    // A Textseq-id with neither an accession nor a name: NCBI's label of it is empty, and NCBI
-    // BLAST+ 2.17.0 stops on it (`BLAST Database error: Accessions to Oids lookup error in tfp`,
-    // exit 2, `-db`; line RG Q1b's review, S1).
+    // A Textseq-id with neither an accession nor a name: NCBI's label of it is empty, and what NCBI
+    // BLAST+ 2.17.0 does with it depends on the database and the report: `BLAST Database error:
+    // Accessions to Oids lookup error in tfp` (exit 2, `-db tfp`; line RG Q1b's review, S1), the
+    // pairwise report's `Failed to resolve SeqId: gb||` (exit 255, after its prolog), and `Unknown`
+    // for `qseqid` in a tabular report (exit 0; line RG D3-1 review 4c `out_z/`), which LOSAT's
+    // reports do not write.
     if ids.iter().any(|id| {
         id.textseq()
             .is_some_and(|text| text.accession.is_none() && text.name.is_none())
     }) {
         return Err(reader.refuse(
-            "a PSSM query whose Seq-id has neither an accession nor a name (NCBI BLAST+ stops with a database error)",
+            "a PSSM query whose Seq-id has neither an accession nor a name (NCBI's run then depends on the database and the report: a database error, 'Failed to resolve SeqId' or the query 'Unknown')",
         ));
     }
-    if !ids.iter().all(seq_id_strings_visible) {
-        return Err(reader.refuse(
-            "a PSSM query whose Seq-id holds an empty local id or a byte outside the visible ASCII range",
-        ));
-    }
-    let local_id = match ids {
-        [ParsedSeqId::Local(ObjectId::Str(id))] => Some(String::from_utf8_lossy(id).into_owned()),
-        [ParsedSeqId::Local(ObjectId::Id(id))] => Some(id.to_string()),
-        _ => None,
-    };
-    let titles: &[Vec<u8>] = query.titles.as_deref().unwrap_or(&[]);
-    // NCBI's reader writes an error for each such byte of every VisibleString it keeps: the titles,
-    // the row labels, the PSSM's identifier and the matrix name of its parameters too (NCBI
-    // 2.17.0, a UTF-8 identifier or matrix name: `Error: (803.7) [psiblast]
-    // PssmWithParameters.pssm.identifier.str` / `...params.rpsdbparams.matrixName`, then the
-    // search; PS5b).
-    let identifier = match &pssm.pssm.identifier {
-        Some(ObjectId::Str(identifier)) => identifier.as_slice(),
-        _ => &[],
-    };
-    let matrix_name = pssm
-        .params
-        .as_ref()
-        .and_then(|params| params.rpsdbparams.as_ref())
-        .map_or(&[][..], |rps| rps.matrix_name.as_slice());
-    if titles.iter().any(|title| !visible(title))
-        || pssm
-            .pssm
-            .row_labels
-            .iter()
-            .flatten()
-            .any(|label| !visible(label))
-        || !visible(identifier)
-        || !visible(matrix_name)
+    // A local id that is empty: NCBI's reports show it as no id. (A byte outside the visible range
+    // of a string of the PSSM is NCBI's `#` with its message, made by the reader,
+    // `report::serial::asn_types`.)
+    if ids
+        .iter()
+        .any(|id| matches!(id, ParsedSeqId::Local(ObjectId::Str(name)) if name.is_empty()))
     {
-        return Err(reader.refuse(
-            "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
-        ));
+        return Err(reader.refuse("a PSSM query whose Seq-id holds an empty local id"));
     }
+    let titles = query.titles();
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:669-683
     // ```c++
     //         ITERATE(CBioseq::TDescr::Tdata, iter, data) {
@@ -666,7 +850,7 @@ pub(crate) fn psi_search_and_object(
     } else {
         None
     };
-    let title: &[u8] = titles.first().map_or(&[], |title| title.as_slice());
+    let title: &[u8] = titles.first().copied().unwrap_or(&[]);
     // `NStr::TruncateSpaces` (`eTrunc_Both`) of the `Query=` line would cut the title's ends.
     let title_refusal = title_refusal.or_else(|| {
         (crate::ncbi_str::truncate_spaces(title).len() != title.len()).then(|| {
@@ -702,7 +886,7 @@ pub(crate) fn psi_search_and_object(
     // The warnings of a PSSM query (`blast_setup_cxx.cpp:533-543`, quoted at
     // `report::query_warnings::warning_query_id`) take this title, in every round (the query
     // factory is fixed for the run), while the reports take the Bioseq's title as it is.
-    let warning_title: Vec<u8> = if skipped.contains(&"molinfo") {
+    let warning_title: Vec<u8> = if query.has_molinfo() {
         Vec::new()
     } else {
         let end = title
@@ -717,21 +901,9 @@ pub(crate) fn psi_search_and_object(
             query.inst.repr.0, query.inst.mol.0
         )));
     }
-    let letters: Vec<u8> = match query.inst.seq_data.as_ref() {
-        Some(SeqData::Ncbistdaa(codes)) => codes
-            .iter()
-            .map(|&code| NCBISTDAA_TO_AMINOACID.get(code as usize).copied())
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
-            .iter()
-            .map(|&c| NCBISTDAA_TO_AMINOACID.contains(&c).then_some(c))
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
-    let length = query.inst.length.unwrap_or(-1);
-    if letters.is_empty() || letters.len() as i64 != i64::from(length) || letters.contains(&b'-') {
+    let letters = query_letters(query);
+    let length = query.inst.length.map_or(-1, i64::from);
+    if letters.is_empty() || letters.len() as i64 != length || letters.contains(&b'-') {
         return Err(reader.refuse(
             "a PSSM query whose letters are missing, of another length than its Seq-inst, or with a gap or a byte outside NCBIstdaa",
         ));
@@ -942,39 +1114,39 @@ pub(crate) fn psi_search_and_object(
     // `SaveSearchStrategy` serializes before `CPsiBlastImpl` computes the scores of a PSSM of
     // frequency ratios only (psiblast_app.cpp:340, tblastn_app.cpp:307): the object as read, kept
     // for a request that NCBI writes (a PSSM that NCBI's check refuses writes none; one whose
-    // scores the engine cannot compute is written first), with the members that the reader
-    // skipped, which would be missing from it (`PsiSearch::refuse_request_members`, refused once
-    // the database is opened).
+    // scores the engine cannot compute is written first), with the members that the PSSM writer
+    // does not write yet (`PssmWithParameters::unwritten_members`, `PsiSearch::refuse_request_members`,
+    // refused once the database is opened).
     let request = (super::pssm_request_written(reader.strategy, reader.database)
         && validation_error.is_none())
     .then(|| PssmQueryRequest {
         pssm: std::sync::Arc::new(pssm.clone()),
-        skipped: skipped.clone(),
     });
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,
         stats,
-        query: match local_id {
-            Some(local_id) => FastaRecord::new(local_id, title, &letters),
-            None => FastaRecord::new(String::new(), title, &letters).believing(ids.to_vec()),
-        },
+        query: query_record_of(ids, title, &letters),
         query_ids: ids.to_vec(),
         validation_error,
         scores_error,
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        annot,
+        defline_reads_annot,
         round_query: None,
         split_setup: None,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
-    // writes the prolog and its error whatever the title).
+    // writes the prolog and its error whatever the title; so it does when its object manager's
+    // exception ends the run as the query joins the scope, `PsiSearch::annot_abort`, line RG D3-1).
     if let Some(refusal) = title_refusal {
         if search
             .stop_before_search(reader.strategy, reader.database)
             .is_none()
+            && search.annot.abort.is_none()
         {
             return Err(refusal);
         }
@@ -985,11 +1157,61 @@ pub(crate) fn psi_search_and_object(
     }
     let file = InPssmFile {
         object: pssm,
-        skipped,
         computed: computed.is_some(),
         valid: search.validation_error.is_none() && search.scores_error.is_none(),
     };
     Ok((search, file))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:559 and 705,
+// blastxml2_format.cpp:590 (the query definition of the XML and JSON reports:
+// `sequence::CDeflineGenerator` on the query's Bioseq)
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1977-2077 (`x_SetTitleFromProtein`:
+// a protein without a title takes the name of its `prot` feature from the scope's annotations;
+// `x_SetBioSrc`, :1410, reads its source features)
+/// Whether NCBI's definition line of the PSSM's query (the XML and JSON reports' query
+/// definition) reads its annotations: a query without a title whose annotations hold a feature (a
+/// feature table, or a feature Seq-table, whose rows the lookup makes into features). NCBI BLAST+
+/// 2.17.0 then names the query after its `prot` feature (line RG D3-1 `om/` cases x01-x04, outfmt 5
+/// and 16); LOSAT does not port that lookup (`om/SPEC.md` §1.3) and refuses those reports.
+fn defline_reads_annot(query: &crate::report::serial::pssm::PssmQuery) -> bool {
+    use crate::report::serial::asn_types::{member_index, members, table::named, Value};
+    if !query.titles().is_empty() {
+        return false;
+    }
+    let data = member_index(named::SEQ_ANNOT, "data");
+    let kinds = members(members(named::SEQ_ANNOT)[data].ty);
+    query
+        .annot
+        .iter()
+        .flatten()
+        .any(|annot| match annot.member(data) {
+            Some(Value::Choice(variant, value)) => match kinds[usize::from(*variant)].name() {
+                "ftable" => matches!(value.as_ref(), Value::List(feats) if !feats.is_empty()),
+                "seq-table" => {
+                    let feat_type = value
+                        .member(member_index(named::SEQ_TABLE, "feat-type"))
+                        .map_or(0, |value| match value {
+                            Value::Int(n) => *n,
+                            _ => 0,
+                        });
+                    (1..23).contains(&feat_type)
+                }
+                _ => false,
+            },
+            _ => false,
+        })
+}
+
+/// The refusal of a report whose query definition NCBI makes from the annotations of a PSSM's
+/// query (`PsiSearch::defline_reads_annot`): XML and JSON (`outfmt` 5, 13, 14, 15, 16).
+pub(crate) fn refuse_annot_defline(search: &PsiSearch, outfmt: i32, program: &str) -> Result<()> {
+    if search.defline_reads_annot && matches!(outfmt, 5 | 13..=16) {
+        bail!(
+            "output format {outfmt} with a PSSM query without a title whose annot holds features (NCBI BLAST+ names the query in XML and JSON from those features, which LOSAT does not yet) is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
 }
 
 /// The scores of a PSSM of frequency ratios only, and the gapped values of its scaling:
@@ -1147,23 +1369,25 @@ pub(crate) fn convert_2_matrix<T: Copy>(
     rows
 }
 
-/// LOSAT's refusal of a PSSM file with members that the reader skipped (`skipped`,
-/// `blastinput::pssm_text::read_pssm_with_parameters_and_skips`: the descriptors of the query other
-/// than titles, its `annot`, the members of its `Seq-inst` other than `repr`, `mol`, `length` and
-/// `seq-data`, the `constraints` and `annotatedSites` of the parameters) where NCBI writes the
-/// object it read back (`option`): psiblast's `-out_pssm` (`SavePssmToFile` in round 1,
+/// LOSAT's refusal of a PSSM file with members that the PSSM writer does not write yet
+/// (`PssmWithParameters::unwritten_members`: the descriptors of the query other than titles, its
+/// `annot`, the members of its `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, the
+/// `constraints` and `annotatedSites` of the parameters) where NCBI writes the object it read back
+/// (`option`): psiblast's `-out_pssm` (`SavePssmToFile` in round 1,
 /// `algorithm::psiblast::in_pssm_files::rounds_input`) and the search strategy's request
 /// (`-export_search_strategy`, `psi_search_and_object`). NCBI's object keeps such members and
 /// writes them (NCBI 2.17.0 probes of line PS PS5b, and `p9.pp.ps5_rnd_comment.db.f6`,
-/// `p9.pp.ps5_rnd_molinfo.db.f6` of line RG F1b); `program` names LOSAT's program.
-pub(crate) fn refuse_skipped_members(
-    skipped: &[&'static str],
+/// `p9.pp.ps5_rnd_molinfo.db.f6` of line RG F1b); line RG item D3-2 writes them; `program` names
+/// LOSAT's program.
+pub(crate) fn refuse_unwritten_members(
+    pssm: &PssmWithParameters,
     option: &str,
     program: &str,
 ) -> Result<()> {
+    let skipped = pssm.unwritten_members();
     if !skipped.is_empty() {
         bail!(
-            "a PSSM file with members that LOSAT's reader does not keep ({}), which NCBI BLAST+ writes back with {option}, is not supported by LOSAT's {program}",
+            "a PSSM file with members that LOSAT's PSSM writer does not write yet ({}), which NCBI BLAST+ writes back with {option}, is not supported by LOSAT's {program}",
             skipped.join(", ")
         );
     }
@@ -1171,13 +1395,13 @@ pub(crate) fn refuse_skipped_members(
 }
 
 /// The PSSM file of `-in_pssm` as `read_in_pssm` reads it: the
-/// object after `CPsiBlastImpl`'s constructor, the members the reader skipped, whether the scores
+/// object after `CPsiBlastImpl`'s constructor (`unwritten_members` names what its writer does not
+/// write yet), whether the scores
 /// were computed from the frequency ratios, and whether NCBI's constructor of the search passes
 /// (`CPsiBlastValidate::Pssm` and the PSSM engine's scores of a PSSM of frequency ratios only; it
 /// throws before any PSSM file is written otherwise).
 pub(crate) struct InPssmFile {
     pub(crate) object: PssmWithParameters,
-    pub(crate) skipped: Vec<&'static str>,
     pub(crate) computed: bool,
     pub(crate) valid: bool,
 }
@@ -1410,48 +1634,91 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::serial::asn_types::Value;
+    use crate::report::serial::pssm::Seqdesc;
 
+    // The expected answers are NCBI BLAST+ 2.17.0's (psiblast and tblastn `-in_pssm`, the probes of line RG D3-1
+    // `F/d3a/fg`, named after each case), and review 2's item S1 (`bom2`, `bom4`, `bom7`, `bom8`, `bom10`).
     #[test]
-    fn the_text_asn_test_is_ncbis() {
-        assert!(text_asn(b"PssmWithParameters ::= {\n  pssm {\n"));
-        assert!(text_asn(b"-- a comment\nSeqentry ::= set {\n"));
-        // 27 of 34 bytes letters, digits, spaces or braces (the dash, the colons, the blank
-        // line's end are not): under 80 %.
-        assert!(!text_asn(b"-- a comment\n\nSeq-entry ::= set {\n"));
-        assert!(!text_asn(b">tk\nMKTAYIAKQR\n"));
-        assert!(!text_asn(b"PssmWithParameters {\n"));
-        // Under 80 % letters, digits, spaces and braces.
-        assert!(!text_asn(
-            b"X ::= ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,"
+    fn the_format_guess_is_ncbis() {
+        use PssmFileFormat as P;
+        let binary = |format: &P| matches!(format, P::Refused { what: NOT_TEXT, detail } if detail.starts_with("binary"));
+        let xml = |format: &P| {
+            matches!(
+                format,
+                P::Refused {
+                    what: NOT_TEXT,
+                    detail: "XML"
+                }
+            )
+        };
+        assert!(matches!(guess_format(b""), P::Unsupported));
+        assert!(matches!(guess_format(b"\x1f\x8b\x08\x00"), P::Unsupported));
+        assert!(matches!(guess_format(b">q\nMKV\n"), P::Unsupported));
+        assert!(binary(&guess_format(b"\x30\x80\xa0\x80")));
+        assert!(xml(&guess_format(b"<?xml version=\"1.0\"?>\n")));
+        // A vertical tab is C's white space (`isspace`): NCBI 2.17.0's psiblast reads a file that starts with
+        // vertical tabs and form feeds before `<?xml` or `<!DOCTYPE` as XML ("Unrecognized format for PSSM ...
+        // (must be PssmWithParameters)" for one that is not a PSSM), as without them
+        // (swebok-improve-20261105/sw8/nfix/probe/b25; fg `x03_vt_xml`).
+        assert!(xml(&guess_format(b"\x0b<?xml version=\"1.0\"?>\n")));
+        assert!(xml(&guess_format(
+            b"\x0b\x0c <!DOCTYPE PssmWithParameters>\n"
+        )));
+        // A UTF-8 byte order mark before the text: NCBI's binary reader, which stops at its first byte (review 1
+        // `a04_bom`: "Unrecognized format for PSSM", rc 1), with a line end or a comment after it, and when the
+        // split of the lines fails (more than 5 % of the bytes above 0x7F: `bom7`, `bom8`).
+        let text = b"PssmWithParameters ::= {\n  pssm {\n    isProtein TRUE\n  }\n}\n";
+        let bom = [&b"\xef\xbb\xbf"[..], text].concat();
+        assert!(matches!(guess_format(text), P::TextAsn { start: 0 }));
+        for case in [
+            bom.clone(),
+            [&b"\xef\xbb\xbf\n"[..], text].concat(),
+            [&b"\xef\xbb\xbf-- c --\n"[..], text].concat(),
+            b"\xef\xbb\xbfPssm".to_vec(),
+            b"\xef\xbb\xbf PssmWithParameters ::= {}\n".to_vec(),
+            [&b"\xef\xbb\xbf1"[..], text].concat(),
+        ] {
+            assert!(matches!(guess_format(&case), P::Unrecognized), "{case:?}");
+        }
+        // `\1` is not a binary byte (`bom10`); a NEXUS line makes it `eAlignment` (fg `n03_nexus_bom`).
+        assert!(matches!(
+            guess_format(&[&b"\x01"[..], text].concat()),
+            P::Unsupported
         ));
-        assert_eq!(guess_format(b""), PssmFileFormat::Unsupported);
-        assert_eq!(
-            guess_format(b"\x1f\x8b\x08\x00"),
-            PssmFileFormat::Unsupported
-        );
-        assert_eq!(guess_format(b">q\nMKV\n"), PssmFileFormat::Unsupported);
-        assert_eq!(guess_format(b"\x30\x80\xa0\x80"), PssmFileFormat::NotText);
-        assert_eq!(
-            guess_format(b"<?xml version=\"1.0\"?>\n"),
-            PssmFileFormat::NotText
-        );
-        // A vertical tab is C's white space (`isspace`): NCBI 2.17.0's psiblast searches a PSSM
-        // with a comment of vertical tabs (its counts give 93 % instead of 56 %) and reads a
-        // file that starts with vertical tabs and form feeds before `<?xml` or `<!DOCTYPE` as
-        // XML ("Unrecognized format for PSSM ... (must be PssmWithParameters)" for one that is
-        // not a PSSM), as without them (swebok-improve-20261105/sw8/nfix/probe/b25).
-        // 37 of 42 bytes counted (7 without the vertical tabs).
-        assert!(text_asn(
-            &[&b"X ::= {\n-- "[..], &[0x0b; 30], b"\n"].concat()
+        assert!(matches!(
+            guess_format(&[&bom[..], b"-- #NEXUS\n"].concat()),
+            P::Unsupported
         ));
-        assert_eq!(
-            guess_format(b"\x0b<?xml version=\"1.0\"?>\n"),
-            PssmFileFormat::NotText
-        );
-        assert_eq!(
-            guess_format(b"\x0b\x0c <!DOCTYPE PssmWithParameters>\n"),
-            PssmFileFormat::NotText
-        );
+        // A first byte `0` is the SEQUENCE tag: a binary PSSM.
+        assert!(binary(&guess_format(&[&b"0\xef"[..], &text[1..]].concat())));
+        // The text after a NEXUS line: TestFormatNewick reads the stream to its end, where the text reader starts
+        // (fg `n01_nexus_text`: exit status 0, nothing written).
+        let nexus = [&text[..], b"-- #NEXUS\n"].concat();
+        assert!(matches!(guess_format(&nexus), P::TextAsn { start } if start == nexus.len()));
+        // The binary reader's first tag (fg `b01`-`b08`).
+        assert!(matches!(guess_format(b"\x3f\x80"), P::Eof));
+        assert!(matches!(guess_format(b"\x3f\x81\x80"), P::Eof));
+        assert!(matches!(
+            guess_format(b"\x3f\xff\xff\xff\xff\x01"),
+            P::Unrecognized
+        ));
+        assert!(matches!(guess_format(b"\x3f\x11\x02"), P::Unrecognized));
+        assert!(matches!(guess_format(b"\x20\x02"), P::Unrecognized));
+        assert!(binary(&guess_format(b"\x3f\x10\x02")));
+        // A Glimmer3 frame beyond `int` (fg `f08`): NCBI's `CStringException`.
+        assert!(matches!(
+            guess_format(b">x\nA 1 2 99999999999 1.0\n"),
+            P::Exception(e) if e.what().contains("Cannot convert string '99999999999' to int, overflow")
+        ));
+        // TestFormatFasta's `NStr::Find` past a buffer of four bytes (fg `f11`): refused.
+        assert!(matches!(
+            guess_format(b">ab\x02"),
+            P::Refused {
+                what: UNDECIDED_GUESS,
+                ..
+            }
+        ));
     }
 
     fn fixture(name: &str) -> Vec<u8> {
@@ -1495,6 +1762,165 @@ mod tests {
         assert_eq!(stats.lambda, Some(267.0 * 1e-3));
     }
 
+    // Line RG D3-1 review 4 S1, S2: a PSSM whose query's annotations end the run as the query joins
+    // NCBI's scope (`d3om_t04_dup_partial_id`, two `partial` columns: CAnnotException) gets that stop
+    // whatever the values NCBI reads later; NCBI BLAST+ 2.17.0 writes plain t04's bytes for each
+    // variant below (`F/d3a/r3/s2`, review 4 `p3`), and neither a search strategy's request nor a
+    // PSSM file (`-out_pssm`, review 4 `p2`).
+    // Line RG D3-1 fix 4 (review 4b S1): the query's Seq-entry joins the scope as NCBI's object
+    // manager adds it (`annot_index::index_entry`): phase C, the attach of its ids, phase I; a set
+    // then stops at `GetSeq()`; Seq-data of another alphabet and the subjects' ids come after
+    // (NCBI BLAST+ 2.17.0: the fixture rows `db.ps.inpssm.d3.om.r4.*`).
+    #[test]
+    fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
+        let stop = |name: &str, database: bool| {
+            let text = gunzip(&format!("pssm/d3om_r4_{name}.asn.gz"));
+            let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&text)
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            let reader = PssmReader {
+                database,
+                ..PssmReader::PSIBLAST
+            };
+            psi_search_and_object(pssm, reader).map(|(search, file)| {
+                assert!(!file.valid && search.request.is_none(), "{name}");
+                assert!(!search.joins_scope(), "{name}");
+                let abort = search.annot.abort.as_ref().unwrap();
+                (
+                    String::from_utf8(search.annot.posts.text()).unwrap(),
+                    abort.message.clone(),
+                )
+            })
+        };
+        let (posts, error) = stop("set_t04", true).unwrap();
+        assert!(
+            posts.is_empty() && error.contains("Duplicate partial column"),
+            "{error}"
+        );
+        // The set's own annotation, then its member's, then the member's Std-seg (phase I).
+        let (posts, error) = stop("set_order", true).unwrap();
+        assert_eq!(
+            posts,
+            "Warning: (1207.4) [psiblast] Invalid 'lens' size in denseg\nWarning: (1207.6) [psiblast] Invalid 'starts' size in denseg\n"
+        );
+        assert!(error.contains("unsupported location type: feat"), "{error}");
+        let (posts, error) = stop("set_getseq", true).unwrap();
+        assert!(posts.contains("(1207.6)"), "{posts}");
+        assert!(
+            error.contains("Seq_entry_.cpp\", line 99: Error: (CInvalidChoiceSelection::eFail) CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.set"),
+            "{error}"
+        );
+        // Seq-data that the search does not read: the object manager's stop comes first.
+        let (_, error) = stop("ncbi8aa_t04", true).unwrap();
+        assert!(error.contains("Duplicate partial column"), "{error}");
+        // A Seq-id twice: phase C's exception, else the attach's before phase I's.
+        let (_, error) = stop("dupid_t04", true).unwrap();
+        assert!(error.contains("Duplicate partial column"), "{error}");
+        let (_, error) = stop("dupid_a19", true).unwrap();
+        assert!(
+            error.contains("tse_info.cpp\", line 901: Error: (CObjMgrException::eAddDataError) ncbi::objects::CTSE_Info::x_SetBioseqIds() - duplicate Bioseq id lcl|Query_1 present in\n  seq1: lcl|Query_1 | lcl|Query_1\n  seq2: lcl|Query_1 | lcl|Query_1\n"),
+            "{error}"
+        );
+        // With `-subject` a subject's Seq-id of the handle may have made its info: a local id's
+        // text is its own whatever made it (NCBI BLAST+ 2.17.0 `-subject -parse_deflines` with
+        // `lcl|query_1`, review 4c `out_x/` x01, x02), a GenBank accession's is not (an EMBL
+        // subject's shows, `r5/out_ids5/ncbi/sub.ps.gb_twice_emb`).
+        let (_, error) = stop("dupid_a19", false).unwrap();
+        assert!(
+            error.contains("duplicate Bioseq id lcl|Query_1 present in"),
+            "{error}"
+        );
+        let plain = String::from_utf8(gunzip("pssm/d3om_r4_ncbi8aa_t04.asn.gz")).unwrap();
+        let annot = ", annot { { data seq-table { feat-type 1, num-rows 1, columns { { header { field-id partial }, data bit '80'H }, { header { field-id partial }, data bit '80'H } } } } }";
+        assert_eq!(plain.matches(annot).count(), 1);
+        let go_on = plain.replace(annot, "");
+        let pssm =
+            crate::blastinput::pssm_text::read_pssm_with_parameters(go_on.as_bytes()).unwrap();
+        let refusal = psi_search_of(pssm).unwrap_err().to_string();
+        assert!(refusal.contains("whose Seq-data is ncbi8aa"), "{refusal}");
+        // Two Seq-ids of one handle (GenBank and EMBL share an accession alone): NCBI's exception
+        // with the spelling of the handle's first Seq-id (`r5/out_ids5/ncbi/ps.one_emb_gb`).
+        let two = |ids: &str, database: bool| {
+            let text = go_on
+                .replace("seq-data ncbi8aa", "seq-data ncbistdaa")
+                .replace("local str \"Query_1\"", ids);
+            let pssm =
+                crate::blastinput::pssm_text::read_pssm_with_parameters(text.as_bytes()).unwrap();
+            let reader = PssmReader {
+                database,
+                ..PssmReader::PSIBLAST
+            };
+            psi_search_and_object(pssm, reader).map(|(search, _)| {
+                search
+                    .annot
+                    .abort
+                    .as_ref()
+                    .map_or_else(String::new, |abort| abort.message.clone())
+            })
+        };
+        let ids = "embl { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\", version 1 }";
+        let error = two(ids, true).unwrap();
+        assert!(
+            error.contains("duplicate Bioseq id emb|AAA00001.1| present in\n  seq1: emb|AAA00001.1| | emb|AAA00001.1|\n  seq2: emb|AAA00001.1| | emb|AAA00001.1|\n"),
+            "{error}"
+        );
+        let refusal = two(ids, false).unwrap_err().to_string();
+        assert!(
+            refusal.contains("may write as a subject record spelled it"),
+            "{refusal}"
+        );
+        // Two versions are two handles: no exception.
+        let error = two(
+            "genbank { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\" }",
+            true,
+        );
+        assert!(!error.unwrap_or_default().contains("duplicate Bioseq id"));
+    }
+
+    #[test]
+    fn the_object_managers_stop_comes_before_the_pssms_values() {
+        let text = String::from_utf8(gunzip("pssm/d3om_t04_dup_partial_id.asn.gz")).unwrap();
+        let variant = |from: &str, to: &str| {
+            assert_eq!(text.matches(from).count(), 1, "{from}");
+            text.replace(from, to)
+        };
+        let local = "local str \"Query_1\"";
+        for (name, pssm) in [
+            ("t04", text.clone()),
+            ("dims", variant("numColumns 30,", "numColumns 31,")),
+            (
+                "range",
+                variant(
+                    "scores {\n        -32768,\n        -1,",
+                    "scores {\n        -32768,\n        40000,",
+                ),
+            ),
+            ("neglambda", variant("{ 267, 10, -3 }", "{ -267, 10, -3 }")),
+            (
+                "ids",
+                variant(local, "local str \"Query_1\",\n        gi 5"),
+            ),
+            ("noid", variant(&format!("{local}\n"), "")),
+            ("emptylocal", variant(local, "local str \"\"")),
+            ("textnoacc", variant(local, "genbank { version 1 }")),
+            ("molna", variant("mol aa,", "mol na,")),
+            ("letters", variant("length 30,", "length 31,")),
+        ] {
+            let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(pssm.as_bytes())
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            let reader = PssmReader {
+                strategy: true,
+                database: true,
+                ..PssmReader::PSIBLAST
+            };
+            let (search, file) = psi_search_and_object(pssm, reader)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert!(search.annot.abort.is_some(), "{name}");
+            assert!(search.request.is_none(), "{name}");
+            assert!(search.refuse_request_members("PSIBLAST").is_ok(), "{name}");
+            assert!(!file.valid, "{name}");
+        }
+    }
+
     // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot
     // Seq-id, read (line RG Q1b; NCBI BLAST+ 2.17.0 psiblast: `Query= P01013 Gene X protein
     // (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query
@@ -1530,34 +1956,32 @@ mod tests {
     fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         use crate::algorithm::pssm_search::PssmQueryStop;
         let read = |name: &str| {
-            crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&gunzip(name))
-                .unwrap()
+            crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(name)).unwrap()
         };
         let reader = |matrix_name, request| PssmReader {
             program: "TBLASTN",
             matrix_name,
             strategy: request,
             database: true,
+            archive: None,
         };
         // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
         // and the file the engine's scores (`with_computed_scores`).
-        let (as_read, skipped) = read("pssm/ps5_ratio30_noparams.asn.gz");
+        let as_read = read("pssm/ps5_ratio30_noparams.asn.gz");
         assert!(as_read.pssm.final_data.is_none());
         let (search, file) =
-            psi_search_and_object(as_read.clone(), skipped.clone(), reader("BLOSUM62", true))
-                .unwrap();
+            psi_search_and_object(as_read.clone(), reader("BLOSUM62", true)).unwrap();
         assert_eq!(*search.request_pssm().unwrap(), as_read);
         assert!(file.object.pssm.final_data.is_some() && file.valid);
         assert_eq!(search.stop_before_search(true, true), None);
         // Without a request (no strategy, or `-subject`): no copy.
         let (search, _) =
-            psi_search_and_object(as_read.clone(), skipped.clone(), reader("BLOSUM62", false))
-                .unwrap();
+            psi_search_and_object(as_read.clone(), reader("BLOSUM62", false)).unwrap();
         assert!(search.request.is_none());
         // A matrix without 11/1: the engine's error comes after the request (review 4 R5-1), the
         // strategy's "Remote PSI-BL2SEQ" before it, and without the strategy the error alone.
         let (search, file) =
-            psi_search_and_object(as_read.clone(), skipped, reader("BLOSUM45", true)).unwrap();
+            psi_search_and_object(as_read.clone(), reader("BLOSUM45", true)).unwrap();
         assert_eq!(*search.request_pssm().unwrap(), as_read);
         assert!(!file.valid);
         let scores = PssmQueryStop::Scores(
@@ -1570,8 +1994,8 @@ mod tests {
             Some(PssmQueryStop::Bl2seq)
         );
         // NCBI's check of the PSSM: no request.
-        let (scaled, skipped) = read("pssm/ps4_rnd_scaled.asn.gz");
-        let (search, _) = psi_search_and_object(scaled, skipped, reader("BLOSUM62", true)).unwrap();
+        let scaled = read("pssm/ps4_rnd_scaled.asn.gz");
+        let (search, _) = psi_search_and_object(scaled, reader("BLOSUM62", true)).unwrap();
         assert!(search.request.is_none());
         assert!(matches!(
             search.stop_before_search(true, true),
@@ -1581,12 +2005,11 @@ mod tests {
             search.stop_before_search(true, false),
             Some(PssmQueryStop::Bl2seq)
         );
-        // Members the reader skipped: the request keeps them for the refusal made once the
-        // database is opened.
-        let (comment, skipped) = read("pssm/ps5_rnd_comment.asn.gz");
-        assert!(!skipped.is_empty());
-        let (search, _) =
-            psi_search_and_object(comment, skipped, reader("BLOSUM62", true)).unwrap();
+        // Members the PSSM writer does not write yet: the request keeps them for the refusal made
+        // once the database is opened.
+        let comment = read("pssm/ps5_rnd_comment.asn.gz");
+        assert_eq!(comment.unwritten_members(), ["Seqdesc"]);
+        let (search, _) = psi_search_and_object(comment, reader("BLOSUM62", true)).unwrap();
         let refusal = search
             .refuse_request_members("TBLASTN")
             .unwrap_err()
@@ -1684,14 +2107,21 @@ mod tests {
             pssm.pssm.num_columns = columns as i32;
             pssm.pssm.intermediate_data = None;
             pssm.pssm.final_data.as_mut().unwrap().scores = vec![i32::from(i16::MAX); 28 * columns];
-            let inst = &mut pssm.pssm.query.as_mut().unwrap().inst;
-            inst.length = Some(columns as i32);
+            let inst = &mut pssm
+                .pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .inst;
+            inst.length = Some(columns as u32);
             match inst.seq_data.as_mut().unwrap() {
                 SeqData::Iupacaa(letters)
                 | SeqData::Ncbieaa(letters)
                 | SeqData::Ncbistdaa(letters) => {
                     *letters = vec![letters[0]; columns];
                 }
+                SeqData::Other(_) => unreachable!("the test's PSSM is NCBIstdaa"),
             }
             psi_search_of(pssm)
         };
@@ -1709,8 +2139,17 @@ mod tests {
     fn query_titles_that_ncbi_reads_two_ways_are_refused() {
         let with_titles = |titles: &[&[u8]]| {
             let mut pssm = rnd();
-            pssm.pssm.query.as_mut().unwrap().titles =
-                Some(titles.iter().map(|title| title.to_vec()).collect());
+            pssm.pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .descr = Some(
+                titles
+                    .iter()
+                    .map(|title| Seqdesc::Title(title.to_vec()))
+                    .collect(),
+            );
             psi_search_of(pssm).map(|search| search.query.title)
         };
         assert_eq!(with_titles(&[b"rnd random"]).unwrap(), b"rnd random");
@@ -1729,10 +2168,28 @@ mod tests {
     // `PS/tmp/rev5b`, `d.*` and `m.molinfo*`); the record keeps the title for the reports.
     #[test]
     fn the_warning_title_is_the_query_sources() {
-        let warning = |title: &[u8], skipped: Vec<&'static str>| {
+        // A descriptor other than a title, of the variant `name` (its value does not matter here).
+        let other = |name: &str| {
+            let index = crate::report::serial::asn_types::member_index(
+                crate::report::serial::asn_types::table::named::SEQDESC,
+                name,
+            );
+            Seqdesc::Other(Value::Choice(index as u16, Box::new(Value::Null)))
+        };
+        let warning = |title: &[u8], others: Vec<&'static str>| {
             let mut pssm = rnd();
-            pssm.pssm.query.as_mut().unwrap().titles = Some(vec![title.to_vec()]);
-            let (search, _) = psi_search_and_object(pssm, skipped, PssmReader::PSIBLAST).unwrap();
+            let mut descr = vec![Seqdesc::Title(title.to_vec())];
+            descr.extend(others.into_iter().map(|name| match name {
+                "Seqdesc" => other("comment"),
+                name => other(name),
+            }));
+            pssm.pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .descr = Some(descr);
+            let (search, _) = psi_search_and_object(pssm, PssmReader::PSIBLAST).unwrap();
             assert_eq!(search.query.title, title);
             search.warning_title.unwrap()
         };
@@ -1742,6 +2199,45 @@ mod tests {
         assert_eq!(warning(b".", vec![]), b"");
         assert_eq!(warning(b"rnd random", vec!["Seqdesc"]), b"rnd random");
         assert_eq!(warning(b"rnd random", vec!["Seqdesc", "molinfo"]), b"");
+    }
+
+    // Line RG D3-1 (`om/` cases i01, m03): annotations without objects give NCBI's object manager
+    // nothing to index; the search keeps no message (`annot_index` has the other cases).
+    #[test]
+    fn empty_annotations_give_no_messages() {
+        use crate::report::serial::asn_types::{member_index, members, table::named};
+        let data = member_index(named::SEQ_ANNOT, "data");
+        let kinds = members(named::SEQ_ANNOT)[data].ty;
+        let with_annot = |kinds_of_data: &[&str]| {
+            let mut pssm = rnd();
+            pssm.pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .annot = Some(
+                kinds_of_data
+                    .iter()
+                    .map(|kind| {
+                        let variant = member_index(kinds, kind) as u16;
+                        Value::Sequence(vec![(
+                            data as u16,
+                            Value::Choice(variant, Box::new(Value::List(Vec::new()))),
+                        )])
+                    })
+                    .collect(),
+            );
+            psi_search_of(pssm)
+        };
+        for annot in [
+            &[][..],
+            &["ids"],
+            &["ftable", "align", "graph", "locs", "ids"],
+        ] {
+            let search = with_annot(annot).unwrap();
+            assert_eq!(search.annot, Default::default(), "{annot:?}");
+            assert!(!search.defline_reads_annot);
+        }
     }
 
     // The review of PS4a, S2 and N3: the record's local id is the Seq-id's `GetSeqIdString()`
@@ -1754,7 +2250,12 @@ mod tests {
             (ObjectId::Id(-3), "-3"),
         ] {
             let mut pssm = rnd();
-            pssm.pssm.query.as_mut().unwrap().ids = vec![ParsedSeqId::Local(id)];
+            pssm.pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .ids = vec![ParsedSeqId::Local(id)];
             let search = psi_search_of(pssm).unwrap();
             assert_eq!(search.query.local_id, shown);
             assert!(search.query.believed().is_none());
@@ -1795,7 +2296,12 @@ mod tests {
             ),
         ] {
             let mut pssm = rnd();
-            pssm.pssm.query.as_mut().unwrap().ids = ids.clone();
+            pssm.pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .ids = ids.clone();
             let search = psi_search_of(pssm).unwrap();
             for record in [search.query_record(false), search.query_record(true)] {
                 let believed = record.believed().expect("the ids are shown");
@@ -1845,13 +2351,6 @@ mod tests {
                 "an empty local id",
             ),
             (
-                vec![ParsedSeqId::General(Dbtag {
-                    db: b"my\x80db".to_vec(),
-                    tag: ObjectId::Id(5),
-                })],
-                "a byte outside the visible ASCII range",
-            ),
-            (
                 vec![ParsedSeqId::Other(crate::seqid::model::TextseqId {
                     release: Some(b"x".to_vec()),
                     ..Default::default()
@@ -1860,7 +2359,12 @@ mod tests {
             ),
         ] {
             let mut pssm = rnd();
-            pssm.pssm.query.as_mut().unwrap().ids = ids;
+            pssm.pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap()
+                .ids = ids;
             let error = psi_search_of(pssm).unwrap_err().to_string();
             assert!(error.contains(refusal), "{error}");
         }

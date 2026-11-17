@@ -29,8 +29,11 @@
 //! traceback reads them. A LOSAT_X_MBLUTKEEP table goes back to the batch loop's keep when the
 //! tables drop (`x_mb_lut_keep.rs`), as at the end of the batch before: the keep is zeroed and
 //! taken by the next build as before; what the traceback no longer holds is the rest (the chains,
-//! the PV array, and every table that is not kept). A batch split into query chunks has no table
-//! (its chunks' calls stop after their preliminary stage and drop theirs when they return).
+//! the PV array, and every table that is not kept). In the loop's last batch no build is left to
+//! take the kept table, so the keep frees it here too (`Keep::release`), and the last traceback
+//! holds no table, as NCBI's. A batch split into query chunks has no table (its chunks' calls stop
+//! after their preliminary stage and drop theirs when they return, before the batch reaches this
+//! point).
 //!
 //! Why the reports are the same. The tables are read only by the scan of the preliminary stage
 //! (`prelim_subject::prelim_chunk_hits`); the batch's values derived from them before the scan (the
@@ -50,20 +53,26 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::algorithm::blastn::coordination::LookupTables;
+use crate::algorithm::blastn::lookup::x_mb_lut_keep::Keep;
 
 // No NCBI counterpart: the batches whose tables were dropped before their traceback.
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
 /// The end of a batch's preliminary stage: the batch's tables are dropped here, where NCBI's
-/// traceback stage drops its table.
-pub(super) fn after_prelim(tables: LookupTables) {
+/// traceback stage drops its table, and the keep of the loop's last batch (`last_keep`: no build
+/// follows) frees its table.
+pub(super) fn after_prelim(tables: LookupTables, last_keep: Option<&Keep>) {
     if tables.two_stage_lookup.is_some()
         || tables.pv_direct_lookup.is_some()
         || tables.na_lookup.is_some()
     {
         DROPPED.fetch_add(1, Ordering::Relaxed);
     }
+    // The tables first: a kept table goes back to the keep when its table drops.
     drop(tables);
+    if let Some(keep) = last_keep {
+        keep.release();
+    }
 }
 
 /// No NCBI counterpart: with LOSAT_TIMING, the `[TIMING] x_bn_lut_drop` line `main` prints at

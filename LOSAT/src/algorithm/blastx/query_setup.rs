@@ -907,6 +907,7 @@ mod tests {
             warnings: vec![],
             source: None,
             around: None,
+            skipped: None,
         };
         assert_eq!(
             batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
@@ -934,6 +935,7 @@ mod tests {
             warnings: vec![],
             source: None,
             around: None,
+            skipped: None,
         };
         let records = [
             record(100),

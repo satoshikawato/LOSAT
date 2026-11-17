@@ -10,6 +10,8 @@ import type { RecordKey } from '../../domain/dataset.js';
 import { FileReadError, type StartResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
+/** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
+export const ABI_VERSION = 3;
 /** Stream 2: the JSON response of describe, register, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -19,6 +21,18 @@ export const INFLATED_STREAM = 5;
  * entries that the engine sends after the run, also when the run fails (ABI v2 §5; line RG E1w-3b).
  */
 export const RUN_FILES_STREAM = 8;
+/**
+ * Stream 9: a run's signal that the host discards what it received of an output stream, which
+ * failed alone after a chunk of it was sent (ABI v2 §5, §7; line RG T7-W). Each `emit` is one
+ * signal; `discardedStream` reads the stream's number from its bytes.
+ */
+export const DISCARD_STREAM = 9;
+
+/** The output stream that a signal of stream 9 discards: its 4 bytes, an unsigned 32-bit little-endian number. */
+export function discardedStream(bytes: Uint8Array): number {
+  if (bytes.length !== 4) throw new Error(`a signal of stream ${DISCARD_STREAM} has ${bytes.length} bytes, not 4`);
+  return new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
+}
 export const ROLE_QUERY = 0;
 export const ROLE_SUBJECT = 1;
 /** The kind of a named input file (`file_begin`, ABI v2 §4): a WindowMasker unit counts file, BLASTN's `-window_masker_db`. */

@@ -234,6 +234,7 @@ impl RpstblastnArgs {
             comp_based_stats: self.comp_based_stats.clone(),
             several_volumes: false,
             costs: None,
+            setup: None,
         })
     }
 
@@ -340,6 +341,7 @@ impl RpstblastnArgs {
             request_inputs,
             taxdb_setting: None,
             matrix_search: None,
+            first_query_ordinal: 0,
         })
     }
 

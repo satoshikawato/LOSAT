@@ -1022,13 +1022,13 @@ mod tests {
     // length, the sentinel walks of 2-letter words (`SENT` = 2).
     #[test]
     fn slices_of_2_letter_words_equal_scan_unit() {
-        use crate::algorithm::tblastx::scoring::MatrixScores;
+        use crate::algorithm::tblastx::scoring::MatrixScore;
         for (i, matrix) in [ScoringMatrix::Blosum62, ScoringMatrix::Pam30]
             .into_iter()
             .enumerate()
         {
-            let scores = MatrixScores::with_word(matrix, 2);
-            slices_check(scores.scorer(), 0x2b17_51ce_0000_0001 + i as u64);
+            let scores = MatrixScore::with_word(matrix, 2);
+            slices_check(scores, 0x2b17_51ce_0000_0001 + i as u64);
         }
     }
 

@@ -50,6 +50,8 @@ pub fn main_entry() -> Result<()> {
 }
 
 fn run_main_entry() -> Result<()> {
+    // The process's run: NCBI's application starts with a diagnostic stream that has not failed,
+    // the command line's (`ncbi_exception::main_diag_failbit`, `MainDiag`).
     // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
     // counterpart; it reads the clock only with LOSAT_TIMING.
     crate::utils::xtiming::start();

@@ -76,6 +76,10 @@ pub(crate) struct TranslatedRpsSearch {
     /// the search strategy's requests (`handle_sets`); set by `for_database` of a run that writes
     /// one.
     pub(crate) costs: Option<(String, i32, i32)>,
+    /// The set-up that checked the volumes in `for_database` (series PR, item PS12m): the run
+    /// maps them again for each batch with it (`RpsVolumeSetup::reopen`), which knows the volumes
+    /// whose cells were regrouped; set by `for_database`.
+    pub(crate) setup: Option<Arc<RpsVolumeSetup>>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -110,9 +114,11 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         }
         // The volumes' costs are read for the search strategy's requests only (`handle_sets`;
         // after volume files that failed NCBI's checks, `costs` opens the first volume's again).
+        let costs = strategy.then(|| setup.costs(volumes.first())).flatten();
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
-            costs: strategy.then(|| setup.costs(volumes.first())).flatten(),
+            costs,
+            setup: Some(Arc::new(setup)),
             ..self.clone()
         }))
     }
@@ -135,7 +141,9 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let processed = std::cell::Cell::new(0usize);
         let diagnostics = std::cell::RefCell::new(diagnostics);
         let volumes = RpsVolumeSet::of(database.x_seqdb());
-        let setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        let Some(setup) = self.setup.as_deref() else {
+            bail!("internal error: the volumes of {PROGRAM} were not set up");
+        };
         let lengths = database_lengths(database);
         // `-num_threads 0`: one thread for each volume (NCBI's "auto", as rpsblast's).
         let threads = if self.search.auto_threads {
@@ -178,7 +186,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     })
                     .collect();
                 let searched = self.search_window(
-                    &batches, options, database, &volumes, &setup, lengths, pool, &workers,
+                    &batches, options, database, &volumes, setup, lengths, pool, &workers,
                 );
                 replay(
                     &events,
@@ -928,6 +936,7 @@ mod tests {
             warnings: Vec::new(),
             source: None,
             around: None,
+            skipped: None,
         }
     }
 
@@ -1221,6 +1230,7 @@ mod tests {
             comp_based_stats: "0".to_string(),
             several_volumes: false,
             costs: None,
+            setup: None,
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;
@@ -1441,6 +1451,7 @@ mod tests {
             comp_based_stats: "0".to_string(),
             several_volumes: true,
             costs: None,
+            setup: None,
         };
         search.search.x_drop_gapped_bits = Some(1e9);
         let n_only = [record("n", &[b'N'; 210])];
@@ -1482,6 +1493,7 @@ mod tests {
             comp_based_stats: "0".to_string(),
             several_volumes: false,
             costs: None,
+            setup: None,
         };
         search.search.x_drop_ungapped_bits = Some(9e6);
         let repeat = b"TGGTGTTGC".repeat(20);

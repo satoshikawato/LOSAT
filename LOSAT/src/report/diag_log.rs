@@ -142,6 +142,14 @@ impl Posts {
         }
     }
 
+    /// The reads of the loads of a batch's prefetch among these posts (`loads`), in order.
+    pub fn load_reads(&self) -> impl Iterator<Item = &crate::report::query_warnings::SubjectRead> {
+        self.0.iter().flat_map(|post| match post {
+            Post::Loads(reads) => reads.as_slice(),
+            _ => &[],
+        })
+    }
+
     /// Adds one post of `severity` whose text is `text` (with its line feed).
     pub fn post(&mut self, severity: i32, text: impl Into<Vec<u8>>) {
         let text = text.into();
@@ -164,11 +172,23 @@ impl Posts {
     /// are written. The texts that the loads take from the run's loads left out are theirs from
     /// now on.
     pub fn placed(&self) -> Posts {
+        self.placed_in(None)
+    }
+
+    /// [`Posts::placed`] with the texts left out in `ledger` where it is given instead of the
+    /// run's (`query_warnings::SubjectRead::placed_in`: the model of the writers).
+    pub fn placed_in(
+        &self,
+        ledger: Option<&std::sync::Arc<crate::report::query_warnings::LoadTexts>>,
+    ) -> Posts {
         let mut posts = Posts::new();
         for post in &self.0 {
             match post {
                 Post::Loads(reads) => {
-                    let text: Vec<u8> = reads.iter().flat_map(|read| read.placed()).collect();
+                    let text: Vec<u8> = reads
+                        .iter()
+                        .flat_map(|read| read.placed_in(ledger))
+                        .collect();
                     posts.lines(&text);
                 }
                 Post::Lines(lines) => posts.lines(lines),
@@ -197,7 +217,6 @@ impl Posts {
     }
 
     /// What standard error shows of the posts.
-    #[cfg(test)]
     pub fn text(&self) -> Vec<u8> {
         let mut text = Vec::new();
         for post in &self.0 {

@@ -110,7 +110,8 @@ const fn x_fseed_on() -> bool {
 // LOSAT_BPF_S16 (0 = dev's loop; 1 = the first cells' bounds and hits read ahead before the copy;
 // 2 = the scan reads ahead the bound of each listed cell, the copy does not, and the first cells'
 // hits are read ahead before the copy; 3 = 2 without the first cells' hits; 4 = 0 with the copy
-// `x_lean_copy_tight`; 5 = 2 with the copy `x_lean_copy_tight`).
+// `x_lean_copy_tight`; 5 = 2 with the copy `x_lean_copy_tight`; 6 = 1 with the copy
+// `x_lean_copy_tight`).
 fn x_bpf_s16_arm() -> u8 {
     use std::sync::OnceLock;
     static ARM: OnceLock<u8> = OnceLock::new();
@@ -118,7 +119,7 @@ fn x_bpf_s16_arm() -> u8 {
         std::env::var("LOSAT_BPF_S16")
             .ok()
             .and_then(|v| v.parse().ok())
-            .filter(|&a: &u8| a <= 5)
+            .filter(|&a: &u8| a <= 6)
             .unwrap_or(0)
     })
 }
@@ -490,7 +491,19 @@ unsafe fn x_scan_flat_lean<const CALLER: u8, F>(
                 bf,
                 candidate,
             ),
-            _ => x_scan_flat_lean_arm::<CALLER, 5, F>(
+            5 => x_scan_flat_lean_arm::<CALLER, 5, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            ),
+            _ => x_scan_flat_lean_arm::<CALLER, 6, F>(
                 lookup,
                 subject,
                 subject_length,
@@ -536,11 +549,11 @@ unsafe fn x_scan_flat_lean_arm<const CALLER: u8, const ARM: u8, F>(
     crate::utils::xstats::add(&X_S16_COUNTS[2], u64::from(listed <= 16));
     crate::utils::xstats::add(&X_S16_COUNTS[3], u64::from(listed <= 64));
     cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
-    if ARM == 1 || ARM == 2 || ARM == 5 {
+    if ARM == 1 || ARM == 2 || ARM == 5 || ARM == 6 {
         // PROBE: the read-ahead of the copy's first cells, which its loop does not read ahead.
         let starts = &lookup.starts[..];
         let hits = &lookup.hits[..];
-        if ARM == 1 {
+        if ARM == 1 || ARM == 6 {
             for &(_, index) in &cells[..listed.min(X_STARTS_AHEAD)] {
                 x_prefetch_ptr(starts.as_ptr().wrapping_add(index as usize));
                 x_prefetch_ptr(starts.as_ptr().wrapping_add(index as usize + 1));
@@ -572,7 +585,7 @@ unsafe fn x_scan_flat_lean_arm<const CALLER: u8, const ARM: u8, F>(
     loop {
         // SAFETY: the list's indices are below 15^word length < starts.len() - 1 (x_pairs_fit),
         // and `cells` holds X_STARTS_AHEAD entries past them (above).
-        let staged = if ARM == 4 {
+        let staged = if ARM == 4 || ARM == 6 {
             unsafe {
                 x_lean_copy_tight::<true>(&cells, listed, starts, hits, diffs, heres, bf, &mut at)
             }

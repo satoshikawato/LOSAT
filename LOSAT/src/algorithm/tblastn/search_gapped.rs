@@ -2286,6 +2286,40 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
     usize::try_from(position as isize - base).ok()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
+// c++/src/algo/blast/core/blast_hits.c:1161-1163,1233-1234
+// ```c
+//       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
+// ...
+//     /* skip translation if full translation has already been done */
+//     if (target_t->partial && (start ||
+//         (stop < target_t->subject_blk->length / CODON_LENGTH -3)))
+// ...
+//     /* +1 as the first byte is a sentinel. */
+//     return target_t->translations[context] - target_t->range[2*context] + 1;
+// ```
+// NCBI skips the translation of a subject (its searched range, `-subject_loc`) of fewer than 12
+// bases (`stop < n / 3 - 3` is false) and returns the frame's translation that was never made:
+// NULL + 1. Every caller reads from there next: the traceback's gapped start and ALIGN_EX
+// (blast_traceback.c:429-440,509-512), the identities after the composition-based redo
+// (blast_kappa.c:527-528, after its E-value purge, :3677-3700), the ungapped re-evaluation
+// (blast_hits.c:2700-2705; LOSAT's TBLASTN refuses `-ungapped`). NCBI BLAST+ 2.17.0 dies there with
+// SIGSEGV (probes on ws, 2026-11-17: `-subject`, `-subject_loc` and `-db`, frames + and -, a matrix
+// query at `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS
+// 1.46, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or
+// the hit list; at the default word size 3, any of 9 or 10 bases in the probes; with `-word_size 2`
+// they reach it too) lets the search go on, in NCBI and LOSAT alike.
+/// The refusal of a read of the translation of a frame of a subject of fewer than 12 bases
+/// (`TargetTranslation::get`): NCBI BLAST+ never makes that translation and reads from address 1
+/// on (NULL + 1).
+#[cold]
+#[inline(never)]
+fn x_traceback_of_an_untranslated_frame() -> anyhow::Error {
+    anyhow::anyhow!(
+        "TBLASTN: the traceback of an alignment on a subject (or its -subject_loc range) of fewer than 12 bases, where NCBI BLAST+ reads the translation of the subject's frame, which it never makes for a subject this short, and crashes; LOSAT does not support it"
+    )
+}
+
 pub(super) struct TargetTranslation<'a> {
     subject: SubjectNt<'a>,
     code: &'a GeneticCode,
@@ -2435,6 +2469,12 @@ impl<'a> TargetTranslation<'a> {
                     0
                 };
             }
+        } else if target.sequence.is_empty() {
+            // NCBI blast_hits.c:1161-1163,1233-1234: the frame never translated, NULL + 1
+            // (`x_traceback_of_an_untranslated_frame`). Only a subject of fewer than 12 bases skips
+            // the first translation; every translation leaves at least its closing byte.
+            debug_assert!(n / 3 <= 3, "an empty translation of a subject of {n} bases");
+            return Err(x_traceback_of_an_untranslated_frame());
         }
         Ok((&target.sequence, target.stop, target.base))
     }
@@ -2471,7 +2511,8 @@ impl<'a> TargetTranslation<'a> {
     /// the translation's ends), as (residues, the whole translation's length, the subject position
     /// of the first byte). The residues end as the whole translation does where the window
     /// reaches its ends (no byte before its first residue, a 0 after its last) and with a fence
-    /// elsewhere. A subject of fewer than 12 letters gives what `get(frame, -1, end)` gives.
+    /// elsewhere. A subject of fewer than 12 letters gives what `get(frame, -1, end)` gives (its
+    /// refusal, `x_traceback_of_an_untranslated_frame`).
     pub(super) fn x_whole_window(
         &mut self,
         frame: i8,
@@ -2482,7 +2523,7 @@ impl<'a> TargetTranslation<'a> {
         debug_assert!(margin >= HSP_MAX_WINDOW, "margin {margin}");
         let n = self.subject.len();
         // `get` translates nothing for a subject of fewer than 12 letters (`stop < n / 3 - 3` is
-        // `0 < 0`) and gives an empty window, as it did after a fence.
+        // false) and refuses the read, as after a fence.
         if n / 3 <= 3 {
             return self.get(frame, -1, end);
         }
@@ -5719,16 +5760,36 @@ mod tests {
         for frame in [1, 2, 3, -1, -2, -3] {
             let mut whole = TargetTranslation::new(&short, &code);
             let mut windows = TargetTranslation::new(&short, &code);
-            let expected = whole
-                .get(frame, -1, 2)
-                .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
-                .unwrap();
+            let expected = whole.get(frame, -1, 2).map(|_| ()).unwrap_err().to_string();
             let got = windows
                 .x_whole_window(frame, 0, 2, HSP_MAX_WINDOW)
-                .map(|(sequence, stop, base)| (sequence.to_vec(), stop, base))
-                .unwrap();
+                .map(|_| ())
+                .unwrap_err()
+                .to_string();
             assert_eq!(got, expected, "frame {frame}");
-            assert_eq!(got, (Vec::new(), 0, 0), "frame {frame}");
+            assert_eq!(
+                got,
+                x_traceback_of_an_untranslated_frame().to_string(),
+                "frame {frame}"
+            );
+            // A partial window of the HSP refuses too (NCBI's `subject.offset >= 0` takes the same
+            // skip).
+            let partial = windows
+                .get(frame, 0, 2)
+                .map(|_| ())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(partial, expected, "frame {frame}");
+        }
+        // The bound: NCBI translates a subject of 12 bases (`0 < 12 / 3 - 3`), none shorter.
+        for n in 1..=12 {
+            let subject = vec![b'A'; n];
+            for frame in [1, 2, 3, -1, -2, -3] {
+                let read = TargetTranslation::new(&subject, &code)
+                    .get(frame, 0, 1)
+                    .is_ok();
+                assert_eq!(read, n == 12, "{n} bases, frame {frame}");
+            }
         }
     }
 

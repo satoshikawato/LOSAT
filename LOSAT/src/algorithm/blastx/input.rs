@@ -3281,9 +3281,9 @@ mod stream_tests {
             } else {
                 &[false, true][..]
             } {
-                let temporary = std::env::temp_dir().join(format!(
+                let temporary = crate::utils::test_dir::temp_dir().join(format!(
                     "losatx-e-stream-unit-{}-{}",
-                    std::process::id(),
+                    crate::utils::test_dir::process_id(),
                     fields[0]
                 ));
                 let input: Box<dyn NativeRead> = if file_backend {
@@ -3943,9 +3943,9 @@ mod query_settings_tests {
 
     /// The directory of this test's files (removed at its end).
     fn dir() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
+        crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-query-settings-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ))
     }
 

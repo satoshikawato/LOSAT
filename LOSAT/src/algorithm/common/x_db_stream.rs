@@ -890,6 +890,10 @@ mod tests {
     /// Threads that ask for the same sequences at once read each block once: the one that comes
     /// first reads it, and the others wait for that read or take what it holds.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn threads_that_ask_together_read_each_block_once() {
         let db = nucleotides("nucl_v5");
         let stream = stream_of(&db, 4, 256);
@@ -915,6 +919,10 @@ mod tests {
     /// and read about one block each per pass. It is a limit, not the number: a thread held up
     /// after it took its sequence reads a block again when the others have let it go.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn threads_that_take_the_next_sequence_read_each_block_about_once() {
         let db = nucleotides("nucl_v5");
         let stream = stream_of(&db, 4, 256);
@@ -1085,6 +1093,10 @@ mod tests {
 
     /// A thread that asks while another reads waits for that read, and takes its value.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn a_shared_read_is_waited_for() {
         let reads = XSharedReads::<u32>::new();
         let (started, asked) = (Barrier::new(2), Barrier::new(2));
@@ -1109,6 +1121,7 @@ mod tests {
     /// A read that fails or unwinds frees its key: the next thread reads, and nobody is left
     /// waiting.
     #[test]
+    #[cfg_attr(panic = "abort", ignore = "catches a panic: the build aborts on panic")]
     fn a_failed_read_leaves_the_next_thread_to_read() {
         let reads = XSharedReads::<u32>::new();
         let error = reads.read_once(1, || anyhow::bail!("no")).unwrap_err();
@@ -1123,6 +1136,10 @@ mod tests {
 
     /// A thread that waits for a read that fails makes the read itself, whenever it comes.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn a_failed_read_wakes_the_thread_that_waits_for_it() {
         let reads = XSharedReads::<u32>::new();
         let started = Barrier::new(2);
@@ -1156,8 +1173,10 @@ mod tests {
     /// a test that damages them.
     fn copied(name: &str, tag: &str) -> std::path::PathBuf {
         let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
-        let dir =
-            std::env::temp_dir().join(format!("losat-x-db-stream-{tag}-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-x-db-stream-{tag}-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         for entry in std::fs::read_dir(&from).unwrap() {
             let path = entry.unwrap().path();
@@ -1229,6 +1248,10 @@ mod tests {
     /// and for a sequence alone, with NCBI's read error and with LOSAT's refusal; the other blocks
     /// are read.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn a_read_that_fails_fails_the_reader_and_the_threads_that_wait() {
         let db = nucleotides("nucl_v4");
         for max_bytes in [0, 64] {

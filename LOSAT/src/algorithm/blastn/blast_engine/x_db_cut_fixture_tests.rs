@@ -60,9 +60,9 @@ fn pieces(first: usize, count: usize) -> Vec<u8> {
 /// A nucleotide database of `pieces(first, count)` made by `run_makeblastdb`; returns the
 /// directory (to remove) and the database name.
 fn database(label: &str, first: usize, count: usize) -> (PathBuf, String) {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat-bndbcut-fixture-{label}-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

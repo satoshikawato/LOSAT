@@ -808,10 +808,20 @@ struct XPairRow {
     merge: Mutex<XPairMerge>,
 }
 
-/// The state of a row's merge between its groups.
+/// The state of a row's merge between its groups: `next[i]` the rank j of row i's next pair,
+/// `keys[i]` the key of that pair while row i is a candidate of the merge (`XPairRow::make`), else
+/// `i32::MIN`, `made` the groups made.
 struct XPairMerge {
     next: [u8; X_PAIR_ALPHABET],
+    keys: [i32; X_PAIR_ALPHABET + 1],
     made: u8,
+}
+
+/// The merge's key of pair (i, j) of sum `sum` (`XPairRow::make`): the sum, then the smaller i, in
+/// one i32 (the sums lie in i16, below 15 rows).
+#[inline(always)]
+fn x_pair_key(sum: i32, i: usize) -> i32 {
+    (sum << 4) | (X_PAIR_ALPHABET - i) as i32
 }
 
 impl XPairRow {
@@ -820,17 +830,35 @@ impl XPairRow {
     /// the last group made. `next[i]` is the rank j of row i's next pair. Row i's next pair is the
     /// next of the merge only when row i - 1 has gone past j (`next[i - 1] > next[i]`): else (i - 1,
     /// next[i - 1]) has a sum at least as large and comes first on a tie (the smaller k), so `next`
-    /// never increases with i and the candidates are the rows up to the first with `next[i] == 0`;
-    /// among them the largest sum, the smallest i on a tie, is the next pair. One thread at a time
-    /// (`merge`); a group is read only once it is set.
+    /// never increases with i. These candidates hold their pair's key (`x_pair_key`: the sum, then
+    /// the smaller i) in `keys`, the other rows `i32::MIN`, and the largest key is the next pair.
+    /// Taking (i, j) changes only rows i (its next pair, or no candidate once row i - 1's next is
+    /// j + 1 or its pairs end) and i + 1 (a candidate once row i passes its next rank j). One thread
+    /// at a time (`merge`); a group is read only once it is set.
     #[cold]
     #[inline(never)]
     fn make(&self, table: &XPairTable, g: usize) -> &XPairGroup {
         let mut merge = self.merge.lock().unwrap_or_else(PoisonError::into_inner);
+        let merge = &mut *merge;
         let alphabet = table.alphabet;
         let (a, b) = (usize::from(self.a), usize::from(self.b));
         let row_a = &table.matrix_sorted[a][..alphabet];
         let row_b = &table.matrix_sorted[b][..alphabet];
+        let made = merge.made;
+        if made == 0 {
+            // Every sum of the row lies between its first and last pair's (the rows are sorted):
+            // `x_pair_table` checked them for the letters inside the compressed alphabet, the only
+            // rows `XWords` reads; here for this row, so the keys and sums below fit.
+            let (high, low) = (
+                row_a[0] + row_b[0],
+                row_a[alphabet - 1] + row_b[alphabet - 1],
+            );
+            assert!(
+                low > i32::from(i16::MIN) && high <= i32::from(i16::MAX),
+                "the pair sums {low}..={high} of letters ({a}, {b}) leave the pair table's i16"
+            );
+            merge.keys[0] = x_pair_key(high, 0);
+        }
         while usize::from(merge.made) <= g {
             let first = usize::from(merge.made) * X_PAIR_GROUP;
             let end = (first + X_PAIR_GROUP).min(alphabet * alphabet);
@@ -839,30 +867,21 @@ impl XPairRow {
                 codes: [0; X_PAIR_GROUP],
             };
             for slot in 0..end.saturating_sub(first) {
-                let (mut best, mut best_sum) = (0usize, i32::MIN);
-                for i in 0..alphabet {
-                    let j = usize::from(merge.next[i]);
-                    if j < alphabet && (i == 0 || usize::from(merge.next[i - 1]) > j) {
-                        let sum = row_a[i] + row_b[j];
-                        if sum > best_sum {
-                            best = i;
-                            best_sum = sum;
-                        }
-                    }
-                    if j == 0 {
-                        break;
-                    }
+                let key = merge.keys.iter().fold(i32::MIN, |max, &key| max.max(key));
+                let i = X_PAIR_ALPHABET - (key & 15) as usize;
+                let j = usize::from(merge.next[i]);
+                merge.next[i] = j as u8 + 1;
+                merge.keys[i] =
+                    if j + 1 < alphabet && (i == 0 || usize::from(merge.next[i - 1]) > j + 1) {
+                        x_pair_key(row_a[i] + row_b[j + 1], i)
+                    } else {
+                        i32::MIN
+                    };
+                if i + 1 < alphabet && usize::from(merge.next[i + 1]) == j {
+                    merge.keys[i + 1] = x_pair_key(row_a[i + 1] + row_b[j], i + 1);
                 }
-                let j = usize::from(merge.next[best]);
-                merge.next[best] += 1;
-                // `x_pair_table` checked the sums of the letters inside the compressed alphabet,
-                // the only rows `XWords` reads.
-                assert!(
-                    best_sum > i32::from(i16::MIN) && best_sum <= i32::from(i16::MAX),
-                    "a pair sum {best_sum} of letters ({a}, {b}) outside the pair table's i16"
-                );
-                group.sums[slot] = best_sum as i16;
-                group.codes[slot] = table.matrix_sorted_char[a][best]
+                group.sums[slot] = (key >> 4) as i16;
+                group.codes[slot] = table.matrix_sorted_char[a][i]
                     + alphabet as u8 * table.matrix_sorted_char[b][j];
             }
             let at = usize::from(merge.made);
@@ -871,9 +890,8 @@ impl XPairRow {
                 "a pair group made twice"
             );
             merge.made += 1;
-            X_PAIR_GROUPS_MADE.fetch_add(1, Ordering::Relaxed);
         }
-        drop(merge);
+        X_PAIR_GROUPS_MADE.fetch_add(u64::from(merge.made - made), Ordering::Relaxed);
         self.groups[g].get().expect("made above")
     }
 
@@ -930,6 +948,7 @@ impl XPairTable {
                 groups: [const { std::sync::OnceLock::new() }; X_PAIR_GROUPS],
                 merge: Mutex::new(XPairMerge {
                     next: [0; X_PAIR_ALPHABET],
+                    keys: [i32::MIN; X_PAIR_ALPHABET + 1],
                     made: 0,
                 }),
             })

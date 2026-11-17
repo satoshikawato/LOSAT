@@ -67,7 +67,7 @@ from frozen_allowlist import Allowlist  # noqa: E402
 PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "rpsblast", "rpstblastn")
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")  # the programs of fasta_input_fixtures.py
 OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
-DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each)
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each, and row family files)
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db`, `tblastx -db` and `psiblast -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
-LOSAT/tests/db_search_manifest/<program>.tsv (one file per program, read by `read_manifest`, which
-returns the rows in the order of `PROGRAMS`, then the order of each file; README.md there) lists the rows (columns: row_id, program, kind, db, query, extra_args,
+LOSAT/tests/db_search_manifest/<program>.tsv (one file per program, and <program>.<family>.tsv for a row family
+with its own file, `family_files`; read by `read_manifest`, which returns the rows in the order of `PROGRAMS`, each
+program's file before its family files, then the order of each file; README.md there) lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
 master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
@@ -85,7 +86,7 @@ TESTS = ENGINE / "tests"
 sys.path.insert(0, str(TESTS))
 import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
 
-MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS
+MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS, <program>.<family>.tsv
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
@@ -104,37 +105,68 @@ ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHI
 
 
 def manifest_file(program: str) -> Path:
-    """The file of a program's rows."""
+    """The file of a program's rows, but those of its row families that have their own file."""
     return MANIFEST / f"{program}.tsv"
 
 
+def row_family(row_id: str) -> str:
+    """The family of a row: the second word of its id (`db.ldo.bp.before.0` is a row of `ldo`)."""
+    words = row_id.split(".")
+    return words[1] if len(words) > 1 else ""
+
+
+def family_files(program: str) -> dict[str, Path]:
+    """The row families of `program` that have their own file `<program>.<family>.tsv` (a file over
+    512 KiB moves a family there, `check_manifest_sizes.py`), by family, in the order of their names."""
+    return {path.name[len(program) + 1:-len(".tsv")]: path for path in sorted(MANIFEST.glob(f"{program}.*.tsv"))}
+
+
+def program_files(program: str) -> list[Path]:
+    """The files of `program`'s rows in the order `read_manifest` reads them: its file, then its family files."""
+    return [manifest_file(program), *family_files(program).values()]
+
+
+def row_file(row: dict[str, str], families: dict[str, Path]) -> Path:
+    """The one file of `row`: its family's own file where its program has one (`families`, of
+    `family_files`), else its program's file. `read_manifest` checks it and `write_manifest` writes there."""
+    return families.get(row_family(row["row_id"]), manifest_file(row["program"]))
+
+
 def read_manifest() -> tuple[dict[str, list[str]], list[dict[str, str]]]:
-    """The comment lines of each program's file (by program) and all rows: the programs in the order
-    of `PROGRAMS`, each file's rows in its order. A row in the file of another program is an error."""
-    comments: dict[str, list[str]] = {program: [] for program in PROGRAMS}
+    """The comment lines of each file (by file name) and all rows: the programs in the order of
+    `PROGRAMS`, each program's file first, then its family files (`family_files`), each file's rows
+    in its order. A row in the file of another program, or in another file of its program than its
+    own (`row_file`), is an error."""
+    comments: dict[str, list[str]] = {}
     rows: list[dict[str, str]] = []
     for program in PROGRAMS:
-        path = manifest_file(program)
-        if not path.exists():
+        if not manifest_file(program).exists():
             # A missing file would drop its rows from every check without notice.
-            raise SystemExit(f"{MANIFEST.name}/{path.name}: missing (every program in PROGRAMS has a file)")
-        header: list[str] = []
-        for line in path.read_text().split("\n"):
-            if line.startswith("#"):
-                comments[program].append(line)
-            elif line and not header:
-                header = line.split("\t")
-                if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
-                    raise SystemExit(f"{path.name}: unexpected header {line!r}")
-            elif line:
-                cells = line.split("\t")
-                if not len(COLUMNS) <= len(cells) <= len(header):
-                    raise SystemExit(f"{path.name}: {len(cells)} cells in {line[:60]!r}")
-                row = {column: "" for column in header}
-                row.update(zip(header, cells))
-                if row["program"] != program:
-                    raise SystemExit(f"{path.name}: the row {row['row_id']} is a {row['program']!r} row")
-                rows.append(row)
+            raise SystemExit(f"{MANIFEST.name}/{manifest_file(program).name}: missing (every program in PROGRAMS"
+                             " has a file)")
+        families = family_files(program)
+        for path in program_files(program):
+            comments[path.name] = []
+            header: list[str] = []
+            for line in path.read_text().split("\n"):
+                if line.startswith("#"):
+                    comments[path.name].append(line)
+                elif line and not header:
+                    header = line.split("\t")
+                    if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
+                        raise SystemExit(f"{path.name}: unexpected header {line!r}")
+                elif line:
+                    cells = line.split("\t")
+                    if not len(COLUMNS) <= len(cells) <= len(header):
+                        raise SystemExit(f"{path.name}: {len(cells)} cells in {line[:60]!r}")
+                    row = {column: "" for column in header}
+                    row.update(zip(header, cells))
+                    if row["program"] != program:
+                        raise SystemExit(f"{path.name}: the row {row['row_id']} is a {row['program']!r} row")
+                    if row_file(row, families) != path:
+                        raise SystemExit(f"{path.name}: the row {row['row_id']} belongs in "
+                                         f"{row_file(row, families).name}")
+                    rows.append(row)
     return comments, rows
 
 
@@ -153,19 +185,21 @@ def header_cells(rows: list[dict[str, str]]) -> list[str]:
 
 
 def write_manifest(comments: dict[str, list[str]], rows: list[dict[str, str]]) -> None:
-    """Write each program's file: its comment lines, the header (the `files` columns when some row of
-    any program has them, so the files keep one header) and its rows. A file whose text is the same is left alone."""
+    """Write each file: its comment lines (`comments`, by file name), the header (the `files` columns
+    when some row of any program has them, so the files keep one header) and its rows (`row_file`).
+    A file whose text is the same is left alone."""
     header = "\t".join(header_cells(rows))
     MANIFEST.mkdir(exist_ok=True)
     for program in PROGRAMS:
-        own = [row for row in rows if row["program"] == program]
-        if not own and not manifest_file(program).exists():
-            continue
-        lines = comments.get(program, []) + [header] + ["\t".join(row_cells(row)) for row in own]
-        text = "\n".join(lines) + "\n"
-        path = manifest_file(program)
-        if not path.exists() or path.read_text() != text:
-            path.write_text(text)
+        families = family_files(program)
+        for path in program_files(program):
+            own = [row for row in rows if row["program"] == program and row_file(row, families) == path]
+            if not own and not path.exists():
+                continue
+            lines = comments.get(path.name, []) + [header] + ["\t".join(row_cells(row)) for row in own]
+            text = "\n".join(lines) + "\n"
+            if not path.exists() or path.read_text() != text:
+                path.write_text(text)
 
 
 def extra_tokens(row: dict[str, str]) -> list[str]:

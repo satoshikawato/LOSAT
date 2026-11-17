@@ -3,10 +3,12 @@
 
 No NCBI counterpart: this checks the size of LOSAT's own fixture lists, not ported behavior.
 
-The `-db` fixture rows are one file per program (db_search_manifest/<program>.tsv). The rule
-"no committed file over about 1 MB without the Owner's consent" would stop every line that adds
-rows once a file nears it, so a file that passes 512 KiB fails here: split its rows by family into
-more files (and teach the loader `db_search_fixtures.py` their names) before it grows further.
+The `-db` fixture rows are one file per program (db_search_manifest/<program>.tsv), but the row
+families moved to their own file (<program>.<family>.tsv: the rows `db.<family>.*` of that program,
+`db_search_fixtures.family_files`). The rule "no committed file over about 1 MB without the Owner's
+consent" would stop every line that adds rows once a file nears it, so a file that passes 512 KiB
+fails here: move a row family of it to its own file before it grows further (the loader reads
+every such file; no other change is needed).
 
 Usage: python3 LOSAT/tests/check_manifest_sizes.py --root .
 """
@@ -38,8 +40,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     big = oversized(directory)
     for name, size in big:
-        print(f"{MANIFEST_DIR.as_posix()}/{name}\t{size} bytes\tover {LIMIT}: split the file by row family "
-              f"(and teach db_search_fixtures.py the new files)")
+        print(f"{MANIFEST_DIR.as_posix()}/{name}\t{size} bytes\tover {LIMIT}: move a row family to its own "
+              f"file, <program>.<family>.tsv (db_search_fixtures.py reads it)")
     if big:
         return 1
     print(f"manifest size check: every file of {MANIFEST_DIR.as_posix()} is {LIMIT} bytes or less")

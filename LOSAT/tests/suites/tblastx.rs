@@ -35,6 +35,8 @@ mod tblastx_matrix;
 mod tblastx_prefetch;
 #[path = "../tblastx_qslice.rs"]
 mod tblastx_qslice;
+#[path = "../tblastx_query_batch.rs"]
+mod tblastx_query_batch;
 #[path = "../tblastx_query_frames.rs"]
 mod tblastx_query_frames;
 #[path = "../tblastx_ref_lut.rs"]

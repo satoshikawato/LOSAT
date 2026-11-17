@@ -218,7 +218,11 @@ export class DataService implements DataGateway {
       state: 'staged',
       token,
       writers,
-      receiver: new RunOutputReceiver(channel.port2, (stream, bytes) => this.append(run, stream, bytes)),
+      receiver: new RunOutputReceiver(
+        channel.port2,
+        (stream, bytes) => this.append(run, stream, bytes),
+        (stream) => this.clear(run, stream),
+      ),
       lengths,
       hitLines: 0,
       hitLineOpen: false,
@@ -365,6 +369,25 @@ export class DataService implements DataGateway {
         }
       }
     }
+  }
+
+  /**
+   * Drops what a staged run received of one of its outputs, which the engine discarded (it failed
+   * alone after some of its chunks were sent, docs/web/abi_v2.md §5): the output stays empty. After a
+   * failure, the run keeps nothing.
+   */
+  private clear(run: StagedRun, stream: RunOutput): void {
+    if (run.failure !== undefined) return;
+    try {
+      const writer = run.writers.get(stream);
+      if (writer === undefined) throw new Error(`The engine discarded output stream ${stream}, which this run does not write`);
+      writer.clear();
+    } catch (error) {
+      run.failure = toError(error);
+      void this.deps.store.removeAll(runPrefix(run.token)).catch(() => undefined);
+      return;
+    }
+    run.lengths[stream] = 0;
   }
 
   private async readStream(runId: string, stream: OutputStream): Promise<Uint8Array> {

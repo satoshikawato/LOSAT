@@ -712,7 +712,11 @@ past the mapping). Fix 3 adds `t5b/taxdb/zero_kingdom_past_page` (an entry of ta
 mapping after its third tab: the blastdbcmd cases `T5B609`-`T5B610`, `-tax_info` writes `N/A` for taxid 0) and
 `t5b/taxdb/dup_last_btd_empty` (an empty `taxdb.btd` with good's index and its last taxid again after it: the search
 for that taxid reads a record, so no lookup writes the offset error, and NCBI faults at the first lookup that reads a
-record; the rows `db.t5b.de.*` of the six programs, LOSAT's refusals).
+record; the rows `db.t5b.de.*` of the six programs, LOSAT's refusals). The rows `db.t5b.ldo.*` of the six programs
+(merge 2 with line DBID loadord) put `../seqdb/taxdb/btd_empty`, `t5b/taxdb/names_past_page` and
+`t5b/taxdb/dup_last_btd_empty` on the search path of loadord's batch whose prefetch NCBI stops at a Seq-id lookup
+(`multidb/ldl` or `ldb` with `ldp`, and their nucleotide copies): the loads before the stop write the offset error,
+nothing, or make NCBI fault (LOSAT's refusal), then NCBI's error.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

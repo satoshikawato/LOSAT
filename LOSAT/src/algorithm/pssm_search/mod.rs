@@ -414,6 +414,16 @@ impl PsiSearch {
         Ok(query)
     }
 
+    /// The query that NCBI's scope holds for the PSSM of `-in_pssm`: the PSSM's Bioseq, which
+    /// psiblast and tblastn add to the scope with its Seq-ids `query_ids` before the search
+    /// (`query_batch::QueryScope::of_bioseq_ids`; psiblast_app.cpp:537, tblastn_app.cpp:226), for
+    /// the stop of a batch's prefetch (`common::database::PrefetchQueries`). A later round's PSSM
+    /// of a FASTA query (`from_engine`) has no ids of its own: the scope then holds the query's
+    /// batch (`blastp::blast_engine::psi_round`).
+    pub(crate) fn query_scope(&self) -> crate::blastinput::query_batch::QueryScope {
+        crate::blastinput::query_batch::QueryScope::of_bioseq_ids(&self.query_ids)
+    }
+
     /// The id of the query's Seq-loc of `-in_pssm` (`query_ids`), `None` for a FASTA query.
     pub(crate) fn query_seq_loc_id(&self) -> Option<&crate::seqid::ParsedSeqId> {
         self.query_ids.first()

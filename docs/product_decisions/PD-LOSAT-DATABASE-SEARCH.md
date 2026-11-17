@@ -193,11 +193,28 @@ twice. A version 5 list that mixes databases with and without the accession tabl
 `makeblastdb -parse_seqids` is searched as NCBI searches it, and a batch whose prefetch looks a
 reported parsed Seq-id up in a file without the table stops as NCBI's does, with `BLAST Database
 error: DB contains no accession info.` (exit 2) after the prologs and the reports of the batches
-before (line DBID item mixdb2); refused is a run whose reports read such a Seq-id with the prefetch
-off, and a stopping batch whose other sequences' loads write texts of the taxonomy database or
-throw on their ids, or, after a BLAST XML report that NCBI's XML stream cuts before its hits
-(outfmt 5, a query title or id outside US-ASCII: that report makes none of its loads, line RG
-item K4h), look a tax id up (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+before (line DBID item mixdb2), and with the texts of the taxonomy database of the loads that NCBI's
+prefetch makes before the stopping lookup, in the order of the Seq-id handles of the batch's Seq-align
+ids (line DBID item loadord); refused is a run whose reports read such a Seq-id with the prefetch
+off, a stopping batch where a load whose order to the stop NCBI takes from the addresses of
+its Seq-id handles writes such a text, or where a lookup that throws on its id may come before the
+stop, one where a load that NCBI makes only where it skips an earlier stopping lookup writes such a
+text, one whose stopping ids NCBI may all never look up (another sequence holds an id of its
+handle that the batch may load first or the run loaded before, in a batch, query or psiblast
+round before, or in a call of the library's batches before; or a query that NCBI's scope holds at
+the prefetch has it: the batch's records as read, those that `-query_loc` drops included, by
+their `lcl|Query_N` or the ids of `-parse_deflines`, or the query of `-in_pssm`, and with outfmt 5
+those of the batches before; of several stopping ids, the first that NCBI surely looks up ends
+the loads), and one where a load whose order to the stop LOSAT does not know would make a lookup
+of a tax id that a BLAST XML report before the batch left (outfmt 5: NCBI's XML stream cuts the
+report before its hits at a query title or id outside US-ASCII, and it makes none of its loads,
+line RG item K4h; the texts of such lookups come at the first load after the cut report that
+makes the same lookup: a load of the reports or prefetches of the batches between the cut report
+and the stopping batch, else a load of the stopping batch's prefetch before the stopping lookup,
+or not at all, in every search program since review 5 of line DBID item loadord; the cut report
+loads nothing, so the sequences that it shows count as loaded for no stop, since review 6)
+(`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
+line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an
@@ -912,7 +929,9 @@ program writes, the same bytes at every `-num_threads` (P1, P1.1), apart from wh
   write their reports batch by batch, first read every header of a database of up to 2^20 sequences
   to learn whether a refusal below can occur. The Seq-align id of a reported sequence is looked up
   as NCBI's formatters look it up (`CSeqDB::SeqidToOid`: the LMDB keys of version 5, the ISAM files
-  of version 4, under the search's id or taxonomy list), whatever its kind: version 5 finds `bbs|`,
+  of version 4, under the search's id or taxonomy list; an ISAM with a file that is not a regular
+  file, such as a directory, is none, as NCBI's `CSeqDBIsam::IndexExists` says, so the lookup
+  finds nothing in that volume, since line DBID item loadord), whatever its kind: version 5 finds `bbs|`,
   `nat|` and `lcl|<integer>` by their keys, and `gnl|BL_ORD_ID|n` of the sequence's own number in
   its volume is found also beside another id. NCBI's scope first looks among the sequences of the
   batch it has already read, without case, so another reported sequence that holds the id can be

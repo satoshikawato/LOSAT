@@ -489,29 +489,23 @@ impl Volume {
         self.read_block_in(first, end, first_ordinal, first_oid, BlockBuffer::Mapped)
     }
 
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
-    /// (`File::x_read_range_into`; `SequenceBlock::x_into_data` gives the buffer back).
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
+    /// worker's buffer `kept` (`File::x_read_range_into`; `SequenceBlock::x_into_kept` gives the
+    /// buffer back).
     pub fn x_read_block_into(
         &self,
         first: u32,
         end: u32,
         first_ordinal: u32,
         first_oid: u32,
-        buf: Vec<u8>,
+        kept: &mut Vec<u8>,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.read_block_in(
             first,
             end,
             first_ordinal,
             first_oid,
-            BlockBuffer::Given(buf),
+            BlockBuffer::Given(kept),
         )
     }
 
@@ -521,7 +515,7 @@ impl Volume {
         end: u32,
         first_ordinal: u32,
         first_oid: u32,
-        buffer: BlockBuffer,
+        buffer: BlockBuffer<'_>,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
         let seqtype = self.index.seqtype;
@@ -543,14 +537,7 @@ impl Volume {
         let data = match buffer {
             BlockBuffer::New => file.read_range(data_start, data_end)?,
             BlockBuffer::Mapped => file.x_read_range_mapped(data_start, data_end)?,
-            #[cfg(any(
-                test,
-                all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                )
-            ))]
-            BlockBuffer::Given(buf) => file.x_read_range_into(data_start, data_end, buf)?,
+            BlockBuffer::Given(kept) => file.x_read_range_into(data_start, data_end, kept)?,
         };
         let block = SequenceBlock {
             seqtype,
@@ -1300,20 +1287,14 @@ pub(super) fn held_block_end(offsets: &[u32], first: u32, max_bytes: u64, lead: 
 }
 
 /// Where `Volume::read_block_in` puts the bytes of a block.
-enum BlockBuffer {
+enum BlockBuffer<'a> {
     /// A new buffer (`read_block`).
     New,
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `File::x_read_range_mapped`'s buffer.
     Mapped,
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer.
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
-    Given(Vec<u8>),
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): the worker's buffer
+    /// (`File::x_read_range_into`).
+    Given(&'a mut Vec<u8>),
 }
 
 /// A contiguous range of sequences of one volume, held in memory.
@@ -1670,14 +1651,12 @@ impl SequenceBlock {
         crate::utils::x_mapped::X_BYTES.give(&mut self.data);
     }
 
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the block's buffer, for the next `x_read_block_into`. No
-    /// NCBI counterpart: only where the bytes are kept.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub fn x_into_data(self) -> Vec<u8> {
-        self.data
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): gives the buffer of a block of
+    /// `x_read_block_into` back for the worker's next block: into `kept` below 1 MiB, else to
+    /// `utils::x_mapped::X_BYTES` (`x_mapped::X_BYTES.x_keep`). No NCBI counterpart: only where
+    /// the bytes are kept.
+    pub fn x_into_kept(self, kept: &mut Vec<u8>) {
+        crate::utils::x_mapped::X_BYTES.x_keep(kept, self.data);
     }
 
     /// The bytes of a block of one nucleotide cut to its 2-bit

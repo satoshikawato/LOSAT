@@ -65,8 +65,17 @@ enum Step<'a> {
 /// Writes `value`, a value of the type `ty` of the table, with `enc` (as the value of the member
 /// or element that the caller opened, or of a document that it began).
 pub(crate) fn write_value<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
+    write_until(enc, ty, value, |_| false);
+}
+
+/// `write_value` until `stop(enc)` holds before a step (a value opened or one call of the
+/// encoder): whether the value was written whole.
+fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E) -> bool) -> bool {
     let mut todo = vec![Step::Value(ty, value)];
     while let Some(step) = todo.pop() {
+        if stop(enc) {
+            return false;
+        }
         match step {
             Step::Value(ty, value) => open(enc, ty, value, &mut todo),
             Step::Member(member) => enc.member(member.name(), member.tag),
@@ -78,6 +87,7 @@ pub(crate) fn write_value<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
             Step::EndNamed => enc.end_named(),
         }
     }
+    true
 }
 
 /// `value` as one document of its type (`MSerial_AsnText << object`: `WriteFileHeader`, the
@@ -93,11 +103,15 @@ pub(crate) fn write_document<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
 /// `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to the
 /// stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
 /// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer
-/// first flushed.
+/// first flushed. The writing stops there, as NCBI's does, so the text in memory is the cut and
+/// at most one step more.
 pub(crate) fn failed_stream_text(ty: u16, value: &Value) -> Vec<u8> {
     let mut out = Vec::new();
     let mut enc = Traced::new(AsnTextEncoder::new(&mut out), 0);
-    write_document(&mut enc, ty, value);
+    enc.begin_document(type_info(ty).name());
+    if write_until(&mut enc, ty, value, |enc| enc.first_write().is_some()) {
+        enc.end_document();
+    }
     let cut = enc.first_write().unwrap_or(0);
     drop(enc);
     out.truncate(cut);

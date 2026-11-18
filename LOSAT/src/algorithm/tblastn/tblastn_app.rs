@@ -1580,6 +1580,7 @@ fn search(
         // ```
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
         old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+        read_fails: None,
     };
     // Without the Gumbel block NCBI's shortest subject length is the statistics' average
     // (blast_setup.c:975), which divides by their number of sequences.
@@ -1852,6 +1853,17 @@ fn search(
             (Some(_), Some(stream)) => SubjectLetters::Stream(stream),
             (Some(_), None) => SubjectLetters::Packed(&database_stores),
             (None, _) => subject_letters,
+        };
+        // Where NCBI's search first fails to read the database (the chunks of a split batch).
+        let subject_set = SubjectSetNumbers {
+            read_fails: stores_error.as_ref().map(|_| {
+                if database.is_some_and(TblastnDatabase::first_oid_read_fails) {
+                    super::stage_d_pipeline::ReadFails::Setup
+                } else {
+                    super::stage_d_pipeline::ReadFails::Search
+                }
+            }),
+            ..subject_set
         };
         // The batches before the stop are searched and reported; a reader at the end of its
         // input reads no batch (`!input->End()`), and the reports have no query (an empty

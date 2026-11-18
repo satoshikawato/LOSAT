@@ -411,8 +411,9 @@ mod tests {
     // ```
     // The chunk ranges in `size_t`, where a debug build's `usize` subtraction panicked:
     // CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200 make 310 residues 3 chunks of 2^64 / 3 or so, the
-    // first of which covers the batch (and would be split again) while the others keep NCBI's empty
-    // bounds, and 248 residues 2 chunks of 25 with a gap of 200 between them; CHUNK_SIZE=100
+    // first of which covers the batch (and would be split again, but NCBI's `CQuerySplitter::Split`
+    // stops first at the chunks without a query) while the others keep NCBI's empty bounds, and 248
+    // residues 2 chunks of 25 with a gap of 200 between them; CHUNK_SIZE=100
     // OVERLAP_CHUNK_SIZE=95 make 31 residues 6 chunks of 85, below the overlap, the first covering
     // the batch.
     #[test]

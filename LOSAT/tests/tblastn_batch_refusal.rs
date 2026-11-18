@@ -38,12 +38,14 @@ const X_SHORT: &str = "TBLASTN: the traceback of an alignment on a subject (or i
 subject's frame, which it never makes for a subject this short, and crashes; LOSAT does not \
 support it";
 
-/// The refusal of a query chunk that NCBI would split again (it stops with a null reference).
+/// The refusal of a query chunk that NCBI would split again (the chunk's search dereferences the
+/// lookup table its setup did not make).
 const SPLIT_AGAIN: &str = "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would \
 split a query chunk again (it then stops with a null reference) is not supported by LOSAT's \
 TBLASTN";
 
-/// The refusal of a query chunk without a query (NCBI stops making its query factory).
+/// The refusal of a query chunk without a query (NCBI's `CQuerySplitter::Split` dereferences its
+/// missing query vector, before any chunk is searched).
 const EMPTY_CHUNK: &str = "a query chunk without a query is not supported by LOSAT's TBLASTN";
 
 /// The refusal of a negative `CHUNK_SIZE` whose wrapped chunk ranges leave gaps between them
@@ -382,9 +384,9 @@ fn the_batches_searched_ahead_stop_at_the_earliest_refused_batch() {
     }
 }
 
-/// `losat makeblastdb` of the nucleotide FASTA `set` as database `name` in `dir`.
-fn makeblastdb(dir: &Path, name: &str, set: &Path) {
-    let args = [
+/// `losat makeblastdb` of the nucleotide FASTA `set` as database `name` in `dir`, with `extra`.
+fn makeblastdb(dir: &Path, name: &str, set: &Path, extra: &[&str]) {
+    let mut args = vec![
         "makeblastdb",
         "-in",
         set.to_str().unwrap(),
@@ -393,6 +395,7 @@ fn makeblastdb(dir: &Path, name: &str, set: &Path) {
         "-out",
         name,
     ];
+    args.extend(extra);
     let made = losat(dir, &[], &args);
     assert!(
         made.status.success(),
@@ -407,7 +410,7 @@ fn a_database_search_writes_the_reports_before_the_refusal() {
     let temp = TempDir::new("db");
     let dir = temp.0.as_path();
     let inputs = inputs(dir);
-    makeblastdb(dir, "sdb", &inputs.subject);
+    makeblastdb(dir, "sdb", &inputs.subject, &[]);
     let db = ["-db", "sdb"];
     for outfmt in ["0", "6"] {
         for threads in ["1", "4"] {
@@ -439,34 +442,55 @@ fn a_database_search_writes_the_reports_before_the_refusal() {
 }
 
 /// The refusals of a query chunk where NCBI stops in the search of the batch come after the report
-/// of the batch before, as NCBI's error does (`qa`, 31 residues, is not split):
-/// - `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split a query of 310 residues into 15 chunks of 95,
-///   which NCBI would split again (it stops with a null reference);
-/// - `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` (NCBI's `size_t` ranges wrap) make the same query 3
-///   chunks, the first of which covers it and would be split again;
-/// - with those values a query of 200 residues is a chunk of 1 residue and a chunk without a query.
+/// of the batch before, as NCBI's error does (`qa`, 31 residues, and `q9`, 9, are not split), in
+/// NCBI's order: `CQuerySplitter::Split` stops at a chunk without a query before any chunk is
+/// searched, the search of a chunk that would be split again stops after the chunks before it.
+/// - `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split a query of 310 residues into 15 chunks of 95 to
+///   100, which NCBI would split again (chunk 0 stops);
+/// - `CHUNK_SIZE=23 OVERLAP_CHUNK_SIZE=5` split it into 16 chunks of 22 and a last one of 38,
+///   which NCBI would split again (after the 16 chunks before it are searched), also where that
+///   chunk's letters are all X (no valid context: NCBI's stop comes first);
+/// - `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` (NCBI's `size_t` ranges wrap) make the same query a
+///   first chunk that covers it and 2 chunks without a query, and a query of 200 residues a chunk
+///   of 1 residue and a chunk without a query;
+/// - `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=95` make `qa` a first chunk that covers it (the evened
+///   chunk size, 85, is below the overlap) and 5 chunks without a query.
 ///
 /// A query of 248 residues is 2 chunks of 25 and 23 residues with 200 between them, which NCBI
 /// searches on with the hits there lost: refused before any byte (PD-LOSAT-NCBI-DEFECTS D13).
 #[test]
-fn a_query_chunk_split_again_is_refused_after_the_reports_before() {
+fn the_query_chunk_stops_are_refused_after_the_reports_before() {
     let temp = TempDir::new("chunk");
     let dir = temp.0.as_path();
     let inputs = inputs(dir);
     let subject = ["-subject", inputs.subject.to_str().unwrap()];
     let long = QA.repeat(10);
+    let tail_x = format!("{QA}M{}", "X".repeat(278));
     let queries = fasta(dir, "ql.faa", &[("qa", QA), ("ql", &long)]);
+    let tail = fasta(dir, "qt.faa", &[("qa", QA), ("qt", &tail_x)]);
     let empty = fasta(dir, "qe.faa", &[("qa", QA), ("qe", &QA.repeat(7)[..200])]);
     let gaps = fasta(dir, "qg.faa", &[("qa", QA), ("qg", &QA.repeat(8))]);
+    let short = fasta(dir, "q9.faa", &[("q9", &QA[..9])]);
+    let close = fasta(dir, "q9qa.faa", &[("q9", &QA[..9]), ("qa", QA)]);
     let positive = [
         ("BATCH_SIZE", "1"),
         ("CHUNK_SIZE", "100"),
         ("OVERLAP_CHUNK_SIZE", "80"),
     ];
+    let last = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "23"),
+        ("OVERLAP_CHUNK_SIZE", "5"),
+    ];
     let negative = [
         ("BATCH_SIZE", "1"),
         ("CHUNK_SIZE", "-100"),
         ("OVERLAP_CHUNK_SIZE", "-200"),
+    ];
+    let overlap = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "100"),
+        ("OVERLAP_CHUNK_SIZE", "95"),
     ];
     for threads in ["1", "4"] {
         let alone = search(dir, &[], &inputs.first, &subject, "6", threads);
@@ -474,14 +498,44 @@ fn a_query_chunk_split_again_is_refused_after_the_reports_before() {
             alone.status.success() && !alone.stdout.is_empty(),
             "threads {threads}"
         );
-        for (name, env, query, message) in [
-            ("split again", &positive, &queries, SPLIT_AGAIN),
-            ("negative, split again", &negative, &queries, SPLIT_AGAIN),
+        let short_alone = search(dir, &[], &short, &subject, "6", threads);
+        assert!(short_alone.status.success(), "threads {threads}: q9");
+        for (name, env, query, message, before) in [
+            ("split again", &positive, &queries, SPLIT_AGAIN, &alone),
+            (
+                "the last chunk split again",
+                &last,
+                &queries,
+                SPLIT_AGAIN,
+                &alone,
+            ),
+            (
+                "the last chunk, all X, split again",
+                &last,
+                &tail,
+                SPLIT_AGAIN,
+                &alone,
+            ),
+            (
+                "negative, a first chunk that covers the batch, then chunks without a query",
+                &negative,
+                &queries,
+                EMPTY_CHUNK,
+                &alone,
+            ),
             (
                 "negative, a chunk without a query",
                 &negative,
                 &empty,
                 EMPTY_CHUNK,
+                &alone,
+            ),
+            (
+                "an evened chunk size below the overlap, chunks without a query",
+                &overlap,
+                &close,
+                EMPTY_CHUNK,
+                &short_alone,
             ),
         ] {
             let case = format!("{name}, threads {threads}");
@@ -489,14 +543,144 @@ fn a_query_chunk_split_again_is_refused_after_the_reports_before() {
             assert_refused(&refused, message, &case);
             assert_bytes(
                 &refused.stdout,
-                &alone.stdout,
-                &format!("{case}: the report of qa"),
+                &before.stdout,
+                &format!("{case}: the report of the query before"),
             );
         }
         let case = format!("negative, gaps, threads {threads}");
         let refused = search(dir, &negative, &gaps, &subject, "6", threads);
         assert_refused(&refused, NEGATIVE_GAPS, &case);
         assert!(refused.stdout.is_empty(), "{case}: nothing before");
+    }
+}
+
+/// The splitting values of `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` above: chunk 0 split again
+/// (`100`, `80`), the last chunk split again (`23`, `5`), chunks without a query (`-100`,
+/// `-200`), each with `BATCH_SIZE=1`.
+const SPLITS: [[(&str, &str); 3]; 3] = [
+    [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "100"),
+        ("OVERLAP_CHUNK_SIZE", "80"),
+    ],
+    [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "23"),
+        ("OVERLAP_CHUNK_SIZE", "5"),
+    ],
+    [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "-100"),
+        ("OVERLAP_CHUNK_SIZE", "-200"),
+    ],
+];
+
+/// A database that a seqid list leaves without a subject (`-negative_seqidlist` of every id,
+/// `-seqidlist` of an id it does not have; NCBI posts `Filtering resulted in an empty database.`
+/// with each batch's results) or whose volumes have none (`e_nA`, an alias with `NSEQ 1` and
+/// `LENGTH 100`, on which NCBI reads no sequence): NCBI 2.17.0 still splits a batch and stops in
+/// its search, after the report of the batch before (`qa`, no hit, and its warning); nothing of
+/// the stopped batch is written, its warning neither (probes of line RG item X-short-bat, fix round
+/// 3). Without a stop (a negative pair whose chunks leave gaps between them, which lose no hit
+/// where there is no subject) the batch is reported as it is without the variables.
+#[test]
+fn a_split_batch_stops_on_a_database_without_a_subject() {
+    let temp = TempDir::new("nosubject");
+    let dir = temp.0.as_path();
+    let inputs = inputs(dir);
+    makeblastdb(dir, "pdb", &inputs.subject, &["-parse_seqids"]);
+    std::fs::write(dir.join("all.txt"), "pa\nw11\n").unwrap();
+    std::fs::write(dir.join("none.txt"), "zz\n").unwrap();
+    let e_na = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/aliaskeys/e_nA");
+    let queries = fasta(dir, "ql.faa", &[("qa", QA), ("ql", &QA.repeat(10))]);
+    let gaps = fasta(dir, "qg.faa", &[("qa", QA), ("qg", &QA.repeat(8))]);
+    let databases: [&[&str]; 3] = [
+        &["-db", "pdb", "-negative_seqidlist", "all.txt"],
+        &["-db", "pdb", "-seqidlist", "none.txt"],
+        &["-db", e_na.to_str().unwrap()],
+    ];
+    for db in databases {
+        for threads in ["1", "4"] {
+            let alone = search(dir, &[], &inputs.first, db, "7", threads);
+            let text = String::from_utf8_lossy(&alone.stdout);
+            assert!(alone.status.success(), "{db:?} threads {threads}: {text}");
+            let before = &alone.stdout[..text.rfind("# BLAST processed").expect("the count line")];
+            for (env, message) in SPLITS.iter().zip([SPLIT_AGAIN, SPLIT_AGAIN, EMPTY_CHUNK]) {
+                let case = format!("{db:?} {env:?} threads {threads}");
+                let refused = search(dir, env, &queries, db, "7", threads);
+                assert_refused(&refused, message, &case);
+                assert_bytes(
+                    &refused.stdout,
+                    before,
+                    &format!("{case}: the report of qa"),
+                );
+                let stderr = String::from_utf8_lossy(&refused.stderr);
+                assert!(!stderr.contains("Query_2"), "{case}: {stderr}");
+            }
+            let case = format!("{db:?} gaps threads {threads}");
+            let whole = search(dir, &SPLITS[2], &gaps, db, "7", threads);
+            let unsplit = search(dir, &SPLITS[2][..1], &gaps, db, "7", threads);
+            assert!(whole.status.success() && unsplit.status.success(), "{case}");
+            assert_bytes(&whole.stdout, &unsplit.stdout, &case);
+            assert_bytes(&whole.stderr, &unsplit.stderr, &format!("{case}: stderr"));
+        }
+    }
+}
+
+/// Where NCBI's search first fails to read the database, a split batch meets NCBI's chunk stops
+/// in NCBI's order (2.17.0 probes of line RG item X-short-bat, fix round 3): on `n_min1`
+/// (`MIN_SEQ_LENGTH 1`) the setup of the first chunk with a valid context that is not split again
+/// fails (`The average subject length is too short`), on `e_nF` (volumes without an OID, `NSEQ 1`)
+/// that of the first chunk not split again, which reads the length of OID 0 before its
+/// Karlin-Altschul check (`Database memory map file error`); a chunk without a query stops NCBI
+/// before both, a chunk split again before the chunks after it. One batch (a query of 310
+/// residues: `ql`, `qa` ten times; `xh`, 278 X then `qa` and M, whose chunks 0 to 15 of the second
+/// split are all X; `xt`, the reverse), so nothing is written.
+#[test]
+fn a_split_batch_meets_a_failing_read_of_the_database_where_ncbi_does() {
+    let temp = TempDir::new("readfails");
+    let dir = temp.0.as_path();
+    let aliases = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/aliaskeys");
+    let x = "X".repeat(278);
+    let long = fasta(dir, "ql.faa", &[("ql", &QA.repeat(10))]);
+    let head = fasta(dir, "xh.faa", &[("xh", &format!("{x}{QA}M"))]);
+    let tail = fasta(dir, "xt.faa", &[("xt", &format!("{QA}M{x}"))]);
+    let min1 = "BLAST engine error: The average subject length is too short";
+    let memory = "BLAST engine error: Database memory map file error";
+    // (database, splitting values, query, the refusal or (with exit status 3) NCBI's error)
+    let cases: [(&str, usize, &PathBuf, Result<&str, &str>); 9] = [
+        ("n_min1", 0, &long, Ok(SPLIT_AGAIN)),
+        ("n_min1", 1, &long, Err(min1)),
+        ("n_min1", 2, &long, Ok(EMPTY_CHUNK)),
+        ("n_min1", 1, &head, Ok(SPLIT_AGAIN)),
+        ("n_min1", 1, &tail, Err(min1)),
+        ("e_nF", 0, &long, Ok(SPLIT_AGAIN)),
+        ("e_nF", 1, &long, Err(memory)),
+        ("e_nF", 2, &long, Ok(EMPTY_CHUNK)),
+        ("e_nF", 1, &head, Err(memory)),
+    ];
+    for (name, split, query, expected) in cases {
+        let db = aliases.join(name);
+        for threads in ["1", "4"] {
+            let case = format!("{name} {:?} {query:?} threads {threads}", SPLITS[split]);
+            let run = search(
+                dir,
+                &SPLITS[split],
+                query,
+                &["-db", db.to_str().unwrap()],
+                "6",
+                threads,
+            );
+            assert!(run.stdout.is_empty(), "{case}");
+            match expected {
+                Ok(message) => assert_refused(&run, message, &case),
+                Err(error) => {
+                    let stderr = String::from_utf8_lossy(&run.stderr);
+                    assert_eq!(run.status.code(), Some(3), "{case}: {stderr}");
+                    assert_eq!(stderr, format!("{error}\n"), "{case}");
+                }
+            }
+        }
     }
 }
 

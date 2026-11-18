@@ -175,15 +175,17 @@
   refusal of 1.31 narrowed to the other formats and to the first row of a query's report with
   `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
   line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  numbered after 1.49)
+  numbered after 1.49);
   1.53 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
   of a query batch crashes, does not finish or stops come after the reports of the query
   batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
-  Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops and,
-  with `-in_pssm`, that of a query whose letters give no Karlin-Altschul parameters, which came
-  before the run's first byte; Owner-delegated, standing instruction 2026-09-29, restated
+  Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops (also
+  on a database left without a subject, whose batch LOSAT reported before) and, with `-in_pssm`,
+  that of a query whose letters give no Karlin-Altschul parameters, which came before the run's
+  first byte; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.50 (line DBID item pfoff-2) and 1.51 and 1.52, which line RG items
-  X-short-tbx and X4 hold on their branches: the first of them to merge renumbers)
+  X-short-tbx and X4 hold on their branches; the first of the three to merge takes 1.51 and the
+  others renumber)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -342,10 +344,13 @@ Explicit rejections (rule 3):
   `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair with which a chunk would be split again, and a
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
   kept the rejection for these programs. TBLASTN refuses where NCBI stops in the batch's
-  search (a chunk split again, also the first range of a negative `CHUNK_SIZE` that covers the
-  batch, and a chunk without a query) after the reports of the batches before, and a negative
-  `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on, before the
-  run's first byte (version 1.53).
+  search (a chunk without a query, also where the first range of a negative `CHUNK_SIZE` covers
+  the batch, at which `CQuerySplitter::Split` stops before any chunk is searched, and a chunk
+  split again, at which the search of that chunk stops; also on a database that a seqid list
+  leaves without a subject) after the reports of the batches before, in NCBI's order with the
+  setup of each chunk's search and its read of the database, and a negative `CHUNK_SIZE` whose
+  wrapped ranges leave gaps between them, which NCBI searches on, before the run's first byte
+  (version 1.53).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
   exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit
@@ -1633,8 +1638,9 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   step where NCBI's search of a batch crashes, does not finish or stops take the same form,
   TBLASTX's (version 1.40): two `-window_size 0` one-hit alignments at the end of their subject
   chunk or past it, which NCBI's interval tree splits without end; the overflow banks of the seed
-  search; a query chunk split again (also with a negative `CHUNK_SIZE` whose first wrapped range
-  covers the batch) or holding no query (D13); and with `-in_pssm` (one batch: the prologs) a
+  search; a query chunk split again or holding no query (the latter also where a negative
+  `CHUNK_SIZE`'s first wrapped range covers the batch; both also on a database that a seqid list
+  leaves without a subject; D13); and with `-in_pssm` (one batch: the prologs) a
   query whose letters give no Karlin-Altschul parameters (one that `-seg` masks completely: NCBI's
   `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc` did not
   make, in the setup of its preliminary search, `psiblast_aux_priv.cpp:90-93`; refused before the

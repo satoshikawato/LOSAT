@@ -52,7 +52,7 @@ pub(super) struct Member {
     /// `OPTIONAL` or `DEFAULT`: the reader does not insist that the member is present.
     pub(super) optional: bool,
     /// Whether the generated class has a set flag for the member (`SET_MEMBER`, `HaveSetFlag()`):
-    /// such a member is read by `ReadWithSetFlagMember`, which adds "error while reading <name>"
+    /// such a member is read by `ReadWithSetFlagMember`, which adds `error while reading <name>`
     /// to a `CSerialException`. The generated classes give every member one except a member that
     /// holds a class or choice by reference (`ADD_NAMED_REF_MEMBER`, `CRef<>`): `ref_req`,
     /// `ref_opt`.

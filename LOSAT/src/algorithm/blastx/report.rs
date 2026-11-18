@@ -458,6 +458,7 @@ pub(crate) fn alignment(
     matrix: crate::config::ScoringMatrix,
 ) -> Result<DisplayAlignment> {
     let raw = &hsp.hsp;
+    let (q_end, s_end) = hsp.seqalign_ends();
     let context = &batch.prepared.contexts[raw.context];
     let query_length = query_record.sequence.len();
     let mut qi = usize::try_from(raw.q_start)?;
@@ -532,7 +533,7 @@ pub(crate) fn alignment(
         }
     }
     ensure!(
-        qi == raw.q_end as usize && si == raw.s_end as usize,
+        qi == q_end as usize && si == s_end as usize,
         "BLASTX edit script does not reach final endpoints"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:930-959
@@ -620,7 +621,7 @@ pub(crate) fn alignment(
     // Every consumed query residue has width three; query gaps retain columns
     // between the mapped mask endpoints. The masks here are the returned DNA
     // intervals, after the core protein-to-DNA conversion, not lookup AA masks.
-    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, q_end);
     // A record cut to `-query_loc`: the reports read the frame from the record (NCBI reference:
     // c++/src/objtools/align_format/showalign.cpp:411-422, `seq_range::record_frame`).
     let query_place = query_record.placement();
@@ -681,7 +682,7 @@ pub(crate) fn alignment(
             } else {
                 (query_length as i32 + i32::from(raw.frame) - nt).div_euclid(3)
             };
-            query_columns[(aa.clamp(raw.q_start, raw.q_end - 1) - raw.q_start) as usize]
+            query_columns[(aa.clamp(raw.q_start, q_end - 1) - raw.q_start) as usize]
         };
         let (first, last) = if raw.frame > 0 {
             (map_nt(from), map_nt(to))
@@ -757,7 +758,7 @@ pub(crate) fn alignment(
         qstart: qstart + query_offset,
         qend: qend + query_offset,
         sstart: raw.s_start + 1 + subject_offset,
-        send: raw.s_end + subject_offset,
+        send: s_end + subject_offset,
         frame,
         subject_stored_gaps,
     })
@@ -786,21 +787,19 @@ pub(crate) fn hsp_scores(
     query_length: usize,
 ) -> Result<crate::report::hit_sort::HspScores> {
     let raw = &hsp.hsp;
+    let (q_end, s_end) = hsp.seqalign_ends();
     let length = display_script(hsp)?
         .iter()
         .map(|op| op.num() as usize)
         .sum();
-    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, q_end);
     Ok(crate::report::hit_sort::HspScores::of_values(
         hsp.bit_score,
         hsp.evalue,
         hsp.identity,
         length,
         (usize::try_from(qstart)?, usize::try_from(qend)?),
-        (
-            usize::try_from(raw.s_start + 1)?,
-            usize::try_from(raw.s_end)?,
-        ),
+        (usize::try_from(raw.s_start + 1)?, usize::try_from(s_end)?),
     ))
 }
 
@@ -1342,7 +1341,16 @@ pub(super) struct LocalReport<'a, 'p> {
     pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
 }
 
-/// Sorts the HSPs of each list of `batches` by e-value, the order of every report.
+/// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
+/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+/// ```c++
+///         // Sort HSPs with e-values as first priority and scores as
+///         // tie-breakers, since that is the order we want to see them in
+///         // in Seq-aligns.
+///         Blast_HSPListSortByEvalue(hsp_list);
+/// ```
 pub(super) fn sort_lists(batches: &mut [BatchResults]) {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {

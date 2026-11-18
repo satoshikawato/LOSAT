@@ -290,6 +290,7 @@ fn xml_rows(
     srow: &mut Vec<u8>,
 ) -> Result<(i32, i32)> {
     let raw = &hsp.hsp;
+    let (q_end, s_end) = hsp.seqalign_ends();
     qrow.clear();
     srow.clear();
     let (mut qi, mut si) = (usize::try_from(raw.q_start)?, usize::try_from(raw.s_start)?);
@@ -321,10 +322,10 @@ fn xml_rows(
         }
     }
     ensure!(
-        qi == raw.q_end as usize && si == raw.s_end as usize,
+        qi == q_end as usize && si == s_end as usize,
         "BLASTX edit script does not reach final endpoints"
     );
-    let (qstart, qend) = query_endpoints(query.sequence.len(), raw.frame, raw.q_start, raw.q_end);
+    let (qstart, qend) = query_endpoints(query.sequence.len(), raw.frame, raw.q_start, q_end);
     Ok((qstart.min(qend), qstart.max(qend)))
 }
 
@@ -1452,7 +1453,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     query_from,
                                     query_to,
                                     hit_from: hsp.hsp.s_start + 1 + subject_offset,
-                                    hit_to: hsp.hsp.s_end + subject_offset,
+                                    hit_to: hsp.seqalign_ends().1 + subject_offset,
                                     query_frame: translation_frame(
                                         plus,
                                         query_from,

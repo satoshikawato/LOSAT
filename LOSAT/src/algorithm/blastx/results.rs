@@ -380,6 +380,47 @@ pub struct Hsp {
     pub composition_method: i32,
 }
 
+impl Hsp {
+    /// The ends of the HSP's Seq-align, which every report prints: the 0-based starts plus the
+    /// letters of the edit script (`Sub` and `Ins` on the query, `Sub` and `Del` on the
+    /// subject), or the HSP's ends without one. They are the HSP's own ends except where NCBI's
+    /// gapped traceback had no right extension (`found_end` FALSE: rpstblastn's window copy of a
+    /// frame shorter than the HSP's gapped start, `-strand plus` or `minus` with
+    /// composition-based statistics). There the HSP keeps NCBI's ends for every step on the HSP,
+    /// the sort before the Seq-aligns (`compare_hsp`) among them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653
+    /// ```c
+    ///     if (found_end == FALSE) {
+    ///         gap_align->query_stop = q_start - 1;
+    ///         gap_align->subject_stop = s_start - 1;
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:181-182 (the
+    /// Seq-align runs the edit script from the starts)
+    /// ```c++
+    ///     int start1 = hsp->query.offset;   // start of alignment on master sequence
+    ///     int start2 = hsp->subject.offset; // start of alignment on slave sequence
+    /// ```
+    pub(crate) fn seqalign_ends(&self) -> (i32, i32) {
+        if self.edit_script.is_empty() {
+            return (self.hsp.q_end, self.hsp.s_end);
+        }
+        let (mut q, mut s) = (self.hsp.q_start, self.hsp.s_start);
+        for op in &self.edit_script {
+            match *op {
+                GapEditOp::Sub(n) => {
+                    q += n as i32;
+                    s += n as i32;
+                }
+                GapEditOp::Ins(n) => q += n as i32,
+                GapEditOp::Del(n) => s += n as i32,
+            }
+        }
+        (q, s)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1390-1435
 // ```c++
 // s_EvalueComp(double evalue1, double evalue2)

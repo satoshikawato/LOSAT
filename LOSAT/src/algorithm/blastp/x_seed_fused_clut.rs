@@ -21,9 +21,10 @@
 //! the branch (line SF S3, family bpf-seed-loop). A switch of the strict set (`utils/xswitch.rs`):
 //! on unless it is `0`.
 //!
-//! The loops after the branch-free list, natively (until 2026-11-02 the switches LOSAT_X_BPFSEED,
-//! LOSAT_X_BPFSTAGE and LOSAT_X_BPFLEAN, folded here by line SF S3, family bpf-seed-loop: each `=0`
-//! was slower on every input measured, #472, #543, #551). On a table that takes the branch-free
+//! The loops after the branch-free list, on every target (until 2026-11-02 the switches
+//! LOSAT_X_BPFSEED, LOSAT_X_BPFSTAGE and LOSAT_X_BPFLEAN, folded here by line SF S3, family
+//! bpf-seed-loop: each `=0` was slower on every input measured, #472, #543, #551; WebAssembly
+//! since 2026-11-18, below). On a table that takes the branch-free
 //! list, a subject where `XHitBf::fits` holds runs the loop of `x_scan_flat_fseed_loop`, which
 //! differs from `x_scan_flat_bf` in two ways: each hit goes first through blastp's branch-free
 //! two-hit test (`XHitBf::test`, the test of LOSAT_X_BPHITBF, which does not act here; its argument
@@ -49,9 +50,21 @@
 //! cell of few hits does not read the line after them. So the hits, their order, the tests, the
 //! entries and the calls are those of `x_scan_flat_fseed_loop` (which makes its whole list before
 //! any test, too); the staged values do not depend on the table's entries. Each loop is out of line
-//! with a closure of its own type, so the loops without it keep their code. WebAssembly keeps
-//! `x_scan_flat_bf` (`x_fseed_on`): in Node the branch-free test took x1.06-1.09 the time of 3
-//! proteins x UniRef50, and the staged loop x1.13-1.18 on 3 proteins and on 42 residues.
+//! with a closure of its own type, so the loops without it keep their code.
+//!
+//! WebAssembly takes the same loops since 2026-11-18 (line W2). Until then wasm32 kept
+//! `x_scan_flat_bf` on every subject (`x_fseed_on`), as in Node the branch-free test had taken
+//! x1.06-1.09 the time of 3 proteins x UniRef50, and the staged loop x1.13-1.18 on 3 proteins and
+//! on 42 residues. Measured again on dev 7d968922d (the serial WASI command in Node 26.8.2, one
+//! process, rounds in rotating order, on a shared machine at load 35-81; blastp-fast,
+//! `-evalue 0.001`, proteins of one species of an OrthoFinder set against the 6,600 proteins of
+//! another; every report identical): 1,000 and 3,000 query proteins (3.85 hits per listed cell at
+//! 1,000) took x0.80 and x0.78 the time of the whole search (15/15 and 6/7 rounds faster), 1 to 100
+//! proteins and one of 1,806 residues x0.89-0.95. In callgrind (the compiled code alone) the
+//! instructions were x1.015 at 1,000 proteins and x0.91-0.98 on the smaller cases, the mispredicted
+//! branches of its model x0.72 at 1,000 proteins (the seed loop's own 19.3 M -> 1.9 M), x0.76-0.86
+//! on 10 and 100 proteins and the long one, x1.03 of 0.31 M on one protein: the time saved comes
+//! with fewer mispredicted branches, not fewer instructions.
 
 use std::cell::Cell;
 
@@ -89,13 +102,6 @@ pub(crate) fn x_bp_flat_print_summary() {
     if lean + fseed + bf + branch > 0 {
         eprintln!("[X_STATS] BPFLAT lean={lean} fseed={fseed} bf={bf} branch={branch}");
     }
-}
-
-// No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
-/// Whether tables with the branch-free list take [`x_scan_flat_fseed`]: every target but wasm32
-/// (module header).
-const fn x_fseed_on() -> bool {
-    !cfg!(target_arch = "wasm32")
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPCLUTSCANBF switch once; it does not change any value
@@ -138,10 +144,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<const CALLER: u8, F>(
     if x_bp_clut_scan_bf() {
         // The branch-free two-hit test and no read-ahead of the diagonal entries, where the test
         // gives the reference's outcomes (module header).
-        if let Some(bf) = x_fseed_on()
-            .then(|| x_fseed_test(diag_offset, subject_length, window, word_size))
-            .flatten()
-        {
+        if let Some(bf) = x_fseed_test(diag_offset, subject_length, window, word_size) {
             x_scan_flat_fseed::<CALLER, _>(
                 lookup,
                 subject,

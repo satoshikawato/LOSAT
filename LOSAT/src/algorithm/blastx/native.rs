@@ -1856,20 +1856,17 @@ pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
 //         		ERR_POST(Warning << warning);
 //         		continue;
 // ```
-/// The warning of each `-subject` record without letters.
+/// The warning of each `-subject` record without letters, as every program writes it
+/// (`input_files::write_empty_subject_warnings_of`: the id, then the title's bytes as read).
 pub(super) fn write_empty_subject_warnings(
     subjects: &[FastaRecord],
     stderr: &mut dyn Write,
 ) -> Result<()> {
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        write!(
-            stderr,
-            "Warning: [blastx] {} ",
-            String::from_utf8_lossy(s.warning_id())
-        )?;
-        stderr.write_all(&s.title)?;
-        writeln!(stderr, ": Subject sequence contains no data")?;
-    }
+    crate::blastinput::input_files::write_empty_subject_warnings_of(
+        subjects.iter().map(|s| (s.names(), s.sequence.len())),
+        "blastx",
+        stderr,
+    )?;
     Ok(())
 }
 
@@ -3349,7 +3346,9 @@ mod archive_error_tests {
                 None,
                 &config,
                 std::slice::from_ref(&query),
-                &[std::sync::Arc::from(&b"s0"[..])],
+                &[crate::report::pairwise::DescriptionLabel::title_only(
+                    b"s0".to_vec(),
+                )],
                 &report,
                 &BlastxPairwiseOptions {
                     word_threshold: 12.0,

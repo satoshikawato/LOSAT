@@ -205,7 +205,7 @@ impl RoundSections<'_> {
     }
 
     /// The description-table label of the subject `s_idx` of `group` (`BlastpSections::head`).
-    fn label(&self, group: &QueryGroup<'_>, s_idx: u32) -> Vec<u8> {
+    fn label(&self, group: &QueryGroup<'_>, s_idx: u32) -> super::DescriptionLabel {
         let title = group
             .subject_titles
             .get(&s_idx)
@@ -475,14 +475,7 @@ impl RoundSections<'_> {
         for (s_idx, best, _) in &rows {
             // Each line loads its subject (`write_description_table`).
             read(*s_idx, writer)?;
-            let label = self.label(group, *s_idx);
-            if label.len() > 68 {
-                writer.write_all(&label[..65])?;
-                writer.write_all(b"...")?;
-            } else {
-                writer.write_all(&label)?;
-                write_spaces(writer, 68 - label.len())?;
-            }
+            self.label(group, *s_idx).write_cut(writer)?;
             writeln!(
                 writer,
                 "  {:<max_score$}  {:<max_evalue$}",

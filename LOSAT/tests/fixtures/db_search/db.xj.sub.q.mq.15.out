@@ -1,0 +1,3080 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "q1 one",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "q2 ab z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "q3 a√©b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_4",
+            "query_title": "q4 a‚Ç¨b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_5",
+            "query_title": "q5 aüòÄb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_6",
+            "query_title": "q6 a√©b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_7",
+            "query_title": "q7 a¬©b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_8",
+            "query_title": "q8 a‚Ç¨b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "lcl|Query_9",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "lcl|Query_10",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_11",
+            "query_title": "q11 a√Ä‚Ç¨b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_12",
+            "query_title": "q12 a‡ÅÅb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_13",
+            "query_title": "q13 a‡Äºb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_14",
+            "query_title": "q14 a‡ÄÅb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_15",
+            "query_title": "q15 aÌ†Äb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_16",
+            "query_title": "q16 aÙêÄÄb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_17",
+            "query_title": "q17 a√µ‚Ç¨‚Ç¨‚Ç¨b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_18",
+            "query_title": "q18 a√øb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_19",
+            "query_title": "q19 a",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_20",
+            "query_title": "q20 a",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_21",
+            "query_title": "q21 ab z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_22",
+            "query_title": "q22 a",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_23",
+            "query_title": "q23 a",
+            "query_len": 181,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 2,
+                    "query_to": 181,
+                    "query_frame": 2,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_24",
+            "query_title": "q24 a&<>'\"b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_25",
+            "query_title": "q25 a√©b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_26",
+            "query_title": "q26 a\u0001b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_27",
+            "query_title": "q27 a",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_28",
+            "query_title": "q28 aüòÄb z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_29",
+            "query_title": "q29 a<b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_30",
+            "query_title": "q30 a\u0009b z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_31",
+            "query_title": "q31 a\u000Ab z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_32",
+            "query_title": "q32 a\u000Db z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_33",
+            "query_title": "q33 one√",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_34",
+            "query_title": "q34 one‚Ç",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_35",
+            "query_title": "q35 one√",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_36",
+            "query_title": "q36 one¬",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_37",
+            "query_title": "q37 oneüò",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_38",
+            "query_title": "\u0001q38 ab z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_39",
+            "query_title": "\u001Bq39 ab z",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_40",
+            "query_title": "q40√© rest",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_41",
+            "query_title": "q41√© rest",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "lcl|Query_42",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_43",
+            "query_title": "q43",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_44",
+            "query_title": "q44√ø rest",
+            "query_len": 180,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1 subject"
+                  }
+                ],
+                "len": 60,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 127.872,
+                    "score": 320,
+                    "evalue": 1.79607e-46,
+                    "identity": 60,
+                    "positive": 60,
+                    "query_from": 1,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 60,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                    "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 4,
+              "eff_space": 3136,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

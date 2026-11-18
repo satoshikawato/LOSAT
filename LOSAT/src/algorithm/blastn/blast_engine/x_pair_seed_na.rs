@@ -57,8 +57,8 @@
 //!
 //! Scope (anything else returns `false`, and the reference code runs): no two-stage table,
 //! the diagonal hash (query longer than 8000), `window_size == 0` (one hit), `scan_range ==
-//! 0`, an unmasked subject, no debug, trace or window diagnostics, one subject searched by the
-//! owner of a pool of two threads or more.
+//! 0`, no debug, trace or window diagnostics, one subject (masked or not: the strips cover its
+//! scan ranges) searched by the owner of a pool of two threads or more.
 //!
 //! Strip size: a lookup hit is a seed here (no word extension filters it), about 100 per
 //! subject offset for 30,000 24-mers against a 3 Mb genome (297.7 M pairs), so the strips are
@@ -169,7 +169,6 @@ fn in_scope(x: &NaInputs<'_>) -> bool {
         x.use_array_indexing,
         x.window_size,
         x.scan_range,
-        x.subject_masked,
         x.diagnostics,
         x.one_subject_owner,
     )
@@ -181,16 +180,10 @@ fn scope(
     use_array_indexing: bool,
     window_size: usize,
     scan_range: usize,
-    subject_masked: bool,
     diagnostics: bool,
     one_subject_owner: bool,
 ) -> bool {
-    !use_array_indexing
-        && window_size == 0
-        && scan_range == 0
-        && !subject_masked
-        && !diagnostics
-        && one_subject_owner
+    !use_array_indexing && window_size == 0 && scan_range == 0 && !diagnostics && one_subject_owner
 }
 
 /// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
@@ -203,7 +196,6 @@ pub(in super::super) fn wants(
     use_array_indexing: bool,
     window_size: usize,
     scan_range: usize,
-    subject_masked: bool,
     diagnostics: bool,
     one_subject_owner: bool,
 ) -> bool {
@@ -214,7 +206,6 @@ pub(in super::super) fn wants(
         use_array_indexing,
         window_size,
         scan_range,
-        subject_masked,
         diagnostics,
         one_subject_owner,
     ) && pool_threads().is_some();
@@ -242,7 +233,7 @@ pub(in super::super) fn wants(
 ///         Int4 context = BSearchContextInfo(q_off, query_info);
 /// ```
 /// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
-/// word length and step (unmasked subject), from `job.start` to `job.end`; every lookup hit of
+/// word length and step (masked subject or not), from `job.start` to `job.end`; every lookup hit of
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
 /// becomes a `Seed` with the context of its query offset.
 fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
@@ -695,8 +686,8 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
 ///         hits_extended += extend(offset_pairs, hitsfound, word_params,
 /// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
-/// its pool): the scan ranges of `scan_subject_kmers_with_ranges` (an unmasked subject,
-/// `word_length == lut_word_length`) cut into strips scanned by any thread, folded here in
+/// its pool): the scan ranges of `scan_subject_kmers_with_ranges` (`word_length ==
+/// lut_word_length`) cut into strips scanned by any thread, folded here in
 /// strip order into `hash` and `hits`. With `fold_part` (LOSAT_X_PAIRPARFOLD,
 /// `x_pair_seed_part.rs`) the fold is split by diagonal-hash bucket over the threads instead.
 /// `target_strips` is `plan_strips`'s target (`STRIPS_PER_THREAD` per thread in `run`).
@@ -1035,7 +1026,11 @@ mod tests {
     #[test]
     fn seed_stage_on_strips_equals_one_scan() {
         let mut rng = Lcg(0x0B13_5EED);
-        for word_length in [6usize, 7, 8] {
+        // each word size on an unmasked and a masked subject
+        for (word_length, masked) in [6usize, 7, 8]
+            .into_iter()
+            .flat_map(|w| [(w, false), (w, true)])
+        {
             let q_len = 3000 + rng.below(3000) as usize;
             let mut query = random_dna(&mut rng, q_len);
             // a repeat inside the query (long lookup lists)
@@ -1113,7 +1108,26 @@ mod tests {
             let index = QueryContextIndex::new(&contexts, false);
             let score_matrix = build_blastna_matrix(1, -3);
             let nucl_score_table = build_nucl_score_table(1, -3);
-            let seq_ranges = [(0i32, s_len as i32)];
+            // a masked subject's scan ranges (NCBI's `seq_ranges`, right end exclusive) cover most
+            // of it with gaps of 1 to 120 bases, some shorter than a word (the scan skips them)
+            let seq_ranges = if masked {
+                let mut ranges = Vec::new();
+                let mut at = rng.below(30) as usize;
+                while at < s_len {
+                    let len = if rng.below(10) == 0 {
+                        1 + rng.below(20) as usize
+                    } else {
+                        30 + rng.below(2000) as usize
+                    };
+                    let end = (at + len).min(s_len);
+                    ranges.push((at as i32, end as i32));
+                    at = end + 1 + rng.below(120) as usize;
+                }
+                assert!(ranges.len() > 10);
+                ranges
+            } else {
+                vec![(0i32, s_len as i32)]
+            };
             let diag_offset = 37 + rng.below(1000) as isize;
             let x = NaInputs {
                 pv_direct_lookup: Some(&lookup),
@@ -1123,7 +1137,7 @@ mod tests {
                 search_seq_packed: &packed,
                 s_len,
                 subject_seq_ranges: &seq_ranges,
-                subject_masked: false,
+                subject_masked: masked,
                 scan_step: 1,
                 query_context_index: &index,
                 query_contexts: &contexts,
@@ -1156,8 +1170,8 @@ mod tests {
                 word_length,
                 1,
                 &seq_ranges,
-                false,
-                select_mb_scan_kind(word_length, 1, false),
+                masked,
+                select_mb_scan_kind(word_length, 1, masked),
                 |kmer_start, s_range, kmer| {
                     for &q_off_1 in x.hits(kmer) {
                         if q_off_1 == 0 {
@@ -1191,7 +1205,7 @@ mod tests {
             let below_cutoff = seeds.len() as u64 - counts.skipped - serial_hits.len() as u64;
             assert!(
                 serial_hits.len() > 5 && counts.skipped > 0 && below_cutoff > 0,
-                "word {word_length}: the test sequences give too few cases ({} hits, {} skipped, {} other)",
+                "word {word_length} masked {masked}: the test sequences give too few cases ({} hits, {} skipped, {} other)",
                 serial_hits.len(),
                 counts.skipped,
                 below_cutoff
@@ -1218,7 +1232,11 @@ mod tests {
                 .filter(|&t| grid.div_ceil(t) > 512 && grid.div_ceil(t) % 4 != 0)
                 .take(2)
                 .collect();
-            assert_eq!(odd_targets.len(), 2, "word {word_length}: grid {grid}");
+            assert_eq!(
+                odd_targets.len(),
+                2,
+                "word {word_length} masked {masked}: grid {grid}"
+            );
             for threads in 1..=6usize {
                 let pool = rayon::ThreadPoolBuilder::new()
                     .num_threads(threads)
@@ -1249,7 +1267,7 @@ mod tests {
                         }
                         scratch.x_pieces = Some(pieces);
                         let at =
-                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned} lists {lists} pieces {pieces}");
+                            format!("word {word_length} masked {masked} threads {threads} target {target} partitioned {partitioned} lists {lists} pieces {pieces}");
                         let (state, keys, stats_seeds, strips) = pool.install(|| {
                             let mut hash = new_hash();
                             let mut hits = Vec::new();
@@ -1269,7 +1287,10 @@ mod tests {
                             )
                         });
                         assert_eq!(stats_seeds, seeds.len() as u64, "{at}");
-                        assert_eq!(strips, grid.div_ceil(per), "{at}");
+                        // (a masked subject's plan has a strip or more per scan range)
+                        if !masked {
+                            assert_eq!(strips, grid.div_ceil(per), "{at}");
+                        }
                         assert_eq!(keys, serial_keys, "{at}");
                         assert_eq!(state, hash_state(&serial_hash), "{at}");
                     }

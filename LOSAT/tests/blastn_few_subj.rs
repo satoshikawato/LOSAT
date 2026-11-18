@@ -11,9 +11,9 @@
 //! the search without it. With `LOSAT_TIMING` the strips report how many chunks they took, which
 //! shows which shape ran: the rule needs the longest unit's letters times the strips' speed-up at
 //! the thread count to be more than all the letters (two subjects of about 300 kb each: 4 threads
-//! or more; a record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no lowercase
-//! mask with `-lcase_masking`. That those bytes equal NCBI's is the business of the fixtures
-//! (`tests/blastn_regression_fixtures.py`).
+//! or more; a record of 5.2 Mb, whose second chunk is short: 2 threads or more), with or without
+//! lowercase masks (`-lcase_masking`: the strips cover a masked chunk's scan ranges). That those
+//! bytes equal NCBI's is the business of the fixtures (`tests/blastn_regression_fixtures.py`).
 //!
 //! The query is LC738874 (287 kb, longer than 8000 letters: the strips take the diagonal hash),
 //! and 3,000 letters of it for the diagonal array. The subjects are LC738868 and LC738869 (two
@@ -265,25 +265,64 @@ fn a_subject_of_two_chunks_megablast() {
     check(&long_subject(), "megablast", &[(2, true), (3, true)]);
 }
 
-// With `-lcase_masking` the rule keeps the tasks of the pool (a masked chunk has no strips): no
-// strips with or without lowercase letters, and the one-thread report; without the option the same
-// subjects take the shape at 4 threads.
+/// `letters` with 2,000 lowercase letters every 50 kb (from 10 kb on): masks for
+/// `-lcase_masking`.
+fn lowercase_stretches(letters: &str) -> String {
+    let mut text = letters.to_string();
+    let mut at = 10_000;
+    while at + 2000 <= text.len() {
+        let stretch = text[at..at + 2000].to_ascii_lowercase();
+        text.replace_range(at..at + 2000, &stretch);
+        at += 50_000;
+    }
+    text
+}
+
+// With `-lcase_masking` the rule gives masked subjects the shape too (the strips cover a masked
+// chunk's scan ranges): lowercase stretches in both subjects, which change the report, and at 4
+// threads the subjects one at a time with strips and the one-thread report, as without the switch.
 #[test]
-fn lowercase_masking_keeps_the_subject_tasks() {
-    let first = letters("LC738868.fasta");
-    let mut masked = first[..1000].to_ascii_lowercase();
-    masked.push_str(&first[1000..]);
+fn lowercase_masking_takes_the_shape_too() {
     let subject = subject_file(&[
-        ("LC738868", masked),
-        ("LC738869", letters("LC738869.fasta")),
+        ("LC738868", lowercase_stretches(&letters("LC738868.fasta"))),
+        ("LC738869", lowercase_stretches(&letters("LC738869.fasta"))),
     ]);
+    for task in ["megablast", "dc-megablast"] {
+        let task_args = ["-task", task, "-lcase_masking"];
+        let (expected, _) = blastn(&subject, &task_args, 1, &[]);
+        assert!(!expected.is_empty(), "{task}: no hits");
+        let (unmasked, _) = blastn(&subject, &task_args[..2], 1, &[]);
+        assert!(unmasked != expected, "{task}: the masks change nothing");
+        let (report, stderr) = blastn(&subject, &task_args, 4, &[TIMING]);
+        assert!(
+            report == expected,
+            "{task}: the report differs at 4 threads"
+        );
+        assert_eq!(strip_chunks(&stderr), 2, "{task}: {stderr}");
+        let (report, stderr) = blastn(&subject, &task_args, 4, &[OFF, TIMING]);
+        assert!(
+            report == expected,
+            "{task}: the report differs with {OFF:?}"
+        );
+        assert_eq!(strip_chunks(&stderr), 0, "{task}: {stderr}");
+    }
+}
+
+// A masked record of two chunks (the long subject with lowercase stretches): its chunks one at a
+// time with strips from 2 threads on, with the one-thread report.
+#[test]
+fn a_masked_subject_of_two_chunks_takes_its_chunks_one_at_a_time() {
+    let long = std::fs::read_to_string(long_subject())
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with('>'))
+        .collect::<String>();
+    let subject = subject_file(&[("long", lowercase_stretches(&long))]);
     let task_args = ["-task", "megablast", "-lcase_masking"];
     let (expected, _) = blastn(&subject, &task_args, 1, &[]);
     assert!(!expected.is_empty());
-    let (report, stderr) = blastn(&subject, &task_args, 4, &[TIMING]);
-    assert!(report == expected, "the report differs at 4 threads");
-    assert_eq!(strip_chunks(&stderr), 0, "{stderr}");
-    let (_, stderr) = blastn(&subject, &task_args[..2], 4, &[TIMING]);
+    let (report, stderr) = blastn(&subject, &task_args, 2, &[TIMING]);
+    assert!(report == expected, "the report differs at 2 threads");
     assert_eq!(strip_chunks(&stderr), 2, "{stderr}");
 }
 

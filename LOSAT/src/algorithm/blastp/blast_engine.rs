@@ -6342,11 +6342,12 @@ fn search_pssm_query(
                 .map(|choice| choice.number)
         })
         .collect::<Result<Vec<i32>>>()?;
-    // An XInclude format without a file name (`xinclude`) ends the run with NCBI's error where the
-    // formatter is made (below, psiblast_app.cpp:503), before the prolog and the search: LOSAT's
-    // refusals of the search's reports wait for it (NCBI 2.17.0, line RG F/d36 probe
-    // ps.pssm.o14: `Please provide a file name for outfmt 14.`).
-    if xinclude.is_none() {
+    // An XInclude format without a file name (`xinclude`, which `xinclude_check` refuses; the
+    // command line hands over its choice whenever it writes to standard output) ends the run with
+    // NCBI's error where the formatter is made (below, psiblast_app.cpp:503), before the prolog
+    // and the search: LOSAT's refusals of the search's reports wait for it (NCBI 2.17.0, line RG
+    // F/d36 probe ps.pssm.o14: `Please provide a file name for outfmt 14.`).
+    if xinclude.is_none_or(|choice| crate::blastinput::app::xinclude_check(choice).is_ok()) {
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's

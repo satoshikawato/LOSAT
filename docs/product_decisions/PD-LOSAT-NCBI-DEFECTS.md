@@ -345,7 +345,11 @@ Explicit rejections (rule 3):
   chunk without a query come after the reports of the query batches before, where NCBI's
   exception stops the search of the batch (version 1.52, the form of 1.40; psiblast's later
   rounds, the only ones it splits, and the negative `CHUNK_SIZE`, where NCBI does not always stop,
-  keep the rejection before the first byte).
+  keep the rejection before the first byte). A chunk without a query is refused first: NCBI's
+  `CQuerySplitter::Split` makes every chunk's query factory before it sets a chunk up and stops at
+  such a chunk's missing query vector (`split_query_cxx.cpp:234,876-879`, `CCoreException`), before
+  any chunk is split again (as with a positive pair whose evened chunk size falls below the
+  overlap, whose chunk 0 covers the batch).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
   exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit

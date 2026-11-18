@@ -9886,6 +9886,30 @@ fn search_split_query_batches(
                 .into()
             }
         };
+        // NCBI's `CQuerySplitter::Split` makes the query factory of every chunk before it sets any
+        // chunk up, and a chunk without a query has no query vector to make it from
+        // (`CCoreException::eNullPtr`), so NCBI stops there before a chunk is split again (as with
+        // a positive pair whose evened chunk size falls below the overlap: chunk 0 covers the
+        // batch); `split_protein_batch` makes no part for such a chunk.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234,876-879
+        // ```c++
+        //     m_SplitQueriesInChunk.assign(m_NumChunks, CRef<CBlastQueryVector>());
+        // ...
+        //         for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
+        //             CRef<IQueryFactory> qf
+        //                 (new CObjMgr_QueryFactory(*m_SplitQueriesInChunk[chunk_num]));
+        //             m_QueryChunkFactories.push_back(qf);
+        // ```
+        if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
+            return Err(batch_refusal(anyhow::anyhow!(
+                "a query chunk without a query is not supported by LOSAT's {}",
+                args.app.name()
+            )));
+        }
+        // Every chunk holds a query: NCBI sets the chunks up one by one after the split
+        // (prelim_stage.cpp:235-244) and stops at the missing lookup table of a chunk that it would
+        // split again (prelim_search_runner.hpp:77).
         if protein_chunk_would_be_split(&chunks, sizes) {
             return Err(batch_refusal(anyhow::anyhow!(
                 "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
@@ -9902,14 +9926,6 @@ fn search_split_query_batches(
             .map(option_space_of_query)
             .collect::<Result<_>>()?;
         for chunk in &chunks {
-            // NCBI fails to make the query factory of a chunk without a query ("Empty
-            // CBlastQueryVector"); `split_protein_batch` makes none.
-            if chunk.queries.is_empty() {
-                return Err(batch_refusal(anyhow::anyhow!(
-                    "a query chunk without a query is not supported by LOSAT's {}",
-                    args.app.name()
-                )));
-            }
             let parts: Vec<FastaRecord> = chunk
                 .queries
                 .iter()

@@ -6,7 +6,11 @@
 //! letters); with `BATCH_SIZE=50` each is a batch, and with `CHUNK_SIZE=150` (the overlap 100) the
 //! first is not split (92 / 50 makes one chunk) and the second is split into chunks of 143 letters
 //! that NCBI would split again, which NCBI stops on with a null reference (`db.ps.it.rej.split`'s
-//! case).
+//! case). `x4/chunk_empty.faa`: 9 and 31 letters of that protein; with `BATCH_SIZE=1 CHUNK_SIZE=100
+//! OVERLAP_CHUNK_SIZE=95` the first is not split (9 / 5 makes one chunk) and the second makes 6
+//! chunks of an evened size of 85, below the overlap: chunk 0 covers the batch (and would be split
+//! again) and chunks 1 to 5 hold no query, on which NCBI's `CQuerySplitter::Split` stops first
+//! (split_query_cxx.cpp:234,876-879).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 //! ```c++
@@ -101,5 +105,34 @@ fn a_chunk_split_again_in_batch_2_is_refused_after_batch_1() {
         );
         assert_eq!(one_batch.code, Some(1), "n{threads}");
         assert_eq!(one_batch.stdout, "", "n{threads}");
+    }
+}
+
+#[test]
+fn a_chunk_without_a_query_in_batch_2_is_refused_before_a_split_again() {
+    let env = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "100"),
+        ("OVERLAP_CHUNK_SIZE", "95"),
+    ];
+    let alone7 = search("tests/fasta/x4/chunk_empty.faa", "7", 1, &[]);
+    assert_eq!(alone7.code, Some(0), "{}", alone7.stderr);
+    // Batch 1's comment lines and rows: the part of the run without the batches' epilog before
+    // q31's `# Query:` line.
+    let batch1 = alone7
+        .stdout
+        .find("# BLASTP 2.17.0+\n# Query: q31")
+        .expect("q31's report");
+    for threads in [1, 4] {
+        let commented = search("tests/fasta/x4/chunk_empty.faa", "7", threads, &env);
+        assert_eq!(commented.code, Some(1), "n{threads}: {}", commented.stderr);
+        assert!(
+            commented
+                .stderr
+                .contains("a query chunk without a query is not supported by LOSAT's BLASTP"),
+            "n{threads}: {}",
+            commented.stderr
+        );
+        assert_eq!(commented.stdout, alone7.stdout[..batch1], "n{threads}");
     }
 }

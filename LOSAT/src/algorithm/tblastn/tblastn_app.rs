@@ -982,8 +982,14 @@ fn search_pssm_query(
     database: Option<&TblastnDatabase>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    for &outfmt in outfmts {
-        super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
+    // An XInclude format without a file name ends the run with NCBI's error before the search
+    // (`xinclude_checks` below): LOSAT's refusals of the search's reports wait for it (NCBI
+    // 2.17.0, line RG F/d36 probes tbnp.o13, tbnp.o14: `Please provide a file name for outfmt
+    // 14.`).
+    if xinclude_checks(outputs, args.out.as_deref()).is_ok() {
+        for &outfmt in outfmts {
+            super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
+        }
     }
     // The query record's refusal comes before any output, in a run that searches.
     let searches = psi.searches(args.strategy.is_some(), database.is_some());

@@ -686,6 +686,16 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
     }
 }
 
+/// Whether NCBI refuses the format choice `choice` of a `program` run with `-out` `out` itself,
+/// later than its parse: SAM, AIRR and FASTA outside their programs and a custom delimiter that
+/// the field list uses (`formatting_handler_check`), and an XInclude format (13, 14) without a
+/// file name (`xinclude_check_for`). LOSAT's refusals of the formats that psiblast, rpsblast and
+/// rpstblastn do not write yet, which come at the parse, leave these to NCBI's own error at its
+/// place (line RG F/d36 probes rps.conf20, rps.o14, ps.o13, ps.o14).
+pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<&Path>) -> bool {
+    formatting_handler_check(choice, program).is_err() || xinclude_check_for(choice, out).is_err()
+}
+
 /// A `-seg` value as NCBI's filtering handler reads it, with NCBI's errors. Every locut and
 /// hicut that `NStr::StringToDouble` reads is taken, an infinity or NaN too: the query filter
 /// keeps the default for one that is not above 0 (NaN included, `SegSpec::params`), SEG

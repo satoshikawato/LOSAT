@@ -954,7 +954,10 @@ fn psiblast_args(
     outputs: &ReportOutputs<'_>,
 ) -> anyhow::Result<crate::algorithm::blastp::args::BlastpArgs> {
     for format in &outputs.formats {
-        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(format.outfmt)?;
+        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
+            format.outfmt,
+            format.side_out(args.out.as_deref()),
+        )?;
     }
     args.into_blastp_args()
 }

@@ -2899,26 +2899,28 @@ fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String>
 }
 
 /// The query-anchored view of a `-outfmt` value of 1 to 4 that `app` writes
-/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. A
-/// field list after the number is refused, as outfmt 0's is: the library's value keeps the words
-/// after the number (`OutputFormat::split_fields`), the command line's drops them as NCBI does
+/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. The
+/// words after the number (the library's value as given) are dropped, as NCBI drops them for
+/// every format but the tables (`parse_formatting_string`) and the command line's value does
 /// (`FormatChoice::normalized`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851
+/// ```c++
+///         if ( !(fmt_type == eTabular ||
+///                fmt_type == eTabularWithComments ||
+///                fmt_type == eCommaSeparatedValues ||
+///                fmt_type == eCommaSeparatedValuesWithHeader ||
+///                fmt_type == eSAM) ) {
+///                custom_fmt_spec.clear();
+///         }
+/// ```
 fn blastp_query_anchored_view(
     app: BlastpApp,
     outfmt: &str,
-) -> Result<Option<crate::report::pairwise::PairwiseView>> {
-    let Ok(choice) = crate::blastinput::app::parse_formatting_string(outfmt) else {
-        return Ok(None);
-    };
-    let view = blastp_pairwise_view_of(app, choice.number)
-        .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise);
-    if view.is_some() && OutputFormat::split_fields(outfmt).1.is_some() {
-        bail!(
-            "blastp outfmt {} does not accept custom field lists",
-            choice.number
-        );
-    }
-    Ok(view)
+) -> Option<crate::report::pairwise::PairwiseView> {
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
+    blastp_pairwise_view_of(app, choice.number)
+        .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
 }
 
 /// Whether a `-outfmt` value is the BLAST archive (outfmt 11), read as NCBI reads it (a
@@ -6340,7 +6342,13 @@ fn search_pssm_query(
                 .map(|choice| choice.number)
         })
         .collect::<Result<Vec<i32>>>()?;
-    crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
+    // An XInclude format without a file name (`xinclude`) ends the run with NCBI's error where the
+    // formatter is made (below, psiblast_app.cpp:503), before the prolog and the search: LOSAT's
+    // refusals of the search's reports wait for it (NCBI 2.17.0, line RG F/d36 probe
+    // ps.pssm.o14: `Please provide a file name for outfmt 14.`).
+    if xinclude.is_none() {
+        crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
     // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
     // ```c++
@@ -9011,7 +9019,7 @@ fn write_reports_without_queries(
             continue;
         }
         // Outfmt 1 to 4 write what outfmt 0 writes without a query.
-        let view = blastp_query_anchored_view(args.app, format.outfmt)?;
+        let view = blastp_query_anchored_view(args.app, format.outfmt);
         let outfmt = match view {
             Some(_) => OutputFormat::Pairwise,
             None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,

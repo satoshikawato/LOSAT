@@ -346,7 +346,7 @@ impl RpsblastArgs {
     /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusal of the output formats of
     /// a later item.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(&self.outfmt)?;
+        Self::check_outfmt(&self.outfmt, self.out.as_deref())?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         let request_inputs = self
             .export_search_strategy
@@ -473,43 +473,46 @@ impl RpsblastArgs {
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
     /// errors are NCBI's); the formats that NCBI runs and LOSAT's RPSBLAST does not write yet are
-    /// refused (item PS15a, `check_rps_outfmt`).
-    pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        check_rps_outfmt(outfmt, "RPSBLAST", false)
+    /// refused (item PS15a, `check_rps_outfmt`), with `-out` `out`.
+    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>) -> Result<()> {
+        check_rps_outfmt(outfmt, "RPSBLAST", out)
     }
 }
 
 /// The refusal of an `-outfmt` that NCBI's RPS programs run and LOSAT's `program` (RPSBLAST,
 /// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10, and RPSTBLASTN's
-/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). Outfmt
-/// 17 goes on to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt
-/// 13 and 14 too (to the standard output: NCBI's "Please provide a file name",
-/// `app::xinclude_check_for`). So does a custom delimiter that the field list uses (outfmt 20's
-/// `delim=;` with `staxids`): NCBI refuses the value itself where it checks the formatting
-/// arguments (`s_ValidateCustomDelim`, blast_args.cpp:2887 at `formatting_handler_check`), after
-/// the arguments' own errors (`-query` not accessible: NCBI 2.17.0, line RG F/d36 probes
-/// rps.conf20, rps.conf20.q, rpst.conf20, rpst.conf20.q), and never runs the format.
-pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bool) -> Result<()> {
-    use crate::blastinput::app::ReportFormat;
+/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). A value
+/// that NCBI refuses itself later (`app::ncbi_refuses_format`: outfmt 17, a custom delimiter that
+/// the field list uses, outfmt 13 and 14 without a file name in `-out` `out`) goes on to NCBI's
+/// error at its place, after the arguments' own errors (`-query` not accessible) and before the
+/// database is opened (NCBI 2.17.0, line RG F/d36 probes rps.conf20, rps.conf20.q,
+/// rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14), and never runs the format.
+pub(crate) fn check_rps_outfmt(
+    outfmt: &str,
+    program: &str,
+    out: Option<&std::path::Path>,
+) -> Result<()> {
+    use crate::blastinput::app::{Program, ReportFormat};
     let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
-    if crate::report::tabular::custom_delimiter_conflict(&choice.spec, &choice.delimiter).is_some()
-    {
+    // RPSBLAST searches with blastp's options, RPSTBLASTN with blastx's (neither writes SAM).
+    let search = if program == "RPSTBLASTN" {
+        Program::Blastx
+    } else {
+        Program::Blastp
+    };
+    if crate::blastinput::app::ncbi_refuses_format(&choice, search, out) {
         return Ok(());
     }
     if let Some(format) = ReportFormat::from_number(choice.number) {
-        let ncbi_error =
-            xinclude_to_ncbi && matches!(format, ReportFormat::Json | ReportFormat::Xml2);
         let query_anchored =
             program == "RPSTBLASTN" && crate::report::pairwise::PairwiseView::of(format).is_some();
-        if !ncbi_error
-            && !query_anchored
+        if !query_anchored
             && !matches!(
                 format,
                 ReportFormat::Pairwise
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::Sam
             )
         {
             bail!(

@@ -7,3 +7,8 @@
   `"06 std"`, `+7`, `00`), as the command line already did; `rpsblast` and `rpstblastn -outfmt "20 delim=; qseqid
   staxids"` stop with NCBI's error for a delimiter that the fields use, not with LOSAT's refusal of outfmt 20 (line RG,
   series F, D-36 review 1).
+- `blastp` and `psiblast` through the library run `-outfmt 0` to `4` with words after the number (`"0 std"`,
+  `"0 delim=@"`, `"00 qseqid"`, `"1 qseqid"`) and drop the words, as NCBI BLAST+ 2.17.0 and LOSAT's command line do,
+  instead of refusing them. `psiblast`, `rpsblast` and PSI-TBLASTN (`tblastn -in_pssm`) with `-outfmt 13` or `14` and
+  no `-out` file now stop with NCBI's `Please provide a file name for outfmt 14.`, in NCBI's order, instead of LOSAT's
+  refusal of the format (line RG, series F, D-36 review 1b).

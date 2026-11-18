@@ -206,7 +206,7 @@ jobs:
         run: >-
           cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
           x_restricted_gap::tests xdrop_simd::x_w128::tests
-          x_w128_loops_write_the_residues_of_the_word_loop x_same_matrix
+          tblastn::x_subject_translate::tests::x_w128_loops x_same_matrix
           x_seed_fused::tests x_seed_diag::tests
           tblastx::x_scan_byte::tests tblastx::x_scan_bf::tests
 

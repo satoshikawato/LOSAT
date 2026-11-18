@@ -346,7 +346,9 @@ Explicit rejections (rule 3):
   kept the rejection for these programs. TBLASTN refuses where NCBI stops in the batch's
   search (a chunk without a query, also where the first range of a negative `CHUNK_SIZE` covers
   the batch, at which `CQuerySplitter::Split` stops before any chunk is searched, and a chunk
-  split again, at which the search of that chunk stops; also on a database that a seqid list
+  split again, at which the search of that chunk stops (at more than one thread NCBI logs that
+  null pointer and goes on; LOSAT refuses at every thread count, as NCBI does at
+  `-num_threads 1`); also on a database that a seqid list
   leaves without a subject) after the reports of the batches before, in NCBI's order with the
   setup of each chunk's search and its read of the database, and a negative `CHUNK_SIZE` whose
   wrapped ranges leave gaps between them, which NCBI searches on, before the run's first byte

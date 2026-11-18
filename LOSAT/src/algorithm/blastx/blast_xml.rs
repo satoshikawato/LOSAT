@@ -1428,7 +1428,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 // and the rows that `-subject`'s mapper leaves,
                                 // `SubjectLoc::of_list`). NCBI catches it in
                                 // `s_BlastXMLAddIteration` (`CaughtException`).
-                                if rows_empty(&hsp.hsp) {
+                                if rows_empty(hsp) {
                                     return Err(CaughtException(
                                         match loc.of_list(list, options.gapped) {
                                             SubjectLoc::Interval => std_seg_lengths_not_accurate(),

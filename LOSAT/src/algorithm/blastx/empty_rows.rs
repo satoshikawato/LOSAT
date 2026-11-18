@@ -14,13 +14,13 @@ use super::preliminary::PreliminaryHsp;
 
 /// Whether the Std-seg rows of the reported ungapped HSP `hsp` are empty: an HSP of length 0
 /// (`serial::seqalign::ungapped_rows_empty`, the one predicate of the writers). Every reported HSP
-/// of another length has rows of its letters (gapped HSPs, and `Blast_HSPTest` deleted the
-/// ungapped ones of negative length).
+/// of another length has rows of its letters (gapped HSPs, by their Seq-align's ends
+/// `Hsp::seqalign_ends`, and `Blast_HSPTest` deleted the ungapped ones of negative length).
 #[inline]
-pub(crate) fn rows_empty(hsp: &PreliminaryHsp) -> bool {
+pub(crate) fn rows_empty(hsp: &super::results::Hsp) -> bool {
     crate::report::serial::seqalign::ungapped_rows_empty(
-        i64::from(hsp.q_start),
-        i64::from(hsp.q_end),
+        i64::from(hsp.hsp.q_start),
+        i64::from(hsp.seqalign_ends().0),
     )
 }
 
@@ -619,7 +619,7 @@ pub(crate) fn subject_rows_all_empty(list: &super::results::HspList, gapped: boo
         .iter()
         .filter(|hsp| super::report::has_seqalign(hsp, gapped))
         .peekable();
-    !gapped && aligned.peek().is_some() && aligned.all(|hsp| rows_empty(&hsp.hsp))
+    !gapped && aligned.peek().is_some() && aligned.all(rows_empty)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679
@@ -779,9 +779,7 @@ pub(crate) fn refuse_mapped_without_scores(
                 (!written).then_some(UNPORTED_SUBJECT_ALL_EMPTY)
             } else {
                 shown
-                    .any(|hsp| {
-                        rows_empty(&hsp.hsp) && mapper_wraps_empty_row(hsp.hsp.s_start, true)
-                    })
+                    .any(|hsp| rows_empty(hsp) && mapper_wraps_empty_row(hsp.hsp.s_start, true))
                     .then_some(UNPORTED_SUBJECT_START)
             };
             if let Some(refusal) = refusal {

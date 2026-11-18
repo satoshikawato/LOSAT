@@ -588,9 +588,10 @@ pub(super) fn write_blastx_tabular(
                     && listed
                         .iter()
                         .any(|list| match loc.of_list(list, options.gapped) {
-                            SubjectLoc::Whole => list.hsps.iter().any(|hsp| {
-                                has_seqalign(hsp, options.gapped) && rows_empty(&hsp.hsp)
-                            }),
+                            SubjectLoc::Whole => list
+                                .hsps
+                                .iter()
+                                .any(|hsp| has_seqalign(hsp, options.gapped) && rows_empty(hsp)),
                             SubjectLoc::Interval => matches!(
                                 subject_mapped_rows(
                                     loc,
@@ -663,7 +664,7 @@ pub(super) fn write_blastx_tabular(
                             }
                             // The one nucleotide of `-subject`'s mapped empty row
                             // (`seqalign::mapped_empty_query_nucleotide`); `-db` stopped above.
-                            if rows_empty(raw) {
+                            if rows_empty(hsp) {
                                 let at = mapped_empty_query_nucleotide(
                                     ungapped_interval(
                                         raw.q_start,
@@ -676,8 +677,12 @@ pub(super) fn write_blastx_tabular(
                                 ) as u64;
                                 return (at, at);
                             }
-                            let (start, end) =
-                                query_endpoints(searched_length, raw.frame, raw.q_start, raw.q_end);
+                            let (start, end) = query_endpoints(
+                                searched_length,
+                                raw.frame,
+                                raw.q_start,
+                                hsp.seqalign_ends().0,
+                            );
                             (start.min(end) as u64 - 1, start.max(end) as u64 - 1)
                         }));
                         coverage_percent(union_length(&mut query_ranges), query_length)
@@ -737,7 +742,7 @@ pub(super) fn write_blastx_tabular(
                         }
                         let raw = &hsp.hsp;
                         // An HSP of length 0 (`empty_rows::tabular_empty_row`).
-                        let empty = rows_empty(raw);
+                        let empty = rows_empty(hsp);
                         let form = if empty {
                             tabular_empty_row(
                                 loc,
@@ -869,6 +874,8 @@ pub(super) fn write_blastx_tabular(
                                 qcovhsp: query_coverage_per_hsp(
                                     options.gapped,
                                     shown_count,
+                                    // The HSP's own ends (`Blast_HSPGetQueryCoverage` of the
+                                    // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's.
                                     raw.q_end - raw.q_start,
                                     // `-subject`'s mapped empty row has one nucleotide.
                                     if empty {

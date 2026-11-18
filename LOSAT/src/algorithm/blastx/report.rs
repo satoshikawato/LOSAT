@@ -1755,7 +1755,7 @@ pub(super) fn render_queries_with(
                         }
                         // The default fields enter NCBI's alignment block and read the query
                         // (`qaccver`, `qstart`, ...).
-                        let (form, scores, mapped) = if rows_empty(&hsp.hsp) {
+                        let (form, scores, mapped) = if rows_empty(hsp) {
                             let loc = SubjectLoc::of(shown).of_list(list, options.gapped);
                             let shown_hsps = list
                                 .hsps

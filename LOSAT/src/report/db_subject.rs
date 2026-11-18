@@ -4761,21 +4761,29 @@ mod tests {
             loads(run(AfterThrow::EndsAtAlignment, every, every), &skips),
             [L, T, L, U, U, U]
         );
-        // `-num_alignments 1`: only the first alignment is shown, which loads.
+        // `-num_alignments 1`: only the first alignment is shown, which loads; 3 throws in the
+        // description lines alone.
         assert_eq!(
             loads(run(AfterThrow::EndsAtAlignment, every, 1), &skips),
-            [L, T, L, U, L, L]
+            [L, T, L, T, L, L]
         );
         // `-num_descriptions 0`: only the alignments up to the end load, and 2 is never reached.
         assert_eq!(
             loads(run(AfterThrow::EndsAtAlignment, 0, every), &skips),
             [L, T, U, U, U, U]
         );
-        // A batch that prefetches loads every subject it shows.
-        let prefetched: [(bool, &[usize]); 2] = [(false, &[0, 2]), (true, &[1, 4])];
+        // A batch that prefetches loads every subject it shows, where `-num_descriptions 0
+        // -num_alignments 1` reads the first alignment alone of a batch that does not.
+        let prefetched: [(bool, &[usize]); 2] = [(false, &[0, 2, 4]), (true, &[5, 1, 3])];
         assert_eq!(
-            loads(run(AfterThrow::SkipsAlignment, every, every), &prefetched),
-            [L, U, L, U, U, U]
+            loads(run(AfterThrow::SkipsAlignment, 0, 1), &prefetched),
+            [L, U, L, U, L, L]
+        );
+        // After the run's end a batch that prefetches loads nothing either.
+        let after_end: [(bool, &[usize]); 2] = [(true, &[1, 0]), (false, &[2, 3, 4, 5])];
+        assert_eq!(
+            loads(run(AfterThrow::SkipsAlignment, every, every), &after_end),
+            [L, T, U, U, U, U]
         );
         // A later call's reports read nothing after the end (`RunLoads`).
         let calls = RunLoads::new(run(AfterThrow::SkipsAlignment, every, every));
@@ -4812,10 +4820,11 @@ mod tests {
         );
         assert_eq!(refseq.skipped_id(), b"NP_100001");
         assert!(!refseq.alignment_id_is_local());
-        // A GI Seq-align id (read in showdefline.cpp:886-913, not probed): `gi|N|` with
-        // `-show_gis`, then the bare id and two spaces before the title.
+        // A GI Seq-align id (read in showdefline.cpp:886-913 and `GetBareId`, not probed): the
+        // bare id of a GI is its FASTA form; `-show_gis` puts `gi|N|` before it and two spaces
+        // before the title.
         let gi = ParsedSubject::new(one_defline(vec![ParsedSeqId::Gi(1234)])).unwrap();
-        assert_eq!(line(&gi), "1234 Unknown");
-        assert_eq!(line(&gi.showing_gis(true)), "gi|1234|1234   Unknown");
+        assert_eq!(line(&gi), "gi|1234 Unknown");
+        assert_eq!(line(&gi.showing_gis(true)), "gi|1234|gi|1234   Unknown");
     }
 }

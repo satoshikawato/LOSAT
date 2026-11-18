@@ -1446,6 +1446,28 @@ fn write_first_batch_prologs(
 /// limits and the environment, then the query batches (`read_query_batches`), the search of
 /// the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
+/// What a pairwise report of `formats` shows (`-num_descriptions`, `-num_alignments`) and the
+/// sorts in whose order it reads its subjects (the first report's, as the writer's), for the
+/// loads of a subject whose lookup throws (line DBID item pfoff-3).
+fn pairwise_shown(
+    resolved: &ResolvedTblastnArgs,
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> (
+    crate::report::db_subject::Shown,
+    Option<crate::report::hit_sort::ReportSort>,
+) {
+    let shown = crate::report::db_subject::Shown {
+        descriptions: resolved.num_descriptions,
+        alignments: resolved.num_alignments,
+    };
+    let sort = formats
+        .first()
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .and_then(crate::report::pairwise::PairwiseView::of)
+        .map(|view| view.report_sort(resolved.formatting.report_sort()));
+    (shown, sort)
+}
+
 fn search(
     args: &TblastnArgs,
     resolved: ResolvedTblastnArgs,
@@ -2443,19 +2465,7 @@ fn search(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     &outputs.formats,
-                    (
-                        crate::report::db_subject::Shown {
-                            descriptions: resolved.num_descriptions,
-                            alignments: resolved.num_alignments,
-                        },
-                        // The pairwise report reads its subjects in the order of its sorts.
-                        outputs
-                            .formats
-                            .first()
-                            .and_then(crate::api::local_blast::FormatOutput::report_format)
-                            .and_then(crate::report::pairwise::PairwiseView::of)
-                            .map(|view| view.report_sort(resolved.formatting.report_sort())),
-                    ),
+                    pairwise_shown(&resolved, &outputs.formats),
                     &batch_spans,
                 )
                 // A read of a reported sequence that

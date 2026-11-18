@@ -485,6 +485,7 @@ export LOSAT_X_TBNXLATE128=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXBOARD=1
+export LOSAT_X_TBXCTXTABLE=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
@@ -4298,7 +4299,7 @@ Scheduling (each value computed by one thread with the original function; order 
   0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
   `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
 - `LOSAT_X_BNSEEDLISTS=1` (BLASTN `-task blastn`, `megablast` and `blastn-short`: the partitioned stages of
-  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one unmasked subject, a
+  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one subject, a
   query block above 8,000 letters; in the strict set from the pull request that added it, 2026-10-28:
   `LOSAT_X_BNSEEDLISTS=0` turns it off) gives those stages the form `LOSAT_X_DCSEEDLEAN` gives dc-megablast's
   (`x_pair_seed_part::seed_stage_part_lists`); each partition gets the same seeds in the same order, so the hits and
@@ -6203,6 +6204,36 @@ Scheduling (each value computed by one thread with the original function; order 
   within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
   (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
   gave nothing more (x0.991-1.023).
+- `LOSAT_X_TBXCTXTABLE=1` TBLASTX (speed; in the strict set from the pull request that added it, 2026-11-17, on by
+  default; `=0` turns it off; `tblastx/x_pair_par.rs` `x_ctx_table`, `x_context_of`): the units' two-hit test finds the
+  context of a hit that passes it (NCBI's `BSearchContextInfo`, `blast_query_info.c:219-243`) in the
+  `XContextTable` (`common/x_context_table.rs`, the table blastp's and blastx's fused loops take), made once per query batch from the
+  frame bases in `XPairPar::prepare`: a coarse table of at most 16,384 entries gives the context at the start of the
+  offset's block, and a walk over the frame bases moves on to the last context that starts at or before the offset.
+  Cause removed: the binary search over every context of the batch (`BlastAaLookupTable::get_context_idx`; NCBI's
+  narrowing by the shortest and longest context is not ported) compared the hit's query offset with a frame base at
+  each step, a branch the data decides: on ViPTreeGen's 40 Autographivirales genomes all against all (six contexts a
+  batch) it was mispredicted about once per search, 27 % of the unit scan's mispredictions (precise
+  `br_misp_retired.all_branches`) and about 11 % of its cycles. The table gives the binary search's index for every
+  offset (no rule; an offset outside the table takes the binary search, and with `=0` the table covers no offset, so
+  every hit takes it: the path before). It acts where the unit path runs (`LOSAT_X_PAIRPAR`'s batches); the reference
+  frame loop keeps the binary search. Memory: one table per batch, a coarse table of at most 64 KiB (42 KiB for a 42 kb query) and a copy of
+  the frame bases (4 bytes a context). Tests:
+  the lib test `the_context_table_gives_the_binary_search_index` (`x_pair_par.rs`; 240 random layouts of 0 to 300
+  contexts with empty contexts, a first frame base above 0 and batches over 16,384 letters, every offset from below
+  the first base to past the end, against `get_context_idx`, and `=0`'s table) and `LOSAT/tests/tblastx_ctx_table.rs`
+  (one and three MelaMJNV pieces against PemoMJNVA at 1 and 2 threads: the default's report equals `=0`'s and the
+  reach row shows the table's path ran). Evidence (ws, line DT, ad-DT-9; one booked core of node 0, `-num_threads 1`, the same output in every run, against
+  dev 5436a3abb): wall time (warm-up + 5 rounds alternating, medians) ViPTreeGen's Autographivirales.40 47.15 ->
+  45.74 s x0.970 (every round of this form under dev's fastest), Begomovirus.40 x0.981, ssDNA.prok.8, Easyfig's
+  tblastx example and Galaxy's tblastx test x1.000 (at the clock's 10 ms); user-space cycles (perf stat, 3 rounds
+  alternating, medians) x0.967 (branch misses x0.760, instructions x0.984), x0.971, x0.986, x0.986, x0.996; Galaxy's
+  tblastn and blastx tests the same instructions. Memory (max RSS, 10 rounds alternating, medians): Autographivirales.40
+  24,948 -> 24,836 KiB, Begomovirus.40 16,262 -> 16,318 KiB (+56 KiB, the batch's coarse table); the heap peak
+  (valgrind massif) ssDNA.prok.8 170,225,864 B in both, Begomovirus.40 170,443,912 -> 170,444,232 B. A branch-free
+  binary search (`core::hint::select_unpredictable` in `get_context_idx`) gave cycles x0.971 / x0.980 / x0.987 /
+  x0.988 / x0.999 against dev eba441b86 on the same cases, where this form gave x0.964 / x0.968 / x0.985 / x0.983 /
+  x0.998, and was not taken.
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`

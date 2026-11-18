@@ -1,0 +1,7 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.pub.pub.E.gen.authors.names.str.E
+Bad char [0x1] in string at line 13
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.pub.pub.E.gen.authors.names.str.E
+Bad char [0x2] in string at line 13
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.pub.pub.E.gen.authors.affil.std.affil
+Bad char [0x3] in string at line 13
+

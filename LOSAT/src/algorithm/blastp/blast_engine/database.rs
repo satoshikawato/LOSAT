@@ -2834,9 +2834,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_database_without_a_title_shows_its_name() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-notitle-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2866,9 +2866,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_first_header_of_each_volume_is_read_at_open() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-badheader-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3084,7 +3084,10 @@ mod tests {
     fn a_rejected_search_block_of_a_restricted_database_names_the_oid() {
         // prot_v4 through an alias whose range keeps OIDs 2 to 9 (line DBID ordnum): the block's
         // sequence 7 (rank 7) is OID 9.
-        let dir = std::env::temp_dir().join(format!("losat_bp_ordnum_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_bp_ordnum_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let alias = dir.join("prot_v4_r.pal");
         std::fs::write(
@@ -3239,6 +3242,10 @@ mod tests {
     // the diagonal offset of the one-thread order, whatever the block size and the thread
     // count, across the six volumes of the fixture.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blocks_give_every_sequence_the_diagonal_offset_of_the_one_thread_order() {
         let database = open("prot_mv");
         let single = open("prot_v4");
@@ -3524,8 +3531,10 @@ mod tests {
                     }
                 }
             }
-            let dir =
-                std::env::temp_dir().join(format!("losat-bpdbcut-{label}-{}", std::process::id()));
+            let dir = crate::utils::test_dir::temp_dir().join(format!(
+                "losat-bpdbcut-{label}-{}",
+                crate::utils::test_dir::process_id()
+            ));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let name = dir.join("gen").to_str().unwrap().to_string();
@@ -4132,9 +4141,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-nohdr-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4239,9 +4248,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-badtitle-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4359,12 +4368,16 @@ mod tests {
     // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
     // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn titles_and_taxids_in_one_pass_give_the_answers_of_the_two_checks() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let paja = manifest_dir.join("tests/db_search/paja_taxid");
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-qblock-onepass-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4437,9 +4450,9 @@ mod tests {
         };
         assert_eq!(allowed(&open("prot_v4")), [true, true]);
         assert_eq!(read_allowed(&open("prot_v4")), [true, true]);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-qblock-titles-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4557,12 +4570,16 @@ mod tests {
     // prefetch) and one whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`),
     // at one thread and in a pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         use crate::seqdb::alias::SearchPath;
         let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-qblock-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();

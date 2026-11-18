@@ -50,6 +50,7 @@ const TAG_VISIBLE_STRING: u8 = 0x1a;
 const TAG_STRING_STORE: u8 = 0x41;
 const TAG_SEQUENCE: u8 = 0x30;
 const TAG_SET: u8 = 0x31;
+const TAG_NULL: u8 = 0x05;
 /// A constructed context-specific tag (`[i]`, i < 31): `0xa0 | i`.
 const TAG_CONTEXT: u8 = 0xa0;
 /// `eIndefiniteLengthByte`.
@@ -397,6 +398,35 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.out.push(TAG_STRING_STORE);
         self.length(value.len());
         self.out.extend_from_slice(value);
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:433-437
+    /// ```c++
+    /// void CObjectOStreamAsnBinary::WriteNull(void)
+    /// {
+    ///     WriteSysTag(eNull);
+    ///     WriteShortLength(0);
+    /// }
+    /// ```
+    fn null(&mut self) {
+        self.out.extend_from_slice(&[TAG_NULL, 0]);
+    }
+
+    /// The tag of NCBI's UTF8String depends on its parameter `SERIAL_WRITE_UTF8STRING_TAG`
+    /// (objostrasnb.cpp:281-301): no BLAST document that LOSAT writes in ASN.1 binary holds one.
+    fn utf8_str(&mut self, _value: &[u8]) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::Unwritten("a UTF8String"));
+        }
+    }
+
+    /// NCBI parses a delay buffer read from text before it writes it in binary
+    /// (`CMemberInfoFunctions::WriteLongMember`, member.cpp:1084-1119): no BLAST document that
+    /// LOSAT writes in ASN.1 binary holds one.
+    fn delayed(&mut self, _text: &[u8]) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::Unwritten("a member read into a delay buffer"));
+        }
     }
 
     fn buffered(&self) -> usize {

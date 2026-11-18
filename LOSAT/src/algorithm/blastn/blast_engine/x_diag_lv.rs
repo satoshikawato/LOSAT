@@ -959,6 +959,7 @@ mod tests {
     // it again (`x_lv2_reset`) panic, each with its own message; after the reset both work.
     #[cfg(debug_assertions)]
     #[test]
+    #[cfg_attr(panic = "abort", ignore = "catches a panic: the build aborts on panic")]
     fn a_stale_memo_panics_in_debug_builds() {
         use std::panic::{catch_unwind, AssertUnwindSafe};
         let seeds = LvSeeds::new(true, 18, 40);

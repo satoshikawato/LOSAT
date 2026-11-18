@@ -3,6 +3,6 @@
   LOSAT refused it: the table's rows, values and messages come as in NCBI, and NCBI's `BM::Invalid serialization
   format` error ends the run with exit status 255 (or is the message of a `Sorted, max length` or `Seq-table location`
   column, after which the run goes on). Malformed data that NCBI reads past, decodes with undefined behaviour or from
-  memory it did not write stays refused, with its reason (line RG item Q-BM, decided by the Owner on 2026-11-16). A row
-  in a GAP block that is not one is answered where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic agree, and refused
-  only where they differ, as NCBI's answer then depends on the machine it was built for.
+  memory it did not write stays refused, with its reason (line RG item Q-BM, decided by the Owner on 2026-11-16). A GAP
+  block that is not one is decoded, and its rows answered, where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic
+  agree, and refused only where they differ, as NCBI's result then depends on the machine it was built for.

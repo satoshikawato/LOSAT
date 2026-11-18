@@ -374,12 +374,47 @@ fn only_a_query_that_reaches_a_block_that_is_not_one_is_refused() {
         assert_eq!(vector.get_bit(n), Err(Fail::Refuse(Rule::GapSearch)), "{n}");
         assert_eq!(vector.count_to(n).unwrap(), 1, "{n}");
     }
-    // a block whose entries NCBI's decoding leaves to memory the data does not decide (an
-    // opaque GAP into a block not yet made): refused by a query that reaches it
+    // token 61's exceptions set bits in a GAP block that is not one (ends 60100, 60201, 54765,
+    // 54867): `gap_set_value` of NCBI's three builds leaves it the same, so it is decoded, and
+    // its rows are NCBI's
     let data = hex("02018000000100020005000000803DB050C800DEFC030082A915603C9E39000000000000");
     let vector = ok(2147483648, &data);
-    assert_eq!(vector.get_bit(5), Err(Fail::Refuse(Rule::GapOrder)));
-    assert_eq!(vector.count_to(5), Err(Fail::Refuse(Rule::GapOrder)));
+    assert!(!vector.get_bit(5).unwrap());
+    assert_eq!(vector.count_to(5).unwrap(), 0);
+}
+
+#[test]
+fn bits_set_in_a_gap_block_that_is_not_one() {
+    // t2e: a GAP block that is not one (token 20), then a bit set in it (token 19): NCBI's three
+    // builds' `gap_set_value` leave the block the same, and its rows are NCBI's; bit 100 is 1 in
+    // the SSE4.2 build only, and the ranks are NCBI's `unsigned` sums
+    let data = hex("0201800000010002000500000080141800C01200F0FF0F000007FFFFFFFF13050000");
+    let vector = ok(2147483648, &data);
+    for (n, bit, rank) in [
+        (0, false, 0),
+        (4, false, 0),
+        (5, true, 1),
+        (9, false, 1),
+        (99, false, 1),
+        (4660, false, 0),
+        (65536, false, 0),
+    ] {
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
+        assert_eq!(vector.count_to(n).unwrap(), rank, "{n}");
+    }
+    assert_eq!(vector.get_bit(100), Err(Fail::Refuse(Rule::GapSearch)));
+    assert_eq!(vector.count_to(100).unwrap(), 1);
+    // a bit set where the builds differ: the block of the id list 9, 5, whose bit 5 is 0 in the
+    // scalar and SSE2 builds (which set it) and 1 in the SSE4.2 build (which leaves the block)
+    let vector = ok(0, &stream(&[18, 2, 0, 9, 0, 5, 0, 0]));
+    let Kind::Gap(entries) = &vector.segs[0].kind else {
+        panic!("{:?}", vector.segs[0].kind);
+    };
+    let mut gap = Arr::block(entries, GAP_LEVELS[usize::from(gap_level(entries[0]))]);
+    assert_eq!(
+        gap_set_value(&mut gap, true, 5),
+        Err(Fail::Refuse(Rule::GapSearch))
+    );
 }
 
 #[test]

@@ -88,8 +88,8 @@ pub(crate) enum Refusal {
     /// A Dense-seg whose division by `numseg` is by zero (SIGFPE).
     DivideByZero,
     /// A bit-bvector or bit-set-bvector that the index reads whose BitMagic data NCBI decodes past
-    /// its checks, or a row of it whose answer differs between NCBI's builds of BitMagic
-    /// (`bitmagic::Fail::Refuse`).
+    /// its checks, or that NCBI's builds of BitMagic decode differently or answer differently for
+    /// a row of it (`bitmagic::Fail::Refuse`).
     BitVector,
     /// A Packed-seg read past its `present`, `starts`, `ids` or `lens`.
     PackedOutOfBounds,
@@ -120,7 +120,7 @@ impl Refusal {
             Refusal::EmptyRegion => "a PSSM query whose annot has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)",
             Refusal::NullPointer => "a PSSM query whose annot has a Seq-table row without a Seq-id or a location (NCBI's object manager stops with a NULL pointer report of memory addresses)",
             Refusal::DivideByZero => "a PSSM query whose annot has a Dense-seg of no segments with starts or strands (NCBI's object manager divides by zero and crashes)",
-            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager reads past, decodes with undefined behaviour (an XOR block, a shift of 32 bits or more, a write past BitMagic's blocks or buffers) or from memory it did not write, or that holds a GAP block that is not one which NCBI searches while decoding, or which a row of the index reaches where NCBI's builds of BitMagic (scalar, SSE2, SSE4.2) answer differently",
+            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager reads past, decodes with undefined behaviour (an XOR block, a shift of 32 bits or more, a write past BitMagic's blocks or buffers) or from memory it did not write, or that holds a GAP block that is not one which NCBI's builds of BitMagic (scalar, SSE2, SSE4.2) decode differently or answer differently for a row of the index",
             Refusal::PackedOutOfBounds => "a PSSM query whose annot has a Packed-seg with fewer present, starts, ids or lens than its dim and numseg (NCBI's object manager reads past them)",
             Refusal::DeltaOverflow => "a PSSM query whose annot has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)",
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",

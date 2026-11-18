@@ -6,16 +6,17 @@
 //! bitmap, or the full block's pointer), by NCBI's steps for each, and stops at the first event of
 //! NCBI's that it does not port (`Fail::Refuse`): a read past the data, an XOR reference token, a
 //! step that NCBI runs with undefined behaviour or a write past its buffers, a read of memory that
-//! NCBI did not write in this decoding, or a decoding step that searches a GAP block that is not
-//! one. NCBI's own checks throw `std::logic_error("BM::Invalid serialization format")`
-//! (`Fail::Invalid`).
+//! NCBI did not write in this decoding, or a search of a GAP block that is not one whose result
+//! differs between NCBI's builds. NCBI's own checks throw
+//! `std::logic_error("BM::Invalid serialization format")` (`Fail::Invalid`).
 //!
 //! The decoded vector keeps the size and the set bits, which is all that NCBI's index asks of it
 //! (`BitVector`: the size, a bit, and the count of set bits up to a bit; `bm/SPEC.md` §1.3). A GAP
-//! block that is not one (its ends do not increase up to 65535) is kept as NCBI keeps it; a query
-//! that reaches it runs the searches of NCBI's three builds of BitMagic (scalar, SSE2, SSE4.2:
-//! which one NCBI runs depends on the machine it was built for) and is answered where the three
-//! agree, refused (`Rule::GapSearch`) where they differ. Rows that do not reach it are answered.
+//! block that is not one (its ends do not increase up to 65535) is kept as NCBI keeps it. A step
+//! that searches it, a bit that the decoding sets in it (`gap_set_value`) or a query that reaches
+//! it, runs the searches of NCBI's three builds of BitMagic (scalar, SSE2, SSE4.2: which one NCBI
+//! runs depends on the machine it was built for) and goes on where the three agree, refused
+//! (`Rule::GapSearch`) where they differ. Rows that do not reach it are answered.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqtable/BVector_data.cpp:73-82
 //! ```c++
@@ -44,8 +45,6 @@ type Block = [u64; 1024];
 /// as `gap_word_t`, bmserial.h:1269, 5119-5120).
 const GAP_ENTRIES: usize = 65536;
 const EX_ENTRIES: usize = 32768;
-/// The largest length a GAP header's 13 bits hold (`gap_length`, `*buf >> 3`).
-const GAP_LEN_MAX: u32 = 8191;
 /// The entries of the GAP result buffer of `combine_operation_block_or` and
 /// `combine_operation_with_block` (`tmp_buf[bm::gap_equiv_len * 3]`, bm.h:7287, 7665).
 const OR_BUF: usize = 3 * 4096;
@@ -86,10 +85,8 @@ pub(crate) enum Rule {
     /// A GAP block of length 0 that NCBI reads (U7, U9), or one whose length left the header's
     /// 13 bits before NCBI searches it.
     GapLength,
-    /// A GAP block that is not one (its ends do not increase up to 65535) that a decoding step
-    /// of NCBI's searches (`gap_set_value` of a bit into it) or makes from memory the data does not
-    /// decide (an opaque GAP of token 61), or a run of it that ends before it starts where NCBI's
-    /// `or_bit_block` shifts by 32 or writes past the block (U12).
+    /// A run of a GAP block that is not one (its ends do not increase up to 65535) that ends
+    /// before it starts where NCBI's `or_bit_block` shifts by 32 or writes past the block (U12).
     GapOrder,
     /// An entry of NCBI's work arrays or of a GAP block that this decoding did not write.
     Unwritten,
@@ -97,8 +94,9 @@ pub(crate) enum Rule {
     Window,
     /// A run of bits past the block (U10).
     RunRange,
-    /// A query of a GAP block that is not one whose answer differs between NCBI's builds
-    /// (scalar, SSE2, SSE4.2): NCBI's result depends on the machine it was built for.
+    /// A search of a GAP block that is not one (a query, or `gap_set_value` while decoding) whose
+    /// result differs between NCBI's builds (scalar, SSE2, SSE4.2): NCBI's result depends on the
+    /// machine it was built for.
     GapSearch,
 }
 
@@ -144,7 +142,7 @@ enum Kind {
     Runs(Box<[(u16, u16)]>, Box<[u32]>),
     /// The words, and the set bits of the 16-word chunks before each.
     Bits(Box<Block>, Box<[u32; 64]>),
-    /// A GAP block that is not one: its entries `[0..=L]` as NCBI holds them.
+    /// A GAP block that is not one: the entries of its buffer that NCBI wrote.
     Gap(Box<[u16]>),
     /// A block whose entries depend on memory or code that the data does not decide: refused by
     /// any query that reaches it.
@@ -1028,10 +1026,6 @@ fn clear_bit(block: &mut Block, p: u32) {
     block[(p >> 6) as usize & 1023] &= !(1 << (p & 63));
 }
 
-fn get(block: &Block, p: u32) -> bool {
-    block[(p >> 6) as usize & 1023] >> (p & 63) & 1 != 0
-}
-
 fn or_word32(block: &mut Block, k: usize, word: u32) {
     block[(k >> 1) & 1023] |= u64::from(word) << ((k & 1) * 32);
 }
@@ -1101,7 +1095,7 @@ fn block_runs(block: &Block, limit: usize) -> Option<Vec<(u16, u16)>> {
 // `gap_test_unr`, `gap_bit_count_range`, `gap_bit_count_unr`) run scalar, SSE2 or SSE4.2 code by
 // the machine NCBI's BitMagic is built for, which agree on such a block. A query of one that is not
 // runs all three (`gap_test3`, `gap_bfind3`, `gap_count3`) and is refused where they differ
-// (`Rule::GapSearch`); a decoding step that searches one stays refused (`Rule::GapOrder`).
+// (`Rule::GapSearch`); so does a bit that the decoding sets in one (`gap_set_value`).
 
 /// Entry `i` of a GAP block, of the entries that NCBI wrote.
 fn gap_at(gap: &[u16], i: usize) -> Result<u16, Fail> {
@@ -1155,28 +1149,6 @@ fn gap_of_runs(runs: &[(u16, u16)]) -> Vec<u16> {
     }
     gap[0] |= ((gap.len() - 1) as u16).wrapping_shl(3);
     gap
-}
-
-/// Sets bit `p` in the runs; false when it is set.
-fn insert(runs: &mut Vec<(u16, u16)>, p: u16) -> bool {
-    let at = runs.partition_point(|run| run.1 < p);
-    if runs.get(at).is_some_and(|run| run.0 <= p) {
-        return false;
-    }
-    let left = at > 0 && u32::from(runs[at - 1].1) + 1 == u32::from(p);
-    let right = runs
-        .get(at)
-        .is_some_and(|run| u32::from(p) + 1 == u32::from(run.0));
-    match (left, right) {
-        (true, true) => {
-            runs[at - 1].1 = runs[at].1;
-            runs.remove(at);
-        }
-        (true, false) => runs[at - 1].1 = p,
-        (false, true) => runs[at].0 = p,
-        (false, false) => runs.insert(at, (p, p)),
-    }
-    true
 }
 
 // NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4786-4811 (`gap_add_to_bitset`)
@@ -1240,12 +1212,33 @@ fn gap_bitmap(gap: &[u16]) -> Result<Box<Block>, Fail> {
     Ok(block)
 }
 
+/// The entries of a GAP block of each level (`gap_len_table`, bmconst.h:396-403).
+const GAP_LEVELS: [usize; 4] = [128, 256, 512, 1280];
+
 // NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:5409-5418 (`gap_calc_level` with
-// the default `gap_len_table`, 128, 256, 512, 1280: -1 above 1276), called with `gap_length`, one
-// more than the GAP's last index
+// the default `gap_len_table`: -1 above 1276)
+/// `gap_calc_level(len, glevel_len)`: the level of a GAP block of `len` entries (`gap_length`,
+/// one more than its last index).
+fn gap_calc_level(len: usize) -> Option<u16> {
+    GAP_LEVELS
+        .iter()
+        .position(|&n| len <= n - 4)
+        .map(|level| level as u16)
+}
+
 /// Whether a GAP block of last index `len` is too long for a GAP block and converted to bits.
 fn gap_converts(len: usize) -> bool {
-    len + 1 > 1280 - 4
+    gap_calc_level(len + 1).is_none()
+}
+
+/// `gap_level(buf)` (bmfunc.h:1757-1761).
+fn gap_level(head: u16) -> u16 {
+    (head >> 1) & 3
+}
+
+/// `set_gap_level(buf, level)` (bmfunc.h:5387-5393).
+fn with_level(head: u16, level: u16) -> u16 {
+    (head & !6) | (level << 1)
 }
 
 // NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:7414-7422 (`gap_operation_or`: the
@@ -1930,6 +1923,160 @@ fn gap_add_value(gap: &mut Arr, pos: u16) -> Result<(), Fail> {
     gap.set(usize::from(end), 65535)
 }
 
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4075-4140 (`gap_set_value`; the
+// four-argument form of 4048-4058 runs `gap_set_value_cpos`, 3962-4038, the same steps)
+// ```c++
+//     unsigned is_set;
+//     unsigned curr = bm::gap_bfind(buf, pos, &is_set);
+//     T end = (T) (*buf >> 3);
+//     if (is_set == val)
+//         return end;
+//     T* pcurr = buf + curr;
+//     T* pprev = pcurr - 1;
+//     T* pend = buf + end;
+//     if (!pos)
+//     {
+//         *buf ^= 1;
+//         if (buf[1]) // We need to insert a 1 bit GAP here
+//         {
+//             ::memmove(&buf[2], &buf[1], (end - 1) * sizeof(gap_word_t));
+//             buf[1] = 0;
+//             ++end;
+//         }
+//         else // Only 1 bit in the GAP. We need to delete the first GAP.
+//         {
+//             pprev = buf + 1; pcurr = pprev + 1;
+//             goto copy_gaps;
+//         }
+//     }
+//     else
+//     if (curr > 1 && ((unsigned)(*pprev))+1 == pos) // Left border bit
+//     {
+//        ++(*pprev);
+//        if (*pprev == *pcurr)  // Curr. GAP to be merged with prev.GAP.
+//        {
+//             --end;
+//             if (pcurr != pend) // GAP merge: 2 GAPS to be deleted
+//             {
+//                 ++pcurr;
+//                 copy_gaps:
+//                 --end;
+//                 do { *pprev++ = *pcurr++; } while (pcurr < pend);
+//             }
+//        }
+//     }
+//     else
+//     if (*pcurr == pos) // Rightmost bit in the GAP. Border goes left.
+//     {
+//         --(*pcurr);
+//         end += (pcurr == pend);
+//     }
+//     else  // Worst case: split current GAP
+//     {
+//         if (*pcurr != bm::gap_max_bits-1) // last gap does not need memmove
+//             ::memmove(pcurr+2, pcurr, (end - curr + 1)*(sizeof(T)));
+//         end += 2;
+//         pcurr[0] = (T)(pos-1);
+//         pcurr[1] = (T)pos;
+//     }
+//     *buf = (T)((*buf & 7) + (end << 3));
+//     buf[end] = bm::gap_max_bits-1;
+//     return end;
+// ```
+/// `gap_set_value(val, buf, pos)` after `gap_bfind` found the entry `curr`: any GAP block, a
+/// header that wraps (`end` is a `gap_word_t`). A `memmove` whose count wraps (`end - 1` with
+/// `end` 0, `end - curr + 1` with `curr` past `end + 1`) runs past the buffer: refused.
+fn gap_set_at(gap: &mut Arr, val: u16, pos: u16, curr: usize) -> Result<u16, Fail> {
+    let head = gap.get(0)?;
+    let mut end = head >> 3;
+    if gap_value_at(gap.written(), curr) == val {
+        return Ok(end);
+    }
+    let pend = usize::from(end);
+    if pos == 0 {
+        gap.set(0, head ^ 1)?;
+        if gap.get(1)? != 0 {
+            if pend == 0 {
+                return Err(refuse(Rule::Bounds));
+            }
+            gap.copy_within(1..pend, 2)?;
+            gap.set(1, 0)?;
+            end = end.wrapping_add(1);
+        } else {
+            end = end.wrapping_sub(1);
+            gap.copy_within(2..pend.max(3), 1)?;
+        }
+    } else if curr > 1 && u32::from(gap.get(curr - 1)?) + 1 == u32::from(pos) {
+        gap.set(curr - 1, pos)?;
+        if pos == gap.get(curr)? {
+            end = end.wrapping_sub(1);
+            if curr != pend {
+                end = end.wrapping_sub(1);
+                gap.copy_within(curr + 1..pend.max(curr + 2), curr - 1)?;
+            }
+        }
+    } else if gap.get(curr)? == pos {
+        gap.set(curr, pos - 1)?;
+        end = end.wrapping_add(u16::from(curr == pend));
+    } else {
+        if gap.get(curr)? != 65535 {
+            if curr > pend + 1 {
+                return Err(refuse(Rule::Bounds));
+            }
+            gap.copy_within(curr..pend + 1, curr + 2)?;
+        }
+        end = end.wrapping_add(2);
+        gap.set(curr, pos - 1)?;
+        gap.set(curr + 1, pos)?;
+    }
+    let head = (gap.get(0)? & 7).wrapping_add(end.wrapping_shl(3));
+    gap.set(0, head)?;
+    gap.set(usize::from(end), 65535)?;
+    Ok(end)
+}
+
+/// `gap_set_value(val, buf, pos)` of NCBI's three builds, whose `gap_bfind` is `VECT_GAP_BFIND`
+/// in the SIMD ones (bmfunc.h:1840-1841): the block as they leave it where they leave it the
+/// same, else `Rule::GapSearch` (NCBI's block then depends on the machine it was built for). They
+/// differ only on a GAP block that is not one.
+fn gap_set_value(gap: &mut Arr, val: bool, pos: u16) -> Result<u16, Fail> {
+    let found = {
+        let entries = gap.written();
+        let pos = u32::from(pos);
+        [
+            gap_bfind_scalar(entries, pos)?,
+            gap_bfind_sse2(entries, pos)?,
+            gap_bfind_sse42(entries, pos, 2)?,
+        ]
+    };
+    if found[1..].iter().all(|&curr| curr == found[0]) {
+        return gap_set_at(gap, u16::from(val), pos, found[0]);
+    }
+    // the bit already `val` in each build: none changes the block
+    if found
+        .iter()
+        .all(|&curr| gap_value_at(gap.written(), curr) == u16::from(val))
+    {
+        return Ok(gap.get(0)? >> 3);
+    }
+    let mut builds = Vec::with_capacity(3);
+    for curr in found {
+        let mut build = gap.clone();
+        let end = gap_set_at(&mut build, u16::from(val), pos, curr)?;
+        builds.push((end, build));
+    }
+    let (end, first) = &builds[0];
+    if builds[1..]
+        .iter()
+        .any(|(e, build)| e != end || build.written() != first.written())
+    {
+        return Err(refuse(Rule::GapSearch));
+    }
+    let end = *end;
+    *gap = builds.swap_remove(0).1;
+    Ok(end)
+}
+
 // NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3000-3034 (`gap_restore_mins`)
 fn gap_restore_mins(gap: &mut [u16], min0: u16, min1: u16) {
     let len = usize::from(gap[0] >> 3);
@@ -1953,11 +2100,12 @@ fn gap_restore_mins(gap: &mut [u16], min0: u16, min1: u16) {
 /// no slot. The deserializer makes new blocks as GAP blocks (`set_new_blocks_strat(BM_GAP)`,
 /// bmserial.h:5604).
 enum Slot {
-    /// A GAP block: its entries `[0..=L]`, and whether it is one (`gap_valid`).
+    /// A GAP block: the entries of its buffer that NCBI wrote (its header's level is the
+    /// buffer's, `GAP_LEVELS`), and whether it is one (`gap_valid`: then its entries `[0..=L]`).
     Gap(Vec<u16>, bool),
-    /// A GAP block that NCBI stored and cannot read back the same way each run: entries that it
-    /// did not write, or that the data does not decide. Refused when NCBI reads the block (a
-    /// query that reaches it, `Kind::Poison`), freed unread when it makes the block full.
+    /// A GAP block that NCBI stored and cannot read back the same way each run (its header
+    /// overwritten, `Decoder::gap_plain`). Refused when NCBI reads the block (a query that reaches
+    /// it, `Kind::Poison`), freed unread when it makes the block full.
     Poison(Rule),
     /// A bitmap, also one of all ones (which is not the full block).
     Bits(Box<Block>),
@@ -1968,9 +2116,15 @@ enum Slot {
 static FULL: Slot = Slot::Full;
 
 impl Slot {
-    fn gap(gap: Vec<u16>) -> Slot {
-        let valid = gap_valid(&gap);
-        Slot::Gap(gap, valid)
+    /// A GAP block of the written entries `gap`: a block that is one keeps its entries
+    /// `[0..=L]`, one that is not all that NCBI wrote (its searches may read past `L`).
+    fn gap(mut gap: Vec<u16>) -> Slot {
+        let len = gap.first().map_or(0, |&head| usize::from(head >> 3) + 1);
+        if gap.get(..len).is_some_and(gap_valid) {
+            gap.truncate(len);
+            return Slot::Gap(gap, true);
+        }
+        Slot::Gap(gap, false)
     }
 }
 
@@ -2003,28 +2157,49 @@ fn or_into(block: &mut Block, bits: &Block) {
 }
 
 /// `clone_gap_block(gap, gap_res)` (bmblocks.h:838-858): a new GAP block of the GAP's
-/// `gap_length` entries, or a bitmap above the last level.
+/// `gap_length` entries (those that NCBI wrote; the rest of the copy is memory it did not write)
+/// at the level of that length, or a bitmap above the last level.
 fn clone_gap(gap: &[u16]) -> Result<Slot, Fail> {
     let len = gap_last(gap)?;
-    if gap_converts(len) {
+    let Some(level) = gap_calc_level(len + 1) else {
         return Ok(Slot::Bits(gap_bitmap(gap)?));
-    }
-    Ok(match gap.get(..=len) {
-        Some(entries) => Slot::gap(entries.to_vec()),
-        None => Slot::Poison(Rule::Unwritten),
-    })
+    };
+    let mut block = gap[..gap.len().min(len + 1)].to_vec();
+    block[0] = with_level(block[0], level);
+    Ok(Slot::gap(block))
 }
 
-/// `assign_gap` (bmblocks.h:985-1030): the result of a GAP operation, a bitmap above the last
-/// level (`convert_gap2bitset` with the result's length).
-fn assign_gap(res: Vec<u16>) -> Result<Slot, Fail> {
+/// `assign_gap(res, res_len, blk)` (bmblocks.h:985-1030) into a GAP block of level `level`: a
+/// bitmap above the last level (`convert_gap2bitset` with the result's length), a new block at
+/// the result's level where it reaches the block's limit, else the block keeps its level.
+fn assign_gap(mut res: Vec<u16>, level: u16) -> Result<Slot, Fail> {
     let len = res.len() - 1;
-    if gap_converts(len) {
+    let Some(new_level) = gap_calc_level(len + 1) else {
         let mut block = Box::new([0; 1024]);
         gap_add_to_bitset(&res, len, &mut block)?;
         return Ok(Slot::Bits(block));
-    }
+    };
+    let level = if len >= GAP_LEVELS[usize::from(level)] - 4 {
+        new_level
+    } else {
+        level
+    };
+    res[0] = with_level(res[0], level);
     Ok(Slot::gap(res))
+}
+
+/// `extend_gap_block(nb, blk)` (bmblocks.h:1810-1836): a GAP block past its level's limit moves
+/// to the next level (`allocate_gap_block` copies its `gap_length` entries and remakes the header),
+/// or becomes a bitmap from the last level or at 1280 entries (`deoptimize_block`).
+fn extend_gap(gap: &[u16]) -> Result<Slot, Fail> {
+    let head = gap_at(gap, 0)?;
+    let (level, len) = (gap_level(head), usize::from(head >> 3) + 1);
+    if level == 3 || len >= GAP_LEVELS[3] {
+        return Ok(Slot::Bits(gap_bitmap(gap)?));
+    }
+    let mut block = gap[..gap.len().min(len)].to_vec();
+    block[0] = (((len - 1) as u16) << 3) | ((level + 1) << 1) | (head & 1);
+    Ok(Slot::gap(block))
 }
 
 impl Store {
@@ -2064,35 +2239,34 @@ impl Store {
     // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:4646-4672 (`set_bit_no_check`),
     // bmblocks.h:1076-1118 (`check_allocate_block`: a null block becomes the empty GAP block of
     // `gap_set_all`), bm.h:2119-2132 (`gap_block_set_no_ret`: `gap_set_value`, then above the
-    // level's limit `extend_gap_block`, bmblocks.h:1819-1836, which makes a bitmap above 1276)
+    // level's limit `extend_gap_block`, bmblocks.h:1810-1836)
     /// `bvector<>::set_bit_no_check(nb * 65536 + p)`.
     fn set_bit(&mut self, nb: u32, p: u16) -> Result<(), Fail> {
         if self.is_full(nb) {
             return Ok(());
         }
-        let slot = self.slot(nb);
+        // `gap_set_all(allocate_gap_block(0), gap_max_bits, 0)`
+        let slot = self
+            .slot(nb)
+            .get_or_insert_with(|| Slot::Gap(vec![1 << 3, 65535], true));
         match slot {
-            None => *slot = Some(Slot::Gap(gap_of_runs(&[(p, p)]), true)),
-            Some(Slot::Full) => {}
-            Some(Slot::Poison(rule)) => return Err(refuse(*rule)),
-            // `gap_bfind` of a GAP block that is not one
-            Some(Slot::Gap(_, false)) => return Err(refuse(Rule::GapOrder)),
-            Some(Slot::Gap(gap, true)) => {
-                let mut runs = gap_runs(gap);
-                if insert(&mut runs, p) {
-                    let next = gap_of_runs(&runs);
-                    if next.len() - 1 > 1280 - 4 {
-                        let mut block = Box::new([0; 1024]);
-                        for &(first, last) in &runs {
-                            fill_range(&mut block, u32::from(first), u32::from(last));
-                        }
-                        *slot = Some(Slot::Bits(block));
-                    } else {
-                        *gap = next;
-                    }
-                }
+            Slot::Full => {}
+            Slot::Poison(rule) => return Err(refuse(*rule)),
+            Slot::Gap(gap, _) => {
+                // `gap_block_set_no_ret`: `gap_set_value` in the block's buffer, then
+                // `extend_gap_block` past the level's limit (`gap_limit`, bmfunc.h:1744-1748)
+                let head = gap_at(gap, 0)?;
+                let mut buf = Arr::block(gap, GAP_LEVELS[usize::from(gap_level(head))]);
+                let end = usize::from(gap_set_value(&mut buf, true, p)?);
+                let level = gap_level(buf.get(0)?);
+                *slot = if usize::from(head >> 3) < end && end > GAP_LEVELS[usize::from(level)] - 4
+                {
+                    extend_gap(buf.written())?
+                } else {
+                    Slot::gap(buf.written().to_vec())
+                };
             }
-            Some(Slot::Bits(block)) => set_bit(block, u32::from(p)),
+            Slot::Bits(block) => set_bit(block, u32::from(p)),
         }
         Ok(())
     }
@@ -2269,13 +2443,14 @@ impl Store {
             Some(Slot::Poison(rule)) => return Err(refuse(*rule)),
             Some(Slot::Gap(gap, _)) => {
                 // `assign_gap_check` (bmblocks.h:958-980), or `gap_is_all_zero` then `assign_gap`
+                let level = gap_level(gap_at(gap, 0)?);
                 let res = gap_or(gap, arg)?;
                 *slot = if block_or && gap_all(&res, 1) {
                     Some(Slot::Full)
                 } else if gap_all(&res, 0) {
                     None
                 } else {
-                    Some(assign_gap(res)?)
+                    Some(assign_gap(res, level)?)
                 };
             }
             Some(Slot::Bits(block)) => gap_add_to_bitset(arg, gap_last(arg)?, block)?,
@@ -2485,7 +2660,9 @@ impl Segs {
 
 /// One of the deserializer's work arrays (bmserial.h:5110-5129), which NCBI allocates without
 /// initializing them, once for each `bm::deserialize`, and the length of the prefix that this
-/// decoding wrote (`hw`). An entry past it holds memory that NCBI did not write.
+/// decoding wrote (`hw`). An entry past it holds memory that NCBI did not write. Also a GAP block
+/// while `gap_set_value` changes it (`Arr::block`).
+#[derive(Clone)]
 struct Arr {
     v: Vec<u16>,
     hw: usize,
@@ -2497,6 +2674,15 @@ impl Arr {
             v: vec![0; len],
             hw: 0,
         }
+    }
+
+    /// A GAP block of `capacity` entries (`glevel_len[level]`, the allocation of
+    /// `alloc_gap_block`) whose written entries are `gap`.
+    fn block(gap: &[u16], capacity: usize) -> Arr {
+        let mut v = gap[..gap.len().min(capacity)].to_vec();
+        let hw = v.len();
+        v.resize(capacity, 0);
+        Arr { v, hw }
     }
 
     /// The entries `0..n` are written.
@@ -2528,14 +2714,20 @@ impl Arr {
         Ok(())
     }
 
-    /// `memmove(&v[dest], &v[src.start], src.len())`: entries from past the written prefix leave
-    /// the prefix ending at `dest`.
+    /// `memmove(&v[dest], &v[src.start], src.len())`: the copies of written entries are written,
+    /// those of entries past the written prefix are not; a copy past the prefix leaves it.
     fn copy_within(&mut self, src: std::ops::Range<usize>, dest: usize) -> Result<(), Fail> {
-        if dest + src.len() > self.v.len() {
+        let len = src.len();
+        if dest + len > self.v.len() || src.end > self.v.len() {
             return Err(refuse(Rule::Bounds));
         }
-        if src.end > self.hw {
-            self.hw = self.hw.min(dest);
+        if dest <= self.hw {
+            let known = self.hw.saturating_sub(src.start).min(len);
+            self.hw = if known == len {
+                self.hw.max(dest + len)
+            } else {
+                dest + known
+            };
         }
         self.v.copy_within(src, dest);
         Ok(())
@@ -2546,50 +2738,6 @@ impl Arr {
         let n = n.max(1);
         self.check(n)?;
         Ok(&self.v[..n])
-    }
-}
-
-/// Token 61's GAP block while its exceptions apply (`Decoder::gap_v3`).
-enum V3 {
-    /// A GAP block that is one: its bits (in `temp_block_`'s place) and its length `end`.
-    Exact(u32),
-    /// A GAP block that is not one: bounds of its length.
-    Opaque(u32, u32),
-    /// A GAP block whose entries NCBI did not all write.
-    Unwritten,
-}
-
-impl V3 {
-    /// `gap_set_value(value, gap, pos)`.
-    fn set(self, bits: &mut Block, value: bool, pos: u16) -> Result<V3, Fail> {
-        match self {
-            V3::Exact(mut end) if end <= GAP_LEN_MAX => {
-                let pos = u32::from(pos);
-                if get(bits, pos) == value {
-                    return Ok(V3::Exact(end));
-                }
-                for q in [pos.wrapping_sub(1), pos + 1] {
-                    if q < BLOCK_BITS {
-                        if get(bits, q) == value {
-                            end -= 1;
-                        } else {
-                            end += 1;
-                        }
-                    }
-                }
-                if value {
-                    set_bit(bits, pos);
-                } else {
-                    clear_bit(bits, pos);
-                }
-                Ok(V3::Exact(end))
-            }
-            V3::Opaque(lo, hi) if lo >= 1 && hi <= GAP_LEN_MAX => {
-                Ok(V3::Opaque(lo.saturating_sub(2), hi + 2))
-            }
-            V3::Unwritten => Err(refuse(Rule::Unwritten)),
-            _ => Err(refuse(Rule::GapLength)),
-        }
     }
 }
 
@@ -3316,7 +3464,8 @@ impl Decoder<'_> {
                 return Ok(());
             }
             let mut block = vec![0; len + 1];
-            block[0] = head;
+            // `set_gap_level(&gap_head, level)`: the level of `len + 1` entries (not past 1276)
+            block[0] = with_level(head, gap_calc_level(len + 1).unwrap_or(3));
             if len > 1 {
                 self.bytes.u16s(&mut block[1..], (len - 1) as u32)?;
             }
@@ -3398,14 +3547,9 @@ impl Decoder<'_> {
     //                     bm::gap_restore_mins(dst_block, min0, min1);
     //             }
     // ```
-    /// Token 61. With exceptions, `gap_set_value` (bmfunc.h:4075-4140) sets or clears the GAP
-    /// block bit by bit. On a GAP block that is one, LOSAT keeps its bits and its length (one more
-    /// than the changes of value between neighbouring bits; the header keeps its low 13 bits) and
-    /// writes the block as NCBI's steps leave it. On one that is not, `gap_bfind` answers by how
-    /// BitMagic is compiled, so LOSAT keeps only bounds of the length (each step moves it by at
-    /// most 2, within `gap_temp_block_`), refuses a step where it may have left 1..=8191 (`end`
-    /// 0 gives a `memmove` of -1 entries; past 8191 the header no longer ends the GAP), and refuses
-    /// the block where NCBI reads it.
+    /// Token 61. With exceptions, `gap_set_value` sets or clears the GAP block in
+    /// `gap_temp_block_` bit by bit, as NCBI's three builds do (`gap_set_value`: on a GAP block
+    /// that is not one they may differ), then the block is ORed in as the other GAP tokens.
     fn gap_v3(&mut self, nb: u32) -> Result<(), Fail> {
         let s = &mut self.s;
         let gap = &mut s.gap;
@@ -3464,50 +3608,16 @@ impl Decoder<'_> {
             }
         }
         if exceptions {
-            let tmp = &mut s.tmp;
-            let base = usize::from(gap.v[0] >> 3);
-            let mut state = match gap.written().get(..=base) {
-                Some(entries) if gap_valid(entries) => {
-                    tmp.fill(0);
-                    gap_add_to_bitset(entries, base, tmp)?;
-                    V3::Exact(base as u32)
-                }
-                Some(_) => V3::Opaque(base as u32, base as u32),
-                None => V3::Unwritten,
-            };
             for _ in 0..2 {
                 let (h3f, count) = bin.decode_array(&mut s.ex0, &mut s.wflags, 0)?;
                 let value = h3f & 0x10 != 0;
                 for &pos in &s.ex0.v[..count as usize] {
-                    state = state.set(tmp, value, pos)?;
+                    gap_set_value(gap, value, pos)?;
                 }
                 // `h3f_ex_arr_ex_EOC`: no second list
                 if h3f & 0x20 != 0 {
                     break;
                 }
-            }
-            match state {
-                V3::Exact(len) => {
-                    let block = gap_of_runs(&block_runs(tmp, usize::MAX).unwrap_or_default());
-                    debug_assert_eq!(block.len(), len as usize + 1);
-                    gap.v[..block.len()].copy_from_slice(&block);
-                    gap.hw = block.len();
-                }
-                V3::Opaque(_, hi) => {
-                    // the GAP, unknown, as `combine_operation_block_or` takes it: not read by the
-                    // full block, stored by `clone_gap_block` into a null block at most 1275 long
-                    gap.hw = 0;
-                    return match self.store.get(nb) {
-                        Some(Slot::Full) => Ok(()),
-                        None if !gap_converts(hi as usize) => {
-                            self.store.put(nb, Slot::Poison(Rule::GapOrder));
-                            Ok(())
-                        }
-                        _ => Err(refuse(Rule::GapOrder)),
-                    };
-                }
-                // no step: the block as it is
-                V3::Unwritten => {}
             }
         }
         self.store.or_gap(nb, self.s.gap.written(), true)

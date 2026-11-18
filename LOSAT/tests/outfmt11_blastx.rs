@@ -610,8 +610,10 @@ fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
     assert!(!accepts(&two("100000000000002", "200000000000004")));
     // A mantissa of fewer than 15 digits (its trailing zeros dropped) 1 away is not a last digit.
     let short = |m: &str| format!("evalue real {{ {m}, 10, -1 }}").into_bytes();
-    assert!(!archives_match_allowing_libm_last_digit(&short("6"), &short("5"), true));
-    assert!(!archives_match_allowing_libm_last_digit(&short("0"), &short("1"), true));
+    let rule = |got: &str, want: &str| {
+        archives_match_allowing_libm_last_digit(&short(got), &short(want), true)
+    };
+    assert!(!rule("6", "5") && !rule("0", "1"));
 }
 
 #[test]

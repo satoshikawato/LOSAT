@@ -192,11 +192,12 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_FNEXK, line FN s1 probe): `extend_hit_ungapped_exact_counted` with each
-/// packed subject byte read once and its four bases taken with constant shifts (the loops unrolled
-/// by the four positions of a byte; the first, partial byte of each side is peeled). The steps,
-/// their order, the tests and the `i32` updates are those of the counted loops, so every exit and
-/// the four results are theirs.
+/// EXPERIMENT (LOSAT_X_FNEXK, line FN s1 probe): `extend_hit_ungapped_exact_counted` with the
+/// subject read four bases at a time: each group of four positions comes from one two-byte window
+/// of the packed subject, shifted once by the call's phase (`2 * (3 - first % 4)` on the left,
+/// `2 * (s_off % 4)` on the right), and each step takes its base with a constant shift. The query
+/// is walked by pointer. The steps, their order, the tests and the `i32` updates are those of the
+/// counted loops, so every exit and the four results are theirs.
 #[inline(never)]
 pub(crate) fn extend_hit_ungapped_exact_unrolled(
     q_seq: &[u8],
@@ -210,136 +211,137 @@ pub(crate) fn extend_hit_ungapped_exact_unrolled(
     let x = x_dropoff.wrapping_neg();
     debug_assert!(q_off < q_seq.len() && s_off < subject_len);
     debug_assert!(subject_len.div_ceil(4) <= s_seq_packed.len());
-    let q = q_seq.as_ptr();
+    let m = matrix.as_ptr();
     let s = s_seq_packed.as_ptr();
+    let s_bytes = s_seq_packed.len();
+    // SAFETY (every `cell` read below): `code` is a BLASTNA letter (< 16) and the base < 4, so
+    // `(code << 4) | base` < 256.
+    let cell = |code: u8, base: u32| -> i32 { unsafe { *m.add(((code as usize) << 4) | base as usize) } };
     let mut score: i32 = 0;
     let mut sum: i32 = 0;
 
-    // Left: step i (from 1) reads subject position s_off - i, the base at shift 2 * (p % 4)
-    // from the right of byte p / 4 (positions 4b + 3, 4b + 2, 4b + 1, 4b: shifts 0, 2, 4, 6).
+    // Left: min(q_off, s_off) steps; step j (from 0) reads subject position s_off - 1 - j and query
+    // offset q_off - 1 - j. Group g holds positions first - 4 g .. first - 4 g - 3 (first =
+    // s_off - 1): in the big-endian window (byte b - g - 1) << 8 | (byte b - g), b = first / 4, the
+    // position first - 4 g - t sits at bits 2 (3 - k) + 2 t (k = first % 4), so the window shifted
+    // right by 2 (3 - k) holds the group's t-th base at bits 2 t.
     let left = q_off.min(s_off);
-    let mut q_beg = q_off;
-    let mut i = 0usize;
-    macro_rules! left_step {
-        ($ch:expr, $sh:expr, $l:lifetime) => {{
-            if i == left {
-                break $l;
-            }
-            i += 1;
-            // SAFETY: q_off - i < q_off < q_seq.len() (i <= left <= q_off).
-            let code = unsafe { *q.add(q_off - i) };
-            sum = sum.wrapping_add(cell(matrix, code, (($ch >> $sh) & 3) as usize));
-            if sum > 0 {
-                q_beg = q_off - i;
-                score = score.wrapping_add(sum);
-                sum = 0;
-            } else if sum < x {
-                break $l;
-            }
-        }};
-    }
+    let q0 = q_seq.as_ptr();
+    // SAFETY: q_off < q_seq.len(), and the walk stays in q_off - left .. q_off.
+    let mut qp = unsafe { q0.add(q_off) };
+    let q_stop = unsafe { q0.add(q_off - left) };
+    let mut q_beg_p = qp;
     'left: {
         if left == 0 {
             break 'left;
         }
         let first = s_off - 1;
+        let sh = (2 * (3 - (first & 3))) as u32;
         let mut b = first >> 2;
-        // SAFETY: b = (s_off - 1) / 4 < subject_len.div_ceil(4) <= s_seq_packed.len().
-        let mut ch = unsafe { *s.add(b) };
-        let k = first & 3;
-        if k == 3 {
-            left_step!(ch, 0, 'left);
-        }
-        if k >= 2 {
-            left_step!(ch, 2, 'left);
-        }
-        if k >= 1 {
-            left_step!(ch, 4, 'left);
-        }
-        left_step!(ch, 6, 'left);
         loop {
-            if i == left {
+            if qp == q_stop {
                 break 'left;
             }
-            // i < left <= s_off - 1 - ..., so position s_off - 1 - i >= 0 lies in byte b - 1.
+            // SAFETY: b < s_bytes (b <= first / 4 < subject_len.div_ceil(4)); byte b - 1 is read
+            // only when b >= 1 (a group that reaches below position 0 stops by the step count).
+            let lo = unsafe { *s.add(b) } as u32;
+            let hi = if b > 0 { (unsafe { *s.add(b - 1) }) as u32 } else { 0 };
+            let v = ((hi << 8) | lo) >> sh;
+            macro_rules! step {
+                ($t:expr) => {{
+                    if qp == q_stop {
+                        break 'left;
+                    }
+                    // SAFETY: q_stop < qp <= q0 + q_off.
+                    qp = unsafe { qp.sub(1) };
+                    let code = unsafe { *qp };
+                    sum = sum.wrapping_add(cell(code, (v >> (2 * $t)) & 3));
+                    if sum > 0 {
+                        q_beg_p = qp;
+                        score = score.wrapping_add(sum);
+                        sum = 0;
+                    } else if sum < x {
+                        break 'left;
+                    }
+                }};
+            }
+            step!(0);
+            step!(1);
+            step!(2);
+            step!(3);
+            if b == 0 {
+                break 'left;
+            }
             b -= 1;
-            // SAFETY: b < the previous b <= s_seq_packed.len() - 1.
-            ch = unsafe { *s.add(b) };
-            left_step!(ch, 0, 'left);
-            left_step!(ch, 2, 'left);
-            left_step!(ch, 4, 'left);
-            left_step!(ch, 6, 'left);
         }
     }
-    let q_start = q_beg;
+    // SAFETY: q_beg_p is in q0 ..= q0 + q_off.
+    let q_start = unsafe { q_beg_p.offset_from(q0) } as usize;
     let s_start = s_off - (q_off - q_start);
 
-    // Right: step i (from 0) reads subject position s_off + i (positions 4b .. 4b + 3: shifts 6,
-    // 4, 2, 0).
+    // Right: min(q_avail, s_avail) steps; step j reads subject position s_off + j and query offset
+    // q_off + j. Group g holds positions s_off + 4 g .. + 3: in the window (byte b + g) << 8 |
+    // (byte b + g + 1), b = s_off / 4, shifted left by 2 k (k = s_off % 4) and taken as its top
+    // byte, the group's t-th base sits at bits 6 - 2 t.
     let right = (q_seq.len() - q_off).min(subject_len - s_off);
-    let mut q_end = q_off;
+    // SAFETY: the walk reads q_off .. q_off + right <= q_seq.len().
+    let mut qp = unsafe { q0.add(q_off) };
+    let q_stop = unsafe { q0.add(q_off + right) };
+    let mut q_end_p = qp;
     sum = 0;
     let mut x_current = x;
-    let mut i = 0usize;
-    macro_rules! right_step {
-        ($ch:expr, $sh:expr, $l:lifetime) => {{
-            if i == right {
-                break $l;
-            }
-            // SAFETY: q_off + i < q_off + right <= q_seq.len().
-            let code = unsafe { *q.add(q_off + i) };
-            i += 1;
-            sum = sum.wrapping_add(cell(matrix, code, (($ch >> $sh) & 3) as usize));
-            if sum > 0 {
-                q_end = q_off + i;
-                score = score.wrapping_add(sum);
-                x_current = if score.wrapping_neg() > x {
-                    score.wrapping_neg()
-                } else {
-                    x
-                };
-                sum = 0;
-            } else if sum < x_current {
-                break $l;
-            }
-        }};
-    }
     'right: {
         if right == 0 {
             break 'right;
         }
+        let sh = (2 * (s_off & 3)) as u32;
         let mut b = s_off >> 2;
-        // SAFETY: s_off < subject_len, so b < subject_len.div_ceil(4) <= s_seq_packed.len().
-        let mut ch = unsafe { *s.add(b) };
-        let k = s_off & 3;
-        if k == 0 {
-            right_step!(ch, 6, 'right);
-        }
-        if k <= 1 {
-            right_step!(ch, 4, 'right);
-        }
-        if k <= 2 {
-            right_step!(ch, 2, 'right);
-        }
-        right_step!(ch, 0, 'right);
         loop {
-            if i == right {
+            if qp == q_stop {
                 break 'right;
             }
+            // SAFETY: a step is left, so its position s_off + j < subject_len lies in byte b
+            // < s_bytes; byte b + 1 is read only when it exists.
+            let hi = unsafe { *s.add(b) } as u32;
+            let lo = if b + 1 < s_bytes { (unsafe { *s.add(b + 1) }) as u32 } else { 0 };
+            let v = (((hi << 8) | lo) << sh) >> 8;
+            macro_rules! step {
+                ($t:expr) => {{
+                    if qp == q_stop {
+                        break 'right;
+                    }
+                    // SAFETY: q0 + q_off <= qp < q_stop.
+                    let code = unsafe { *qp };
+                    qp = unsafe { qp.add(1) };
+                    sum = sum.wrapping_add(cell(code, (v >> (6 - 2 * $t)) & 3));
+                    if sum > 0 {
+                        q_end_p = qp;
+                        score = score.wrapping_add(sum);
+                        x_current = if score.wrapping_neg() > x {
+                            score.wrapping_neg()
+                        } else {
+                            x
+                        };
+                        sum = 0;
+                    } else if sum < x_current {
+                        break 'right;
+                    }
+                }};
+            }
+            step!(0);
+            step!(1);
+            step!(2);
+            step!(3);
             b += 1;
-            // SAFETY: i < right, so position s_off + i < subject_len lies in byte b.
-            ch = unsafe { *s.add(b) };
-            right_step!(ch, 6, 'right);
-            right_step!(ch, 4, 'right);
-            right_step!(ch, 2, 'right);
-            right_step!(ch, 0, 'right);
         }
     }
+    // SAFETY: q_end_p is in q0 + q_off ..= q_stop.
+    let q_end = unsafe { q_end_p.offset_from(q0) } as usize;
 
     UngappedData {
         q_start,
         s_start,
-        length: q_end - q_beg,
+        length: q_end - q_start,
         score,
     }
 }

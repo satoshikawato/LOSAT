@@ -703,11 +703,11 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("LengthError".to_string(), 2),
+            ("LengthError".to_string(), 3),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 4),
-            ("Read".to_string(), 122),
-            ("Serial".to_string(), 40),
+            ("Read".to_string(), 149),
+            ("Serial".to_string(), 57),
             ("UnknownEncoding".to_string(), 7),
         ]
     );

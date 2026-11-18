@@ -170,8 +170,10 @@
   after 1.48);
   1.50 2026-11-18 (makeblastdb `-mask_data`, line NP item M4a-1c: the explicit rejection of a mask
   file's string whose length passes the end of the file and is 1 GiB to 2^47 bytes, which NCBI's
-  reader reserves before it reads and which succeeds or fails by the host's memory, rule 3;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.49)
+  reader reserves before it reads and which succeeds or fails by the host's memory, and of an
+  element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
+  run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.49)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1487,6 +1489,19 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   LOSAT refuses it (exit 1, "losat makeblastdb: mask data that LOSAT does not read: a string whose
   length ... passes the end of the file ..."), before the build. Fixtures
   `LOSAT/tests/seqdb/mask_parse/b_length_*.asnb` (`make_mask_parse_fixtures.py`).
+  An element of a mask's list of `CRef`s (`masks`, a `mix`, an `equiv`, a `packed-int`) stated as
+  `NULL` (`05 00` in binary), which NCBI's reader takes and leaves as an empty `CRef`
+  (`CObjectIStream::ReadPointer`, `serial/objistr.cpp:1133-1213`), is explicitly rejected under
+  rule 3 where makeblastdb dereferences it: the `GetId` of each mask in `x_ProcessMaskData`
+  (`**iter`) and the walk of `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`,
+  `objects/seqloc/Seq_loc.cpp:3541-3620`) stop with a `CCoreException` whose report prints a stack
+  trace with the run's library addresses and the path of the installed binary. LOSAT refuses it
+  there (exit 1, "losat makeblastdb: mask data that LOSAT does not read: an element of ... stated
+  as NULL ..."): after the masks before it, after any error of NCBI's reader in the rest of its
+  object, and only where the walk reaches it (after two Seq-ids or a `feat` the walk stops first,
+  and LOSAT writes NCBI's "Cannot get masked range Seq-id"). Unit tests in
+  `LOSAT/src/writedb/mask_info/tests.rs`; the fixtures `h_pointer_*` and `b_pointer_*` of
+  `make_mask_parse_fixtures.py` hold the cases NCBI completes or fails on without that report.
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

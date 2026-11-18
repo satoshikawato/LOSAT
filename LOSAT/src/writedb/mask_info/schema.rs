@@ -28,6 +28,18 @@ pub(super) enum Ty {
     SetOf(&'static Ty),
 }
 
+impl Ty {
+    /// The name of a class or choice type (`GetName()` of its type information, the name that a
+    /// `:Type` of NCBI's pointer syntax is compared with); empty for the other types.
+    pub(super) fn type_name(&self) -> &'static str {
+        match self {
+            Ty::Class(def) => def.name,
+            Ty::Choice(def) => def.name,
+            _ => "",
+        }
+    }
+}
+
 pub(super) struct EnumDef {
     pub(super) values: &'static [(&'static str, i32)],
     /// `INTEGER { names }` (any integer is accepted) as opposed to `ENUMERATED`.
@@ -45,6 +57,11 @@ pub(super) struct Member {
     /// holds a class or choice by reference (`ADD_NAMED_REF_MEMBER`, `CRef<>`): `ref_req`,
     /// `ref_opt`.
     pub(super) set_flag: bool,
+    /// An `OPTIONAL` member held by `CRef<>` (`ref_opt`). The generated constructor allocates the
+    /// object of a mandatory `CRef<>` member (`ref_req`), which NCBI reads in place; an optional one
+    /// is empty when NCBI reads it, so `CPointerTypeInfo::ReadPointer` reads it with NCBI's pointer
+    /// syntax (`NULL`, `@n`, `:Type value`; `Rd::read_pointer`).
+    pub(super) pointer: bool,
 }
 
 pub(super) struct ClassDef {
@@ -71,6 +88,7 @@ const fn req(name: &'static str, ty: &'static Ty) -> Member {
         ty,
         optional: false,
         set_flag: true,
+        pointer: false,
     }
 }
 
@@ -80,6 +98,7 @@ const fn opt(name: &'static str, ty: &'static Ty) -> Member {
         ty,
         optional: true,
         set_flag: true,
+        pointer: false,
     }
 }
 
@@ -110,15 +129,20 @@ const fn ref_req(name: &'static str, ty: &'static Ty) -> Member {
         ty,
         optional: false,
         set_flag: false,
+        pointer: false,
     }
 }
 
+// (checked with makeblastdb 2.17.0: `NULL` for `Seq-interval.fuzz-from` and `Seq-point.fuzz` leaves
+// them unset, `@1` there fails in `GetRegisteredObject`; `NULL` for a mandatory `Seq-interval.id`
+// is read as a Seq-id, the h_pointer_* fixtures.)
 const fn ref_opt(name: &'static str, ty: &'static Ty) -> Member {
     Member {
         name,
         ty,
         optional: true,
         set_flag: false,
+        pointer: true,
     }
 }
 

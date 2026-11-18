@@ -9,7 +9,7 @@
 use super::reader::{reserve_string, throw_error, Fail, Input, StringPost, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_text_reader::FIND_NAME;
+use crate::report::serial::asn_text_reader::{PointerType, FIND_NAME};
 use crate::report::serial::encoder::StreamPosition;
 use crate::seqid::ber::StdSignedError;
 
@@ -62,6 +62,11 @@ const UNEXPECTED_SYS_TAG_BYTE: ThrowSite = asnb_site(
     Some("ncbi::CObjectIStreamAsnBinary::UnexpectedSysTagByte"),
 );
 const READ_LENGTH_LONG: &str = "ncbi::CObjectIStreamAsnBinary::ReadLengthLong";
+const PEEK_CLASS_TAG: ThrowSite = asnb_site(
+    231,
+    OVERFLOW,
+    Some("ncbi::CObjectIStreamAsnBinary::PeekClassTag"),
+);
 const UNEXPECTED_MEMBER: ThrowSite = asnb_site(
     1066,
     FORMAT_ERROR,
@@ -108,6 +113,10 @@ const TAG_NULL: u8 = 0x05;
 const TAG_ENUMERATED: u8 = 0x0a;
 const TAG_UTF8_STRING: u8 = 0x0c;
 const TAG_VISIBLE_STRING: u8 = 0x1a;
+/// `MakeTagByte(eApplication, ePrimitive, eObjectReference)`: the object index of `@n`.
+const TAG_OBJECT_REFERENCE: u8 = 0x5e;
+/// `MakeTagByte(eApplication, eConstructed, eLongTag)`: a class name follows, then its value.
+const TAG_OTHER_POINTER: u8 = 0x7f;
 const TAG_SEQUENCE: i32 = 16;
 const TAG_SET: i32 = 17;
 const LONG_TAG: u8 = 0x1f;
@@ -377,9 +386,14 @@ impl<'a> BerIn<'a> {
             // `n` bytes (the length of the length) before where its length says. makeblastdb 2.17.0
             // fails with "EndOfContentsByte expected" on such an item (checked on the
             // `long_len_*` cases of the fixtures).
+            //
+            // The sum is `Int8 + size_t`: computed in 64 unsigned bits, it wraps, and is stored in
+            // the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is then an
+            // indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one ends the
+            // members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_* fixtures).
             let base = self.pos as i64;
             let long_length = self.read_length_long(len)?;
-            base.saturating_add(i64::try_from(long_length).unwrap_or(i64::MAX))
+            (base as u64).wrapping_add(long_length) as i64
         } else {
             self.pos as i64 + i64::from(len)
         };
@@ -966,6 +980,129 @@ impl Input for BerIn<'_> {
             )));
         }
         Ok(value)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1861-1887
+    // ```c++
+    // pair<TObjectPtr, TTypeInfo>
+    // CObjectIStreamAsnBinary::ReadPointer(TTypeInfo declaredType)
+    // {
+    //     ...
+    //     TByte byte = PeekTagByte();
+    //     ...
+    //     switch ( byte ) {
+    //     case ASN_BINARY_MAKE_TAG_BYTE(eUniversal, ePrimitive, eNull):
+    //         {
+    //             ...
+    //             m_CurrentTagLength = 1;
+    //             ExpectShortLength(0);
+    //             EndOfTag();
+    //             return pair<TObjectPtr, TTypeInfo>((TObjectPtr)0, declaredType);
+    //         }
+    //     case ASN_BINARY_MAKE_TAG_BYTE(eApplication, ePrimitive, eObjectReference):
+    //         ...
+    //     case ASN_BINARY_MAKE_TAG_BYTE(eApplication, eConstructed, eLongTag):
+    //         ...
+    //     case eContainterTagByte:
+    //     case eContainterTagByte+1:
+    //     default:
+    //         ... (the declared type) ...
+    // ```
+    // (The binary stream's own `ReadPointer`: the same cases as `CObjectIStream::ReadPointer` with
+    // `ReadPointerType`, objistrasnb.cpp:1797-1823, inlined.)
+    /// `ReadPointerType`: the tag byte, a NULL (`05 00`) taken as `ReadNull` takes it.
+    fn read_pointer_type(&mut self) -> R<PointerType> {
+        Ok(match self.peek(0)? {
+            TAG_NULL => {
+                self.read_null()?;
+                PointerType::Null
+            }
+            TAG_OBJECT_REFERENCE => PointerType::Object,
+            TAG_OTHER_POINTER => PointerType::Other,
+            _ => PointerType::This,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1831-1836
+    // ```c++
+    // CObjectIStream::TObjectIndex CObjectIStreamAsnBinary::ReadObjectPointer(void)
+    // {
+    //     TObjectIndex data;
+    //     ReadStdSigned(*this, data);
+    //     return data;
+    // }
+    // ```
+    // (`ReadPointer` does not take the tag: `m_CurrentTagLength` is still 0 from the end of the
+    // item before (`EndOfTag`, `ExpectIndefiniteLength`, `ExpectEndOfContent`), so `ReadShortLength`
+    // reads the tag byte itself as the length, 94, and `ReadStdSigned` of the 8-byte
+    // `TObjectIndex` the 94 bytes after it. checked with makeblastdb 2.17.0, the b_pointer_*_at
+    // fixtures.)
+    fn read_object_pointer(&mut self) -> R<()> {
+        self.read_std_signed(8).map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1838-1843
+    // ```c++
+    // string CObjectIStreamAsnBinary::ReadOtherPointer(void)
+    // {
+    //     string className = PeekClassTag();
+    //     ExpectIndefiniteLength();
+    //     return className;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:219-240
+    // ```c++
+    // string CObjectIStreamAsnBinary::PeekClassTag(void)
+    // {
+    //     TByte byte = StartTag(PeekTagByte());
+    //     if ( GetTagValue(byte) != eLongTag ) {
+    //         ThrowError(fFormatError, "LongTag expected");
+    //     }
+    //     string name;
+    //     size_t i = 1;
+    //     TByte c;
+    //     while ( ((c = PeekTagByte(i++)) & 0x80) != 0 ) {
+    //         name += char(c & 0x7f);
+    //         if ( i > 1024 ) {
+    //             ThrowError(fOverflow, "tag number is too big (greater than 1024)");
+    //         }
+    //     }
+    //     ...
+    //     m_CurrentTagLength = i;
+    //     name += char(c & 0x7f);
+    //     return name;
+    // }
+    // ```
+    /// `ReadOtherPointer`: the class name in the bytes of the long tag (7 bits each, the last one
+    /// without the high bit), then the length of the value (`ExpectIndefiniteLength`).
+    fn read_other_pointer(&mut self) -> R<Vec<u8>> {
+        let mut name = Vec::new();
+        let mut i = 1;
+        loop {
+            let c = self.peek(i)?;
+            i += 1;
+            name.push(c & 0x7f);
+            if c & 0x80 == 0 {
+                break;
+            }
+            if i > 1024 {
+                return self.throw(PEEK_CLASS_TAG, "tag number is too big (greater than 1024)");
+            }
+        }
+        self.tag_len = i;
+        self.expect_indefinite_length()?;
+        Ok(name)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1845-1848
+    // ```c++
+    // void CObjectIStreamAsnBinary::ReadOtherPointerEnd(void)
+    // {
+    //     ExpectEndOfContent();
+    // }
+    // ```
+    fn read_other_pointer_end(&mut self) -> R<()> {
+        self.expect_end_of_content()
     }
 }
 

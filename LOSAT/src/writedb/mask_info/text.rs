@@ -18,8 +18,8 @@ use super::schema::{ChoiceDef, ClassDef, EnumDef};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::string_to_int;
 use crate::report::serial::asn_text_reader::{
-    AsnSource, AsnTextError, AsnTextErrorKind, MemberId, NcbiThrow, Reader, StreamSource,
-    FILL_BUFFER_EOF, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
+    AsnSource, AsnTextError, AsnTextErrorKind, MemberId, NcbiThrow, PointerType, Reader,
+    StreamSource, FILL_BUFFER_EOF, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
 };
 use crate::report::serial::encoder::StreamPosition;
 
@@ -404,5 +404,49 @@ impl<S: AsnSource> Input for TextIn<S> {
             self.r.enumerated(def.values).map(|(_, value)| value)
         };
         value.map_err(|e| self.fail(e))
+    }
+
+    /// `ReadPointerType` (`Reader::pointer_type`).
+    fn read_pointer_type(&mut self) -> R<PointerType> {
+        let value = self.r.pointer_type();
+        value.map_err(|e| self.fail(e))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1631-1640
+    // ```c++
+    // CObjectIStream::TObjectIndex CObjectIStreamAsn::ReadObjectPointer(void)
+    // {
+    //     if ( sizeof(TObjectIndex) == sizeof(Int4) )
+    //         return ReadInt4();
+    //     else if ( sizeof(TObjectIndex) == sizeof(Int8) )
+    //         return TObjectIndex(ReadInt8());
+    // ```
+    // (`TObjectIndex` is `size_t`, objistr.hpp:1029.)
+    fn read_object_pointer(&mut self) -> R<()> {
+        let value = self.r.int8();
+        value.map(|_| ()).map_err(|e| self.fail(e))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1643-1646
+    // ```c++
+    // string CObjectIStreamAsn::ReadOtherPointer(void)
+    // {
+    //     return ReadTypeId(SkipWhiteSpace());
+    // }
+    // ```
+    /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of
+    /// `(size_t)-1` bytes that `CTempString::operator string` asks for: `std::length_error`.
+    fn read_other_pointer(&mut self) -> R<Vec<u8>> {
+        let id = self.r.type_id();
+        match id.map_err(|e| self.fail(e))? {
+            Some(id) => Ok(self.r.bytes(id).to_vec()),
+            None => Err(Fail::LengthError),
+        }
+    }
+
+    /// `ReadOtherPointerEnd` of the text stream: `CObjectIStream`'s, which reads nothing
+    /// (objistr.cpp:1223-1225).
+    fn read_other_pointer_end(&mut self) -> R<()> {
+        Ok(())
     }
 }

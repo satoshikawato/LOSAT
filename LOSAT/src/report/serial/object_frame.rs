@@ -186,3 +186,35 @@ pub(crate) fn text_frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32
         (FrameKind::ArrayElement, true) => (ASN, 1288, "ncbi::CObjectIStreamAsn::SkipContainer"),
     }
 }
+
+/// The `END_OBJECT_FRAME` of the named frame that `CObjectIStream::ReadPointer`, which the text
+/// stream does not override, puts around a value of the type that `:Type` names (the frame
+/// `GetFrameName` calls by that type): the place of the line that `NCBI_RETHROW_SAME` adds to a
+/// `CException` other than a `CSerialException` passing through it. The mask reader's
+/// (`writedb::mask_info`) frame of `:Type`.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1174-1197
+// ```c++
+//     case eOtherPointer:
+//         {
+//             _TRACE("CObjectIStream::ReadPointer: new...");
+//             string className = ReadOtherPointer();
+//             _TRACE("CObjectIStream::ReadPointer: new " << className);
+//             objectType = MapType(className);
+//
+//             BEGIN_OBJECT_FRAME2(eFrameNamed, objectType);
+//             ...
+//             ReadObject(objectPtr, objectType);
+//             if ( objectType->IsCObject() )
+//                 ref.Release();
+//
+//             END_OBJECT_FRAME();
+//
+//             ReadOtherPointerEnd();
+//             break;
+//         }
+// ```
+pub(crate) const READ_POINTER_FRAME_END: (&str, u32, &str) = (
+    "src/serial/objistr.cpp",
+    1195,
+    "ncbi::CObjectIStream::ReadPointer",
+);

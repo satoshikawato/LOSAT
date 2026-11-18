@@ -491,7 +491,9 @@ pub(crate) fn process_mask_data(
 
             let mut masks = first_obj.masks;
             loop {
-                if db.mask_data_source_mut().is_none() && !masks.masks.is_empty() {
+                // NCBI's list holds the element stated as NULL too (`MaskList::null_element`).
+                let listed = !masks.masks.is_empty() || masks.null_element.is_some();
+                if db.mask_data_source_mut().is_none() && listed {
                     db.set_mask_data_source(MaskedRangeSet::new());
                 }
 
@@ -502,6 +504,10 @@ pub(crate) fn process_mask_data(
                     if let Some(set) = db.mask_data_source_mut() {
                         set.insert(algo_id, seq_id, mask.parts)?;
                     }
+                }
+                // The next mask's `GetId` dereferences an element stated as NULL: refused there.
+                if let Some(null) = masks.null_element.take() {
+                    return Err(null.refusal().into());
                 }
 
                 if !masks.more {

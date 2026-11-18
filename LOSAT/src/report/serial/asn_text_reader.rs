@@ -412,6 +412,23 @@ pub(crate) enum MemberId {
     Tag(Range<usize>),
 }
 
+/// `CObjectIStream::EPointerType`: what `ReadPointerType` finds where NCBI's object stream reads a
+/// `CRef<>` that is empty at that moment (`CObjectIStream::ReadPointer`, objistr.cpp:1133-1213).
+/// The text stream's is [`Reader::pointer_type`]; the binary one's is the mask reader's
+/// (`writedb::mask_info::ber`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PointerType {
+    /// `eNullPointer`: `NULL` (text), `05 00` (binary); the `CRef<>` stays empty.
+    Null,
+    /// `eObjectPointer`: `@` and an object index (text), the application tag 30 (binary).
+    Object,
+    /// `eOtherPointer`: `:` and a type name (text), the application long tag with the name
+    /// (binary); the value of that type follows.
+    Other,
+    /// `eThisPointer`: anything else, the value of the declared type.
+    This,
+}
+
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
 pub(crate) struct Members {
     block_start: bool,
@@ -852,6 +869,38 @@ impl<S: AsnSource> Reader<S> {
         Ok(id)
     }
 
+    /// `ReadTypeId(SkipWhiteSpace())` (quoted at `file_header`), as `ReadOtherPointer` reads the
+    /// type name after a `:` (objistrasn.cpp:1643-1646): a name from a letter or `_` (empty
+    /// otherwise), or the text between `[` and `]` on one line, which NCBI takes without its last
+    /// byte (`CTempString(ptr + 1, i - 2)`), leaving the `]` unread (`SkipChars(i)`). `None` for
+    /// `[]`, whose length `i - 2` is `(size_t)-1`.
+    pub(crate) fn type_id(&mut self) -> Result<Option<Range<usize>>> {
+        let c = self.skip_white_space()?;
+        if c != b'[' {
+            return Ok(Some(self.scan_end_of_id(is_first_id_char(c))?));
+        }
+        let mut i = 1;
+        loop {
+            match self.peek_char(i)? {
+                b'\r' | b'\n' => {
+                    return Err(
+                        self.error_at(NcbiThrow::Stream(READ_TYPE_ID), "end of line: expected ']'")
+                    )
+                }
+                b']' => {
+                    let start = self.pos;
+                    self.pos += i;
+                    return Ok(if i >= 2 {
+                        Some(start + 1..start + i - 1)
+                    } else {
+                        None
+                    });
+                }
+                _ => i += 1,
+            }
+        }
+    }
+
     /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
     /// a name that is not one of them is an error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1436-1475
@@ -1199,6 +1248,15 @@ impl<S: AsnSource> Reader<S> {
     // ```
     pub(crate) fn null(&mut self) -> Result<()> {
         let c = self.skip_white_space()?;
+        if self.take_null_word(c) {
+            return Ok(());
+        }
+        Err(self.error_at(NcbiThrow::Stream(READ_NULL), "'NULL' expected"))
+    }
+
+    /// Whether the word `NULL`, not followed by an identifier byte, starts at the current byte `c`
+    /// (`ReadNull`, `ReadPointerType`); it is taken when it does.
+    fn take_null_word(&mut self, c: u8) -> bool {
         if c == b'N'
             && self.peek_at(1) == b'U'
             && self.peek_at(2) == b'L'
@@ -1206,9 +1264,63 @@ impl<S: AsnSource> Reader<S> {
             && !is_id_char(self.peek_at(4))
         {
             self.pos += 4;
-            return Ok(());
+            return true;
         }
-        Err(self.error_at(NcbiThrow::Stream(READ_NULL), "'NULL' expected"))
+        false
+    }
+
+    /// `ReadPointerType`: `NULL`, `@` or `:` (taken), or the value of the declared type (nothing
+    /// taken), after `SkipWhiteSpace` (`PeekChar(true)`).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1606-1630
+    // ```c++
+    // CObjectIStream::EPointerType CObjectIStreamAsn::ReadPointerType(void)
+    // {
+    //     switch ( PeekChar(true) ) {
+    //     case 'N':
+    //         if ( m_Input.PeekCharNoEOF(1) == 'U' &&
+    //              m_Input.PeekCharNoEOF(2) == 'L' &&
+    //              m_Input.PeekCharNoEOF(3) == 'L' &&
+    //              !IdChar(m_Input.PeekCharNoEOF(4)) ) {
+    //             // "NULL"
+    //             m_Input.SkipChars(4);
+    //             return eNullPointer;
+    //         }
+    //         break;
+    //     case '@':
+    //         m_Input.SkipChar();
+    //         return eObjectPointer;
+    //     case ':':
+    //         m_Input.SkipChar();
+    //         return eOtherPointer;
+    //     default:
+    //         break;
+    //     }
+    //     return eThisPointer;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:161-164
+    // ```c++
+    // char CObjectIStreamAsn::PeekChar(bool skipWhiteSpace)
+    // {
+    //     return skipWhiteSpace? SkipWhiteSpace(): m_Input.PeekChar();
+    // }
+    // ```
+    pub(crate) fn pointer_type(&mut self) -> Result<PointerType> {
+        let c = self.skip_white_space()?;
+        if self.take_null_word(c) {
+            return Ok(PointerType::Null);
+        }
+        match c {
+            b'@' => {
+                self.pos += 1;
+                Ok(PointerType::Object)
+            }
+            b':' => {
+                self.pos += 1;
+                Ok(PointerType::Other)
+            }
+            _ => Ok(PointerType::This),
+        }
     }
 
     /// `ReadEnum` of an ENUMERATED type with the values `values`: a name or a number.

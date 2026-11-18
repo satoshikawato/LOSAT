@@ -202,13 +202,16 @@ fn describe(path: &std::path::Path) -> String {
                     String::from_utf8_lossy(&info.algo_options),
                     dump_list(&info.masks)
                 );
-                let mut bad = program_bad || info.masks.masks.iter().any(|m| m.id.is_none());
+                let incomplete = |list: &MaskList| {
+                    list.null_element.is_some() || list.masks.iter().any(|m| m.id.is_none())
+                };
+                let mut bad = program_bad || incomplete(&info.masks);
                 let mut more = info.masks.more;
                 while more && !bad {
                     match reader.next_list() {
                         Ok(list) => {
                             out += &format!(" +{}", dump_list(&list));
-                            bad = list.masks.iter().any(|m| m.id.is_none());
+                            bad = incomplete(&list);
                             more = list.more;
                         }
                         Err(MaskFileError::EofInContinuation { .. }) => {
@@ -578,7 +581,9 @@ fn posts_equal_what_makeblastdb_posts() {
                     posted.extend_from_slice(&post.line());
                 }
             };
-            let complete = |list: &MaskList| list.masks.iter().all(|mask| mask.id.is_some());
+            let complete = |list: &MaskList| {
+                list.null_element.is_none() && list.masks.iter().all(|mask| mask.id.is_some())
+            };
             loop {
                 let next = reader.next_info();
                 post(&mut reader);
@@ -656,6 +661,7 @@ fn hand_written_text_values() {
                     parts: vec![MaskPart::Interval(interval(5, 14))],
                 }],
                 more: false,
+                null_element: None,
             },
         }]
     );
@@ -1258,4 +1264,222 @@ fn a_text_file_is_read_in_blocks() {
         r.buffered()
     );
     assert!(r.next_info().unwrap().is_none());
+}
+
+// ---------------------------------------------------------------------------------------------
+// NCBI's pointer syntax: what LOSAT refuses (the files that makeblastdb reads or fails on are the
+// h_pointer_* and b_pointer_* fixtures)
+
+/// A text object whose `masks` list holds `masks`.
+fn text_object(masks: &str) -> Vec<u8> {
+    format!(
+        "Blast-db-mask-info ::= {{ algo-id 0, algo-program windowmasker, algo-options \"x\", \
+         masks {{ masks {{ {masks} }}, more FALSE }} }}\n"
+    )
+    .into_bytes()
+}
+
+/// A BER item with an indefinite length: the tag, `80`, `content`, `00 00`.
+fn ber(tag: u8, content: &[u8]) -> Vec<u8> {
+    [&[tag, 0x80][..], content, &[0, 0][..]].concat()
+}
+
+/// The member or variant `[n]` holding `content`.
+fn ber_member(n: u8, content: &[u8]) -> Vec<u8> {
+    ber(0xa0 | n, content)
+}
+
+fn ber_int(n: u8) -> Vec<u8> {
+    vec![0x02, 0x01, n]
+}
+
+/// `Seq-interval { from, to, id local id <id> }` in BER.
+fn ber_interval(from: u8, to: u8, id: u8) -> Vec<u8> {
+    let local = ber_member(0, &ber_member(0, &ber_int(id)));
+    let members = [
+        ber_member(0, &ber_int(from)),
+        ber_member(1, &ber_int(to)),
+        ber_member(3, &local),
+    ];
+    ber(0x30, &members.concat())
+}
+
+/// A binary object whose `masks` list holds the Seq-locs `locs`.
+fn binary_object(locs: &[Vec<u8>]) -> Vec<u8> {
+    let more = ber_member(1, &[0x01, 0x01, 0x00]);
+    let masks = [ber_member(0, &ber(0x30, &locs.concat())), more].concat();
+    let members = [
+        ber_member(0, &ber_int(0)),
+        ber_member(1, &ber_int(30)),
+        ber_member(2, &[0x1a, 0x01, b'x']),
+        ber_member(3, &ber(0x30, &masks)),
+    ];
+    ber(0x30, &members.concat())
+}
+
+/// The list of the one object of `data`.
+fn one_list(label: &str, data: &[u8]) -> MaskList {
+    let mut objects = read_bytes(label, data).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_eq!(objects.len(), 1, "{label}");
+    objects.remove(0).0.masks
+}
+
+/// The list of an element stated as `NULL` that makeblastdb dereferences, and LOSAT's refusal
+/// of it.
+fn null_list(label: &str, list: &MaskList) -> &'static str {
+    let null = list
+        .null_element
+        .as_ref()
+        .unwrap_or_else(|| panic!("{label}: {list:?}"));
+    assert!(
+        matches!(null.refusal(), MaskFileError::Unsupported(_)),
+        "{label}"
+    );
+    null.list
+}
+
+const MASKS: &str = "the masks of a Blast-mask-list";
+const MIX: &str = "a Seq-loc-mix (mix)";
+const EQUIV: &str = "a Seq-loc-equiv (equiv)";
+const PACKED_INT: &str = "a Packed-seqint (packed-int)";
+
+#[test]
+fn null_elements_that_makeblastdb_dereferences_are_refused() {
+    let int = |id: u32| format!("int {{ from 5, to 14, id local id {id} }}");
+    let text = |masks: &str| one_list(masks, &text_object(masks));
+    // a NULL mask: the masks before it are kept, those after it dropped
+    let masks = format!("{}, NULL, {}", int(3), int(4));
+    let list = text(&masks);
+    assert_eq!(null_list(&masks, &list), MASKS);
+    assert_eq!(list.masks.len(), 1);
+    assert_eq!(list.masks[0].id, local(3));
+    assert_eq!(list.masks[0].intervals(), vec![interval(5, 14)]);
+    // an element of each list inside a mask, reached by `CheckId`
+    for (masks, expected) in [
+        (format!("mix {{ {}, NULL }}", int(3)), MIX),
+        (format!("equiv {{ {}, NULL }}", int(3)), EQUIV),
+        (
+            "packed-int { { from 5, to 14, id local id 3 }, NULL }".to_string(),
+            PACKED_INT,
+        ),
+        // each Seq-loc walks its own parts: the inner mix reaches its NULL although its Seq-id
+        // differs from the outer one
+        (
+            format!("mix {{ {}, mix {{ {}, NULL }} }}", int(4), int(3)),
+            MIX,
+        ),
+        (format!("NULL, {}", int(3)), MASKS),
+    ] {
+        let list = text(&masks);
+        assert_eq!(null_list(&masks, &list), expected, "{masks}");
+        assert!(list.masks.is_empty(), "{masks}");
+    }
+    // the walk stops before the NULL: two Seq-ids, or a `feat` (makeblastdb: "Cannot get masked
+    // range Seq-id")
+    for masks in [
+        format!("mix {{ {}, {}, NULL }}", int(3), int(4)),
+        format!("equiv {{ {}, {}, NULL }}", int(3), int(4)),
+        "packed-int { { from 5, to 14, id local id 3 }, { from 20, to 29, id local id 4 }, NULL }"
+            .to_string(),
+        "mix { feat gibb 5, NULL }".to_string(),
+    ] {
+        let list = text(&masks);
+        assert_eq!(list.null_element, None, "{masks}");
+        assert_eq!(list.masks.len(), 1, "{masks}");
+        assert_eq!(list.masks[0].id, None, "{masks}");
+    }
+    // a mask without a Seq-id before a NULL mask: makeblastdb fails on the first
+    let list = text("null NULL, NULL");
+    assert_eq!(null_list("null NULL, NULL", &list), MASKS);
+    assert_eq!(list.masks.len(), 1);
+    assert_eq!(list.masks[0].id, None);
+    // an error of the reader later in the object comes first
+    let masks = "NULL, int { from 5, to 14, id local id 3, bad 1 }";
+    assert!(refused(&read_bytes(masks, &text_object(masks))));
+    // optional members stated as NULL are unset, as makeblastdb leaves them
+    let masks = "packed-int { { from 5, to 14, id local id 3, fuzz-from NULL } }";
+    let list = text(masks);
+    assert_eq!(list.null_element, None);
+    assert_eq!(list.masks[0].id, local(3));
+
+    // binary: `05 00`
+    let null = vec![0x05, 0x00];
+    let int3 = ber_member(3, &ber_interval(5, 14, 3));
+    let int4 = ber_member(3, &ber_interval(20, 29, 4));
+    let list = one_list(
+        "masks",
+        &binary_object(&[int3.clone(), null.clone(), int4.clone()]),
+    );
+    assert_eq!(null_list("masks", &list), MASKS);
+    assert_eq!(list.masks.len(), 1);
+    assert_eq!(list.masks[0].id, local(3));
+    let packed = ber_member(
+        4,
+        &ber(0x30, &[ber_interval(5, 14, 3), null.clone()].concat()),
+    );
+    let mix = ber_member(7, &ber(0x30, &[int3.clone(), null.clone()].concat()));
+    let equiv = ber_member(8, &ber(0x31, &[int3.clone(), null.clone()].concat()));
+    for (label, loc, expected) in [
+        ("packed-int", packed, PACKED_INT),
+        ("mix", mix, MIX),
+        ("equiv", equiv, EQUIV),
+    ] {
+        let list = one_list(label, &binary_object(&[loc]));
+        assert_eq!(null_list(label, &list), expected, "{label}");
+        assert!(list.masks.is_empty(), "{label}");
+    }
+    let stopped = ber_member(7, &ber(0x30, &[int3, int4, null].concat()));
+    let list = one_list("two ids", &binary_object(&[stopped]));
+    assert_eq!(list.null_element, None);
+    assert_eq!(list.masks[0].id, None);
+}
+
+#[test]
+fn a_value_of_another_type_is_refused() {
+    let refused_text = |masks: &str| {
+        let result = read_bytes(masks, &text_object(masks));
+        assert!(
+            matches!(result, Err(MaskFileError::Unsupported(_))),
+            "{masks}: {result:?}"
+        );
+    };
+    // `:Type` naming a type other than the declared one: makeblastdb reads it or not by the types
+    // its process has met before
+    refused_text(":Seq-interval { from 5, to 14, id local id 3 }");
+    refused_text(":No-such-type int { from 5, to 14, id local id 3 }");
+    refused_text("packed-int { :Seq-loc int { from 5, to 14, id local id 3 } }");
+    refused_text("mix { :Seq-interval { from 5, to 14, id local id 3 } }");
+    refused_text("packed-int { { from 5, to 14, id local id 3, fuzz-from :Seq-loc null NULL } }");
+    refused_text("bond { a { point 5, id local id 3 }, b :Seq-interval { from 5, to 9 } }");
+    // the declared type is read
+    let masks = ":Seq-loc int { from 5, to 14, id local id 3 }";
+    let list = one_list(masks, &text_object(masks));
+    assert_eq!(list.masks[0].id, local(3));
+    // binary: the application long tag whose bytes spell the name
+    let other = |name: &str, value: &[u8]| -> Vec<u8> {
+        let bytes = name.as_bytes();
+        let mut tag = vec![0x7f];
+        tag.extend(bytes[..bytes.len() - 1].iter().map(|b| b | 0x80));
+        tag.push(bytes[bytes.len() - 1]);
+        ber_tagged(&tag, value)
+    };
+    let seq_interval = ber_interval(5, 14, 3);
+    let result = read_bytes(
+        "other",
+        &binary_object(&[other("Seq-interval", &seq_interval)]),
+    );
+    assert!(
+        matches!(result, Err(MaskFileError::Unsupported(_))),
+        "{result:?}"
+    );
+    let list = one_list(
+        "declared",
+        &binary_object(&[other("Seq-loc", &ber_member(3, &seq_interval))]),
+    );
+    assert_eq!(list.masks[0].id, local(3));
+}
+
+/// A BER item whose tag is the bytes `tag`, with an indefinite length.
+fn ber_tagged(tag: &[u8], content: &[u8]) -> Vec<u8> {
+    [tag, &[0x80][..], content, &[0, 0][..]].concat()
 }

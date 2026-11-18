@@ -16,3 +16,8 @@
   `VisibleString` belongs with NCBI's warning, once per run; LOSAT refused both. A damaged mask file ends the run with
   makeblastdb's own report and exit status (the exception report, "BLAST ran out of memory" for a string no host can
   hold), where LOSAT wrote its own text.
+- makeblastdb `-mask_data`: NCBI's pointer syntax in a mask file is read as NCBI BLAST+ 2.17.0 reads it: `NULL` for
+  an optional member such as `fuzz-from`, `@n` with makeblastdb's error report, `:Type value` of the declared type.
+  A `:Type` of another type, and a list element stated as `NULL` where makeblastdb dereferences it (its report
+  prints the run's memory addresses), are refused. A binary length of 8 bytes whose end wraps past 2^64 now reads
+  as makeblastdb reads it.

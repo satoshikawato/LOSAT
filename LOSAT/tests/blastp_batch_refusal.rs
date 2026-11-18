@@ -10,7 +10,14 @@
 //! OVERLAP_CHUNK_SIZE=95` the first is not split (9 / 5 makes one chunk) and the second makes 6
 //! chunks of an evened size of 85, below the overlap: chunk 0 covers the batch (and would be split
 //! again) and chunks 1 to 5 hold no query, on which NCBI's `CQuerySplitter::Split` stops first
-//! (split_query_cxx.cpp:234,876-879).
+//! (split_query_cxx.cpp:234,876-879). A negative pair (fix round 4): `outfmt0/xsb_ql.faa` (qa, 31
+//! letters, and ql, qa ten times) with `BATCH_SIZE=1 CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` (NCBI's
+//! `size_t` sizes 100 apart): qa is one chunk (31 / 100), ql makes 3 chunks whose evened size wraps
+//! past its 310 letters, so chunk 0 covers ql and chunks 1 and 2 hold no query: NCBI stops there
+//! after qa's report (NCBI BLAST+ 2.17.0 n1: exit status 3, rows `db.x4.chunk.neg.*`). Where the wrapped
+//! ranges leave gaps between chunks that all hold a query (`x4/chunk_second.faa` with `CHUNK_SIZE=-1
+//! OVERLAP_CHUNK_SIZE=-200`: the 398 letters make chunks [0, 100) and [300, 398)), NCBI searches on
+//! without the hits in the gap, and LOSAT refuses before the first byte (PD-LOSAT-NCBI-DEFECTS D13).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 //! ```c++
@@ -134,5 +141,72 @@ fn a_chunk_without_a_query_in_batch_2_is_refused_before_a_split_again() {
             commented.stderr
         );
         assert_eq!(commented.stdout, alone7.stdout[..batch1], "n{threads}");
+    }
+}
+
+#[test]
+fn a_negative_pair_that_leaves_chunks_without_a_query_in_batch_2_is_refused_after_batch_1() {
+    let env = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "-100"),
+        ("OVERLAP_CHUNK_SIZE", "-200"),
+    ];
+    // qa's report in one batch of both queries without the variables (not split): its rows, and
+    // its comment lines and rows before ql's `# Query:` line.
+    let whole = search("tests/fasta/outfmt0/xsb_ql.faa", "6", 1, &[]);
+    let whole7 = search("tests/fasta/outfmt0/xsb_ql.faa", "7", 1, &[]);
+    assert_eq!(whole.code, Some(0), "{}", whole.stderr);
+    let qa: String = whole
+        .stdout
+        .lines()
+        .filter(|line| line.starts_with("qa\t"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert!(!qa.is_empty());
+    let batch1 = whole7
+        .stdout
+        .find("# BLASTP 2.17.0+\n# Query: ql")
+        .expect("ql's report");
+    for threads in [1, 4] {
+        let run = search("tests/fasta/outfmt0/xsb_ql.faa", "6", threads, &env);
+        assert_eq!(run.code, Some(1), "n{threads}: {}", run.stderr);
+        assert!(
+            run.stderr
+                .contains("a query chunk without a query is not supported by LOSAT's BLASTP"),
+            "n{threads}: {}",
+            run.stderr
+        );
+        assert_eq!(run.stdout, qa, "n{threads}");
+        let commented = search("tests/fasta/outfmt0/xsb_ql.faa", "7", threads, &env);
+        assert_eq!(commented.code, Some(1), "n{threads}: {}", commented.stderr);
+        assert_eq!(commented.stdout, whole7.stdout[..batch1], "n{threads}");
+    }
+}
+
+#[test]
+fn a_negative_pair_that_leaves_gaps_between_its_chunks_is_refused_before_the_first_byte() {
+    let env = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "-1"),
+        ("OVERLAP_CHUNK_SIZE", "-200"),
+    ];
+    for threads in [1, 4] {
+        for outfmt in ["6", "7"] {
+            let run = search("tests/fasta/x4/chunk_second.faa", outfmt, threads, &env);
+            assert_eq!(
+                run.code,
+                Some(1),
+                "n{threads} outfmt {outfmt}: {}",
+                run.stderr
+            );
+            assert_eq!(run.stdout, "", "n{threads} outfmt {outfmt}");
+            assert!(
+                run.stderr.contains(
+                    "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch"
+                ),
+                "n{threads} outfmt {outfmt}: {}",
+                run.stderr
+            );
+        }
     }
 }

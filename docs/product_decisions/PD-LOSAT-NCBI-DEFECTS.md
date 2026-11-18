@@ -183,7 +183,10 @@
   Owner's decision of 2026-11-16 on line RG's question Q-X2c); Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.51, which line RG item
   X-short-tbx holds on its branch; the same day, X4 fix round 3: also the explicit rejection of a
-  failed batch whose first query holds a redone match, on which NCBI crashes, rule 3)
+  failed batch whose first query holds a redone match, on which NCBI crashes, rule 3; X4 fix
+  round 4: a negative `CHUNK_SIZE` that leaves a chunk without a query also after the reports of
+  the batches before, the rejection before the first byte kept for the negative pair whose chunks
+  leave gaps)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -344,12 +347,19 @@ Explicit rejections (rule 3):
   kept the rejection for these programs. BLASTP's rejections of a chunk split again or of a
   chunk without a query come after the reports of the query batches before, where NCBI's
   exception stops the search of the batch (version 1.52, the form of 1.40; psiblast's later
-  rounds, the only ones it splits, and the negative `CHUNK_SIZE`, where NCBI does not always stop,
-  keep the rejection before the first byte). A chunk without a query is refused first: NCBI's
-  `CQuerySplitter::Split` makes every chunk's query factory before it sets a chunk up and stops at
-  such a chunk's missing query vector (`split_query_cxx.cpp:234,876-879`, `CCoreException`), before
-  any chunk is split again (as with a positive pair whose evened chunk size falls below the
-  overlap, whose chunk 0 covers the batch).
+  rounds, the only ones it splits, keep the rejection before the first byte). A chunk without a
+  query is refused first: NCBI's `CQuerySplitter::Split` makes every chunk's query factory before
+  it sets a chunk up and stops at such a chunk's missing query vector
+  (`split_query_cxx.cpp:234,876-879`, `CCoreException`), before any chunk is split again (as with
+  a positive pair whose evened chunk size falls below the overlap, whose chunk 0 covers the
+  batch). A negative `CHUNK_SIZE` is one of these where its wrapped evened size passes the
+  batch's length (`split_query_cxx.cpp:145-171`): chunk 0 covers the batch and the chunks after
+  it hold no query, so NCBI stops at the split after the batches before (version 1.52, X4 fix
+  round 4; review 2 of X4 found NCBI's exit status 3 with the reports of the batches before,
+  rows `db.x4.chunk.neg.*`). Only a negative pair whose wrapped ranges leave gaps between chunks
+  that all hold a query and are not split again, which NCBI searches on with the hits in the
+  gaps lost, keeps the rejection before the first byte (row `db.x4.chunk.neg.gap.6`; rows
+  `db.x4.chunk.empty.*` and `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
   exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit
@@ -1504,11 +1514,10 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   error of a batch's search (`Traceback failed`, below) comes: NCBI prints each batch's reports
   before it searches the next (`blastp_app.cpp:257-276`) and then never ends in the match's batch,
   the form of 1.40 (the Owner's decision of 2026-11-16 on line RG's question Q-X2c: "the results
-  of the query batches before are written"), which TBLASTN's rejections of a step where NCBI does
-  not finish take too (1.52). Where that cell scores 0 or less, NCBI's redo of the match fails: a
-  failed match that is not the batch's last redone one is dropped, and a failed last one fails the
-  batch's traceback (`BLAST engine error: Traceback failed`, exit status 3, after the reports of
-  the batches before), which LOSAT reproduces (rule 2; fixture rows `db.x4.rej.swendless`,
+  of the query batches before are written"). Where that cell scores 0 or less, NCBI's redo of the
+  match fails: a failed match that is not the batch's last redone one is dropped, and a failed last
+  one fails the batch's traceback (`BLAST engine error: Traceback failed`, exit status 3, after the
+  reports of the batches before), which LOSAT reproduces (rule 2; fixture rows `db.x4.rej.swendless`,
   `db.x4.sw.zero.6` and `db.x4.sw.fail.*`; `LOSAT/tests/blastp_sw_tback.rs`). Before that
   round NCBI makes every positive alignment of the window, which takes it about a minute for a
   subject of 1,200 letters against an 80-letter query; LOSAT gives the same outcome at the first
@@ -1520,8 +1529,10 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   (exit 1, "a query batch whose last match fails its Smith-Waterman redo (-use_sw_tback) after a
   match of the batch's first query was redone and kept, with which NCBI BLAST+ 2.17.0's blastp
   crashes, is not supported by LOSAT's BLASTP") after what NCBI formats before that step, as
-  above (fixture rows `db.x4.sw.fail.c.*` and `db.x4.sw.fail.h.*`; `db.x4.sw.fail.f.6` and
-  `db.x4.sw.fail.g.6`, whose first query holds none, end in `Traceback failed`).
+  above (fixture rows `db.x4.sw.fail.c.*` and `db.x4.sw.fail.h.*`, whose outfmt 0 and 7 stdout is
+  NCBI's of a near input that fails at the same step, rows `db.x4.sw.fail.f.0` and
+  `db.x4.sw.fail.h_anchor.*`; `db.x4.sw.fail.f.6` and `db.x4.sw.fail.g.6`, whose first query holds
+  none, end in `Traceback failed`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

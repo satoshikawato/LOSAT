@@ -9861,20 +9861,12 @@ fn search_split_query_batches(
             );
             continue;
         };
-        // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
-        // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
-        anyhow::ensure!(
-            !sizes.negative_chunk_size(),
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
-            args.app.name()
-        );
         // NCBI stops in the search of the batch (its exception) after it has printed the reports of
-        // the batches before (`blastp_app.cpp:257-276`, quoted in `search`): so do these refusals,
-        // as the batch's failure (`database::HeaderReadError`, the batch's first query; TBLASTN's
-        // and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). In psiblast's later rounds,
-        // the only ones it splits, NCBI has printed the rounds of the query before as well: those
-        // refusals come before the run's first byte. The negative CHUNK_SIZE above, where NCBI does
-        // not always stop, is refused before the first byte too, as TBLASTN's.
+        // the batches before (`blastp_app.cpp:257-276`, quoted in `search`): so do the two refusals
+        // below, as the batch's failure (`database::HeaderReadError`, the batch's first query;
+        // TBLASTN's and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). In psiblast's
+        // later rounds, the only ones it splits, NCBI has printed the rounds of the query before as
+        // well: those refusals come before the run's first byte.
         let batch_refusal = |refusal: anyhow::Error| -> anyhow::Error {
             if args.psi_search.is_some() {
                 refusal
@@ -9889,8 +9881,9 @@ fn search_split_query_batches(
         // NCBI's `CQuerySplitter::Split` makes the query factory of every chunk before it sets any
         // chunk up, and a chunk without a query has no query vector to make it from
         // (`CCoreException::eNullPtr`), so NCBI stops there before a chunk is split again (as with
-        // a positive pair whose evened chunk size falls below the overlap: chunk 0 covers the
-        // batch); `split_protein_batch` makes no part for such a chunk.
+        // a positive pair whose evened chunk size falls below the overlap, or a negative pair whose
+        // wrapped size passes the batch's length: chunk 0 covers the batch); `split_protein_batch`
+        // makes no part for such a chunk.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234,876-879
         // ```c++
@@ -9916,6 +9909,17 @@ fn search_split_query_batches(
                 args.app.name()
             )));
         }
+        // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it,
+        // and NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171, quoted at
+        // `split_protein_batch`): where the first range covers the batch, the chunks after it
+        // hold no query and NCBI stops above. Otherwise the ranges leave gaps between chunks that
+        // each hold a query and would not be split again, which NCBI searches on with the hits in
+        // the gaps lost: that is refused before the run's first byte (PD-LOSAT-NCBI-DEFECTS D13).
+        anyhow::ensure!(
+            !sizes.negative_chunk_size(),
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
+            args.app.name()
+        );
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The options' search spaces of the batch's contexts (one per query), which every chunk
         // reads by its own context index (`SplitQuery_SetEffectiveSearchSpace`, quoted at

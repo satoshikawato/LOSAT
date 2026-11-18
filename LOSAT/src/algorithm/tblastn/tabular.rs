@@ -305,11 +305,7 @@ pub(super) fn write_tblastn_tabular(
     }
     let code = GeneticCode::try_from_id(tab.genetic_code).map_err(anyhow::Error::msg)?;
     // The positives of the rows: the formatter's `m_ScoringMatrix` (`GetAsciiProteinMatrix`).
-    let table = TabularWriter {
-        spec,
-        program_version: tab.program_version,
-        matrix: Some(tab.matrix),
-    };
+    let table = TabularWriter::new(spec, tab.program_version, Some(tab.matrix));
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -338,6 +334,8 @@ pub(super) fn write_tblastn_tabular(
         None => &mut no_diagnostics,
     };
     write_tabular_prolog(spec, tab.inputs.taxdb_found, writer, diagnostics)?;
+    // The bytes of one comment block or one row, written to the report stream as soon as they
+    // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
     let mut buf: Vec<u8> = Vec::new();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let mut x_window: Vec<u8> = Vec::new();
@@ -368,7 +366,6 @@ pub(super) fn write_tblastn_tabular(
             .iter()
             .map(|list| list.hsps.hsps.len())
             .sum();
-        buf.clear();
         // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
         // null alignment set, so outfmt 7 has no count line (`write_tabular`).
         table.query_header(
@@ -377,10 +374,8 @@ pub(super) fn write_tblastn_tabular(
             tab.shown.name().as_bytes(),
             (!tab.query_batch_skipped[q_idx]).then_some(hit_count),
         )?;
-        if probe.is_some() {
-            writer.write_all(&buf)?;
-            buf.clear();
-        }
+        writer.write_all(&buf)?;
+        buf.clear();
         // The query's formatter (`TabularRows`).
         let mut rows = TabularRows::default();
         for list in hitlist.lists() {
@@ -464,8 +459,6 @@ pub(super) fn write_tblastn_tabular(
                         && fetch.reads(engine_ident)
                         && !subject.throws()
                     {
-                        writer.write_all(&buf)?;
-                        buf.clear();
                         warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
                     }
                 }
@@ -476,8 +469,6 @@ pub(super) fn write_tblastn_tabular(
                 {
                     let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
-                        writer.write_all(&buf)?;
-                        buf.clear();
                         writer.flush()?;
                         warnings.sink.write_all(&text)?;
                         warnings.sink.flush()?;
@@ -588,38 +579,28 @@ pub(super) fn write_tblastn_tabular(
                     end_gaps: true,
                     qcovhsp: hsp_coverage(hsp.q_end - hsp.q_start, i32::try_from(searched_length)?),
                 };
-                match probe.as_deref_mut() {
-                    // One printed row is one HSP; the probe marks it without changing it.
-                    Some(probe) => {
-                        buf.clear();
-                        table.row(
-                            &mut buf,
-                            &mut rows,
-                            &tabular_query,
-                            &subject,
-                            kept.as_ref(),
-                            &row,
-                        );
-                        writer.flush()?;
-                        probe.begin(hsp_index);
-                        writer.write_all(&buf)?;
-                        writer.flush()?;
-                        probe.end(hsp_index);
-                        buf.clear();
-                    }
-                    None => table.row(
-                        &mut buf,
-                        &mut rows,
-                        &tabular_query,
-                        &subject,
-                        kept.as_ref(),
-                        &row,
-                    ),
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
+                table.row(
+                    &mut buf,
+                    &mut rows,
+                    &tabular_query,
+                    &subject,
+                    kept.as_ref(),
+                    &row,
+                );
+                writer.write_all(&buf)?;
+                buf.clear();
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
                 }
                 hsp_index += 1;
             }
         }
-        writer.write_all(&buf)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     // ```c++

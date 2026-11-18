@@ -536,9 +536,30 @@ pub fn write_empty_subject_warnings_by_length(
     program: &str,
     diagnostics: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
-    for (index, record) in records.iter().enumerate() {
-        if length(index) == 0 {
-            let mut text = match record.believed() {
+    write_empty_subject_warnings_of(
+        records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (record.names(), length(index))),
+        program,
+        diagnostics,
+    )
+}
+
+/// `write_empty_subject_warnings` of the subjects whose names (`fasta_reader::RecordNames`) and
+/// numbers of letters `records` gives, in their order: the shared reader's records and BLASTX's
+/// (`algorithm::blastx::input::FastaRecord::names`).
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (quoted at
+/// `write_empty_subject_warnings`)
+pub fn write_empty_subject_warnings_of<'a>(
+    records: impl IntoIterator<Item = (crate::blastinput::fasta_reader::RecordNames<'a>, usize)>,
+    program: &str,
+    diagnostics: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    for (index, (record, length)) in records.into_iter().enumerate() {
+        if length == 0 {
+            let mut text = match record.believed {
                 Some(ids) => {
                     let mut text = ids.warning_id.clone();
                     text.push(b' ');
@@ -546,7 +567,7 @@ pub fn write_empty_subject_warnings_by_length(
                 }
                 None => format!("Subject_{} ", index + 1).into_bytes(),
             };
-            text.extend_from_slice(&record.title);
+            text.extend_from_slice(record.title);
             text.extend_from_slice(b": Subject sequence contains no data");
             // A post of NCBI's main thread (`ncbi_exception::post_line`; tblastn's formatter, which
             // makes it, comes after the PSSM query's annotations are indexed).

@@ -892,6 +892,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             // Windows the module takes (`active`): from its smallest, wordsize + BATCH.
             let window = [40, 3 + BATCH as i32, 64][case % 3];

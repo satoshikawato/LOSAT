@@ -4441,6 +4441,7 @@ mod tests {
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),
+            ctx_of: x_ctx_table(&lookup, true),
         };
         let mut diag_array = vec![start; size as usize];
         let mut diag_offset = start_offset;
@@ -4572,6 +4573,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(pp.x_group_count(), 2);
             assert!((0..2).all(|g| pp.x_group_has_entries(g)));
@@ -5015,6 +5017,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(
                 unit_lists(&pp, &inp),
@@ -5153,6 +5156,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             // Ratio 1: every unit whose unmasked table is at least the masked one's size.
             let pp = XPairPar {
@@ -5167,6 +5171,7 @@ mod tests {
                     band_cells: None,
                 }),
                 extents: x_group_extents(&contexts, X_MAX_GROUPS),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(pp.extents.len(), pp.groups.len());
             // Negative control: tables of half the masked size (below extent + window, against
@@ -5183,6 +5188,7 @@ mod tests {
                     .iter()
                     .map(|&e| (x_masked_cells(e, window) / 2).saturating_sub(window as usize))
                     .collect(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             let chunk = SubjectChunk {
                 offset: 0,
@@ -6266,6 +6272,7 @@ mod tests {
                     sliced: None,
                     mask_rule: None,
                     extents: Vec::new(),
+                    ctx_of: x_ctx_table(&lookup, true),
                 },
                 cutoff_scores: vec![12; contexts.len()],
                 x_dropoff_per_context: vec![16; contexts.len()],
@@ -6790,6 +6797,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             },
             cutoff_scores: vec![12; contexts.len()],
             x_dropoff_per_context: vec![16; contexts.len()],
@@ -7254,6 +7262,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(pp.sent, sent_expected, "case {case_no}");
             assert_eq!(

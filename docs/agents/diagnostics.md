@@ -365,6 +365,7 @@ export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
 export LOSAT_X_BNTBRANGE=1
+export LOSAT_X_BPCELL128=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPDBCUT=1
@@ -484,6 +485,7 @@ export LOSAT_X_TBNXLATE128=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXBOARD=1
+export LOSAT_X_TBXCTXTABLE=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
@@ -2667,7 +2669,8 @@ Rebuilding less:
   job), with 13-18 % fewer branch mispredicts.
 - `LOSAT_X_BPMASKED=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-24;
   `=0` turns it off; acts only where `LOSAT_X_BPDEFER`'s deferred calls run: not with `LOSAT_X_BPDEFER=0` or
-  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly), not with
+  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly; there `LOSAT_X_BPCELL128`'s 128-bit
+  batches take the tables of `LOSAT_X_BPMASKEDMIN`'s rule where the target has them), not with
   `LOSAT_X_BPDIAG=0`, never in blastp-fast's loops on the compressed table (they have no AVX2 batches); and
   only on lookup tables with at least `LOSAT_X_BPMASKEDMIN` hits per used backbone cell, in hundredths,
   built-in 250, `0` every table) blastp's
@@ -2694,6 +2697,33 @@ Rebuilding less:
   the fly proteome took x1.148 at 1.11 hits per used cell (x1.192 against UniRef50 volume 00), x1.123 at 1.48
   (x1.071), x1.020 at 2.08, x0.987 at 2.60, x0.924 at 4.52, x0.928 at 7.07 and x0.935 at 10.38 (x0.919 against
   UniRef50 volume 00), so the built-in cutoff lies between 2.08 and 2.60.
+- `LOSAT_X_BPCELL128=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-11-18,
+  class platform, on by default; `=0` turns it off, `=2` runs it in place of the AVX2 batches on any x86-64
+  CPU with SSSE3, SSE4.1 and POPCNT, as a diagnostic for the tests; acts where `LOSAT_X_BPDIAG` is on and its
+  AVX2 batches do not run: the WebAssembly build (simd128) and x86-64 with SSSE3, SSE4.1 and POPCNT but no
+  AVX2, which ran the per-hit loop on every table before; only on the lookup tables `LOSAT_X_BPMASKEDMIN`
+  gives the masked batch, 250 hundredths of a hit per used cell, `0` every table, the others keep the
+  per-hit loop) blastp's fused loop tests a lookup cell's hits in batches of eight in two 128-bit vectors
+  (`blastp/x_seed_fused.rs` `x_cell_w128`; exactness argument in its module header): each batch is the test
+  of eight lanes of `LOSAT_X_BXCROSS128`'s kernel (`XCrossW128`, every lane at the cell's subject offset,
+  so the lane formulas are the AVX2 batch's), its candidates called at once in lane order, and the fewer
+  than eight hits after the cell's last batch are tested one after the other with `LOSAT_X_BPHITBF`'s
+  branch-free test (where the per-hit loop takes it) or `x_test_hit`. Neither `LOSAT_X_BPDEFER`'s deferral
+  nor the masked last batch is taken: both cost the WebAssembly build more than they save. With
+  `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=w128` (the counts of the tables it batched) and the
+  `x_bpmasked` line gives the rule's (thread, table) choices (`tables_masked=` batched, `tables_deferred=`
+  left to the per-hit loop). Measured 2026-11-18 on the local machine (WSL2, no hardware counters; v4-W W2
+  s4): the serial WASI command under Node 26.8.2 (V8 TurboFan, `--no-liftoff --single-threaded`), the
+  instructions of the compiled module under callgrind against `dev` c648413ac, outputs identical in every
+  arm, query sets of Species4 x Species6 (`-subject`, `-evalue 0.001`): 1,000 proteins (122 hits per used
+  cell) 0.821 (138.3 -> 113.6 G) with 23 % fewer simulated branch mispredicts, 100 proteins (118) 0.842, 10
+  (14.7) 0.889, 3 (6.37) 0.940, 1 (3.72) 0.968, single proteins at 3.10 and 2.52 hits 1.013 and 1.002 (5-7 %
+  more simulated mispredicts from 3.10 to 6.37); below the cutoff the per-hit loop as before (2.42: 1.001;
+  with `LOSAT_X_BPMASKEDMIN=0` a prototype build gave 2.42 1.014, 1.97 1.012, 1.25 1.024). Wall time
+  of the same commands in one Node process (rotating rounds, load 20-45): 100 proteins x0.83-0.88 of `dev`
+  for the prototype forms tried, 7/7 rounds faster. Native AVX2 code is unchanged (machine code compared function by
+  function with `dev`); natively with `=2` (SSE) the 100-protein case runs 1.07 of the AVX2 default's
+  instructions.
 - BPSCANBF (graduated 2026-10-26, in the set since 2026-10-17; no variable; always on) (BLASTP, speed; acts in
   the fused loop on the standard lookup table; the compressed table keeps
   its scan) blastp's fused loop finds the lookup cells with hits by the
@@ -2721,8 +2751,9 @@ Rebuilding less:
   loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
 - `LOSAT_X_BPHITBF=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-20;
   `=0` turns it off) the per-hit loop of the fused seed loop (`blastp/x_seed_fused.rs` `x_cell_per_hit`, the
-  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64 and WebAssembly;
-  exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
+  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64, and where
+  `LOSAT_X_BPCELL128`'s 128-bit batches do not take the table, WebAssembly's tables with few hits per used
+  cell; `LOSAT_X_BPCELL128` takes the test for a cell's last hits; exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
   (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch,
   in doubled arithmetic: with the packed entry `raw`, `d2 = 2 (s + diag_offset) - (raw <<
   1)` is twice the reference's `diff` (a cleared entry holds `-window`), a candidate is `(d2 - 2 wordsize) as
@@ -6167,6 +6198,36 @@ Scheduling (each value computed by one thread with the original function; order 
   within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
   (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
   gave nothing more (x0.991-1.023).
+- `LOSAT_X_TBXCTXTABLE=1` TBLASTX (speed; in the strict set from the pull request that added it, 2026-11-17, on by
+  default; `=0` turns it off; `tblastx/x_pair_par.rs` `x_ctx_table`, `x_context_of`): the units' two-hit test finds the
+  context of a hit that passes it (NCBI's `BSearchContextInfo`, `blast_query_info.c:219-243`) in the
+  `XContextTable` (`common/x_context_table.rs`, the table blastp's and blastx's fused loops take), made once per query batch from the
+  frame bases in `XPairPar::prepare`: a coarse table of at most 16,384 entries gives the context at the start of the
+  offset's block, and a walk over the frame bases moves on to the last context that starts at or before the offset.
+  Cause removed: the binary search over every context of the batch (`BlastAaLookupTable::get_context_idx`; NCBI's
+  narrowing by the shortest and longest context is not ported) compared the hit's query offset with a frame base at
+  each step, a branch the data decides: on ViPTreeGen's 40 Autographivirales genomes all against all (six contexts a
+  batch) it was mispredicted about once per search, 27 % of the unit scan's mispredictions (precise
+  `br_misp_retired.all_branches`) and about 11 % of its cycles. The table gives the binary search's index for every
+  offset (no rule; an offset outside the table takes the binary search, and with `=0` the table covers no offset, so
+  every hit takes it: the path before). It acts where the unit path runs (`LOSAT_X_PAIRPAR`'s batches); the reference
+  frame loop keeps the binary search. Memory: one table per batch, a coarse table of at most 64 KiB (42 KiB for a 42 kb query) and a copy of
+  the frame bases (4 bytes a context). Tests:
+  the lib test `the_context_table_gives_the_binary_search_index` (`x_pair_par.rs`; 240 random layouts of 0 to 300
+  contexts with empty contexts, a first frame base above 0 and batches over 16,384 letters, every offset from below
+  the first base to past the end, against `get_context_idx`, and `=0`'s table) and `LOSAT/tests/tblastx_ctx_table.rs`
+  (one and three MelaMJNV pieces against PemoMJNVA at 1 and 2 threads: the default's report equals `=0`'s and the
+  reach row shows the table's path ran). Evidence (ws, line DT, ad-DT-9; one booked core of node 0, `-num_threads 1`, the same output in every run, against
+  dev 5436a3abb): wall time (warm-up + 5 rounds alternating, medians) ViPTreeGen's Autographivirales.40 47.15 ->
+  45.74 s x0.970 (every round of this form under dev's fastest), Begomovirus.40 x0.981, ssDNA.prok.8, Easyfig's
+  tblastx example and Galaxy's tblastx test x1.000 (at the clock's 10 ms); user-space cycles (perf stat, 3 rounds
+  alternating, medians) x0.967 (branch misses x0.760, instructions x0.984), x0.971, x0.986, x0.986, x0.996; Galaxy's
+  tblastn and blastx tests the same instructions. Memory (max RSS, 10 rounds alternating, medians): Autographivirales.40
+  24,948 -> 24,836 KiB, Begomovirus.40 16,262 -> 16,318 KiB (+56 KiB, the batch's coarse table); the heap peak
+  (valgrind massif) ssDNA.prok.8 170,225,864 B in both, Begomovirus.40 170,443,912 -> 170,444,232 B. A branch-free
+  binary search (`core::hint::select_unpredictable` in `get_context_idx`) gave cycles x0.971 / x0.980 / x0.987 /
+  x0.988 / x0.999 against dev eba441b86 on the same cases, where this form gave x0.964 / x0.968 / x0.985 / x0.983 /
+  x0.998, and was not taken.
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`

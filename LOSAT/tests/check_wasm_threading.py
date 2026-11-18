@@ -210,29 +210,39 @@ def main():
     #
     #         if (pssm.Empty()) {  // FASTA input
     # ```
-    # psiblast through each WASI command, at -num_threads 1: every psiblast row of the frozen NCBI
-    # -subject fixtures (outfmt0_manifest.tsv, 95 rows), compared by the checker of the native gates
-    # (docs/evidence/losat_web_e2a/check_losat.py: stdout, stderr, the PSSM files), which runs a
-    # wrapper that starts the command's runner in the place of the binary. Its PSSM queries (-in_pssm)
-    # open no query input, as NCBI reads none, and its ASN.1 PSSM files are staged under a name
-    # without a process id, which WASI does not have
-    # (LOSAT/src/utils/process_id.rs). The -db rows (db_search_manifest/psiblast*.tsv) are not run
-    # here: in 14 of them the ASN.1 PSSM's informationContent differs in its last printed digit, the
-    # bytes of NCBI BLAST+ 2.17.0 with glibc's FMA variant of log() off, which the frozen bytes had on.
+    # psiblast through each WASI command, at -num_threads 1, by the checkers of the native gates, which
+    # run a wrapper that starts the command's runner in the place of the binary: every psiblast row of
+    # the frozen NCBI -subject fixtures (outfmt0_manifest.tsv, 95 rows; docs/evidence/losat_web_e2a/
+    # check_losat.py: stdout, stderr, the PSSM files) and of the -db fixtures (db_search_manifest/
+    # psiblast*.tsv, every row; db_search_fixtures.py check). Its PSSM queries (-in_pssm) open no query
+    # input, as NCBI reads none, and its ASN.1 PSSM files are staged under a name without a process
+    # id, which WASI does not have (LOSAT/src/utils/process_id.rs). The -db rows run with
+    # PD-LOSAT-PLATFORM-LIBM's rule on the PSSM files (Owner 2026-11-18, WASI=b): in 14 of them the
+    # ASN.1 PSSM's informationContent comes from log() and differs in the last of its 15 digits by 1,
+    # the bytes NCBI BLAST+ 2.17.0 writes with glibc's FMA variant of log() off (Wasm has no FMA); the
+    # frozen bytes had it on. `--libm-last-digit` names the native command, whose run of such a row
+    # gives the frozen bytes of a PSSM file over 64 KB (not frozen; compared by its SHA-256). Every
+    # other byte, standard output, standard error and the exit status stay exact.
     for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
         wrapper = out / "psiblast-fixtures" / kind / "losat"
         wrapper.parent.mkdir(parents=True, exist_ok=True)
         wrapper.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(str(x)) for x in prefixes[kind]) + ' "$@"\n')
         wrapper.chmod(0o755)
-        label = f"psiblast-fixtures/{kind}/outfmt0"
-        try:
-            execute(label, [sys.executable, ROOT / "docs/evidence/losat_web_e2a/check_losat.py", "--losat", wrapper,
-                            "--programs", "psiblast", "--threads", "1"], timeout=3600)
-        except AssertionError:
-            lines = (out / label / "stdout").read_text(errors="replace").splitlines()
-            print("\n".join(line for line in lines if "\tDIFF\t" in line or line.startswith("# ")), flush=True)
-            raise
-        print(label, (out / label / "stdout").read_text().splitlines()[-1], flush=True)
+        for name, checker, differs in [
+                ("outfmt0", [ROOT / "docs/evidence/losat_web_e2a/check_losat.py", "--losat", wrapper,
+                             "--programs", "psiblast", "--threads", "1"], "\tDIFF\t"),
+                ("db", [TESTS / "db_search_fixtures.py", "check", "--losat", wrapper, "--program", "psiblast",
+                        "--threads", "1", "--libm-last-digit", args.native.resolve()], "\tdiffers\t")]:
+            label = f"psiblast-fixtures/{kind}/{name}"
+            started = time.monotonic()
+            try:
+                execute(label, [sys.executable, *checker], timeout=3600)
+            except AssertionError:
+                lines = (out / label / "stdout").read_text(errors="replace").splitlines()
+                print("\n".join(line for line in lines if differs in line or line.startswith("# ")), flush=True)
+                raise
+            print(label, (out / label / "stdout").read_text().splitlines()[-1],
+                  f"({time.monotonic() - started:.0f} s)", flush=True)
     # NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
     # ```c++
     #     m_DeleteFlag = false;

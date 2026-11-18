@@ -3757,6 +3757,7 @@ mod tests {
     // reading outside the table (it read with `get_unchecked` until the SWEBOK 2026-11-04 audit,
     // KA4).
     #[test]
+    #[cfg_attr(panic = "abort", ignore = "catches a panic: the build aborts on panic")]
     fn get_hits_panics_outside_the_table() {
         let lookup = build_lookup_for_test(
             vec![vec![make_query_frame(

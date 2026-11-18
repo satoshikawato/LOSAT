@@ -41,6 +41,14 @@ pub struct JsonEncoder<'b> {
 }
 
 impl<'b> JsonEncoder<'b> {
+    /// The error of a value that the JSON documents do not hold (`Encoder::null`, `utf8_str`,
+    /// `delayed`).
+    fn unwritten(&mut self, what: &'static str) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::Unwritten(what));
+        }
+    }
+
     /// An encoder that appends a document to `out`.
     pub fn new(out: &'b mut Vec<u8>) -> Self {
         Self {
@@ -519,6 +527,18 @@ impl Encoder for JsonEncoder<'_> {
     /// ```
     fn visible_str(&mut self, value: &[u8]) {
         self.write_string(value);
+    }
+
+    /// The JSON documents (outfmt 12, 13, 15) have no NULL, UTF8String or delayed member (the
+    /// values of a PSSM file's members, `asn_types::write`).
+    fn null(&mut self) {
+        self.unwritten("a NULL value");
+    }
+    fn utf8_str(&mut self, _value: &[u8]) {
+        self.unwritten("a UTF8String");
+    }
+    fn delayed(&mut self, _text: &[u8]) {
+        self.unwritten("a member read into a delay buffer");
     }
 
     /// The JSON documents (outfmt 12, 13, 15) have no OCTET STRING.

@@ -1136,9 +1136,9 @@ mod tests {
     #[test]
     fn the_reported_sequences_are_read_only_for_reports_of_letters() {
         use super::super::x_subject_store::SubjectLetters;
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-tblastn-db-reported-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1189,9 +1189,9 @@ mod tests {
     #[test]
     fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
         use super::super::x_subject_store::SubjectLetters;
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-tblastn-db-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();

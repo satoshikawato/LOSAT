@@ -511,10 +511,11 @@ mod tests {
             missing.message,
             format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n")
         );
-        // A directory opens and reads nothing on Unix: the unknown format. Windows cannot open a
-        // directory as a file, so the open fails first there: the "could not open" exception.
+        // A directory opens and reads nothing on Unix and on WASI: the unknown format. Windows
+        // cannot open a directory as a file, so the open fails first there: the "could not open"
+        // exception.
         let directory = open(env!("CARGO_MANIFEST_DIR"), &FileCounts).unwrap_err();
-        if cfg!(unix) {
+        if cfg!(any(unix, target_os = "wasi")) {
             assert_eq!(directory.exit, 1);
             assert_eq!(
                 directory.message,
@@ -542,10 +543,14 @@ mod tests {
     // ascii counts are read (line NP M3d), their errors are NCBI's and their warnings come after
     // the registry's posts at each load.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "std::fs::File::open(\"\") succeeds on WASI, so the empty masker name is not \"could not open\": the wasm build differs here (reported)"
+    )]
     fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastn-window-masker-taxid-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         for (taxid, file) in [("562", "mg1655_u9.obinary"), ("7227", "dm2L_u9.binary")] {

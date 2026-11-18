@@ -734,7 +734,10 @@ fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
 
 /// A directory of its own for a test's files.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-pssm-{}-{name}", std::process::id()));
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-pssm-{}-{name}",
+        crate::utils::test_dir::process_id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -1102,6 +1105,10 @@ fn dev_null_keeps_no_bytes_and_eperm_is_immutable() {
 // The review of PS3 (B2): NCBI writes a PSSM file that is also a report stream among the reports'
 // bytes, in an order of their buffers; refused before the search.
 #[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "the same-file check needs unix metadata or canonicalize, which WASI lacks: the wasm build does not refuse the alias (reported)"
+)]
 fn a_pssm_file_that_is_a_report_stream_is_refused() {
     let dir = scratch("alias");
     let out = dir.join("out.txt");

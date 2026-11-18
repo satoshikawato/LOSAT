@@ -490,9 +490,9 @@ mod tests {
     // after it, at 2 to 8 threads with blocks of one sequence, of 40 bytes and of 1 MiB.
     #[test]
     fn a_failing_block_in_the_middle_stops_the_window_as_it_stops_the_rounds() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-bndbstream-middle-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

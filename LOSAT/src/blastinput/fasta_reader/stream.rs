@@ -773,7 +773,7 @@ impl<R: Read> FastaStream<R> {
 // then remaining regular-file bytes without forcing the next 8191-byte window.
 // Independent instrumented pinned CPushback_Streambuf calibrates this hint;
 // sgetn may span windows when the preserved allocation is larger than 8191.
-fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
+fn file_available(file: &mut crate::blastinput::input_files::InputFile) -> std::io::Result<usize> {
     let metadata = file.metadata()?;
     // Windows reports a pipe or a console as a file whose position can be read
     // (`input_files::has_stream_position`); elsewhere `stream_position` below fails on one.
@@ -792,7 +792,7 @@ fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
         // FIONREAD before forcing a file-buffer refill (independent C++ oracle).
         #[cfg(unix)]
         {
-            rustix::io::ioctl_fionread(file)
+            rustix::io::ioctl_fionread(&**file)
                 .map(|n| n as usize)
                 .map_err(Into::into)
         }
@@ -830,7 +830,7 @@ impl<'a> FastaStream<&'a [u8]> {
     }
 }
 
-impl FastaStream<std::fs::File> {
+impl FastaStream<crate::blastinput::input_files::InputFile> {
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
     // ```c++
     // CT_INT_TYPE CPushback_Streambuf::underflow(void)
@@ -847,7 +847,8 @@ impl FastaStream<std::fs::File> {
     //     x_FillBuffer((size_t) m_Sb->in_avail());
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
-    pub(crate) fn from_file(input: std::fs::File) -> Self {
+    pub(crate) fn from_file(input: impl Into<crate::blastinput::input_files::InputFile>) -> Self {
+        let input = input.into();
         let no_position = !crate::blastinput::input_files::has_stream_position(&input);
         let mut stream = Self::new(input);
         stream.no_position = no_position;
@@ -882,7 +883,10 @@ impl FastaStream<std::fs::File> {
     /// to 1), whether standard input is a pipe or a regular file (fixture rows
     /// `stdin_q_lost_g55_pipe` and `stdin_q_lost_g55_file` keep the tail that a file named by
     /// its path loses).
-    pub(crate) fn from_standard_input(input: std::fs::File) -> Self {
+    pub(crate) fn from_standard_input(
+        input: impl Into<crate::blastinput::input_files::InputFile>,
+    ) -> Self {
+        let input = input.into();
         let no_position = !crate::blastinput::input_files::has_stream_position(&input);
         let mut stream = Self::new(input);
         stream.no_position = no_position;

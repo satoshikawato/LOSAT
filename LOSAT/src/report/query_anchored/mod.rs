@@ -1611,6 +1611,7 @@ fn display_sequence_line(
         j as usize,
         actual_line_len,
         rows.masked[row].map(|(index, frame)| (&rows.masks[index][..], frame)),
+        false,
     );
     add_space(out, 2);
     if !empty {
@@ -1619,10 +1620,12 @@ fn display_sequence_line(
     out.push(b'\n');
 }
 
-/// `x_OutputSeq` of a row line (no HTML): the columns `start..start + len` of `sequence`, those
-/// of the row's masks in lower case (`m_SeqLocChar` is `eLowerCase`, blast_format.cpp:1581).
+/// `x_OutputSeq` of a row line: the columns `start..start + len` of `sequence`, those of the row's
+/// masks in lower case (`m_SeqLocChar` is `eLowerCase`, blast_format.cpp:1581); under `html`
+/// (`eHtml`) the columns of each mask on the line in a `<font>` span (`mask_spans`,
+/// `write_styled`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2486-2523
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2486-2541
 /// ```c++
 ///     _ASSERT((int)sequence.size() > start);
 ///     list<CRange<int> > actualSeqloc;
@@ -1642,18 +1645,44 @@ fn display_sequence_line(
 ///                 //go through each residule and mask it
 ///                 for (int i=max<int>(from, start);
 ///                      i<=min<int>(to, start+len -1); i++){
+///                     //store seqloc start for font tag below
+///                     if ((m_AlignOption & eHtml) && isFirstChar){
+///                         isFirstChar = false;
+///                         eachSeqloc.Set(i, eachSeqloc.GetTo());
+///                     }
 ///                     ...
 ///                     } else if (m_SeqLocChar==eLowerCase){
 ///                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 ///                     }
+///                     //store seqloc start for font tag below
+///                     if ((m_AlignOption & eHtml)
+///                         && i == min<int>(to, start+len)){
+///                         eachSeqloc.Set(eachSeqloc.GetFrom(), i);
+///                     }
+///                 }
+///                 if(!(eachSeqloc.GetFrom()==0&&eachSeqloc.GetTo()==0)){
+///                     actualSeqloc.push_back(eachSeqloc);
+///                 }
+///             }
+///         }
+///     }
+///
+///     if(actualSeqloc.empty()){//no need to add font tag
+///         ...
+///             out<<actualSeq;
+///         }
+///     } else {//now deal with font tag for mask for html display
 /// ```
-/// (The row's masks are those of its own sequence with its frame, `prepare_rows`.)
+/// (The row's masks are those of its own sequence with its frame, `prepare_rows`. The
+/// mismatch colours of the first branch need `eColorDifferentBases`, which no BLAST program
+/// sets: blast_format.cpp, survey T4 §1.1.)
 fn output_seq(
     out: &mut Vec<u8>,
     sequence: &[u8],
     start: usize,
     len: usize,
     masks: Option<(&[(i64, i64, i8)], i8)>,
+    html: bool,
 ) {
     let end = (start + len).min(sequence.len());
     let first = out.len();
@@ -1661,6 +1690,7 @@ fn output_seq(
     let Some((masks, row_frame)) = masks else {
         return;
     };
+    let mut spans = Vec::new();
     for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
         let lo = from.max(start as i64);
         let hi = to.min(start as i64 + len as i64 - 1);
@@ -1670,6 +1700,133 @@ fn output_seq(
                 letter.make_ascii_lowercase();
             }
             column += 1;
+        }
+        if html {
+            if let Some(span) = mask_span(from, to, start as i64, len as i64) {
+                spans.push(span);
+            }
+        }
+    }
+    if !spans.is_empty() {
+        let letters = out.split_off(first);
+        write_styled(out, &letters, start as i64, &spans);
+    }
+}
+
+/// `eachSeqloc` of a mask of the columns `from..=to` on the line of columns `start..start + len`
+/// (`x_OutputSeq` under `eHtml`, quoted at `output_seq`): its first column on the line, and its
+/// last where the mask ends on the line, else 0 (the `GetTo()` of `CRange<int>(0, 0)`); `None` for
+/// a mask that does not meet the line and for the range `(0, 0)` that NCBI drops: a mask that
+/// starts at the alignment's first column and does not end on the first line (its letters are in
+/// lower case, without a span), or that covers that column alone.
+fn mask_span(from: i64, to: i64, start: i64, len: i64) -> Option<(i64, i64)> {
+    let lo = from.max(start);
+    let hi = to.min(start + len - 1);
+    if lo > hi {
+        return None;
+    }
+    // `i == min<int>(to, start+len)`: only the mask's own last column, `to`, when it lies on the
+    // line (`hi` is below `start + len`).
+    let last = if to <= hi { to } else { 0 };
+    (!(lo == 0 && last == 0)).then_some((lo, last))
+}
+
+/// The letters `letters` of a line of first column `start` with the spans `spans` (`mask_span`)
+/// each in NCBI's mask template: a span opens at its first column and closes after its last
+/// column on the line, unless that column is the line's first (`to > 0`), in which case it runs,
+/// as a span that ends past the line does, to the line's end (`s_ProcessStyledContent` closes it
+/// at the last letter).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2541-2573
+/// ```c++
+///     } else {//now deal with font tag for mask for html display
+///         bool endTag = false;
+///         bool frontTag = false;
+///         string refStr;
+///         string styledSqLocTmpl = CAlignFormatUtil::MapTemplate(k_DefaultMaskSeqLocTempl,"color",color[m_SeqLocColor]);
+///         for (int i = 0; i < (int)actualSeq.size(); i ++){
+///             bool startStyledOutput = false,stopStyledOutput = false;
+///             for (list<CRange<int> >::iterator iter=actualSeqloc.begin();
+///                  iter!=actualSeqloc.end(); iter++){
+///                 int from = (*iter).GetFrom() - start;
+///                 int to = (*iter).GetTo() - start;
+///                 //start tag
+///                 if(from == i){
+///                     frontTag = true;
+///                 }
+///                 if(to == i && to > 0){
+///                     endTag = true;
+///                 }
+///             }
+///             startStyledOutput = frontTag;
+///             stopStyledOutput = endTag && frontTag;
+///             bool isStyled = s_ProcessStyledContent(actualSeq,i,startStyledOutput,stopStyledOutput,styledSqLocTmpl ,refStr,out);
+///             if(!isStyled) out<<actualSeq[i];
+///             if(endTag && frontTag){
+///                 endTag = false;
+///                 frontTag = false;
+///             }
+///         }
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:374-387
+/// ```c++
+/// static bool s_ProcessStyledContent(string& seq, int currIndex, bool startStyledOutput, bool stopStyledOutput, string tmpl,string &styledSeqStr,CNcbiOstream& out)
+/// {
+///     bool isStyled = false;
+///     if(startStyledOutput || (!styledSeqStr.empty() && !stopStyledOutput)){
+/// 	    styledSeqStr += seq[currIndex];
+///         isStyled = true;
+///     }
+///     if(!styledSeqStr.empty() && (stopStyledOutput || currIndex == (int)seq.size() - 1) ) {
+///         styledSeqStr = CAlignFormatUtil::MapTemplate(tmpl,"alndata",styledSeqStr);
+///         out << styledSeqStr;
+///         styledSeqStr = "";
+///     }
+///     return isStyled;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:93,111,163
+/// ```c++
+/// static const char* color[]={"#000000", "#808080", "#FF0000"};
+/// ...
+/// static const char* k_DefaultMaskSeqLocTempl = "<font color=\"<@color@>\"><@alndata@></font>";
+/// ...
+///     m_SeqLocColor = eBlack;
+/// ```
+/// (The letters hold no `<@`, so the template's one replacement is the letters.)
+fn write_styled(out: &mut Vec<u8>, letters: &[u8], start: i64, spans: &[(i64, i64)]) {
+    const OPEN: &[u8] = b"<font color=\"#000000\">";
+    const CLOSE: &[u8] = b"</font>";
+    let (mut front, mut end) = (false, false);
+    let mut styled: Vec<u8> = Vec::new();
+    for (i, &letter) in letters.iter().enumerate() {
+        let i = i as i64;
+        for &(from, to) in spans {
+            if from - start == i {
+                front = true;
+            }
+            if to - start == i && to - start > 0 {
+                end = true;
+            }
+        }
+        let (start_styled, stop_styled) = (front, end && front);
+        let mut is_styled = false;
+        if start_styled || (!styled.is_empty() && !stop_styled) {
+            styled.push(letter);
+            is_styled = true;
+        }
+        if !styled.is_empty() && (stop_styled || i == letters.len() as i64 - 1) {
+            out.extend_from_slice(OPEN);
+            out.append(&mut styled);
+            out.extend_from_slice(CLOSE);
+        }
+        if !is_styled {
+            out.push(letter);
+        }
+        if end && front {
+            end = false;
+            front = false;
         }
     }
 }
@@ -2010,5 +2167,7 @@ mod tests_t3b;
 mod tests_t3c;
 #[cfg(test)]
 mod tests_t3c_self;
+#[cfg(test)]
+mod tests_t4a0;
 #[cfg(test)]
 mod tests_x2g;

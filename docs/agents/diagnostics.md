@@ -365,6 +365,7 @@ export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
 export LOSAT_X_BNTBRANGE=1
+export LOSAT_X_BPCELL128=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPDBCUT=1
@@ -2668,7 +2669,8 @@ Rebuilding less:
   job), with 13-18 % fewer branch mispredicts.
 - `LOSAT_X_BPMASKED=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-24;
   `=0` turns it off; acts only where `LOSAT_X_BPDEFER`'s deferred calls run: not with `LOSAT_X_BPDEFER=0` or
-  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly), not with
+  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly; there `LOSAT_X_BPCELL128`'s 128-bit
+  batches take the tables of `LOSAT_X_BPMASKEDMIN`'s rule where the target has them), not with
   `LOSAT_X_BPDIAG=0`, never in blastp-fast's loops on the compressed table (they have no AVX2 batches); and
   only on lookup tables with at least `LOSAT_X_BPMASKEDMIN` hits per used backbone cell, in hundredths,
   built-in 250, `0` every table) blastp's
@@ -2695,6 +2697,33 @@ Rebuilding less:
   the fly proteome took x1.148 at 1.11 hits per used cell (x1.192 against UniRef50 volume 00), x1.123 at 1.48
   (x1.071), x1.020 at 2.08, x0.987 at 2.60, x0.924 at 4.52, x0.928 at 7.07 and x0.935 at 10.38 (x0.919 against
   UniRef50 volume 00), so the built-in cutoff lies between 2.08 and 2.60.
+- `LOSAT_X_BPCELL128=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-11-18,
+  class platform, on by default; `=0` turns it off, `=2` runs it in place of the AVX2 batches on any x86-64
+  CPU with SSSE3, SSE4.1 and POPCNT, as a diagnostic for the tests; acts where `LOSAT_X_BPDIAG` is on and its
+  AVX2 batches do not run: the WebAssembly build (simd128) and x86-64 with SSSE3, SSE4.1 and POPCNT but no
+  AVX2, which ran the per-hit loop on every table before; only on the lookup tables `LOSAT_X_BPMASKEDMIN`
+  gives the masked batch, 250 hundredths of a hit per used cell, `0` every table, the others keep the
+  per-hit loop) blastp's fused loop tests a lookup cell's hits in batches of eight in two 128-bit vectors
+  (`blastp/x_seed_fused.rs` `x_cell_w128`; exactness argument in its module header): each batch is the test
+  of eight lanes of `LOSAT_X_BXCROSS128`'s kernel (`XCrossW128`, every lane at the cell's subject offset,
+  so the lane formulas are the AVX2 batch's), its candidates called at once in lane order, and the fewer
+  than eight hits after the cell's last batch are tested one after the other with `LOSAT_X_BPHITBF`'s
+  branch-free test (where the per-hit loop takes it) or `x_test_hit`. Neither `LOSAT_X_BPDEFER`'s deferral
+  nor the masked last batch is taken: both cost the WebAssembly build more than they save. With
+  `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=w128` (the counts of the tables it batched) and the
+  `x_bpmasked` line gives the rule's (thread, table) choices (`tables_masked=` batched, `tables_deferred=`
+  left to the per-hit loop). Measured 2026-11-18 on the local machine (WSL2, no hardware counters; v4-W W2
+  s4): the serial WASI command under Node 26.8.2 (V8 TurboFan, `--no-liftoff --single-threaded`), the
+  instructions of the compiled module under callgrind against `dev` c648413ac, outputs identical in every
+  arm, query sets of Species4 x Species6 (`-subject`, `-evalue 0.001`): 1,000 proteins (122 hits per used
+  cell) 0.821 (138.3 -> 113.6 G) with 23 % fewer simulated branch mispredicts, 100 proteins (118) 0.842, 10
+  (14.7) 0.889, 3 (6.37) 0.940, 1 (3.72) 0.968, single proteins at 3.10 and 2.52 hits 1.013 and 1.002 (5-7 %
+  more simulated mispredicts from 3.10 to 6.37); below the cutoff the per-hit loop as before (2.42: 1.001;
+  with `LOSAT_X_BPMASKEDMIN=0` a prototype build gave 2.42 1.014, 1.97 1.012, 1.25 1.024). Wall time
+  of the same commands in one Node process (rotating rounds, load 20-45): 100 proteins x0.83-0.88 of `dev`
+  for the prototype forms tried, 7/7 rounds faster. Native AVX2 code is unchanged (machine code compared function by
+  function with `dev`); natively with `=2` (SSE) the 100-protein case runs 1.07 of the AVX2 default's
+  instructions.
 - BPSCANBF (graduated 2026-10-26, in the set since 2026-10-17; no variable; always on) (BLASTP, speed; acts in
   the fused loop on the standard lookup table; the compressed table keeps
   its scan) blastp's fused loop finds the lookup cells with hits by the
@@ -2722,8 +2751,9 @@ Rebuilding less:
   loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
 - `LOSAT_X_BPHITBF=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-20;
   `=0` turns it off) the per-hit loop of the fused seed loop (`blastp/x_seed_fused.rs` `x_cell_per_hit`, the
-  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64 and WebAssembly;
-  exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
+  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64, and where
+  `LOSAT_X_BPCELL128`'s 128-bit batches do not take the table, WebAssembly's tables with few hits per used
+  cell; `LOSAT_X_BPCELL128` takes the test for a cell's last hits; exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
   (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch,
   in doubled arithmetic: with the packed entry `raw`, `d2 = 2 (s + diag_offset) - (raw <<
   1)` is twice the reference's `diff` (a cleared entry holds `-window`), a candidate is `(d2 - 2 wordsize) as
@@ -4263,7 +4293,7 @@ Scheduling (each value computed by one thread with the original function; order 
   0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
   `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
 - `LOSAT_X_BNSEEDLISTS=1` (BLASTN `-task blastn`, `megablast` and `blastn-short`: the partitioned stages of
-  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one unmasked subject, a
+  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one subject, a
   query block above 8,000 letters; in the strict set from the pull request that added it, 2026-10-28:
   `LOSAT_X_BNSEEDLISTS=0` turns it off) gives those stages the form `LOSAT_X_DCSEEDLEAN` gives dc-megablast's
   (`x_pair_seed_part::seed_stage_part_lists`); each partition gets the same seeds in the same order, so the hits and

@@ -3,8 +3,10 @@
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`) since 2026-10-17: on unless
 //! `LOSAT_X_BPDIAG=0`. It acts in the fused seed loop (every two-hit blastp search). With it on, the hits of one lookup cell are tested in
-//! batches of eight in AVX2 registers where the CPU has AVX2; without AVX2 the per-hit loop runs,
-//! and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. `LOSAT_X_BPDEFER` (in the set too since
+//! batches of eight in AVX2 registers where the CPU has AVX2; without AVX2 in 128-bit vectors
+//! where `LOSAT_X_BPCELL128` runs (x86-64 with SSSE3, SSE4.1 and POPCNT;
+//! `tests/blastp_diag_defer.rs`) and otherwise the per-hit loop runs, and
+//! `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. `LOSAT_X_BPDEFER` (in the set too since
 //! 2026-10-17; `tests/blastp_diag_defer.rs`) calls the candidates of the AVX2 batches after a
 //! cell's last batch, and `LOSAT_X_BPMASKED` (in the set since 2026-10-24, same file) gives those
 //! batches the masked last batch, so the default's line names `avx2-defer-masked` where the CPU
@@ -116,21 +118,29 @@ fn blastp(
 
 /// Checks one search's `[TIMING] x_bpdiag` line: `LOSAT_X_BPDIAG_SIMD=0` runs the scalar batch,
 /// otherwise the AVX2 batch where this CPU has AVX2 (`avx2-defer-masked` when the search runs
-/// with `LOSAT_X_BPDEFER` and `LOSAT_X_BPMASKED` on, `defer`) and the per-hit loop (nothing
-/// counted) where it has not. A batched run has tested cells and passed candidates on.
+/// with `LOSAT_X_BPDEFER` and `LOSAT_X_BPMASKED` on, `defer`); where it has not, the 128-bit
+/// batches of `LOSAT_X_BPCELL128` where it has SSSE3, SSE4.1 and POPCNT, and the per-hit loop
+/// (nothing counted) elsewhere. A batched run has tested cells and passed candidates on.
 fn check_counts(counts: &[DiagCounts], simd: &str, defer: bool, what: &str) {
     assert_eq!(counts.len(), 1, "{what}: {counts:?}");
     let c = &counts[0];
     #[cfg(target_arch = "x86_64")]
-    let avx2 = std::arch::is_x86_feature_detected!("avx2");
+    let (avx2, w128) = (
+        std::arch::is_x86_feature_detected!("avx2"),
+        std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+            && std::arch::is_x86_feature_detected!("popcnt"),
+    );
     #[cfg(not(target_arch = "x86_64"))]
-    let avx2 = false;
+    let (avx2, w128) = (false, false);
     let expected = if simd == "0" {
         "scalar"
     } else if avx2 && defer {
         "avx2-defer-masked"
     } else if avx2 {
         "avx2"
+    } else if w128 {
+        "w128"
     } else {
         "per-hit"
     };
@@ -233,7 +243,8 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     ];
     // The batches, with the `LOSAT_X_BPDIAG_SIMD` value each runs with and whether
     // `LOSAT_X_BPDEFER` is on: the default (the CPU's path, the AVX2 batch with the deferred calls
-    // and the masked last batch, or the per-hit loop without AVX2), its scalar batch, and its AVX2
+    // and the masked last batch, or without AVX2 the 128-bit batches or the per-hit loop), its
+    // scalar batch, and its AVX2
     // batch without the deferred
     // calls (`LOSAT_X_BPDEFER=0`).
     let batched: [(Vars, &str, bool); 3] = [

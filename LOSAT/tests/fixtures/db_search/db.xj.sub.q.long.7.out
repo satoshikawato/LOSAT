@@ -1,0 +1,379 @@
+# BLASTX 2.17.0+
+# Query: q1 one
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q2 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q2	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q3 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q3	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q4 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q4	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q5 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q5	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q6 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q6	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q7	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q8 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q8	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q9 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q9	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q10 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q10	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q11 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q11	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q12 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q12	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q13 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q13	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q14 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q14	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q15 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q15	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q16 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q16	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q17 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q17	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q18 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q18	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q19 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q19	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q20 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q20	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q21 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q21	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q22 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q22	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q23 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q23	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q24 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q24	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q25 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q25	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q26 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q26	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q27 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q27	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q28 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q28	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q29 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q29	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q30 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q30	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q31 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q31	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q32 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaÃ© tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q32	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q33 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q33	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q34 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q34	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q35 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q35	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q36 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q36	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q37 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q37	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q38 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q38	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q39 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q39	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q40 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q40	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q41 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q41	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q42 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q42	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q43 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q43	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q44 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q44	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q45 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q45	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q46 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q46	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q47 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q47	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q48 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q48	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q49 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q49	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q50 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q50	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q51 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q51	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q52 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q52	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q53 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q53	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q54 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q54	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q55 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q55	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q56 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q56	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q57 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q57	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q58 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q58	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q59 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q59	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q60 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q60	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q61 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q61	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q62 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q62	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLASTX 2.17.0+
+# Query: q63 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title words here
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q63	s1	100.000	60	0	0	1	180	1	60	1.80e-46	127
+# BLAST processed 63 queries

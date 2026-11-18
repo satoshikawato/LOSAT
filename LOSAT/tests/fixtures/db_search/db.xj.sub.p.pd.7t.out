@@ -1,0 +1,31 @@
+# BLASTX 2.17.0+
+# Query: q1 √© rest
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query id, query acc., query acc.ver, subject id, subject ids, subject acc., subject acc.ver, subject accs., subject title, subject titles
+# 1 hits found
+q1	q1	q1	s1	s1	s1	s1	s1	N/A	N/A
+# BLASTX 2.17.0+
+# Query: q2 È rest
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query id, query acc., query acc.ver, subject id, subject ids, subject acc., subject acc.ver, subject accs., subject title, subject titles
+# 1 hits found
+q2	q2	q2	s1	s1	s1	s1	s1	N/A	N/A
+# BLASTX 2.17.0+
+# Query: q3 Å rest
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query id, query acc., query acc.ver, subject id, subject ids, subject acc., subject acc.ver, subject accs., subject title, subject titles
+# 1 hits found
+q3	q3	q3	s1	s1	s1	s1	s1	N/A	N/A
+# BLASTX 2.17.0+
+# Query: q4  rest
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query id, query acc., query acc.ver, subject id, subject ids, subject acc., subject acc.ver, subject accs., subject title, subject titles
+# 1 hits found
+q4	q4	q4	s1	s1	s1	s1	s1	N/A	N/A
+# BLASTX 2.17.0+
+# Query: q5 ˇ rest
+# Database: User specified sequence set (Input: tests/db_search/xb/xb_sp_clean.faa)
+# Fields: query id, query acc., query acc.ver, subject id, subject ids, subject acc., subject acc.ver, subject accs., subject title, subject titles
+# 1 hits found
+q5	q5	q5	s1	s1	s1	s1	s1	N/A	N/A
+# BLAST processed 5 queries

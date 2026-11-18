@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "pgo5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pgo5",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T22:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37260,
+  "bytes-to-cache": 218,
+  "files": [
+    "pgo5.pdb",
+    "pgo5.phr",
+    "pgo5.pin",
+    "pgo5.pnd",
+    "pgo5.pni",
+    "pgo5.pog",
+    "pgo5.pot",
+    "pgo5.psq",
+    "pgo5.ptf",
+    "pgo5.pto"
+  ]
+}

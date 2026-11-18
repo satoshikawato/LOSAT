@@ -11021,26 +11021,10 @@ fn run_in_pool(
                     );
                 }
             }
-            let earlier = crate::algorithm::common::database::EarlierUtf8 {
-                fetched: batch.fetched_utf8.map(|at| (0, at)),
-                aligned: database::drop_unaligned(database, &mut batch_hit_lists).map(|at| (0, at)),
-            };
-            // NCBI's warning of its first read of a UTF8String header follows the batch's reader
-            // messages and request posts (`warnings[start]`), before its prefetch.
-            let read = database::read_titles(database, &batch_hit_lists, earlier, &mut titles);
-            if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
-                match &read {
-                    Ok(read) => read.as_ref(),
-                    Err(error) => error
-                        .downcast_ref::<database::HeaderReadError>()
-                        .and_then(|failure| failure.utf8.as_ref()),
-                },
-                &database.db,
-                "blastn",
-            ) {
-                warnings[start].append(&posts);
-            }
-            if let Err(error) = read {
+            let read = (&mut titles, &mut warnings[start]);
+            if let Err(error) =
+                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
+            {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
@@ -11351,8 +11335,7 @@ fn run_in_pool(
             {
                 // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the
                 // batch's prefetch (where it is on and loads a sequence) only its stop
-                // (`BlastnDatabase::batch_prefetch_stop`).
-                let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
+                // (`BlastnDatabase::xml2_prefetch`).
                 // NCBI's scope at the batch's prefetch, as above.
                 let scope = || {
                     crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
@@ -11362,29 +11345,15 @@ fn run_in_pool(
                         _ => batch_records.input(),
                     })
                 };
-                let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
-                if off {
-                    database.scope_utf8_hit_reads(
-                        &titles,
-                        &batch_hit_lists,
-                        start,
-                        &mut query_reads,
-                    );
-                }
-                (seq_aligns > 0 && !off).then(|| {
-                    database
-                        .batch_prefetch_stop(
-                            &titles,
-                            &hit_lists,
-                            &batch_hit_lists,
-                            !args.ungapped,
-                            &crate::algorithm::common::database::PrefetchQueries::new(
-                                start, &scope,
-                            )
-                            .after_unrecorded_calls(args.first_query_ordinal > 0),
-                        )
-                        .map(Posts::of_lines)
-                })
+                database.xml2_prefetch(
+                    &titles,
+                    &hit_lists,
+                    &batch_hit_lists,
+                    !args.ungapped,
+                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
+                        .after_unrecorded_calls(args.first_query_ordinal > 0),
+                    &mut query_reads[start..],
+                )
             } else {
                 None
             };

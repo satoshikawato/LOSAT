@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "pplain",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pplain",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T22:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37186,
+  "bytes-to-cache": 218,
+  "files": [
+    "pplain.pdb",
+    "pplain.phr",
+    "pplain.pin",
+    "pplain.pot",
+    "pplain.psq",
+    "pplain.ptf",
+    "pplain.pto"
+  ]
+}

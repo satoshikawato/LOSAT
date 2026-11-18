@@ -472,71 +472,6 @@ impl TblastnDatabase {
         self.db.scope_utf8_seen()
     }
 
-    /// Before the model of the loads of the batch of the queries `span`
-    /// (`shared::Utf8Read::reach` of the call's first read among the batches' own, `utf8_read`).
-    pub(super) fn reach_batch(
-        &self,
-        utf8_read: Option<&shared::Utf8Read>,
-        span: &std::ops::Range<usize>,
-    ) {
-        shared::Utf8Read::reach(utf8_read, span, &self.db);
-    }
-
-    /// The XML2 and JSON formats (whose prefetch is modelled only where it stops,
-    /// `prefetch_stop_error`): NCBI's warning of a UTF8String header that a load of the prefetch of
-    /// a batch (of `spans`, in order; their final hit lists in `results`) posts where it is on
-    /// (`shared::scope_utf8_prefetch_post`), by the batch's first query, for the batch's prefetch
-    /// posts, or where it is off a `Hit` of a query's report (`shared::scope_utf8_hit_reads`, in
-    /// `subject_reads`); none after the call's first read among the batches' own (`utf8_read`,
-    /// `reach_batch`).
-    pub(super) fn xml2_scope_utf8(
-        &self,
-        (reported, subject_reads): (
-            &ReportedSubjects,
-            &mut crate::report::query_warnings::SubjectReads,
-        ),
-        results: &[KappaResultHitList],
-        spans: &[std::ops::Range<usize>],
-        utf8_read: Option<&shared::Utf8Read>,
-    ) -> Result<Vec<(usize, crate::report::diag_log::Posts)>> {
-        let mut posts = Vec::new();
-        if !self.db.scope_utf8_seen() {
-            return Ok(posts);
-        }
-        for span in spans {
-            self.reach_batch(utf8_read, span);
-            let Some(hitlists) = results.get(span.clone()) else {
-                break;
-            };
-            if shared::prefetch_off(seq_aligns_of(hitlists)) {
-                for (query, hitlist) in span.clone().zip(hitlists) {
-                    let subjects = hitlist.lists().iter().map(|list| {
-                        let rank = list.oid as usize;
-                        (
-                            rank as u32,
-                            reported.ordinals[rank],
-                            reported.parsed_subject(rank),
-                        )
-                    });
-                    let reads =
-                        shared::scope_utf8_hit_reads(&self.db, &self.taxdb, subjects, PROGRAM);
-                    subject_reads.set(query, reads);
-                }
-                continue;
-            }
-            let subjects: Vec<shared::PrefetchSubject<'_>> =
-                Self::prefetch_subjects(reported, hitlists, SubjectFetch::Every).collect();
-            let warning = shared::scope_utf8_prefetch_post(&self.db, &subjects, PROGRAM)?;
-            if !warning.is_empty() {
-                posts.push((
-                    span.start,
-                    crate::report::diag_log::Posts::of_lines(warning),
-                ));
-            }
-        }
-        Ok(posts)
-    }
-
     /// The database read where it is searched by `threads` threads, after the checks of
     /// `common::database::x_check_nucleotide_stores` (`common/x_db_stream.rs`).
     pub(super) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
@@ -581,25 +516,27 @@ pub(super) fn fetch_excluded(database: &TblastnDatabase) -> Option<shared::Fetch
     shared::FetchExcluded::of(&database.db)
 }
 
-/// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
-/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
-/// `read_titles`.
-/// NCBI's fetches with `check_oid_exclusion` of the redo and the traceback of a call's batches
-/// (`excluded`, [`fetch_excluded`]), with the note of each batch's first fetch that read a header
-/// with a UTF8String where a VisibleString is expected, by the batch's first query (`notes`: the
-/// batches may be searched side by side).
-pub(super) struct FetchedUtf8<'a> {
-    excluded: Option<&'a shared::FetchExcluded<'a>>,
-    pub(super) notes: BTreeMap<usize, crate::seqdb::Utf8Reads>,
+/// A TBLASTN call's reads of header records: NCBI's fetches with `check_oid_exclusion` of the
+/// redo and the traceback of its batches (`excluded`, [`fetch_excluded`]), with the note of each
+/// batch's first fetch that read a header with a UTF8String where a VisibleString is expected, by
+/// the batch's first query (`notes`: the batches may be searched side by side), then the reads of
+/// each batch's Seq-aligns and reported sequences (`titles`), whose first such read is the call's
+/// (`utf8`, `shared::CallUtf8`: its warning, the model of the loads after it).
+pub(super) struct CallReads<'a> {
+    database: Option<&'a TblastnDatabase>,
+    excluded: Option<shared::FetchExcluded<'a>>,
+    notes: BTreeMap<usize, crate::seqdb::Utf8Reads>,
+    utf8: shared::CallUtf8,
 }
 
-impl<'a> FetchedUtf8<'a> {
-    /// The notes of the batches that `batches` makes (each with its searched queries), where the
-    /// fetches check (`excluded`).
+impl<'a> CallReads<'a> {
+    /// The reads of a call of `database` (`None`: the subjects are records) whose batches
+    /// `batches` makes (each with its searched queries).
     pub(super) fn of(
-        excluded: Option<&'a shared::FetchExcluded<'a>>,
+        database: Option<&'a TblastnDatabase>,
         batches: impl FnOnce() -> Vec<crate::blastinput::seq_range::RangedBatch>,
     ) -> Self {
+        let excluded = database.and_then(fetch_excluded);
         let notes = match excluded {
             Some(_) => batches()
                 .into_iter()
@@ -607,7 +544,12 @@ impl<'a> FetchedUtf8<'a> {
                 .collect(),
             None => Default::default(),
         };
-        Self { excluded, notes }
+        Self {
+            database,
+            excluded,
+            notes,
+            utf8: shared::CallUtf8::default(),
+        }
     }
 
     /// The fetches of the batch of the queries `range` (`stage_d_pipeline::BatchFetches`).
@@ -616,94 +558,168 @@ impl<'a> FetchedUtf8<'a> {
         range: &std::ops::Range<usize>,
     ) -> Option<super::stage_d_pipeline::BatchFetches<'_>> {
         self.excluded
+            .as_ref()
             .map(|excluded| super::stage_d_pipeline::BatchFetches {
                 excluded,
                 utf8: self.notes.get(&range.start),
             })
     }
-}
 
-/// The call's first read, in a batch's Seq-aligns, of a header with a UTF8String where a
-/// VisibleString is expected: the batch's first query and the read (`TblastnDatabase::batch_titles`).
-pub(super) type FirstUtf8 = Option<(usize, shared::Utf8Read)>;
-
-/// The reads of [`TblastnDatabase::batch_titles`]: the notes of each batch's first fetch that read
-/// such a header, by the batch's first query (the batches may be searched side by side), the
-/// titles read, and the call's first read ([`FirstUtf8`]).
-pub(super) type BatchReads<'r> = (
-    &'r BTreeMap<usize, crate::seqdb::Utf8Reads>,
-    &'r mut DatabaseTitles,
-    &'r mut FirstUtf8,
-);
-
-impl TblastnDatabase {
     /// `-db`: the definition lines of the final hit lists `hitlists` of the batch of the queries
     /// `range`, read where NCBI makes the batch's Seq-aligns ([`read_titles`], after the batch's
-    /// fetches and Seq-aligns that read a UTF8String header, [`drop_unaligned`]), into the titles of
-    /// `reads`, whose first read of such a header of the call it notes where none came before.
+    /// fetches and Seq-aligns that read a UTF8String header, [`drop_unaligned`]), into `titles`;
+    /// the first read of such a header is the call's where none came before (`utf8`).
     /// `Ok(Some(error))`: NCBI's reader error (a header file that NCBI cannot read), which fails
     /// this batch after the reports of the batches before; LOSAT's refusals are errors.
-    pub(super) fn batch_titles(
+    /// `Ok(None)` without a database.
+    pub(super) fn titles(
         &self,
         hitlists: &mut [KappaResultHitList],
         range: &std::ops::Range<usize>,
-        (fetched, titles, first): BatchReads<'_>,
+        titles: &mut DatabaseTitles,
     ) -> Result<Option<anyhow::Error>> {
-        let earlier = shared::EarlierUtf8 {
-            fetched: fetched
-                .get(&range.start)
-                .and_then(crate::seqdb::Utf8Reads::take)
-                .map(|note| (range.start, note.at)),
-            aligned: drop_unaligned(self, hitlists).map(|at| (range.start, at)),
+        let Some(database) = self.database else {
+            return Ok(None);
         };
-        match read_titles(self, hitlists, range.start, earlier, titles) {
-            Ok(read) => {
-                if first.is_none() {
-                    *first = read.map(|read| (range.start, read));
-                }
-                Ok(None)
-            }
+        let fetched = self
+            .notes
+            .get(&range.start)
+            .and_then(crate::seqdb::Utf8Reads::take)
+            .map(|note| note.at);
+        let aligned = drop_unaligned(database, hitlists);
+        let earlier = shared::EarlierUtf8::of_batch(range.start, fetched, aligned);
+        let read = read_titles(database, hitlists, range.start, earlier, titles);
+        self.utf8.note(
+            range.start,
+            shared::Utf8Read::of_read(&read, Option::as_ref),
+        );
+        match read {
+            Ok(_) => Ok(None),
             Err(error) => match error.downcast::<shared::HeaderReadError>() {
-                Ok(failure) => {
-                    if first.is_none() {
-                        *first = failure.utf8.map(|read| (range.start, read));
-                    }
-                    Ok(Some(failure.error))
-                }
+                Ok(failure) => Ok(Some(failure.error)),
                 Err(error) => Err(error),
             },
         }
     }
-}
 
-/// NCBI's warning of the call's first read of a UTF8String header (`first`,
-/// [`TblastnDatabase::batch_titles`]) in the first query of the batch that read it, a reported one
-/// (of the `reported` queries), with the posts that follow the reader's messages of the batch
-/// (`query_warnings::query_posts`), where the run has not posted it (a load of the model of the
-/// loads may have, `shared::load_read_texts`).
-pub(super) fn header_read(
-    first: Option<&(usize, shared::Utf8Read)>,
-    database: Option<&TblastnDatabase>,
-    reported: usize,
-) -> Option<(usize, crate::report::diag_log::Posts)> {
-    let (query, read) = first.filter(|(query, _)| *query < reported)?;
-    Some((*query, read.post(&database?.db, PROGRAM_NAME)?))
-}
+    /// The batches `spans`, in order, each after the model of the loads reaches it
+    /// (`shared::CallUtf8::reach`): no load of the batch of the call's first read among the
+    /// batches' own, or of a later batch, posts its warning.
+    pub(super) fn reaching<'s>(
+        &'s self,
+        spans: &'s [std::ops::Range<usize>],
+    ) -> impl Iterator<Item = &'s std::ops::Range<usize>> + 's {
+        spans.iter().inspect(move |span| self.reach(span))
+    }
 
-/// NCBI's warning of that read where the failed batch of the queries `range` made it with its
-/// Seq-aligns, before the failure: written after the batch's reader messages and request posts.
-pub(super) fn failed_header_read(
-    first: Option<&(usize, shared::Utf8Read)>,
-    database: Option<&TblastnDatabase>,
-    range: &std::ops::Range<usize>,
-) -> Option<crate::report::diag_log::Posts> {
-    let (_, read) = first.filter(|(query, _)| *query == range.start)?;
-    read.post(&database?.db, PROGRAM_NAME)
+    /// `shared::CallUtf8::reach` before the model of the loads of the batch of the queries `span`.
+    pub(super) fn reach(&self, span: &std::ops::Range<usize>) {
+        if let Some(database) = self.database {
+            self.utf8.reach(span, &database.db);
+        }
+    }
+
+    /// The XML2 and JSON formats (`xml2`; whose prefetch is modelled only where it stops,
+    /// `prefetch_stop_error`): NCBI's warning of a UTF8String header that a load of the prefetch of
+    /// a batch (of `spans`, in order; their final hit lists in `results`) posts where it is on
+    /// (`shared::scope_utf8_prefetch_post`), by the batch's first query, for the batch's prefetch
+    /// posts, or where it is off a `Hit` of a query's report (`shared::scope_utf8_hit_reads`, in
+    /// `subject_reads`); none from the batch of the call's first read among the batches' own on
+    /// (`reaching`). Nothing for another format.
+    pub(super) fn xml2(
+        &self,
+        xml2: bool,
+        (reported, subject_reads): (
+            &ReportedSubjects,
+            &mut crate::report::query_warnings::SubjectReads,
+        ),
+        results: &[KappaResultHitList],
+        spans: &[std::ops::Range<usize>],
+    ) -> Result<Vec<(usize, crate::report::diag_log::Posts)>> {
+        let mut posts = Vec::new();
+        let Some(database) = self
+            .database
+            .filter(|database| xml2 && database.scope_utf8_seen())
+        else {
+            return Ok(posts);
+        };
+        for span in self.reaching(spans) {
+            let Some(hitlists) = results.get(span.clone()) else {
+                break;
+            };
+            if shared::prefetch_off(seq_aligns_of(hitlists)) {
+                for (query, hitlist) in span.clone().zip(hitlists) {
+                    let subjects = hitlist.lists().iter().map(|list| {
+                        let rank = list.oid as usize;
+                        (
+                            rank as u32,
+                            reported.ordinals[rank],
+                            reported.parsed_subject(rank),
+                        )
+                    });
+                    let reads = shared::scope_utf8_hit_reads(
+                        &database.db,
+                        &database.taxdb,
+                        subjects,
+                        PROGRAM,
+                    );
+                    subject_reads.set(query, reads);
+                }
+                continue;
+            }
+            let subjects: Vec<shared::PrefetchSubject<'_>> =
+                TblastnDatabase::prefetch_subjects(reported, hitlists, SubjectFetch::Every)
+                    .collect();
+            let warning = shared::scope_utf8_prefetch_post(&database.db, &subjects, PROGRAM)?;
+            if !warning.is_empty() {
+                posts.push((
+                    span.start,
+                    crate::report::diag_log::Posts::of_lines(warning),
+                ));
+            }
+        }
+        Ok(posts)
+    }
+
+    /// NCBI's warning of the call's first read of a UTF8String header among its batches' own in
+    /// the first query of the batch that read it, a reported one (of the `reported` queries), with
+    /// the posts that follow the reader's messages of the batch (`query_warnings::query_posts`),
+    /// where the run has not posted it (a load of the model of the loads may have,
+    /// `shared::load_read_texts`).
+    pub(super) fn header_read(
+        &self,
+        reported: usize,
+    ) -> Option<(usize, crate::report::diag_log::Posts)> {
+        self.utf8.post(
+            self.database.map(|database| &database.db),
+            PROGRAM_NAME,
+            reported,
+        )
+    }
+
+    /// Writes NCBI's warning of that read to `diagnostics` (and the archive's messages) where the
+    /// failed batch of the queries `range` made it with its Seq-aligns, before the failure: after
+    /// the batch's reader messages and request posts.
+    pub(super) fn write_failed(
+        &self,
+        range: &std::ops::Range<usize>,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> Result<()> {
+        let db = self.database.map(|database| &database.db);
+        match self.utf8.failed_post(db, PROGRAM_NAME, range.start) {
+            Some(posts) => Ok(posts.write(diagnostics, archive)?),
+            None => Ok(()),
+        }
+    }
 }
 
 /// The post prefix of TBLASTN's warnings (`[tblastn]`).
 const PROGRAM_NAME: &str = "tblastn";
 
+/// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
 pub(super) fn drop_unaligned(
     database: &TblastnDatabase,
     hitlists: &mut [KappaResultHitList],

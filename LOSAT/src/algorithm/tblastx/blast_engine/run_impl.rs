@@ -4134,11 +4134,12 @@ fn run_batch_loop(
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            let earlier = crate::algorithm::common::database::EarlierUtf8 {
-                fetched: batch.fetched_utf8.map(|at| (start, at)),
-                aligned: super::super::database::drop_unaligned(database, &mut batch.hits)
-                    .map(|at| (start, at)),
-            };
+            let aligned = super::super::database::drop_unaligned(database, &mut batch.hits);
+            let earlier = crate::algorithm::common::database::EarlierUtf8::of_batch(
+                start,
+                batch.fetched_utf8,
+                aligned,
+            );
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
                 database,

@@ -700,6 +700,15 @@ is not read. Probe: `remaining-gaps-20261112/T/fix3_t5d.md`. Rows `db.t5d.*.dup.
 description line, a JSON `Hit`; psiblast's PSSM before the first round's report where the report reads nothing),
 `db.t5d.blastp.dup.same.15` at the JSON prefetch, `db.t5d.blastp.dup.none.magic.6e` (`BLASTDB=../seqdb/taxdb/bad_magic`)
 before the taxonomy database's texts of opening of the same load. Probe: `remaining-gaps-20261112/T/fix4_t5d.md`.
+Rows `db.t5d.*.dup5*` (fix 5 of item T5d): `make_t5.py NCBI_BIN --dup5-only` writes `pdo5_same`, `pds5`
+(`gb|DUP00005.1|`, hd0, the copy's title a UTF8String), `ppig1` (`gnl|PIG|x001`, hd1: its lookup throws, and its
+Seq-id handle, packed 1, loads before DUP00005's, packed 5), `ppig5` (`gnl|PIG|x005`, one packed number with
+DUP00005's), `pdo5b_same`, `pdo5b_id`, `pds5b` (`gb|DUQ00005.1|`, hd2, the copy's title or accession a UTF8String),
+`pgo5`, `pgs5` (`gi|5`, hd0, the copy's title a UTF8String), `pplain` (no `-parse_seqids`: a list's lookup of a text
+id stops NCBI's prefetch), the nucleotide `ndo5_same`, `nds5`, `npig1`, and the queries `hd_q10.*` (q1, q0, q0b) and
+`hd_q02.*` (q0, q2). A prefetch whose loads end at the throwing lookup writes `Error pre-fetching sequence data` and
+no warning, which the next batch's prefetch writes; the reject rows are orders that NCBI takes from the addresses of
+its Seq-id infos and a report that reads the throwing subject. Probe: `remaining-gaps-20261112/T/fix5_t5d.md`.
 
 Rewritten ends that NCBI cannot decode (merge 4 of line RG item T5c with item T7; rows `db.t5.sfu.*`, `db.t5.sfux.*`):
 `t5/make_t5.py NCBI_BIN --sfu-only` writes `t5/psfu_100009` (version 4 without `-parse_seqids`, `-taxid 100009`; the

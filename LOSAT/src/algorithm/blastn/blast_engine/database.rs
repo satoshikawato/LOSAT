@@ -697,14 +697,13 @@ impl BlastnDatabase {
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
-    /// The XML2 and JSON formats, a batch of `hit_lists` (by query, from `start`) whose prefetch
-    /// is off: each query's report's `Hit` loads (`shared::scope_utf8_hit_reads`, the subjects in
-    /// the hit list's order), into `reads` by query.
-    pub(super) fn scope_utf8_hit_reads(
+    /// The XML2 and JSON formats, a batch of `hit_lists` (by query) whose prefetch is off: each
+    /// query's report's `Hit` loads (`shared::scope_utf8_hit_reads`, the subjects in the hit
+    /// list's order), into `reads` by query.
+    fn scope_utf8_hit_reads(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
-        start: usize,
         reads: &mut [crate::report::query_warnings::QueryReads],
     ) {
         if !self.db.scope_utf8_seen() {
@@ -726,7 +725,7 @@ impl BlastnDatabase {
             });
             let query = shared::scope_utf8_hit_reads(&self.db, &self.taxdb, subjects, PROGRAM);
             if !query.is_empty() {
-                reads[start + index] = query;
+                reads[index] = query;
             }
         }
     }
@@ -767,31 +766,43 @@ impl BlastnDatabase {
         )
     }
 
-    /// The stop of NCBI's prefetch of the query batch of `queries` whose final hit lists are
-    /// `hit_lists`, for the XML2 and JSON formats, which write the taxonomy
-    /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
-    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`;
-    /// the reports read every reported subject), which BLASTN writes after the stop (the XML
-    /// formats are not streamed, `x_rpt_stream`). `Ok`: the warning of a UTF8String header that a
-    /// load of a batch that does not stop posts (`shared::batch_prefetch_stop`), for the batch's
-    /// prefetch posts.
-    pub(super) fn batch_prefetch_stop(
+    /// NCBI's prefetch of the query batch of `queries` whose final hit lists are `hit_lists`, for
+    /// the XML2 and JSON formats, which write the taxonomy texts at each `Hit`: where
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off (`shared::prefetch_off`), the `Hit` loads of each
+    /// query's report (`scope_utf8_hit_reads`, into `reads`, by query of the batch) and `None`;
+    /// where it is on and loads a sequence (a batch with Seq-aligns), its stop
+    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
+    /// before, whose final hit lists are `before` (by ordinal id, as `hit_lists`; the reports read
+    /// every reported subject), which BLASTN writes after the stop (the XML formats are not
+    /// streamed, `x_rpt_stream`). `Some(Ok)`: the warning of a UTF8String header that a load of a
+    /// batch that does not stop posts (`shared::batch_prefetch_stop`), for the batch's prefetch
+    /// posts.
+    pub(super) fn xml2_prefetch(
         &self,
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<Vec<u8>> {
-        shared::held_batch_prefetch_stop(
-            &self.db,
-            &self.taxdb,
-            Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every),
-            std::iter::empty(),
-            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
-            PROGRAM,
-            queries,
-        )
+        reads: &mut [crate::report::query_warnings::QueryReads],
+    ) -> Option<Result<crate::report::diag_log::Posts>> {
+        let seq_aligns = seq_aligns_of(hit_lists, gapped);
+        if shared::prefetch_off(seq_aligns) {
+            self.scope_utf8_hit_reads(titles, hit_lists, reads);
+            return None;
+        }
+        (seq_aligns > 0).then(|| {
+            shared::held_batch_prefetch_stop(
+                &self.db,
+                &self.taxdb,
+                Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every),
+                std::iter::empty(),
+                Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
+                PROGRAM,
+                queries,
+            )
+            .map(crate::report::diag_log::Posts::of_lines)
+        })
     }
 
     /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
@@ -1806,6 +1817,31 @@ pub(super) fn fetch_excluded(database: &BlastnDatabase) -> Option<shared::FetchE
 /// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search fails.
 pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::Error {
     shared::FetchExcluded::refusal(failed, PROGRAM)
+}
+
+impl BlastnDatabase {
+    /// The titles of the sequences that the final hit lists `hit_lists` of a query batch name,
+    /// read where NCBI makes the batch's Seq-aligns ([`read_titles`], into the titles of `reads`),
+    /// after those of no Seq-align leave the lists ([`drop_unaligned`]) and after the batch's
+    /// fetches (`fetched`: the first that read a UTF8String header). NCBI's warning of the batch's
+    /// first read of such a header goes to the posts of `reads` (the batch's reader messages and
+    /// request posts, before its prefetch), also where the read fails after it
+    /// (`shared::Utf8Read::of_read`). The error is `read_titles`'.
+    pub(super) fn batch_titles(
+        &self,
+        fetched: Option<crate::seqdb::SeqLocation>,
+        hit_lists: &mut [Option<BlastnHitList>],
+        (titles, posts): (&mut DatabaseTitles, &mut crate::report::diag_log::Posts),
+    ) -> Result<()> {
+        let aligned = drop_unaligned(self, hit_lists);
+        let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
+        let read = read_titles(self, hit_lists, earlier, titles);
+        let first = shared::Utf8Read::of_read(&read, Option::as_ref);
+        if let Some(warning) = shared::Utf8Read::post_of(first, &self.db, "blastn") {
+            posts.append(&warning);
+        }
+        read.map(|_| ())
+    }
 }
 
 /// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no

@@ -758,6 +758,8 @@ pub struct SeqDb {
     scope_utf8_ended: AtomicBool,
     /// Whether a load of that model posts the warning (`SeqDb::claim_utf8_post`).
     utf8_claimed: AtomicBool,
+    /// Whether the loads modelled now are not NCBI's (`SeqDb::without_scope_utf8_loads`).
+    scope_utf8_held: AtomicBool,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1317,6 +1319,7 @@ impl SeqDb {
             scope_utf8: AtomicBool::new(false),
             scope_utf8_ended: AtomicBool::new(false),
             utf8_claimed: AtomicBool::new(false),
+            scope_utf8_held: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2461,14 +2464,33 @@ impl SeqDb {
 
     /// Whether a load whose Seq-align id's lookup reads such a header may post NCBI's warning: a
     /// reader met such a subject (`scope_utf8_seen`), the run has not posted it
-    /// (`take_utf8_post`), and no batch before the load posts it with its own reads
-    /// (`end_scope_utf8_loads`).
+    /// (`take_utf8_post`), no batch before the load posts it with its own reads
+    /// (`end_scope_utf8_loads`), and NCBI makes the loads modelled now
+    /// (`without_scope_utf8_loads`).
     pub fn scope_utf8_loads(&self) -> bool {
         self.scope_utf8_seen()
             && !self.utf8_posted()
             && !self
                 .scope_utf8_ended
                 .load(std::sync::atomic::Ordering::Relaxed)
+            && !self
+                .scope_utf8_held
+                .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// `model` (a model of loads, `algorithm::common::database::batch_prefetch`) where NCBI does
+    /// not make the loads whose Seq-align id's lookup reads such a header: none of them posts the
+    /// warning (`scope_utf8_loads`), which a later load or read may still post.
+    #[cold]
+    #[inline(never)]
+    pub fn without_scope_utf8_loads<T>(&self, model: impl FnOnce() -> T) -> T {
+        let held = self
+            .scope_utf8_held
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        let modelled = model();
+        self.scope_utf8_held
+            .store(held, std::sync::atomic::Ordering::Relaxed);
+        modelled
     }
 
     /// The sequence at `at` (by its ordinal id).

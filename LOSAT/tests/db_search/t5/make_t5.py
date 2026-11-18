@@ -92,7 +92,8 @@ T5d) it writes the databases of NCBI's other reads of a UTF8String header (`fetc
 traceback and of the composition-based redo under a negative seqid list, and blastdbcmd's version check.
 
 With `--dup-only` (fix 3 of line RG item T5d) it writes the databases of NCBI's scope's read of another
-sequence that holds a reported sequence's Seq-align id (`dup_main`).
+sequence that holds a reported sequence's Seq-align id (`dup_main`); with `--dup5-only` (fix 5) those of the
+order of such a load to a lookup that throws on its id and to another such load (`dup5_main`).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
@@ -637,6 +638,59 @@ def dup_main(ncbi_bin):
     os.rmdir(work)
 
 
+def dup5_main(ncbi_bin):
+    """`--dup5-only` (line RG item T5d fix 5): version 5 databases (`-parse_seqids`, taxid 9606) whose
+    lists hold a reported sequence's Seq-align id twice, the copy first (NCBI orders a list's volumes by
+    path), beside a sequence whose id NCBI's lookup throws on (`SeqDB_SimplifyAccession` of a `PIG` string
+    tag; NCBI's prefetch catches it with `Error pre-fetching sequence data`). `pdo5_same` and `pds5`:
+    `gb|DUP00005.1| subject record`, hd0 (which `q0` matches), the copy with its title a UTF8String;
+    `ppig1`: `gnl|PIG|x001 throwing record`, hd1 (`q1`), whose Seq-id handle (packed number 1) NCBI's
+    prefetch loads before DUP00005's (5); `ppig5`: `gnl|PIG|x005 throwing tie`, hd1, one packed number
+    with DUP00005's (NCBI orders the two handles by the addresses of their infos); `pdo5b_same`,
+    `pdo5b_id` and `pds5b`: `gb|DUQ00005.1| subject record`, hd2 (`q2`), packed 5 too, the copies with
+    their title or their accession a UTF8String; `pgo5` and `pgs5`: `gi|5 gi subject record`, hd0, the
+    copy's title a UTF8String (a gi's lookup reads no accession table; packed 5 too), and `pplain` (hd2,
+    without `-parse_seqids`), whose list's lookup of a text id stops NCBI's prefetch (`DB contains no
+    accession info`). `nds5`, `ndo5_same` and `npig1`: the same with their codons (nucleotide). Queries `hd_q10.faa` (`q1`, `q0`, `q0b`: hd1, hd0, hd0) and `hd_q02.faa` (`q0`,
+    `q2`), and their codons (`.fna`)."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    title = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    accession = lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x0C)
+    dup = "gb|DUP00005.1| subject record"
+    duq = "gb|DUQ00005.1| subject record"
+    for name, header, letters, edit in (
+            ("pdo5_same", dup, 0, title), ("pds5", dup, 0, None),
+            ("ppig1", "gnl|PIG|x001 throwing record", 1, None), ("ppig5", "gnl|PIG|x005 throwing tie", 1, None),
+            ("pdo5b_same", duq, 2, title), ("pdo5b_id", duq, 2, accession), ("pds5b", duq, 2, None),
+            ("pgo5", "gi|5 gi subject record", 0, title), ("pgs5", "gi|5 gi subject record", 0, None),
+            ("pplain", "plain record", 2, None),
+            ("ndo5_same", dup, 0, title), ("nds5", dup, 0, None),
+            ("npig1", "gnl|PIG|x001 throwing record", 1, None)):
+        kind = name[0]
+        fasta = os.path.join(work, f"{name}.fa")
+        with open(fasta, "w") as f:
+            f.write(f">{header}\n{(proteins if kind == 'p' else nucleotides)[letters]}\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot" if kind == "p" else "nucl",
+               "-blastdb_version", "5", "-taxid", "9606", "-title", name, "-out", out]
+        cmd += [] if name == "pplain" else ["-parse_seqids"]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        if edit is not None:
+            patch_record_any(out, kind, 0, edit)
+    for ext, seqs in (("faa", proteins), ("fna", nucleotides)):
+        with open(os.path.join(here, f"hd_q10.{ext}"), "w") as f:
+            f.write(f">q1\n{seqs[1]}\n>q0\n{seqs[0]}\n>q0b\n{seqs[0]}\n")
+        with open(os.path.join(here, f"hd_q02.{ext}"), "w") as f:
+            f.write(f">q0\n{seqs[0]}\n>q2\n{seqs[2]}\n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
 def stored_main(ncbi_bin, prefix, stored):
     """The version 4 protein databases `<prefix>_<taxid>` of the titles `stored` (the letters of
     `pdup.faa`, `-taxid <taxid>`, none for `None`) and the alias `<prefix>` over them."""
@@ -921,6 +975,8 @@ if __name__ == "__main__":
         fetch_main(sys.argv[1])
     elif "--dup-only" in sys.argv[2:]:
         dup_main(sys.argv[1])
+    elif "--dup5-only" in sys.argv[2:]:
+        dup5_main(sys.argv[1])
     elif "--header-only" in sys.argv[2:]:
         header_main(sys.argv[1], [name for name in sys.argv[2:] if not name.startswith("--")])
     elif "--sfu-only" in sys.argv[2:]:

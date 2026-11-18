@@ -996,18 +996,11 @@ impl XFetchedUtf8 {
     }
 }
 
-impl ListedTitles<'_> {
-    /// The `utf8` of the call's titles, where there are titles (`blast_engine::call_titles`).
-    pub(super) fn utf8_of<'t>(titles: &'t Option<ListedTitles<'_>>) -> Option<&'t Utf8Read> {
-        titles.as_ref().and_then(|titles| titles.utf8.as_ref())
-    }
-}
-
 /// The notes of the subjects that a call's fetches with `check_oid_exclusion` read (a seqid
 /// list's, `ListedSubjects::note_fetched`) around its traceback: the PSSM's position-based redo
 /// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
-/// (`after`) every subject of the ordinary traceback, or those that the
-/// composition-based redo's early termination test leaves (its heaps as it left them).
+/// (`after`) every subject of the ordinary traceback, or those that the composition-based redo's
+/// early termination test leaves (its heaps as it left them).
 pub(super) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,
@@ -1038,23 +1031,107 @@ impl<'a> FetchNotes<'a> {
     }
 
     /// After the traceback: `heaps`, the composition-based redo's, which made the hit lists where
-    /// `redone` (else the ordinary traceback did), the batch of each query being in `batches`
+    /// the ordinary traceback made none (`ordinary`), the batch of each query being in `batches`
     /// (`redo_run::kappa_query_batches`).
-    pub(super) fn after(
+    pub(super) fn after<T>(
         &self,
         heaps: &[BlastCompoHeap],
-        redone: bool,
+        ordinary: &Option<T>,
         batches: &[std::ops::Range<usize>],
     ) {
         let (Some(listed), Some(database)) = (self.listed, self.database) else {
             return;
         };
         let batch_of = |q_idx: usize| batches[q_idx].clone();
-        if redone {
+        if ordinary.is_none() {
             listed.note_fetched(database, Some(heaps), &batch_of);
         } else if !self.pssm_redone.get() {
             listed.note_fetched(database, None, &batch_of);
         }
+    }
+}
+
+/// The reads of a call's reported subjects' titles (`titles`), one batch after the other, and
+/// their first read of a header with a UTF8String where a VisibleString is expected, the call's
+/// (`utf8`, `shared::CallUtf8`).
+pub(super) struct CallTitles<'a> {
+    database: Option<&'a BlastpDatabase>,
+    /// The call's query batches, each with its searched queries.
+    batches: &'a [crate::blastinput::seq_range::RangedBatch],
+    utf8: shared::CallUtf8,
+}
+
+impl<'a> CallTitles<'a> {
+    pub(super) fn new(
+        database: Option<&'a BlastpDatabase>,
+        batches: &'a [crate::blastinput::seq_range::RangedBatch],
+    ) -> Self {
+        Self {
+            database,
+            batches,
+            utf8: shared::CallUtf8::default(),
+        }
+    }
+
+    /// The titles of the call's reported database subjects, the `listed` ones
+    /// (`ListedSubjects::read_titles`, or with LOSAT_X_BPLISTEDLEAN `x_lean`,
+    /// `x_read_titles_lean`), read one batch after the other: the first queries of the call's
+    /// batches (`shared::HeaderReader::batch_starts`). Their `utf8` is NCBI's first read, in the
+    /// Seq-aligns of the call's batches, of a header with a UTF8String where a VisibleString is
+    /// expected, the call's (`utf8`): its warning comes before anything the batch writes after its
+    /// search (`header_read`), and before an error of the batch's prefetch
+    /// (`HeaderReadError::after_reads`).
+    pub(super) fn titles<'l>(
+        &self,
+        listed: Option<&'l ListedSubjects>,
+        hit_lists: &[Option<BlastpHitList>],
+        x_lean: bool,
+    ) -> Result<Option<ListedTitles<'l>>>
+    where
+        'a: 'l,
+    {
+        let (Some(listed), Some(database)) = (listed, self.database) else {
+            return Ok(None);
+        };
+        let starts: Vec<usize> = self
+            .batches
+            .iter()
+            .map(|batch| batch.searched.start)
+            .collect();
+        let titles = if x_lean {
+            listed.x_read_titles_lean(database, hit_lists, &starts)?
+        } else {
+            listed.read_titles(database, hit_lists, &starts)?
+        };
+        if let Some(read) = &titles.utf8 {
+            let batch = self
+                .batches
+                .iter()
+                .find(|batch| batch.searched.contains(&read.query))
+                .map_or(read.query, |batch| batch.searched.start);
+            self.utf8.note(batch, Some(read));
+        }
+        Ok(Some(titles))
+    }
+
+    /// The call's first read of such a header in its batches' Seq-aligns (`titles`).
+    pub(super) fn utf8(&self) -> Option<&Utf8Read> {
+        self.utf8.read()
+    }
+
+    /// NCBI's warning of that read in the first query of the batch whose Seq-aligns read it, with
+    /// the posts that follow the reader's messages of the batch (`query_warnings::query_posts`),
+    /// where the run has not posted it (a load of the model of the loads may have,
+    /// `shared::load_read_texts`), with the post prefix `program`.
+    pub(super) fn header_read(
+        &self,
+        program: &str,
+    ) -> Option<(usize, crate::report::diag_log::Posts)> {
+        self.utf8.post(
+            self.database.map(BlastpDatabase::seqdb),
+            program,
+            usize::MAX,
+        )
     }
 }
 

@@ -1886,14 +1886,9 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
-        let mut utf8_read: super::database::FirstUtf8 = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
-        // the search's batches (`database::fetch_excluded`, `database::FetchedUtf8`).
-        let fetch_excluded = database.and_then(super::database::fetch_excluded);
-        let fetched_utf8 = super::database::FetchedUtf8::of(fetch_excluded.as_ref(), || {
-            query_input.batches(batch_size)
-        });
-        let batch_fetches = |range: &std::ops::Range<usize>| fetched_utf8.of_batch(range);
+        // the search's batches (`database::fetch_excluded`), and their reads of headers.
+        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -1940,7 +1935,7 @@ fn search(
                 engine_positives,
                 culling_limit: resolved.culling_limit,
                 pssm: pssm.as_deref(),
-                fetch_excluded: batch_fetches(&range),
+                fetch_excluded: reads.of_batch(&range),
             },
             compo_adjust_mode,
             resolved.sum_stats,
@@ -2010,7 +2005,7 @@ fn search(
                             engine_positives,
                             culling_limit: resolved.culling_limit,
                             pssm: pssm.as_deref(),
-                            fetch_excluded: batch_fetches(&range),
+                            fetch_excluded: reads.of_batch(&range),
                         },
                         compo_adjust_mode,
                         resolved.sum_stats,
@@ -2134,9 +2129,8 @@ fn search(
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.
-            if let Some(database) = database {
-                let reads = (&fetched_utf8.notes, &mut titles, &mut utf8_read);
-                if let Some(error) = database.batch_titles(&mut batch_results, &range, reads)? {
+            if database.is_some() {
+                if let Some(error) = reads.titles(&mut batch_results, &range, &mut titles)? {
                     failed = Some((range, error));
                     break;
                 }
@@ -2489,15 +2483,8 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            let utf8_first = utf8_read.as_ref().map(|(_, read)| read);
-            if first_xml2 {
-                prefetch_posts.extend(database.xml2_scope_utf8(
-                    (reported, &mut subject_reads),
-                    &results,
-                    &batch_spans,
-                    utf8_first,
-                )?);
-            }
+            let xml2_reads = (reported, &mut subject_reads);
+            prefetch_posts.extend(reads.xml2(first_xml2, xml2_reads, &results, &batch_spans)?);
             if first_prefetches && (taxdb_found || database.parsed_seqids()) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
@@ -2536,8 +2523,7 @@ fn search(
                     }
                     Ok::<(), anyhow::Error>(())
                 };
-                for span in &batch_spans {
-                    database.reach_batch(utf8_first, span);
+                for span in reads.reaching(&batch_spans) {
                     let hitlists = &results[span.clone()];
                     // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
                     let seq_aligns = super::database::seq_aligns_of(hitlists);
@@ -2552,8 +2538,7 @@ fn search(
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up
-                        // but a lookup that reads a UTF8String header (`load_read_texts`).
+                        // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
                             continue;
                         }
@@ -2639,7 +2624,7 @@ fn search(
         // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
-            database.reach_batch(utf8_read.as_ref().map(|(_, read)| read), &span);
+            reads.reach(&span);
             // The batches before are those of `results`, which the stop truncated (above).
             let prefetched = |query: usize| {
                 prefetch_posts
@@ -2778,7 +2763,6 @@ fn search(
         // The posts before each query's report: NCBI's posts of the bytes replaced in the search
         // strategy request of each reported batch follow the reader's messages of the batch, in
         // its first query (`query_warnings::query_posts`).
-        let header_read = super::database::header_read(utf8_read.as_ref(), database, queries.len());
         let query_posts = crate::report::query_warnings::query_posts(
             query_warning_lines,
             args.strategy
@@ -2786,7 +2770,7 @@ fn search(
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
             prefetch_posts,
             |query| batches.warnings[query].len(),
-            header_read,
+            reads.header_read(queries.len()),
         );
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
@@ -2863,11 +2847,7 @@ fn search(
             if let Some(strategy) = args.strategy.as_ref() {
                 strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
-            let failed_read =
-                super::database::failed_header_read(utf8_read.as_ref(), database, &range);
-            if let Some(posts) = failed_read {
-                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            }
+            reads.write_failed(&range, &mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(error);
         }
     }

@@ -673,14 +673,16 @@ search code with a different subject source.
   report at its first read of the subject (outfmt 0's description line, a tabular row, a BLAST XML,
   XML2 or JSON `Hit`; psiblast's PSSM after the round's report where the report reads nothing of
   it), and in the prefetch of a batch that the limit leaves on with a format that reads nothing of
-  the subject. Refused there: two such loads, or that load and one that asks the taxonomy database
-  where the batch writes a text of it, whose order NCBI takes from the addresses of its Seq-id
-  infos (one packed number, or neither packed: NCBI 2.17.0 wrote the warning before the texts of
+  the subject. Refused there: two such loads whose warnings name different members (two of one
+  member write the same bytes in either order, fix 5), or that load and one that asks the taxonomy
+  database where the batch writes a text of it, whose order NCBI takes from the addresses of its
+  Seq-id infos (one packed number, or neither packed: NCBI 2.17.0 wrote the warning before the texts of
   opening in one run and after them in the next, blastx probe `gt.bad_magic`, fix 4) or that LOSAT
-  does not know (a batch of more than 200 Seq-align ids, as line DBID loadord's stops), and a
-  prefetch whose loads end at a lookup that throws on its id before that load (the formatters then
-  read the subject one by one with the warning, which LOSAT does not place in a batch whose
-  prefetch is on). In blastdbcmd before the
+  does not know (a batch of more than 200 Seq-align ids, as line DBID loadord's stops). A
+  prefetch whose loads end at a lookup that throws on its id (`Error pre-fetching sequence data`)
+  before that load does not make it, so it writes no warning (fix 5 of item T5d): the warning comes
+  at the run's next load of the id (a later batch's prefetch) or not at all; a report that reads the
+  subjects reads the one whose lookup throws too, which LOSAT refuses. In blastdbcmd before the
   record's text, and before `Entry not found` where the version check of `-entry` or
   `-entry_batch` read it; segmasker and dustmasker write none. A tag in the long form is read
   with no message (`PeekLongTag`), or fails as NCBI's read does.

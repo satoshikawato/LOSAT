@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pdo5b_id",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pdo5b_id",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T22:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49542,
+  "bytes-to-cache": 226,
+  "files": [
+    "pdo5b_id.pdb",
+    "pdo5b_id.phr",
+    "pdo5b_id.pin",
+    "pdo5b_id.pog",
+    "pdo5b_id.pos",
+    "pdo5b_id.pot",
+    "pdo5b_id.psq",
+    "pdo5b_id.ptf",
+    "pdo5b_id.pto"
+  ]
+}

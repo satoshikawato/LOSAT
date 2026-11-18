@@ -406,8 +406,9 @@ struct Frame {
     read_pointer: bool,
     /// The type of a named, class, choice or container frame (`Object type= `).
     type_name: Option<&'static str>,
-    /// The member or variant of a member or variant frame (`SetTopMemberId`).
-    member: Option<&'static str>,
+    /// The member or variant of a member or variant frame (`SetTopMemberId`), as the place of its
+    /// name in the schema (`Member::name`, `Variant::name`): one word to store for each member.
+    member: Option<&'static &'static str>,
 }
 
 impl Frame {
@@ -419,6 +420,11 @@ impl Frame {
             type_name,
             member: None,
         }
+    }
+
+    /// The member or variant of a member or variant frame.
+    fn member(self) -> Option<&'static str> {
+        self.member.copied()
     }
 
     /// The source file, line and function of the `END_OBJECT_FRAME` that leaves the frame: the
@@ -557,14 +563,15 @@ const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
     "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
 );
 
-/// What `ReadWithSetFlagMember` of the member `name` makes of `fail`.
+/// What reading `member` makes of `fail`: `ReadWithSetFlagMember` rethrows a `CSerialException`
+/// of a member with a set flag (`Member::set_flag`).
 #[cold]
 #[inline(never)]
-fn set_flag_member_error(fail: Fail, name: &str) -> Fail {
+fn member_error(fail: Fail, member: &Member) -> Fail {
     match fail {
-        Fail::Serial(e) => {
+        Fail::Serial(e) if member.set_flag => {
             let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-            let message = format!("error while reading {name}");
+            let message = format!("error while reading {}", member.name);
             Fail::serial(e.rethrow_same(file, line, function, message))
         }
         other => other,
@@ -629,18 +636,25 @@ impl<I: Input> Rd<I> {
 
     /// `END_OBJECT_FRAME` of `frame`, which [`enter`](Self::enter) entered at `depth`, after
     /// what it holds was read with `result`: the traces that wait for it take its step, and an
-    /// error gets [`leave`](Self::leave).
+    /// error gets [`leave`](Self::leave) (`exit_traced`, the one place that needs the frame).
     #[inline(always)]
     fn exit<T>(&mut self, depth: usize, frame: Frame, result: R<T>) -> R<T> {
         self.depth = depth;
         self.inp.set_stack_depth(depth);
+        match result {
+            Ok(value) if self.traces.is_empty() => Ok(value),
+            result => self.exit_traced(depth, frame, result),
+        }
+    }
+
+    /// [`exit`](Self::exit) of a frame that traces wait for or that an error leaves.
+    #[cold]
+    #[inline(never)]
+    fn exit_traced<T>(&mut self, depth: usize, frame: Frame, result: R<T>) -> R<T> {
         if !self.traces.is_empty() {
             self.trace_frame(depth, frame);
         }
-        match result {
-            Ok(value) => Ok(value),
-            Err(fail) => Err(self.leave(frame, fail)),
-        }
+        result.map_err(|fail| self.leave(frame, fail))
     }
 
     /// What leaving `frame` (the stack is below it now) adds to `fail`.
@@ -649,11 +663,11 @@ impl<I: Input> Rd<I> {
     fn leave(&mut self, frame: Frame, fail: Fail) -> Fail {
         match fail {
             Fail::Serial(mut e) => {
-                e.add_frame_info(frame_name(frame.kind, frame.type_name, frame.member));
+                e.add_frame_info(frame_name(frame.kind, frame.type_name, frame.member()));
                 Fail::Serial(e)
             }
             Fail::Eof if self.depth >= 2 => {
-                let info = frame_info(frame.kind, frame.type_name, frame.member);
+                let info = frame_info(frame.kind, frame.type_name, frame.member());
                 Fail::serial(NcbiException::new(
                     HANDLE_EOF,
                     format!("{}: {info}", self.inp.position()),
@@ -661,7 +675,7 @@ impl<I: Input> Rd<I> {
             }
             Fail::Exception(e) => {
                 let (file, line, function) = frame.end();
-                let info = frame_info(frame.kind, frame.type_name, frame.member);
+                let info = frame_info(frame.kind, frame.type_name, frame.member());
                 Fail::exception(e.rethrow_same(file, line, function, info))
             }
             other => other,
@@ -671,7 +685,7 @@ impl<I: Input> Rd<I> {
     /// `SetTopMemberId`: the member or variant of the top frame, `frame`. A trace that waits for
     /// the frame takes the member it had.
     #[inline(always)]
-    fn set_member(&mut self, frame: &mut Frame, name: &'static str) {
+    fn set_member(&mut self, frame: &mut Frame, name: &'static &'static str) {
         if !self.traces.is_empty() {
             self.trace_frame(self.depth - 1, *frame);
         }
@@ -699,7 +713,7 @@ impl<I: Input> Rd<I> {
             trace.level = depth;
             match frame.kind {
                 FrameKind::ClassMember | FrameKind::ChoiceVariant => {
-                    trace.steps.extend(frame.member.map(StackStep::Member));
+                    trace.steps.extend(frame.member().map(StackStep::Member));
                 }
                 FrameKind::ArrayElement => trace.steps.push(StackStep::Element),
                 _ => {}
@@ -820,8 +834,10 @@ impl<I: Input> Rd<I> {
             s.frame_with(Frame::new(FrameKind::ClassMember, None), |s, frame| {
                 while let Some(index) = s.inp.begin_member(def, pos)? {
                     let member = &def.members[index];
-                    s.set_member(frame, member.name);
-                    s.missing_members(&def.members[pos..index])?;
+                    s.set_member(frame, &member.name);
+                    if index > pos {
+                        s.missing_members(&def.members[pos..index])?;
+                    }
                     // `ReadPointer` of a member held by `CRef<>` around `read`, which is called at
                     // this one place. Such a member has no set flag (`Member::set_flag`): the
                     // errors of `begin_pointer` are not `ReadWithSetFlagMember`'s.
@@ -830,17 +846,11 @@ impl<I: Input> Rd<I> {
                     } else {
                         Pointee::This
                     };
-                    let result = match pointee {
-                        Pointee::Null => Ok(()),
-                        Pointee::This | Pointee::Other(..) => {
-                            let result = read(s, index);
-                            s.end_pointer(pointee, result)
+                    if !matches!(pointee, Pointee::Null) {
+                        let result = read(s, index);
+                        if let Err(fail) = s.end_pointer(pointee, result) {
+                            return Err(member_error(fail, member));
                         }
-                    };
-                    if member.set_flag {
-                        result.map_err(|fail| set_flag_member_error(fail, member.name))?;
-                    } else {
-                        result?;
                     }
                     pos = index + 1;
                     s.inp.end_member()?;
@@ -884,7 +894,7 @@ impl<I: Input> Rd<I> {
             s.inp.begin_choice()?;
             let value = s.frame_with(Frame::new(FrameKind::ChoiceVariant, None), |s, frame| {
                 let index = s.inp.begin_variant(def)?;
-                s.set_member(frame, def.variants[index].name);
+                s.set_member(frame, &def.variants[index].name);
                 let value = read(s, index)?;
                 s.inp.end_variant()?;
                 Ok(value)
@@ -1041,9 +1051,24 @@ impl<I: Input> Rd<I> {
     }
 
     /// [`read_pointer`](Self::read_pointer) up to the value: where it is ([`Pointee`]), the named
-    /// frame of `Other` entered. [`end_pointer`](Self::end_pointer) follows the value.
+    /// frame of `Other` entered. [`end_pointer`](Self::end_pointer) follows the value. A mask
+    /// file's pointers are `NULL` or the value itself; the others are read by
+    /// [`begin_other_pointer`](Self::begin_other_pointer).
+    #[inline(always)]
     fn begin_pointer(&mut self, declared: &'static str) -> R<Pointee> {
         match self.inp.read_pointer_type()? {
+            PointerType::Null => Ok(Pointee::Null),
+            PointerType::This => Ok(Pointee::This),
+            other => self.begin_other_pointer(other, declared),
+        }
+    }
+
+    /// [`begin_pointer`](Self::begin_pointer) of an object index (`@n`) or a value of a named type
+    /// (`:Type`).
+    #[cold]
+    #[inline(never)]
+    fn begin_other_pointer(&mut self, kind: PointerType, declared: &'static str) -> R<Pointee> {
+        match kind {
             PointerType::Null => Ok(Pointee::Null),
             PointerType::This => Ok(Pointee::This),
             PointerType::Object => {

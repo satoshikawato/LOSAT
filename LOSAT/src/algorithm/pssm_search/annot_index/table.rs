@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use super::bitmagic::{self, BitVector, Fail};
 use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
@@ -182,6 +183,8 @@ pub(super) struct Caches {
     size: HashMap<usize, u64>,
     /// `GetIntSize()` of each `int-delta`'s data asked (`Index::int_size`).
     int_size: HashMap<usize, u64>,
+    /// The vector of each `BVector-data` decoded (`Indexer::bit_vector`), or why it was not.
+    bvector: HashMap<usize, Result<BitVector, Fail>>,
 }
 
 fn address(value: V<'_>) -> usize {
@@ -726,6 +729,7 @@ impl Indexer<'_> {
                     Err(Stop::Exception(e)) => {
                         self.ncbi_catch(&e, "Bad 'Seq-table location' column")
                     }
+                    Err(Stop::Std(what)) => self.std_catch(what, "Bad 'Seq-table location' column"),
                     Err(other) => return Err(other),
                 }
             }
@@ -824,6 +828,9 @@ impl Indexer<'_> {
                         Err(Stop::Exception(e)) => {
                             self.ncbi_catch(&e, "Bad 'Sorted, max length' column")
                         }
+                        Err(Stop::Std(what)) => {
+                            self.std_catch(what, "Bad 'Sorted, max length' column")
+                        }
                         Err(other) => return Err(other),
                     }
                 }
@@ -861,6 +868,33 @@ impl Indexer<'_> {
         for line in lines.split_inclusive(|&byte| byte == b'\n') {
             self.posts.post(crate::report::diag_log::ERROR, line);
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:560-565, 580-584
+    // ```c++
+    // #define STD_CATCH(message)                                    \
+    //     catch (NCBI_NS_STD::exception& e) {                       \
+    //         NCBI_NS_NCBI::CNcbiDiag()                             \
+    //             << NCBI_NS_NCBI::Error                            \
+    //             << "[" << message << "] Exception: " << e.what(); \
+    //     }
+    // ...
+    // #define NCBI_CATCH(message)                                   \
+    //     catch (NCBI_NS_NCBI::CException& e) {                     \
+    //         NCBI_REPORT_EXCEPTION(message, e);                    \
+    //     }                                                         \
+    //     STD_CATCH(message)
+    // ```
+    /// `NCBI_CATCH(title)` of a `std::exception` whose `what()` is `what`: `Error: [<program>]
+    /// [<title>] Exception: <what>` (line RG D3-1 `bm/` cases m12, m13: BitMagic's
+    /// `BM::Invalid serialization format`).
+    fn std_catch(&mut self, what: &str, title: &str) {
+        let line = crate::ncbi_exception::error_post_line(
+            None,
+            Some(self.program),
+            format!("[{title}] Exception: {what}").as_bytes(),
+        );
+        self.posts.post(crate::report::diag_log::ERROR, line);
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1028-1170 (`x_InitFeatTableKeys`)
@@ -1440,9 +1474,22 @@ impl Indexer<'_> {
     //     return true;
     // }
     // ```
-    // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes from the raw
-    // bytes without a check (BVector_data.cpp:64-72): refused. An `int-scaled` value that leaves
-    // `Int8` is a signed overflow: refused.
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:474-484
+    // ```c++
+    // template<class Arr, class Row, class Int>
+    // static inline
+    // bool sx_TryGet(const Arr& arr, Row row, Int& v)
+    // {
+    //     if ( row >= arr.size() ) {
+    //         return false;
+    //     }
+    //     v = arr[row];
+    //     return true;
+    // }
+    // ```
+    // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes at its first
+    // value (`Indexer::bit_vector`); its row is cast to BitMagic's 32-bit `size_type` first. An
+    // `int-scaled` value that leaves `Int8` is a signed overflow: refused.
     /// `x_TryGetInt8(row, v, type_name)` of the multi-data `data`, one level: its value, or the
     /// multi-data inside it to read first (`Get`).
     fn x_try_get_int8<'v>(
@@ -1462,7 +1509,11 @@ impl Indexer<'_> {
                 let shifted = u32::from(byte) << (row % 8);
                 Some(i64::from(shifted & 0x80 != 0))
             }
-            "bit-bvector" => return Err(Stop::Refuse(Refusal::BitVector)),
+            "bit-bvector" => {
+                let vector = self.bit_vector(value)?;
+                let row = row as u32;
+                (row < vector.size()).then(|| i64::from(vector.get_bit(row)))
+            }
             "int1" => usize::try_from(row)
                 .ok()
                 .and_then(|row| value.octets().get(row))
@@ -1768,14 +1819,19 @@ impl Indexer<'_> {
     //     case e_Bit_set_bvector:
     //     {
     //         const bm::bvector<>& bv = GetBit_set_bvector().GetBitVector();
-    //         ...
+    //         auto bv_row = static_cast<bm::bvector<>::size_type>(row);
+    //         if ( row >= bv.size()  ||  !bv.get_bit(bv_row) ) {
+    //             return kSkipped;
+    //         }
+    //         return row == 0 ? 0 : bv.count_range(0, bv_row - 1);
     //     }
     // ```
     // `x_GetBitSetCache(byte_index)` counts the set bits of the bytes before it (in blocks of
     // 256, :180-224); `x_FindDeltaSum(row)` (`USE_DELTA_CACHE` not defined, :232, 292-426) finds
     // the first `indexes-delta` element whose prefix sum reaches `row`: that element when the sum
     // is `row`, else none (`kInvalidRow`, `kSkipped`). `lower_bound` is libstdc++'s halving search,
-    // also on indexes that are not sorted. A `bit-set-bvector` is BitMagic data (refused).
+    // also on indexes that are not sorted. A `bit-set-bvector` is BitMagic data, decoded at its
+    // first index (`Indexer::bit_vector`).
     /// `GetIndexAt(row)`: the data index of `row`, `None` for `kSkipped`.
     fn sparse_index_at(&mut self, sparse: V<'_>, row: u64) -> Result<Option<u64>, Stop> {
         let (variant, value) = sparse.choice();
@@ -1835,7 +1891,50 @@ impl Indexer<'_> {
                 let before = before.get(byte_index).copied().unwrap_or_default();
                 Ok(Some(before + u64::from(in_byte)))
             }
-            _ => Err(Stop::Refuse(Refusal::BitVector)),
+            _ => {
+                let vector = self.bit_vector(value)?;
+                if row >= u64::from(vector.size()) || !vector.get_bit(row as u32) {
+                    return Ok(None);
+                }
+                Ok(Some(match row {
+                    0 => 0,
+                    _ => vector.count_to(row as u32 - 1),
+                }))
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objects/seqtable/BVector_data.hpp:74-80
+    // ```c++
+    //     // return bvector object, create it if necessary from serialized data
+    //     const bm::bvector<>& GetBitVector(void) const {
+    //         if ( !m_BitVector ) {
+    //             x_CreateBitVector();
+    //         }
+    //         return *m_BitVector;
+    //     }
+    // ```
+    // `x_CreateBitVector` (BVector_data.cpp:73-82, quoted in `bitmagic`) decodes the data into a
+    // vector of the `size` member; a throw leaves no vector, and the next value decodes the data
+    // again and throws again (`bm/SPEC.md` §0), as the cached failure here does.
+    /// `GetBitVector()` of the `BVector-data` `value`: its vector (`bitmagic::decode`, once per
+    /// `BVector-data`), NCBI's `std::logic_error` (`BM::Invalid serialization format`), or LOSAT's
+    /// refusal of data that NCBI decodes outside BitMagic's checked form.
+    fn bit_vector(&mut self, value: V<'_>) -> Result<&BitVector, Stop> {
+        let decoded = self
+            .caches
+            .bvector
+            .entry(address(value))
+            .or_insert_with(|| {
+                bitmagic::decode(
+                    value.field("size").int() as u32,
+                    value.field("data").octets(),
+                )
+            });
+        match decoded {
+            Ok(vector) => Ok(vector),
+            Err(Fail::Invalid) => Err(Stop::std_exception(bitmagic::INVALID)),
+            Err(Fail::Refuse(_)) => Err(Stop::Refuse(Refusal::BitVector)),
         }
     }
 }

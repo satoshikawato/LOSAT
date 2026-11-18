@@ -347,9 +347,10 @@ Explicit rejections (rule 3):
   search (a chunk without a query, also where the first range of a negative `CHUNK_SIZE` covers
   the batch, at which `CQuerySplitter::Split` stops before any chunk is searched, and a chunk
   split again, at which the search of that chunk stops (at more than one thread NCBI logs that
-  null pointer and goes on; LOSAT refuses at every thread count, as NCBI does at
-  `-num_threads 1`); also on a database that a seqid list
-  leaves without a subject) after the reports of the batches before, in NCBI's order with the
+  null pointer, reports the batch without that chunk's hits and exits 0; LOSAT refuses at every
+  thread count, as NCBI does at `-num_threads 1`); also on a database left without a subject: a
+  seqid list that keeps none, an alias over volumes without sequences) after the reports of the
+  batches before, in NCBI's order with the
   setup of each chunk's search and its read of the database, and a negative `CHUNK_SIZE` whose
   wrapped ranges leave gaps between them, which NCBI searches on, before the run's first byte
   (version 1.53).
@@ -1641,8 +1642,8 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   TBLASTX's (version 1.40): two `-window_size 0` one-hit alignments at the end of their subject
   chunk or past it, which NCBI's interval tree splits without end; the overflow banks of the seed
   search; a query chunk split again or holding no query (the latter also where a negative
-  `CHUNK_SIZE`'s first wrapped range covers the batch; both also on a database that a seqid list
-  leaves without a subject; D13); and with `-in_pssm` (one batch: the prologs) a
+  `CHUNK_SIZE`'s first wrapped range covers the batch; both also on a database left without a subject: a
+  seqid list that keeps none, an alias over volumes without sequences; D13); and with `-in_pssm` (one batch: the prologs) a
   query whose letters give no Karlin-Altschul parameters (one that `-seg` masks completely: NCBI's
   `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc` did not
   make, in the setup of its preliminary search, `psiblast_aux_priv.cpp:90-93`; refused before the

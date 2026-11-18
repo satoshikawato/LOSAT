@@ -144,7 +144,8 @@ FASTA files:
   `db.xs.tblastn.bat.min1*.6` on `aliaskeys/n_min1` (`MIN_SEQ_LENGTH 1`), where the setup of the first chunk that NCBI
   searches fails (`The average subject length is too short`) unless a chunk stop comes first, and
   `db.xs.tblastn.bat.e0.6` on `aliaskeys/e_nF` (volumes without an OID), whose setup fails to read the length of OID 0
-  (`Database memory map file error`).
+  (`Database memory map file error`), and `db.xs.tblastn.bat.nosq.6` on `arch_tbn_snucl_nonsq` (no sequence file), whose
+  search fails to read the first sequence of chunk 0 (the same error).
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's

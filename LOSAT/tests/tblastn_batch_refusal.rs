@@ -579,10 +579,11 @@ const SPLITS: [[(&str, &str); 3]; 3] = [
 /// `-seqidlist` of an id it does not have; NCBI posts `Filtering resulted in an empty database.`
 /// with each batch's results) or whose volumes have none (`e_nA`, an alias with `NSEQ 1` and
 /// `LENGTH 100`, on which NCBI reads no sequence): NCBI 2.17.0 still splits a batch and stops in
-/// its search, after the report of the batch before (`qa`, no hit, and its warning); nothing of
-/// the stopped batch is written, its warning neither (probes of line RG item X-short-bat, fix round
-/// 3). Without a stop (a negative pair whose chunks leave gaps between them, which lose no hit
-/// where there is no subject) the batch is reported as it is without the variables.
+/// its search, after the report of the batch before (`qa`, no hit, and its warning, which the
+/// stopped batch's stderr starts with); nothing of the stopped batch is written, its warning
+/// neither (probes of line RG item X-short-bat, fix round 3). Without a stop (a negative pair
+/// whose chunks leave gaps between them, which lose no hit where there is no subject) the batch
+/// is reported as it is without the variables.
 #[test]
 fn a_split_batch_stops_on_a_database_without_a_subject() {
     let temp = TempDir::new("nosubject");
@@ -616,6 +617,10 @@ fn a_split_batch_stops_on_a_database_without_a_subject() {
                 );
                 let stderr = String::from_utf8_lossy(&refused.stderr);
                 assert!(!stderr.contains("Query_2"), "{case}: {stderr}");
+                assert!(
+                    refused.stderr.starts_with(&alone.stderr),
+                    "{case}: the warning of qa first: {stderr}"
+                );
             }
             let case = format!("{db:?} gaps threads {threads}");
             let whole = search(dir, &SPLITS[2], &gaps, db, "7", threads);
@@ -628,39 +633,54 @@ fn a_split_batch_stops_on_a_database_without_a_subject() {
 }
 
 /// Where NCBI's search first fails to read the database, a split batch meets NCBI's chunk stops
-/// in NCBI's order (2.17.0 probes of line RG item X-short-bat, fix round 3): on `n_min1`
-/// (`MIN_SEQ_LENGTH 1`) the setup of the first chunk with a valid context that is not split again
-/// fails (`The average subject length is too short`), on `e_nF` (volumes without an OID, `NSEQ 1`)
-/// that of the first chunk not split again, which reads the length of OID 0 before its
-/// Karlin-Altschul check (`Database memory map file error`); a chunk without a query stops NCBI
-/// before both, a chunk split again before the chunks after it. One batch (a query of 310
-/// residues: `ql`, `qa` ten times; `xh`, 278 X then `qa` and M, whose chunks 0 to 15 of the second
-/// split are all X; `xt`, the reverse), so nothing is written.
+/// in NCBI's order (2.17.0 probes of line RG item X-short-bat, fix round 3 and review 3): on
+/// `n_min1` (`MIN_SEQ_LENGTH 1`) the setup of the first chunk with a valid context that is not
+/// split again fails (`The average subject length is too short`; its cases never reach the
+/// `break` of `ReadFails::Search`, since the chunk's own setup checks fail first), on `e_nF` (volumes without an
+/// OID, `NSEQ 1`) that of the first chunk not split again, which reads the length of OID 0 before
+/// its Karlin-Altschul check (`Database memory map file error`, `ReadFails::Setup`), and on
+/// `arch_tbn_snucl_nonsq` (a database without its sequence file) the search of the first chunk
+/// with a valid context, which reads its first sequence after that check (`Database memory map
+/// file error`, `ReadFails::Search`: an all-X head goes on to the split-again stop, which `e_nF`
+/// meets later, and `late` and `gaps` end at the read, which only the `break` after the first
+/// valid chunk's checks gives); a chunk without a query stops NCBI before all of them, a chunk
+/// split again before the chunks after it. One batch (a query of 310 residues: `ql`, `qa` ten
+/// times; `xh`, 278 X then `qa` and M, whose chunks 0 to 15 of the second split are all X; `xt`,
+/// the reverse; `qg`, `qa` eight times, whose negative pair leaves gaps between its chunks), so
+/// nothing is written.
 #[test]
 fn a_split_batch_meets_a_failing_read_of_the_database_where_ncbi_does() {
     let temp = TempDir::new("readfails");
     let dir = temp.0.as_path();
-    let aliases = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/aliaskeys");
+    let databases = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
     let x = "X".repeat(278);
     let long = fasta(dir, "ql.faa", &[("ql", &QA.repeat(10))]);
+    let gaps = fasta(dir, "qg.faa", &[("qg", &QA.repeat(8))]);
     let head = fasta(dir, "xh.faa", &[("xh", &format!("{x}{QA}M"))]);
     let tail = fasta(dir, "xt.faa", &[("xt", &format!("{QA}M{x}"))]);
     let min1 = "BLAST engine error: The average subject length is too short";
     let memory = "BLAST engine error: Database memory map file error";
     // (database, splitting values, query, the refusal or (with exit status 3) NCBI's error)
-    let cases: [(&str, usize, &PathBuf, Result<&str, &str>); 9] = [
-        ("n_min1", 0, &long, Ok(SPLIT_AGAIN)),
-        ("n_min1", 1, &long, Err(min1)),
-        ("n_min1", 2, &long, Ok(EMPTY_CHUNK)),
-        ("n_min1", 1, &head, Ok(SPLIT_AGAIN)),
-        ("n_min1", 1, &tail, Err(min1)),
-        ("e_nF", 0, &long, Ok(SPLIT_AGAIN)),
-        ("e_nF", 1, &long, Err(memory)),
-        ("e_nF", 2, &long, Ok(EMPTY_CHUNK)),
-        ("e_nF", 1, &head, Err(memory)),
+    let nosq = "arch_tbn_snucl_nonsq";
+    let cases: [(&str, usize, &PathBuf, Result<&str, &str>); 15] = [
+        ("aliaskeys/n_min1", 0, &long, Ok(SPLIT_AGAIN)),
+        ("aliaskeys/n_min1", 1, &long, Err(min1)),
+        ("aliaskeys/n_min1", 2, &long, Ok(EMPTY_CHUNK)),
+        ("aliaskeys/n_min1", 1, &head, Ok(SPLIT_AGAIN)),
+        ("aliaskeys/n_min1", 1, &tail, Err(min1)),
+        ("aliaskeys/e_nF", 0, &long, Ok(SPLIT_AGAIN)),
+        ("aliaskeys/e_nF", 1, &long, Err(memory)),
+        ("aliaskeys/e_nF", 2, &long, Ok(EMPTY_CHUNK)),
+        ("aliaskeys/e_nF", 1, &head, Err(memory)),
+        (nosq, 0, &long, Ok(SPLIT_AGAIN)),
+        (nosq, 1, &long, Err(memory)),
+        (nosq, 2, &long, Ok(EMPTY_CHUNK)),
+        (nosq, 1, &head, Ok(SPLIT_AGAIN)),
+        (nosq, 1, &tail, Err(memory)),
+        (nosq, 2, &gaps, Err(memory)),
     ];
     for (name, split, query, expected) in cases {
-        let db = aliases.join(name);
+        let db = databases.join(name);
         for threads in ["1", "4"] {
             let case = format!("{name} {:?} {query:?} threads {threads}", SPLITS[split]);
             let run = search(

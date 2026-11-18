@@ -1807,6 +1807,7 @@ fn search(
         // With `-in_pssm`, whether the read's failure comes before the batch's setup checks
         // (`PsiSearchReadFailure::precedes_setup_checks`: the empty database).
         let mut read_before_setup = false;
+        let mut read_fails = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
                 // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
@@ -1821,6 +1822,7 @@ fn search(
                     .as_ref()
                     .is_some_and(|failure| failure.precedes_setup_checks());
                 let read = if database.first_oid_read_fails() {
+                    read_fails = Some(super::stage_d_pipeline::ReadFails::Setup);
                     Err(match pssm_failure {
                         Some(failure) => failure.error("TBLASTN"),
                         None => PreliminaryReadError("Database memory map file error").into(),
@@ -1844,7 +1846,12 @@ fn search(
                 };
                 match read {
                     Ok(stores) => (stores, None),
-                    Err(error) => (Vec::new(), Some(error)),
+                    Err(error) => {
+                        // Any other error is the search's: a chunk meets it after the
+                        // Karlin-Altschul check (`ReadFails::Search`).
+                        read_fails.get_or_insert(super::stage_d_pipeline::ReadFails::Search);
+                        (Vec::new(), Some(error))
+                    }
                 }
             }
             None => (Vec::new(), None),
@@ -1854,15 +1861,10 @@ fn search(
             (Some(_), None) => SubjectLetters::Packed(&database_stores),
             (None, _) => subject_letters,
         };
-        // Where NCBI's search first fails to read the database (the chunks of a split batch).
+        // Where NCBI's search first fails to read the database (the chunks of a split batch): the
+        // class was decided with the error above.
         let subject_set = SubjectSetNumbers {
-            read_fails: stores_error.as_ref().map(|_| {
-                if database.is_some_and(TblastnDatabase::first_oid_read_fails) {
-                    super::stage_d_pipeline::ReadFails::Setup
-                } else {
-                    super::stage_d_pipeline::ReadFails::Search
-                }
-            }),
+            read_fails,
             ..subject_set
         };
         // The batches before the stop are searched and reported; a reader at the end of its

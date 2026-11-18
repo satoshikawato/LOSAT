@@ -7,7 +7,8 @@
   `CHUNK_SIZE`), and with `-in_pssm` a window past the PSSM, a gapped start past the subject's translation, a traceback
   that starts past the end of its frame or a PSSM query that `-seg` masks completely (these write the prologs
   first). Searches without such an error are unchanged.
-- `tblastn` stops at such a query chunk also when a seqid list leaves the database without a sequence to search, as
-  NCBI BLAST+ 2.17.0 does; before, it wrote that batch's empty results. With `MIN_SEQ_LENGTH 1` or a database
-  without sequences, the error of the database's first read and the query chunk stops now come in NCBI BLAST+'s
+- `tblastn` stops at such a query chunk also when the database is left without a subject (a seqid list that keeps
+  none, an alias over volumes without sequences), as NCBI BLAST+ 2.17.0 does; before, it wrote that batch's empty
+  results. With a database whose shortest sequence is under 3 bases (`MIN_SEQ_LENGTH` 1 or 2), one without sequences
+  or one whose sequence file is missing, the database's error and the query chunk stops now come in NCBI BLAST+'s
   order.

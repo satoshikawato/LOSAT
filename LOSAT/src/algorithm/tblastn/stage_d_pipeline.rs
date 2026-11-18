@@ -146,7 +146,11 @@ pub(super) enum ReadFails {
     /// (`SeqDb::first_oid_read_fails`; blast_setup.c:925-937, quoted there). Any chunk that NCBI
     /// does not split again meets it.
     Setup,
-    /// At a sequence: the first chunk with a valid context that NCBI searches meets it.
+    /// In the search: the first chunk with a valid context that NCBI searches meets it, at the
+    /// first read of a sequence (a missing sequence file: `Database memory map file error`).
+    /// Also the subject-length error of `tblastn_app`'s stores check (not a read), which the
+    /// chunk's own `setup_checks` meets first with the same text, so that it never reaches the
+    /// `break` of this kind.
     Search,
 }
 
@@ -2554,7 +2558,8 @@ fn preliminary_profile<'a>(
 // prelim_stage.cpp:235) and dereferences the missing query vector of a chunk that no query
 // reaches (`x_ComputeQueryIndicesForChunks`, split_query_cxx.cpp:234-249; `CCoreException`
 // `eNullPtr`); then, chunk by chunk, the setup of a chunk that would be split again makes no
-// lookup table (split_query_aux_priv.cpp:190-201), which the chunk's search dereferences
+// lookup table (blast_aux_priv.cpp:206-216, which split_query_aux_priv.cpp:190-194 calls),
+// which the chunk's search dereferences
 // whether or not its contexts are valid, after the chunks before it were searched. The setup of
 // the preliminary search of each chunk (`BLAST_GapAlignSetUp`, blast_setup.c:925-982) reads the
 // length of OID 0 where the statistics' total is not positive, checks the Karlin-Altschul blocks
@@ -2646,7 +2651,8 @@ fn split_preliminary_hitlists(
         // The wrapped ranges of a negative CHUNK_SIZE that leave no chunk without a query leave
         // gaps between them (a chunk is then never split again), which NCBI searches on with the
         // hits in the gaps lost (PD-LOSAT-NCBI-DEFECTS D13): refused before the run's first byte,
-        // where the search of the first chunk would lose them.
+        // at the first chunk that NCBI searches (with no subject in hand nothing is lost, and the
+        // batch is reported).
         ensure!(
             !sizes.negative_chunk_size(),
             "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"

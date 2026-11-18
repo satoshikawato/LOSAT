@@ -198,10 +198,10 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
         let ch = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
         let s_base = ncbi2na_unpack_base(ch, base as u8) as usize;
         let q_code = unsafe { *q_seq.get_unchecked(q_idx as usize) } as usize;
-        sum += matrix[q_code * BLASTNA_SIZE + s_base];
+        sum = sum.wrapping_add(matrix[q_code * BLASTNA_SIZE + s_base]);
         if sum > 0 {
             q_beg = q_idx;
-            score += sum;
+            score = score.wrapping_add(sum);
             sum = 0;
         } else if sum < x {
             break;
@@ -252,11 +252,15 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
         let q_code = unsafe { *q_seq.get_unchecked(q_idx as usize) } as usize;
         q_idx += 1;
 
-        sum += matrix[q_code * BLASTNA_SIZE + s_base];
+        sum = sum.wrapping_add(matrix[q_code * BLASTNA_SIZE + s_base]);
         if sum > 0 {
             q_end = q_idx;
-            score += sum;
-            x_current = if -score > x { -score } else { x };
+            score = score.wrapping_add(sum);
+            x_current = if score.wrapping_neg() > x {
+                score.wrapping_neg()
+            } else {
+                x
+            };
             sum = 0;
         } else if sum < x_current {
             break;
@@ -812,6 +816,8 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     let mut new_q = q_idx;
 
     // Left extension in 4-base blocks.
+    // The sums wrap as NCBI's `Int4` do in its x86-64 build (with the X-drop `INT_MIN` of a raw X-drop
+    // past `Int4`; `x_ungap_count::extend_hit_ungapped_exact_counted`).
     for _ in 0..left_len {
         if q_idx < 4 || s_idx == 0 {
             break;
@@ -826,10 +832,10 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
         // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
         // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
         let q_byte = query_four_base_byte(q_seq, (q_idx - 4) as usize);
-        sum += score_table[(q_byte ^ s_byte) as usize];
+        sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
         if sum > 0 {
             new_q = q_idx - 4;
-            score += sum;
+            score = score.wrapping_add(sum);
             sum = 0;
         }
         if sum < x {
@@ -861,10 +867,10 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
         // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
         // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
         let q_byte = query_four_base_byte(q_seq, q_idx as usize);
-        sum += score_table[(q_byte ^ s_byte) as usize];
+        sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
         if sum > 0 {
             new_q = q_idx + 3;
-            score += sum;
+            score = score.wrapping_add(sum);
             sum = 0;
         }
         if sum < x {

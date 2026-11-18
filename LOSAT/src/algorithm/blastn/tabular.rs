@@ -936,7 +936,7 @@ mod tests {
             s_idx: 0,
             raw_score: 0,
             internal_q_offset_0: 0,
-            internal_q_end_0: q.1 - q.0 + 1,
+            internal_q_end_0: (q.1 - q.0 + 1) as i32,
             internal_s_offset_0: 0,
             internal_s_end_0: s.0.max(s.1) - s.0.min(s.1) + 1,
             internal_query_context_offset: 0,

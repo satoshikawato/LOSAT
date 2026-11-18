@@ -74,7 +74,9 @@ pub(crate) fn x_tbx_scan_byte() -> crate::algorithm::tblastx::x_scan_byte::XScan
 // No NCBI counterpart: the presence bytes of a table, made once per table.
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of `lookup` when `x_tbx_scan_byte` scans
 /// it (on, the table `fits`, sparse if the mode asks), else `None` (NCBI's loop).
-pub(crate) fn x_tbx_presence(lookup: &BlastAaLookupTable) -> Option<std::sync::Arc<[u8]>> {
+pub(crate) fn x_tbx_presence(
+    lookup: &BlastAaLookupTable,
+) -> Option<crate::algorithm::tblastx::x_scan_byte::XPresence> {
     let mode = x_tbx_scan_byte();
     if !mode.on() {
         return None;
@@ -102,7 +104,7 @@ pub(crate) fn x_reach_scan_byte_not_taken() {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_scan_subject_byte(
     lookup: &BlastAaLookupTable,
-    presence: &[u8],
+    presence: &crate::algorithm::tblastx::x_scan_byte::XPresence,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
     offset_pairs: &mut [BlastOffsetPair],

@@ -433,8 +433,8 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
             return;
         }
         // [C] curr_context = BSearchContextInfo(query_offset, query_info);
-        let ctx_idx = h.lookup.get_context_idx(query_offset as i32);
-        // SAFETY: get_context_idx returns an index below num_contexts == contexts.len().
+        let ctx_idx = h.context_of(query_offset);
+        // SAFETY: context_of returns an index below num_contexts == contexts.len().
         let ctx = unsafe { h.contexts.get_unchecked(ctx_idx) };
         // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
         let q_minus_diff = query_offset.wrapping_sub(diff as u32);
@@ -666,6 +666,7 @@ impl<M: TbxScore> XPairPar<M> {
             window,
             wordsize,
             lookup: sub,
+            ctx_of: &self.ctx_of,
             contexts: inp.contexts,
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
@@ -891,6 +892,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             // Windows the module takes (`active`): from its smallest, wordsize + BATCH.
             let window = [40, 3 + BATCH as i32, 64][case % 3];
@@ -1048,11 +1050,13 @@ mod tests {
             let x_dropoff_per_context: Vec<i32> = (0..contexts.len()).map(|_| 0).collect();
             let window = 40;
             let failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
+            let ctx_of = x_ctx_table(&lookup, true);
             let h = XHitCtx {
                 diag_offset: window,
                 window,
                 wordsize: 3,
                 lookup: &lookup,
+                ctx_of: &ctx_of,
                 contexts: &contexts,
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,

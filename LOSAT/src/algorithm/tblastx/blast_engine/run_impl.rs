@@ -1330,8 +1330,7 @@ fn read_subject_set(
     // record stops the reading there (`read_subjects`). Records without residues (and
     // intervals without letters) are read without a message and reported when the search
     // is set up (`search`).
-    let mut subject_source = FastaInputSource::from_argument(
-        &subject_path,
+    let mut subject_source = FastaInputSource::from_file(
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -1695,7 +1694,7 @@ fn subject_taxonomy(
 fn search_cli(
     mut args: TblastxArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_file: crate::blastinput::input_files::InputFile,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
     x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
@@ -1747,8 +1746,7 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
+    let mut query_source = FastaInputSource::from_file(
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -4272,9 +4270,16 @@ fn run_batch_loop(
                 )
             {
                 let scope = || batch_scope(input_start..input_end);
+                // The batches before: their queries (`done.spans`, in the numbering of
+                // `done.hits`), for what their reports load (`database::batch_prefetch_stop`).
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
+                    done.searched.len(),
+                    &done.spans,
+                    super::super::database::writes_thrown(
+                        outputs.formats.iter().map(|format| format.outfmt),
+                    ),
                     ordered,
                     &reports.titles.borrow(),
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
@@ -4706,18 +4711,8 @@ impl BatchReports<'_> {
                         && !crate::algorithm::common::database::prefetch_always_off(),
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
                 };
-                // Whether each query's batch prefetches (`done.spans`, in the numbering of
-                // `hits`), for the subjects that only the prefetch reads.
-                let prefetch = crate::algorithm::common::database::BatchPrefetch::of(
-                    done.searched.len(),
-                    0,
-                    &done.spans,
-                    |span| {
-                        super::super::database::seq_aligns_of(super::super::database::query_hits(
-                            &hits, span,
-                        ))
-                    },
-                );
+                // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
+                // prefetch decides the subjects that only the prefetch reads.
                 reported_subjects = super::super::database::reported_subjects(
                     database,
                     &self.titles.borrow(),
@@ -4725,7 +4720,11 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    &prefetch,
+                    super::super::database::writes_thrown(
+                        outputs.formats.iter().map(|format| format.outfmt),
+                    ),
+                    done.searched.len(),
+                    &done.spans,
                 )?;
                 // The texts of the reads, made before the hits named the subjects by rank, by
                 // rank as the writers name them.

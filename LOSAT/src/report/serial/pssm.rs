@@ -22,12 +22,15 @@
 //! A member is written when it is set: an OPTIONAL member that is `None` is not, and neither is a
 //! member with a DEFAULT that was not set (`is_protein` and `by_row` hold whether and how they were
 //! set). The reader keeps every member NCBI's object keeps (`blastinput::pssm_text`, line RG item
-//! D3-1): the members that this writer does not write yet (the descriptors of the query other than
-//! its titles, its `annot`, the members of its `Seq-inst` other than `repr`, `mol`, `length` and
-//! `seq-data`, and the `constraints` and `annotatedSites` of the parameters, held as values of the
-//! generic reader, `report::serial::asn_types::Value`) are named by
-//! `PssmWithParameters::unwritten_members`, which every writer of a PSSM that was read refuses.
+//! D3-1), and the writer writes them all: the members that the search does not read (the
+//! descriptors of the query other than its titles, its `annot`, the members of its `Seq-inst` other
+//! than `repr`, `mol`, `length` and `seq-data`, a query Seq-entry `set`, Seq-data of another
+//! alphabet, and the `constraints` and `annotatedSites` of the parameters) are values of the
+//! generic reader (`report::serial::asn_types::Value`), written by the generic writer
+//! (`asn_types::write`, line RG item D3-2).
 
+use super::asn_types::table::named;
+use super::asn_types::write::write_value as write_generic;
 use super::asn_types::Value;
 use super::encoder::Encoder;
 
@@ -421,59 +424,6 @@ pub struct PssmParameters {
     pub annotated_sites: Option<Value>,
 }
 
-impl PssmWithParameters {
-    /// The members that the writer of a PSSM does not write yet (the D3 refusals of `-out_pssm`
-    /// and of the search strategy's request, which line RG item D3-2 lifts): `"molinfo"` for a
-    /// `molinfo` descriptor of the query and `"Seqdesc"` for another descriptor other than a
-    /// title, then `fuzz`, `topology`, `strand`, `ext`, `hist` of its `Seq-inst`, `annot`,
-    /// `constraints` and `annotatedSites`, in the order of the document; first `"set"` for a query
-    /// Seq-entry set and `"seq-data"` for Seq-data that the reader does not type (a run never
-    /// reaches the writer with either: `in_pssm::psi_search_and_object`).
-    pub fn unwritten_members(&self) -> Vec<&'static str> {
-        let mut names = Vec::new();
-        match self.pssm.query.as_ref() {
-            Some(SeqEntry::Set(_)) => names.push("set"),
-            Some(SeqEntry::Seq(query))
-                if matches!(query.inst.seq_data, Some(SeqData::Other(_))) =>
-            {
-                names.push("seq-data")
-            }
-            _ => {}
-        }
-        if let Some(query) = self.pssm.query.as_ref().and_then(SeqEntry::seq) {
-            for descriptor in query.descr.iter().flatten() {
-                match descriptor.variant_name() {
-                    "title" => {}
-                    "molinfo" => names.push("molinfo"),
-                    _ => names.push("Seqdesc"),
-                }
-            }
-            let inst = &query.inst;
-            for (name, set) in [
-                ("fuzz", inst.fuzz.is_some()),
-                ("topology", inst.topology.is_some()),
-                ("strand", inst.strand.is_some()),
-                ("ext", inst.ext.is_some()),
-                ("hist", inst.hist.is_some()),
-                ("annot", query.annot.is_some()),
-            ] {
-                if set {
-                    names.push(name);
-                }
-            }
-        }
-        if let Some(params) = &self.params {
-            if params.constraints.is_some() {
-                names.push("constraints");
-            }
-            if params.annotated_sites.is_some() {
-                names.push("annotatedSites");
-            }
-        }
-        names
-    }
-}
-
 /// `FormatRpsDbParameters`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:303-315
 // ```asn
@@ -606,15 +556,19 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
         enc.end_member();
     }
     if let Some(query) = &pssm.query {
-        // A set, or a query whose Seq-data the reader does not type, never reaches the writer: NCBI
-        // stops the run first (`in_pssm::psi_search_and_object`), and `unwritten_members` names
-        // both.
-        let SeqEntry::Seq(query) = query else {
-            unreachable!("a query Seq-entry set is never written")
-        };
         enc.member("query", 6);
-        enc.variant("Seq-entry", "seq", 0);
-        write_query(enc, query);
+        match query {
+            SeqEntry::Seq(query) => {
+                enc.variant("Seq-entry", "seq", 0);
+                write_query(enc, query);
+            }
+            // NCBI stops a search of such a query (`in_pssm::psi_search_and_object`) before it
+            // writes a PSSM file or a request; the writer writes it as read.
+            SeqEntry::Set(set) => {
+                enc.variant("Seq-entry", "set", 1);
+                write_generic(enc, named::BIOSEQ_SET, set);
+            }
+        }
         enc.end_variant();
         enc.end_member();
     }
@@ -663,17 +617,20 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
     }
     enc.end_list();
     enc.end_member();
-    // The descriptors other than titles are not written yet (`unwritten_members`, refused by
-    // every writer of a PSSM that was read).
-    if query.descr.is_some() {
+    if let Some(descr) = &query.descr {
         enc.member("descr", 1);
         enc.begin_named("Seq-descr");
         enc.begin_list(true);
-        for title in query.titles() {
+        for descriptor in descr {
             enc.element();
-            enc.variant("Seqdesc", "title", 4);
-            enc.visible_str(title);
-            enc.end_variant();
+            match descriptor {
+                Seqdesc::Title(title) => {
+                    enc.variant("Seqdesc", "title", 4);
+                    enc.visible_str(title);
+                    enc.end_variant();
+                }
+                Seqdesc::Other(value) => write_generic(enc, named::SEQDESC, value),
+            }
         }
         enc.end_list();
         enc.end_named();
@@ -696,36 +653,73 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
         }
         enc.end_member();
     }
+    if let Some(fuzz) = &query.inst.fuzz {
+        enc.member("fuzz", 3);
+        write_generic(enc, named::INT_FUZZ, fuzz);
+        enc.end_member();
+    }
+    for (name, tag, value) in [
+        ("topology", 4, query.inst.topology),
+        ("strand", 5, query.inst.strand),
+    ] {
+        if let Some(value) = value {
+            enc.member(name, tag);
+            write_generic(
+                enc,
+                super::asn_types::members(named::SEQ_INST)[usize::from(tag)].ty,
+                &Value::Enum(value),
+            );
+            enc.end_member();
+        }
+    }
     if let Some(data) = &query.inst.seq_data {
         enc.member("seq-data", 6);
-        match data {
-            SeqData::Iupacaa(letters) => {
-                enc.variant("Seq-data", "iupacaa", 1);
-                enc.begin_named("IUPACaa");
-                enc.string_store(letters);
-                enc.end_named();
+        let (variant, tag, named_type) = match data {
+            SeqData::Iupacaa(_) => ("iupacaa", 1, "IUPACaa"),
+            SeqData::Ncbieaa(_) => ("ncbieaa", 7, "NCBIeaa"),
+            SeqData::Ncbistdaa(_) => ("ncbistdaa", 9, "NCBIstdaa"),
+            // NCBI stops a search of such a query (`in_pssm::psi_search_and_object`) before it
+            // writes a PSSM file or a request; the writer writes it as read.
+            SeqData::Other(value) => {
+                write_generic(enc, named::SEQ_DATA, value);
+                ("", 0, "")
             }
-            SeqData::Ncbieaa(letters) => {
-                enc.variant("Seq-data", "ncbieaa", 7);
-                enc.begin_named("NCBIeaa");
-                enc.string_store(letters);
-                enc.end_named();
+        };
+        if !variant.is_empty() {
+            enc.variant("Seq-data", variant, tag);
+            enc.begin_named(named_type);
+            match data {
+                SeqData::Iupacaa(letters) | SeqData::Ncbieaa(letters) => enc.string_store(letters),
+                SeqData::Ncbistdaa(codes) => enc.octets(codes),
+                SeqData::Other(_) => {}
             }
-            SeqData::Ncbistdaa(codes) => {
-                enc.variant("Seq-data", "ncbistdaa", 9);
-                enc.begin_named("NCBIstdaa");
-                enc.octets(codes);
-                enc.end_named();
-            }
-            SeqData::Other(_) => {
-                unreachable!("Seq-data that the reader does not type is never written")
-            }
+            enc.end_named();
+            enc.end_variant();
         }
-        enc.end_variant();
         enc.end_member();
+    }
+    for (name, tag, value) in [
+        ("ext", 7, (named::SEQ_EXT, &query.inst.ext)),
+        ("hist", 8, (named::SEQ_HIST, &query.inst.hist)),
+    ] {
+        if let (ty, Some(value)) = value {
+            enc.member(name, tag);
+            write_generic(enc, ty, value);
+            enc.end_member();
+        }
     }
     enc.end_sequence();
     enc.end_member();
+    if let Some(annots) = &query.annot {
+        enc.member("annot", 3);
+        enc.begin_list(true);
+        for annot in annots {
+            enc.element();
+            write_generic(enc, named::SEQ_ANNOT, annot);
+        }
+        enc.end_list();
+        enc.end_member();
+    }
     enc.end_sequence();
 }
 
@@ -847,6 +841,11 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
         enc.end_sequence();
         enc.end_member();
     }
+    if let Some(constraints) = &params.constraints {
+        enc.member("constraints", 2);
+        write_generic(enc, named::COREDEF, constraints);
+        enc.end_member();
+    }
     for (name, tag, value) in [
         ("bitScoreThresh", 3, params.bit_score_thresh),
         (
@@ -860,6 +859,11 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
             enc.real(value);
             enc.end_member();
         }
+    }
+    if let Some(sites) = &params.annotated_sites {
+        enc.member("annotatedSites", 5);
+        write_generic(enc, named::SITE_ANNOT_SET, sites);
+        enc.end_member();
     }
     enc.end_sequence();
 }

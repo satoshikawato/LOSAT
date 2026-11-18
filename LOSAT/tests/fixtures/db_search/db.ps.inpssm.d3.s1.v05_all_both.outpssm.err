@@ -1,0 +1,5 @@
+Error: [psiblast] Both Variation-ref.validated and Variation-ref.variant-properties.other-validation are set; ignoring Variation-ref.validated
+Error: [psiblast] Both Variation-ref.allele-origin and Variation-ref.variant-properties.allele-origin are set; ignoring Variation-ref.validated
+Error: [psiblast] Both Variation-ref.allele-state and Variation-ref.variant-properties.allele-state are set; ignoring Variation-ref.validated
+Error: [psiblast] Both Variation-ref.allele-frequency and Variation-ref.variant-properties.allele-frequency are set; ignoring Variation-ref.validated
+Error: [psiblast] Both Variation-ref.is-ancestral-allele and Variation-ref.variant-properties.is-ancestral-allele are set; ignoring Variation-ref.validated

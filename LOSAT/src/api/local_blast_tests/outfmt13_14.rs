@@ -25,9 +25,9 @@ fn temp_dir(stem: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time before Unix epoch")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat_outfmt1314_crate_{stem}_{}_{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         nanos
     ));
     fs::create_dir_all(&dir).expect("temp dir");

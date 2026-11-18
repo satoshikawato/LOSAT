@@ -298,6 +298,14 @@ To also check native without parallel support, build it using
 from the crate directory and pass `--native-serial` to the checker.
 The comparison gate requires NCBI BLAST+ 2.17.0 only as a test oracle. It retains
 raw bytes, argv, stderr, artifact identity, and worker lifecycle records.
+It also runs every psiblast row of `outfmt0_manifest.tsv` (through
+`docs/evidence/losat_web_e2a/check_losat.py`) through each WASI command it is given (the
+threaded one, and `--serial`) at `-num_threads 1`, with a wrapper script in the place
+of the binary (`<output-dir>/psiblast-fixtures/<kind>/`).
+Its `stdin/` section reads standard input in every search program through each WASI
+command (`-query -`, no `-query`, an empty pipe, `-subject -`, both, and a regular file as
+the standard input) and requires the native command's stdout, stderr and exit status of
+the same run.
 
 Every supported explicit N > 1 uses N total compute threads: the caller plus
 N-1 child workers. Diagnostics report pool_threads=N and caller_participates=true;

@@ -213,6 +213,10 @@ fn int_scaled_values() {
 /// give their rows on a thread of 256 KiB, the sizes found once for each value (line RG D3-1
 /// review 7 S1: NCBI walks to the bottom at each level).
 #[test]
+#[cfg_attr(
+    all(target_os = "wasi", not(target_feature = "atomics")),
+    ignore = "needs threads: wasm32-wasip1 has none"
+)]
 fn nested_multi_data_are_read_without_recursion() {
     std::thread::Builder::new()
         .stack_size(256 << 10)

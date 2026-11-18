@@ -492,6 +492,10 @@ mod tests {
     /// `-soft_masking true`: every frame gets the intervals of the hard frame and keeps its letters
     /// (no unmasked copy), in the serial loop and on pools of 1, 2 and 3 threads.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn soft_frames_keep_letters_and_hard_intervals() {
         let mut rng = Rng(0x2545_f491_4f6c_dd1d);
         let seqs: Vec<Vec<u8>> = (0..12).map(|_| sequence(&mut rng)).collect();

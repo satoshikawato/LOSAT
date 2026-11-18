@@ -1078,13 +1078,6 @@ impl BlastxArgs {
         // not (the task: `run_local`, first).
         crate::algorithm::blastn::args::QueryStrand::parse(&self.strand)?;
         let outfmt = u8::try_from(choice.number)?;
-        if self
-            .subject
-            .as_deref()
-            .is_some_and(|subject| subject.as_os_str() == "-")
-        {
-            bail!("unsupported BLASTX stdin subject");
-        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:872-877
         // ```c++
         //         if (ungapped && *ungapped && compo_mode != eNoCompositionBasedStats) {

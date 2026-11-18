@@ -202,16 +202,30 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
             || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
+            || (e.exit == 2 && e.message.starts_with("BLAST Database error: "))
             || e.exit == 255
     }) {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
+        // ```c++
+        //     catch (const CSeqDBException& e) {                                      \
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-202
+        // ```c++
+        //         else {                                                              \
+        //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+        //         	exit_code = BLAST_DATABASE_ERROR;                               \
+        //         }                                                                   \
+        // ```
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
         // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
         // an exception of NCBI's XML stream, `blast_xml::writer::run_ending_exception`, or the
-        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
-        // an engine error.
+        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`) or through its
+        // `CSeqDBException` branch, which comes first (exit status 2: the lookup of a reported
+        // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
+        // not an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -375,10 +389,12 @@ fn run_inner(
         write_run_error_archive(args, archive.as_ref(), &error);
         error
     };
+    // `-subject -` is `cin` (ncbiargs.cpp:717-721, quoted at `input_files::open_input`), the
+    // stream that `-query -` names too: one owner opens both (`open_input`).
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
         (None, Some(path)) => Some(
-            crate::blastinput::input_files::open_file_input(path, "subject")
+            crate::blastinput::input_files::open_input(path, "subject", program.upper)
                 .map_err(early_archive_error)?,
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -808,7 +824,21 @@ fn run_inner(
     if args.db.is_none() {
         query_stream.around = super::empty_rows::query_letters_around(&options, &subjects);
     }
-    if stream_is_empty(&mut query_stream) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-245
+    // ```c++
+    //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+    //     CRef<CBlastInput> input(new CBlastInput(fasta));
+    //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+    //     sequences = input->GetAllSeqs(*scope);
+    // ```
+    // With `-query -` and `-subject -` the subjects were read from `cin` to its end above: the
+    // stream has failed, its `tellg()` is negative, and the test above answers "not empty" even
+    // for a regular file as the standard input. No query batch is read then: outfmt 7 writes
+    // `# BLAST processed 0 queries`, never `Query is Empty!` (blastp's `shared_standard_input`,
+    // the same rule).
+    let shared_standard_input =
+        args.query.as_os_str() == "-" && subject_path.is_some_and(|path| path.as_os_str() == "-");
+    if !shared_standard_input && stream_is_empty(&mut query_stream) {
         stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
@@ -1265,6 +1295,9 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
+    /// Whether every report is outfmt 13 to 16, which write a lookup that throws where a batch's
+    /// prefetch is off as NCBI does (`Xml2Kind::every`, for `HitLoads::of`).
+    writes_thrown: bool,
 }
 
 impl ReportedAsks {
@@ -1304,6 +1337,9 @@ impl ReportedAsks {
                 outfmt => i32::from(outfmt),
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
+            writes_thrown: crate::report::blast_xml2::Xml2Kind::every([
+                super::blast_xml::xml2_kind(options.outfmt),
+            ]),
         }
     }
 
@@ -1320,6 +1356,11 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
+        asks.writes_thrown = crate::report::blast_xml2::Xml2Kind::every(
+            options
+                .iter()
+                .map(|options| super::blast_xml::xml2_kind(options.outfmt)),
+        );
         asks
     }
 
@@ -1336,6 +1377,8 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            // `Xml2Kind::every` of the two.
+            writes_thrown: self.writes_thrown && other.writes_thrown,
         }
     }
 }
@@ -1561,6 +1604,7 @@ pub(super) fn reported_batch(
         asks.prefetched && !unfetched,
         asks.prefetch_runs && !unfetched,
         unfetched,
+        asks.writes_thrown,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -1721,7 +1765,6 @@ pub(super) fn reported_batch(
 pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
     error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
-        || error.is::<super::preliminary::OneHitWindowRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<NativeError>()
 }
@@ -2770,16 +2813,8 @@ impl XUnit {
         match (taken, &prep.layout) {
             (Some(unit), _) => Ok(Some(unit)),
             (None, Some(layout)) => {
-                // Phase 1 failed: a unit's preparation fails the reader batch, as NCBI's set-up
-                // fails it before any search (and as with one thread), so nothing of this unit's
-                // search is written. Its one-hit windows of `-window_size 0` are then not refused
-                // at the buffer's end (`preliminary::refuse_window_past_buffers`), whose bytes
-                // after this unit are not known here: a refusal must not take the batch's error's
-                // place.
                 super::split::split_sizes(layout.query_count)?;
-                let mut unit = prepare_unit(self.queries(), layout, options, subjects)?;
-                unit.prepared.reader_buffer_after = usize::MAX;
-                Ok(Some(unit))
+                prepare_unit(self.queries(), layout, options, subjects).map(Some)
             }
             (None, None) => Ok(None),
         }
@@ -3277,7 +3312,7 @@ mod archive_error_tests {
             database_name: String::new(),
             database_num_sequences: 1,
             database_total_letters: 50_000,
-            matrix_name: "BLOSUM62".into(),
+            matrix_name: Some("BLOSUM62".into()),
             gap_open: 11,
             gap_extend: 1,
             word_threshold: 12.0,
@@ -3336,6 +3371,24 @@ mod archive_error_tests {
         assert_eq!(
             failure.downcast_ref::<NativeError>().map(|e| e.exit),
             Some(6)
+        );
+    }
+
+    // Line DBID pfoff-1: `CATCH_ALL`'s report of a `CSeqDBException` that an outfmt 13 or 14
+    // report raises (the lookup of a reported subject that throws) stays as it is, not an
+    // engine error.
+    #[test]
+    fn a_database_error_of_catch_all_is_no_engine_error() {
+        let thrown = crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::lookup_throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO).unwrap(),
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        );
+        let error = report_error(NativeError::exception(&thrown).into());
+        let error = error.downcast_ref::<NativeError>().unwrap();
+        assert_eq!(error.exit, 2);
+        assert_eq!(
+            error.message,
+            "BLAST Database error: DB contains no accession info.\n"
         );
     }
 }

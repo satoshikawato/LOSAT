@@ -649,9 +649,9 @@ pub struct FastaInputSource<R: Read> {
     reader: reader::FastaReader<R>,
 }
 
-impl FastaInputSource<std::fs::File> {
+impl FastaInputSource<crate::blastinput::input_files::InputFile> {
     /// An input source over an opened file or standard input (`CStreamLineReader` over
-    /// the argument's stream).
+    /// the argument's stream, which reads as `stream::InputBackend::of` says).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:291-300
     /// ```c++
@@ -667,27 +667,11 @@ impl FastaInputSource<std::fs::File> {
     /// }
     /// ```
     /// `GetConvertGapsToNs` is set only by the mapper (magicblast).
-    pub fn from_file(file: std::fs::File, config: ReaderConfig) -> Self {
-        Self::from_stream(FastaStream::from_file(file), config)
-    }
-
-    /// An input source over standard input (`-`, NCBI's `cin`; `FastaStream::from_standard_input`).
-    pub fn from_standard_input(file: std::fs::File, config: ReaderConfig) -> Self {
-        Self::from_stream(FastaStream::from_standard_input(file), config)
-    }
-
-    /// The input source of an opened `-query` or `-subject` argument: standard input for `-`
-    /// (`from_standard_input`), else a file (`from_file`).
-    pub fn from_argument(
-        path: &std::path::Path,
-        file: std::fs::File,
+    pub fn from_file(
+        file: impl Into<crate::blastinput::input_files::InputFile>,
         config: ReaderConfig,
     ) -> Self {
-        if path.as_os_str() == "-" {
-            Self::from_standard_input(file, config)
-        } else {
-            Self::from_file(file, config)
-        }
+        Self::from_stream(FastaStream::from_file(file), config)
     }
 }
 

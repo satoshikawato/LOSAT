@@ -119,6 +119,9 @@ pub(super) struct ReportView<'a> {
     pub(super) subject_accessions: &'a [Option<[Arc<[u8]>; 2]>],
     pub(super) subject_stitles: &'a [Arc<[u8]>],
     pub(super) hit_lists: &'a [Option<BlastpHitList>],
+    /// What the XML2 and JSON reports do at each subject's `Hit`, by rank
+    /// (`ListedTitles::hit_loads`, from `report_prep::prefetch_reported_subjects`).
+    pub(super) hit_loads: &'a crate::report::db_subject::HitLoads,
     pub(super) engine_counts: &'a EngineCounts,
     pub(super) pairwise_hits: &'a Option<Arc<Vec<PairwiseHit>>>,
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
@@ -354,6 +357,7 @@ pub(super) fn write_xml(
         subject_records,
         subject_titles,
         hit_lists,
+        hit_loads,
         pairwise_hits,
         filtered_empty,
         xml_matrix_failure,
@@ -493,7 +497,9 @@ pub(super) fn write_xml(
         Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
         crate::algorithm::common::database::TaxdbNotes,
     ) = match (xml2_kind, listed_titles.as_ref(), database) {
-        (Some(_), Some(titles), Some(database)) => titles.read_taxids(database, hit_lists)?,
+        (Some(_), Some(titles), Some(database)) => {
+            titles.read_taxids(database, hit_lists, hit_loads)?
+        }
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
     let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref(), database) {
@@ -510,6 +516,7 @@ pub(super) fn write_xml(
                 length: &database_length,
                 parsed: listed_parsed,
                 parsed_taxonomy: &xml_parsed_taxonomy,
+                loads: hit_loads,
             }
         }
         _ => crate::report::blast_xml::XmlSubjects::Records {
@@ -802,7 +809,7 @@ pub(super) fn write_pairwise(
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
-        matrix_name: args.matrix_name.clone(),
+        matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
         word_threshold: args.threshold,

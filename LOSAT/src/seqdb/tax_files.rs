@@ -1789,7 +1789,10 @@ mod tests {
 
         let linux = Platform::LINUX_X86_64;
         let platform = LmdbPlatform::LINUX_X86_64;
-        let dir = std::env::temp_dir().join(format!("losat-tax-files-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-tax-files-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 

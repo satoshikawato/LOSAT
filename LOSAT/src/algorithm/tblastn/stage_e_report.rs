@@ -1512,7 +1512,7 @@ fn write_pairwise(
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
-        matrix_name: matrix_name.to_string(),
+        matrix_name: Some(matrix_name.to_string()),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         word_threshold: scoring.threshold,
@@ -2066,7 +2066,7 @@ mod tests {
                     // No NCBI counterpart: test plumbing; the platform's temporary directory
                     // replaces the Unix-only "/tmp" that made a mismatch fail on Windows with
                     // "path not found" instead of reporting the byte difference.
-                    let path = std::env::temp_dir()
+                    let path = crate::utils::test_dir::temp_dir()
                         .join(format!("tblastn_stagee_mode{mode}_fmt{fmt}.actual"))
                         .display()
                         .to_string();

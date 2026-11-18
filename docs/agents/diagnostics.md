@@ -2492,15 +2492,16 @@ Rebuilding less:
   The loop after the list. Until 2026-11-02 three more strict-set switches, `LOSAT_X_BPFSEED`,
   `LOSAT_X_BPFSTAGE` and `LOSAT_X_BPFLEAN`, chose its form; they were folded into it (line SF S3, family
   bpf-seed-loop) and select nothing now: no variable is read, so `=0` and `=1` give the same run. What runs, in
-  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (every flat table, natively), a subject
+  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (every flat table), a subject
   where `XHitBf::fits` holds (`1 <= wordsize < window`, `0 <= diag_offset` and `diag_offset + length + 2 window <
   2^30`) runs `x_scan_flat_lean` if `XFlatCompressedLookup::x_pairs_fit` holds (a subject of a word or more, which
   keeps its sentinel, with the 15-letter alphabet and words of 2 to 6 letters), else `x_scan_flat_fseed_loop`; a
-  subject where `XHitBf::fits` fails runs `x_scan_flat_bf`, and wasm32 always runs `x_scan_flat_bf`. Only
+  subject where `XHitBf::fits` fails runs `x_scan_flat_bf` (wasm32 too since 2026-11-18; until then it ran
+  `x_scan_flat_bf` on every subject). Only
   `LOSAT_X_BPCLUTSCANBF=0` keeps the loop with the branch (`x_scan_flat_in::<false, _>`). With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints
   `[X_STATS] BPFLAT lean=N fseed=N bf=N branch=N` at exit when one of them is not zero: the subjects that
-  `x_scan_flat_lean` (a subject of a word or more), `x_scan_flat_fseed_loop` (natively, a subject shorter than a
-  word), `x_scan_flat_bf` (past `XHitBf::fits`, and every subject on wasm32) and the loop with the branch (only
+  `x_scan_flat_lean` (a subject of a word or more), `x_scan_flat_fseed_loop` (a subject shorter than a
+  word), `x_scan_flat_bf` (past `XHitBf::fits`) and the loop with the branch (only
   `=0`) scanned; `tests/blastp_fast_scan_bf.rs` reads it. `x_scan_flat_fseed_loop`
   gives each hit to blastp's branch-free two-hit test (`XHitBf::test`) first, a flag-1 entry or a candidate on to
   `x_test_hit`, and reads no diagonal entry ahead; `x_scan_flat_lean` makes the list two offsets per step in a loop
@@ -2513,9 +2514,14 @@ Rebuilding less:
   (workstation, node 0, `cycles:u`): the branch-free test x0.90-0.96 on dense tables (#472: OrthoFinder's 1/10 of the
   Arabidopsis proteins x the zebrafish proteome x0.901, UniRef50 volume 00 `-db` 3 proteins x0.957, 10 proteins
   x0.912), the staged loop with the list two offsets per step x0.80-0.95 (#543: 3 proteins x0.795, 10 proteins x0.895),
-  and the out-of-line steps and copy x0.98-0.99 and x0.82 on 3 proteins x UniRef50 (#551). WebAssembly keeps
-  `x_scan_flat_bf` because there both were slower (Node 26, serial WASI command, 3 rounds, 3 proteins x UniRef50: the
-  branch-free test x1.06-1.09, the staged loop x1.13-1.18).
+  and the out-of-line steps and copy x0.98-0.99 and x0.82 on 3 proteins x UniRef50 (#551). WebAssembly kept
+  `x_scan_flat_bf` until 2026-11-18 because there both had been slower (Node 26, serial WASI command, 3 rounds, 3
+  proteins x UniRef50: the branch-free test x1.06-1.09, the staged loop x1.13-1.18); measured again on dev 7d968922d
+  (Node 26.8.2, serial WASI command, rotating rounds in one process, a shared machine at load 35-81; blastp-fast `-evalue 0.001` against OrthoFinder's
+  species 6, 6,600 proteins, every report identical), the same loops as natively took x0.80 the time of the whole
+  search with 1,000 proteins of species 4 (15/15 rounds faster; 3.85 hits per listed cell), x0.78 with 3,000 (6/7)
+  and x0.89-0.95 with 1 to 100 proteins and one of 1,806 residues, with x0.91-1.02 the instructions of the compiled
+  code and x0.72 its mispredicted branches at 1,000 proteins (callgrind), so wasm32 takes them since then.
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled

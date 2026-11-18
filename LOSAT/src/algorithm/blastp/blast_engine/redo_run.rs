@@ -326,11 +326,6 @@ pub(super) struct RedoInputs<'a, P> {
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    pub(super) total_db_len: usize,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     pub(super) timing_enabled: bool,
 }
 
@@ -394,7 +389,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         args,
         subjects,
         blastp_num_threads,
-        total_db_len,
         ..
     } = *redo;
     #[cfg(all(
@@ -439,7 +433,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                 blastp_num_threads,
                 subjects.len(),
                 kappa_parallel_query_indices.len(),
-                total_db_len,
             )
     };
     #[cfg(any(
@@ -470,7 +463,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                 blastp_num_threads,
                 subjects.len(),
                 match_jobs,
-                total_db_len,
             ) {
                 Some(q_idx)
             } else {
@@ -528,7 +520,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                     &[]
                 },
             ),
-            total_db_len,
         );
     #[cfg(all(
         feature = "parallel",

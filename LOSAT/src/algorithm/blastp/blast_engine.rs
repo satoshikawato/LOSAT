@@ -1132,7 +1132,6 @@ fn blastp_should_parallelize_stage(
     effective_threads: usize,
     _subject_records: usize,
     worker_jobs: usize,
-    _total_subject_residues: usize,
 ) -> bool {
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1409-1475
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
@@ -1166,10 +1165,6 @@ fn blastp_should_parallelize_subject_prep(
         effective_threads,
         subject_records.len(),
         subject_records.len(),
-        subject_records
-            .iter()
-            .map(|record| record.seq().len())
-            .sum::<usize>(),
     )
 }
 
@@ -6717,19 +6712,16 @@ impl<'a> BlastpSubjectSource<'a> {
     }
 
     /// The number of sequences and of letters that the `Database:` lines of the reports
-    /// show: the real totals, also with `-dbsize`.
-    fn shown_totals(self) -> (usize, usize) {
+    /// show: the real totals, also with `-dbsize`, as NCBI's `Int8` (`PairwiseDatabase`).
+    fn shown_totals(self) -> (i64, i64) {
         match self {
             Self::Fasta(records) => (
-                records.len(),
-                records.iter().map(|record| record.seq().len()).sum(),
+                records.len() as i64,
+                records.iter().map(|record| record.seq().len() as i64).sum(),
             ),
             Self::Database(database) => {
                 let shown = database.pairwise_database();
-                (
-                    usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
-                    usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
-                )
+                (shown.num_sequences, shown.total_letters)
             }
         }
     }
@@ -9045,10 +9037,9 @@ fn write_reports_without_queries(
                     gapped_karlin: lookup_protein_params(&args.scoring),
                     gumbel: if !args.old_fsc {
                         Some(
-                            lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
-                                .context(
-                                    "missing NCBI gumbel parameters for supported blastp scoring",
-                                )?,
+                            lookup_protein_gumbel_params(&args.scoring, total_db_len).context(
+                                "missing NCBI gumbel parameters for supported blastp scoring",
+                            )?,
                         )
                     } else {
                         None
@@ -10827,7 +10818,7 @@ fn run_call(
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
     if contexts.iter().any(|ctx| ctx.is_valid)
         && crate::stats::setup::setup_subject_length(
-            total_db_len as i64,
+            total_db_len,
             num_subjects,
             (!args.old_fsc).then_some((cutoff_subject_length, false)),
         )
@@ -11082,11 +11073,6 @@ fn run_call(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             ))]
             blastp_num_threads,
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            total_db_len,
         },
         &process_subject,
         &process_own_subject,
@@ -11389,11 +11375,6 @@ fn run_call(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         blastp_num_threads,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        total_db_len,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -12603,6 +12584,68 @@ mod tests {
             psiblast_pssm: None,
             formatting: Default::default(),
             rps: None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-923
+    // ```c
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    //
+    //    if (seq_src) {
+    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    //       if (total_length <= 0)
+    //           total_length = BlastSeqSrcGetTotLen(seq_src);
+    //
+    //       /* Set the database length for new FSC */
+    //       if (sbp->gbp) {
+    //           Int8 dbl = total_length;
+    //           /* Override the database length or set one (e.g., blast2seq). */
+    //           if (eff_len_options->db_length) {
+    //               dbl = eff_len_options->db_length;
+    //           }
+    //           sbp->gbp->db_length =
+    //               (Blast_SubjectIsTranslated(program_number))?
+    //               dbl/3 : dbl;
+    //       }
+    // ```
+    // The call's extent holds a database total of 2^32 letters or more (an alias file's `LENGTH`
+    // over `tests/db_search/taxfilter/tfp`, rows db.cnt.l4295.bp.* and db.cnt.avg2p32.bp_c0) as
+    // NCBI's `Int8` on every target: the effective lengths and the Gumbel block read all of it.
+    #[test]
+    fn db_extent_holds_a_total_of_2_to_the_32_letters_or_more() {
+        let resolved = make_blastp_args().resolve().expect("resolved blastp args");
+        for (name, total) in [
+            ("l4295", 4_294_967_296_000_000_000),
+            ("l4294", 4_294_967_295_999_999_999),
+            ("avg2p32", 98_784_247_808),
+        ] {
+            assert!(total > i64::from(u32::MAX), "{name}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/dbcounts")
+                .join(name);
+            let database = database::BlastpDatabase::open(
+                path.to_str().unwrap(),
+                &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+                "BLASTP",
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            let extent = call_setup::db_extent(&resolved, Some(&database), &[])
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            assert_eq!(
+                (
+                    extent.total_db_len,
+                    extent.eff_db_length,
+                    extent.num_subjects
+                ),
+                (total, total, 23),
+                "{name}"
+            );
+            assert_eq!(
+                extent.gapped_gumbel.map(|gumbel| gumbel.db_length),
+                Some(total),
+                "{name}"
+            );
         }
     }
 

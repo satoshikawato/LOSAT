@@ -389,10 +389,12 @@ fn run_inner(
         write_run_error_archive(args, archive.as_ref(), &error);
         error
     };
+    // `-subject -` is `cin` (ncbiargs.cpp:717-721, quoted at `input_files::open_input`), the
+    // stream that `-query -` names too: one owner opens both (`open_input`).
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
         (None, Some(path)) => Some(
-            crate::blastinput::input_files::open_file_input(path, "subject")
+            crate::blastinput::input_files::open_input(path, "subject", program.upper)
                 .map_err(early_archive_error)?,
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -822,7 +824,21 @@ fn run_inner(
     if args.db.is_none() {
         query_stream.around = super::empty_rows::query_letters_around(&options, &subjects);
     }
-    if stream_is_empty(&mut query_stream) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-245
+    // ```c++
+    //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+    //     CRef<CBlastInput> input(new CBlastInput(fasta));
+    //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+    //     sequences = input->GetAllSeqs(*scope);
+    // ```
+    // With `-query -` and `-subject -` the subjects were read from `cin` to its end above: the
+    // stream has failed, its `tellg()` is negative, and the test above answers "not empty" even
+    // for a regular file as the standard input. No query batch is read then: outfmt 7 writes
+    // `# BLAST processed 0 queries`, never `Query is Empty!` (blastp's `shared_standard_input`,
+    // the same rule).
+    let shared_standard_input =
+        args.query.as_os_str() == "-" && subject_path.is_some_and(|path| path.as_os_str() == "-");
+    if !shared_standard_input && stream_is_empty(&mut query_stream) {
         stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
@@ -3299,7 +3315,7 @@ mod archive_error_tests {
             database_name: String::new(),
             database_num_sequences: 1,
             database_total_letters: 50_000,
-            matrix_name: "BLOSUM62".into(),
+            matrix_name: Some("BLOSUM62".into()),
             gap_open: 11,
             gap_extend: 1,
             word_threshold: 12.0,

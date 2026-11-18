@@ -67,7 +67,7 @@ from frozen_allowlist import Allowlist  # noqa: E402
 # db_search_manifest/psiblast.tsv; rpsblast's (line PS, PS11a) and rpstblastn's (PS12a) are rows of
 # db_search_manifest/rpsblast.tsv and rpstblastn.tsv.
 PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "rpsblast", "rpstblastn")
-FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")  # the programs of fasta_input_fixtures.py
+FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx")  # the programs of fasta_input_fixtures.py
 OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
 DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each, and row family files)
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
@@ -79,7 +79,7 @@ FAST_TBLASTX = frozenset({
     "p08_trcumjnv_mellatmjnv", "p12_lc738874_lc738875_default", "p13_mela_mje_reverse",
 })
 # A change to the FASTA-input reader (NCBI's CFastaReader port), its fixture script, manifests or
-# inputs selects all four programs (they share the reader).
+# inputs selects every program (they share the reader).
 FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
 PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast|rpstblastn)/")
 

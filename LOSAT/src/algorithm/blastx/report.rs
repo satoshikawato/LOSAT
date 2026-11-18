@@ -2382,7 +2382,7 @@ fn pairwise_metadata(
         database_name,
         database_num_sequences: num_sequences,
         database_total_letters: total,
-        matrix_name: options.matrix.clone(),
+        matrix_name: Some(options.matrix.clone()),
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
         word_threshold: 0.0,
@@ -2510,9 +2510,25 @@ pub(crate) fn write_epilog(
         return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     if options.pairwise_view().is_some() {
+        let mut report = pairwise_metadata(options, subjects, shown);
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:191-223
+        // ```c++
+        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+        // ...
+        //             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+        //             	results = local_search.Run();
+        // ...
+        //         formatter.PrintEpilog(opt);
+        // ```
+        // RPSTBLASTN's options name a matrix once a query batch's search has set it up
+        // (`CreateRpsStructures`; every batch holds a query): a run without a query batch has a
+        // null matrix name (`pairwise::write_matrix_line`).
+        if options.rpstblastn.is_some() && queries == 0 {
+            report.matrix_name = None;
+        }
         crate::report::pairwise::write_blastx_epilog(
             writer,
-            &pairwise_metadata(options, subjects, shown),
+            &report,
             &crate::report::pairwise::BlastxPairwiseOptions {
                 word_threshold: options.threshold,
                 gapped: options.gapped,

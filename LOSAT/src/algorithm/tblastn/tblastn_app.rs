@@ -306,7 +306,7 @@ impl TblastnArgs {
                     && args.strategy.is_none();
                 match subject_input {
                     Input::File(file) => read_subject_input(
-                        FastaInputSource::from_argument(&subject_path, file, config),
+                        FastaInputSource::from_file(file, config),
                         &args,
                         subject_range.as_ref(),
                         x_packed,
@@ -877,7 +877,7 @@ fn search_cli(
                     .subject
                     .as_deref()
                     .is_some_and(|path| path.as_os_str() == "-");
-            let mut source = FastaInputSource::from_argument(&args.query, query_file, config);
+            let mut source = FastaInputSource::from_file(query_file, config);
             source.set_id_scope(args.id_scope.clone());
             let empty = !shared_standard_input && source.stream_is_empty();
             (QuerySource::File(source), empty)

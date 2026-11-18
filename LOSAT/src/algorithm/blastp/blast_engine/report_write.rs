@@ -809,7 +809,7 @@ pub(super) fn write_pairwise(
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
-        matrix_name: args.matrix_name.clone(),
+        matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
         word_threshold: args.threshold,

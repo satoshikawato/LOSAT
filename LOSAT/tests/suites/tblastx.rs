@@ -62,6 +62,8 @@ mod tblastx_seed_compact;
 mod tblastx_seed_release;
 #[path = "../tblastx_seed_unmap.rs"]
 mod tblastx_seed_unmap;
+#[path = "../tblastx_short_subject.rs"]
+mod tblastx_short_subject;
 #[path = "../tblastx_store.rs"]
 mod tblastx_store;
 #[path = "../tblastx_subject_next.rs"]

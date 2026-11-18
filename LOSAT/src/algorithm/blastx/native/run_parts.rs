@@ -181,7 +181,7 @@ pub(super) struct SubjectRead<'a> {
     pub(super) args: &'a BlastxArgs,
     pub(super) settings: &'a ApplicationSettings,
     pub(super) id_scope: &'a Option<Arc<IdScope>>,
-    pub(super) subject_file: Option<std::fs::File>,
+    pub(super) subject_file: Option<crate::blastinput::input_files::InputFile>,
     pub(super) archive: &'a Option<ArchiveHandle>,
     pub(super) strategy: &'a Option<StrategyExport>,
     pub(super) stderr: &'a mut dyn Write,
@@ -356,7 +356,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             false,
-                            false,
+                            None,
                         )
                         .map_err(reported_error)?,
                     };

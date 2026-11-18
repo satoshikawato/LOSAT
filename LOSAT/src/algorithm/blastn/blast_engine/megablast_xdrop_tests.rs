@@ -22,9 +22,9 @@
 fn megablast_automatic_xdrop_preserves_oracle_scripts() {
     let input =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/NZ_CP006932.fasta");
-    let directory = std::env::temp_dir().join(format!(
+    let directory = crate::utils::test_dir::temp_dir().join(format!(
         "losat-megablast-xdrop-{}-{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

@@ -11,6 +11,9 @@
 //! start again at every batch. This file holds one test, so that no other test of its process
 //! reads the environment while it changes `BATCH_SIZE`.
 
+// integration tests run natively only (WASI has no `std::env::temp_dir()` or `std::process::id()`)
+#![allow(clippy::disallowed_methods)]
+
 mod run_local_support;
 
 use losat::api::{Outcome, Program};

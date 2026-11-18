@@ -2411,6 +2411,10 @@ mod tests {
     // plan. Its bytes are charged to the shared limit once (`keeps`, by the
     // first of them) and it is made once.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn x_subject_plan_is_made_and_charged_once_when_batches_race() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let subject = x_test_subject(9_000);
@@ -2466,6 +2470,10 @@ mod tests {
     // NCBI computes.
     // The whole stage: `x_scan_plan` from eight threads on one subject.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn x_scan_plans_of_racing_batches_share_one_subject_plan() {
         let subject = x_test_subject(30_000);
         let query: &[u8] = b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ";

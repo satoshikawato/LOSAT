@@ -287,10 +287,10 @@ impl TblastxDatabase {
     //             		x_SetTaxInfoAll(subject_bh, bdlRef);
     //             	}
     // ```
-    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence, by
-    /// rank (every rank is made from a hit, `reported_subjects`;
-    /// `algorithm::common::tabular::tabular_taxonomy`). A header that does not decode is
-    /// refused before the report.
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence that a
+    /// report loads (`ReportedSubjects::loads`), by rank (every rank is made from a hit,
+    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`). A header that does
+    /// not decode is refused before the report.
     pub(crate) fn tabular_taxonomy(
         &self,
         reported: &ReportedSubjects,
@@ -300,6 +300,7 @@ impl TblastxDatabase {
             &reported.ordinals,
             &reported.parsed,
             0..reported.ordinals.len(),
+            &reported.loads,
             PROGRAM,
         )
     }
@@ -535,22 +536,23 @@ pub(crate) fn batch_prefetch(
 /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
 /// whose reported hits are `before` (by ordinal id; `before_queries` queries, those of each batch
 /// `before_spans`), of the subjects that those reports load (`hit_loads` of the batches before
-/// alone, of `batches_prefetch`, the reports' own answer, with `writes_thrown`; review 2 of line
-/// DBID pfoff-1, N-M2), which TBLASTX writes after the stop (the XML formats are not streamed,
-/// `report_stream`).
+/// alone, of `batches_prefetch`, the reports' own answer, with `after` and the hits' engine
+/// `identities`, `hit_identities`; review 2 of line DBID pfoff-1, N-M2), which TBLASTX writes
+/// after the stop (the XML formats are not streamed, `report_stream`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
     before: &[TblastxHsp],
     before_queries: usize,
     before_spans: &[std::ops::Range<usize>],
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::RunThrow>,
+    identities: &dyn Fn(&TblastxHsp) -> usize,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
     let prefetch = batches_prefetch(before, before_queries, before_spans);
-    let loads = hit_loads(before, &prefetch, writes_thrown, titles);
+    let loads = hit_loads(before, &prefetch, after, titles, identities);
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
@@ -686,43 +688,108 @@ pub(crate) struct ReportedSubjects {
 /// What the XML2 and JSON reports of the reported hits `ordered` (in report order, subjects named
 /// by ordinal id) do at each subject's `Hit` (`HitLoads::of`, the one answer, by ordinal id):
 /// `prefetch` tells by the hits' query index whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `writes_thrown` whether every format writes a `Hit` that
-/// throws as NCBI does (`Xml2Kind::every`); the `Hit`s are those that `blast_xml` makes (the HSPs
-/// of each query, a subject's following each other).
+/// (`BatchPrefetch::reads_one_by_one`), `after` what the formats do after a subject whose lookup
+/// throws (`FormatThrow::of_outfmts`), `identities` the engine's identities of a hit
+/// (`hit_identities`), which tell whether a row of `nident` alone reads its subject; the `Hit`s
+/// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other).
 fn hit_loads(
     ordered: &[TblastxHsp],
     prefetch: &shared::BatchPrefetch,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::RunThrow>,
     titles: &DatabaseTitles,
+    identities: &dyn Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
+    let reports: Vec<&[TblastxHsp]> = ordered
+        .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx)
+        .collect();
     HitLoads::of(
-        writes_thrown,
-        ordered
-            .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx)
-            .map(|hits| {
-                (
-                    prefetch.reads_one_by_one(hits[0].hit.q_idx as usize),
-                    hits.iter()
-                        .map(|hsp| Some(hsp.hit.s_idx as usize))
-                        .collect(),
-                )
-            }),
-        |ordinal| match titles.get(&u32::try_from(ordinal).ok()?) {
-            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
-            _ => None,
-        },
+        after,
+        reports.iter().map(|hits| {
+            (
+                prefetch.reads_one_by_one(hits[0].hit.q_idx as usize),
+                hits.iter()
+                    .map(|hsp| Some(hsp.hit.s_idx as usize))
+                    .collect(),
+            )
+        }),
+        |ordinal| titled_parsed(titles, ordinal),
+        |report, hit| identities(&reports[report][hit]),
     )
 }
 
-/// Whether every format of the run, `outfmts` as `-outfmt` gives them, writes a `Hit` whose
-/// subject's lookup throws as NCBI does (`Xml2Kind::every`, for `hit_loads`): the stop of a batch's
-/// prefetch (`batch_prefetch_stop`) and the reports (`reported_subjects`) ask it of the run's
-/// formats alike (review 2 of line DBID pfoff-1, N-M2).
-pub(crate) fn writes_thrown<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> bool {
-    crate::report::blast_xml2::Xml2Kind::every(
-        outfmts
-            .into_iter()
-            .map(|outfmt| super::report::output_format(outfmt).xml2_kind()),
+/// The subject with parsed Seq-ids of the ordinal id `ordinal` in `titles`.
+fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubject> {
+    match titles.get(&u32::try_from(ordinal).ok()?) {
+        Some(ReportedHeader::Parsed(subject)) => Some(subject),
+        _ => None,
+    }
+}
+
+/// The engine's identities of the hit `hsp` (its subject named by ordinal id) of the query whose
+/// letters are `query` (`report::stored_engine_identities` against its subject's store in
+/// `stores`, which a report with `nident` reads): whether a row of `nident` alone reads its
+/// subject (`SubjectFetch::WithIdentities`). A report whose fields include `nident` reads the
+/// letters of its subjects (`tabular::reads_letters`: `nident` is one of its `ROW_FIELDS`), so
+/// the subjects that this is asked for have a store; one without a store would count as a subject
+/// whose rows read it (1), which ends the run where NCBI's `nident` reads it (review 3 of line
+/// DBID pfoff-2, L3).
+pub(crate) fn hit_identities(
+    stores: &ReportedStores,
+    hsp: &TblastxHsp,
+    query: &[u8],
+    query_code: &crate::utils::genetic_code::GeneticCode,
+    db_code: &crate::utils::genetic_code::GeneticCode,
+) -> usize {
+    stores.get(&hsp.hit.s_idx).map_or(1, |store| {
+        super::report::stored_engine_identities(
+            hsp,
+            store,
+            query,
+            query_code,
+            db_code,
+            &mut Vec::new(),
+        )
+    })
+}
+
+/// What the formats of the run, `outfmts` as `-outfmt` gives them, do after a subject whose lookup
+/// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads` and the
+/// run's `RunLoads`): the stop of a batch's prefetch (`batch_prefetch_stop`) and the reports
+/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2).
+pub(crate) fn after_throw<'a>(
+    outfmts: impl IntoIterator<Item = &'a str>,
+) -> Option<crate::report::db_subject::RunThrow> {
+    crate::report::db_subject::FormatThrow::of_outfmts(
+        outfmts,
+        crate::blastinput::app::Program::Tblastx,
+    )
+}
+
+/// What one query's report of the hits `ordered` (in report order) loads where its batch's
+/// prefetch is off (`RunLoads::loads` of that report alone, by ordinal id, after the reports
+/// before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its reads one
+/// by one (`run_impl`'s texts of a batch whose prefetch is off), not one whose load throws, nor
+/// one that no report reaches after it.
+pub(crate) fn report_loads(
+    run: &crate::report::db_subject::RunLoads,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    identities: impl Fn(&TblastxHsp) -> usize,
+) -> HitLoads {
+    // A subject's HSPs follow each other: one `Hit`.
+    let subjects: Vec<&[TblastxHsp]> = ordered
+        .chunk_by(|a, b| a.hit.s_idx == b.hit.s_idx)
+        .collect();
+    run.loads(
+        [(
+            true,
+            subjects
+                .iter()
+                .map(|hsps| Some(hsps[0].hit.s_idx as usize))
+                .collect(),
+        )],
+        |ordinal| titled_parsed(titles, ordinal),
+        |_, subject| subjects[subject].iter().map(&identities).max().unwrap_or(0),
     )
 }
 
@@ -773,8 +840,9 @@ fn batches_prefetch(
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
 /// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
-/// each batch `spans`; `writes_thrown`: every format writes a `Hit` that throws as NCBI does, for
-/// the one answer of what the reports load, `hit_loads`).
+/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws, for
+/// the one answer of what the reports load, `hit_loads`, with the hits' engine `identities`,
+/// `hit_identities`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
@@ -783,7 +851,8 @@ pub(crate) fn reported_subjects(
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::RunThrow>,
+    identities: &dyn Fn(&TblastxHsp) -> usize,
     queries: usize,
     spans: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
@@ -801,7 +870,7 @@ pub(crate) fn reported_subjects(
             .map(|hsp| (hsp.hit.q_idx as usize, hsp.hit.s_idx)),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
-    let loads = hit_loads(ordered, &prefetch, writes_thrown, titles);
+    let loads = hit_loads(ordered, &prefetch, after, titles, identities);
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -1052,9 +1121,9 @@ mod tests {
     // `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
     #[test]
     fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-tblastx-db-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1091,6 +1160,10 @@ mod tests {
     // tabular formats and outfmt 0, and two sequences whose Seq-align ids match (njoined, in two
     // volumes) refuse outfmt 0 only, read on one thread and on four.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_report_of_any_sequence_that_could_be_refused_is_found() {
         let open = |name: &str| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -1,0 +1,25 @@
+# TBLASTN 2.17.0+
+# Query: pfo_ft the longest ORF of multidb/na's ENST00000335295.4 (HBB)
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject id, evalue
+# 13 hits found
+pfo_ft	Unknown	1.14e-109
+pfo_ft	Unknown	8.85e-86
+pfo_ft	Unknown	6.74e-84
+pfo_ft	Unknown	1.73e-73
+pfo_ft	ENSDART00000053077.6	1.49e-58
+pfo_ft	ENSDART00000101713.5	1.50e-58
+pfo_ft	ENSDART00000066384.5	2.72e-51
+pfo_ft	ENSDART00000066384.5	7.56e-37
+pfo_ft	ENSTTEST0001.1	2.63e-36
+pfo_ft	ENSTTEST0001.1	2.63e-36
+pfo_ft	ENSTTEST0001.1	2.63e-36
+pfo_ft	ENSDART00000101709.5	3.21e-35
+pfo_ft	ENSDART00000125092.4	2.17e-34
+# TBLASTN 2.17.0+
+# Query: mix2_u the glob1 ORF of multidb/nnp
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject id, evalue
+# 1 hits found
+mix2_u	FBtr0083245	2.90e-113
+# BLAST processed 2 queries

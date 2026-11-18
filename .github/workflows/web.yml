@@ -110,7 +110,9 @@ jobs:
       # (2026-11-11 its DNS failed and jobs hung for hours; 2026-11-18 its mirror delivered
       # 50-100 kB/s and the install step timed out at 10, then at 25 minutes). The tag must be
       # @playwright/test's version in web/app/package.json: the "Playwright image matches" step.
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      # The digest pins the image as the actions here are pinned by SHA (the image that the green
+      # runs of 2026-11-18 pulled); a bump changes the tag and the digest together.
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
       # Playwright's CI advice for Chromium in a container: a shared IPC namespace, and an init
       # process that reaps the browsers' children.
       # Firefox's sandbox makes a user namespace, which Docker's default seccomp profile refuses
@@ -146,14 +148,18 @@ jobs:
         if: matrix.project == 'chromium'
       # The image's tag is the version of @playwright/test that `npm ci` installed (a bump of one
       # without the other fails here, not as a missing browser): the image holds the browsers of
-      # that version only.
+      # that version only. Its digest pins it (no tag alone). The one image of the file is checked
+      # here for both jobs (browser-engine runs under the same condition).
       - name: Playwright image matches @playwright/test
+        if: matrix.project == 'chromium'
         run: |
           want="v$(node -p "require('@playwright/test/package.json').version")-noble"
           images=$(grep -E '^ +image: mcr\.microsoft\.com/playwright:' ../../.github/workflows/web.yml | sed 's/.*playwright://')
           test -n "$images" || { echo "::error::no Playwright image in .github/workflows/web.yml"; exit 1; }
           for image in $images; do
-            [ "$image" = "$want" ] || { echo "::error::the container image is playwright:$image, but @playwright/test installs $want: change the tag in .github/workflows/web.yml"; exit 1; }
+            tag=${image%%@*}
+            [ "$tag" = "$want" ] || { echo "::error::the container image is playwright:$tag, but @playwright/test installs $want: change the tag and the digest in .github/workflows/web.yml"; exit 1; }
+            [ "$tag" != "$image" ] || { echo "::error::the container image playwright:$image has no @sha256 digest: pin it as the actions are pinned"; exit 1; }
           done
       - run: npm run e2e -- --project=${{ matrix.project }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -416,17 +422,6 @@ jobs:
           echo "LOSAT_WEB_NATIVE=$RUNNER_TEMP/native/losat" >> "$GITHUB_ENV"
           chmod +x "$RUNNER_TEMP/native/losat"
       - run: npm ci
-      # The image's tag is the version of @playwright/test that `npm ci` installed (a bump of one
-      # without the other fails here, not as a missing browser): the image holds the browsers of
-      # that version only.
-      - name: Playwright image matches @playwright/test
-        run: |
-          want="v$(node -p "require('@playwright/test/package.json').version")-noble"
-          images=$(grep -E '^ +image: mcr\.microsoft\.com/playwright:' ../../.github/workflows/web.yml | sed 's/.*playwright://')
-          test -n "$images" || { echo "::error::no Playwright image in .github/workflows/web.yml"; exit 1; }
-          for image in $images; do
-            [ "$image" = "$want" ] || { echo "::error::the container image is playwright:$image, but @playwright/test installs $want: change the tag in .github/workflows/web.yml"; exit 1; }
-          done
       # Every unit test that needs the reactors (about 90 s): engine-runtime (the RecordScanner
       # contract, inflation, describe), hsp-correspondence (the HSP records against every outfmt 0
       # fixture), engine-memory and window-masker. Until 2026-11-14 only engine-runtime ran here, and

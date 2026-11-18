@@ -352,11 +352,7 @@ pub fn split_query_batch(
                 let qstart = chunk_from as i64 - query_from as i64;
                 let qend = chunk_to as i64 - query_to as i64;
                 let from = qstart.max(0) as usize;
-                let to = if qend >= 0 {
-                    query_to - query_from
-                } else {
-                    chunk_to - query_from
-                } as usize;
+                let to = (if qend >= 0 { query_to } else { chunk_to } - query_from) as usize;
                 queries.push(ChunkQuery { query, from, to });
                 let (plus, minus) = strand.searched();
                 contexts.push(plus.then_some(2 * query));
@@ -1099,7 +1095,8 @@ mod tests {
     //             break;
     // ```
     // The chunk ranges in `size_t`, where a debug build's `usize` subtraction panicked
-    // ("attempt to subtract with overflow", the probes of item X-chunk, 2026-11-18):
+    // ("attempt to subtract with overflow", as BLASTP's `split_protein_batch` did before RG
+    // item X4):
     // CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200 make 310 letters 3 chunks of 2^64 / 3 or so, the
     // first of which covers the batch while the others keep NCBI's empty bounds (no query), and
     // 248 letters 2 chunks of 25 with a gap of 200 between them; CHUNK_SIZE=100

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.50
+- Version: 1.54
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -175,7 +175,17 @@
   refusal of 1.31 narrowed to the other formats and to the first row of a query's report with
   `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
   line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  numbered after 1.49)
+  numbered after 1.49);
+  1.54 2026-11-18 (BLASTN, line RG item X-chunk: a query chunk without a query stops the search of
+  a query batch at NCBI's step, `CQuerySplitter::Split`, before any chunk is set up and after the
+  reports of the query batches before, also when a negative `CHUNK_SIZE` above a negative
+  `OVERLAP_CHUNK_SIZE` makes its first range cover the batch (LOSAT refused that pair as the
+  gaps case, before the run's first byte), and in the formats that NCBI writes batch by batch but
+  LOSAT writes after the loop; the chunk ranges in NCBI's `size_t` arithmetic; exception 1 and the
+  rejection of a negative pair whose ranges leave gaps are unchanged; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.50 (line DBID item pfoff-2) and
+  1.51 to 1.53, which line RG items X-short-tbx, X4 and X-short-bat hold on their branches; the
+  first to merge takes the next free number and the others renumber)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -212,7 +222,10 @@ rule.
    overlap close to the chunk size), NCBI skips the chunk's lookup table and stops with a
    `CCoreException` (null pointer) that names its build's source files, exit 3
    (`split_query_aux_priv.cpp:190-201`, `blast_aux_priv.cpp:206-208`; only a debug build
-   asserts against it). LOSAT searches each chunk once. Evidence
+   asserts against it; at more than one thread NCBI logs the exception and goes on, exit 0,
+   without that chunk's hits; a chunk without a query stops NCBI earlier, at
+   `CQuerySplitter::Split`, at every thread count: the rejection below). LOSAT searches each
+   chunk once. Evidence
    `docs/evidence/losat_web_e2g/resplit/`: 42 configurations (3 queries of 30 to 60 kb,
    blastn and megablast, 7 chunk and overlap pairs); NCBI exit 3 in all; LOSAT's output
    equals NCBI's unsplit output in 35, and NCBI's output at the largest overlap that does
@@ -1066,7 +1079,10 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
-  wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise
+  wrap; NCBI stops in `CQuerySplitter::Split` (a null-pointer `CCoreException`, exit 3, after
+  the reports of the query batches before) where its first range covers the batch and the
+  others hold no query (a chunk without a query, below; version 1.54: the pair was refused before
+  the run's first byte, with a message that took it for exception 1's case), and otherwise
   searches chunk ranges with gaps between them (hits are lost). Version 1.1 (maintainer,
   2026-10-02): the second case, although NCBI's result is deterministic, stays an explicit
   rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
@@ -1075,10 +1091,17 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   variables and so does LOSAT (fixtures `env.negative_pair_*`).
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
-  query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
-  (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
-  `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
-  oracle cases, the reason holds in all).
+  query (an evened chunk size below the overlap, which wraps the start of the second range
+  past the queries' length, or the first range of a negative `CHUNK_SIZE` covering the
+  batch): NCBI's `CQuerySplitter::Split` makes the query factory of every chunk before any
+  chunk is set up and dereferences the missing query vector of such a chunk
+  (`split_query_cxx.cpp:234-249,876-880`, called at `prelim_stage.cpp:235`): a null-pointer
+  `CCoreException`, exit 3, at every thread count, before any chunk is set up and so before the
+  stop of exception 1; LOSAT rejects "a query chunk without a query", after the reports
+  of the query batches before, which it writes in every format as NCBI does (round-3
+  audit: 27 oracle cases, the reason holds in all; line RG item X-chunk: BLASTN `-db` and
+  `-subject`, the tasks blastn, megablast, dc-megablast and blastn-short, `-num_threads` 1
+  and 4).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb

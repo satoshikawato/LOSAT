@@ -133,6 +133,14 @@ FASTA files:
   (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
   `w11` followed by 21 A, searched in `-subject_loc` 1-11 and 1-12 (NCBI measures the range).
 
+- The database `xch_s` (rows `db.xc.*`, line RG item X-chunk; title `xch subjects`, `-blastdb_version 4`, made once with
+  NCBI BLAST+ 2.17.0 `makeblastdb`) is `LOSAT/tests/fasta/outfmt0/xch_s.fna`: `pa` (4000 random bases) and `pb` (1500).
+  `xch_<name>.fna` there are query pairs of pieces of `pa` (every 37th base changed) for BLASTN's `CHUNK_SIZE` and
+  `OVERLAP_CHUNK_SIZE` pairs that leave a query chunk without a query (`under`, `p95`, `neg`), leave gaps between the
+  chunks (`gaps`), split the second query into chunks that NCBI does not split again (`ctl`) or does (`again`); with
+  `BATCH_SIZE=1` the first query is the first query batch. Written by `make_xchunk_inputs.py` (its docstring has the
+  pairs).
+
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
   one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)

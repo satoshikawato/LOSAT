@@ -819,6 +819,50 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     reduced_cutoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
+    // EXPERIMENT (LOSAT_X_FNAPX, line FN s1 probe): the counted loops; `=0` the loops of dev.
+    if x_fnapx_on() {
+        extend_hit_ungapped_approx_counted(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            s_match_end,
+            subject_len,
+            x_dropoff,
+            score_table,
+            reduced_cutoff,
+            matrix,
+        )
+    } else {
+        extend_hit_ungapped_approx_loops(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            s_match_end,
+            subject_len,
+            x_dropoff,
+            score_table,
+            reduced_cutoff,
+            matrix,
+        )
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_FNAPX=0): dev's loops of `extend_hit_ungapped_approx_ncbi`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn extend_hit_ungapped_approx_loops(
+    q_seq: &[u8],        // BLASTNA (1 byte/base)
+    s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
+    q_off: usize,
+    s_off: usize,
+    s_match_end: usize,
+    subject_len: usize,
+    x_dropoff: i32,
+    score_table: &[i32; 256],
+    reduced_cutoff: i32,
+    matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
+) -> UngappedData {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
     // 913-917 and 1755-1759)
     // ```c
@@ -976,9 +1020,196 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
 // The approximate extension works on the concatenated query: its left loop is bounded by
 // the offset in the whole query, and the truncated `q_byte` reads the sentinel (0x0F) as
 // bases, so it runs into the previous context. The exact extension stops at the sentinel.
+/// EXPERIMENT (LOSAT_X_FNAPX): the switch, read once into a static (default on).
+#[inline(always)]
+fn x_fnapx_on() -> bool {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static STATE: AtomicU8 = AtomicU8::new(0);
+    match STATE.load(Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => {
+            let on = std::env::var("LOSAT_X_FNAPX")
+                .map(|v| v.trim() != "0")
+                .unwrap_or(true);
+            STATE.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_FNAPX, line FN s1 probe): `extend_hit_ungapped_approx_ncbi` with NCBI's
+/// loop counts as the only bounds (`len = MIN(q_ext, s_ext) / COMPRESSION_RATIO` on the left,
+/// `MIN(query->length - q_ext, subject->length - s_ext) / COMPRESSION_RATIO` on the right): within
+/// them `q_idx >= 4` and `s_idx >= 1` always hold on the left and every byte read is in its buffer,
+/// so the loops read through raw pointers without the per-block tests. The block's bytes, the
+/// table, the tests and the `i32` updates are the C ones, in the C order.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn extend_hit_ungapped_approx_counted(
+    q_seq: &[u8],
+    s_seq_packed: &[u8],
+    q_off: usize,
+    s_off: usize,
+    s_match_end: usize,
+    subject_len: usize,
+    x_dropoff: i32,
+    score_table: &[i32; 256],
+    reduced_cutoff: i32,
+    matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
+) -> UngappedData {
+    let x = x_dropoff.wrapping_neg();
+    let q_len = q_seq.len();
+    let len = (COMPRESSION_RATIO - (s_off % COMPRESSION_RATIO)) % COMPRESSION_RATIO;
+    let q_ext = q_off + len;
+    let s_ext = s_off + len;
+    let q = q_seq.as_ptr();
+    let s = s_seq_packed.as_ptr();
+    #[inline(always)]
+    fn block(q: *const u8) -> u8 {
+        // SAFETY: the callers pass four letters inside the query (the loop counts below).
+        let (a, b, c, d) = unsafe { (*q, *q.add(1), *q.add(2), *q.add(3)) };
+        (a << 6) | (b << 4) | (c << 2) | d
+    }
+
+    let left_len = q_ext.min(s_ext) / COMPRESSION_RATIO;
+    debug_assert!(4 * left_len <= q_ext && left_len <= s_ext / COMPRESSION_RATIO);
+    let mut score = 0i32;
+    let mut sum = 0i32;
+    let mut new_q = q_ext;
+    let mut i = 0usize;
+    while i < left_len {
+        // block i reads query q_ext - 4 (i + 1) .. q_ext - 4 i and subject byte s_ext / 4 - 1 - i
+        let qb = q_ext - 4 * (i + 1);
+        // SAFETY: i < left_len <= s_ext / 4, so the byte index s_ext / 4 - 1 - i is within the
+        // packed subject; qb >= q_ext - 4 * left_len >= 0 and qb + 3 < q_ext <= q_len.
+        let s_byte = unsafe { *s.add(s_ext / COMPRESSION_RATIO - 1 - i) };
+        let q_byte = block(unsafe { q.add(qb) });
+        sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
+        if sum > 0 {
+            new_q = qb;
+            score = score.wrapping_add(sum);
+            sum = 0;
+        }
+        if sum < x {
+            break;
+        }
+        i += 1;
+    }
+    let q_start = new_q;
+    let s_start = s_ext - (q_ext - q_start);
+
+    let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
+    debug_assert!(q_ext + 4 * right_len <= q_len);
+    debug_assert!(s_ext / COMPRESSION_RATIO + right_len <= s_seq_packed.len());
+    sum = 0;
+    let mut new_q = q_ext as isize;
+    let mut i = 0usize;
+    while i < right_len {
+        let qb = q_ext + 4 * i;
+        // SAFETY: qb + 3 < q_ext + 4 * right_len <= q_len, and the byte index s_ext / 4 + i is below
+        // (s_ext + 4 * right_len) / 4 <= subject_len / 4 <= the packed length.
+        let s_byte = unsafe { *s.add(s_ext / COMPRESSION_RATIO + i) };
+        let q_byte = block(unsafe { q.add(qb) });
+        sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
+        if sum > 0 {
+            new_q = (qb + 3) as isize;
+            score = score.wrapping_add(sum);
+            sum = 0;
+        }
+        if sum < x {
+            break;
+        }
+        i += 1;
+    }
+
+    if score >= reduced_cutoff {
+        return extend_hit_ungapped_exact_ncbi(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            subject_len,
+            x_dropoff,
+            matrix,
+        );
+    }
+
+    let s_match_len = s_match_end.saturating_sub(s_start);
+    let right_len = if new_q >= q_start as isize {
+        (new_q - q_start as isize + 1) as usize
+    } else {
+        0
+    };
+    let length = s_match_len.max(right_len);
+
+    UngappedData {
+        q_start,
+        s_start,
+        length,
+        score,
+    }
+}
+
 #[cfg(test)]
 mod approx_context_tests {
     use super::{build_nucl_score_table, extend_hit_ungapped_approx_ncbi};
+
+    /// EXPERIMENT (LOSAT_X_FNAPX): the counted loops give dev's loops' four results at every hit of
+    /// random queries (contexts between sentinels, ambiguity codes) against random packed subjects,
+    /// at three X-drops and three reduced cutoffs.
+    #[test]
+    fn x_fnapx_counted_loops_match_the_loops_of_dev() {
+        use super::{extend_hit_ungapped_approx_counted, extend_hit_ungapped_approx_loops};
+        let matrix = crate::algorithm::blastn::alignment::build_blastna_matrix(1, -2);
+        let score_table = build_nucl_score_table(1, -2);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut calls = 0usize;
+        for _round in 0..40 {
+            let mut query = Vec::new();
+            while query.len() < 120 {
+                let len = 1 + (next() % 50) as usize;
+                for _ in 0..len {
+                    let r = next() % 64;
+                    query.push(if r == 0 { 14 } else { (r % 4) as u8 });
+                }
+                query.push(15);
+            }
+            let subject_len = 1 + (next() % 160) as usize;
+            let packed: Vec<u8> = (0..subject_len.div_ceil(4)).map(|_| next() as u8).collect();
+            for q_off in 0..query.len().saturating_sub(4) {
+                for s_off in 0..subject_len.saturating_sub(4) {
+                    let s_match_end = (s_off + 4).min(subject_len);
+                    for x_dropoff in [5, 16, 40] {
+                        for reduced_cutoff in [3, 12, i32::MAX] {
+                            let len = (4 - s_off % 4) % 4;
+                            if q_off + len > query.len() {
+                                continue;
+                            }
+                            let key = |u: super::UngappedData| (u.q_start, u.s_start, u.length, u.score);
+                            let a = extend_hit_ungapped_approx_loops(
+                                &query, &packed, q_off, s_off, s_match_end, subject_len, x_dropoff,
+                                &score_table, reduced_cutoff, &matrix,
+                            );
+                            let b = extend_hit_ungapped_approx_counted(
+                                &query, &packed, q_off, s_off, s_match_end, subject_len, x_dropoff,
+                                &score_table, reduced_cutoff, &matrix,
+                            );
+                            assert_eq!(key(a), key(b), "{q_off} {s_off} {x_dropoff} {reduced_cutoff}");
+                            calls += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(calls > 100_000, "{calls}");
+    }
     use crate::algorithm::blastn::alignment::build_blastna_matrix;
 
     fn blastna(text: &str) -> Vec<u8> {

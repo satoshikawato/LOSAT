@@ -5,7 +5,7 @@ The rows cover how NCBI reads the FASTA files of -query and -subject (comparison
 deflines, sequence lines, line ends, text before the first defline, empty records, standard
 input, query batches (BATCH_SIZE), -lcase_masking, for BLASTN (megablast, blastn, dc-megablast,
 blastn-short), TBLASTX, TBLASTN (protein query, nucleotide subject) and BLASTP, with outfmt 0, 6
-and 7 and, on a core subset, -num_threads 2 and 4. Rows of kind `losat-rejection` (first lines
+and 7 and, on a core subset, -num_threads 2 and 4; and BLASTX's query and subject from standard input. Rows of kind `losat-rejection` (first lines
 that NCBI would parse as a Seq-id and fetch over the network) are never run on NCBI: LOSAT rejects
 them explicitly (AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by
 LOSAT's <PROGRAM>"). The expectation of such a row is that
@@ -809,6 +809,38 @@ def extra_rows() -> list[Row]:
                     note="the pushback quirk depends on how the bytes arrive (file window, pipe)")
                 add(f"stdin_s_def_utf8_{mode}", program, task, q, "-",
                     stdin=f"{mode}:{variant_file('def_utf8', 's', 'nuc')}", fmts=(6, 0))
+    # BLASTX (whose query stream RPSTBLASTN's search reads too) reads standard input as the programs
+    # above, NCBI's `cin` (one rule for `-` in LOSAT: fasta_reader::stream::InputBackend::of): the
+    # lost_g55 tail is kept from a pipe and from a redirected file, and lost from the path.
+    s_prot = "@/base.s.prot.faa"
+    g55 = variant_file("eol_lost_g55", "q", "nuc")
+    for mode in ("pipe", "file"):
+        add(f"stdin_q_lost_g55_{mode}", "blastx", "", "-", s_prot, stdin=f"{mode}:{g55}", fmts=(6, 0),
+            note="cin keeps the tail that the file named by its path loses")
+    add("eol_lost_g55.q", "blastx", "", g55, s_prot, fmts=(6, 0), note="the same bytes named by their path")
+    add("stdin_q_pipe", "blastx", "", "-", s_prot, stdin="pipe:@/base.q.nuc.fa", fmts=(6, 0))
+    add("stdin_q_file", "blastx", "", "-", s_prot, stdin="file:@/base.q.nuc.fa", fmts=(6, 0))
+    add("stdin_q_empty_pipe", "blastx", "", "-", s_prot, stdin="empty", note="an empty pipe is not an empty query")
+    # `-subject -` (one owner opens it, input_files::open_input), and both from standard input: the
+    # subjects read `cin` to its end, the query then reads nothing (no query, no 'Query is Empty!').
+    q_nuc = "@/base.q.nuc.fa"
+    add("stdin_s_pipe", "blastx", "", q_nuc, "-", stdin=f"pipe:{s_prot}")
+    add("stdin_s_file", "blastx", "", q_nuc, "-", stdin=f"file:{s_prot}")
+    add("stdin_qs_pipe", "blastx", "", "-", "-", stdin=f"pipe:{s_prot}",
+        note="the subject reads standard input to its end; the query then sees EOF (no query, no 'Query is Empty!')")
+    add("stdin_qs_file", "blastx", "", "-", "-", stdin=f"file:{s_prot}", fmts=(6, 0, 7))
+    add("stdin_qs_omitted", "blastx", "", "", "-", stdin=f"pipe:{s_prot}", fmts=(6, 7))
+    add("stdin_s_empty_pipe", "blastx", "", q_nuc, "-", stdin="empty", fmts=(6, 0))
+    add("stdin_s_devnull", "blastx", "", q_nuc, "-", stdin="file:/dev/null", fmts=(6,))
+    add("stdin_qs_empty_pipe", "blastx", "", "-", "-", stdin="empty", fmts=(6, 7))
+    add("stdin_s_ws_pipe", "blastx", "", q_nuc, "-", stdin="pipe:@/file_ws_only.s.prot.faa", fmts=(6, 0))
+    add("stdin_s_def_utf8_pipe", "blastx", "", q_nuc, "-", stdin="pipe:@/def_utf8.s.prot.faa", fmts=(6, 0))
+    for mode in ("pipe", "file"):
+        add(f"stdin_s_lost_g55_{mode}", "blastx", "", q_nuc, "-",
+            stdin=f"{mode}:{variant_file('eol_lost_g55', 's', 'nuc')}", fmts=(6, 0),
+            note="the subject's reader refills from cin as the query's does")
+    add("eol_lost_g55.s", "blastx", "", q_nuc, variant_file("eol_lost_g55", "s", "nuc"), fmts=(6, 0),
+        note="the same bytes named by their path")
     # lost_g55 as plain files, to compare with standard input
     # files that are not files
     for program, task in ALL_PROGRAMS:

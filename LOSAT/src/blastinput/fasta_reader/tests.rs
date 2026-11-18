@@ -987,9 +987,9 @@ fn window_boundary_input(window: usize, offset: usize, tail: usize, end: &[u8]) 
 // the reader with its bulk paths off (one byte at a time).
 #[test]
 fn bytes_read_as_a_file_with_the_same_bytes() {
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-bytes-vs-file-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let configs = [
         ReaderConfig::query("BLASTN", false, false),
@@ -1257,9 +1257,9 @@ fn read_subjects_reader_errors_end_the_program() {
 // either fails (empty) or the position is restored).
 #[test]
 fn stream_is_empty_reads_files_and_never_pipes() {
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-stream-is-empty-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let config = ReaderConfig::query("BLASTN", false, false);
     for (bytes, empty) in [
@@ -1306,13 +1306,13 @@ fn stream_is_empty_reads_files_and_never_pipes() {
 fn standard_input_refills_one_byte_and_keeps_the_tail() {
     let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
     let kept = b"TCTTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCCTTTTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGCACGTACGTACGTACGTACGTACGTACGTAC";
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-standard-input-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     std::fs::write(&path, text).unwrap();
     let config = ReaderConfig::query("BLASTN", false, false);
-    let read_source = |mut source: FastaInputSource<std::fs::File>| {
+    let read_source = |mut source: FastaInputSource<crate::blastinput::input_files::InputFile>| {
         let mut messages = Vec::new();
         let records = read_all(&mut source, &mut |message: &[u8]| {
             messages.extend_from_slice(message);
@@ -1327,8 +1327,10 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
     ));
     assert_eq!(records[0].sequence.len(), 85);
     assert_eq!(hyphen_lines(&messages), vec![2, 3]);
-    let (records, messages) = read_source(FastaInputSource::from_standard_input(
-        std::fs::File::open(&path).unwrap(),
+    let (records, messages) = read_source(FastaInputSource::from_file(
+        crate::blastinput::input_files::InputFile::as_standard_input(
+            std::fs::File::open(&path).unwrap(),
+        ),
         config,
     ));
     assert_eq!(records[0].sequence, kept);
@@ -1341,7 +1343,10 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
         std::io::Write::write_all(&mut writer, text).unwrap();
         drop(writer);
         let file = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
-        let (records, _) = read_source(FastaInputSource::from_standard_input(file, config));
+        let (records, _) = read_source(FastaInputSource::from_file(
+            crate::blastinput::input_files::InputFile::as_standard_input(file),
+            config,
+        ));
         assert_eq!(records[0].sequence, kept);
     }
 }

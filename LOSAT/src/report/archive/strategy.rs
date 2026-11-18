@@ -252,15 +252,22 @@ fn is_same_as_output(file: &std::fs::File, _path: &Path, out: Option<&Path>) -> 
             .is_ok_and(|fd| same(std::fs::File::from(fd).metadata()))
 }
 
+/// Where there are no inode numbers (Windows, WASI): the strategy file and `-out` (which must
+/// exist, as above) have the same path form (`utils::same_file`). The standard output is not
+/// asked about here.
+///
+/// No NCBI counterpart: NCBI never asks whether its strategy file is its `-out` file (see
+/// `create_strategy_file`).
 #[cfg(not(unix))]
 fn is_same_as_output(_file: &std::fs::File, path: &Path, out: Option<&Path>) -> bool {
-    let (Some(out), Ok(own)) = (
+    use crate::utils::same_file::path_identity;
+    let (Some(out), Some(own)) = (
         out.filter(|out| out.as_os_str() != "-"),
-        std::fs::canonicalize(path),
+        path_identity(path),
     ) else {
         return false;
     };
-    std::fs::canonicalize(out).is_ok_and(|out| out == own)
+    path_identity(out) == Some(own)
 }
 
 /// The arguments that make the `HitlistSize` option of a run's requests besides its format
@@ -1219,7 +1226,10 @@ mod tests {
     /// argument error.
     #[test]
     fn the_file_is_created_or_refused() {
-        let dir = std::env::temp_dir().join(format!("losat-strategy-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-strategy-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.asn");
         std::fs::write(&path, b"old").unwrap();

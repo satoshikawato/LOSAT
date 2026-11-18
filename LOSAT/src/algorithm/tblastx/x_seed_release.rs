@@ -471,6 +471,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(panic = "abort", ignore = "catches a panic: the build aborts on panic")]
     fn a_stage_dropped_by_a_panic_counts() {
         let (state, drops) = new_state(1);
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -59,8 +59,21 @@ pub struct StatFile {
 /// ```
 pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
     let name = path.to_string_lossy().into_owned();
-    let mut file = File::open(path).map_err(|_| WinMaskError::Open { name })?;
+    let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
     discover(&mut file)
+}
+
+/// The counts file `path` opened by name.
+///
+/// No NCBI counterpart: `CNcbiIfstream( "" )` and POSIX `open( "" )` fail (ENOENT) on every
+/// platform NCBI runs on, which is what the empty name of a `-window_masker_taxid` run without a
+/// counts file must give; WASI's `path_open` takes the empty path as the preopened directory
+/// and succeeds, so the empty name is "not found" here on every target.
+fn open_named(path: &Path) -> std::io::Result<File> {
+    if path.as_os_str().is_empty() {
+        return Err(std::io::ErrorKind::NotFound.into());
+    }
+    File::open(path)
 }
 
 /// `discover_stat_type` on an opened file or an in-memory copy of one (LOSAT Web's counts files,
@@ -517,7 +530,7 @@ impl UnitCounts {
     /// -1, `seq_masker.hpp:178-181`).
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
         let name = path.to_string_lossy().into_owned();
-        let mut file = File::open(path).map_err(|_| WinMaskError::Open { name })?;
+        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
         Self::read(&mut file, params)
     }
 

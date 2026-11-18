@@ -750,9 +750,9 @@ mod tests {
     }
 
     fn file_of(bytes: &[u8], tag: &str) -> (std::path::PathBuf, File) {
-        let path = std::env::temp_dir().join(format!(
+        let path = crate::utils::test_dir::temp_dir().join(format!(
             "losat_qscanpar_{}_{tag}_{:?}.fa",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         let mut file = File::create(&path).expect("create the test file");

@@ -767,6 +767,10 @@ fn giim_handles_live_as_ncbis_object_manager_keeps_them() {
 /// alignment of 50,000 nested `disc` sets are indexed on a thread of 256 KiB, as on the main
 /// thread of every target (the Seq-table's data: `table_tests`).
 #[test]
+#[cfg_attr(
+    all(target_os = "wasi", not(target_feature = "atomics")),
+    ignore = "needs threads: wasm32-wasip1 has none"
+)]
 fn nests_of_any_depth_are_walked_without_recursion() {
     std::thread::Builder::new()
         .stack_size(256 << 10)

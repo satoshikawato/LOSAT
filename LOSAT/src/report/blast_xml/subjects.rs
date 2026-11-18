@@ -551,9 +551,12 @@ mod tests {
         let parsed = vec![Some(Arc::new(thrown)), found("AAA00002"), found("AAA00003")];
         // One report read one by one: rank 1, then rank 0 (whose lookup throws), then rank 2.
         let loads = HitLoads::of(
-            true,
+            Some(crate::report::db_subject::RunThrow::every_row(
+                crate::report::db_subject::AfterThrow::EndsReport,
+            )),
             [(true, vec![Some(1), Some(0), Some(2)])],
             |rank: usize| parsed[rank].as_deref(),
+            |_, _| 0,
         );
         let titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"t"[..]); 3];
         let subjects = XmlSubjects::Database {
@@ -591,9 +594,12 @@ mod tests {
             Ok(HitNames::Unread)
         ));
         // Where the run writes another format, every subject is loaded and named.
-        let every = HitLoads::of(false, [(true, vec![Some(0), Some(2)])], |rank: usize| {
-            parsed[rank].as_deref()
-        });
+        let every = HitLoads::of(
+            None,
+            [(true, vec![Some(0), Some(2)])],
+            |rank: usize| parsed[rank].as_deref(),
+            |_, _| 0,
+        );
         assert!(matches!(
             HitNames::of(&every, 0, || subjects.names(0, "BLASTP")),
             Ok(HitNames::Names(_))

@@ -1,0 +1,25 @@
+# TBLASTX 2.17.0+
+# Query: pfo_f the letters of multidb/na's ENST00000335295.4 (HBB)
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject id, evalue
+# 13 hits found
+pfo_f	Unknown	8.84e-148
+pfo_f	Unknown	2.39e-82
+pfo_f	Unknown	1.22e-79
+pfo_f	Unknown	4.01e-78
+pfo_f	ENSDART00000053077.6	1.32e-52
+pfo_f	ENSDART00000101713.5	8.16e-47
+pfo_f	ENSDART00000066384.5	1.13e-46
+pfo_f	ENSDART00000101709.5	1.26e-30
+pfo_f	ENSTTEST0001.1	8.83e-30
+pfo_f	ENSTTEST0001.1	8.83e-30
+pfo_f	ENSTTEST0001.1	8.83e-30
+pfo_f	ENSTTEST0001.1	3.96e-29
+pfo_f	ENSDART00000125092.4	3.55e-28
+# TBLASTX 2.17.0+
+# Query: mix2_u glob1 of multidb/nnp (no accession table)
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject id, evalue
+# 1 hits found
+mix2_u	FBtr0083245	0.0
+# BLAST processed 2 queries

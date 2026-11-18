@@ -1765,7 +1765,10 @@ mod tests {
 
     #[test]
     fn batch_lines_split_in_two() {
-        let dir = std::env::temp_dir().join(format!("losat_bdc_batch_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_bdc_batch_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("b.txt");
         std::fs::write(

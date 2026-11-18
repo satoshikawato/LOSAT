@@ -88,7 +88,10 @@ mod tests {
     // directory named `wmasker.obinary` was no file (the "could not open" error).
     #[test]
     fn the_file_is_found_under_the_decimal_taxid() {
-        let dir = std::env::temp_dir().join(format!("losat-winmask-taxid-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-winmask-taxid-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         for sub in ["7227", "-1", "9606/wmasker.obinary"] {
             std::fs::create_dir_all(dir.join(sub)).unwrap();

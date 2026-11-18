@@ -734,7 +734,10 @@ fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
 
 /// A directory of its own for a test's files.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-pssm-{}-{name}", std::process::id()));
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-pssm-{}-{name}",
+        crate::utils::test_dir::process_id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

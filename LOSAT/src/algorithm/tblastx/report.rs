@@ -1527,6 +1527,7 @@ pub(crate) fn write_tabular<W: Write>(
     database: &str,
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    loads: &crate::report::db_subject::HitLoads,
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1551,7 +1552,14 @@ pub(crate) fn write_tabular<W: Write>(
             )?;
         }
         let mut previous: Option<u32> = None;
+        // The query's formatter is new: its rows keep no subject before the first one that
+        // loads it (`TabularRows`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for &(hsp_index, hsp) in query_hits {
+            // The subject's load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
+            // (`TabularRows::write_thrown_default`).
+            let thrown = loads.thrown(hsp.hit.s_idx as usize).is_some();
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -1561,7 +1569,7 @@ pub(crate) fn write_tabular<W: Write>(
             // (`QueryWarnings::subject_read`; a subject's HSPs follow each other).
             if previous != Some(hsp.hit.s_idx) {
                 previous = Some(hsp.hit.s_idx);
-                if let Some(warnings) = warnings.as_deref_mut() {
+                if let (Some(warnings), false) = (warnings.as_deref_mut(), thrown) {
                     warnings.subject_read(q_idx, hsp.hit.s_idx, &mut *writer)?;
                 }
             }
@@ -1570,7 +1578,22 @@ pub(crate) fn write_tabular<W: Write>(
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
-            write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
+            if thrown {
+                let query_id = query_ids
+                    .get(hsp.hit.q_idx as usize)
+                    .map_or(&b""[..], |id| id.as_ref());
+                rows.write_thrown_default(
+                    writer,
+                    query_id,
+                    |kept| crate::algorithm::common::tabular::printed_id(subject_ids, kept),
+                    hsp.hit.e_value,
+                    hsp.hit.bit_score,
+                    &config,
+                )?;
+            } else {
+                rows.found(hsp.hit.s_idx as usize);
+                write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
+            }
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.end(hsp_index);
@@ -1714,14 +1737,6 @@ impl TblastxOutputFormat {
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
-    }
-
-    /// The document form of an XML2 or JSON format (13 to 16); `None` for the others.
-    pub(crate) fn xml2_kind(self) -> Option<crate::report::blast_xml2::Xml2Kind> {
-        match self {
-            Self::Xml2(kind) => Some(kind),
-            _ => None,
-        }
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which

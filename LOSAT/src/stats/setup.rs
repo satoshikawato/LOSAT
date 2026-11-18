@@ -388,8 +388,8 @@ impl SubjectSpaceOverflow {
 //         new_msg->message = strdup("The average subject length is too short");
 // ```
 /// NCBI's error of a setup whose `min_subject_length` is 0 (`setup_subject_length`): the one
-/// text of blastp's, psiblast's, rpsblast's, rpstblastn's, blastx's and tblastn's error (review C
-/// of line RG D1a-4, N1; review D, N1).
+/// text of blastp's, psiblast's, rpsblast's, rpstblastn's, blastx's, tblastn's, blastn's and
+/// tblastx's error (review C of line RG D1a-4, N1; reviews D and E, N1).
 pub(crate) const SUBJECT_LENGTH_TOO_SHORT: &str = "The average subject length is too short";
 
 // `min_subject_length` is a `Uint4`, so `<= 0` is `== 0`: a negative quotient (a negative

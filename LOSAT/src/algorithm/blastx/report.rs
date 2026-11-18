@@ -1381,8 +1381,9 @@ fn check_failed_lookups(
     for batch in batches {
         crate::report::tabular::check_failed_lookups(
             options.tabular,
-            batch.queries.iter().enumerate().map(|(qidx, lists)| {
-                lists[..lists.len().min(batch.shown_lists(qidx, options))]
+            (0..batch.queries.len()).map(|qidx| {
+                batch
+                    .shown_lists(qidx, options)
                     .iter()
                     .filter(|list| {
                         list.hsps
@@ -1539,9 +1540,9 @@ pub(super) fn render_queries_with(
     //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
     //         }
     // ```
-    // The Seq-annot of each query with alignments (outfmt 8, 12); the structured report
-    // returns before the query's warnings (blast_format.cpp:1431-1452,
-    // `ReportFormat::writes_query_warnings`).
+    // The Seq-annot of each query with alignments (outfmt 8, 9 and 12), of the lists that
+    // `PruneSeqalign` keeps (`BatchResults::shown_lists`); the structured report returns before
+    // the query's warnings (blast_format.cpp:1431-1452, `ReportFormat::writes_query_warnings`).
     if let Some(serial) =
         crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
             .and_then(crate::report::serial::SerialFormat::of)
@@ -1556,14 +1557,7 @@ pub(super) fn render_queries_with(
             },
         };
         return super::seqalign::write_blastx_seqalign(
-            serial,
-            writer,
-            stderr,
-            options.gapped,
-            queries,
-            subjects,
-            &names,
-            batches,
+            serial, writer, stderr, options, queries, subjects, &names, batches,
         );
     }
     // The tabular reports with a field list or a delimiter, and outfmt 10 and 20: the shared
@@ -1732,7 +1726,7 @@ pub(super) fn render_queries_with(
                     }
                 }
                 // Several volumes: the merged lists cut once per query (`BatchResults::shown_lists`).
-                let listed = &lists[..lists.len().min(batch.shown_lists(qidx, options))];
+                let listed = batch.shown_lists(qidx, options);
                 for list in listed {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {

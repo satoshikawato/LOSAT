@@ -509,12 +509,14 @@ impl ReportedSubjects {
     /// one by one (`shared::ParsedShown::one_by_one`). `cut`: the formatter's cut of each query's
     /// lists to the hit list size where RPSTBLASTN merges several volumes
     /// (`ResolvedOptions::shown_lists`; `usize::MAX` for every other search), which counts
-    /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`; the XML
-    /// reports, which NCBI writes before that cut, read every list). `writes_thrown`: every report
-    /// is outfmt 13 to 16, which write a lookup that throws there as NCBI does (`HitLoads::of`:
-    /// where `one_by_one`, a report loads the subjects of its `Hit`s before the first whose lookup
-    /// throws, and none after it; the refusals, the names, the taxonomy reads and the run's record
-    /// of the loads, `note_loaded`, take that one answer).
+    /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`, which
+    /// every report that NCBI cuts reads, `ResolvedOptions::shown_lists`: BLAST XML, XML2 and
+    /// JSON too, whose `Hit`s `HitLoads` reads from the same lists, `BatchResults::cut_lists`).
+    /// `writes_thrown`: every report is outfmt 13 to 16, which write a lookup that throws there
+    /// as NCBI does (`HitLoads::of`: where `one_by_one`, a report loads the subjects of its
+    /// `Hit`s before the first whose lookup throws, and none after it; the refusals, the names,
+    /// the taxonomy reads and the run's record of the loads, `note_loaded`, take that one
+    /// answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -599,14 +601,15 @@ impl ReportedSubjects {
         }
         // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
-        // of each query, `report::reported`).
+        // of each query that the cut above keeps, `report::reported`).
         let loads = HitLoads::of(
             writes_thrown,
             batches.iter().flat_map(|batch| {
-                batch.queries.iter().map(|lists| {
+                (0..batch.queries.len()).map(|qidx| {
                     (
                         one_by_one,
-                        lists
+                        batch
+                            .cut_lists(qidx, cut)
                             .iter()
                             .map(|list| super::report::reported(list, gapped).then_some(list.oid))
                             .collect(),

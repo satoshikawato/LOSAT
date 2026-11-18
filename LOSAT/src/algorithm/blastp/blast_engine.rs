@@ -8239,11 +8239,7 @@ fn x_query_block_plan(
         // SF1).
         BlastpSubjectSource::Database(database) => {
             if database.num_sequences() == 0
-                || call_setup::setup_count_refused(
-                    args,
-                    Some(database),
-                    database.statistics_num_sequences(),
-                )
+                || call_setup::setup_count_refused(args, database.statistics_num_sequences())
             {
                 return None;
             }
@@ -10762,7 +10758,7 @@ fn run_call(
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if call_setup::setup_fails(&args, database, &extent, &contexts)? {
+    if call_setup::setup_fails(&args, &extent, &contexts)? {
         return Err(preliminary_search_error(
             &args,
             query_records,
@@ -14828,6 +14824,68 @@ mod tests {
         }
         assert!(!BlastpReports::prelim_only(true).x_plan_blocks);
         assert!(!BlastpReports::prelim_only(false).x_plan_blocks);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): a database search without the Gumbel block (`-searchsp`,
+    // `OLD_FSC`) keeps its block plan where the setup counts its sequences, and has none where the
+    // count is 0 (`call_setup::setup_count_refused`): that search refuses in the call of all
+    // queries, before any output (review E of line RG D1a-4, N3; the bytes are the rows'
+    // `db.ak.bp.rej.nseq0.oldfsc.blocks` and `db.ak.bp.nseq0.ssp.allx.7`). Thirty queries of 3,000
+    // letters, three batches, more than one block of the built-in 50,000 letters.
+    #[test]
+    fn x_query_block_plan_is_kept_without_the_gumbel_block_but_for_a_count_of_0() {
+        let records = x_block_test_records(&[3000; 30]);
+        let input = seq_range::QueryInput::whole(&records);
+        let batches = crate::blastinput::query_batch::read_query_batches(
+            &records,
+            &records,
+            &input,
+            crate::blastinput::query_batch::QueryReading::Records,
+            10000,
+            true,
+            None,
+        );
+        let settings = crate::blastinput::ncbi_environment::ApplicationSettings::default();
+        // From the manifest's directory, as the other tests' databases: a WASI module has no
+        // working directory (the runner preopens `/`).
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            database::BlastpDatabase::open(path.to_str().expect("UTF-8 path"), &settings, "BLASTP")
+                .expect("test database")
+        };
+        // NSEQ 0 over `tfp` (`aliaskeys/p_nseq0.pal`), and `tfp` itself.
+        let counts_0 = open("tests/db_search/aliaskeys/p_nseq0");
+        let counts = open("tests/db_search/taxfilter/tfp");
+        assert_eq!(counts_0.statistics_num_sequences(), 0);
+        assert!(counts.statistics_num_sequences() > 0);
+        let gumbel = make_blastp_args().resolve().expect("resolved blastp args");
+        let mut searchsp = make_blastp_args();
+        searchsp.searchsp = Some(1000);
+        let searchsp = searchsp.resolve().expect("resolved blastp args");
+        let mut old_fsc = gumbel.clone();
+        old_fsc.old_fsc = true;
+        assert!(searchsp.old_fsc && !gumbel.old_fsc);
+        let mut stream: Vec<u8> = Vec::new();
+        let mut diagnostics = std::io::sink();
+        let outputs = ReportOutputs::single("7", OutputSink::Writer(&mut stream), &mut diagnostics);
+        let plan = |args: &ResolvedBlastpArgs, database: &database::BlastpDatabase| {
+            x_query_block_plan(
+                args,
+                &records,
+                &input,
+                &batches,
+                BlastpSubjectSource::Database(database),
+                &outputs,
+                10000,
+            )
+            .map(|(_, blocks)| blocks.len())
+        };
+        for args in [&searchsp, &old_fsc, &gumbel] {
+            assert!(plan(args, &counts).is_some_and(|blocks| blocks > 1));
+        }
+        assert_eq!(plan(&searchsp, &counts_0), None);
+        assert_eq!(plan(&old_fsc, &counts_0), None);
+        assert!(plan(&gumbel, &counts_0).is_some_and(|blocks| blocks > 1));
     }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary

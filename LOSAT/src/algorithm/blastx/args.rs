@@ -584,10 +584,15 @@ impl ResolvedOptions {
             .is_some_and(|search| search.merges_volumes())
     }
 
-    /// The number of a query's lists the tabular reports write: the merge of several volumes
-    /// keeps each volume's lists (`s_MergeAlignSet`), which NCBI's formatter cuts to the hit
-    /// list size after counting their hits (as rpsblast's `psiblast_hits_found`); all of them
-    /// otherwise.
+    /// The number of a query's lists that the reports NCBI's formatter cuts write: the merge of
+    /// several volumes keeps each volume's lists (`s_MergeAlignSet`), which the formatter cuts to
+    /// the hit list size (`BatchResults::shown_lists`): `PruneSeqalign` before the tabular
+    /// reports (outfmt 7 counts their hits before it, as rpsblast's `psiblast_hits_found`) and
+    /// the Seq-annots (8, 9, 12), `TrimSeqAlign` before BLAST XML, XML2 and JSON (5, 13 to 16);
+    /// the archive (11) and the organism report (18) take every list. All of them otherwise.
+    /// RPSTBLASTN writes only the pairwise and tabular reports until item PS15a
+    /// (`rpsblast::args::check_rps_outfmt` refuses the rest), so the cut of the structured
+    /// reports is the writers' rule for when it does.
     pub(crate) fn shown_lists(&self) -> usize {
         if self.merged_volumes() {
             usize::try_from(self.hitlist_size).unwrap_or(0)

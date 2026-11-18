@@ -118,7 +118,7 @@ pub struct BatchResults {
     /// formatter's cut to the hit list size keeps, which counts following lists whose Seq-align
     /// ids match as one subject (`database::ReportedSubjects::for_batch`,
     /// `common::database::joined_cut`). Empty where the reports take
-    /// `ResolvedOptions::shown_lists` (`BatchResults::shown_lists`).
+    /// `ResolvedOptions::shown_lists` (`BatchResults::cut_lists`).
     pub shown: Vec<usize>,
 }
 
@@ -129,17 +129,25 @@ impl BatchResults {
         self.unlisted.get(query).copied().unwrap_or(0)
     }
 
-    /// The number of the query `query`'s lists that the reports write (`shown`, else
-    /// `ResolvedOptions::shown_lists`).
+    /// The lists of the query `query` that the reports NCBI's formatter cuts write
+    /// (`ResolvedOptions::shown_lists` says which): its first `shown` lists, else its first
+    /// `options.shown_lists()`.
     pub(crate) fn shown_lists(
         &self,
         query: usize,
         options: &super::args::ResolvedOptions,
-    ) -> usize {
-        self.shown
-            .get(query)
-            .copied()
-            .unwrap_or_else(|| options.shown_lists())
+    ) -> &[HspList] {
+        self.cut_lists(query, options.shown_lists())
+    }
+
+    /// The lists of the query `query` that the formatter's cut keeps (`shown`, else the first
+    /// `cut`, `ResolvedOptions::shown_lists`): the one reading of that cut, which
+    /// `shown_lists` and `database::ReportedSubjects::for_batch` take.
+    pub(crate) fn cut_lists(&self, query: usize, cut: usize) -> &[HspList] {
+        let lists = &self.queries[query];
+        &lists[..lists
+            .len()
+            .min(self.shown.get(query).copied().unwrap_or(cut))]
     }
 }
 

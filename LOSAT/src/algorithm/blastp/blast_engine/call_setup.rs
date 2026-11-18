@@ -933,21 +933,21 @@ pub(super) fn db_extent<'a>(
 /// Whether LOSAT refuses a setup that divides by 0 sequences (`check_setup_count`): without the
 /// Gumbel block (`args.old_fsc`: `-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
 /// statistics' average (blast_setup.c:975, quoted at `setup_fails`), whose division by a count of
-/// 0 crashes (SIGFPE, DECISIONS 14 of line RG). `setup_count` is the setup's count of a search of
-/// `database` (`BlastpDbExtent::setup_numbers`): its statistics' count (0 also where they read 0
-/// sequences of a positive total, `SeqDb::statistics_count_is_zero`, or a database without OIDs
-/// counts none of no letters), or an RPS search's first unit's, which is the one unit that can
-/// count 0 (`RpsUnit::check_setup_count`: a unit of one volume with an alias file's `NSEQ 0`; the
-/// bare volumes of several count their profiles), so this one test is every unit's (review D of
-/// line RG D1a-4, N2). The one test of the refusal: `check_setup_count` makes it in the call, and
-/// the block search (`x_query_block_plan`) leaves a search it would refuse to the call of all
-/// queries, which refuses before any output (review D of D1a-4, SF1).
-pub(super) fn setup_count_refused(
-    args: &ResolvedBlastpArgs,
-    database: Option<&BlastpDatabase>,
-    setup_count: i32,
-) -> bool {
-    args.old_fsc && database.is_some() && setup_count == 0
+/// 0 crashes (SIGFPE, DECISIONS 14 of line RG). `setup_count` is the setup's count of the search
+/// (`BlastpDbExtent::setup_numbers`): a database's statistics' count, 0 where they read 0
+/// sequences of a positive total (`SeqDb::statistics_count_is_zero`), or an RPS search's first
+/// unit's, which is the one unit that can count 0 (`RpsUnit::check_setup_count`: a unit of one
+/// volume with an alias file's `NSEQ 0`; the bare volumes of several count their profiles), so
+/// this one test is every unit's (review D of line RG D1a-4, N2). Where the total is not positive
+/// NCBI counts 1 (blast_setup.c:929-937, quoted at `SeqDb::statistics_total_length`): a
+/// database whose statistics count 0 of no letters has no OID 0 to read, NCBI's failed read,
+/// which `run_call` reports before this test (`SeqDb::first_oid_read_fails`); a FASTA subject
+/// set counts at least 1 (`db_extent`), so only a database search reaches 0 (review E of D1a-4,
+/// N2). The one test of the refusal: `check_setup_count` makes it in the call, and the block
+/// search (`x_query_block_plan`) leaves a search it would refuse to the call of all queries,
+/// which refuses before any output (review D of D1a-4, SF1).
+pub(super) fn setup_count_refused(args: &ResolvedBlastpArgs, setup_count: i32) -> bool {
+    args.old_fsc && setup_count == 0
 }
 
 /// LOSAT's refusal of `setup_count_refused`. `setup_fails` makes it only where a query of the call
@@ -957,12 +957,8 @@ pub(super) fn setup_count_refused(
 /// test passes) or one query's round (psiblast, which searches one query per batch). The one owner
 /// of blastp's, psiblast's and rpsblast's check (rpstblastn: `RpsUnit::check_setup_count` per unit
 /// in its batches, the same gate).
-fn check_setup_count(
-    args: &ResolvedBlastpArgs,
-    database: Option<&BlastpDatabase>,
-    setup_count: i32,
-) -> Result<()> {
-    if setup_count_refused(args, database, setup_count) {
+fn check_setup_count(args: &ResolvedBlastpArgs, setup_count: i32) -> Result<()> {
+    if setup_count_refused(args, setup_count) {
         return Err(crate::algorithm::common::database::refusal(
             crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
             args.app.name(),
@@ -991,7 +987,6 @@ fn check_setup_count(
 /// meets them in a batch (`CLocalBlast::Run`, quoted at `setup_count_refused`).
 pub(super) fn setup_fails(
     args: &ResolvedBlastpArgs,
-    database: Option<&BlastpDatabase>,
     extent: &BlastpDbExtent<'_>,
     contexts: &[QueryContext],
 ) -> Result<bool> {
@@ -999,7 +994,7 @@ pub(super) fn setup_fails(
         return Ok(false);
     }
     let (setup_total, setup_count) = extent.setup_numbers;
-    check_setup_count(args, database, setup_count)?;
+    check_setup_count(args, setup_count)?;
     let gumbel = !args.old_fsc;
     Ok(extent.rps_units.map_or_else(
         || {

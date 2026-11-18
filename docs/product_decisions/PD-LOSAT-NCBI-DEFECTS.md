@@ -1753,7 +1753,7 @@ Numbered after exception 13 (version 1.35).
     (dev), and is now its behaviour in the searches as well. What the output writes from past the
     mapping stays refused (the rejections above).
 
-## Approved exception (an Int8 of exactly -2^63 in NCBI's serial output, line RG item D1a-4)
+## Approved exception (a database length or `-dbsize` of exactly -2^63 in NCBI's serial output, line RG item D1a-4)
 
 The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117, D1a-3's Q1 = A,
 words 「A 正しい数を書く (推奨)」) the question of line RG items D1a-3 and D1a-4: LOSAT writes the
@@ -1765,7 +1765,7 @@ name, "approved exception 16 (Int8 -2^63 written as digits)", and D1a-4's other 
 D1a-4 entry of PD-LOSAT-NCBI-DEFECTS", so that a merge of dev that takes their version numbers
 moves only that list (line RG `DECISIONS.md` D1a4-13).
 
-16. **An `Int8` of exactly -2^63 that NCBI's serial writer prints.** `COStreamBuffer::PutInt8`
+16. **A database length or `-dbsize` of exactly -2^63 that NCBI's serial writer prints.** `COStreamBuffer::PutInt8`
     (`util/strbuffer.cpp:1002-1010`) negates a negative value before it writes the digits; for
     INT64_MIN that is a signed overflow, and NCBI BLAST+ 2.17.0's build prints `-0`. NCBI writes
     such a value where an alias file's `LENGTH` (or `STATS_TOTLEN` over several RPS volumes) is

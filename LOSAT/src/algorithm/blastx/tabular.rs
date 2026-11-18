@@ -569,7 +569,7 @@ pub(super) fn write_blastx_tabular(
                 let tabular_query =
                     TabularQuery::of_ids(query.believed(), local_id(query), query_length);
                 // Several volumes: the merged lists cut once per query (`BatchResults::shown_lists`).
-                let listed = &lists[..lists.len().min(batch.shown_lists(qidx, options))];
+                let listed = batch.shown_lists(qidx, options);
                 // The query's formatter (`TabularRows`).
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
@@ -980,14 +980,27 @@ fn write_blastx_tax_report(
             })
         })
         .collect();
-    // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:893-899
+    // ```c++
+    //     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
+    //     if (m_IsUngappedSearch && results.HasAlignments()) {
+    //         aln_set.Reset(CDisplaySeqalign::PrepareBlastUngappedSeqalign(*aln_set));
+    //     }
+    //
+    //     CRef<CSeq_align_set> new_aln_set(const_cast<CSeq_align_set*>(aln_set.GetPointer()));
+    //     CTaxFormat *taxFormatRes = new CTaxFormat (*new_aln_set,*m_Scope,m_IsHTML ? CTaxFormat::eHtml:CTaxFormat::eText, false,max(kMinTaxFormatLineLength,kFormatLineLength));
+    // ```
+    // The HSPs of every list of each query: NCBI does not cut the organism report's Seq-aligns
+    // to the hit list size (no `PruneSeqalign` or `TrimSeqAlign`, as for the archive), so
+    // RPSTBLASTN's merged lists of several volumes are read whole (`BatchResults::shown_lists`
+    // is the cut of the other reports).
     let tax_queries: Vec<TaxQuery<'_>> = batches
         .iter()
         .flat_map(|batch| {
             batch.queries.iter().enumerate().map(move |(qidx, lists)| {
                 (
                     batch.query_ordinal + qidx,
-                    &lists[..lists.len().min(batch.shown_lists(qidx, options))],
+                    lists.as_slice(),
                     batch.search_skipped,
                 )
             })

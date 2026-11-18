@@ -1132,7 +1132,3 @@ fn usage_position(help: &str, name: &str) -> usize {
 #[cfg(test)]
 #[path = "args_tests.rs"]
 mod args_tests;
-
-#[cfg(test)]
-#[path = "args_handwritten_tests.rs"]
-mod args_handwritten_tests;

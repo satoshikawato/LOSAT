@@ -899,6 +899,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             // The default window, the smallest `fits` takes, a wide one, and the smallest of the
             // batched scan.

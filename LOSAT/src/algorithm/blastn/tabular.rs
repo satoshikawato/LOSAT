@@ -281,8 +281,21 @@ pub(crate) fn write_blastn_tabular(
             // A table whose rows read the subject (every row or none in BLASTN,
             // `TabularSpec::subject_fetch`) loads it at its first row where the query's batch
             // did not prefetch it: the texts of its taxonomy lookups follow the rows before it
-            // (`QueryWarnings::subject_read`), before those of the row's own lookups.
-            if fetches && !hsp_list.hsps.is_empty() {
+            // (`QueryWarnings::subject_read`), before those of the row's own lookups. A table
+            // that reads a subject whose load throws outside the subject block ends the run at
+            // its first row (`TabularWriter::ends_run`).
+            if let Some(end) = table.ends_run(
+                &subject,
+                crate::blastinput::app::Program::Blastn,
+                first.num_ident,
+            ) {
+                return Err(crate::report::tabular::run_end(writer, &buf, end, || {
+                    if let Some(warnings) = warnings.as_deref_mut() {
+                        warnings.end_run();
+                    }
+                }));
+            }
+            if fetches && !subject.throws() {
                 if let Some(warnings) = warnings.as_deref_mut() {
                     if warnings.reads_with_texts(q_idx) {
                         writer.write_all(&buf)?;
@@ -308,7 +321,8 @@ pub(crate) fn write_blastn_tabular(
                         warnings.sink.flush()?;
                     }
                 }
-                if needs.rows {
+                // A row whose subject's load throws prints none of its letters.
+                if needs.rows && !subject.throws() {
                     xml_rows_into(
                         hsp,
                         tab.queries,

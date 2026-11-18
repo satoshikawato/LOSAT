@@ -1295,9 +1295,9 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
-    /// Whether every report is outfmt 13 to 16, which write a lookup that throws where a batch's
-    /// prefetch is off as NCBI does (`Xml2Kind::every`, for `HitLoads::of`).
-    writes_thrown: bool,
+    /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
+    /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
+    throw: crate::report::db_subject::FormatThrow,
 }
 
 impl ReportedAsks {
@@ -1337,9 +1337,14 @@ impl ReportedAsks {
                 outfmt => i32::from(outfmt),
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
-            writes_thrown: crate::report::blast_xml2::Xml2Kind::every([
-                super::blast_xml::xml2_kind(options.outfmt),
-            ]),
+            throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
+                .map_or(crate::report::db_subject::FormatThrow::Refused, |format| {
+                    crate::report::db_subject::FormatThrow::of(
+                        format,
+                        options.tabular,
+                        crate::blastinput::app::Program::Blastx,
+                    )
+                }),
         }
     }
 
@@ -1356,11 +1361,6 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
-        asks.writes_thrown = crate::report::blast_xml2::Xml2Kind::every(
-            options
-                .iter()
-                .map(|options| super::blast_xml::xml2_kind(options.outfmt)),
-        );
         asks
     }
 
@@ -1377,8 +1377,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
-            // `Xml2Kind::every` of the two.
-            writes_thrown: self.writes_thrown && other.writes_thrown,
+            throw: self.throw.and(other.throw),
         }
     }
 }
@@ -1604,7 +1603,7 @@ pub(super) fn reported_batch(
         asks.prefetched && !unfetched,
         asks.prefetch_runs && !unfetched,
         unfetched,
-        asks.writes_thrown,
+        crate::report::db_subject::FormatThrow::of_run([asks.throw]),
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;

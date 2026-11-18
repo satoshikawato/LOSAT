@@ -17,9 +17,9 @@ Pull requests leave their entries in [`changelog.d/`](changelog.d/README.md), on
 `python3 scripts/changelog_fragments.py collect` (it moves the entries under `## [Unreleased]`,
 newest first, and deletes the files) and commit both.
 
-## v0.2.0 TLOSAN preparation
+## v0.2.0
 
-The [v0.2.0 readiness record](docs/release/v0.2.0.md) defines the declared local TBLASTN scope, candidate checks, current distribution blockers, and reproducible commands. The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.
+The [v0.2.0 release record](docs/release/v0.2.0.md) holds the scope, the platform status and the items still open. The [release test plan](docs/release/v0.2.0_certification_plan.md) lists the runs on the candidate commit and their order (section 7); v0.2.0 has its own contract (`docs/release/v0.2.0_rc_contract.json`), assembler (`LOSAT/tests/prepare_release_candidate_v020.py`) and workflow (`.github/workflows/release-readiness-v020.yml`). The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.
 
 ## v0.1.0 Release Candidate Gate
 

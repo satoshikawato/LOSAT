@@ -54,9 +54,9 @@ use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, FailedLookup,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
+    TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -252,12 +252,7 @@ impl SubjectValues<'_> {
     /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
     fn lookup(&self) -> SubjectLookup<'_> {
         match &self.failed {
-            Some(failed) => SubjectLookup::Failed(FailedLookup {
-                full: &failed.align_id[0],
-                accession: &failed.align_id[1],
-                subject_id: failed.subject_id,
-                all_ids: failed.all_ids.then_some(&*self.all_ids),
-            }),
+            Some(failed) => failed.lookup(&self.all_ids),
             None => SubjectLookup::Found,
         }
     }
@@ -339,6 +334,7 @@ fn subject_values<'a>(
                         align_id: [local.clone(), local],
                         subject_id: true,
                         all_ids: false,
+                        thrown: None,
                     }
                 }),
                 id,
@@ -347,6 +343,23 @@ fn subject_values<'a>(
         // A database sequence: the default report's ids (`ReportedSubjects::tabular_ids`), with
         // parsed Seq-ids the ids and titles of each definition line, else its one stored title.
         ShownSubjects::Database { reported, .. } => {
+            // A subject whose load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads::thrown`): NCBI reads none of its own values.
+            if let (Some(exception), Some(subject)) =
+                (reported.loads().thrown(oid), reported.parsed_subject(oid))
+            {
+                return SubjectValues {
+                    id: std::borrow::Cow::Borrowed(&[]),
+                    accession: &[],
+                    accession_version: &[],
+                    gi: 0,
+                    all_ids: std::borrow::Cow::Borrowed(&[]),
+                    titles: None,
+                    length: 0,
+                    taxonomy: no_taxonomy,
+                    failed: Some(FailedValues::thrown(subject, exception)),
+                };
+            }
             // No ids where the lookup fails (`ReportedSubjects::tabular_ids`).
             let found = reported.tabular_ids(oid);
             let [id, accession, accession_version] = found.unwrap_or([""; 3]);
@@ -388,6 +401,7 @@ fn subject_values<'a>(
                             ],
                             subject_id: true,
                             all_ids: true,
+                            thrown: None,
                         }
                     }),
                 },
@@ -709,8 +723,21 @@ pub(super) fn write_blastx_tabular(
                         // engine's identities for `nident` alone) loads it first where the
                         // query's batch did not prefetch it: the texts of its taxonomy lookups
                         // follow the rows before it, before those of the row's own lookups.
+                        // A row that reads a subject whose load throws outside the subject block
+                        // ends the run (`TabularWriter::ends_run`).
+                        if let Some(end) = table.ends_run(
+                            &tabular_subject,
+                            crate::blastinput::app::Program::Blastx,
+                            hsp.identity,
+                        ) {
+                            return Err(crate::report::tabular::run_end(writer, &buf, end, || {
+                                if let Some(reads) = reads.as_mut() {
+                                    reads.end_run();
+                                }
+                            }));
+                        }
                         if let Some(reads) = reads.as_mut() {
-                            if fetch.reads(hsp.identity) {
+                            if fetch.reads(hsp.identity) && !tabular_subject.throws() {
                                 reads.subject_read(
                                     0,
                                     list.oid as u32,
@@ -1022,7 +1049,11 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
         ShownSubjects::Fasta { .. } => subject_names.as_ref(),
     };
-    let report = report_batch(&tax_queries, parsed, plain, true, names, program)?;
+    let loads = match shown {
+        ShownSubjects::Database { reported, .. } => Some(reported.loads()),
+        ShownSubjects::Fasta { .. } => None,
+    };
+    let report = report_batch(&tax_queries, parsed, plain, true, loads, names, program)?;
     let mut q_idx = 0;
     for batch in batches {
         for qidx in 0..batch.queries.len() {

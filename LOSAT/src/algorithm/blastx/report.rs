@@ -934,6 +934,11 @@ impl ShownSubjects<'_> {
                 };
                 failed.then(|| LookupFailure::of_plain(false))
             }
+            // A subject whose load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads::thrown`) fails there, before every other lookup.
+            ShownSubjects::Database { reported, .. } if reported.loads().thrown(oid).is_some() => {
+                Some(LookupFailure::thrown())
+            }
             ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
                 Some(parsed)
                     if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
@@ -946,6 +951,7 @@ impl ShownSubjects<'_> {
                     .then_some(LookupFailure {
                         subject_id: true,
                         all_ids: false,
+                        bioseq: false,
                     }),
                 None => reported
                     .tabular_ids(oid)
@@ -1072,7 +1078,10 @@ fn check_failed_lookups(
             |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
             |oid| match shown {
                 ShownSubjects::Database { reported, .. } => {
-                    crate::report::tabular::failed_database_title(reported.oid(oid))
+                    crate::report::tabular::failed_database_subject(
+                        reported.oid(oid),
+                        reported.loads().thrown(oid),
+                    )
                 }
                 ShownSubjects::Fasta { .. } => {
                     crate::report::tabular::failed_record_title(oid, subjects[oid].shown_id())

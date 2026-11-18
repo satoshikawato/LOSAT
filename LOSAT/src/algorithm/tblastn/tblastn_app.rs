@@ -2539,12 +2539,7 @@ fn search(
                         .as_ref()
                         .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    if plural_names
-                        && hitlists
-                            .iter()
-                            .flat_map(super::stage_d_results::KappaResultHitList::lists)
-                            .any(|list| !list.hsps.hsps.is_empty())
-                    {
+                    if plural_names && reported.loads_a_row(hitlists) {
                         database.open_for_tabular_rows()?;
                     }
                     Ok::<(), anyhow::Error>(())

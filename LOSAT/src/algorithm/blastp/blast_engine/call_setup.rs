@@ -714,7 +714,8 @@ pub(super) fn call_lookup(
 ///    Int4 num_seqs = -1;
 /// ```
 pub(super) struct BlastpDbExtent {
-    pub(super) total_db_len: usize,
+    /// NCBI's `Int8` (`BlastpDatabase::total_letters`, or the sum of the subject set's records).
+    pub(super) total_db_len: i64,
     pub(super) sorts_results: bool,
     pub(super) gapped_gumbel: Option<BlastGumbelBlk>,
     pub(super) num_subjects: i32,
@@ -749,11 +750,25 @@ pub(super) fn db_extent(
     //     return seqdb.GetTotalLength();
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
+    // ```c++
+    //     if(dbscan_mode)
+    //     {
+    // 	ITERATE(vector<BLAST_SequenceBlk*>, iter, m_ivSeqBlkVec)
+    // 	{
+    //             m_iTotalLength += (Int8) (*iter)->length;
+    // 	}
+    //     }
+    // ```
     // The total length of a database is the one of its index files, not a sum over
-    // sequences read.
+    // sequences read; NCBI's `Int8` on every target (an alias file's `LENGTH` is not bounded by
+    // the letters LOSAT holds). A subject set's lengths are in memory (at most `isize::MAX`).
     let total_db_len = match database {
-        None => subjects.iter().map(|subject| subject.aa_len).sum::<usize>(),
-        Some(database) => database.total_letters_usize()?,
+        None => subjects
+            .iter()
+            .map(|subject| subject.aa_len as i64)
+            .sum::<i64>(),
+        Some(database) => database.total_letters(),
     };
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
     // ```c
@@ -788,7 +803,7 @@ pub(super) fn db_extent(
     let gumbel_db_length = if args.dbsize != 0 {
         args.dbsize
     } else {
-        database.map_or(total_db_len as i64, |database| {
+        database.map_or(total_db_len, |database| {
             database.statistics().gumbel_db_length
         })
     };
@@ -859,7 +874,7 @@ pub(super) fn db_extent(
     let eff_db_length: i64 = if args.dbsize > 0 {
         args.dbsize
     } else {
-        total_db_len as i64
+        total_db_len
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
     // ```c++
@@ -887,8 +902,7 @@ pub(super) fn db_extent(
         // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is
         // 0 or the count is 0, which `run_call` refuses for a search after this function).
         (_, false) => {
-            crate::stats::setup::setup_subject_length(total_db_len as i64, num_subjects, None)
-                .unwrap_or(0)
+            crate::stats::setup::setup_subject_length(total_db_len, num_subjects, None).unwrap_or(0)
         }
         (None, true) => blastp_preliminary_cutoff_subject_length(subjects),
         (Some(database), true) => database.cutoff_subject_length(),
@@ -919,7 +933,7 @@ pub(super) struct CallStatistics<'s> {
     pub(super) contexts: &'s [QueryContext],
     pub(super) gapped_params: &'s KarlinParams,
     pub(super) gapped_gumbel: &'s Option<BlastGumbelBlk>,
-    pub(super) total_db_len: usize,
+    pub(super) total_db_len: i64,
     pub(super) num_subjects: i32,
     pub(super) eff_db_length: i64,
     pub(super) cutoff_subject_length: i32,
@@ -1064,7 +1078,7 @@ pub(super) fn call_search_spaces<'s>(
     // RPS-BLAST's engine has no loop over subjects (blast_engine.c:1384-1393).
     let per_subject = args.rps_search.is_none() && statistics.is_some_and(|s| s.per_subject());
     let (option_total, option_count) = statistics
-        .map_or((total_db_len as i64, num_subjects), |statistics| {
+        .map_or((total_db_len, num_subjects), |statistics| {
             (statistics.gumbel_db_length, statistics.request_count)
         });
     // The option space of a context of this search's queries (`preliminary_option_space`): 0 for

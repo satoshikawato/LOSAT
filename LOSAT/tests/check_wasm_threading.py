@@ -82,6 +82,13 @@ def fixtures(directory):
     return {name: directory / f"{name}.fasta" for name in records}
 
 
+# The -db rows whose alias files declare a total of 2^32 letters or more (LOSAT/tests/db_search/dbcounts:
+# LENGTH 4294967296000000000 in l4295, 4294967295999999999 in l4294, 68719476736 and 98784247808 in
+# avg2p32), which the WASI commands run (`main`, "db-total").
+DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "db.cnt.l4295.bp.5",
+                 "db.cnt.l4295.bp.15", "db.cnt.l4294.bp.0", "db.cnt.avg2p32.bp_c0", "db.cnt.avg2p32.tx"]
+
+
 # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
 # x_PrintField(*iter); m_Ostream << "\n";
 # Retain exact argv, stderr and outputs. No sorting or output normalization.
@@ -201,6 +208,39 @@ def main():
                 assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(row_id, "-db raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
+    # ```c
+    #    Int8 total_length = -1;
+    #    Int4 num_seqs = -1;
+    #
+    #    if (seq_src) {
+    #       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    #       if (total_length <= 0)
+    #           total_length = BlastSeqSrcGetTotLen(seq_src);
+    # ```
+    # A database total of 2^32 letters or more through each WASI command, at -num_threads 1, by the checker
+    # of the native gates (db_search_fixtures.py check: stdout, stderr and the exit status against the frozen
+    # NCBI bytes, exactly), which runs a wrapper that starts the command's runner in the place of the
+    # binary, as the psiblast -db rows below: each row of DB_TOTAL_ROWS by its id (`--only`, one row each).
+    # wasm32's usize is 32 bits; the engines hold NCBI's Int8 total (before, these rows stopped with "a
+    # database of N letters is not supported by LOSAT's PROGRAM on this platform").
+    for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+        wrapper = out / "db-total" / kind / "losat"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(str(x)) for x in prefixes[kind]) + ' "$@"\n')
+        wrapper.chmod(0o755)
+        started = time.monotonic()
+        for row_id in DB_TOTAL_ROWS:
+            label = f"db-total/{kind}/{row_id}"
+            try:
+                execute(label, [sys.executable, TESTS / "db_search_fixtures.py", "check", "--losat", wrapper,
+                                "--only", row_id, "--threads", "1"], timeout=600)
+            except AssertionError:
+                print((out / label / "stdout").read_text(errors="replace"), flush=True)
+                raise
+            lines = (out / label / "stdout").read_text().splitlines()
+            assert lines[0].startswith(f"{row_id}\tsame\t") and lines[-1].startswith("# rows=1 differing=0 "), (label, lines)
+        print(f"db-total/{kind}", f"{len(DB_TOTAL_ROWS)} rows same", f"({time.monotonic() - started:.0f} s)", flush=True)
     # NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:448-453
     # ```c++
     #         /*** Get the query sequence(s) or PSSM (these two options are mutually

@@ -746,7 +746,7 @@ mod tests {
                     gap_open: 11,
                     gap_extend: 1,
                 },
-                (subject_nt_length / 3) as i64,
+                subject_nt_length / 3,
             )
             .unwrap();
             // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
@@ -1190,7 +1190,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            total_nt,
+            total_nt as i64,
             1,
             &[gapped],
             &[ungapped],

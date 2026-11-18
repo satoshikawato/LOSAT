@@ -75,8 +75,8 @@ impl TblastxDatabase {
     }
 
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
-    /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
-    /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
+    /// (`common::database::open_database`). The total length is NCBI's `Int8`, which the engine
+    /// holds as such (`SubjectSetNumbers::total`) on every target.
     #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
@@ -97,16 +97,6 @@ impl TblastxDatabase {
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
-        // The statistics' setup total (`DbStatistics::setup_total`: not negative, below 2^63; a
-        // `LENGTH` of 2^63 or more is NCBI's negative `Int8`, read as such) as the engine holds it.
-        let total = db.statistics().setup_total;
-        usize::try_from(total)
-            .ok()
-            .with_context(|| {
-                format!(
-                    "a database of {total} letters is not supported by LOSAT's TBLASTX on this platform"
-                )
-            })?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -1061,6 +1051,43 @@ mod tests {
         );
         TblastxDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
             .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
+    // ```c
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    //
+    //    if (seq_src) {
+    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    //       if (total_length <= 0)
+    //           total_length = BlastSeqSrcGetTotLen(seq_src);
+    // ```
+    // An alias file's `LENGTH` of 2^32 letters or more over the 16 sequences of
+    // `tests/db_search/taxfilter/tfn` (`tests/db_search/dbcounts`, row db.cnt.avg2p32.tx) is
+    // NCBI's `Int8` on every target, wasm32's 32-bit `usize` included: the database opens with
+    // its whole total.
+    #[test]
+    fn totals_of_2_to_the_32_letters_or_more_are_held_whole() {
+        for (name, total) in [
+            ("l4295", 4_294_967_296_000_000_000),
+            ("l4294", 4_294_967_295_999_999_999),
+            ("avg2p32", 68_719_476_736),
+        ] {
+            assert!(total > i64::from(u32::MAX), "{name}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/dbcounts")
+                .join(name);
+            let database =
+                TblastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+                    .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            let numbers = database.numbers(None);
+            assert_eq!(
+                (numbers.total, numbers.count, numbers.link_total),
+                (total, 16, total),
+                "{name}"
+            );
+        }
     }
 
     /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant

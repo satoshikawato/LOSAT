@@ -1763,15 +1763,16 @@ fn pairwise_metadata(
     // A database's lines come from `ShownSubjects::pairwise_database`; these fields serve
     // `-subject` (the Gumbel block's printed numbers do not depend on the length).
     let (database_name, num_sequences, total) = match shown {
+        // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are held in memory.
         ShownSubjects::Fasta { path, .. } => (
             format!("User specified sequence set (Input: {})", path.display()),
-            subjects.len(),
-            subjects.iter().map(|s| s.sequence.len()).sum(),
+            subjects.len() as i64,
+            subjects.iter().map(|s| s.sequence.len() as i64).sum(),
         ),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            usize::try_from(pairwise.num_sequences).unwrap_or(usize::MAX),
-            usize::try_from(pairwise.total_letters).unwrap_or(usize::MAX),
+            pairwise.num_sequences,
+            pairwise.total_letters,
         ),
     };
     BlastpPairwiseReport {
@@ -1792,7 +1793,7 @@ fn pairwise_metadata(
             Default::default()
         },
         gumbel: options.has_gumbel_block().then(|| {
-            lookup_protein_gumbel_params(&scoring, total as i64)
+            lookup_protein_gumbel_params(&scoring, total)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
         // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).

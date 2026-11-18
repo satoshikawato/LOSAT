@@ -505,8 +505,11 @@ pub struct BlastpPairwiseQuery {
 pub struct BlastpPairwiseReport {
     pub version: String,
     pub database_name: String,
-    pub database_num_sequences: usize,
-    pub database_total_letters: usize,
+    /// The `Database:` lines' counts of a FASTA subject set (its records and letters), NCBI's
+    /// `Int8` (`tot_num_seqs`, `tot_length`); a `-db` search prints `PairwiseDatabase` and keeps
+    /// its sums here (an alias file's `LENGTH` can pass 2^32 on a 32-bit target).
+    pub database_num_sequences: i64,
+    pub database_total_letters: i64,
     /// `options.GetMatrixName()`; `None` where NCBI's options name no matrix (a null `const
     /// char*`: an RPS search that set up no query batch, `write_matrix_line`).
     pub matrix_name: Option<String>,
@@ -2432,8 +2435,8 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     version: &str,
     program: &str,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_blastp_pairwise_intro(writer, version, program)?;
@@ -2613,8 +2616,8 @@ fn write_final_database_block<W: Write>(
 fn write_blastp_database_header_spacing<W: Write>(
     writer: &mut W,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     trailing: usize,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-525
@@ -2638,8 +2641,8 @@ fn write_blastp_database_header_spacing<W: Write>(
     writeln!(
         writer,
         "           {} sequences; {} total letters",
-        crate::ncbi_str::int8_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
-        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(database_num_sequences),
+        crate::ncbi_str::int8_with_commas(database_total_letters)
     )?;
     for _ in 0..trailing {
         writeln!(writer)?;
@@ -2930,8 +2933,8 @@ fn write_blastp_final_footer<W: Write>(
 fn write_final_database_report<W: Write>(
     writer: &mut W,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
     // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
@@ -2941,7 +2944,7 @@ fn write_final_database_report<W: Write>(
     writeln!(
         writer,
         "  Number of letters in database: {}",
-        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(database_total_letters)
     )?;
     writeln!(
         writer,
@@ -3736,8 +3739,9 @@ pub struct BlastnPairwiseReport {
     /// `-task megablast` (NCBI's `m_Megablast`; the program name stays `blastn`).
     pub megablast: bool,
     pub database_name: String,
-    pub database_num_sequences: usize,
-    pub database_total_letters: usize,
+    /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
+    pub database_num_sequences: i64,
+    pub database_total_letters: i64,
     /// The database of a `-db` search (its `Database:` lines); `None` for a subject set,
     /// whose lines are `database_name` with a period and the counts.
     pub database: Option<PairwiseDatabase>,
@@ -4591,8 +4595,8 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     version: &str,
     megablast: bool,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     if megablast {
@@ -4948,8 +4952,9 @@ pub struct TblastxPairwiseQuery {
 pub struct TblastxPairwiseReport {
     pub version: String,
     pub database_name: String,
-    pub database_num_sequences: usize,
-    pub database_total_letters: usize,
+    /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
+    pub database_num_sequences: i64,
+    pub database_total_letters: i64,
     /// The `-matrix` name as typed (`options.GetMatrixName()`), BLOSUM62 when omitted.
     pub matrix_name: String,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
@@ -4990,8 +4995,8 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, "TBLASTX", version)?;
@@ -5616,6 +5621,44 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
+    // (quoted at `write_blastp_database_header_spacing`)
+    // ```c++
+    //         out << NStr::Int8ToString(tot_num_seqs, NStr::fWithCommas) <<
+    //             " sequences; " <<
+    //             NStr::Int8ToString(tot_length, NStr::fWithCommas) <<
+    //             " total letters\n\n";
+    // ```
+    // The `Database:` lines of a FASTA subject set print NCBI's `Int8` counts whole: a set of
+    // 2^32 letters or more (two records of 3,000,000,000 letters, each below 2^32 as on wasm32) is
+    // not cut to a 32-bit `usize`.
+    #[test]
+    fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
+        let mut prolog = Vec::new();
+        write_blastp_pairwise_prolog(
+            &mut prolog,
+            "2.17.0+",
+            "BLASTP",
+            "s",
+            2,
+            6_000_000_000,
+            None,
+        )
+        .unwrap();
+        let prolog = String::from_utf8(prolog).unwrap();
+        assert!(
+            prolog.contains("Database: s.\n           2 sequences; 6,000,000,000 total letters\n"),
+            "{prolog}"
+        );
+        let mut epilog = Vec::new();
+        write_final_database_report(&mut epilog, "s", 2, 6_000_000_000).unwrap();
+        let epilog = String::from_utf8(epilog).unwrap();
+        assert!(
+            epilog.contains("  Number of letters in database: 6,000,000,000\n  Number of sequences in database:  2\n"),
+            "{epilog}"
+        );
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268 (quoted at
     // `write_matrix_line`)
@@ -6644,8 +6687,8 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     program: &str,
     version: &str,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, program, version)?;
@@ -7742,7 +7785,7 @@ pub fn write_blastx_epilog(
         writeln!(
             writer,
             "  Number of letters in database: {}",
-            crate::ncbi_str::int8_with_commas(report.database_total_letters as i64)
+            crate::ncbi_str::int8_with_commas(report.database_total_letters)
         )?;
         writeln!(
             writer,

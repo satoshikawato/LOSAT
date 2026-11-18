@@ -113,7 +113,7 @@ pub(super) enum LocalParameterCall {
 #[allow(dead_code)] // Stage D's public path remains gated until C/D/E are complete.
 pub(super) fn local_subject_effective_lengths(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     gapped_params: &[KarlinParams],
 ) -> Result<Vec<LocalContextLength>, SearchSpaceOverflow> {
@@ -164,11 +164,13 @@ pub(super) fn local_subject_effective_lengths(
 // its length adjustment is that of the chunk's part. The warning is not written: a chunk
 // with one search space has one context.
 // The lengths are `stats::setup::calc_eff_lengths` (one owner for the six programs, line RG
-// D1a-3): `db_num_seqs` is NCBI's `Int4` (negative for an alias file's negative `NSEQ`), and an
-// effective search space past NCBI's `Int8` is refused (`SearchSpaceOverflow`).
+// D1a-3): `subject_nt_length` is NCBI's `Int8` `real_db_length` (blast_parameters.h:217; a
+// database's total, which an alias file's `LENGTH` declares, `-dbsize` or a subject's length),
+// `db_num_seqs` is NCBI's `Int4` (negative for an alias file's negative `NSEQ`), and an effective
+// search space past NCBI's `Int8` is refused (`SearchSpaceOverflow`).
 pub(super) fn local_subject_effective_lengths_with_search_spaces(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     gapped_params: &[KarlinParams],
     search_spaces: Option<&[i64]>,
@@ -177,7 +179,7 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
     let search_space_set =
         search_spaces.is_some_and(|spaces| spaces.iter().any(|&space| space != 0));
     let Some((db_length, db_num_seqs)) = crate::stats::setup::eff_lengths_database(
-        subject_nt_length as i64,
+        subject_nt_length,
         db_num_seqs,
         0,
         search_space_set,
@@ -229,7 +231,7 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
 #[allow(dead_code)] // The public TBLASTN path remains gated until C/D/E pass.
 pub(super) fn local_parameters_for_call(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     gapped_params: &[KarlinParams],
     ungapped_params: &[KarlinParams],
@@ -296,7 +298,7 @@ pub(super) struct LocalKarlinBlocks<'a> {
 /// (`LocalKarlinBlocks`).
 pub(super) fn local_parameters_for_blocks(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     blocks: LocalKarlinBlocks<'_>,
     options: LocalParameterOptions<'_>,
@@ -504,7 +506,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let result = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
-            subject_length,
+            subject_length as i64,
             1,
             &[gapped; 3],
             &[ungapped; 3],
@@ -735,7 +737,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let result = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
-            subject_length,
+            subject_length as i64,
             1,
             &[gapped; 3],
             &[ungapped; 3],
@@ -814,5 +816,51 @@ mod tests {
                 },
             ]
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:217
+    // ```c
+    //    Int8 real_db_length; /**< Total database length to use in search space
+    // ```
+    // A database of 2^32 letters or more (an alias file's `LENGTH`: 68,719,476,736 letters in 16
+    // sequences, row db.cnt.avg2p32; 4,294,967,296,000,000,000 with `-searchsp 1000000`) reaches
+    // the effective lengths whole, as NCBI's `Int8`, on every target: its third is the statistics'
+    // length (`stats::setup::calc_eff_lengths`, which these lengths are).
+    #[test]
+    fn effective_lengths_read_a_database_of_2_to_the_32_letters_or_more() {
+        let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        for (total, search_space) in [
+            (68_719_476_736i64, 0),
+            (4_294_967_296_000_000_000, 1_000_000),
+            (4_294_967_295_999_999_999, 1_000_000),
+        ] {
+            assert!(total > i64::from(u32::MAX));
+            let expected = crate::stats::setup::calc_eff_lengths(
+                120,
+                total / 3,
+                16,
+                &params,
+                search_space,
+                "TBLASTN",
+            )
+            .unwrap();
+            let spaces = [search_space];
+            assert_eq!(
+                local_subject_effective_lengths_with_search_spaces(
+                    &[(120, true)],
+                    total,
+                    16,
+                    &[params],
+                    (search_space != 0).then_some(&spaces[..]),
+                )
+                .unwrap(),
+                vec![LocalContextLength {
+                    length_adjustment: i64::from(expected.length_adjustment),
+                    eff_searchsp: expected.eff_searchsp,
+                    subject_stat_length: total / 3,
+                }],
+                "{total}"
+            );
+        }
     }
 }

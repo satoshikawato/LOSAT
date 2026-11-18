@@ -796,5 +796,36 @@ class NcbiUsageReportOffTests(unittest.TestCase):
             self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
 
 
+
+class WasmDbTotalRowsTests(unittest.TestCase):
+    """The -db rows that check_wasm_threading.py runs through each WASI command for a database total of 2^32
+    letters or more (`DB_TOTAL_ROWS`): NCBI's rows of one database whose alias file declares such a `LENGTH`
+    (below 2^63: from there NCBI's `Int8` is negative, and the statistics read the length of OID 0)."""
+
+    def test_the_rows_are_every_ncbi_row_of_one_database_of_2_to_the_32_letters_or_more(self):
+        import check_wasm_threading as watcher
+
+        def alias_length(row: dict[str, str]) -> int:
+            names = row["db"].split()
+            if len(names) != 1 or ":" in names[0]:
+                return 0
+            for suffix in (".nal", ".pal"):
+                alias = db_fixtures.ENGINE / (names[0] + suffix)
+                if alias.is_file():
+                    for line in alias.read_text().splitlines():
+                        key, _, value = line.partition(" ")
+                        if key == "LENGTH":
+                            return int(value)
+            return 0
+
+        rows = db_fixtures.read_manifest()[1]
+        expected = [row["row_id"] for row in rows if row["kind"] == "ncbi" and 2**32 <= alias_length(row) < 2**63]
+        self.assertEqual(sorted(watcher.DB_TOTAL_ROWS), sorted(expected))
+        self.assertEqual(len(set(watcher.DB_TOTAL_ROWS)), 8)
+        # The watcher selects each row by `--only` (a prefix of the row id): it names that row alone.
+        for row_id in watcher.DB_TOTAL_ROWS:
+            self.assertEqual([row["row_id"] for row in rows if row["row_id"].startswith(row_id)], [row_id])
+
+
 if __name__ == "__main__":
     unittest.main()

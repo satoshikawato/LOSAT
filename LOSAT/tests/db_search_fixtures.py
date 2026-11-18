@@ -53,7 +53,9 @@ LOSAT/tests/db_search (README.md there says how they were built).
   `-out_pssm` file that cannot be written: NCBI stops after that query's report with its own error)
   has a non-empty `stdout_bytes` cell: its stdout must be NCBI's of the same command, frozen as
   <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
-  against `stdout_sha256`. Its `rc` and stderr are LOSAT's.
+  against `stdout_sha256`. Its `rc` and stderr are LOSAT's. Where NCBI crashes on such a row, the frozen
+  stdout is the part of the report that LOSAT writes before it refuses; `freeze` keeps it when NCBI's
+  stdout stops earlier or later but agrees up to that point (`frozen_stdout`).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -82,6 +84,13 @@ and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library a
 the rows of rpsblast and rpstblastn (the library API has no such program), those that give both
 `-query` and `-in_pssm` (the library's query is one or the other) and those that read the query from
 standard input (the library's query is records) are `library-skip`.
+With `--libm-last-digit NATIVE` (PD-LOSAT-PLATFORM-LIBM; `check_wasm_threading.py` passes it for the WASI
+commands, with its native command) a row whose PSSM files differ from the frozen ones only in the last of
+the 15 digits of ASN.1 REAL values, by 1 (`xinclude_fixtures.libm_last_digit_differences`), is
+`libm-last-digit` (it counts as the same; the files and their number of such values are listed), and the
+summary line adds `libm_last_digit=N`. A PSSM file over 64 KB is not frozen: its expected bytes are those of
+NATIVE's run of the row, which must have the frozen SHA-256. Standard output, standard error, the exit
+status and every other byte stay exact; without the option every byte counts.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -382,18 +391,29 @@ def strip_sam_cl(data: bytes) -> bytes:
     return data if end < 0 else data[:start] + data[end:]
 
 
-def frozen_stdout(row: dict[str, str], stdout: bytes) -> bytes:
-    """The stdout that `freeze` writes for `row`: NCBI's, except that a SAM document (outfmt 17) whose bytes
-    differ from the frozen file's only in the CL tag of its @PG line keeps the frozen bytes.
+def frozen_stdout(row: dict[str, str], stdout: bytes, returncode: int = 0) -> bytes:
+    """The stdout that `freeze` writes for `row`: NCBI's, except in two cases that keep the frozen bytes.
 
-    NCBI writes its argv[0] in that tag, the path of the NCBI build that ran (the oracle, Bioconda's, ws's).
-    Without this rule a freeze with another build of the same NCBI release would rewrite the file and its
-    sha256 and byte cells although the search output is the same by the rule that `check` (and set D's
-    `run_oracle.py`) compares with, and a freeze of the candidate would leave `git status` dirty."""
-    if not is_sam_outfmt(row["outfmt"]):
-        return stdout
+    1. A SAM document (outfmt 17) whose bytes differ from the frozen file's only in the CL tag of its @PG
+       line. NCBI writes its argv[0] in that tag, the path of the NCBI build that ran (the oracle,
+       Bioconda's, ws's). Without this rule a freeze with another build of the same NCBI release would
+       rewrite the file and its sha256 and byte cells although the search output is the same by the rule
+       that `check` (and set D's `run_oracle.py`) compares with, and a freeze of the candidate would leave
+       `git status` dirty.
+    2. A run that NCBI ends by a signal (`returncode` < 0) whose stdout and the frozen file are the same
+       up to where the shorter one stops. Such rows are `losat-rejection` rows of a crash (a segment that
+       NCBI frees and still walks): how much of its report NCBI writes before the crash depends on its
+       heap and the environment (the same official 2.17.0 binary wrote 17 bytes of
+       db.x2g.bx.of.p0127.nd0.1 on ws and 349 on this machine), so a freeze cannot reproduce the cut,
+       and the frozen file holds the bytes that LOSAT writes before it refuses. A stdout that differs
+       before that point is a new answer and replaces the file."""
     path = FROZEN / f"{row['row_id']}.out"
     if not path.is_file():
+        return stdout
+    if returncode < 0:
+        frozen = path.read_bytes()
+        return frozen if frozen.startswith(stdout) or stdout.startswith(frozen) else stdout
+    if not is_sam_outfmt(row["outfmt"]):
         return stdout
     frozen = path.read_bytes()
     return frozen if strip_sam_cl(frozen) == strip_sam_cl(stdout) else stdout
@@ -481,7 +501,7 @@ def freeze(args: argparse.Namespace) -> int:
             else:
                 run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))
-            out = frozen_stdout(row, run.stdout)
+            out = frozen_stdout(row, run.stdout, run.returncode)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
             row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
             print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
@@ -513,13 +533,13 @@ def freeze(args: argparse.Namespace) -> int:
             run = pssms.run
             refuse_valgrind_messages(row, run.stderr)
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
-            out = frozen_stdout(row, run.stdout)
+            out = frozen_stdout(row, run.stdout, run.returncode)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
                              preexec_fn=ncbi_stack(row))
             refuse_valgrind_messages(row, run.stderr)
-            out = frozen_stdout(row, run.stdout)
+            out = frozen_stdout(row, run.stdout, run.returncode)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
@@ -581,7 +601,13 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
     return (observed != 0) != (expected != 0) if library else observed != expected
 
 
-def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
+def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False,
+              libm_native: Path | None = None) -> tuple[str, str]:
+    """The row's status (`same`, `rejection`, `differs`, `libm-last-digit`, `library-skip`,
+    `library-input-error`) and its detail. With `libm_native` (`--libm-last-digit`), the PSSM files
+    follow PD-LOSAT-PLATFORM-LIBM's rule (`xinclude.pssm_problems`): a file over 64 KB, which is not
+    frozen, is compared with the file of `libm_native`'s run of the row, which must have the frozen
+    SHA-256. Standard output, standard error and the exit status are compared byte for byte."""
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
@@ -667,27 +693,45 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append("stdout " + first_difference(expected_out, observed_out))
     if run.stderr != err:
         problems.append("stderr " + first_difference(err, run.stderr))
+    accepted: list[str] = []
     if pssm:
-        problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference)
-    return ("differs", "; ".join(problems)) if problems else ("same", "")
+        reference = None
+        if libm_native is not None:
+            native_files: list[dict[str, bytes]] = []
+
+            def reference(name: str) -> bytes | None:
+                # `libm_native`'s run of the row, once, for the files that are not frozen.
+                if not native_files:
+                    command = [str(libm_native), row["program"], *search_argv(row), "-num_threads", str(threads)]
+                    native_files.append(dict(xinclude.run_with_pssm(
+                        command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE, env=row_env(row, env),
+                        timeout=TIMEOUT).files))
+                return native_files[0].get(name)
+        problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference, reference, accepted)
+    if problems:
+        return "differs", "; ".join(problems)
+    return ("libm-last-digit", "; ".join(accepted)) if accepted else ("same", "")
 
 
 def check(args: argparse.Namespace) -> int:
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
     env = clean_env(dict(os.environ), home.name)
     losat = args.losat.resolve()
-    lines, bad = [], 0
+    libm_native = args.libm_last_digit.resolve() if args.libm_last_digit else None
+    lines, bad, libm = [], 0, 0
     for row in read_manifest()[1]:
         if not selected(row, args):
             continue
-        status, detail = check_row(row, losat, args.threads, env, args.library)
+        status, detail = check_row(row, losat, args.threads, env, args.library, libm_native)
         bad += status == "differs"
+        libm += status == "libm-last-digit"
         lines.append(f"{row['row_id']}\t{status}\t{detail}")
     text = "".join(line + "\n" for line in lines)
     sys.stdout.write(text)
     if args.out:
         args.out.write_text(text)
-    print(f"# rows={len(lines)} differing={bad} threads={args.threads}")
+    print(f"# rows={len(lines)} differing={bad} threads={args.threads}"
+          + (f" libm_last_digit={libm}" if libm_native else ""))
     return 1 if bad else 0
 
 
@@ -708,6 +752,10 @@ def main() -> int:
     ck.add_argument("--out", type=Path)
     ck.add_argument("--library", action="store_true",
                     help="--losat is examples/library_command_line (the search through the library API)")
+    ck.add_argument("--libm-last-digit", type=Path, metavar="NATIVE",
+                    help="PD-LOSAT-PLATFORM-LIBM (the WASI commands): a PSSM file may differ in the last of the 15 "
+                         "digits of ASN.1 REAL values by 1; NATIVE is a LOSAT command whose run gives the frozen "
+                         "bytes of a PSSM file that is not frozen")
     args = parser.parse_args()
     return freeze(args) if args.command == "freeze" else check(args)
 

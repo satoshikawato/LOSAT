@@ -109,8 +109,8 @@ pub(crate) fn add_blastn_sam(
                 debug_assert_eq!(hsp.s_idx as usize, s_idx, "one subject per HSP list");
                 hsp_records.push(HspRecord {
                     subject,
-                    q_offset: hsp.internal_q_offset_0 as i32,
-                    q_end: hsp.internal_q_end_0 as i32,
+                    q_offset: hsp.internal_q_offset_0,
+                    q_end: hsp.internal_q_end_0,
                     s_offset: hsp.internal_s_offset_0 as i32,
                     s_end: hsp.internal_s_end_0 as i32,
                     q_frame: if hsp.query_frame < 0 { -1 } else { 1 },

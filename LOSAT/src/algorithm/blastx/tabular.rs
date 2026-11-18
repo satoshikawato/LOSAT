@@ -1,6 +1,6 @@
-//! BLASTX's tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
-//! default `std` fields with a tab) and outfmt 10 and 20: the adapter of the shared writer
-//! (`report::tabular`, NCBI's `CBlastTabularInfo`). For each query of a query batch in order it
+//! BLASTX's tabular reports (outfmt 6 and 7, the default `std` fields with a tab as any field list
+//! or delimiter, `report::tabular::TabularSpec::std`) and outfmt 10 and 20: the adapter of the shared
+//! writer (`report::tabular`, NCBI's `CBlastTabularInfo`). For each query of a query batch in order it
 //! writes the query's warnings, outfmt 7's comment lines and one row per HSP of the query's final
 //! hit list that has a Seq-align (`report::has_seqalign`), in the list's order; outfmt 20's
 //! header line comes with the prolog (`write_prolog`, before the search) and outfmt 7's count of
@@ -46,8 +46,8 @@ use super::empty_rows::{
 };
 use super::input::FastaRecord;
 use super::report::{
-    alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_tabular_id,
-    tabular_io_error, ShownSubjects, TabularFlushError,
+    alignment, has_seqalign, query_endpoints, query_warning, tabular_io_error, ShownSubjects,
+    TabularFlushError,
 };
 use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
@@ -140,12 +140,7 @@ pub(super) fn write_prolog(
         return Ok(());
     }
     write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
-    TabularWriter {
-        spec,
-        program_version: program_version(program),
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, program_version(program), None).prolog(writer)?;
     Ok(())
 }
 
@@ -314,19 +309,19 @@ fn subject_values<'a>(
         }
         // A record without parsed ids: its `sseqid` is the first word of its title, or of the
         // title that `GenerateDefline` makes of it for a `Subject_` word
-        // (`report::subject_tabular_id`), none where that throws; its `sall*` the first word of
+        // (`FastaRecord::subject_tabular_id`), none where that throws; its `sall*` the first word of
         // its title (`s_ReplaceLocalId`, `DeflineIds::of_record`).
         ShownSubjects::Fasta { .. } => {
-            let tabular = subject_tabular_id(subject);
+            let tabular = subject.subject_tabular_id();
             let failed_id = tabular.is_none();
-            let id = tabular.unwrap_or_default();
+            let id = std::borrow::Cow::Owned(tabular.unwrap_or_default());
             SubjectValues {
                 accession: &[],
                 accession_version: &[],
                 gi: 0,
                 // Only where the word is not the id, which the writer prints for none.
-                all_ids: if all_deflines && local_id(subject) != &*id {
-                    std::borrow::Cow::Owned(DeflineIds::of_record(local_id(subject)))
+                all_ids: if all_deflines && subject.shown_id() != &*id {
+                    std::borrow::Cow::Owned(DeflineIds::of_record(subject.shown_id()))
                 } else {
                     std::borrow::Cow::Borrowed(&[])
                 },
@@ -460,11 +455,11 @@ pub(super) fn write_blastx_tabular(
     //         return;
     //     }
     // ```
-    let table = TabularWriter {
+    let table = TabularWriter::new(
         spec,
-        program_version: program_version(options.program()),
-        matrix: options.rpstblastn.is_none().then_some(options.scoring),
-    };
+        program_version(options.program()),
+        options.rpstblastn.is_none().then_some(options.scoring),
+    );
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
     //         alnVec->SetGapChar('-');
@@ -495,6 +490,9 @@ pub(super) fn write_blastx_tabular(
     let loc = SubjectLoc::of(shown);
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let mut next_hsp = first_hsp;
+    // The bytes of one comment block or one row, written to the report stream as soon as they
+    // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
+    let mut buf: Vec<u8> = Vec::new();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -528,7 +526,7 @@ pub(super) fn write_blastx_tabular(
             //     m_Ostream.flush();
             // }
             // ```
-            // As the default report's: a stream failure unwinds through the query's formatter.
+            // A stream failure unwinds through the query's formatter.
             (|| -> Result<()> {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
                 // ```c++
@@ -545,7 +543,6 @@ pub(super) fn write_blastx_tabular(
                             .count()
                     })
                     .sum();
-                let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,
                     &query.query_line(),
@@ -553,6 +550,8 @@ pub(super) fn write_blastx_tabular(
                     // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
                     (!batch.search_skipped || options.merged_volumes()).then_some(count),
                 )?;
+                writer.write_all(&buf)?;
+                buf.clear();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:787-790
                 // ```c++
                 //             if(m_QueryRange.NotEmpty())
@@ -578,7 +577,7 @@ pub(super) fn write_blastx_tabular(
                     .query_range
                     .map_or(searched_length, |range| range.length());
                 let tabular_query =
-                    TabularQuery::of_ids(query.believed(), local_id(query), query_length);
+                    TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
                 // The query's formatter (`TabularRows`).
@@ -617,7 +616,6 @@ pub(super) fn write_blastx_tabular(
                             ),
                         })
                 {
-                    writer.write_all(&buf)?;
                     writer.flush()?;
                     return Err(NativeError::exception(&row_is_empty()).into());
                 }
@@ -729,8 +727,6 @@ pub(super) fn write_blastx_tabular(
                         // ends the run (`TabularWriter::ends_run`).
                         if let Some(reads) = reads.as_mut() {
                             if fetch.reads(hsp.identity) {
-                                writer.write_all(&buf)?;
-                                buf.clear();
                                 reads.subject_read(
                                     0,
                                     list.oid as u32,
@@ -755,8 +751,6 @@ pub(super) fn write_blastx_tabular(
                         if let (Some(names), true) = (names, table.sets_subject(&tabular_subject)) {
                             let text = names.row_messages(spec, values.taxonomy);
                             if !text.is_empty() {
-                                writer.write_all(&buf)?;
-                                buf.clear();
                                 writer.flush()?;
                                 stderr.write_all(&text)?;
                                 stderr.flush()?;
@@ -782,7 +776,6 @@ pub(super) fn write_blastx_tabular(
                             (hsp.evalue, hsp.bit_score, raw.score)
                         };
                         if form == TabularEmptyRow::Throws {
-                            writer.write_all(&buf)?;
                             writer.flush()?;
                             return Err(
                                 NativeError::exception(&std_seg_lengths_not_accurate()).into()
@@ -870,7 +863,9 @@ pub(super) fn write_blastx_tabular(
                             };
                             (row, catch_query, catch_subject)
                         } else {
-                            a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                            // The writer counts the rows' identities and positives
+                            // (`TabularWriter::row`); `alignment` makes no counts.
+                            a = alignment(batch, hsp, subject, query, &code)?;
                             // NCBI reads the alignment's rows when a field reads its counts
                             // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;
                             // BLASTX fetches the sequences, so `nident`, `mismatch` and `pident`
@@ -920,38 +915,27 @@ pub(super) fn write_blastx_tabular(
                         // m_Ostream << "\n";
                         // ```
                         // One printed row is one HSP; the probe marks it without changing it.
-                        match probe.as_deref_mut() {
-                            Some(probe) => {
-                                writer.write_all(&buf)?;
-                                buf.clear();
-                                writer.flush()?;
-                                probe.begin(next_hsp);
-                                table.row(
-                                    &mut buf,
-                                    &mut table_rows,
-                                    &row_query,
-                                    &row_subject,
-                                    kept.as_ref(),
-                                    &row,
-                                );
-                                writer.write_all(&buf)?;
-                                buf.clear();
-                                writer.flush()?;
-                                probe.end(next_hsp);
-                            }
-                            None => table.row(
-                                &mut buf,
-                                &mut table_rows,
-                                &row_query,
-                                &row_subject,
-                                kept.as_ref(),
-                                &row,
-                            ),
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.begin(next_hsp);
+                        }
+                        table.row(
+                            &mut buf,
+                            &mut table_rows,
+                            &row_query,
+                            &row_subject,
+                            kept.as_ref(),
+                            &row,
+                        );
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.end(next_hsp);
                         }
                         next_hsp += 1;
                     }
                 }
-                writer.write_all(&buf)?;
                 // A text whose read the rows did not place comes after them.
                 if let Some(reads) = reads.as_mut() {
                     reads.before_query(1, &mut *writer, &mut *stderr)?;

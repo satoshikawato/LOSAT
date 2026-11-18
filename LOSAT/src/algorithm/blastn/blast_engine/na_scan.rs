@@ -195,7 +195,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         na_lookup_ref,
         query_context_index,
         query_contexts,
-        encoded_queries_blastna,
+        encoded_query_concat_blastna,
         cutoff_scores,
         use_array_indexing,
         diag_array_length,
@@ -307,11 +307,6 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 let ctx = &query_contexts[context_idx];
                 let q_idx = context_idx as u32;
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
-                // ```c
-                // Uint1 *q_start = query->sequence;
-                // ```
-                let q_seq_blastna = encoded_queries_blastna[context_idx];
                 let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
                 // Use pre-computed cutoff score (computed once per query-subject pair)
@@ -367,8 +362,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                         q_idx,
                         s_idx,
                         s_id,
-                        q_pos_usize,
-                        q_pos_usize.saturating_add(safe_k),
+                        q_pos_usize as i32,
+                        q_pos_usize.saturating_add(safe_k) as i32,
                         kmer_start.saturating_add(chunk.offset),
                         kmer_start
                             .saturating_add(safe_k)
@@ -733,6 +728,14 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 //                         word_params->nucl_score_table,
                 //                         cutoffs->reduced_nucl_cutoff_score);
                 // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+                // ```c
+                // Uint1 *q_start = query->sequence;
+                // ```
+                // NCBI's `query` is the concatenated query and `q_off` an offset in it
+                // (na_ungapped.c:164-206 too): a walk that does not stop at the context's
+                // sentinel (a raw X-drop of 2^30 or more) reads the contexts before it.
+                let q_off_concat = ctx.query_offset as usize + q_off;
                 let x_dropoff = x_dropoff_scores[context_idx];
                 let reduced_cutoff = reduced_cutoff_scores[context_idx];
                 let ungapped_start = if timing_enabled {
@@ -742,9 +745,9 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 };
                 let ungapped = if safe_k < 11 {
                     extend_hit_ungapped_exact_ncbi(
-                        q_seq_blastna,
+                        encoded_query_concat_blastna,
                         search_seq_packed,
-                        q_off,
+                        q_off_concat,
                         s_off,
                         s_len,
                         x_dropoff,
@@ -752,9 +755,9 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     )
                 } else {
                     extend_hit_ungapped_approx_ncbi(
-                        q_seq_blastna,
+                        encoded_query_concat_blastna,
                         search_seq_packed,
-                        q_off,
+                        q_off_concat,
                         s_off,
                         s_end,
                         s_len,
@@ -776,8 +779,6 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     }
                     scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
                 }
-                let qs = ungapped.q_start;
-                let qe = ungapped.q_start + ungapped.length;
                 let ss = ungapped.s_start;
                 let ungapped_se = ungapped.s_start + ungapped.length;
                 let ungapped_score = ungapped.score;
@@ -790,8 +791,13 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 //     BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
                 // }
                 // ```
-                if blastn_trace_enabled
-                    && blastn_trace::should_trace_range(
+                if blastn_trace_enabled {
+                    // No NCBI counterpart (LOSAT_TRACE_BLASTN_* diagnostics): the hit's
+                    // context-relative range, NCBI's `Int4` one (below 0 for a hit that starts
+                    // left of its context), computed only for the trace.
+                    let qs = (ungapped.q_start as isize - ctx.query_offset as isize) as i32;
+                    let qe = qs + ungapped.length as i32;
+                    if blastn_trace::should_trace_range(
                         "ungapped",
                         q_idx,
                         s_idx,
@@ -802,9 +808,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                         ungapped_se.saturating_add(chunk.offset),
                         ctx.len,
                         ctx.frame,
-                    )
-                {
-                    blastn_trace::log(
+                    ) {
+                        blastn_trace::log(
                         "ungapped",
                         format!(
                             "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
@@ -824,6 +829,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                             off_found || ungapped_score >= cutoff_score
                         ),
                     );
+                    }
                 }
 
                 // NCBI reference: na_ungapped.c:757-758
@@ -905,34 +911,18 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 if in_window && debug_mode {
                     eprintln!(
                         "[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})",
-                        q_pos_usize,
-                        s_pos,
-                        ungapped_score,
-                        qe - qs
+                        q_pos_usize, s_pos, ungapped_score, ungapped.length
                     );
                 }
 
                 // NCBI architecture: Collect ungapped hit for batch processing
                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
+                // `UngappedHit::saved` holds NCBI's saving of the hit (`BLAST_SaveInitialHit`) and
+                // its offsets in the context (`s_AdjustInitialHSPOffsets`, a negative `Int4` start
+                // for a hit that starts left of its context).
                 x_push_ungapped(
                     ungapped_hits,
-                    UngappedHit {
-                        context_idx: q_idx,
-                        query_idx: ctx.query_idx,
-                        query_frame: ctx.frame,
-                        query_context_offset: ctx.query_offset,
-                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                        // ```c
-                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                        // ```
-                        seed_q_off: q_off as u32,
-                        seed_s_off: s_off as u32,
-                        qs: qs as u32,
-                        qe: qe as u32,
-                        ss: ss as u32,
-                        se: ungapped_se as u32,
-                        score: ungapped_score,
-                    },
+                    UngappedHit::saved(q_idx, ctx, q_off_concat, s_off, &ungapped),
                 );
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772

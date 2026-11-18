@@ -104,12 +104,7 @@ pub(crate) struct BlastnTabular<'a> {
 /// ```
 pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
     let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
-    TabularWriter {
-        spec,
-        program_version: &version,
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, &version, None).prolog(writer)?;
     Ok(())
 }
 
@@ -156,11 +151,7 @@ pub(crate) fn write_blastn_tabular(
         }
     }
     let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
-    let table = TabularWriter {
-        spec,
-        program_version: &version,
-        matrix: None,
-    };
+    let table = TabularWriter::new(spec, &version, None);
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -936,7 +927,7 @@ mod tests {
             s_idx: 0,
             raw_score: 0,
             internal_q_offset_0: 0,
-            internal_q_end_0: q.1 - q.0 + 1,
+            internal_q_end_0: (q.1 - q.0 + 1) as i32,
             internal_s_offset_0: 0,
             internal_s_end_0: s.0.max(s.1) - s.0.min(s.1) + 1,
             internal_query_context_offset: 0,

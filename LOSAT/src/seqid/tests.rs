@@ -309,12 +309,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         qcovhsp: 100,
     };
     let mut out = Vec::new();
-    TabularWriter {
-        spec: &spec,
-        program_version: "BLASTP 2.17.0+",
-        matrix: None,
-    }
-    .row(
+    TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
         &mut out,
         &mut crate::report::tabular::TabularRows::default(),
         &TabularQuery::local(b"q", 1),

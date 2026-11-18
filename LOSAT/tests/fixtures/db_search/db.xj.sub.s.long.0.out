@@ -1,0 +1,1195 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/db_search/xj/xj_sp_long.faa).
+           82 sequences; 4,920 total letters
+
+
+
+Query= q1 one
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s82 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s81 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s80 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s79 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s78 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s77 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s76 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s75 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s74 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s73 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s72 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s71 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s70 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s69 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s68 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s67 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s66 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s65 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s64 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s63 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s62 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa�...  127     1e-44
+s61 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé...  127     1e-44
+s60 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé ...  127     1e-44
+s59 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé t...  127     1e-44
+s58 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé ta...  127     1e-44
+s57 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tai...  127     1e-44
+s56 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail...  127     1e-44
+s55 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail ...  127     1e-44
+s54 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail o...  127     1e-44
+s53 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of...  127     1e-44
+s52 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of ...  127     1e-44
+s51 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of t...  127     1e-44
+s50 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of th...  127     1e-44
+s49 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the...  127     1e-44
+s48 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the ...  127     1e-44
+s47 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the t...  127     1e-44
+s46 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the ti...  127     1e-44
+s45 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the tit...  127     1e-44
+s44 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the titl...  127     1e-44
+s43 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title...  127     1e-44
+s42 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title ...  127     1e-44
+s41 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s40 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s39 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s38 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s37 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s36 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s35 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s34 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s33 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s32 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s31 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s30 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s29 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s28 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s27 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s26 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s25 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s24 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s23 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s22 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...  127     1e-44
+s21 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa�...  127     1e-44
+s20 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé...  127     1e-44
+s19 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé ...  127     1e-44
+s18 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé t...  127     1e-44
+s17 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé ta...  127     1e-44
+s16 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tai...  127     1e-44
+s15 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail...  127     1e-44
+s14 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail ...  127     1e-44
+s13 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail o...  127     1e-44
+s12 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of...  127     1e-44
+s11 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of ...  127     1e-44
+s10 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of t...  127     1e-44
+s9 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the...  127     1e-44
+s8 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the ...  127     1e-44
+s7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the t...  127     1e-44
+s6 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the ti...  127     1e-44
+s5 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the tit...  127     1e-44
+s4 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the titl...  127     1e-44
+s3 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title...  127     1e-44
+s2 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title ...  127     1e-44
+s1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title w...  127     1e-44
+
+
+> s82 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s81 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s80 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s79 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s78 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s77 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s76 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s75 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s74 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s73 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s72 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s71 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s70 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s69 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s68 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s67 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s66 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s65 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s64 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s63 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s62 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s61 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s60 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s59 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s58 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s57 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s56 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s55 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s54 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s53 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s52 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s51 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s50 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of 
+the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s49 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of 
+the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s48 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of 
+the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s47 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s46 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s45 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s44 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s43 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title 
+words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s42 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title 
+words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s41 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s40 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s39 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s38 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s37 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s36 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s35 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s34 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s33 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s32 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s31 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s30 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s29 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s28 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s27 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s26 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s25 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s24 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s23 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s22 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s21 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s20 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s19 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s18 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s17 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s16 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s15 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé 
+tail of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s14 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s13 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s12 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s11 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s10 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail 
+of the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s9 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of 
+the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s8 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of 
+the title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s6 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s5 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s4 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the 
+title words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s3 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title 
+words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s2 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title 
+words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+> s1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé tail of the title 
+words here
+Length=60
+
+ Score = 127 bits (320),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 124722
+
+
+  Database: User specified sequence set (Input:
+tests/db_search/xj/xj_sp_long.faa).
+    Posted date:  Unknown
+  Number of letters in database: 4,920
+  Number of sequences in database:  82
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

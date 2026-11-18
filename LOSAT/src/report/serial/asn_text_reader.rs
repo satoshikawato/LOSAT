@@ -234,6 +234,50 @@ pub(crate) trait AsnSource {
     fn byte_at(&mut self, pos: usize) -> Option<u8>;
     /// The bytes `range`, all of which `byte_at` has given.
     fn bytes(&self, range: Range<usize>) -> &[u8];
+    /// `CIStreamBuffer::SkipSpaces` from `pos`: the position of the first byte at or after `pos`
+    /// that is not `' '`, or the end of the text.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
+    // ```c++
+    // char CIStreamBuffer::SkipSpaces(void)
+    //     THROWS1((CIOException))
+    // {
+    //     // cache pointers
+    //     const char* pos = m_CurrentPos;
+    //     const char* end = m_DataEndPos;
+    //     // make sure thire is at least one char in buffer
+    //     if ( pos == end ) {
+    //         // fill buffer
+    //         pos = FillBuffer(pos);
+    //         // cache m_DataEndPos
+    //         end = m_DataEndPos;
+    //     }
+    //     ...
+    //     for (;;) {
+    //         ...
+    //         do {
+    //             // cache current char
+    //             char c = *pos;
+    //             if ( c != ' ' ) { // it's not space (' ')
+    //                 // point m_CurrentPos to first non space char
+    //                 m_CurrentPos = pos;
+    //                 // return char value
+    //                 return c;
+    //             }
+    //             // skip space char
+    //         } while ( ++pos < end );
+    //         // here pos == end == m_DataEndPos
+    //         // point m_CurrentPos to end of buffer
+    //         m_CurrentPos = pos;
+    //         // fill next portion
+    //         pos = FillBuffer(pos);
+    //         // cache m_DataEndPos
+    //         end = m_DataEndPos;
+    //     }
+    // }
+    // ```
+    // (`FillBuffer` throws `CEofException` at the end of the input: the caller's `byte_at` of
+    // the position returned finds it.)
+    fn skip_spaces(&mut self, pos: usize) -> usize;
     /// The reader will not ask for a byte before `pos` again (a stream may drop them).
     #[inline]
     fn release_before(&mut self, _pos: usize) {}
@@ -259,6 +303,12 @@ impl AsnSource for SliceSource<'_> {
     #[inline]
     fn bytes(&self, range: Range<usize>) -> &[u8] {
         &self.text[range]
+    }
+
+    #[inline]
+    fn skip_spaces(&mut self, pos: usize) -> usize {
+        let rest = self.text.get(pos..).unwrap_or_default();
+        pos + spaces_at_start(rest)
     }
 }
 
@@ -355,6 +405,19 @@ impl<R: Read> AsnSource for StreamSource<R> {
     }
 
     #[inline]
+    fn skip_spaces(&mut self, mut pos: usize) -> usize {
+        loop {
+            let rest = self.buf.get(pos - self.base..).unwrap_or_default();
+            let spaces = spaces_at_start(rest);
+            pos += spaces;
+            // The end of the buffer: the spaces may go on in the next block.
+            if spaces < rest.len() || self.fill_to(pos).is_none() {
+                return pos;
+            }
+        }
+    }
+
+    #[inline]
     fn release_before(&mut self, pos: usize) {
         let dead = pos - self.base;
         // Drop the read bytes once they are most of a buffer of more than a few blocks: each
@@ -364,6 +427,12 @@ impl<R: Read> AsnSource for StreamSource<R> {
             self.base = pos;
         }
     }
+}
+
+/// The number of `' '` at the start of `bytes` (`AsnSource::skip_spaces`).
+#[inline]
+fn spaces_at_start(bytes: &[u8]) -> usize {
+    bytes.iter().position(|&c| c != b' ').unwrap_or(bytes.len())
 }
 
 /// `FirstIdChar` (objistrasn.cpp:118-121).
@@ -640,11 +709,12 @@ impl<S: AsnSource> Reader<S> {
     #[inline(never)]
     fn skip_white_space_from_here(&mut self) -> Result<u8> {
         loop {
+            self.pos = self.src.skip_spaces(self.pos);
             let Some(c) = self.src.byte_at(self.pos) else {
                 return Err(self.end_of_text_in_white_space());
             };
             match c {
-                b' ' | b'\t' => self.pos += 1,
+                b'\t' => self.pos += 1,
                 b'\r' | b'\n' => {
                     self.pos += 1;
                     self.skip_end_of_line(c);

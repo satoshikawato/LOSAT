@@ -1119,7 +1119,7 @@ impl<S: AsnSource> Reader<S> {
             c = self.peek_char(0)?;
         }
         if !c.is_ascii_digit() {
-            return Err(self.error("bad number"));
+            return Err(self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number"));
         }
         let mut n: u32 = 0;
         loop {
@@ -1131,7 +1131,9 @@ impl<S: AsnSource> Reader<S> {
             n = n
                 .checked_mul(10)
                 .and_then(|n| n.checked_add(u32::from(c - b'0')))
-                .ok_or_else(|| self.error("number overflow"))?;
+                .ok_or_else(|| {
+                    self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow")
+                })?;
         }
     }
 

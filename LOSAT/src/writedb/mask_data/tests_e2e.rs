@@ -1166,7 +1166,11 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
         "line 3: \"masks\" expected",
     );
     let text = format!("Error: {}", thrown.what());
-    assert!(text.starts_with("Error: NCBI C++ Exception:\n"), "{text}");
+    assert_eq!(
+        text.lines().next(),
+        Some("Error: NCBI C++ Exception:"),
+        "{text}"
+    );
     assert_eq!(
         describe(MaskDataError::File(MaskFileError::Ncbi(
             WriteDbError::Exception(thrown)

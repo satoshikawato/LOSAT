@@ -369,9 +369,9 @@ fn bl_taxid_in_a_name_is_refused() {
     // NCBI writes `STaxInfo::blNameTaxid`, an uninitialised `int` (`-1784` in probe
     // `s2.blastp.bltaxid`), where the report shows that taxid's group.
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat-tax-report-{}-{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).unwrap();
@@ -548,7 +548,10 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
         tax_browser_url(Some(&read)),
         b"http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
-    // An empty value is no entry (`HasEntry`, `Get(...).empty()`).
+    // An empty PROTOCOL is the scheme (`GetProtocol`'s `HasEntry` counts it); an empty browser URL
+    // is NCBI's (`Get(...).empty()`). NCBI BLAST+ 2.17.0, `./.ncbirc` `[BLASTFMTUTIL]` `PROTOCOL=`,
+    // outfmt 18 of a taxid whose name holds `<@taxBrowserURL@>` (line RG, review of T4a0 `pe`):
+    // `Url //www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi rid 0 ...`.
     let read = read_registry(
         b"[BLASTFMTUTIL]\nPROTOCOL=\n[TAX_BROWSER]\nBLASTFMTUTIL=\n",
         Layer::SystemWide,
@@ -556,7 +559,7 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
     .unwrap();
     assert_eq!(
         tax_browser_url(Some(&read)),
-        b"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
+        b"//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
     let read = read_registry(
         b"[TAX_BROWSER]\nBLASTFMTUTIL=<@protocol@>//x/<@rid@>\n",
@@ -579,24 +582,6 @@ fn crate_test_taxdb(rows: &[(i32, &[u8])]) -> (Vec<u8>, Vec<u8>) {
         data.extend(*record);
     }
     (index, data)
-}
-
-#[test]
-fn a_registry_read_posts_as_ncbi() {
-    // NCBI BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): the posts of one read; each
-    // query's report reads `./.ncbirc` twice.
-    use crate::blastinput::ncbi_registry::{read_registry, Layer};
-    let read = read_registry(b"[FOO]\na=1\na=2\n", Layer::SystemWide).unwrap();
-    assert_eq!(
-        registry_posts(&read, "blastp"),
-        b"Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3\n"
-            .to_vec()
-    );
-    let read = read_registry(b"\xef", Layer::SystemWide).unwrap();
-    assert_eq!(
-        registry_posts(&read, "blastp"),
-        b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
-    );
 }
 
 /// A query whose batch NCBI did not search (no valid context) has a null Seq-align-set, which
@@ -654,4 +639,48 @@ fn a_query_that_ncbi_did_not_search_is_refused_after_its_query_block() {
             }
         }
     }
+}
+
+/// `Subjects` whose loads throw for the subjects `thrown` (a batch whose prefetch is off).
+struct ThrowingSubjects(Subjects, Vec<usize>);
+
+impl TaxSubjects for ThrowingSubjects {
+    fn deflines(&self, subject: usize) -> &[TaxDefline] {
+        self.0.deflines(subject)
+    }
+
+    fn refused(&self, subject: usize, reason: &str) -> anyhow::Error {
+        self.0.refused(subject, reason)
+    }
+
+    fn throws(&self, subject: usize) -> bool {
+        self.1.contains(&subject)
+    }
+}
+
+// NCBI taxFormat.cpp:995-1023 (`x_InitTaxInfoMap`: the `catch` of each HSP's load, `continue`)
+// where the load of a subject throws (`DB contains no accession info.`, a batch whose prefetch is
+// off; review 2 of line DBID pfoff-2, M2, probe `bp.fmt.U2.18`): the report leaves out each HSP of
+// that subject before any read or lookup, and the subject is not the previous id, so the report
+// goes on as if the HSPs were not there.
+#[test]
+fn the_hsps_of_a_subject_whose_load_throws_are_left_out() {
+    let subjects = ThrowingSubjects(
+        Subjects(vec![
+            vec![line("NP_000001", "thrown subject", 9606)],
+            vec![line("XP_000002", "found subject", 10090)],
+        ]),
+        vec![0],
+    );
+    let hsps = [
+        hsp(0, 1e-50, 150.0),
+        hsp(1, 1e-40, 120.0),
+        hsp(0, 1e-30, 90.0),
+        hsp(1, 1e-20, 60.0),
+    ];
+    let names = names(Some("of18"));
+    let (steps, _) = organism_report(&hsps, &subjects, &mut lookups(names.as_ref())).unwrap();
+    // 0's HSPs read and look nothing up and leave the previous id (1) as it was, so 1's second
+    // HSP is skipped as the previous id's.
+    assert_eq!(steps, [Step::Read(1), Step::LookUp(10090)]);
 }

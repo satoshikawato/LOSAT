@@ -11,9 +11,9 @@ fn temp_path(stem: &str, extension: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time before Unix epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!(
+    crate::utils::test_dir::temp_dir().join(format!(
         "losat_tblastx_{stem}_{}_{}.{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         nanos,
         extension
     ))

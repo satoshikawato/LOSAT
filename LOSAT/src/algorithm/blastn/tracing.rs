@@ -190,7 +190,7 @@ pub fn should_trace_seed(
     context_idx: u32,
     subject_idx: usize,
     subject_id: &str,
-    seed_q: usize,
+    seed_q: i32,
     seed_s: usize,
 ) -> bool {
     let cfg = config();
@@ -207,7 +207,9 @@ pub fn should_trace_seed(
             return false;
         }
     }
-    cfg.seed == Some((seed_q, seed_s))
+    // No NCBI counterpart: a seed outside its context (NCBI's `Int4` offset below 0) matches no
+    // seed of the trace setting.
+    usize::try_from(seed_q).is_ok_and(|seed_q| cfg.seed == Some((seed_q, seed_s)))
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3918
@@ -225,13 +227,16 @@ pub fn should_trace_range(
     context_idx: u32,
     subject_idx: usize,
     subject_id: &str,
-    q_offset: usize,
-    q_end: usize,
+    q_offset: i32,
+    q_end: i32,
     s_offset: usize,
     s_end: usize,
     query_length: usize,
     query_frame: i32,
 ) -> bool {
+    // No NCBI counterpart: the query offsets are NCBI's `Int4` offsets in the context; one outside
+    // it (below 0) is taken as 0 for the trace's range test.
+    let (q_offset, q_end) = (q_offset.max(0) as usize, q_end.max(0) as usize);
     let cfg = config();
     if !cfg.enabled || !stage_matches(cfg.stage, stage) {
         return false;

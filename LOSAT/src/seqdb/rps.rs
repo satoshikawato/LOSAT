@@ -999,7 +999,10 @@ mod tests {
 
     /// A temporary directory of this test (tests of one binary run in parallel).
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("losat-rps-{name}-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-rps-{name}-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

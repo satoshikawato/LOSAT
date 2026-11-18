@@ -7,12 +7,19 @@ pub mod genetic_code;
 // quoted in the module).
 pub(crate) mod mapped_file;
 pub mod matrix;
+pub(crate) mod process_id;
+// No NCBI counterpart: whether two names are one file where there are no inode numbers (WASI).
+pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
 // libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, quoted in the module): the order
 // in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
 // ptrmap.hpp:171 of the 2025-05-13 package).
 pub(crate) mod std_sort;
+// No NCBI counterpart: test plumbing; the tests' temporary directory and process id
+// (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
+#[cfg(test)]
+pub(crate) mod test_dir;
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;

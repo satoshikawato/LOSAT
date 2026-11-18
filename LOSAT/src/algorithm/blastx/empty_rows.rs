@@ -194,8 +194,7 @@ fn mapper_wraps_empty_row(s_start: i32, protein: bool) -> bool {
 }
 
 /// How NCBI's tabular formatter (`CBlastTabularInfo::SetFields`) writes the row of an HSP with
-/// empty rows (`rows_empty`): the one decision of BLASTX's two tabular writers (the field lists,
-/// `tabular::write_blastx_tabular`, and the default fields of outfmt 6 and 7, `report.rs`).
+/// empty rows (`rows_empty`), for BLASTX's tabular writer (`tabular::write_blastx_tabular`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabularEmptyRow {
     /// `-subject` with a field of the alignment block, a subject with two or more shown HSPs (or

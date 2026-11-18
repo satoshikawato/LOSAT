@@ -443,6 +443,12 @@ pub trait TaxSubjects {
 
     /// LOSAT's refusal of a title of `subject` (`TaxTitle::Refused`), which names it.
     fn refused(&self, subject: usize, reason: &str) -> anyhow::Error;
+
+    /// Whether the load of `subject` throws where its query's batch has its prefetch off
+    /// (`db_subject::HitLoads::thrown`): the report leaves its HSPs out (`organism_report`).
+    fn throws(&self, _subject: usize) -> bool {
+        false
+    }
 }
 
 /// LOSAT's refusal of an organism report that it does not write as NCBI (a title, a taxonomy
@@ -532,19 +538,22 @@ enum SubjectName {
 pub struct SubjectTable<'p> {
     subjects: std::collections::HashMap<usize, (Vec<TaxDefline>, SubjectName)>,
     parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    /// What the reports load of each subject (`db_subject::HitLoads`; `None`: every subject).
+    loads: Option<&'p crate::report::db_subject::HitLoads>,
     program: String,
 }
 
 impl<'p> SubjectTable<'p> {
     /// The table of the subjects of `queries`' HSPs: `parsed` are the parsed subjects by subject
     /// index (empty when none has parsed Seq-ids), `plain(index)` a subject as the adapter has it
-    /// (`TaxPlain`); the subjects are proteins where `protein`. `program` names the program in
-    /// LOSAT's refusals.
+    /// (`TaxPlain`); the subjects are proteins where `protein`; `loads` what the reports load of
+    /// each subject (`None`: every subject). `program` names the program in LOSAT's refusals.
     pub fn new<'a>(
         queries: &[TaxQuery<'_>],
         parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
         plain: impl Fn(usize) -> TaxPlain<'a>,
         protein: bool,
+        loads: Option<&'p crate::report::db_subject::HitLoads>,
         program: &str,
     ) -> Self {
         let mut subjects = std::collections::HashMap::new();
@@ -560,6 +569,7 @@ impl<'p> SubjectTable<'p> {
         SubjectTable {
             subjects,
             parsed,
+            loads,
             program: program.to_owned(),
         }
     }
@@ -603,6 +613,11 @@ impl TaxSubjects for SubjectTable<'_> {
             ),
             None => format!("a subject {reason}; this is not supported by LOSAT's {program}"),
         }))
+    }
+
+    fn throws(&self, subject: usize) -> bool {
+        self.loads
+            .is_some_and(|loads| loads.thrown(subject).is_some())
     }
 }
 
@@ -692,7 +707,9 @@ impl TaxLookups {
         TaxLookups {
             db: names.and_then(TabularNames::report_db).cloned(),
             program: program.to_owned(),
-            registry_posts: registry.map_or_else(Vec::new, |read| registry_posts(read, &lower)),
+            registry_posts: registry.map_or_else(Vec::new, |read| {
+                super::formatter_registry::registry_posts(read, &lower)
+            }),
             browser_url: tax_browser_url(registry),
             lower,
             answers: Default::default(),
@@ -756,106 +773,31 @@ impl TaxLookups {
 
 /// `./.ncbirc` as NCBI's organism report reads it (`CTaxFormat::x_InitTaxFormat` and
 /// `CAlignFormatUtil::GetProtocol` read the file of the current directory each time a report is
-/// made, with a registry of their own): `None` without the file. LOSAT refuses a file whose read
-/// throws (NCBI's report then fails: a syntax error, NCBI BLAST+ 2.17.0 exit 255 after the first
-/// query's `Query=` block, probe `T/t2/probe_rc`) and one that reads other files (`[NCBI]
-/// .Inherits`, which LOSAT's registry reads refuse elsewhere too); the messages of a read that
-/// does not throw are NCBI's posts of each report (`registry_posts`).
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:171-177
-/// ```c++
-///     //set config file
-///     m_ConfigFile = new CNcbiIfstream(".ncbirc");
-///     m_Reg = new CNcbiRegistry(*m_ConfigFile);
-///     if(m_Reg) {
-///         m_TaxBrowserURL = m_Reg->Get("TAX_BROWSER","BLASTFMTUTIL");
-///     }
-/// ```
+/// made: `formatter_registry::read_cwd_ncbirc`): `None` without the file. LOSAT refuses a file
+/// whose read throws (NCBI's report then fails) and one that reads other files; the messages of a
+/// read that does not throw are NCBI's posts of each report (`formatter_registry::registry_posts`).
 fn read_ncbirc(program: &str) -> Result<Option<crate::blastinput::ncbi_registry::RegistryRead>> {
-    use crate::blastinput::ncbi_registry::{read_registry, Layer};
-    let path = std::path::Path::new(".ncbirc");
-    let Ok(bytes) = std::fs::read(path) else {
-        return Ok(None);
-    };
-    let refused = |what: &str| {
+    super::formatter_registry::read_cwd_ncbirc().map_err(|what| {
         anyhow::Error::new(TaxReportRefusal(format!(
             "the registry file ./.ncbirc {what}, which NCBI BLAST+'s organism report (outfmt 18) reads for each query; this is not supported by LOSAT's {program}"
         )))
-    };
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1615-1625
-    // ```c++
-    // CNcbiRegistry::CNcbiRegistry(CNcbiIstream& is, TFlags flags,
-    //                              const string& path)
-    // ...
-    //     x_Init();
-    //     m_FileRegistry->Read(is, flags & ~(fWithNcbirc | fCaseFlags));
-    //     LoadBaseRegistries(flags, 0, path);
-    //     IncludeNcbircIfAllowed(flags & ~fCaseFlags);
-    // ```
-    // One `Read` of the stream into a file layer (the byte order mark checked once), as the
-    // system-wide `.ncbirc` is read; flags 0 include no other `.ncbirc`.
-    let read = read_registry(&bytes, Layer::SystemWide).map_err(|reason| refused(&reason))?;
-    if read.error.is_some() {
-        return Err(refused("cannot be read as a registry"));
-    }
-    if read.last_value("NCBI", ".Inherits").is_some() {
-        return Err(refused("sets [NCBI] .Inherits"));
-    }
-    Ok(Some(read))
+    })
 }
 
-/// What one read of `./.ncbirc` (`read`) posts while `program` runs: a warning of each entry
-/// that sets an entry again, then the error of a stream that failed (`IRWRegistry::Read`, as the
-/// registry of `-window_masker_taxid` posts them, `ncbi_environment::window_masker_ncbirc`). NCBI
-/// BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): two of each per query of outfmt 18,
-/// `Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3` and
-/// `Error: (110.4) [blastp] Error reading the registry after line 1: `.
-fn registry_posts(read: &crate::blastinput::ncbi_registry::RegistryRead, program: &str) -> Vec<u8> {
-    use crate::blastinput::ncbi_registry::{repeated_entry_post, running_error_reading_post};
-    let mut posts = String::new();
-    for repeated in &read.repeated {
-        posts.push_str(&repeated_entry_post(repeated, program));
-    }
-    if read.stream_failed {
-        posts.push_str(&running_error_reading_post(program));
-    }
-    posts.into_bytes()
-}
-
-/// `m_TaxBrowserURL`: `[TAX_BROWSER] BLASTFMTUTIL` of `./.ncbirc` (`registry`), else NCBI's URL,
-/// with `<@protocol@>` replaced by `[BLASTFMTUTIL] PROTOCOL` (`https:` where it is not set or
-/// empty: `HasEntry` counts no empty value).
+/// `m_TaxBrowserURL`: the browser URL of `./.ncbirc` (`registry`,
+/// `formatter_registry::tax_browser_template`) with `<@protocol@>` replaced by NCBI's scheme
+/// (`formatter_registry::protocol`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:176-178
 /// ```c++
 ///     m_TaxBrowserURL = (m_TaxBrowserURL.empty()) ? s_TagToConstString("TAX_BROWSER_URL") : m_TaxBrowserURL;
 ///     m_TaxBrowserURL = CAlignFormatUtil::MapTemplate(m_TaxBrowserURL,"protocol",m_Protocol);
 /// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3643-3655
-/// ```c++
-/// string CAlignFormatUtil::GetProtocol()
-/// {
-///     CNcbiIfstream  config_file(".ncbirc");
-///     CNcbiRegistry config_reg(config_file);
-///     string httpProt = "https:";
-///     if(!config_reg.Empty()) {
-///         if(config_reg.HasEntry("BLASTFMTUTIL","PROTOCOL")) {
-///             httpProt = config_reg.Get("BLASTFMTUTIL","PROTOCOL");
-///         }
-///     }
-///     return httpProt;
-/// }
-/// ```
 fn tax_browser_url(registry: Option<&crate::blastinput::ncbi_registry::RegistryRead>) -> Vec<u8> {
-    const DEFAULT: &[u8] = b"<@protocol@>//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi";
-    let value = |section: &str, name: &str| {
-        registry
-            .and_then(|read| read.last_value(section, name))
-            .filter(|value| !value.is_empty())
-    };
-    let url = value("TAX_BROWSER", "BLASTFMTUTIL").unwrap_or(DEFAULT);
-    let protocol = value("BLASTFMTUTIL", "PROTOCOL").unwrap_or(b"https:");
-    Text::of(url).map_bytes("protocol", protocol).flat()
+    use super::formatter_registry::{protocol, tax_browser_template};
+    Text::of(tax_browser_template(registry))
+        .map_bytes("protocol", protocol(registry))
+        .flat()
 }
 
 /// The organism line of `names` before its centring and the replacements after it
@@ -1161,17 +1103,19 @@ pub fn write_report(
 /// BLASTP's, BLASTX's): the table of the subjects of `queries`' HSPs (`SubjectTable::new` of
 /// `parsed`, `plain` and `protein`), the lookups of the run's database that
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
-/// batch's first byte. `program` names the program in LOSAT's refusals and NCBI's messages.
+/// batch's first byte; `loads` what the reports load of each subject (`None`: every subject).
+/// `program` names the program in LOSAT's refusals and NCBI's messages.
 #[allow(clippy::too_many_arguments)]
 pub fn report_batch<'a>(
     queries: &[TaxQuery<'_>],
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     plain: impl Fn(usize) -> TaxPlain<'a>,
     protein: bool,
+    loads: Option<&crate::report::db_subject::HitLoads>,
     names: Option<&TabularNames>,
     program: &str,
 ) -> Result<TaxReport> {
-    let table = SubjectTable::new(queries, parsed, plain, protein, program);
+    let table = SubjectTable::new(queries, parsed, plain, protein, loads, program);
     TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
 }
 
@@ -1225,7 +1169,9 @@ pub fn report_batch<'a>(
 /// skip, then the lookups of its definition lines (`lookups`: a taxid not yet in the query's map,
 /// at each definition line that reaches it). A title that throws drops the rest of its subject's
 /// HSP before it widens the columns; a lookup that throws drops it after; either way the subject
-/// is not the previous id, so its next HSP is read again. LOSAT's refusals: a title that it does
+/// is not the previous id, so its next HSP is read again. An HSP whose subject's load throws
+/// (`TaxSubjects::throws`, the load of `GetBioseqHandle` where its batch's prefetch is off) is
+/// left out at the load, and is not the previous id either. LOSAT's refusals: a title that it does
 /// not write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
 /// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there).
 fn organism_report(
@@ -1242,7 +1188,11 @@ fn organism_report(
         if previous.is_some_and(|previous| subjects.same(previous, hsp.subject)) {
             continue;
         }
-        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines.
+        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines; a
+        // load that throws goes to the `catch`, `continue`, and reads nothing.
+        if subjects.throws(hsp.subject) {
+            continue;
+        }
         steps.push(Step::Read(hsp.subject));
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:950-951
         // ```c++

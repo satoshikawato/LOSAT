@@ -1601,8 +1601,10 @@ mod tests {
     ) -> (std::path::PathBuf, crate::seqdb::SeqDb) {
         use std::io::Read;
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/rps");
-        let dir =
-            std::env::temp_dir().join(format!("losat-rps-engine-{name}-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-rps-engine-{name}-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for extension in [
@@ -1648,6 +1650,10 @@ mod tests {
     // results of the search one context after another on one worker; a query whose cutoffs are
     // refused gets that refusal as its result, the others theirs.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn units_of_contexts_give_the_results_of_the_search_in_order() {
         use crate::algorithm::rps_search::volumes::{Consensus, RpsVolumeSet, RpsVolumeSetup};
         let (dir, db) = rps_mini("units");

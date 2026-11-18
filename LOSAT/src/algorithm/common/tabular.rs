@@ -116,6 +116,10 @@ pub(crate) enum TabularSubjects<'a> {
         sources: &'a [crate::report::defline::SourceTaxname],
         lengths: &'a [usize],
         taxonomy: &'a [TabularTaxonomy],
+        /// What the reports do at each subject (`report::db_subject::HitLoads`, by the subjects'
+        /// key here): a subject whose load throws writes its rows as NCBI's `catch` leaves them
+        /// (`report::tabular::SubjectLookup::Throws`).
+        loads: &'a crate::report::db_subject::HitLoads,
     },
 }
 
@@ -145,6 +149,9 @@ pub(crate) struct FailedValues<'a> {
     /// Whether `x_SetSubjectIds` throws, after the lines that `SubjectValues::all_ids` then holds
     /// (`FailedLookup::all_ids`).
     pub(crate) all_ids: bool,
+    /// Where the load of the subject throws before both (`report::tabular::ThrownLookup`): the
+    /// Seq-align id's GI and the exception.
+    pub(crate) thrown: Option<(i64, &'a crate::ncbi_exception::NcbiException)>,
 }
 
 impl<'a> FailedValues<'a> {
@@ -162,8 +169,75 @@ impl<'a> FailedValues<'a> {
                 align_id: [Cow::Owned(full), Cow::Owned(accession)],
                 subject_id,
                 all_ids,
+                thrown: None,
             }
         })
+    }
+
+    /// The failure of a database sequence with parsed Seq-ids whose load throws with `exception`
+    /// where the query's batch has its prefetch off (`report::db_subject::HitLoads::thrown`).
+    pub(crate) fn thrown(
+        subject: &ParsedSubject,
+        exception: &'a crate::ncbi_exception::NcbiException,
+    ) -> Self {
+        let [full, accession] = subject.alignment_tabular_ids();
+        FailedValues {
+            align_id: [Cow::Owned(full), Cow::Owned(accession)],
+            subject_id: false,
+            all_ids: false,
+            thrown: Some((subject.alignment_gi(), exception)),
+        }
+    }
+
+    /// The lookup of a subject that fails as these values say, with the definition lines' ids
+    /// `all_ids` that `x_SetSubjectIds` pushed before it threw (`TabularSubject::lookup`).
+    pub(crate) fn lookup<'s>(
+        &'s self,
+        all_ids: &'s [crate::report::tabular::DeflineIds],
+    ) -> crate::report::tabular::SubjectLookup<'s> {
+        match self.thrown {
+            Some((gi, exception)) => crate::report::tabular::SubjectLookup::Throws(
+                crate::report::tabular::ThrownLookup {
+                    full: &self.align_id[0],
+                    gi,
+                    accession: &self.align_id[1],
+                    exception,
+                },
+            ),
+            None => crate::report::tabular::SubjectLookup::Failed(
+                crate::report::tabular::FailedLookup {
+                    full: &self.align_id[0],
+                    accession: &self.align_id[1],
+                    subject_id: self.subject_id,
+                    all_ids: self.all_ids.then_some(all_ids),
+                },
+            ),
+        }
+    }
+}
+
+impl<'a> SubjectValues<'a> {
+    /// The values of the database sequence `subject` (subject index `index`) whose load throws
+    /// with `exception` (`FailedValues::thrown`): its rows print none of its own values (NCBI's
+    /// `catch` leaves the subject block's members as the rows before set them), and NCBI reads
+    /// none of its ids, titles or taxonomy, which LOSAT does not check.
+    pub(crate) fn thrown(
+        subject: &ParsedSubject,
+        exception: &'a crate::ncbi_exception::NcbiException,
+        index: usize,
+    ) -> Self {
+        SubjectValues {
+            id: Cow::Borrowed(&[]),
+            accession: Cow::Borrowed(&[]),
+            accession_version: Cow::Borrowed(&[]),
+            gi: 0,
+            all_ids: Vec::new(),
+            titles: None,
+            length: 0,
+            taxonomy: Cow::Owned(TabularTaxonomy::default()),
+            failed: Some(FailedValues::thrown(subject, exception)),
+            index,
+        }
     }
 }
 
@@ -198,14 +272,7 @@ impl SubjectValues<'_> {
     /// The lookup of the subject (`TabularSubject::lookup`).
     pub(crate) fn lookup(&self) -> crate::report::tabular::SubjectLookup<'_> {
         match &self.failed {
-            Some(failed) => crate::report::tabular::SubjectLookup::Failed(
-                crate::report::tabular::FailedLookup {
-                    full: &failed.align_id[0],
-                    accession: &failed.align_id[1],
-                    subject_id: failed.subject_id,
-                    all_ids: failed.all_ids.then_some(self.all_ids.as_slice()),
-                },
-            ),
+            Some(failed) => failed.lookup(&self.all_ids),
             None => crate::report::tabular::SubjectLookup::Found,
         }
     }
@@ -216,15 +283,21 @@ impl SubjectValues<'_> {
 /// `SetSubjectId` throws), and for a subject with parsed Seq-ids (`parsed`) and a report of
 /// `sall*`, also `x_SetSubjectIds` (`ParsedSubject::lookup_failure`). `database`: the subjects are
 /// a database's (the one definition line of a sequence without parsed Seq-ids throws in
-/// `x_SetSubjectIds` too, `LookupFailure::of_plain`); `protein` is their kind.
+/// `x_SetSubjectIds` too, `LookupFailure::of_plain`); `protein` is their kind. A subject whose
+/// load throws (`loads`, by subject index: `report::db_subject::HitLoad::Throws`) fails there,
+/// before every other lookup (`LookupFailure::thrown`).
 pub(crate) fn subject_lookup_failure(
     spec: Option<&TabularSpec>,
     ids: &[SubjectId],
     parsed: &[Option<Arc<ParsedSubject>>],
+    loads: &crate::report::db_subject::HitLoads,
     database: bool,
     protein: bool,
     s_idx: usize,
 ) -> Option<crate::report::tabular::LookupFailure> {
+    if loads.thrown(s_idx).is_some() {
+        return Some(crate::report::tabular::LookupFailure::thrown());
+    }
     let failed_id = matches!(ids.get(s_idx), Some(None));
     match parsed.get(s_idx).and_then(Option::as_deref) {
         Some(subject) if spec.is_some_and(reports_all_ids) => {
@@ -233,6 +306,7 @@ pub(crate) fn subject_lookup_failure(
         Some(_) => failed_id.then_some(crate::report::tabular::LookupFailure {
             subject_id: true,
             all_ids: false,
+            bioseq: false,
         }),
         None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
     }
@@ -257,14 +331,17 @@ pub(crate) fn lookups_may_fail(ids: &[SubjectId], parsed: &[Option<Arc<ParsedSub
 
 /// Whether a tabular report of `spec` is checked for rows whose lookups fail
 /// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (`None` for a failed
-/// `SetSubjectId`) and `parsed` are as given: some id failed, or a subject with parsed Seq-ids
-/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`).
+/// `SetSubjectId`) and `parsed` are as given: some id failed, a subject with parsed Seq-ids
+/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`), or the load of some subject throws
+/// (`loads`).
 pub(crate) fn checks_failed_lookups(
     spec: Option<&TabularSpec>,
     ids: &[SubjectId],
     parsed: &[Option<Arc<ParsedSubject>>],
+    loads: &crate::report::db_subject::HitLoads,
 ) -> bool {
     (ids.iter().any(Option::is_none)
+        || loads.any_throws()
         || (!parsed.is_empty()
             && spec.is_some_and(reports_all_ids)
             && parsed.iter().any(Option::is_some)))
@@ -278,6 +355,15 @@ impl<'a> TabularSubjects<'a> {
             TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
                 parsed
             }
+        }
+    }
+
+    /// What the reports load of each subject (`report::db_subject::HitLoads`; `None` for a
+    /// subject set, whose subjects are all loaded).
+    pub(crate) fn loads(&self) -> Option<&'a crate::report::db_subject::HitLoads> {
+        match *self {
+            TabularSubjects::Records { .. } => None,
+            TabularSubjects::Database { loads, .. } => Some(loads),
         }
     }
 
@@ -394,6 +480,7 @@ impl<'a> TabularSubjects<'a> {
                             align_id: [local.clone(), local],
                             subject_id: true,
                             all_ids: false,
+                            thrown: None,
                         })
                     }
                     _ => None,
@@ -420,7 +507,14 @@ impl<'a> TabularSubjects<'a> {
                 sources,
                 lengths,
                 taxonomy,
+                loads,
             } => {
+                if let (Some(exception), Some(subject)) = (
+                    loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
+                ) {
+                    return Ok(SubjectValues::thrown(subject, exception, s_idx));
+                }
                 let length = lengths.get(s_idx).copied().unwrap_or_default();
                 let taxonomy = match taxonomy.get(s_idx) {
                     Some(taxonomy) => Cow::Borrowed(taxonomy),
@@ -485,6 +579,7 @@ impl<'a> TabularSubjects<'a> {
                                 align_id: [Cow::Owned(full), Cow::Owned(accession)],
                                 subject_id: true,
                                 all_ids: true,
+                                thrown: None,
                             }
                         });
                         Ok(SubjectValues {
@@ -529,19 +624,24 @@ impl<'a> TabularSubjects<'a> {
 /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals` of `db`,
 /// by rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
 /// from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a `taxid`), for
-/// the ranks `ranks` (the subjects of the report's rows); the others are left empty. A header
-/// that does not decode is refused before the report (`program` names the program).
+/// the ranks `ranks` (the subjects of the report's rows) that a report loads (`loads`, by rank);
+/// the others are left empty: NCBI reads no definition line of a subject whose load throws (its
+/// rows keep the taxonomy of the rows before) nor of one that no report reaches, and looks none
+/// of their taxids up (review 1 of line DBID pfoff-2, H1 and M1). A header that does not decode
+/// is refused before the report (`program` names the program).
 pub(crate) fn tabular_taxonomy(
     db: &SeqDb,
     ordinals: &[u32],
     parsed: &[Option<Arc<ParsedSubject>>],
     ranks: impl IntoIterator<Item = usize>,
+    loads: &crate::report::db_subject::HitLoads,
     program: &str,
 ) -> Result<Vec<TabularTaxonomy>> {
     let mut taxonomy = vec![TabularTaxonomy::default(); ordinals.len()];
     let mut read = vec![false; ordinals.len()];
     for rank in ranks {
-        if rank >= ordinals.len() || std::mem::replace(&mut read[rank], true) {
+        if rank >= ordinals.len() || !loads.loaded(rank) || std::mem::replace(&mut read[rank], true)
+        {
             continue;
         }
         taxonomy[rank] = match parsed.get(rank).and_then(Option::as_deref) {
@@ -592,12 +692,7 @@ pub(crate) fn write_tabular_prolog(
         diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter {
-        spec,
-        program_version,
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, program_version, None).prolog(writer)?;
     Ok(())
 }
 
@@ -624,6 +719,7 @@ pub(crate) fn write_tax_report(
         subjects.parsed(),
         |s_idx| subjects.tax_plain(s_idx, records),
         protein,
+        subjects.loads(),
         names,
         program,
     )?;

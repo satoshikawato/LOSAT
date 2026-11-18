@@ -22,7 +22,9 @@ pub use writer::{written_queries, BlastXmlWriter, DocumentPosts, StructuredXml};
 /// of `BlastXML2_FormatReport` and `BlastJSON_FormatReport`): the document writes what NCBI wrote
 /// before it (`StructuredXml::query`'s output) and the program posts its message
 /// (`StructuredXml::caught_message`) and goes on. Raised by BLASTX's HSPs of length 0
-/// (`algorithm::blastx::empty_rows`).
+/// (`algorithm::blastx::empty_rows`) and by the `Hit` of a database sequence whose lookup throws
+/// where the `Hit` loads it (`subjects::HitNames::names` of `HitNames::Throws`, as
+/// `report::db_subject::HitLoads` decides it; XML2 and JSON only).
 #[derive(Debug)]
 pub struct CaughtException(pub crate::ncbi_exception::NcbiException);
 
@@ -34,12 +36,13 @@ impl std::fmt::Display for CaughtException {
 
 impl std::error::Error for CaughtException {}
 
-/// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast); the
-/// `&auml;` is NCBI's text (api/version.cpp:47-51) and is escaped again when written.
-pub const REFERENCE_GAPPED_BLAST: &str = "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.";
+/// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast): NCBI's text
+/// (`CReference::GetString(eGappedBlast)`, `report::reference`), whose `&auml;` is escaped again
+/// when written.
+pub const REFERENCE_GAPPED_BLAST: &str = super::reference::Publication::GappedBlast.string();
 
-/// `BlastOutput_reference` of megablast (`CReference::eMegaBlast`).
-pub const REFERENCE_MEGABLAST: &str = "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.";
+/// `BlastOutput_reference` of megablast (`CReference::GetString(eMegaBlast)`).
+pub const REFERENCE_MEGABLAST: &str = super::reference::Publication::MegaBlast.string();
 
 #[cfg(test)]
 mod tests;

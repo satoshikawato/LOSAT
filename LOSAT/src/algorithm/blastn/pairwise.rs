@@ -128,13 +128,15 @@ pub(crate) fn pairwise_hits(
 }
 
 /// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
-/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
-/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`).
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths in a report
+/// of `line_length` columns a line, the report's `PairwiseConfig::line_length`, before any row is
+/// made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`).
 #[inline(never)]
 pub(crate) fn pairwise_windows(
     hit_lists: &[Option<BlastnHitList>],
     num_queries: usize,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    line_length: usize,
 ) -> Vec<std::ops::Range<usize>> {
     use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
     let estimates: Vec<usize> = (0..num_queries)
@@ -147,6 +149,7 @@ pub(crate) fn pairwise_windows(
                     .flat_map(|hit_list| &hit_list.hsplist_array)
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.length),
+                line_length,
             )
         })
         .collect();
@@ -387,7 +390,17 @@ fn context_rows_into(
 ) -> Result<()> {
     query_row.clear();
     subject_row.clear();
-    let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
+    // An HSP outside its query context (a negative `Int4` offset) never reaches a report
+    // (`run::hsp_outside_query_context`). The end is not below the offset, so neither cast
+    // wraps; the range test below would refuse one that did.
+    ensure!(
+        hsp.internal_q_offset_0 >= 0,
+        "BLASTN HSP outside its sequences"
+    );
+    let (qs, qe) = (
+        hsp.internal_q_offset_0 as usize,
+        hsp.internal_q_end_0 as usize,
+    );
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
     ensure!(
         qs <= qe && qe <= query.len() && ss <= se && se <= subject_length,
@@ -758,8 +771,8 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
-            internal_q_offset_0: q.0,
-            internal_q_end_0: q.1,
+            internal_q_offset_0: q.0 as i32,
+            internal_q_end_0: q.1 as i32,
             internal_s_offset_0: s.0,
             internal_s_end_0: s.1,
             internal_query_context_offset: 0,

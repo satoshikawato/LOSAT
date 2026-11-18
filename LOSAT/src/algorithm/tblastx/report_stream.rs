@@ -56,8 +56,11 @@
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
 //!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
-//!   extension that scores higher past the end of its query frame, `extension::query_batch`, and a
-//!   one-hit merge of lengths that add up to 0). Any other error that LOSAT raises where NCBI would
+//!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
+//!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
+//!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and
+//!   the re-evaluation's fetch of a subject whose header cannot be read under a negative seqid list,
+//!   `subject_loop::x_fetch_keeps`). Any other error that LOSAT raises where NCBI would
 //!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
 //!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
 //!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),
@@ -371,6 +374,10 @@ mod tests {
     // whose headers refuse the reports, is not read above its bound), and reads it up to the
     // bound, at one thread and in a pool, for outfmt 6 and 0.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_database_with_parsed_seqids_beyond_the_bound_keeps_its_reports_after_the_loop() {
         let open = |name: &str| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

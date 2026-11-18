@@ -196,13 +196,14 @@ class ContractTests(unittest.TestCase):
 
     def test_contract_lists_rejected_tasks_and_toolchain(self) -> None:
         contract = release.load_contract(REPO_ROOT)
+        self.assertEqual(contract["public_cli"]["rejected_tasks"], ["rmblastn"])
         self.assertEqual(
-            contract["public_cli"]["rejected_tasks"], ["blastp-short"]
+            contract["public_cli"]["blastp_tasks"], ["blastp", "blastp-fast", "blastp-short"]
         )
         self.assertEqual(contract["public_cli"]["blastx_tasks"], ["blastx", "blastx-fast"])
         self.assertEqual(contract["public_cli"]["tblastn_tasks"], ["tblastn", "tblastn-fast"])
         for case in contract["smoke"]:
-            self.assertNotIn("blastp-short", case["arguments"])
+            self.assertNotIn("rmblastn", case["arguments"])
         toolchain = contract["cert_toolchain"]
         self.assertEqual(toolchain["rust"], "1.92.0")
         self.assertEqual(toolchain["cargo"], "1.92.0")
@@ -239,6 +240,26 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(
             {claim["claim"] for claim in claims}, {"certified", "supported", "preview"}
         )
+
+    def test_public_wording_has_no_certification_words(self) -> None:
+        # The wording strings are copied into the handoff's public "Platform claims" table.
+        # Internal keys (`claim`: "certified") stay; the public words follow README.md.
+        claims = release.load_contract(REPO_ROOT)["platform_claims"]
+        for claim in claims:
+            for word in ("certified", "certification", "verified"):
+                self.assertNotIn(word, claim["wording"].lower(), claim["platform"])
+            if claim["claim"] == "certified":
+                self.assertTrue(
+                    claim["wording"].startswith(
+                        "Supported: matches NCBI BLAST+ 2.17.0 on the release test set"
+                    ),
+                    claim["platform"],
+                )
+            if claim["claim"] == "supported":
+                self.assertEqual(
+                    claim["wording"],
+                    "Supported: tested in CI, outside the release's NCBI parity claim",
+                )
 
     def test_load_contract_rejects_changed_contracts(self) -> None:
         def mutate_release(c: dict) -> None:
@@ -893,6 +914,9 @@ class AggregateTests(unittest.TestCase):
             for claim in contract["platform_claims"]:
                 self.assertIn(claim["platform"], text)
                 self.assertIn(claim["wording"], text)
+            # RC-HANDOFF.md is published with the release: the internal `claim` key
+            # ("certified") stays out of it, as README.md's words do.
+            self.assertNotIn("certified", text.lower())
 
     def test_aggregate_refuses_a_dry_run_sidecar(self) -> None:
         contract = filled_contract("d" * 40)

@@ -67,9 +67,10 @@
 //!                     continue;
 //!                 }
 //! ```
-//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without
-//! LOSAT_X_BXCROSS's cell test: `LOSAT_X_BXCROSS=0`, a CPU without AVX2 or POPCNT, aarch64,
-//! WebAssembly) 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
+//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without a cell
+//! test of batches across the cells' borders: `LOSAT_X_BXCROSS=0`, aarch64, x86-64 without SSSE3,
+//! SSE4.1 or POPCNT, and `LOSAT_X_BXCROSS128=0` on x86-64 without AVX2 and in WebAssembly)
+//! 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
 //! far and 14.5-17.4 % overlap, which of the two is hard to predict, and 1.2-1.4 % meet a flag-1
 //! cell and 2.1-2.8 % are candidates for the extension.
 //!
@@ -118,8 +119,10 @@
 //! cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64 (not timed); `=2`
 //! the plain loops for every table, `=3` for sparse tables, on any CPU. Where it does not act the
 //! branch-free scan of BXSCANBF (graduated, always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
-//! its candidate loop. On x86-64 with AVX2 and POPCNT the direct loop scans the subjects of batches
-//! with few hits per used cell (BXDIAGMIN: short queries); elsewhere every batch.
+//! its candidate loop. Where LOSAT_X_BXDIAG's fused loop runs by default (x86-64 with AVX2 and
+//! POPCNT, LOSAT_X_BXCROSS; the WebAssembly build and x86-64 with SSSE3, SSE4.1 and POPCNT,
+//! LOSAT_X_BXCROSS128) the direct loop scans the subjects of batches with few hits per used cell
+//! (BXDIAGMIN: short queries); elsewhere every batch.
 
 use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;
@@ -127,10 +130,11 @@ use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
 use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use crate::algorithm::tblastx::x_scan_byte::{
-    x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
+    x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XPresence, XScanByte,
+    X_SCAN_BYTE_SLACK,
 };
 use std::cell::RefCell;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 // No NCBI counterpart: reads the LOSAT_X_BXHITBF switch once; it does not change any value NCBI
 // computes.
@@ -163,7 +167,7 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 /// the table was built pooled (`pooled`), so that its vectors go back to the pool when it is
 /// dropped (LOSAT_X_BXPOOLN1 builds a one-thread search's tables without the pool).
 pub struct XKeptPresence {
-    presence: OnceLock<Option<(Arc<[u8]>, bool)>>,
+    presence: OnceLock<Option<(XPresence, bool)>>,
     /// EXPERIMENT (LOSAT_X_BXCTXONCE): the context table of the query batch the table was built
     /// from (`x_seed_diag.rs` `x_with_context_table`), made by the first thread that needs it.
     pub(super) contexts: OnceLock<crate::algorithm::blastp::x_seed_fused::XContextTable>,
@@ -205,7 +209,7 @@ impl Lookup {
     /// EXPERIMENT (LOSAT_X_BXSCANBYTE): the presence bytes for `x_scan_one_range_byte` when `mode`
     /// scans this table that way (a standard table, the switch on, the table sparse if `mode`
     /// asks), built on the first call that needs them; else `None` (the scan before).
-    fn x_scan_presence(&self, mode: XScanByte) -> Option<&[u8]> {
+    fn x_scan_presence(&self, mode: XScanByte) -> Option<&XPresence> {
         match self {
             Self::Standard(table, kept) if mode.on() => {
                 x_kept_presence(mode, kept.presence.get_or_init(|| x_table_presence(table)))

@@ -2004,6 +2004,68 @@ pub(crate) mod arch {
     pub unsafe fn packs32(a: V, b: V) -> V {
         _mm_packs_epi32(a, b)
     }
+    // The wrappers below are used by blastx's 128-bit cross-cell batches (`blastp/x_seed_fused.rs`,
+    // LOSAT_X_BXCROSS128) on x86-64 and wasm32 only; the aarch64 layer does not have them.
+    /// 32-bit lanes: `a - b`, wrapping.
+    #[inline(always)]
+    pub unsafe fn sub32(a: V, b: V) -> V {
+        _mm_sub_epi32(a, b)
+    }
+    /// 32-bit lanes: all ones where equal, zero elsewhere.
+    #[inline(always)]
+    pub unsafe fn eq32(a: V, b: V) -> V {
+        _mm_cmpeq_epi32(a, b)
+    }
+    /// 32-bit lanes shifted left by `N` bits.
+    #[inline(always)]
+    pub unsafe fn shl32<const N: i32>(v: V) -> V {
+        _mm_slli_epi32::<N>(v)
+    }
+    /// 32-bit lanes shifted right (arithmetic) by `N` bits.
+    #[inline(always)]
+    pub unsafe fn sra32<const N: i32>(v: V) -> V {
+        _mm_srai_epi32::<N>(v)
+    }
+    /// The 32-bit lanes `a`, `b`, `c`, `d` (lane 0 first).
+    #[inline(always)]
+    pub unsafe fn set32(a: i32, b: i32, c: i32, d: i32) -> V {
+        _mm_setr_epi32(a, b, c, d)
+    }
+    /// Bit `i` set where 32-bit lane `i` has its top bit set.
+    #[inline(always)]
+    pub unsafe fn mask32(v: V) -> u32 {
+        _mm_movemask_ps(_mm_castsi128_ps(v)) as u32
+    }
+    /// Whether any bit of `v` is set.
+    #[inline(always)]
+    pub unsafe fn any_set(v: V) -> bool {
+        _mm_testz_si128(v, v) == 0
+    }
+    /// The 32-bit lanes rotated by one: lane `i` is lane `(i + 1) % 4` of `v`.
+    #[inline(always)]
+    pub unsafe fn rot32_1(v: V) -> V {
+        _mm_shuffle_epi32::<0b00_11_10_01>(v)
+    }
+    /// The 32-bit lanes rotated by two: lane `i` is lane `(i + 2) % 4` of `v`.
+    #[inline(always)]
+    pub unsafe fn rot32_2(v: V) -> V {
+        _mm_shuffle_epi32::<0b01_00_11_10>(v)
+    }
+    /// The 32-bit lanes rotated by three: lane `i` is lane `(i + 3) % 4` of `v`.
+    #[inline(always)]
+    pub unsafe fn rot32_3(v: V) -> V {
+        _mm_shuffle_epi32::<0b10_01_00_11>(v)
+    }
+    /// 16-bit lanes 0..4, zero-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn zext_lo16(v: V) -> V {
+        _mm_cvtepu16_epi32(v)
+    }
+    /// 16-bit lanes 4..8, zero-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn zext_hi16(v: V) -> V {
+        _mm_unpackhi_epi16(v, _mm_setzero_si128())
+    }
     // The wrappers below are used by tblastn's 128-bit translation (`tblastn/x_subject_translate.rs`)
     // on x86-64 and wasm32 only; the aarch64 layer does not have them.
     /// 16-bit lanes shifted left by `n` bits (`n < 16`).
@@ -2302,6 +2364,68 @@ pub(crate) mod arch {
     #[inline(always)]
     pub unsafe fn packs32(a: V, b: V) -> V {
         i16x8_narrow_i32x4(a, b)
+    }
+    // The wrappers below are used by blastx's 128-bit cross-cell batches (`blastp/x_seed_fused.rs`,
+    // LOSAT_X_BXCROSS128) on x86-64 and wasm32 only; the aarch64 layer does not have them.
+    /// 32-bit lanes: `a - b`, wrapping.
+    #[inline(always)]
+    pub unsafe fn sub32(a: V, b: V) -> V {
+        i32x4_sub(a, b)
+    }
+    /// 32-bit lanes: all ones where equal, zero elsewhere.
+    #[inline(always)]
+    pub unsafe fn eq32(a: V, b: V) -> V {
+        i32x4_eq(a, b)
+    }
+    /// 32-bit lanes shifted left by `N` bits.
+    #[inline(always)]
+    pub unsafe fn shl32<const N: i32>(v: V) -> V {
+        i32x4_shl(v, N as u32)
+    }
+    /// 32-bit lanes shifted right (arithmetic) by `N` bits.
+    #[inline(always)]
+    pub unsafe fn sra32<const N: i32>(v: V) -> V {
+        i32x4_shr(v, N as u32)
+    }
+    /// The 32-bit lanes `a`, `b`, `c`, `d` (lane 0 first).
+    #[inline(always)]
+    pub unsafe fn set32(a: i32, b: i32, c: i32, d: i32) -> V {
+        i32x4(a, b, c, d)
+    }
+    /// Bit `i` set where 32-bit lane `i` has its top bit set.
+    #[inline(always)]
+    pub unsafe fn mask32(v: V) -> u32 {
+        u32::from(i32x4_bitmask(v))
+    }
+    /// Whether any bit of `v` is set.
+    #[inline(always)]
+    pub unsafe fn any_set(v: V) -> bool {
+        v128_any_true(v)
+    }
+    /// The 32-bit lanes rotated by one: lane `i` is lane `(i + 1) % 4` of `v`.
+    #[inline(always)]
+    pub unsafe fn rot32_1(v: V) -> V {
+        i32x4_shuffle::<1, 2, 3, 0>(v, v)
+    }
+    /// The 32-bit lanes rotated by two: lane `i` is lane `(i + 2) % 4` of `v`.
+    #[inline(always)]
+    pub unsafe fn rot32_2(v: V) -> V {
+        i32x4_shuffle::<2, 3, 0, 1>(v, v)
+    }
+    /// The 32-bit lanes rotated by three: lane `i` is lane `(i + 3) % 4` of `v`.
+    #[inline(always)]
+    pub unsafe fn rot32_3(v: V) -> V {
+        i32x4_shuffle::<3, 0, 1, 2>(v, v)
+    }
+    /// 16-bit lanes 0..4, zero-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn zext_lo16(v: V) -> V {
+        u32x4_extend_low_u16x8(v)
+    }
+    /// 16-bit lanes 4..8, zero-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn zext_hi16(v: V) -> V {
+        u32x4_extend_high_u16x8(v)
     }
     // The wrappers below are used by tblastn's 128-bit translation (`tblastn/x_subject_translate.rs`)
     // on x86-64 and wasm32 only; the aarch64 layer does not have them.

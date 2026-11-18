@@ -3,6 +3,9 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+// integration tests run natively only (WASI has no `std::env::temp_dir()` or `std::process::id()`)
+#![allow(clippy::disallowed_methods)]
+
 #[path = "../run_local_tblastx.rs"]
 mod run_local_tblastx;
 #[path = "../tblastx_band.rs"]
@@ -11,6 +14,8 @@ mod tblastx_band;
 mod tblastx_batch_pipe;
 #[path = "../tblastx_chunk_merge.rs"]
 mod tblastx_chunk_merge;
+#[path = "../tblastx_ctx_table.rs"]
+mod tblastx_ctx_table;
 #[path = "../tblastx_db_search.rs"]
 mod tblastx_db_search;
 #[path = "../tblastx_db_stream.rs"]
@@ -57,6 +62,8 @@ mod tblastx_seed_compact;
 mod tblastx_seed_release;
 #[path = "../tblastx_seed_unmap.rs"]
 mod tblastx_seed_unmap;
+#[path = "../tblastx_short_subject.rs"]
+mod tblastx_short_subject;
 #[path = "../tblastx_store.rs"]
 mod tblastx_store;
 #[path = "../tblastx_subject_next.rs"]

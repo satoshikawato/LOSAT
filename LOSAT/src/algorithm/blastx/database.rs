@@ -33,7 +33,7 @@ use super::subjects::Subjects;
 use crate::algorithm::common::database::{self as shared, PreliminaryReadError};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
@@ -317,6 +317,10 @@ pub(crate) struct ReportedSubjects {
     /// parsed Seq-ids, by rank (`shared::read_reported_taxonomy`; empty as `taxonomy`).
     parsed_taxonomy: Vec<Vec<HitTaxonomy>>,
     taxdb_notes: shared::TaxdbNotes,
+    /// What the batch's reports do at the `Hit` of each subject, by rank (`HitLoads`, the one
+    /// answer: a subject whose `Hit` throws, one that no report loads), which the refusals, the
+    /// names, the taxonomy reads and the run's record of the loads take.
+    loads: HitLoads,
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none): their
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
     /// holds the title of their first definition line.
@@ -502,7 +506,11 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`).
+    /// one by one (`shared::ParsedShown::one_by_one`). `after`: what the reports do after a
+    /// subject whose lookup throws (`FormatThrow::of_run`; `None`: a report refuses it), for
+    /// `HitLoads::of` (where `one_by_one`, which subjects throw and which no report loads; the
+    /// refusals, the names, the tables' rows, the taxonomy reads and the run's record of the
+    /// loads, `note_loaded`, take that one answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -521,6 +529,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
+        after: Option<crate::report::db_subject::RunThrow>,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -552,6 +561,37 @@ impl ReportedSubjects {
                 }
             }
         }
+        // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
+        // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
+        // of each query, `report::reported`).
+        let report_lists: Vec<&[super::results::HspList]> = batches
+            .iter()
+            .flat_map(|batch| batch.queries.iter().map(Vec::as_slice))
+            .collect();
+        let loads = HitLoads::of(
+            after,
+            report_lists.iter().map(|lists| {
+                (
+                    one_by_one,
+                    lists
+                        .iter()
+                        .map(|list| super::report::reported(list, gapped).then_some(list.oid))
+                        .collect(),
+                )
+            }),
+            |oid| parsed.get(&oid).map(Arc::as_ref),
+            // A list's rows read its subject where one of the HSPs that they show has
+            // identities (`report::reads_list`).
+            |report, list| {
+                report_lists[report][list]
+                    .hsps
+                    .iter()
+                    .filter(|hsp| super::report::has_seqalign(hsp, gapped))
+                    .map(|hsp| hsp.identity)
+                    .max()
+                    .unwrap_or(0)
+            },
+        );
         let taxdb_found = database.db.taxdb_found();
         let mut reported = ReportedSubjects::default();
         for (&oid, title) in &listed {
@@ -571,9 +611,15 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
-                    subject.fetched(taxonomy, one_by_one).map_err(|reason| {
-                        shared::parsed_refusal(database.db.oid(ordinal), &reason, database.program)
-                    })?;
+                    subject
+                        .fetched(taxonomy, one_by_one, loads.load(oid))
+                        .map_err(|reason| {
+                            shared::parsed_refusal(
+                                database.db.oid(ordinal),
+                                &reason,
+                                database.program,
+                            )
+                        })?;
                 } else if reports && prefetched {
                     shared::check_prefetched_parsed(
                         &database.db,
@@ -696,16 +742,21 @@ impl ReportedSubjects {
                 }
             }
         }
+        reported.loads = loads.renamed(|oid| rank.get(&oid).copied());
         if reports && taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
             // sequences with a title are the reported ones.
             // A sequence with parsed Seq-ids has the taxid of each definition line
-            // (`shared::read_reported_taxonomy`).
+            // (`shared::read_reported_taxonomy`). Of the reported ones, those that the reports
+            // load (`HitLoads::loaded`): the reads of a subject whose `Hit` throws, and of one
+            // shown only after it, are never made, so the texts of opening the taxonomy database
+            // and of a volume's first lookup of a taxid go to the loads that make them, in this
+            // batch or a later one (review 1 of line DBID pfoff-1, H1).
             let shown: std::collections::BTreeSet<usize> = listed
                 .iter()
                 .enumerate()
-                .filter(|(_, (_, title))| title.is_some())
+                .filter(|(rank, (_, title))| title.is_some() && reported.loads.loaded(*rank))
                 .map(|(rank, _)| rank)
                 .collect();
             // A taxonomy database LOSAT cannot read as NCBI does is LOSAT's refusal of the XML2
@@ -800,7 +851,11 @@ impl ReportedSubjects {
                             })
                     })
                     .flatten()
-                    .filter(move |list| super::report::reads_list(list, gapped, rows))
+                    // Not a subject that no report loads (`HitLoads::loaded`: one whose `Hit`
+                    // throws, or that is shown only after it).
+                    .filter(move |list| {
+                        super::report::reads_list(list, gapped, rows) && self.loads.loaded(list.oid)
+                    })
                     .map(|list| {
                         shared::PrefetchSubject::unflipped(
                             self.ordinals[list.oid],
@@ -921,13 +976,18 @@ impl ReportedSubjects {
                         .map(|list| list.oid as u32)
                         .collect(),
                 };
-                let subjects = ranks.into_iter().map(|rank| {
-                    (
-                        rank,
-                        self.ordinals[rank as usize],
-                        self.parsed_subject(rank as usize),
-                    )
-                });
+                // A subject whose load throws loads nothing, nor does one that no report
+                // reaches after it (`HitLoads::loaded`).
+                let subjects = ranks
+                    .into_iter()
+                    .filter(|&rank| self.loads.loaded(rank as usize))
+                    .map(|rank| {
+                        (
+                            rank,
+                            self.ordinals[rank as usize],
+                            self.parsed_subject(rank as usize),
+                        )
+                    });
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,
@@ -1011,6 +1071,10 @@ impl ReportedSubjects {
             .flat_map(|batch| batch.queries.iter().flatten())
             .filter(|list| super::report::reported(list, gapped))
             .map(|list| list.oid)
+            // A subject that no report loads (`HitLoads::loaded`: one whose load throws, whose
+            // rows keep the names of the rows before, and one that no report reaches): NCBI reads
+            // none of its definition lines and looks none of its taxids up.
+            .filter(|&rank| self.loads.loaded(rank))
             .collect();
         let count = self.ordinals.len();
         if needs.all_deflines {
@@ -1124,6 +1188,11 @@ impl ReportedSubjects {
         &self.taxdb_notes
     }
 
+    /// What the batch's reports do at the `Hit` of each subject, by rank (`for_batch`).
+    pub(crate) fn loads(&self) -> &HitLoads {
+        &self.loads
+    }
+
     /// The tabular `sseqid`, `sacc` and `saccver` of rank `rank` (only with `tabular` in
     /// `for_batch`): the same id for a sequence without parsed Seq-ids whose title gives a word;
     /// `None` where the lookup fails (`common::tabular::SubjectId`).
@@ -1194,18 +1263,17 @@ impl ReportedSubjects {
 
     /// The description-table labels by rank: the title as NCBI's defline generator makes it
     /// for the description table (as BLASTP's, BLASTN's and TBLASTN's `-db` reports).
-    pub(crate) fn descriptions(&self) -> Vec<Arc<[u8]>> {
+    pub(crate) fn descriptions(&self) -> Vec<crate::report::pairwise::DescriptionLabel> {
         self.titles
             .iter()
             .enumerate()
             .map(|(rank, title)| {
-                let label = crate::report::pairwise::database_description_label(
+                crate::report::pairwise::database_description_label(
                     title,
                     crate::report::pairwise::stored_source(&self.sources, rank as u32),
                     self.parsed_subject(rank),
                     true,
-                );
-                Arc::from(label)
+                )
             })
             .collect()
     }
@@ -1359,9 +1427,9 @@ mod tests {
     // end of `taxdb.btd`), `x16_taxid` (taxid 9606) with `bad_magic`.
     #[test]
     fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-db-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1390,6 +1458,7 @@ mod tests {
                 false,
                 false,
                 false,
+                None,
             )
             .unwrap();
             let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -1428,9 +1497,9 @@ mod tests {
     // above; query 0 shows nothing (its HSP has no Seq-align), query 1 shows both sequences.
     #[test]
     fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-db-prefetch-off-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1464,6 +1533,7 @@ mod tests {
                 false,
                 false,
                 false,
+                None,
             )
             .unwrap();
             for hsp in batches

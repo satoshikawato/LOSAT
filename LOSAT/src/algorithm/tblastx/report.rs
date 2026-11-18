@@ -1197,8 +1197,9 @@ pub(crate) fn seqalign_identities(hits: &[TblastxHsp]) -> Vec<u32> {
 }
 
 /// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
-/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
-/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`), as BLASTN's
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths in a report
+/// of `line_length` columns a line, the report's `PairwiseConfig::line_length`, before any row is
+/// made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`), as BLASTN's
 /// (`blastn::pairwise::pairwise_windows`). `hits` is the final list in report order (queries in
 /// input order).
 #[inline(never)]
@@ -1206,12 +1207,13 @@ pub(crate) fn pairwise_windows(
     hits: &[TblastxHsp],
     num_queries: usize,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    line_length: usize,
 ) -> Vec<std::ops::Range<usize>> {
     use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
-    let mut estimates = vec![query_estimate_of(std::iter::empty()); num_queries];
+    let mut estimates = vec![query_estimate_of(std::iter::empty(), line_length); num_queries];
     for query_hits in hits.chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx) {
         if let Some(estimate) = estimates.get_mut(query_hits[0].hit.q_idx as usize) {
-            *estimate = query_estimate_of(query_hits.iter().map(|hsp| hsp.hit.length));
+            *estimate = query_estimate_of(query_hits.iter().map(|hsp| hsp.hit.length), line_length);
         }
     }
     query_windows(&estimates, window_bytes(x_pool))
@@ -1525,6 +1527,7 @@ pub(crate) fn write_tabular<W: Write>(
     database: &str,
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    loads: &crate::report::db_subject::HitLoads,
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1549,7 +1552,14 @@ pub(crate) fn write_tabular<W: Write>(
             )?;
         }
         let mut previous: Option<u32> = None;
+        // The query's formatter is new: its rows keep no subject before the first one that
+        // loads it (`TabularRows`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for &(hsp_index, hsp) in query_hits {
+            // The subject's load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
+            // (`TabularRows::write_thrown_default`).
+            let thrown = loads.thrown(hsp.hit.s_idx as usize).is_some();
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -1559,7 +1569,7 @@ pub(crate) fn write_tabular<W: Write>(
             // (`QueryWarnings::subject_read`; a subject's HSPs follow each other).
             if previous != Some(hsp.hit.s_idx) {
                 previous = Some(hsp.hit.s_idx);
-                if let Some(warnings) = warnings.as_deref_mut() {
+                if let (Some(warnings), false) = (warnings.as_deref_mut(), thrown) {
                     warnings.subject_read(q_idx, hsp.hit.s_idx, &mut *writer)?;
                 }
             }
@@ -1568,7 +1578,22 @@ pub(crate) fn write_tabular<W: Write>(
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
-            write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
+            if thrown {
+                let query_id = query_ids
+                    .get(hsp.hit.q_idx as usize)
+                    .map_or(&b""[..], |id| id.as_ref());
+                rows.write_thrown_default(
+                    writer,
+                    query_id,
+                    |kept| crate::algorithm::common::tabular::printed_id(subject_ids, kept),
+                    hsp.hit.e_value,
+                    hsp.hit.bit_score,
+                    &config,
+                )?;
+            } else {
+                rows.found(hsp.hit.s_idx as usize);
+                write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
+            }
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.end(hsp_index);

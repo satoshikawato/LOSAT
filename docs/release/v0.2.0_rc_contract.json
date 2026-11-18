@@ -29,7 +29,7 @@
   },
   "certification_lineage": {
     "candidate_sha": "",
-    "candidate_sha_note": "must equal the commit every run of certification_set used (C); 40 lowercase hex digits when filled",
+    "candidate_sha_note": "must equal the commit every run of certification_set used (C); 40 lowercase hex digits when filled. Every GitHub run is dispatched on cert/<first 9 hex of C>, a branch whose head is C; the merge commit M of the promotion PR has C's tree (git diff --quiet C M), and R is M plus document-only commits on release/0.2",
     "runtime_input_paths": [
       "LOSAT/src",
       "LOSAT/Cargo.toml",
@@ -61,7 +61,11 @@
       "LOSAT/tests/fixtures/blastn_regression",
       "LOSAT/tests/fixtures/tblastx_regression",
       "LOSAT/tests/fixtures/range_regression",
-      "LOSAT/tests/fixtures/fasta_input"
+      "LOSAT/tests/fixtures/fasta_input",
+      "LOSAT/tests/fasta_input_fixtures",
+      "LOSAT/tests/dropin_corpus_manifest.tsv",
+      "LOSAT/tests/fixtures/dropin_corpus",
+      "LOSAT/tests/fixtures/db_search_long"
     ],
     "runs": {
       "B": {
@@ -142,7 +146,7 @@
       }
     },
     "rerun_required": true,
-    "rerun_reason": "LOSAT/src changed in more than 1,400 commits since the v0.1.0 certification, so every LOSAT-side result is re-run on the candidate commit C."
+    "rerun_reason": "LOSAT/src changed in more than 4,500 commits since the v0.1.0 certification, so every LOSAT-side result is re-run on the candidate commit C."
   },
   "certification_set": [
     {
@@ -162,7 +166,7 @@
       "cases": "43 cases x 4 platforms (Windows x64, macOS arm64, macOS x64, Linux aarch64) + 6 NCBI reference executions + 12 repeats per platform",
       "comparator": "mixed",
       "comparator_note": "NCBI executed on each platform for the 6 representatives (variance bounded by ncbi_platform_variance_v011.json); 43 LOSAT outputs = canonical hashes",
-      "tool": "platform-native-certification.yml (candidate_sha=C)",
+      "tool": "platform-native-certification.yml (candidate_sha=C) dispatched on cert/<9 hex of C>",
       "where": "github",
       "expected_duration": "22 min - 3.5 h",
       "evidence_key": "runs.B"
@@ -170,9 +174,9 @@
     {
       "id": "C",
       "title": "Cross-platform and thread equality",
-      "cases": "platform_check_cases.json x 5 platforms x 1 and 4 threads; arm64 also LOSAT_X_DPNEON2=0; cargo test --all-features on four platforms",
+      "cases": "platform_check_cases.json (59 cases) x 5 platforms x 1 and 4 threads; arm64 also LOSAT_X_DPNEON2=0; cargo test --all-features on four platforms",
       "comparator": "hash_equality",
-      "tool": "platform-checks.yml (set=full)",
+      "tool": "platform-checks.yml (set=full) dispatched on cert/<9 hex of C>",
       "where": "github",
       "expected_duration": "about 2.5 h",
       "evidence_key": "runs.C"
@@ -180,7 +184,7 @@
     {
       "id": "D",
       "title": "NCBI fixture set, -subject rows, re-executed",
-      "cases": "outfmt0_manifest.tsv: 958 rows, all five programs and every task, outfmt 0/5/6/7/8/9/11-17",
+      "cases": "outfmt0_manifest.tsv: 2,602 rows, six programs (blastn 635, blastp 591, blastx 529, tblastn 404, tblastx 348, psiblast 95) and every task, outfmt 0, 5-17 and 20",
       "comparator": "ncbi_executed",
       "comparator_note": "run_oracle.py re-runs the oracle and fails on any hash different from the frozen column; then LOSAT vs frozen at 1, 2, 4 threads",
       "tool": "docs/evidence/losat_web_e2a/run_oracle.py then check_losat.py",
@@ -191,7 +195,7 @@
     {
       "id": "E",
       "title": "NCBI fixture set, -db rows",
-      "cases": "db_search_manifest.tsv 573 rows (ncbi 557 + 16 LOSAT rejections), NCBI -num_threads 1",
+      "cases": "db_search_manifest/ (14 files) 6,263 rows at dev bc9448188 (ncbi 5,722 + 541 LOSAT rejections), eight programs, NCBI -num_threads 1",
       "comparator": "ncbi_executed",
       "comparator_note": "db_search_fixtures.py freeze into a scratch checkout of C; git status --porcelain of the frozen files must be empty; then check",
       "tool": "LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin <oracle>, then check --losat <C binary>",
@@ -202,29 +206,29 @@
     {
       "id": "F",
       "title": "Full regression set",
-      "cases": "ci_fast_regressions.py --all-cases (S02 baseline 236, Gate A and Stage G frozen hashes, every NCBI frozen fixture family, switch_reach_check.py)",
+      "cases": "ci_fast_regressions.py --programs all --all-cases (S02 baseline 236, Gate A and Stage G frozen hashes, D and E rows at 1 and 4 threads, blastn_regression 350, tblastx_regression 85, range_regression 75, fasta_input 4,140, drop-in corpus 210) plus the promotion PR's regressions job (switch_reach_check.py, library example)",
       "comparator": "ncbi_frozen",
-      "comparator_note": "NCBI frozen + LOSAT frozen",
-      "tool": "nightly.yml dispatched on main after the promotion, or the regressions job of the promotion PR",
+      "comparator_note": "NCBI frozen + LOSAT frozen. Evidence: the nightly run (runs.F) and the promotion PR's ci.yml run (runs.H, which holds the regressions job)",
+      "tool": "nightly.yml (job full-regressions) dispatched on cert/<9 hex of C>, and the regressions job of the promotion PR's ci.yml run",
       "where": "github",
-      "expected_duration": "about 6 min",
+      "expected_duration": "about 12 min",
       "evidence_key": "runs.F"
     },
     {
       "id": "G",
       "title": "WASI threads and serial compatibility",
-      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
+      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; psiblast's -subject rows (outfmt0_manifest.tsv) and -db rows (db_search_manifest, PSSM files under PD-LOSAT-PLATFORM-LIBM) on both WASI commands; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
       "comparator": "mixed",
       "comparator_note": "NCBI executed (the workflow downloads and sha-verifies 2.17.0) + raw-byte equality",
-      "tool": "wasm-threading.yml (candidate_sha=C, include_serial_compatibility=true)",
+      "tool": "wasm-threading.yml (candidate_sha=C, include_serial_compatibility=true) dispatched on cert/<9 hex of C>",
       "where": "github",
-      "expected_duration": "16-17 min per run",
+      "expected_duration": "about 30 min per run (16-17 min before the psiblast -db sections, which took 6-7 min per WASI command on ws)",
       "evidence_key": "runs.G"
     },
     {
       "id": "H",
       "title": "Output formats and library tests",
-      "cases": "cargo test --locked --all-features (lib + eight suites, 679 ported NCBI unit cases)",
+      "cases": "cargo test --locked --all-features (lib + eight test targets; NCBI unit case ledger: 1,101 cases, ported 157, partial 313, e2e 117, n-a 454, to-port 44, superseded 16)",
       "comparator": "ncbi_frozen",
       "comparator_note": "NCBI frozen + LOSAT invariants",
       "tool": "CI rust job of the promotion PR",
@@ -235,7 +239,7 @@
     {
       "id": "I",
       "title": "Release-candidate artifacts",
-      "cases": "8 artifacts built from R, extracted, losat --version = losat 0.2.0, one smoke per program (5), checksums, handoff",
+      "cases": "8 artifacts built from R, extracted, losat --version = losat 0.2.0, one smoke per classic search program (5), checksums, handoff",
       "comparator": "ncbi_frozen",
       "comparator_note": "contract smoke hashes (NCBI-certified outputs)",
       "tool": "release-readiness-v020.yml (candidate_sha=R)",
@@ -270,7 +274,7 @@
         "J"
       ],
       "claim": "certified",
-      "wording": "Certified against NCBI BLAST+ 2.17.0: blastn (megablast, blastn, dc-megablast, blastn-short), blastp (blastp, blastp-fast), blastx, tblastn, tblastx"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (blastn: megablast, blastn, dc-megablast, blastn-short; blastp: blastp, blastp-fast, blastp-short; blastx: blastx, blastx-fast; tblastn: tblastn, tblastn-fast; tblastx; psiblast; rpsblast; rpstblastn; and the tools makeblastdb, blastdbcmd, dustmasker, segmasker, convert2blastmask, rpsbproc)"
     },
     {
       "platform": "Linux aarch64",
@@ -280,7 +284,7 @@
         "C"
       ],
       "claim": "certified",
-      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (43 cases compared with NCBI on the platform; every other case gives the same bytes as Linux x64)"
     },
     {
       "platform": "Windows x86_64",
@@ -290,7 +294,7 @@
         "C"
       ],
       "claim": "certified",
-      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (43 cases compared with NCBI on the platform; every other case gives the same bytes as Linux x64)"
     },
     {
       "platform": "macOS arm64",
@@ -300,7 +304,7 @@
         "C"
       ],
       "claim": "certified",
-      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (43 cases compared with NCBI on the platform; every other case gives the same bytes as Linux x64)"
     },
     {
       "platform": "macOS x86_64",
@@ -310,7 +314,7 @@
         "C"
       ],
       "claim": "certified",
-      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (43 cases compared with NCBI on the platform; every other case gives the same bytes as Linux x64)"
     },
     {
       "platform": "WASI serial (wasm32-wasip1)",
@@ -320,7 +324,7 @@
         "G"
       ],
       "claim": "certified",
-      "wording": "Certified: byte-identical to the Linux x64 native binary on the Gate A set and the threading-regression set"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (same bytes as the Linux x64 native binary on the Gate A set and the threading-regression set, except the last digit of a value in psiblast's ASN.1 PSSM, PD-LOSAT-PLATFORM-LIBM)"
     },
     {
       "platform": "WASI threads (wasm32-wasip1-threads)",
@@ -329,7 +333,7 @@
         "G"
       ],
       "claim": "supported",
-      "wording": "Supported: tested in CI, not a certification claim"
+      "wording": "Supported: tested in CI, outside the release's NCBI parity claim"
     },
     {
       "platform": "Web GUI (browser, reactor)",
@@ -338,7 +342,7 @@
         "web.yml E2E and V-ABI quick"
       ],
       "claim": "preview",
-      "wording": "Preview: no NCBI certification claim (PD-LOSAT-WEB-APP-BOUNDARY)"
+      "wording": "Preview: outside the release's NCBI parity claim (PD-LOSAT-WEB-APP-BOUNDARY)"
     }
   ],
   "public_cli": {
@@ -350,7 +354,8 @@
     ],
     "blastp_tasks": [
       "blastp",
-      "blastp-fast"
+      "blastp-fast",
+      "blastp-short"
     ],
     "blastx_tasks": [
       "blastx",
@@ -364,7 +369,7 @@
       "tblastx"
     ],
     "rejected_tasks": [
-      "blastp-short"
+      "rmblastn"
     ]
   },
   "smoke": [

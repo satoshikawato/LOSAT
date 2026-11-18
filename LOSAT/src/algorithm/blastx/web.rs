@@ -188,12 +188,7 @@ pub(crate) fn run_pair(
     //         		warning += "Subject sequence contains no data";
     //         		ERR_POST(Warning << warning);
     // ```
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        let mut diagnostics = diagnostics.borrow_mut();
-        write!(diagnostics, "Warning: [blastx] {} ", s.internal_id)?;
-        diagnostics.write_all(&s.title)?;
-        writeln!(diagnostics, ": Subject sequence contains no data")?;
-    }
+    super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
@@ -315,6 +310,8 @@ pub(crate) fn run_pair(
                                 false,
                                 None,
                                 xml_matrix,
+                                // The queued batches are searched: the pool is free.
+                                Some(pool),
                             )?;
                             processed += queries.len();
                         }
@@ -402,6 +399,7 @@ pub(crate) fn run_pair(
                     false,
                     None,
                     xml_matrix,
+                    x_pool,
                 )?;
                 processed += queries.len();
                 Ok(())
@@ -481,7 +479,9 @@ mod tests {
             let options = v1_resolve(&args).unwrap();
             assert_eq!(options.outfmt, number, "{outfmt:?}");
             if !fields.is_empty() {
-                assert_eq!(options.fields, fields, "{outfmt:?}");
+                let spec = options.tabular.expect("a field list");
+                let names: Vec<&str> = spec.fields.iter().map(|f| f.name()).collect();
+                assert_eq!(names, fields, "{outfmt:?}");
             }
         }
     }

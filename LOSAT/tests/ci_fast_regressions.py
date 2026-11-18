@@ -12,7 +12,9 @@ and the 8/9/12 rows sa.* (8/12 in ulp.*) and the 5 rows of BLASTN and BLASTP; it
 `-out` and compare the master and side files, xinclude_fixtures.py) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
 lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
-batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
+batches, warnings, hit lists, ambiguity, empty inputs, failed writes); when one of the five classic
+programs is selected the frozen NCBI range errors of range_regression_fixtures.py (`-query_loc` /
+`-subject_loc`, every row); for each
 selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
 <program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
@@ -65,10 +67,11 @@ from frozen_allowlist import Allowlist  # noqa: E402
 # db_search_manifest/psiblast.tsv; rpsblast's (line PS, PS11a) and rpstblastn's (PS12a) are rows of
 # db_search_manifest/rpsblast.tsv and rpstblastn.tsv.
 PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "rpsblast", "rpstblastn")
-FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")  # the programs of fasta_input_fixtures.py
+FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx")  # the programs of fasta_input_fixtures.py
 OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
 DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each, and row family files)
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
+RANGE_PROGRAMS = ("blastn", "blastp", "blastx", "tblastn", "tblastx")  # the programs of range_regression_manifest.tsv
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.
 FAST_TBLASTX = frozenset({
@@ -76,7 +79,7 @@ FAST_TBLASTX = frozenset({
     "p08_trcumjnv_mellatmjnv", "p12_lc738874_lc738875_default", "p13_mela_mje_reverse",
 })
 # A change to the FASTA-input reader (NCBI's CFastaReader port), its fixture script, manifests or
-# inputs selects all four programs (they share the reader).
+# inputs selects every program (they share the reader).
 FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
 PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast|rpstblastn)/")
 
@@ -325,7 +328,8 @@ def db_search_task(losat: Path, program: str, out: Path, threads: int | None) ->
 
 def fixture_tasks(losat: Path, programs: set[str], out: Path, library_example: Path | None) -> list[Task]:
     """The fixture scripts of the selected programs: the outfmt 0 rows at 1 and 4 threads, the `-db` rows at 1
-    and 4 threads, the BLASTN and TBLASTX regression fixtures and the drop-in corpus; with `library_example`
+    and 4 threads, the BLASTN and TBLASTX regression fixtures, the range regression fixtures and the drop-in
+    corpus; with `library_example`
     (`examples/library_command_line`) the `-subject` and `-db` rows through the library API too (`check_losat.py`
     and `db_search_fixtures.py check --library`). The outfmt 0 tasks come first: each took 50 to 90 s one after
     the other, the longest of the phase, and a task that starts last ends last."""
@@ -356,6 +360,16 @@ def fixture_tasks(losat: Path, programs: set[str], out: Path, library_example: P
                     if "\t" in line and not line.endswith("\tsame")] + [f"{name} regression fixtures differ: see {log.name}"]
         tasks.append(Task(f"{program} regression", [sys.executable, str(TESTS / f"{program}_regression_fixtures.py"),
                                                     "check", "--losat", str(losat), "--out", str(log)], failures))
+    if programs & set(RANGE_PROGRAMS):
+        log = out / "range-regression-fixtures.tsv"
+
+        def range_failures(result, log=log) -> list[str]:
+            if result.returncode == 0:
+                return []
+            return [f"range regression fixture {line}" for line in result.stdout.splitlines()
+                    if "\t" in line and not line.endswith("\tsame")] + [f"range regression fixtures differ: see {log.name}"]
+        tasks.append(Task("range regression", [sys.executable, str(TESTS / "range_regression_fixtures.py"), "check",
+                                               "--losat", str(losat), "--out", str(log)], range_failures))
     log = out / "dropin-corpus.tsv"
 
     def dropin_failures(result) -> list[str]:

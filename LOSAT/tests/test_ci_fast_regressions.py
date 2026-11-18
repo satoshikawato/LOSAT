@@ -63,6 +63,38 @@ class SamClRuleTests(unittest.TestCase):
             changed = self.WITH.replace(old, new)
             self.assertNotEqual(db_fixtures.strip_sam_cl(changed), self.WITHOUT, (old, new))
 
+    def test_a_freeze_keeps_a_frozen_sam_file_that_differs_in_the_command_line_only(self):
+        # A freeze with another NCBI build (another argv[0] in CL) must leave the frozen file and its cells
+        # unchanged, so the release's set E (freeze into a clean checkout, then `git status`) stays clean.
+        other_build = self.WITH.replace(b"/x/blastn -a ", b"/opt/ncbi/bin/blastn -a ")
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(db_fixtures, "FROZEN", Path(tmp)):
+            (Path(tmp) / "r.17.out").write_bytes(self.WITH)
+            sam = {"row_id": "r.17", "outfmt": "17 SQ"}
+            self.assertEqual(db_fixtures.frozen_stdout(sam, other_build), self.WITH)
+            changed = other_build.replace(b"r\t0", b"r\t1")
+            self.assertEqual(db_fixtures.frozen_stdout(sam, changed), changed)
+            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "new.17", "outfmt": "17"}, other_build),
+                             other_build)
+            (Path(tmp) / "t.6.out").write_bytes(self.WITH)
+            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "t.6", "outfmt": "6"}, other_build), other_build)
+
+    def test_a_freeze_keeps_the_frozen_report_of_a_run_that_ncbi_ends_by_a_signal(self):
+        # NCBI's crash in a refused row (SIGSEGV) cuts its report at a point that depends on its heap and
+        # the environment: the same binary wrote 17 bytes on ws where the frozen prolog has 349.
+        prolog = b"BLASTX 2.17.0+\n\n\nReference: ...\n\nDatabase: x2g\n"
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(db_fixtures, "FROZEN", Path(tmp)):
+            (Path(tmp) / "c.1.out").write_bytes(prolog)
+            row = {"row_id": "c.1", "outfmt": "1"}
+            shorter, longer = prolog[:17], prolog + b"\nQuery= q1\n"
+            for cut in (shorter, longer, prolog):
+                self.assertEqual(db_fixtures.frozen_stdout(row, cut, -11), prolog)
+            # A report that differs before the cut is a new answer, and a run that exits is frozen as it is.
+            other = prolog.replace(b"x2g", b"x3g")
+            self.assertEqual(db_fixtures.frozen_stdout(row, other, -11), other)
+            self.assertEqual(db_fixtures.frozen_stdout(row, shorter, 1), shorter)
+            self.assertEqual(db_fixtures.frozen_stdout(row, shorter), shorter)
+            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "new.1", "outfmt": "1"}, shorter, -11), shorter)
+
     def test_the_rule_applies_to_outfmt_17_only(self):
         for outfmt in ("17", "17 SQ", " 17 SR ", "17 SQ SR"):
             self.assertTrue(db_fixtures.is_sam_outfmt(outfmt), outfmt)
@@ -138,9 +170,12 @@ class DbSearchFixtureTests(unittest.TestCase):
         by_id = {r["row_id"]: r for r in rows}
         for r in rows:
             if r["kind"] != "ncbi":
+                self.assertFalse(db_fixtures.under_valgrind(r), r["row_id"])
                 continue
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
+            # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.
+            self.assertFalse(near and db_fixtures.under_valgrind(r), r["row_id"])
             if near:
                 source = by_id[near]
                 self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
@@ -155,6 +190,15 @@ class DbSearchFixtureTests(unittest.TestCase):
             err = db_fixtures.FROZEN / f"{frozen}.err"
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
+
+    def test_valgrind_marker_is_a_part_of_covers(self):
+        self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))
+        self.assertTrue(db_fixtures.under_valgrind({"covers": "a | ncbi-valgrind | ncbi-near: db.x"}))
+        self.assertFalse(db_fixtures.under_valgrind({"covers": "ncbi-valgrind"}))
+        self.assertFalse(db_fixtures.under_valgrind({"covers": "frozen under ncbi-valgrind, see | the row"}))
+        self.assertFalse(db_fixtures.under_valgrind({"covers": "ncbi-near: db.x | expect: valgrind"}))
+        self.assertTrue(db_fixtures.valgrind_messages(b"Warning\n==1234== Invalid read of size 1\n"))
+        self.assertFalse(db_fixtures.valgrind_messages(b"Warning: [blastx] Query_1: no hits == none\n"))
 
     def test_env_tokens_are_environment_not_arguments(self):
         row = {"extra_args": "BLASTDB=tests/seqdb/taxdb/good BATCH_SIZE=100 -evalue 1e-5 -word_size 3",
@@ -453,6 +497,133 @@ class XincludeFixtureTests(unittest.TestCase):
             xinclude.extension("16")
         self.assertEqual(xinclude.side_name("id", 3, "13"), "id.out_3.json")
 
+    def test_the_libm_rule_accepts_only_the_last_of_15_digits_of_a_real(self):
+        # PD-LOSAT-PLATFORM-LIBM (macOS, WASI): the cases of `the_libm_rule_accepts_only_a_last_digit_of_a_real`
+        # (LOSAT/tests/outfmt11_blastx.rs), in a Seq-align's score and in psiblast's ASN.1 PSSM.
+        rule = xinclude.libm_last_digit_differences
+
+        def archive(m: str, e: str = "-80", tail: str = "") -> bytes:
+            return f"evalue real {{ {m}, 10, {e} }},\nscore 7{tail}".encode()
+
+        want = archive("693693758698357")
+        self.assertEqual(rule(want, want), 0)
+        for m in ("693693758698358", "693693758698356"):
+            self.assertEqual(rule(archive(m), want), 1, m)
+        for got in (archive("693693758698359"), archive("693693758698355"),  # 2 apart
+                    archive("693693758698358", "-79"),  # another exponent
+                    archive("69369375869836"),  # another digit count
+                    archive("693693758698357", tail=" "),  # any other byte
+                    b"evalue real { 693693758698358, 10, -80 },\nscore 8",
+                    b"evalue real { 693693758698358, 10, -80 },\nscore",
+                    b"evalue 693693758698358,\nscore 7",
+                    b"evalue real { 693693758698358, 2, -80 },\nscore 7"):  # not a REAL of base 10
+            self.assertIsNone(rule(got, want), got)
+
+        # Each value is judged on its own; a second, different one fails the whole file.
+        def pssm(a: str, b: str, zero: str = "0") -> bytes:
+            return (f"lambda {{ {a}, 10, -15 }},\ninformationContent {{\n  {{ {zero}, 10, 0 }},\n"
+                    f"  {{ -{b}, 10, -3 }}\n}}\n").encode()
+
+        want = pssm("347923230575626", "100000000000001")
+        self.assertEqual(rule(pssm("347923230575625", "100000000000002"), want), 2)
+        self.assertEqual(rule(pssm("347923230575627", "100000000000001"), want), 1)
+        self.assertIsNone(rule(pssm("347923230575625", "100000000000003"), want))
+        # A shorter mantissa (NCBI drops the trailing zeros) 1 away is not a last digit of 15.
+        self.assertIsNone(rule(pssm("347923230575626", "100000000000001", "1"), want))
+        self.assertIsNone(rule(b"{ 6, 10, -1 }", b"{ 5, 10, -1 }"))
+        # A missing or added value is a difference of the bytes around the values.
+        self.assertIsNone(rule(want + b"{ 347923230575626, 10, -15 }", want))
+
+    def test_pssm_files_follow_the_libm_rule_only_when_the_caller_asks(self):
+        # Without a reference every byte counts (the native gates); with one (the WASI commands), a frozen
+        # file is the expectation, and a file over 64 KB is compared with the reference's bytes, which must
+        # have the frozen SHA-256.
+        pad = b"\n" + b"x" * xinclude.FREEZE_LIMIT
+        small = b"informationContent {\n  { 347923230575626, 10, -15 }\n}\n"
+        big = small + pad
+        files = [("r.asn", small), ("r.asn.1", big)]
+        row = {"row_id": "r", "files": xinclude.PSSM_ASN, "side_sha256": xinclude.pssm_cell(files, "r", xinclude.PSSM_ASN)}
+        first_difference = lambda want, got: "differs at a line"  # noqa: E731
+
+        def run(*data: bytes) -> xinclude.PssmResult:
+            return xinclude.PssmResult(None, [(name, value) for (name, _), value in zip(files, data)])
+
+        last = small.replace(b"626", b"625")
+        with tempfile.TemporaryDirectory() as tmp:
+            frozen = Path(tmp)
+            xinclude.freeze_pssm(xinclude.PssmResult(None, files), frozen, "r", xinclude.PSSM_ASN)
+            self.assertEqual(sorted(path.name for path in frozen.iterdir()), ["r.asn"])
+            reference = dict(files).get
+            self.assertEqual(xinclude.pssm_problems(run(small, big), row, frozen, first_difference), [])
+            # exact: both files differ
+            problems = xinclude.pssm_problems(run(last, last + pad), row, frozen, first_difference)
+            self.assertEqual(problems, ["r.asn differs at a line", problems[1]])
+            self.assertIn("r.asn.1 differs (sha256", problems[1])
+            # the rule: both are the same, and each is listed
+            accepted: list[str] = []
+            self.assertEqual(xinclude.pssm_problems(run(last, last + pad), row, frozen, first_difference,
+                                                    reference, accepted), [])
+            self.assertEqual(accepted, ["r.asn: 1 values", "r.asn.1: 1 values"])
+            # 2 apart, or another byte, still differ under the rule
+            two = small.replace(b"626", b"624")
+            for got in ((two, big), (small, two + pad), (small, last + pad + b"x")):
+                problems = xinclude.pssm_problems(run(*got), row, frozen, first_difference, reference, [])
+                self.assertEqual(len(problems), 1, got[1][:60])
+            # a reference whose file is not the frozen one gives no expectation
+            problems = xinclude.pssm_problems(run(small, last + pad), row, frozen, first_difference,
+                                              {"r.asn.1": last + pad}.get, [])
+            self.assertEqual(len(problems), 1)
+            self.assertIn("reference run's file has sha256", problems[0])
+            problems = xinclude.pssm_problems(run(small, last + pad), row, frozen, first_difference, {}.get, [])
+            self.assertIn("reference run's file has sha256 none", problems[0])
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT commands are scripts with a #! line")
+    def test_db_check_applies_the_libm_rule_to_pssm_files_only(self):
+        # `db_search_fixtures.py check --libm-last-digit NATIVE` (what check_wasm_threading.py runs for the
+        # WASI commands): a psiblast row whose ASN.1 PSSM (over 64 KB, not frozen) differs in the last
+        # digit of a REAL is `libm-last-digit`; without the option it differs; the report stays exact.
+        value = b"informationContent {\n  { 347923230575626, 10, -15 }\n}\n" + b"x" * xinclude.FREEZE_LIMIT
+        report = b"lambda real { 347923230575626, 10, -15 }\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            directory, frozen = Path(tmp), Path(tmp) / "frozen"
+            frozen.mkdir()
+
+            def command(name: str, asn: bytes, stdout: bytes = report) -> Path:
+                script = directory / name
+                script.write_text(f"#!{sys.executable}\nimport sys\n"
+                                  "path = sys.argv[sys.argv.index('-out_pssm') + 1]\n"
+                                  f"open(path, 'wb').write({asn!r})\nsys.stdout.buffer.write({stdout!r})\n")
+                script.chmod(0o755)
+                return script
+
+            (frozen / "r.out").write_bytes(report)
+            row = {"row_id": "r", "program": "psiblast", "kind": "ncbi", "db": "d", "query": "q", "extra_args": "",
+                   "outfmt": "11", "rc": "0", "stdout_sha256": xinclude.sha256(report),
+                   "stdout_bytes": str(len(report)), "stderr_sha256": "", "covers": "", "files": xinclude.PSSM_ASN,
+                   "side_sha256": xinclude.pssm_cell([("r.asn", value)], "r", xinclude.PSSM_ASN)}
+            native = command("native", value)
+            last = value.replace(b"626", b"625", 1)
+            env = dict(os.environ)
+            with unittest.mock.patch.object(db_fixtures, "FROZEN", frozen):
+                def check(losat: Path, libm: Path | None) -> tuple[str, str]:
+                    return db_fixtures.check_row(row, losat, 1, env, libm_native=libm)
+
+                self.assertEqual(check(native, None), ("same", ""))
+                self.assertEqual(check(native, native), ("same", ""))
+                wasi = command("wasi", last)
+                status, detail = check(wasi, None)
+                self.assertEqual(status, "differs")
+                self.assertIn("r.asn differs (sha256", detail)
+                self.assertEqual(check(wasi, native), ("libm-last-digit", "r.asn: 1 values"))
+                # 2 apart; a reference that does not give the frozen bytes
+                self.assertEqual(check(command("two", value.replace(b"626", b"624", 1)), native)[0], "differs")
+                self.assertEqual(check(wasi, command("other", last))[0], "differs")
+                # the report is compared byte for byte, also with the option
+                moved = command("moved", last, report.replace(b"626", b"625"))
+                status, detail = check(moved, native)
+                self.assertEqual(status, "differs")
+                self.assertIn("stdout line 1", detail)
+
 
 class SelectionTests(unittest.TestCase):
     def test_paths_select_programs(self):
@@ -504,6 +675,26 @@ class StartupTraceNoticeTests(unittest.TestCase):
         failures = self.check("print('losat 1.0')\nsys.stderr.write('warning\\n')\nsys.exit(1)")
         self.assertTrue(any("exited" in failure for failure in failures))
         self.assertTrue(any("stderr without" in failure for failure in failures))
+
+
+class RangeRegressionTaskTests(unittest.TestCase):
+    """The frozen NCBI range errors (range_regression_fixtures.py) run whenever a classic program is selected."""
+
+    def names(self, programs: set[str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            return [task.name for task in fast.fixture_tasks(Path("/x/losat"), programs, Path(tmp), None)]
+
+    def test_each_classic_program_selects_the_range_fixtures_once(self):
+        for program in fast.RANGE_PROGRAMS:
+            self.assertEqual(self.names({program}).count("range regression"), 1, program)
+        self.assertEqual(self.names(set(fast.RANGE_PROGRAMS)).count("range regression"), 1)
+
+    def test_other_programs_do_not(self):
+        self.assertNotIn("range regression", self.names({"psiblast", "rpsblast"}))
+
+    def test_the_fixture_programs_are_the_manifest_programs(self):
+        import range_regression_fixtures as ranges
+        self.assertEqual({row["argv"].split(" ", 1)[0] for row in ranges.read_manifest()}, set(fast.RANGE_PROGRAMS))
 
 
 class RunTasksTests(unittest.TestCase):

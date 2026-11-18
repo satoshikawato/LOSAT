@@ -195,11 +195,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     &mut |bytes| Ok(diagnostics.borrow_mut().write_all(bytes)?),
                     &mut |queries| take(&mut **diagnostics.borrow_mut(), queries, processed.get()),
                     &mut |queries, results| {
+                        // The window's searches are done: the pool is free to format the batch's
+                        // reports.
                         render(
                             &mut **diagnostics.borrow_mut(),
                             queries,
                             &mut vec![results],
                             processed.get(),
+                            Some(pool),
                         )?;
                         processed.set(processed.get() + queries.len());
                         Ok(())
@@ -1480,7 +1483,10 @@ mod tests {
     ) -> (std::path::PathBuf, BlastxDatabase) {
         use std::io::Read;
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/rps");
-        let dir = std::env::temp_dir().join(format!("losat-rpstbn-{test}-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-rpstbn-{test}-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for entry in std::fs::read_dir(&fixtures).unwrap() {

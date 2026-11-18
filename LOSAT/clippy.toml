@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "std::env::temp_dir", reason = "panics on WASI; tests use crate::utils::test_dir::temp_dir, product code handles WASI itself (blastinput/input_files.rs)" },
+    { path = "std::process::id", reason = "panics on WASI; tests use crate::utils::test_dir::process_id, product code uses crate::utils::process_id" },
+]

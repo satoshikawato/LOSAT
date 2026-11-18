@@ -381,6 +381,261 @@ pub(crate) struct Denseg {
     widths: Vec<u32>,
 }
 
+/// Outfmt 0's `CAlnVec` of one HSP (`CDisplaySeqalign::x_GetAlnVecForSeqalign`, without an
+/// anchor: outfmt 0 has no `eMasterAnchored`): the HSP's own Dense-seg of two rows, the query's
+/// and the subject's, each row's alignment range (`GetSeqAlnRange`) and its first and last
+/// position on each line of `-line_length` columns (`scrn_lefts` and `scrn_rights` of
+/// `GetWholeAlnSeqString`, `aln_vec::AlnMap::screen_coords`), which `report::pairwise` prints.
+/// Kept from HSP to HSP to reuse its vectors (`report::pairwise` keeps one per thread).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1823-1861
+/// ```c++
+///     if (align.GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
+///         CRef<CSeq_align> densegAln = align.CreateDensegFromStdseg();
+///         if (m_AlignOption & eTranslateNucToNucAlignment) {
+///             finalAln = densegAln->CreateTranslatedDensegFromNADenseg();
+///         } else {
+///             finalAln = densegAln;
+///         }
+///     } else if(align.GetSegs().Which() ==
+///               CSeq_align::C_Segs::e_Denseg){
+///         if (m_AlignOption & eTranslateNucToNucAlignment) {
+///             finalAln = align.CreateTranslatedDensegFromNADenseg();
+///         } else {
+///             finalAln = &align;
+///         }
+///     } else if(align.GetSegs().Which() ==
+///               CSeq_align::C_Segs::e_Dendiag){
+///         CRef<CSeq_align> densegAln =
+///             CAlignFormatUtil::CreateDensegFromDendiag(align);
+///     ...
+///     CRef<CDense_seg> finalDenseg(new CDense_seg);
+///     const CTypeConstIterator<CDense_seg> ds = ConstBegin(*finalAln);
+///     if((ds->IsSetStrands()
+///         && ds->GetStrands().front()==eNa_strand_minus)
+///        && !(ds->IsSetWidths() && ds->GetWidths()[0] == 3)){
+///         //show plus strand if master is minus for non-translated case
+///         finalDenseg->Assign(*ds);
+///         finalDenseg->Reverse();
+///         avRef = new CAlnVec(*finalDenseg, m_Scope);
+///     } else {
+///         avRef = new CAlnVec(*ds, m_Scope);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:979-992
+/// (`CreateTranslatedDensegFromNADenseg`)
+/// ```c++
+///     for (CDense_seg::TNumseg numseg = 0; numseg < ds.GetNumseg(); numseg++) {
+///         if (orig_lens[numseg] % 3) {
+///     ...
+///         } else {
+///             lens[numseg] = orig_lens[numseg] / 3;
+///         }
+///     }
+///
+///     // add the widths
+///     ds.SetWidths().resize(ds.GetDim(), 3);
+/// ```
+/// The HSP's segments are those of its Seq-align (`report::serial::seqalign`: the starts in the
+/// records, the lengths in residues, `CreateDensegFromStdseg`'s for a Std-seg) with the strands
+/// that `s_CollectSeqAlignData` gives them, the Dense-seg's (`CAlnMap::IsPositiveStrand` reads a
+/// row's strand of the first segment, alnmap.hpp:599-603, quoted at `AlnMap::width`). TBLASTX's
+/// Std-seg of two nucleotide rows becomes one of widths 3 with the lengths in residues
+/// (`CreateTranslatedDensegFromNADenseg`), which the segments already have. The Dense-diag of an
+/// ungapped BLASTN HSP (`CreateDensegFromDendiag`) is the Dense-seg of its one segment.
+pub(crate) struct HspAlnVec {
+    ds: Denseg,
+    map: aln_vec::MapBuffers,
+    rows: [HspRow; 2],
+    aln_stop: u32,
+}
+
+/// A row of an `HspAlnVec`: `scrn_lefts` and `scrn_rights` (`TSeqPosList`, whose fronts are
+/// read and popped a line at a time: the entries of line `k` are the `k`-th, `HspAlnVec::line`),
+/// as pairs, and `GetSeqAlnRange`.
+#[derive(Default)]
+struct HspRow {
+    screens: Vec<(u32, u32)>,
+    range: (i64, i64),
+}
+
+impl Default for HspAlnVec {
+    fn default() -> Self {
+        Self {
+            ds: Denseg {
+                // The rows' sequences, which `set` keeps.
+                ids: vec![SeqKey::Query, SeqKey::Subject(0)],
+                lens: Vec::new(),
+                starts: Vec::new(),
+                plus: Vec::new(),
+                widths: Vec::new(),
+            },
+            map: aln_vec::MapBuffers::default(),
+            rows: Default::default(),
+            aln_stop: 0,
+        }
+    }
+}
+
+/// An error that NCBI's outfmt 0 code reaches only with input that a BLAST search does not make.
+fn pairwise_internal(what: &str) -> io::Error {
+    io::Error::other(format!(
+        "LOSAT internal error in the pairwise report: {what}"
+    ))
+}
+
+impl HspAlnVec {
+    /// Makes the `CAlnVec` of the HSP whose Seq-align has the segments `starts` (two per
+    /// segment, the query's then the subject's, `-1` for a gap), `lens` (in residues) and
+    /// `strands` (two per segment, `report::serial::seqalign::Segments`), its rows of widths
+    /// `widths` (the query's and the subject's: 3 for a row of nucleotides translated against
+    /// proteins, `CreateDensegFromStdseg`; `[1, 1]` for a Dense-seg without widths), and its rows'
+    /// per-line coordinates for lines of `line_length` columns (`(int)m_LineLen`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1281-1283
+    /// ```c++
+    ///         m_AV->GetWholeAlnSeqString(row, sequence[row], &insertAlnStart[row],
+    ///                                    &insertStart[row], &insertLength[row],
+    ///                                    (int)m_LineLen, &seqStarts[row], &seqStops[row]);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1272
+    /// ```c++
+    ///         rowRng[row] = m_AV->GetSeqAlnRange(row);
+    /// ```
+    pub(crate) fn set(
+        &mut self,
+        starts: &[i32],
+        lens: &[i32],
+        strands: &[crate::report::serial::seqalign::Strand],
+        widths: [u32; 2],
+        line_length: usize,
+    ) -> io::Result<()> {
+        use crate::report::serial::seqalign::Strand;
+        if starts.len() != 2 * lens.len() || strands.len() != starts.len() || lens.is_empty() {
+            return Err(pairwise_internal(
+                "an HSP's segments are not a Dense-seg of two rows",
+            ));
+        }
+        let ds = &mut self.ds;
+        ds.lens.clear();
+        ds.lens.extend(lens.iter().map(|&len| len as u32));
+        ds.starts.clear();
+        ds.starts.extend_from_slice(starts);
+        ds.widths.clear();
+        if widths != [1, 1] {
+            ds.widths.extend(widths);
+        }
+        let (mut query, mut subject) = (strands[0], strands[1]);
+        if query == Strand::Minus && widths[0] != 3 {
+            ds.reverse();
+            (query, subject) = (query.reversed(), subject.reversed());
+        }
+        ds.plus.clear();
+        ds.plus
+            .extend([query != Strand::Minus, subject != Strand::Minus]);
+        let map = AlnMap::new_in(&self.ds, &mut self.map).map_err(pairwise_internal)?;
+        for (row, data) in self.rows.iter_mut().enumerate() {
+            let screens = &mut data.screens;
+            screens.clear();
+            map.screen_coords(row, line_length as u32, |left, right| {
+                screens.push((left, right));
+            })?;
+            data.range = map.seq_aln_range(row);
+        }
+        self.aln_stop = map.aln_stop();
+        Ok(())
+    }
+
+    /// `GetAlnStop()` of the HSP (`x_DisplayRowData`'s `aln_stop`): `u32::MAX` for an HSP of
+    /// length 0 (BLASTX's empty rows), whose lines `j <= (int)aln_stop` are none.
+    pub(crate) fn aln_stop(&self) -> u32 {
+        self.aln_stop
+    }
+
+    /// Row `row` on line `line` (0 for the first), of columns `from..=to`: its first and last
+    /// position there (`seqStarts[row].front()`, `seqStops[row].front()`, 0-based) when the row
+    /// meets the line (`hasSequence`), `None` otherwise. Every line pops each row's fronts
+    /// (`pop_front`), so the fronts of line `line` are the row's `line`-th entries.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1504,1544-1549
+    /// ```c++
+    ///     for (int row=0; row<rowNum; row++) {
+    ///         bool hasSequence = true;
+    ///         if (!(m_AlignOption & eShowGapOnlyLines)) {
+    ///             hasSequence = curRange.IntersectingWith(alnRoInfo->rowRng[row]);
+    ///         }
+    ///         //only output rows that have sequence
+    ///         if (hasSequence){
+    ///             int end = alnRoInfo->seqStops[row].front() + 1;
+    ///     ...
+    ///         if(!alnRoInfo->seqStarts[row].empty()){ //shouldn't need this check
+    ///                 alnRoInfo->seqStarts[row].pop_front();
+    ///         }
+    ///         if(!alnRoInfo->seqStops[row].empty()){
+    ///                 alnRoInfo->seqStops[row].pop_front();
+    ///         }
+    /// ```
+    /// (A row has an entry for each line: its screens are at most as wide as the lines.)
+    #[inline(always)]
+    pub(crate) fn line(
+        &self,
+        row: usize,
+        line: usize,
+        from: i64,
+        to: i64,
+    ) -> io::Result<Option<(u32, u32)>> {
+        let data = &self.rows[row];
+        let (row_from, row_to) = data.range;
+        if !(from <= row_to && row_from <= to) {
+            return Ok(None);
+        }
+        match data.screens.get(line) {
+            Some(&screen) => Ok(Some(screen)),
+            None => Err(pairwise_internal("a row has no coordinates for a line")),
+        }
+    }
+}
+
+impl Denseg {
+    /// `CDense_seg::Reverse`: the segments in the other order, each row on the other strand
+    /// (here the rows' strands are the caller's, `HspAlnVec::set`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:661-680
+    /// ```c++
+    ///     //reverse list o' lengths
+    ///     {
+    ///         CDense_seg::TLens::iterator f = SetLens().begin();
+    ///         CDense_seg::TLens::iterator r = SetLens().end();
+    ///         while (f < r) {
+    ///             swap(*(f++), *(--r));
+    ///         }
+    ///     }
+    ///
+    ///     //reverse list o' starts
+    ///     CDense_seg::TStarts &starts = SetStarts();
+    ///     int f = 0;
+    ///     int r = (GetNumseg() - 1) * GetDim();
+    ///     while (f < r) {
+    ///         for (int i = 0;  i < GetDim();  ++i) {
+    ///             swap(starts[f+i], starts[r+i]);
+    ///         }
+    ///         f += GetDim();
+    ///         r -= GetDim();
+    ///     }
+    /// ```
+    fn reverse(&mut self) {
+        let dim = self.ids.len();
+        self.lens.reverse();
+        let num_segs = self.lens.len();
+        for seg in 0..num_segs / 2 {
+            for row in 0..dim {
+                self.starts
+                    .swap(seg * dim + row, (num_segs - 1 - seg) * dim + row);
+            }
+        }
+    }
+}
+
 /// What a program gives the section about its sequences.
 pub(crate) trait Sequences {
     /// Appends the letters `from..=to` (0-based, in the records) of `seq`'s plus strand as the
@@ -781,8 +1036,9 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     }
     let num_distinct_frames = groups.iter().filter(|indices| !indices.is_empty()).count();
     writer.write_all(b"\n")?;
+    let mut buffers = aln_vec::MapBuffers::default();
     for (group, denseg) in &merged {
-        let mut map = AlnMap::new(denseg).map_err(internal)?;
+        let mut map = AlnMap::new_in(denseg, &mut buffers).map_err(internal)?;
         if num_distinct_frames > 1 {
             writer.write_all(b"For reading frame ")?;
             writer.write_all(K_FRAME_CONVERSION[*group].as_bytes())?;
@@ -1354,6 +1610,7 @@ fn display_sequence_line(
         j as usize,
         actual_line_len,
         rows.masked[row].map(|(index, frame)| (&rows.masks[index][..], frame)),
+        false,
     );
     add_space(out, 2);
     if !empty {
@@ -1362,10 +1619,12 @@ fn display_sequence_line(
     out.push(b'\n');
 }
 
-/// `x_OutputSeq` of a row line (no HTML): the columns `start..start + len` of `sequence`, those
-/// of the row's masks in lower case (`m_SeqLocChar` is `eLowerCase`, blast_format.cpp:1581).
+/// `x_OutputSeq` of a row line: the columns `start..start + len` of `sequence`, those of the row's
+/// masks in lower case (`m_SeqLocChar` is `eLowerCase`, blast_format.cpp:1581); under `html`
+/// (`eHtml`) the columns of each mask on the line in a `<font>` span (`mask_spans`,
+/// `write_styled`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2486-2523
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2486-2541
 /// ```c++
 ///     _ASSERT((int)sequence.size() > start);
 ///     list<CRange<int> > actualSeqloc;
@@ -1385,18 +1644,44 @@ fn display_sequence_line(
 ///                 //go through each residule and mask it
 ///                 for (int i=max<int>(from, start);
 ///                      i<=min<int>(to, start+len -1); i++){
+///                     //store seqloc start for font tag below
+///                     if ((m_AlignOption & eHtml) && isFirstChar){
+///                         isFirstChar = false;
+///                         eachSeqloc.Set(i, eachSeqloc.GetTo());
+///                     }
 ///                     ...
 ///                     } else if (m_SeqLocChar==eLowerCase){
 ///                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 ///                     }
+///                     //store seqloc start for font tag below
+///                     if ((m_AlignOption & eHtml)
+///                         && i == min<int>(to, start+len)){
+///                         eachSeqloc.Set(eachSeqloc.GetFrom(), i);
+///                     }
+///                 }
+///                 if(!(eachSeqloc.GetFrom()==0&&eachSeqloc.GetTo()==0)){
+///                     actualSeqloc.push_back(eachSeqloc);
+///                 }
+///             }
+///         }
+///     }
+///
+///     if(actualSeqloc.empty()){//no need to add font tag
+///         ...
+///             out<<actualSeq;
+///         }
+///     } else {//now deal with font tag for mask for html display
 /// ```
-/// (The row's masks are those of its own sequence with its frame, `prepare_rows`.)
+/// (The row's masks are those of its own sequence with its frame, `prepare_rows`. The
+/// mismatch colours of the first branch need `eColorDifferentBases`, which no BLAST program
+/// sets: blast_format.cpp, survey T4 §1.1.)
 fn output_seq(
     out: &mut Vec<u8>,
     sequence: &[u8],
     start: usize,
     len: usize,
     masks: Option<(&[(i64, i64, i8)], i8)>,
+    html: bool,
 ) {
     let end = (start + len).min(sequence.len());
     let first = out.len();
@@ -1404,6 +1689,7 @@ fn output_seq(
     let Some((masks, row_frame)) = masks else {
         return;
     };
+    let mut spans = Vec::new();
     for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
         let lo = from.max(start as i64);
         let hi = to.min(start as i64 + len as i64 - 1);
@@ -1413,6 +1699,133 @@ fn output_seq(
                 letter.make_ascii_lowercase();
             }
             column += 1;
+        }
+        if html {
+            if let Some(span) = mask_span(from, to, start as i64, len as i64) {
+                spans.push(span);
+            }
+        }
+    }
+    if !spans.is_empty() {
+        let letters = out.split_off(first);
+        write_styled(out, &letters, start as i64, &spans);
+    }
+}
+
+/// `eachSeqloc` of a mask of the columns `from..=to` on the line of columns `start..start + len`
+/// (`x_OutputSeq` under `eHtml`, quoted at `output_seq`): its first column on the line, and its
+/// last where the mask ends on the line, else 0 (the `GetTo()` of `CRange<int>(0, 0)`); `None` for
+/// a mask that does not meet the line and for the range `(0, 0)` that NCBI drops: a mask that
+/// starts at the alignment's first column and does not end on the first line (its letters are in
+/// lower case, without a span), or that covers that column alone.
+fn mask_span(from: i64, to: i64, start: i64, len: i64) -> Option<(i64, i64)> {
+    let lo = from.max(start);
+    let hi = to.min(start + len - 1);
+    if lo > hi {
+        return None;
+    }
+    // `i == min<int>(to, start+len)`: only the mask's own last column, `to`, when it lies on the
+    // line (`hi` is below `start + len`).
+    let last = if to <= hi { to } else { 0 };
+    (!(lo == 0 && last == 0)).then_some((lo, last))
+}
+
+/// The letters `letters` of a line of first column `start` with the spans `spans` (`mask_span`)
+/// each in NCBI's mask template: a span opens at its first column and closes after its last
+/// column on the line, unless that column is the line's first (`to > 0`), in which case it runs,
+/// as a span that ends past the line does, to the line's end (`s_ProcessStyledContent` closes it
+/// at the last letter).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2541-2573
+/// ```c++
+///     } else {//now deal with font tag for mask for html display
+///         bool endTag = false;
+///         bool frontTag = false;
+///         string refStr;
+///         string styledSqLocTmpl = CAlignFormatUtil::MapTemplate(k_DefaultMaskSeqLocTempl,"color",color[m_SeqLocColor]);
+///         for (int i = 0; i < (int)actualSeq.size(); i ++){
+///             bool startStyledOutput = false,stopStyledOutput = false;
+///             for (list<CRange<int> >::iterator iter=actualSeqloc.begin();
+///                  iter!=actualSeqloc.end(); iter++){
+///                 int from = (*iter).GetFrom() - start;
+///                 int to = (*iter).GetTo() - start;
+///                 //start tag
+///                 if(from == i){
+///                     frontTag = true;
+///                 }
+///                 if(to == i && to > 0){
+///                     endTag = true;
+///                 }
+///             }
+///             startStyledOutput = frontTag;
+///             stopStyledOutput = endTag && frontTag;
+///             bool isStyled = s_ProcessStyledContent(actualSeq,i,startStyledOutput,stopStyledOutput,styledSqLocTmpl ,refStr,out);
+///             if(!isStyled) out<<actualSeq[i];
+///             if(endTag && frontTag){
+///                 endTag = false;
+///                 frontTag = false;
+///             }
+///         }
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:374-387
+/// ```c++
+/// static bool s_ProcessStyledContent(string& seq, int currIndex, bool startStyledOutput, bool stopStyledOutput, string tmpl,string &styledSeqStr,CNcbiOstream& out)
+/// {
+///     bool isStyled = false;
+///     if(startStyledOutput || (!styledSeqStr.empty() && !stopStyledOutput)){
+/// 	    styledSeqStr += seq[currIndex];
+///         isStyled = true;
+///     }
+///     if(!styledSeqStr.empty() && (stopStyledOutput || currIndex == (int)seq.size() - 1) ) {
+///         styledSeqStr = CAlignFormatUtil::MapTemplate(tmpl,"alndata",styledSeqStr);
+///         out << styledSeqStr;
+///         styledSeqStr = "";
+///     }
+///     return isStyled;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:93,111,163
+/// ```c++
+/// static const char* color[]={"#000000", "#808080", "#FF0000"};
+/// ...
+/// static const char* k_DefaultMaskSeqLocTempl = "<font color=\"<@color@>\"><@alndata@></font>";
+/// ...
+///     m_SeqLocColor = eBlack;
+/// ```
+/// (The letters hold no `<@`, so the template's one replacement is the letters.)
+fn write_styled(out: &mut Vec<u8>, letters: &[u8], start: i64, spans: &[(i64, i64)]) {
+    const OPEN: &[u8] = b"<font color=\"#000000\">";
+    const CLOSE: &[u8] = b"</font>";
+    let (mut front, mut end) = (false, false);
+    let mut styled: Vec<u8> = Vec::new();
+    for (i, &letter) in letters.iter().enumerate() {
+        let i = i as i64;
+        for &(from, to) in spans {
+            if from - start == i {
+                front = true;
+            }
+            if to - start == i && to - start > 0 {
+                end = true;
+            }
+        }
+        let (start_styled, stop_styled) = (front, end && front);
+        let mut is_styled = false;
+        if start_styled || (!styled.is_empty() && !stop_styled) {
+            styled.push(letter);
+            is_styled = true;
+        }
+        if !styled.is_empty() && (stop_styled || i == letters.len() as i64 - 1) {
+            out.extend_from_slice(OPEN);
+            out.append(&mut styled);
+            out.extend_from_slice(CLOSE);
+        }
+        if !is_styled {
+            out.push(letter);
+        }
+        if end && front {
+            end = false;
+            front = false;
         }
     }
 }
@@ -1753,5 +2166,7 @@ mod tests_t3b;
 mod tests_t3c;
 #[cfg(test)]
 mod tests_t3c_self;
+#[cfg(test)]
+mod tests_t4a0;
 #[cfg(test)]
 mod tests_x2g;

@@ -137,6 +137,8 @@ mod taxdb_tool_texts;
 mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]
 mod web_v1_search_space;
+#[path = "../windows_local_time.rs"]
+mod windows_local_time;
 #[path = "../x_reach_directory.rs"]
 mod x_reach_directory;
 #[path = "../xml_dbname.rs"]

@@ -701,7 +701,9 @@ impl RpsVolumeFiles {
 
     /// Opens the volume's `.freq` file (the frequency ratios of the composition-based
     /// statistics), after the other files as NCBI does. A missing file, an empty one or a wrong
-    /// magic number is NCBI's error (the file's own text is replaced by the message below);
+    /// magic number is NCBI's error (the file's own text is replaced by the message below, which
+    /// names `rps_dbname`: `database_name`, the `-db` value of a database of one volume, else the
+    /// volume's path; `RpsVolumeSetup::with_database`);
     /// a file shorter than the rows that the `.rps` offsets name (NCBI reads past it) is
     /// LOSAT's refusal.
     ///
@@ -731,8 +733,13 @@ impl RpsVolumeFiles {
     /// The rows start after the header and `num_profiles + 1` offsets, with the profile count
     /// of the `.rps` file (`freq_header->start_offsets + num_profiles + 1`,
     /// blast_traceback.c:956-957), and their stride is the `.rps` alphabet.
-    pub(crate) fn open_freq(&mut self, base: &Path) -> Result<(), RpsOpenError> {
-        let shown = canonical_volume_path(base);
+    pub(crate) fn open_freq(
+        &mut self,
+        base: &Path,
+        program: &str,
+        database_name: Option<&str>,
+    ) -> Result<(), RpsOpenError> {
+        let shown = database_name.map_or_else(|| canonical_volume_path(base), str::to_string);
         let missing = || {
             RpsOpenError::Ncbi(format!(
                 "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
@@ -753,7 +760,7 @@ impl RpsVolumeFiles {
             .and_then(|bytes| bytes.checked_add(self.rows_start()));
         if needed.is_none_or(|needed| freq.len().map_or(true, |len| len < needed)) {
             return Err(RpsOpenError::Refused(
-                "a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's RPSBLAST".to_string(),
+                format!("a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"),
             ));
         }
         self.freq = Some(freq);
@@ -1107,7 +1114,7 @@ mod tests {
         let base = write_volume(&dir, 28, AUX);
         write_freq(&base, 28);
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        files.open_freq(&base).unwrap();
+        files.open_freq(&base, "RPSBLAST", None).unwrap();
         files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
         assert_eq!(ratios.len(), 2);
         assert_eq!(ratios[0][0], 4000.0 / 1e9);
@@ -1119,7 +1126,7 @@ mod tests {
         let base = write_volume(&dir, 26, AUX);
         write_freq(&base, 28);
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
-        files.open_freq(&base).unwrap();
+        files.open_freq(&base, "RPSBLAST", None).unwrap();
         files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
         let flat: Vec<i32> = (0..7)
             .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
@@ -1152,16 +1159,26 @@ mod tests {
         );
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
         assert_eq!(
-            files.open_freq(&base).err(),
+            files.open_freq(&base, "RPSBLAST", None).err(),
             Some(RpsOpenError::Ncbi(text.clone()))
         );
         std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
-        assert_eq!(files.open_freq(&base).err(), Some(RpsOpenError::Ncbi(text)));
+        assert_eq!(
+            files.open_freq(&base, "RPSBLAST", None).err(),
+            Some(RpsOpenError::Ncbi(text))
+        );
+        // A database of one volume: its `-db` value as given (`RpsVolumeSetup::with_database`).
+        assert_eq!(
+            files.open_freq(&base, "RPSTBLASTN", Some("./cdd")).err(),
+            Some(RpsOpenError::Ncbi(
+                "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".to_string()
+            ))
+        );
         write_freq(&base, 28);
         let freq = std::fs::read(base.with_extension("freq")).unwrap();
         std::fs::write(base.with_extension("freq"), &freq[..freq.len() - 4]).unwrap();
         assert!(matches!(
-            files.open_freq(&base),
+            files.open_freq(&base, "RPSBLAST", None),
             Err(RpsOpenError::Refused(_))
         ));
         let _ = std::fs::remove_dir_all(&dir);

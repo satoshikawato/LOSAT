@@ -14660,6 +14660,10 @@ mod tests {
     //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
     // ```
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn test_x_block_search_refusals_of_the_search_of_all_queries() {
         let lengths = [1500usize, 2000, 1000];
         let records = x_block_test_records(&lengths);
@@ -14752,6 +14756,10 @@ mod tests {
     // `-sum_stats`; and a call of the preliminary stage only never plans
     // (`BlastpReports::prelim_only`), so a block is not split again on its own batches' words.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn x_prelim_block_plan_is_the_search_of_all_queries_of_blastp() {
         let records = x_block_test_records(&[3000; 30]);
         let input = seq_range::QueryInput::whole(&records);
@@ -14800,6 +14808,10 @@ mod tests {
     // default thresholds, with SEG and `-lcase_masking` on, on one thread and on three; queries
     // without letters, of X only, of one letter repeated, of every letter, with lower-case letters.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn x_blocks_contexts_are_the_builders_contexts() {
         let mut records = x_block_test_records(&[300, 0, 1200, 45, 700]);
         for (index, letters) in [
@@ -14941,6 +14953,10 @@ mod tests {
     // plus the words of the batch with the most (or one batch), on one thread and on three. The
     // standard table keeps the blocks it is given.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
         use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
         let lengths = [900usize, 1200, 700, 1100, 800, 1000];

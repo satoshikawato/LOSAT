@@ -1218,8 +1218,15 @@ mod tests {
     /// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's
     /// argument error.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "the same-file check needs unix metadata or canonicalize, which WASI lacks: the wasm build does not refuse the alias (reported)"
+    )]
     fn the_file_is_created_or_refused() {
-        let dir = std::env::temp_dir().join(format!("losat-strategy-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-strategy-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.asn");
         std::fs::write(&path, b"old").unwrap();

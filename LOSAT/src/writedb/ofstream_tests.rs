@@ -8,9 +8,9 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ofstream-{name}-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

@@ -6519,6 +6519,10 @@ mod tests {
     // consecutive query ranges, each given only its own hits, are the report of all queries,
     // on one thread and on a pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         let config = PairwiseConfig {
             program: "blastn".to_string(),
@@ -8199,6 +8203,10 @@ mod tblastx_tests {
     // (ID4f, above): the reports of consecutive query ranges, each given only its own hits, are
     // the report of all queries, on one thread and on a pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
         let config = PairwiseConfig {
             program: "tblastx".to_string(),
@@ -8671,6 +8679,10 @@ mod tblastx_tests {
     // (`QueryWarnings::end_run`); the parallel writer (`x_pairwise_par::write` given a pool, which
     // `LOSAT_X_PAIRWISEPAR` does not turn off here) writes the same bytes.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blastx_query_warnings_follow_the_reports_before_them() {
         use std::sync::{Arc as SyncArc, Mutex};
         #[derive(Clone, Default)]

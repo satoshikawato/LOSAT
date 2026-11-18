@@ -10,6 +10,7 @@
 /// `std::process::id()`.
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn process_id() -> u32 {
+    #[allow(clippy::disallowed_methods)] // the product's own call, off the Wasm targets
     std::process::id()
 }
 

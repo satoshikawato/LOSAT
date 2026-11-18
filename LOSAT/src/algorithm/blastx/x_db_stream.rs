@@ -630,8 +630,10 @@ mod tests {
     fn a_read_that_fails_during_the_search_gives_the_error_of_the_check() {
         // A copy of prot_v5 whose sequence file is cut short after the check.
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
-        let dir =
-            std::env::temp_dir().join(format!("losat-bxdbstream-read-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-bxdbstream-read-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for extension in ["pdb", "phr", "pin", "psq"] {
@@ -658,9 +660,9 @@ mod tests {
     /// A copy of fixture `name` (`tests/seqdb/db`) in a directory of its own, and its path.
     fn copy_of(name: &str, tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-bxdbstream-{tag}-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

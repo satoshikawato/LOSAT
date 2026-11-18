@@ -931,7 +931,10 @@ mod tests {
             .map(|run| (run.offset, run.length, run.ncbi4na))
             .collect();
         assert_eq!(runs, [(1, 4, 15), (5, 2, 5), (11, 2, 0), (13, 1, 15)]);
-        assert_eq!(store.heap_bytes(), 14 / 4 + 1 + 4 * 12 + 16);
+        assert_eq!(
+            store.heap_bytes(),
+            14 / 4 + 1 + 4 * 12 + std::mem::size_of::<MaskedInterval>()
+        );
     }
 
     #[test]

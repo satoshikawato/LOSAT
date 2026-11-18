@@ -15,7 +15,7 @@ const MAX_RANGE_DIFF: i64 = 3;
 
 /// The fields of an HSP that `Blast_HSPListSubjectBestHit` reads: its context, the frame of
 /// the query, the query offsets within the context (NCBI's `Int4` offsets: an HSP can lie
-/// outside its context, `BlastnHsp::outside_query_context`) and the length of the context.
+/// outside its context, `BlastnHsp::internal_q_offset_0`) and the length of the context.
 #[derive(Debug, Clone, Copy)]
 pub struct BestHitKey {
     pub context: u32,

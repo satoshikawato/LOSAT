@@ -1,0 +1,357 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: tests/fasta/outfmt0/x1bo_R_short_s.fna
+           1 sequences; 16,154 total letters
+
+
+
+Query= qA
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 774816
+
+
+Query= qB
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_R                                                                   7330    0.0  
+
+
+>s_R
+Length=16154
+
+ Score = 7330 bits (3969),  Expect = 0.0
+ Identities = 0/3969 (0%), Gaps = 0/3969 (0%)
+ Strand=Plus/Plus
+
+Query  63    ------------------------------------------------------------  122
+                                                                         
+Sbjct  125   GTGACTCGTGACGTGCGAATTTATTCGGAACCAGTTTAAAGGCCCGCGTTCGCTCTTTTA  184
+
+Query  123   ------------------------------------------------------------  182
+                                                                         
+Sbjct  185   ATAAGTTATAAAACCGTAGGAAACAGCCGCCGAGACGTACTCCGGCAACTTCCGTTACTT  244
+
+Query  183   ------------------------------------------------------------  242
+                                                                         
+Sbjct  245   ACGCGTGACCACTCGCGTAACACTTAACATAGGTTAAAAAATTAATGTTAATTGCCAAAA  304
+
+Query  243   ------------------------------------------------------------  302
+                                                                         
+Sbjct  305   ATCATTTCTCTTTGAAACCCCCGGTGCAGATGTTGACCCCCGCTTGCATAGTATCGAACA  364
+
+Query  303   ------------------------------------------------------------  362
+                                                                         
+Sbjct  365   CGCAGGCCTCTCTCGCCTCAAAATATGCCTTGATTTGGCACGCGCCGCAGGTCTCGCAGT  424
+
+Query  363   ------------------------------------------------------------  422
+                                                                         
+Sbjct  425   GAAACATGCATTCAGGCGGCCCCTACTGTCTTTAACCCAATAGGAATACGCCACCCGTCC  484
+
+Query  423   ------------------------------------------------------------  482
+                                                                         
+Sbjct  485   AGGGATCCGCTTTTATTACGCCGGTCGGGGCCCTAGGATACCTCGGCTTACAGACCTCAA  544
+
+Query  483   ------------------------------------------------------------  542
+                                                                         
+Sbjct  545   ATGTGGTATGTTCAATCACACTACACGGAAGGACGGTACTTGACAGCGTCCCGTGCCTGC  604
+
+Query  543   ------------------------------------------------------------  602
+                                                                         
+Sbjct  605   TTCACGCTTGGTTAGCTATGTAGCCGCGGAGGGTGGCCAGTAGGTGTACTTTTATAGGTC  664
+
+Query  603   ------------------------------------------------------------  662
+                                                                         
+Sbjct  665   ATCTGCTTCAGGCTGGCCTTAGATTAGCCACCTCTATACAAGTGTTGCGGATCAGCTAAG  724
+
+Query  663   ------------------------------------------------------------  722
+                                                                         
+Sbjct  725   TGAGTGATGGTTCCGTTTCAGGGTATTCAATGGTGAGTAGTCCTGTTACCACCGATCGGA  784
+
+Query  723   ------------------------------------------------------------  782
+                                                                         
+Sbjct  785   TAAGATCTCTTTCTGTCACCGGTATAACAGCCAATAAATAGGAAGGTGCGTACACGGCGA  844
+
+Query  783   ------------------------------------------------------------  842
+                                                                         
+Sbjct  845   TTATAGCAATGCGGGGAGACTGCTGTAGGGTCGAAACCATGATTCAAGAGCCAAGATGGT  904
+
+Query  843   ------------------------------------------------------------  902
+                                                                         
+Sbjct  905   AACAAATCTGTGGTAAATCGTCCGGTACGTTACGGGCCTGCCGCCGGAAACAAACTATTT  964
+
+Query  903   ------------------------------------------------------------  962
+                                                                         
+Sbjct  965   GCCTGGCGCGATATACGGGTGTAGCGACCAAAGGATAGTCGGCTTTCCCGCGCATTGACT  1024
+
+Query  963   ------------------------------------------------------------  1022
+                                                                         
+Sbjct  1025  TCAATTTCTACCGAGCCCGCCCGATCTTGACTACACCCAAGTTTTTGCAGTTGCTCCAAA  1084
+
+Query  1023  ------------------------------------------------------------  1082
+                                                                         
+Sbjct  1085  CGTTCCACGCTGTCCGTAGGTCCTAAATATATCGCACTCCACGGCTGTTCCCTTTTGGTT  1144
+
+Query  1083  ------------------------------------------------------------  1142
+                                                                         
+Sbjct  1145  TGTCCAAACAAATTGGAAACACTGATGCGACGTGCAGGCCTGCTGCACGAAGTGGTTTCG  1204
+
+Query  1143  ------------------------------------------------------------  1202
+                                                                         
+Sbjct  1205  AAGTTGGTCCCTAACGAGGGGGCCTCCGGCTCTAGCTGGAGGGTGATCATGCAGACGGAC  1264
+
+Query  1203  ------------------------------------------------------------  1262
+                                                                         
+Sbjct  1265  GGGGGCCCGTATCCGTAGGACACAATCATCGCTGGTTCGACTCTGGGGTTTCTGCTGGGA  1324
+
+Query  1263  ------------------------------------------------------------  1322
+                                                                         
+Sbjct  1325  TTTTTCCCATAGGACGGTCCGAAACACCCTCCGCAGCCACGCTGATAGCTCGTATTTGGG  1384
+
+Query  1323  ------------------------------------------------------------  1382
+                                                                         
+Sbjct  1385  ATGAAACTCTGATGCTGCAGCTTTGTTAAAACATAAGTTCAAAACGATAAAAACCATGAG  1444
+
+Query  1383  ------------------------------------------------------------  1442
+                                                                         
+Sbjct  1445  CTACATCGCTCAAAAAATTCATCACGATCCCCCTTATGGGCTCCCCGGGGACGGGAACGA  1504
+
+Query  1443  ------------------------------------------------------------  1502
+                                                                         
+Sbjct  1505  AGCCGGCAGTCAATGAATGGACTCGAGACGGTCGGGACGTTCTTGATGCCCGCCCGGTGA  1564
+
+Query  1503  ------------------------------------------------------------  1562
+                                                                         
+Sbjct  1565  GGCGTTATGCTAGTGACCAGTTTCCCTTGTCGGCTACCTCGACAATGAACCCGTTCGTGA  1624
+
+Query  1563  ------------------------------------------------------------  1622
+                                                                         
+Sbjct  1625  AGCTAATCATGTTAGTAACCCGAGGTCGAGGGTCCCCCCCGTGATCTCTGTCACGCATGG  1684
+
+Query  1623  ------------------------------------------------------------  1682
+                                                                         
+Sbjct  1685  ACAAGGTTCGCTTCTCGGCAGGAGTACCAGACGGTCAGCAACTAGCGGCGGGGCCAATTC  1744
+
+Query  1683  ------------------------------------------------------------  1742
+                                                                         
+Sbjct  1745  CGACTCGAGAACTACTATAGTTCCGATCAAGAACGATAGGGATTCGACACCCCGTTGTCC  1804
+
+Query  1743  ------------------------------------------------------------  1802
+                                                                         
+Sbjct  1805  CCATGACATGCATGTGGTTCTCTGTGTTCAGCAAGTAATGGATCAGAGTTACTAAAGTCA  1864
+
+Query  1803  ------------------------------------------------------------  1862
+                                                                         
+Sbjct  1865  GAACGTGCAAGGCGGCCGCGATGGGTTTTACGGTATTGGTACCTGCGCGAAACTTTCGAC  1924
+
+Query  1863  ------------------------------------------------------------  1922
+                                                                         
+Sbjct  1925  TCAGGCGGTGACTTCAGCGCCCGTATGGACCCGAAGGCAGACGGGGGGCTCCCTGCCCTT  1984
+
+Query  1923  ------------------------------------------------------------  1982
+                                                                         
+Sbjct  1985  CTATATCCAAGGGTATTACCCTGACTAGATGCACCGTCTTGGATATTTAGACGGGCCTTT  2044
+
+Query  1983  ------------------------------------------------------------  2042
+                                                                         
+Sbjct  2045  TACGGAATTTCGGCGATCCGTTAGTCGCCTCGACGGCCCACGTTACAGACCGCGGGGAAG  2104
+
+Query  2043  ------------------------------------------------------------  2102
+                                                                         
+Sbjct  2105  AAGTAGGATTATAGTAGGCCGCCGAGCGGCTCGCCCTATTGCAGGGGAGTGCTAGAAAAG  2164
+
+Query  2103  ------------------------------------------------------------  2162
+                                                                         
+Sbjct  2165  TCGCCAATGATTTGTGTTGCAGATAAACCAATATCAAGTTATGTTTGTTGGGACCTTCTG  2224
+
+Query  2163  ------------------------------------------------------------  2222
+                                                                         
+Sbjct  2225  ATCTAAAGCGTCGAGCAATGCCTACGAACGGATCAGAGCCTCTTTCTGCGGGACCTTCTT  2284
+
+Query  2223  ------------------------------------------------------------  2282
+                                                                         
+Sbjct  2285  CGTCCACGAGAAGCTCTGATAGCTCGACCGTAGAACGCTATAATACTGACCTTGGTGGGG  2344
+
+Query  2283  ------------------------------------------------------------  2342
+                                                                         
+Sbjct  2345  AAGATTAAGCTCCGACGTCCAAGTCCGAACCGAGAGCTCTCATTACGTGTCGTCGTCCTG  2404
+
+Query  2343  ------------------------------------------------------------  2402
+                                                                         
+Sbjct  2405  TCCTCTCTGACGCACGCTAATGGTTGACGTTGGGTAAGGTTAACCCTTCCTGCTCAGCAT  2464
+
+Query  2403  ------------------------------------------------------------  2462
+                                                                         
+Sbjct  2465  GGCACGTAGTCGCATCTAAGTTTGCCCCGAGCTTGGAGCAGGGACCTTCGACTGCGATAA  2524
+
+Query  2463  ------------------------------------------------------------  2522
+                                                                         
+Sbjct  2525  GTATCATCGGGATCAGTGCAGCGCTGCACTTACCCAAGAAGCTGAGCGTCTGATCCGGTT  2584
+
+Query  2523  ------------------------------------------------------------  2582
+                                                                         
+Sbjct  2585  TAATAACACTCAATGGTTAACAGCCCTTTGACTCGGCGTGAAATAATTAATCCACTCTAT  2644
+
+Query  2583  ------------------------------------------------------------  2642
+                                                                         
+Sbjct  2645  TAGTGAAGTCCAGAACCGCTGTGGCCTTAGCCTAACGTACTACTTCGTTGCGTCTGGGTT  2704
+
+Query  2643  ------------------------------------------------------------  2702
+                                                                         
+Sbjct  2705  CATTTTTTAGAGAAGAAAGAGTCGCCACCTAAGCACGGGTCTCCAGCCTTAAAGAGGATC  2764
+
+Query  2703  ------------------------------------------------------------  2762
+                                                                         
+Sbjct  2765  GAACTCCCTCTCTTGGAGATCCATCGGGGACATGGAGTATGCCGGAACGTTTCCATCCTA  2824
+
+Query  2763  ------------------------------------------------------------  2822
+                                                                         
+Sbjct  2825  AGTTCGCACATTGATTCGCTCCCACTGAATCCCTCGCAGGCCGCCAGGAGCCGTCGACTT  2884
+
+Query  2823  ------------------------------------------------------------  2882
+                                                                         
+Sbjct  2885  GTTTTGCCGCAGACGTTCCGTGAGGCAAATAGGTAACAGAGGTTTGACTTGGGTGGGCCC  2944
+
+Query  2883  ------------------------------------------------------------  2942
+                                                                         
+Sbjct  2945  AGTATTAACTGGCACAATGGCACATGACACAAGGGATTAATTGCTATTTACAACAGCAGG  3004
+
+Query  2943  ------------------------------------------------------------  3002
+                                                                         
+Sbjct  3005  TACCCCAGGCAGGTCGTGTTGCAACACAACTACCCCGAATGGTATCCCGAAGCCAGCTAT  3064
+
+Query  3003  ------------------------------------------------------------  3062
+                                                                         
+Sbjct  3065  CGCTGCGGGCTCGTGCCGGCGGTTGCATCTTAGGCATAACCATATGACATTTAACGCGAG  3124
+
+Query  3063  ------------------------------------------------------------  3122
+                                                                         
+Sbjct  3125  CGTCAGCCGGGACTCACATAGGAACAATACCGGGGTCCTTGCAGTGCCTGTCCGACAGTG  3184
+
+Query  3123  ------------------------------------------------------------  3182
+                                                                         
+Sbjct  3185  GAGTCCAGCTGGAGTGCGAACACTGTCTTGGGATCCGGGTTAGACCGACACGCAAGGTCG  3244
+
+Query  3183  ------------------------------------------------------------  3242
+                                                                         
+Sbjct  3245  CCCGTGGGTAATGGCTCGTATACCCATGAAAACGAGATGGAAGGATATGGTAAACCTCCG  3304
+
+Query  3243  ------------------------------------------------------------  3302
+                                                                         
+Sbjct  3305  AAAGACGGATAAGTTTCTATAATGATTGCTTCTTTGTGTGGCGTTTTTGCCGGTGCGAAT  3364
+
+Query  3303  ------------------------------------------------------------  3362
+                                                                         
+Sbjct  3365  CCGTAATTAGGTTTTGAGCCGCACCGCTATTTTCTTGAAGATAGACTATATTTAGAGTGC  3424
+
+Query  3363  ------------------------------------------------------------  3422
+                                                                         
+Sbjct  3425  ATTGTCGCTAACGATGAGGCGCCTTGTGGGACCCAGTCCGCCCAGATCGGCGATGTATGC  3484
+
+Query  3423  ------------------------------------------------------------  3482
+                                                                         
+Sbjct  3485  CGCAACTGCACATAAGCCTGGATGACATTTGACCATAAGGCGATTTAAAGTTCCACAGAA  3544
+
+Query  3483  ------------------------------------------------------------  3542
+                                                                         
+Sbjct  3545  GCCCTTAACTGACGGATCTATCCTTGACTCAAAATATGCCTGTGTGATGTTACTGCGGCA  3604
+
+Query  3543  ------------------------------------------------------------  3602
+                                                                         
+Sbjct  3605  GCGTCCTACAACCTAGTAGCGTAGGGTCCGGGCATCATACTCACCACCGGGGTTTATGCA  3664
+
+Query  3603  ------------------------------------------------------------  3662
+                                                                         
+Sbjct  3665  GCAACATCAATACCTTGGTTGCTAAATAGAAGCCTTAAAATGGGCGTTCGCAAACTATCC  3724
+
+Query  3663  ------------------------------------------------------------  3722
+                                                                         
+Sbjct  3725  ACTCCATCGAATCTACTGGGTGTGCGACGTGCGGCCGCTTTCCACAAGGACTGTCCCTTC  3784
+
+Query  3723  ------------------------------------------------------------  3782
+                                                                         
+Sbjct  3785  CGGCTGTGCCTAACCTAGGCCTCCGACTCATCTACAAGTCATGGGAGTCATAACTGCTCA  3844
+
+Query  3783  ------------------------------------------------------------  3842
+                                                                         
+Sbjct  3845  GCGTGTATAAGGTGACCTGCATACCGAGGGATCCCATACTGACTGTGCTCCGGAGAACCG  3904
+
+Query  3843  ------------------------------------------------------------  3902
+                                                                         
+Sbjct  3905  TGGCTACGCCATCCTTAGAGGCTACCGGGATGCACGTACTAAAAAGGCACTACAAGCCCT  3964
+
+Query  3903  ------------------------------------------------------------  3962
+                                                                         
+Sbjct  3965  TCTGATCGCAGATAAATAGTAGATCACTCTGGTGACGCAGCGGGGTCATATGGGATGGCT  4024
+
+Query  3963  ------------------------------------------------------------  4022
+                                                                         
+Sbjct  4025  CGCAGAGATGCAGATACATACGATTAGCTACGACGGGCGCTATGAGTCTCTATTTAACAT  4084
+
+Query  4023  ---------  4031
+                      
+Sbjct  4085  AAACGAGGA  4093
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 306717
+
+
+Query= qC
+
+Length=16000
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 257853435
+
+
+  Database: tests/fasta/outfmt0/x1bo_R_short_s.fna
+    Posted date:  Nov 18, 2026  1:09 PM
+  Number of letters in database: 16,154
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

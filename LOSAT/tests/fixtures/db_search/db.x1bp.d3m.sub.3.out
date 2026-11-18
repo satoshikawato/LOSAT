@@ -1,0 +1,85 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x1bp_d3m_s.fna).
+           1 sequences; 642 total letters
+
+
+
+Query= qA
+
+Length=1000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_minus3                                                              367     2e-105
+
+
+
+Query_1    1    CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCG  60
+Subject_1  200  ............................................................  141
+
+Query_1    61   GACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGAC  120
+Subject_1  140  ............................................................  81
+
+Query_1    121  TCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGA  180
+Subject_1  80   ............................................................  21
+
+Query_1    181  ACAAGGTGGCTGAGAATATC  200
+Subject_1  20   ....................  1
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 624059
+
+
+Query= qB
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_minus3                                                              367     6e-106
+
+
+
+Query_2    603  ------------------------------------------------------------  662
+Subject_1  200  CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCG  141
+
+Query_2    663  ------------------------------------------------------------  722
+Subject_1  140  GACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGAC  81
+
+Query_2    723  ------------------------------------------------------------  782
+Subject_1  80   TCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGA  21
+
+Query_2    783  --------------------  802
+Subject_1  20   ACAAGGTGGCTGAGAATATC  1
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 183280
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x1bp_d3m_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 642
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3

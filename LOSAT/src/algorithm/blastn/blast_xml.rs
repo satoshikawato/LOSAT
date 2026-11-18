@@ -208,7 +208,20 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             hit_frame: if minus { -1 } else { 1 },
                             qrow: &query_row,
                             srow: &subject_row,
-                            ops: hsp.gap_info.as_deref(),
+                            // NCBI reference (598d8ae6):
+                            // c++/src/algo/blast/format/blastxml_format.cpp:225-235
+                            // ```c++
+                            //         unsigned int num_gaps = 0;
+                            //         ...
+                            //         if (kAlign.GetSegs().IsDendiag())
+                            //         {
+                            //         	align_length = final_aln->GetAlignLength();
+                            // ```
+                            // (blastxml2_format.cpp:212-222 the same.) An HSP without an edit
+                            // script (`-ungapped`) is a Dense-diag: no gaps, one segment over
+                            // the row (`fill_segments` of an empty script), whatever `-` its
+                            // query row shows past the query's end (`pairwise::context_letters`).
+                            ops: Some(hsp.gap_info.as_deref().unwrap_or(&[])),
                             query_first: hsp.q_start as i32 - 1,
                             query_step: 1,
                         })?;

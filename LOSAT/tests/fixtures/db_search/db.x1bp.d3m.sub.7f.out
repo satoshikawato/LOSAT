@@ -1,0 +1,13 @@
+# BLASTN 2.17.0+
+# Query: qA
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/x1bp_d3m_s.fna)
+# Fields: query id, subject id, q. start, q. end, s. start, s. end, query seq, subject seq, BTOP, alignment length, % identity, identical, mismatches, gaps, gap opens, % query coverage per hsp, evalue, bit score
+# 1 hits found
+qA	s_minus3	1	200	200	1	CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC	CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC	200	200	100.000	200	0	0	0	20	2.07e-105	367
+# BLASTN 2.17.0+
+# Query: qB
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/x1bp_d3m_s.fna)
+# Fields: query id, subject id, q. start, q. end, s. start, s. end, query seq, subject seq, BTOP, alignment length, % identity, identical, mismatches, gaps, gap opens, % query coverage per hsp, evalue, bit score
+# 1 hits found
+qB	s_minus3	603	802	200	1	--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------	CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC	-C-G-T-T-C-C-C-A-T-C-G-A-G-C-A-T-A-C-A-T-A-A-A-G-T-C-A-G-G-T-A-T-A-C-T-C-G-T-T-T-G-A-G-C-C-G-A-G-G-T-C-C-A-T-T-A-C-C-C-G-G-A-C-G-A-A-C-G-T-A-A-G-C-A-C-A-C-T-C-A-C-C-A-A-T-C-C-T-A-A-G-G-C-T-T-C-C-G-A-C-C-C-A-G-A-C-T-T-T-C-C-T-C-G-A-T-T-G-A-C-T-C-T-A-C-A-A-G-C-A-A-A-G-G-A-G-C-G-T-C-C-G-A-G-G-T-C-C-A-A-T-A-G-T-G-A-G-G-A-A-A-C-G-C-A-C-C-G-G-C-C-A-C-C-A-A-C-T-G-A-A-C-A-A-G-G-T-G-G-C-T-G-A-G-A-A-T-A-T-C	200	0.000	0	200	0	0	67	6.07e-106	367
+# BLAST processed 2 queries

@@ -273,11 +273,26 @@ impl Rows<'_> {
                 let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
                 lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
             }
-            let gaps = query_row
-                .iter()
-                .chain(&subject_row)
-                .filter(|&&residue| residue == b'-')
-                .count();
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2601-2611
+            // ```c++
+            //        for (int row=0; row<m_AV->GetNumRows(); row++) {
+            //            CRef<CAlnMap::CAlnChunkVec> chunk_vec
+            //                = m_AV->GetAlnChunks(row, m_AV->GetSeqAlnRange(0));
+            //            for (int i=0; i<chunk_vec->size(); i++) {
+            //                CConstRef<CAlnMap::CAlnChunk> chunk = (*chunk_vec)[i];
+            //                if (chunk->IsGap()) {
+            //                    gap += (chunk->GetAlnRange().GetTo()
+            //                            - chunk->GetAlnRange().GetFrom() + 1);
+            // ```
+            // The gaps are the columns of the edit script's gap operations, not the gap
+            // characters of the rows: a query letter past the query's end shows one too
+            // (`context_letters`).
+            let gaps = hsp.gap_info.as_deref().map_or(0, |ops| {
+                ops.iter()
+                    .filter(|op| !matches!(op, GapEditOp::Sub(_)))
+                    .map(|op| op.num() as usize)
+                    .sum()
+            });
             let mut hit = hsp.clone().into_hit();
             hit.num_ident = displayed_ident;
             hits.push(PairwiseHit {
@@ -378,6 +393,91 @@ fn displayed_rows_into(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-300
+// ```c++
+//             if (start >= 0) {
+//                 stop = start + len - 1;
+//
+//                 // add regular sequence to buffer
+//                 GetSeqString(buff, row, start, stop);
+//                 TSeqPos buf_len = min<TSeqPos>(TSeqPos(buff.size()), seg_len);
+//                 buffer += buff;
+//                 if (buf_len < seg_len) {
+//                     // Not enough chars in the sequence, add gap
+//                     ...
+//                     } else {
+//                         fill_ch = GetGapChar(row);
+//                     }
+// ```
+// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:304-305
+// ```c++
+//         if (IsPositiveStrand(row)) {
+//             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buffer);
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:631-643, 720-728
+// ```c++
+// void CSeqVector_CI::x_SetPos(TSeqPos pos)
+// {
+//     TSeqPos size = x_GetSize();
+//     if ( pos >= size ) {
+//         ...
+//         m_CachePos = size;
+//         ...
+//         return;
+// ...
+//     TSeqPos pos = GetPos();
+//     _ASSERT(pos <= x_GetSize());
+//     count = min(count, x_GetSize() - pos);
+//     if ( !count ) {
+//         return;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1852-1857
+// ```c++
+//     if((ds->IsSetStrands()
+//         && ds->GetStrands().front()==eNa_strand_minus)
+//        && !(ds->IsSetWidths() && ds->GetWidths()[0] == 3)){
+//         //show plus strand if master is minus for non-translated case
+//         finalDenseg->Assign(*ds);
+//         finalDenseg->Reverse();
+// ```
+/// The query letters of an HSP's context offsets `[query.offset, query.end)`, in the context's
+/// direction (the complement for a minus-strand HSP, still to be reversed with the rows), as the
+/// reports read them through the Seq-align (`CAlnVec::GetWholeAlnSeqString` on the plus strand of
+/// the query, after `Reverse` for a minus-strand HSP): a letter whose position in the record lies
+/// past the record's end is not read (`CSeqVector` stops at its size), and its column shows the
+/// gap character. Only an HSP that NCBI keeps outside its query context (remaining-gaps X1b-o)
+/// reaches past the end: its query coordinates pass the query's end (`seqalign_query_start` is at
+/// least 0; one below 0 never reaches the rows), and every column of its query row is a gap
+/// character (X1b-p).
+fn context_letters(hsp: &BlastnHsp, query: &[u8]) -> Vec<u8> {
+    let (qs, qe) = (
+        i64::from(hsp.internal_q_offset_0),
+        i64::from(hsp.internal_q_end_0),
+    );
+    let len = query.len() as i64;
+    // The context offsets `[from, to)` lie in the record: plus strand offset `c` at position `c`,
+    // minus strand at `len - 1 - c` (its complement). The offsets below 0 come first in the
+    // context's direction and those from `len` on last; neither is read.
+    let (from, to) = (qs.max(0), qe.min(len));
+    let before = (qe.min(0) - qs).max(0);
+    let after = (qe - qs.max(len)).max(0);
+    let mut context = Vec::with_capacity((qe - qs).max(0) as usize);
+    context.resize(before as usize, b'-');
+    if from < to {
+        let (from, to) = (from as usize, to as usize);
+        if hsp.query_frame < 0 {
+            context.extend(reverse_complement(
+                &query[query.len() - to..query.len() - from],
+            ));
+        } else {
+            context.extend(query[from..to].iter().map(u8::to_ascii_uppercase));
+        }
+    }
+    context.resize(context.len() + after as usize, b'-');
+    context
+}
+
 /// The two rows in the direction of the HSP's query context (cleared first; their capacity is
 /// kept): a minus-strand HSP's rows are still to be reverse-complemented.
 fn context_rows_into(
@@ -390,27 +490,15 @@ fn context_rows_into(
 ) -> Result<()> {
     query_row.clear();
     subject_row.clear();
-    // An HSP outside its query context (a negative `Int4` offset) never reaches a report
-    // (`run::hsp_outside_query_context`). The end is not below the offset, so neither cast
-    // wraps; the range test below would refuse one that did.
-    ensure!(
-        hsp.internal_q_offset_0 >= 0,
-        "BLASTN HSP outside its sequences"
-    );
-    let (qs, qe) = (
-        hsp.internal_q_offset_0 as usize,
-        hsp.internal_q_end_0 as usize,
-    );
+    let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
+    // An HSP whose Seq-align has a query start below 0 never reaches the rows
+    // (`run::left_of_query_refusal`, `BlastnHsp::seqalign_query_start`).
     ensure!(
-        qs <= qe && qe <= query.len() && ss <= se && se <= subject_length,
+        qs <= qe && hsp.seqalign_query_start() >= 0 && ss <= se && se <= subject_length,
         "BLASTN HSP outside its sequences"
     );
-    let context = if hsp.query_frame < 0 {
-        reverse_complement(&query[query.len() - qe..query.len() - qs])
-    } else {
-        query[qs..qe].to_ascii_uppercase()
-    };
+    let context = context_letters(hsp, query);
     let subject = subject_letters(ss, se);
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
@@ -767,7 +855,8 @@ mod tests {
             bit_score: 0.0,
             num_ident: 0,
             query_frame: frame,
-            query_length: 0,
+            // The context's length, as the engine sets it: the tests' queries have 8 letters.
+            query_length: 8,
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
@@ -858,6 +947,53 @@ mod tests {
         )
         .unwrap();
         assert_eq!((q.as_slice(), s.as_slice()), (&b"CCGGT"[..], &b"CCGG-"[..]));
+    }
+
+    // remaining-gaps X1b-p: the query letters of an HSP that NCBI keeps outside its query context
+    // with its Seq-align's query start at or past 0 (`context_letters`, alnvec.cpp:279-300): a
+    // column whose position on the query's plus strand lies past the query's end shows the gap
+    // character, the others their letters. Plus strand: offsets past the end; minus strand:
+    // offsets below 0 (positions past the end of the plus strand); a range that crosses the end
+    // shows the letters before it. A start below 0 is refused (it never reaches the rows).
+    #[test]
+    fn query_letters_past_the_query_end_show_the_gap_character() {
+        let query = record(b"AACCGGTT");
+        let subject = record(b"ACGTACGTAC");
+        let letters = |from: usize, to: usize| subject.seq()[from..to].to_ascii_uppercase();
+        let outside = |frame: i32, offset: i32, end: i32, s: (usize, usize), ops| {
+            let mut hsp = hsp(frame, (0, 0), s, Some(ops));
+            (hsp.internal_q_offset_0, hsp.internal_q_end_0) = (offset, end);
+            hsp
+        };
+        let gapped = || vec![GapEditOp::Sub(2), GapEditOp::Del(1), GapEditOp::Sub(1)];
+        for (hsp, start, rows) in [
+            (outside(1, 10, 13, (0, 4), gapped()), 10, ("----", "ACGT")),
+            (outside(-1, -5, -2, (0, 4), gapped()), 10, ("----", "ACGT")),
+            (
+                outside(1, 6, 10, (0, 4), vec![GapEditOp::Sub(4)]),
+                6,
+                ("TT--", "ACGT"),
+            ),
+            // Context "--AAC" (record positions 9, 8, 7, 6, 5), shown reverse-complemented.
+            (
+                outside(-1, -2, 3, (0, 5), vec![GapEditOp::Sub(5)]),
+                5,
+                ("GTT--", "TACGT"),
+            ),
+        ] {
+            assert_eq!(hsp.seqalign_query_start(), start);
+            let (q, s) = displayed_rows(&hsp, query.seq(), subject.seq().len(), letters).unwrap();
+            assert_eq!(
+                (q.as_slice(), s.as_slice()),
+                (rows.0.as_bytes(), rows.1.as_bytes())
+            );
+        }
+        let left = outside(1, -4, -1, (0, 3), vec![GapEditOp::Sub(3)]);
+        assert_eq!(left.seqalign_query_start(), -4);
+        assert!(displayed_rows(&left, query.seq(), subject.seq().len(), letters).is_err());
+        let right_minus = outside(-1, 9, 12, (0, 3), vec![GapEditOp::Sub(3)]);
+        assert_eq!(right_minus.seqalign_query_start(), -4);
+        assert!(displayed_rows(&right_minus, query.seq(), subject.seq().len(), letters).is_err());
     }
 
     // The XML rows are written into buffers that the caller reuses: stale contents are cleared

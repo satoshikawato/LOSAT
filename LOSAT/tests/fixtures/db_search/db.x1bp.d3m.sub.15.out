@@ -1,0 +1,137 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qA",
+            "query_len": 1000,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s_minus3",
+                    "title": "s_minus3"
+                  }
+                ],
+                "len": 642,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 367.005,
+                    "score": 400,
+                    "evalue": 2.0683e-105,
+                    "identity": 200,
+                    "query_from": 1,
+                    "query_to": 200,
+                    "query_strand": "Plus",
+                    "hit_from": 200,
+                    "hit_to": 1,
+                    "hit_strand": "Minus",
+                    "align_len": 200,
+                    "gaps": 0,
+                    "qseq": "CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC",
+                    "hseq": "CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 11,
+              "eff_space": 624059,
+              "kappa": 0.408145662544724,
+              "lambda": 0.633731443099174,
+              "entropy": 0.91243839227971
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "qB",
+            "query_len": 300,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s_minus3",
+                    "title": "s_minus3"
+                  }
+                ],
+                "len": 642,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 367.005,
+                    "score": 400,
+                    "evalue": 6.07439e-106,
+                    "identity": 0,
+                    "query_from": 603,
+                    "query_to": 802,
+                    "query_strand": "Plus",
+                    "hit_from": 200,
+                    "hit_to": 1,
+                    "hit_strand": "Minus",
+                    "align_len": 200,
+                    "gaps": 0,
+                    "qseq": "--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------",
+                    "hseq": "CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC",
+                    "midline": "                                                                                                                                                                                                        "
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 10,
+              "eff_space": 183280,
+              "kappa": 0.408145662544724,
+              "lambda": 0.633731443099174,
+              "entropy": 0.91243839227971
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

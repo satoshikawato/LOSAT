@@ -7302,30 +7302,10 @@ fn post_process_hits_and_write(
     //                 if ( !is_ooframe )
     //                     s_RemapToSubjectLoc(*iter, *subj_loc);
     // ```
-    // (The tabs that indent lines 1630-1636 are written as spaces.) The batch's final hit
-    // lists, after every drop above, become Seq-aligns before any of its reports is written.
-    // An HSP that NCBI keeps outside its query context (`BlastnHsp::outside_query_context`: an
-    // `-ungapped` HSP whose re-evaluation keeps a part past an end of its context, or a
-    // megablast HSP whose greedy alignment stays there, from a hit whose ungapped extension
-    // passed the context's end) has report coordinates outside the query. Where they leave it on
-    // the left (a plus-strand start below 1, or a minus-strand start from an end past the
-    // context's end) the mapping to a `-subject` location throws (`CAnnotMapperException`,
-    // seq_align_mapper_base.cpp:1292 and 2902; exit status 255); from a database the tabular
-    // report stops with `CAlnException` (alnmap.cpp:753, exit status 255) after the rows before
-    // it, and the pairwise report leaves the HSP out. Where they pass the query's end NCBI's
-    // reports show them (remaining-gaps X1b-o, rounds 4 and 5, 2026-11-17). LOSAT reproduces
-    // neither yet and refuses the batch here, before any of its rows
-    // (`hsp_outside_query_context`).
-    if let Some(q_idx) = hit_lists.iter().position(|list| {
-        list.iter()
-            .flat_map(|list| &list.hsplist_array)
-            .flat_map(|list| &list.hsps)
-            .any(BlastnHsp::outside_query_context)
-    }) {
-        return Err(hsp_outside_query_context(
-            query_ids.get(q_idx).map_or(&[][..], |id| &id[..]),
-        ));
-    }
+    // (The tabs that indent lines 1630-1636 are written as spaces.) An HSP that NCBI keeps
+    // outside its query context reaches here only with a Seq-align query start of at least 0
+    // (`left_of_query_refusal` fails or refuses the batch of one below 0), and the reports
+    // show it with query coordinates past the query's end (remaining-gaps X1b-p).
     shift_to_records(&mut hit_lists, report.ranges);
     let wants_rows =
         outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise());
@@ -9966,19 +9946,102 @@ fn ungapped_subject_stage(
     });
 }
 
-/// LOSAT's refusal of an HSP that NCBI keeps outside its query context
-/// (`BlastnHsp::outside_query_context`) and that reaches the report
-/// (`post_process_hits_and_write`), for the query `query_id`: a hit whose ungapped extension
-/// passed an end of its context (an ungapped X-drop of `INT_MIN`, `-xdrop_ungap 1e10`, lets the
-/// walk's `Int4` sum wrap at the sentinel) gives an HSP there, through the `-ungapped`
-/// re-evaluation or the megablast greedy alignment. NCBI's report of it stops with an exception
-/// (exit status 255) or shows query coordinates outside the query (remaining-gaps X1b-o), which
-/// LOSAT does not reproduce yet.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1542-1547
+// ```c++
+// s_RemapToSubjectLoc(CRef<CSeq_align> & subj_aligns, const CSeq_loc& subj_loc)
+// {
+//     const int kSubjDimension = 1;
+//     _ASSERT(subj_loc.IsInt() || subj_loc.IsWhole());
+//     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1288-1294, 2901-2904
+// ```c++
+//         ITERATE(SAlignment_Segment::TRows, row, seg.m_Rows) {
+//             if (row->m_Start == kInvalidSeqPos) {
+//                 // Dense-diags do not support gaps ('starts' contain
+//                 // TSeqPos which can not be negative).
+//                 NCBI_THROW(CAnnotMapperException, eBadAlignment,
+//                     "Mapped alignment contains gaps and can not be "
+//                     "converted to dense-diag.");
+//     ...
+//     if ( x_IsEmpty() ) {
+//         NCBI_THROW(CAnnotMapperException, eBadAlignment,
+//             "Mapping resulted in an empty alignment, "
+//             "can not initialize Seq-align.");
+// ```
+/// LOSAT's refusal (`hsp_left_of_query`) of the first query of a batch whose final hit list keeps
+/// an HSP that NCBI keeps outside its query context (`BlastnHsp::internal_q_offset_0`) with a
+/// Seq-align query start below 0 (`BlastnHsp::seqalign_query_start`: a plus-strand HSP left of
+/// its context, a minus-strand one right of it); `hit_lists`, `lengths` and `records` are the
+/// batch's, by query of the batch. A list that holds such an HSP is copied and made final as the
+/// reports get it: a subject set's as `post_process_hits_and_write` finishes it, a database's
+/// (finished after the traceback) without its HSPs of score 0; no list is copied in a search
+/// without one (an ungapped X-drop of `INT_MIN`, `-xdrop_ungap 1e10`, gives them, remaining-gaps
+/// X1b-o).
+///
+/// Of a subject set NCBI maps each Seq-align of the batch to the subject's location in the search
+/// (`s_RemapToSubjectLoc`, blast_seqalign.cpp:1630-1636): the query row of such an HSP maps to
+/// nothing, which throws `CAnnotMapperException` (exit status 255), for an ungapped HSP's
+/// Dense-diag at seq_align_mapper_base.cpp:1292 and for a gapped HSP's Dense-seg at line 2902.
+/// Its start at 0 or past it is shown (`algorithm::blastn::pairwise::context_letters`;
+/// remaining-gaps X1b-p).
+fn left_of_query_refusal(
+    args: &BlastnArgs,
+    source: SubjectSource<'_>,
+    hit_lists: &[Option<BlastnHitList>],
+    lengths: &[usize],
+    records: &[FastaRecord],
+) -> Option<anyhow::Error> {
+    let database_search = matches!(source, SubjectSource::Database(_));
+    let keeps_one = |hit_list: &BlastnHitList| {
+        hit_list
+            .hsplist_array
+            .iter()
+            .flat_map(|hsp_list| &hsp_list.hsps)
+            .any(|hsp| hsp.seqalign_query_start() < 0)
+    };
+    let q_idx = hit_lists.iter().enumerate().position(|(q_idx, hit_list)| {
+        let Some(hit_list) = hit_list.as_ref().filter(|hit_list| keeps_one(hit_list)) else {
+            return false;
+        };
+        let mut finished = hit_list.clone();
+        if !database_search {
+            finish_query_hit_list(
+                &mut finished,
+                lengths[q_idx],
+                args.report_counts.hitlist_size,
+                args.max_hsps_per_subject.unwrap_or(0),
+                args.qcov_hsp_perc.unwrap_or(0.0),
+                args.subject_besthit,
+                args.culling_limit_value(),
+                args.ungapped,
+                true,
+            );
+        }
+        drop_hsps_of_score_zero(&mut finished);
+        keeps_one(&finished)
+    })?;
+    let id = records.get(q_idx).map_or(&[][..], FastaRecord::shown_id);
+    Some(hsp_left_of_query(id, database_search))
+}
+
+/// LOSAT's refusal of the query `query_id`, whose final hit list keeps an HSP with a Seq-align
+/// query start below 0 (`left_of_query_refusal`). Of a subject set NCBI stops with an exception
+/// there, after what it wrote before (`fail_batch!` in `run_in_pool`). Of a database
+/// (`database_search`) NCBI maps nothing, and its reports read the query row of the Seq-align
+/// each its own way: some stop with an exception after the rows before, others leave the HSP out
+/// or show it; LOSAT does not reproduce them yet (remaining-gaps X1b-p, decision X1b-p-1).
 #[cold]
 #[inline(never)]
-fn hsp_outside_query_context(query_id: &[u8]) -> anyhow::Error {
+fn hsp_left_of_query(query_id: &[u8], database_search: bool) -> anyhow::Error {
+    let ncbi = if database_search {
+        "whose reports from a database NCBI BLAST+ writes each its own way (some stop with an exception), which LOSAT does not reproduce yet"
+    } else {
+        "where NCBI BLAST+ stops with an exception when it maps the alignment to the subject (exit status 255); LOSAT refuses it after what NCBI BLAST+ writes before"
+    };
     anyhow::anyhow!(
-        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) reaches the report, where NCBI BLAST+ stops with an exception or shows coordinates outside the query; LOSAT does not reproduce that yet",
+        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) starts before the query's first letter, {ncbi}",
         String::from_utf8_lossy(query_id)
     )
 }
@@ -11263,6 +11326,20 @@ fn run_in_pool(
                 fail_batch!(error);
             }
         }
+        // An HSP left of its query (`left_of_query_refusal`): of a subject set NCBI's search of the
+        // batch throws, after the prologs, the reports of the batches before and the batch's reader
+        // messages; of a database LOSAT refuses after NCBI's own errors of the batch (below).
+        let database_search = matches!(source, SubjectSource::Database(_));
+        let left_of_query = match left_of_query_refusal(
+            &args,
+            source,
+            &batch_hit_lists,
+            &lengths[start..],
+            batch_records.input(),
+        ) {
+            Some(error) if !database_search => fail_batch!(error),
+            database_refusal => database_refusal,
+        };
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-309
         // ```c++
         //             if (isArchiveFormat) {
@@ -11335,6 +11412,14 @@ fn run_in_pool(
                 }
                 return Err(error);
             }
+        }
+        // LOSAT's refusal of a database's HSP left of its query (above), as the refusal before.
+        if let Some(error) = left_of_query {
+            let written = if stream.acting() { start } else { 0 };
+            for query_warnings in &warnings[written..=start] {
+                query_warnings.write(&mut *outputs.diagnostics, archive)?;
+            }
+            return Err(error);
         }
         if let SubjectSource::Database(database) = source {
             for hit_list in batch_hit_lists.iter_mut().flatten() {
@@ -16159,11 +16244,13 @@ mod tests {
         );
     }
 
-    // The report refuses a batch whose final hit lists keep an HSP outside its query context
-    // (`post_process_hits_and_write`): one test, `BlastnHsp::outside_query_context`, for a start
-    // below 0 and for an end past the context's length. The drops before it compare NCBI's signed
-    // offsets: an HSP left of its context sorts before one at offset 0 with the same score and
-    // subject range.
+    // An HSP outside its query context (`BlastnHsp::internal_q_offset_0`: a start below 0 or an
+    // end past the context's length) reaches the reports; the search fails or refuses a batch
+    // where one has a Seq-align query start below 0 (`BlastnHsp::seqalign_query_start`,
+    // `left_of_query_refusal`: a plus-strand start left of the context, or a minus-strand
+    // end past it), and the reports show one past the query's end (remaining-gaps X1b-p). The drops before
+    // it compare NCBI's signed offsets: an HSP left of its context sorts before one at offset 0
+    // with the same score and subject range.
     #[test]
     fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
         let hsp = |offset: i32, end: i32| BlastnHsp {
@@ -16192,12 +16279,13 @@ mod tests {
             num_positives: (end - offset) as usize,
         };
         let left = hsp(-13, -1);
-        assert!(left.outside_query_context());
-        assert!(hsp(-1, 11).outside_query_context());
-        assert!(hsp(90, 101).outside_query_context());
-        assert!(hsp(100, 112).outside_query_context());
-        assert!(!hsp(0, 12).outside_query_context());
-        assert!(!hsp(88, 100).outside_query_context());
+        assert_eq!(left.seqalign_query_start(), -13);
+        assert_eq!(hsp(100, 112).seqalign_query_start(), 100);
+        let mut minus = hsp(-12, -2);
+        minus.query_frame = -1;
+        assert_eq!(minus.seqalign_query_start(), 102);
+        (minus.internal_q_offset_0, minus.internal_q_end_0) = (95, 104);
+        assert_eq!(minus.seqalign_query_start(), -4);
         assert_eq!(
             crate::algorithm::blastn::hsp::score_compare_hsps(&left, &hsp(0, 12)),
             std::cmp::Ordering::Less

@@ -2077,3 +2077,7 @@ chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
 `(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
 (with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+
+`x1bp/`: rows `db.x1bp.*` (line RG, item X1b-p). `d3m`, `rs` and `d3` are `makeblastdb -dbtype nucl` (NCBI BLAST+
+2.17.0, run from `LOSAT/`) of `tests/fasta/outfmt0/x1bp_d3m_s.fna`, `x1bo_R_short_s.fna` and `x1bo_d3_s.fna`: subjects
+on which `-ungapped -xdrop_ungap 1e10` (and megablast for `rs`) keeps an HSP outside its query context.

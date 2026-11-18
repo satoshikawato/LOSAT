@@ -442,8 +442,22 @@ fn tabular_hsp<'r>(
         q_frame: 1,
         s_frame: if hsp.s_start > hsp.s_end { -1 } else { 1 },
         rows,
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:288-297
+        // ```c++
+        //                 if (buf_len < seg_len) {
+        //                     // Not enough chars in the sequence, add gap
+        //                     ...
+        //                     if (seg < left_seg  ||  seg > right_seg) {
+        //                         fill_ch = GetEndChar();
+        //                     } else {
+        //                         fill_ch = GetGapChar(row);
+        //                     }
+        // ```
+        // A BLASTN alignment (X-drop or greedy) starts and ends with a substitution, so its rows
+        // have no end gaps: a `-` at a row's end fills a segment past the query's end (an HSP that
+        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character.
+        end_gaps: false,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
-        end_gaps: true,
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }

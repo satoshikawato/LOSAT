@@ -1173,7 +1173,10 @@ pub fn write_hsp_info<W: Write>(
         //             match ++;
         // ```
         // The displayed counts come from the two rows (before the lowercase masking of
-        // the display), and the gaps are the gap columns of both rows.
+        // the display), and the gaps are the gap columns of the alignment (`x_GetNumGaps`'s
+        // chunks): the hit's count of its edit script's gaps where it has one (a query letter
+        // past the query's end shows the gap character too, remaining-gaps X1b-p), else the
+        // gap characters of both rows.
         let (query_row, subject_row) = (
             hit.query_seq.as_deref().unwrap_or_default().as_bytes(),
             hit.subject_seq.as_deref().unwrap_or_default().as_bytes(),
@@ -1184,11 +1187,13 @@ pub fn write_hsp_info<W: Write>(
             .zip(subject_row)
             .filter(|(q, s)| q.eq_ignore_ascii_case(s))
             .count();
-        let gaps = query_row
-            .iter()
-            .chain(subject_row)
-            .filter(|&&residue| residue == b'-')
-            .count();
+        let gaps = hit.gaps.unwrap_or_else(|| {
+            query_row
+                .iter()
+                .chain(subject_row)
+                .filter(|&&residue| residue == b'-')
+                .count()
+        });
         // NCBI reference: c++/src/objtools/align_format/showalign.cpp:310-320
         // ```c++
         //     out<<" Identities = "<<match<<"/"<<(aln_stop+1)<<" ("<<identity<<"%"<<")";
@@ -1332,10 +1337,19 @@ fn write_alignment_with_sequences<W: Write>(
     // ```
     let nucleotide = config.program == "blastn";
     // The rows' end gaps (`end_gap_span`; the subject's gaps stored as residues are residues).
-    let query_span = end_gap_span(&q_chars, |_| false);
-    let subject_span = end_gap_span(&s_chars, |column| {
-        subject_stored_gaps.binary_search(&(column as u32)).is_ok()
-    });
+    // A BLASTN alignment (X-drop or greedy) starts and ends with a substitution and has none: a
+    // `-` at the end of its query row fills a segment past the query's end, the gap character
+    // (alnvec.cpp:288-297, quoted at `end_gap_span`; `algorithm::blastn::pairwise::context_letters`).
+    let (query_span, subject_span) = if nucleotide {
+        ((0, q_chars.len()), (0, s_chars.len()))
+    } else {
+        (
+            end_gap_span(&q_chars, |_| false),
+            end_gap_span(&s_chars, |column| {
+                subject_stored_gaps.binary_search(&(column as u32)).is_ok()
+            }),
+        )
+    };
 
     // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2155
     // ```c++

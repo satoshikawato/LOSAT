@@ -463,6 +463,37 @@ impl SamDocument {
             }
         }
         // SEQ (`fSAM_SeqData`).
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-233
+        // ```c++
+        //         if (m_Flags & CSAM_Formatter::fSAM_SeqData) {
+        //             if(flags & fRead_Reverse) {
+        //                 CSeqVector vect = h.GetSeqVector(
+        //                     CBioseq_Handle::eCoding_Iupac, eNa_strand_minus);
+        //                 vect.GetSeqData(h.GetBioseqLength() - tgt_rg.GetToOpen(),
+        //                     h.GetBioseqLength() - tgt_rg.GetFrom(), seq_data);
+        //             }
+        //             else {
+        //                 CSeqVector vect = h.GetSeqVector(
+        //                     CBioseq_Handle::eCoding_Iupac, eNa_strand_plus);
+        //                 vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
+        // ```
+        // NCBI reference (598d8ae6): c++/include/objmgr/seq_vector_ci.hpp:517-525
+        // ```c++
+        // void CSeqVector_CI::GetSeqData(TSeqPos start, TSeqPos stop, string& buffer)
+        // {
+        //     SetPos(start);
+        //     if (start > stop) {
+        //         buffer.erase();
+        //         return;
+        //     }
+        //     GetSeqData(buffer, stop - start);
+        // }
+        // ```
+        // `CSeqVector` reads no letter at or past the target's length (`x_SetPos` stops at its
+        // size). The target's range passes its end only for a query (`-outfmt "17 SR"`) whose
+        // HSP NCBI keeps outside its context (remaining-gaps X1b-p): on the plus strand the
+        // letters before the end are read, on the minus strand the unsigned start
+        // `length - to` wraps past the stop and nothing is (an empty SEQ, not `*`).
         let want_letters = self.spec.sequence;
         scratch.letters.clear();
         if want_letters {
@@ -471,13 +502,23 @@ impl SamDocument {
             } else {
                 SamRow::Subject
             };
-            letters.letters(
-                row,
-                target.index,
-                tgt_range.0 as usize,
-                tgt_range.1 as usize,
-                &mut scratch.letters,
-            )?;
+            let (from, to) = if reverse && tgt_range.1 > target_length {
+                (0, 0)
+            } else {
+                (
+                    tgt_range.0.min(target_length),
+                    tgt_range.1.min(target_length),
+                )
+            };
+            if from < to {
+                letters.letters(
+                    row,
+                    target.index,
+                    from as usize,
+                    to as usize,
+                    &mut scratch.letters,
+                )?;
+            }
             if reverse {
                 reverse_complement(&mut scratch.letters);
             }

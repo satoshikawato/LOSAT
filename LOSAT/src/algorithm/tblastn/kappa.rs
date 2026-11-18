@@ -780,7 +780,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(160, true)],
-            subject_nt.len(),
+            subject_nt.len() as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -1050,7 +1050,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            subject_nt.len(),
+            subject_nt.len() as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -2229,7 +2229,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            total_nt_length,
+            total_nt_length as i64,
             1,
             &[gapped],
             &[ungapped],

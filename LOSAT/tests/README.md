@@ -306,6 +306,11 @@ Its `stdin/` section reads standard input in every search program through each W
 command (`-query -`, no `-query`, an empty pipe, `-subject -`, both, and a regular file as
 the standard input) and requires the native command's stdout, stderr and exit status of
 the same run.
+Its `blastx-xml-fixtures/` section runs every blastx row of BLAST XML, XML2 and JSON
+(`-outfmt` 5 and 13 to 16; `--outfmts` of the two checkers) of `outfmt0_manifest.tsv`
+(`check_losat.py`) and of `db_search_manifest/blastx*.tsv` (`db_search_fixtures.py check`)
+through each WASI command at `-num_threads 1`, exactly: in these formats blastx reads its
+query file before the search, on the open file itself.
 
 Every supported explicit N > 1 uses N total compute threads: the caller plus
 N-1 child workers. Diagnostics report pool_threads=N and caller_participates=true;

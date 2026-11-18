@@ -1402,9 +1402,20 @@ fn write_first_batch_prologs(
     let name = subject_path.map_or_else(String::new, |path| {
         format!("User specified sequence set (Input: {})", path.display())
     });
-    let total = match database {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
+    // ```c++
+    //     if(dbscan_mode)
+    //     {
+    // 	ITERATE(vector<BLAST_SequenceBlk*>, iter, m_ivSeqBlkVec)
+    // 	{
+    //             m_iTotalLength += (Int8) (*iter)->length;
+    // 	}
+    //     }
+    // ```
+    // The subject set's total as NCBI's `Int8`.
+    let total: i64 = match database {
         Some(_) => 0,
-        None => subject_letters.lengths().sum(),
+        None => subject_letters.lengths().map(|length| length as i64).sum(),
     };
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
@@ -1415,7 +1426,7 @@ fn write_first_batch_prologs(
                 program,
                 crate::NCBI_BLAST_VERSION,
                 &name,
-                num_subjects,
+                num_subjects as i64,
                 total,
                 database,
             )?;

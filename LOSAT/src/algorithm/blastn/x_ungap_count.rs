@@ -122,6 +122,10 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     // ```
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
     // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    // Such a walk can pass two of the query's sentinels (BLASTNA 15, `INT4_MIN / 2` against
+    // every base, blast_stat.c:1124-1127): NCBI's `Int4` sums then wrap in its x86-64 build, and
+    // LOSAT's sums wrap the same way (the line's decision 22: x86-64's two's complement), also in
+    // a build with overflow checks.
     let x = x_dropoff.wrapping_neg();
     debug_assert!(q_off < q_seq.len() && s_off < subject_len);
     debug_assert!(subject_len.div_ceil(4) <= s_seq_packed.len());
@@ -141,10 +145,10 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
         // q_off - i < q_off < q_seq.len() (the callers' offsets of a hit; i <= left).
         let ch = unsafe { *s.add(p >> 2) };
         let code = unsafe { *q.add(q_off - i) };
-        sum += cell(matrix, code, ((ch >> ((!p & 3) << 1)) & 3) as usize);
+        sum = sum.wrapping_add(cell(matrix, code, ((ch >> ((!p & 3) << 1)) & 3) as usize));
         if sum > 0 {
             q_beg = q_off - i;
-            score += sum;
+            score = score.wrapping_add(sum);
             sum = 0;
         } else if sum < x {
             break;
@@ -165,11 +169,15 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
         let ch = unsafe { *s.add(p >> 2) };
         let code = unsafe { *q.add(q_off + i) };
         i += 1;
-        sum += cell(matrix, code, ((ch >> ((!p & 3) << 1)) & 3) as usize);
+        sum = sum.wrapping_add(cell(matrix, code, ((ch >> ((!p & 3) << 1)) & 3) as usize));
         if sum > 0 {
             q_end = q_off + i;
-            score += sum;
-            x_current = if -score > x { -score } else { x };
+            score = score.wrapping_add(sum);
+            x_current = if score.wrapping_neg() > x {
+                score.wrapping_neg()
+            } else {
+                x
+            };
             sum = 0;
         } else if sum < x_current {
             break;
@@ -198,6 +206,33 @@ mod tests {
 
     fn key(u: UngappedData) -> (usize, usize, usize, i32) {
         (u.q_start, u.s_start, u.length, u.score)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:197 and
+    // blast_stat.c:1124-1127
+    // ```c
+    //         if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
+    // ...
+    //         matrix[BLASTNA_SIZE-1][index1] = INT4_MIN / 2;
+    // ...
+    //         matrix[index1][BLASTNA_SIZE-1] = INT4_MIN / 2;
+    // ```
+    /// `-xdrop_ungap 1e10` (X-drop `INT_MIN`, which negates to itself): the left walk from the hit
+    /// at 3 passes the two sentinels (`INT4_MIN / 2` each: `INT_MIN`) and the mismatch A/C (-3),
+    /// where the `Int4` sum wraps to 2^31 - 3, above 0, as in NCBI's x86-64 build; the right walk
+    /// adds the two matches: `i32::MAX`. A build with overflow checks gives the same.
+    #[test]
+    fn a_walk_past_two_sentinels_wraps_as_ncbis_int4() {
+        let matrix = crate::algorithm::blastn::alignment::build_blastna_matrix(1, -3);
+        let query = [0u8, 15, 15, 0, 0];
+        // C A A A A, packed (ncbi2na: A 0, C 1).
+        let packed = [0b0100_0000u8, 0];
+        let expected = (0, 0, 5, i32::MAX);
+        let counted =
+            extend_hit_ungapped_exact_counted(&query, &packed, 3, 3, 5, i32::MIN, &matrix);
+        assert_eq!(key(counted), expected);
+        let ported = extend_hit_ungapped_exact_ported(&query, &packed, 3, 3, 5, i32::MIN, &matrix);
+        assert_eq!(key(ported), expected);
     }
 
     /// Every hit offset of random query blocks (contexts of 1 to 40 letters between sentinels,
@@ -241,7 +276,7 @@ mod tests {
             }
             for q_off in 0..query.len() {
                 for s_off in 0..subject_len {
-                    for x_dropoff in [5, 16, 40] {
+                    for x_dropoff in [5, 16, 40, i32::MIN] {
                         let args = (q_off, s_off, subject_len, x_dropoff);
                         assert_eq!(
                             key(extend_hit_ungapped_exact_counted(

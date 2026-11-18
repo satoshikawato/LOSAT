@@ -2148,7 +2148,8 @@ fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
 /// later query batches); a name that does not exist cannot be one of those streams. The same
 /// file is the same device and inode (`metadata` follows `/dev/stdout` to the stream's file),
 /// or for a character device the same device number (`/dev/null` excepted: no order of its bytes
-/// shows); without inode numbers, the same canonical path as `-out`, or one of the names of the
+/// shows); without inode numbers, the same path form as `-out` (`utils::same_file`: the canonical
+/// path, or on WASI the path by name, which does not see a link to the file), or one of the names of the
 /// standard streams (`ReportStreams`, taken once). Also refused, for `-out_pssm`: a named pipe, a
 /// block device and a symbolic link to no file (`PssmFiles`).
 pub(crate) fn check_pssm_files(
@@ -2279,7 +2280,7 @@ struct ReportStreams {
 impl ReportStreams {
     fn new(out: Option<&std::path::Path>) -> Self {
         Self {
-            out: out.and_then(|out| std::fs::canonicalize(out).ok()),
+            out: out.and_then(crate::utils::same_file::path_identity),
         }
     }
 
@@ -2293,7 +2294,7 @@ impl ReportStreams {
             }
             _ => {}
         }
-        let target = std::fs::canonicalize(name).ok()?;
+        let target = crate::utils::same_file::path_identity(name)?;
         (self.out.as_ref() == Some(&target)).then_some("the -out file")
     }
 }

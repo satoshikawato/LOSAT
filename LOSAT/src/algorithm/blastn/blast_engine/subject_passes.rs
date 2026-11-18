@@ -547,8 +547,8 @@ impl SubjectPasses<'_> {
         // The preliminary stage's word cutoffs and spaces (`Blast_HSPListReevaluateUngapped` and the
         // e-values of an ungapped search, blast_engine.c:1492-1497).
         let &PrelimBatch {
-            encoded_queries_blastna,
-            encoded_queries_nomask,
+            encoded_query_concat_blastna,
+            encoded_query_concat_nomask,
             score_matrix,
             search_karlin_ref,
             round_down_evalue_score,
@@ -578,8 +578,8 @@ impl SubjectPasses<'_> {
                     ungapped_subject_stage(
                         hits,
                         s_blastna,
-                        encoded_queries_blastna,
-                        encoded_queries_nomask,
+                        encoded_query_concat_blastna,
+                        encoded_query_concat_nomask,
                         score_matrix,
                         cutoff_scores,
                         percent_identity,

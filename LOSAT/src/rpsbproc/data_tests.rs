@@ -176,10 +176,6 @@ fn fixture_copy(tag: &str) -> std::path::PathBuf {
 // skips completes after reading `buf[npos]` (case `ct1`, refused), and a line that ends in a
 // space reads past its terminating 0 (refused).
 #[test]
-#[cfg_attr(
-    target_pointer_width = "32",
-    ignore = "NCBI's text prints size_t -1 as 4294967295 on a 32-bit target, not 18446744073709551615: the wasm32 build differs here (reported)"
-)]
 fn cdtrack_lines_read_as_ncbi() {
     let dir = fixture_copy("cdtrack");
     let load = |text: &str| {

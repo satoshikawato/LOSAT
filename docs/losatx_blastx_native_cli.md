@@ -51,9 +51,9 @@ registered CLI contract. A blank field list following `6 ` or `7 ` uses the
 registered standard-field expansion. Output goes to stdout unless `-out` names
 a file; `-out -` also uses stdout.
 
-Each protein subject may contain at most 5,000,000 residues. Longer subjects,
-stdin FASTA specified with `-query -` or `-subject -`, and unsupported options
-and tasks fail explicitly. Native threads 1/2/4/8 and serial
+Each protein subject may contain at most 5,000,000 residues. Longer subjects
+and unsupported options and tasks fail explicitly. `-query -` (or no `-query`)
+and `-subject -` read standard input as NCBI BLAST+ reads it. Native threads 1/2/4/8 and serial
 and threaded command-WASI and Web/reactor entry points are implemented. Their
 full v0.2.0 acceptance, including browser and pool-failure coverage, remains
 open. Formal performance measurements exist for fixed workloads; they do not

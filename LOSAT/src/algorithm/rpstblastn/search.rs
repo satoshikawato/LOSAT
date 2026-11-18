@@ -592,13 +592,6 @@ impl TranslatedRpsSearch {
             );
             drop(run);
             drop(masks);
-            // The `.aux` Ks of the footers' K (volume 0's, with composition-based statistics).
-            let aux_karlin_k = if position == 0 && cbs > 0 {
-                files.aux.karlin_k.clone()
-            } else {
-                Vec::new()
-            };
-            drop(files);
             let traced = match traced {
                 Ok(traced) => traced,
                 // The volume's refusal: the first batch that searches it meets it. The batches
@@ -640,7 +633,7 @@ impl TranslatedRpsSearch {
                     if cbs > 0 {
                         state.gapped_k = Some(footer_gapped_k(
                             &k_marks,
-                            &aux_karlin_k,
+                            &files.aux.karlin_k,
                             gapped.k,
                             state
                                 .parameters
@@ -653,6 +646,8 @@ impl TranslatedRpsSearch {
                 }
                 state.searched = true;
             }
+            // The volume's files close after the batches' footer K, read from `files.aux` in place.
+            drop(files);
         }
         for (batch, state) in states.into_iter().enumerate() {
             outcome[batch] = Some(Ok(state.results()));

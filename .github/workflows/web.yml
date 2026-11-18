@@ -113,7 +113,14 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       # Playwright's CI advice for Chromium in a container: a shared IPC namespace, and an init
       # process that reaps the browsers' children.
-      options: --ipc=host --init
+      # Firefox's sandbox makes a user namespace, which Docker's default seccomp profile refuses
+      # (`CanCreateUserNamespace() clone() failure: EPERM`); the runner is a throwaway VM.
+      options: --ipc=host --init --security-opt seccomp=unconfined
+      # The `.bz2` E2E test packs its file with the bzip2 command (Node has no bzip2 encoder),
+      # which the image lacks; the runner's own (same Ubuntu 24.04) is mounted, not installed
+      # with apt.
+      volumes:
+        - /usr/bin/bzip2:/usr/local/bin/bzip2:ro
       env:
         # Firefox refuses a HOME that root does not own (the runner sets /github/home).
         HOME: /root

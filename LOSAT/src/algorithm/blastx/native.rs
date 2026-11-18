@@ -1008,7 +1008,7 @@ fn run_inner(
         if let Some(strategy) = &strategy {
             strategy.note_searched(
                 queries_before..queries_before + queries.len(),
-                archive::batch_searched_space(results),
+                archive::batch_searched_space(results, &options),
             )?;
         }
         if let Some(scopes) = query_scopes.borrow_mut().as_mut() {

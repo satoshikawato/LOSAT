@@ -5,8 +5,9 @@
 //! reads the field list, writes the comment lines of outfmt 7, the header line of outfmt 20 and
 //! the rows.
 //!
-//! The default reports (outfmt 6 and 7 with the `std` fields and a tab) keep each program's own
-//! writer: `TabularSpec::of_app` returns `None` for them.
+//! `TabularSpec::of_app` returns `None` for the default reports (outfmt 6 and 7 with the `std`
+//! fields and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with
+//! their own writers.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 //! ```c++
@@ -509,8 +510,8 @@ impl TabularSpec {
     // ```
     /// The tabular report of `format` with the custom specification of `choice` as the formatter
     /// of `app`'s application writes it, or `None` for a format that is not tabular and for the
-    /// default outfmt 6 and 7 (the `std` fields and a tab), which the programs write with their
-    /// own writers. The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN too) and
+    /// default outfmt 6 and 7 (the `std` fields and a tab), which BLASTX writes with `std`'s spec
+    /// and the other programs with their own writers. The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN too) and
     /// tblastx hand `-outfmt`'s custom delimiter to their formatter (`SetCustomDelimiter`,
     /// blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266, tblastx_app.cpp:169);
     /// psiblast's, rpsblast's and rpstblastn's never do, so their reports keep the format's own
@@ -568,6 +569,35 @@ impl TabularSpec {
             kind,
             fields,
             delimiter,
+        })
+    }
+
+    /// The default report of outfmt 6 or 7 (`commented`): the `std` fields and a tab, for which
+    /// `of_app` gives `None` (BLASTX writes it with this module as any field list,
+    /// `algorithm::blastx::args::ResolvedOptions::tabular_report`). Made once per process.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81
+    /// ```c++
+    ///     NStr::Split(format, " ", format_tokens);
+    ///
+    ///     if (format_tokens.empty())
+    ///         x_AddDefaultFieldsToShow();
+    /// ```
+    pub fn std(commented: bool) -> &'static TabularSpec {
+        static TABULAR: std::sync::OnceLock<&'static TabularSpec> = std::sync::OnceLock::new();
+        static COMMENTED: std::sync::OnceLock<&'static TabularSpec> = std::sync::OnceLock::new();
+        let (cell, kind) = if commented {
+            (&COMMENTED, TabularKind::Commented)
+        } else {
+            (&TABULAR, TabularKind::Tabular)
+        };
+        cell.get_or_init(|| {
+            TabularSpec {
+                kind,
+                fields: STD_FIELDS.to_vec(),
+                delimiter: "\t".to_string(),
+            }
+            .intern()
         })
     }
 
@@ -1969,15 +1999,22 @@ pub fn run_end(
     crate::report::blast_xml::writer::run_ending_exception(exception)
 }
 
-/// The writer of a tabular report.
+/// The writer of a tabular report (`TabularWriter::new`).
 pub struct TabularWriter<'a> {
-    pub spec: &'a TabularSpec,
+    spec: &'a TabularSpec,
     /// The `# BLASTN 2.17.0+` line's program and version.
-    pub program_version: &'a str,
-    /// The matrix of a protein search's positives (`None` for BLASTN: positives are
-    /// identities): the formatter's `m_ScoringMatrix`, which `CBlastFormat` makes with
-    /// `GetAsciiProteinMatrix` (outfmt 0's matrix, `utils::matrix::protein_display_score`), not
-    /// the XML's `CBlastFormattingMatrix`.
+    program_version: &'a str,
+    /// The matrix that scores the rows' pairs of letters for the positives, where the report
+    /// prints them (`new`).
+    matrix: Option<ScoringMatrix>,
+}
+
+impl<'a> TabularWriter<'a> {
+    /// The writer of the report `spec`, whose `# BLASTX 2.17.0+` line names `program_version`;
+    /// `matrix` is the matrix of a protein search's positives (`None` for BLASTN and for a
+    /// formatter without one: positives are identities): the formatter's `m_ScoringMatrix`,
+    /// which `CBlastFormat` makes with `GetAsciiProteinMatrix` (outfmt 0's matrix,
+    /// `utils::matrix::protein_display_score`), not the XML's `CBlastFormattingMatrix`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
     /// ```c++
@@ -1987,10 +2024,37 @@ pub struct TabularWriter<'a> {
     /// ```c++
     ///                     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
     /// ```
-    pub matrix: Option<ScoringMatrix>,
-}
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1017-1020
+    /// ```c++
+    ///                     if (matrix && !matrix->GetData().empty() &&
+    ///                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
+    ///                         ++num_positives;
+    ///                     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:444-449
+    /// ```c++
+    /// inline void CBlastTabularInfo::x_PrintPercentPositives(void)
+    /// {
+    ///     double perc_positives =
+    ///         (m_AlignLength > 0 ? ((double)m_NumPositives)/m_AlignLength * 100 : 0);
+    ///     m_Ostream << NStr::DoubleToString(perc_positives, 2);
+    /// }
+    /// ```
+    /// The count of the positives is read only by `positive` and `ppos` (`x_PrintNumPositives`,
+    /// `x_PrintPercentPositives`): the writer of a report without them keeps no matrix, so its
+    /// rows score no pair of letters (the same bytes; decided once for the writer, not per row).
+    pub fn new(
+        spec: &'a TabularSpec,
+        program_version: &'a str,
+        matrix: Option<ScoringMatrix>,
+    ) -> Self {
+        Self {
+            spec,
+            program_version,
+            matrix: matrix.filter(|_| spec.has_any(&[Positives, PercentPositives])),
+        }
+    }
 
-impl TabularWriter<'_> {
     /// outfmt 20's line of the field names (`PrintProlog` → `PrintFieldSpecs`).
     pub fn prolog(&self, out: &mut dyn Write) -> io::Result<()> {
         if self.spec.kind != TabularKind::CsvWithHeader {
@@ -2349,7 +2413,9 @@ impl TabularWriter<'_> {
         hsp: &TabularHsp<'_>,
     ) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1027
-        // (the identities and positives counted again from the rows, and the BTOP string).
+        // (the identities and positives counted again from the rows, and the BTOP string). A pair
+        // of letters is scored only by the matrix of a writer whose report prints the positives
+        // (`new`).
         let (num_ident, positives) = match hsp.rows {
             Some((qrow, srow)) => {
                 let (mut ident, mut positive) = (0usize, 0usize);
@@ -3210,11 +3276,7 @@ mod tests {
                 delimiter: String::new(),
             };
             let spec = blastp_spec(format, &choice).unwrap();
-            let writer = TabularWriter {
-                spec: &spec,
-                program_version: "BLASTN 2.17.0+",
-                matrix: None,
-            };
+            let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
             let subject = TabularSubject {
                 id: b"s",
                 accession: b"s",
@@ -3427,11 +3489,7 @@ mod tests {
             index: 0,
         };
         let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
-            let writer = TabularWriter {
-                spec,
-                program_version: "BLASTP 2.17.0+",
-                matrix: Some(ScoringMatrix::Blosum62),
-            };
+            let writer = TabularWriter::new(spec, "BLASTP 2.17.0+", Some(ScoringMatrix::Blosum62));
             let hsp = TabularHsp {
                 q_start: 1,
                 q_end: 6,
@@ -3472,12 +3530,20 @@ mod tests {
             "3\t5\t3\tN/A\n"
         );
         assert_eq!(row(&positives, 1, Some((b"UJ", b"UI"))), "1\t1\t5\tN/A\n");
+        // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:444-449 and
+        // :482-485 (`ppos` and `positive` print the count of the positives, quoted at
+        // `TabularWriter::new`): either field alone keeps the matrix (U-C, C-U, J-J, *-*, A-A
+        // of 6; K-I is -3), so a writer that kept it for one of them only would print 50.00 / 3.
+        let percent = spec(ReportFormat::Tabular, "ppos");
+        assert_eq!(row(&percent, 1, Some((b"UCJ*KA", b"CUJ*IA"))), "83.33\n");
+        let count = spec(ReportFormat::Tabular, "positive");
+        assert_eq!(row(&count, 1, Some((b"UCJ*KA", b"CUJ*IA"))), "5\n");
         let commented = spec(ReportFormat::TabularWithComments, "qseqid");
-        let writer = TabularWriter {
-            spec: &commented,
-            program_version: "PSIBLAST 2.17.0+",
-            matrix: Some(ScoringMatrix::Blosum62),
-        };
+        let writer = TabularWriter::new(
+            &commented,
+            "PSIBLAST 2.17.0+",
+            Some(ScoringMatrix::Blosum62),
+        );
         let mut out = Vec::new();
         writer
             .round_query_header(&mut out, Some(1), b"q1 title", b"db", Some(0))
@@ -3539,12 +3605,7 @@ mod tests {
             qcovhsp: 100,
         };
         let mut out = Vec::new();
-        TabularWriter {
-            spec: &spec,
-            program_version: "BLASTP 2.17.0+",
-            matrix: None,
-        }
-        .row(
+        TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
             &mut out,
             &mut TabularRows::default(),
             &TabularQuery::local(b"q1", 6),
@@ -3588,11 +3649,7 @@ mod tests {
             end_gaps: true,
             qcovhsp: 50,
         };
-        let writer = TabularWriter {
-            spec: &spec,
-            program_version: "BLASTN 2.17.0+",
-            matrix: None,
-        };
+        let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
         let mut rows = TabularRows::default();
         let mut out = Vec::new();
         for subject in subjects {
@@ -3802,9 +3859,10 @@ mod tests {
 
     // NCBI tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
     // line DBID pfoff-2, `R/pfoff/p2`, `*.U2.dflt.6`; review 2, M3): the one writer of the
-    // default tables' rows of a subject whose load throws (BLASTP's, BLASTN's, BLASTX's, TBLASTN's
-    // and TBLASTX's, `TabularRows::write_thrown_default`) prints `saccver` of the query's last
-    // loaded row (`TabularRows::found`), the counts and coordinates 0 and the scores; a new
+    // default tables' rows of a subject whose load throws (BLASTP's, BLASTN's, TBLASTN's and
+    // TBLASTX's, `TabularRows::write_thrown_default`; BLASTX's are the `std` fields of
+    // `TabularWriter::row`) prints `saccver` of the query's last loaded row
+    // (`TabularRows::found`), the counts and coordinates 0 and the scores; a new
     // query's formatter keeps none. The end of the run (`run_end`) writes the rows before it,
     // ends the reads and gives NCBI's exception (exit status 2).
     #[test]

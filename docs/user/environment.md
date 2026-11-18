@@ -137,7 +137,7 @@ overflow`), and with `-outfmt 11` NCBI's error archive. The table says where eac
 
 | Variable | Effect |
 | :--- | :--- |
-| `TZ`, `TZDIR` | The time zone of the date stored in the database and of the times in the log (Unix; on Windows LOSAT writes them in UTC, where NCBI BLAST+ uses the local time). |
+| `TZ`, `TZDIR` | The time zone of the date stored in the database and of the times in the log, with `/etc/localtime` when `TZ` is unset (Unix, and the WASI command from what its host gives it, see below; on Windows LOSAT writes them in UTC, where NCBI BLAST+ uses the local time). |
 | `BLASTDB_LMDB_MAP_SIZE` | The map size of the LMDB index of a version 5 database. |
 | `MAX_LMDB_TXN_ENTRY`, `LMDB_MIN_SPLIT_SIZE`, `LMDB_SPLIT_CHUNK_SIZE` | How NCBI's makeblastdb splits the writes of the LMDB index. |
 
@@ -184,7 +184,10 @@ output).
 ## WebAssembly
 
 When the host sets `PWD`, the WASI command first changes to that directory, so relative file
-names are read from it.
+names are read from it, and makeblastdb's `New DB name:` is the absolute path in it, as natively
+(without `PWD` the directory is `/`). The WASI command reads `TZ`, `TZDIR` and the zone files
+(`/etc/localtime`, `/usr/share/zoneinfo`) as on Unix, from the environment and the directories that
+its host gives it; without them makeblastdb's times and the database's date are UTC.
 LOSAT Web gives the engine an environment of its own: it has only the directory variable of
 `-window_masker_taxid` (see above), and none of the variables of this page applies there. The
 engine reads the registry files that the page gives it, the file of `-conffile` and a `<program>.ini`

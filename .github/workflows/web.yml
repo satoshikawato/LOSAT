@@ -121,9 +121,9 @@ jobs:
       # with apt.
       volumes:
         - /usr/bin/bzip2:/usr/local/bin/bzip2:ro
-      env:
-        # Firefox refuses a HOME that root does not own (the runner sets /github/home).
-        HOME: /root
+    env:
+      # Firefox refuses a HOME that root does not own, and the runner sets /github/home in a container.
+      HOME: /root
     strategy:
       fail-fast: false
       matrix:
@@ -370,6 +370,9 @@ jobs:
     timeout-minutes: 35
     # Playwright's image, as in the `app` job (see there).
     container: *playwright-container
+    env:
+      # Firefox refuses a HOME that root does not own, and the runner sets /github/home in a container.
+      HOME: /root
     strategy:
       fail-fast: false
       matrix:

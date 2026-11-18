@@ -2150,24 +2150,28 @@ mod tests {
         OwnerFirstScan,
     }
 
+    /// (`Slow::OwnerFirstScan`) Sleeps in 1 ms steps until `done`, or until 60 s have passed
+    /// since `from` (then the test's assertions fail: a stall exit that never fires fails the
+    /// test instead of hanging it).
+    fn wait_until(from: std::time::Instant, done: impl Fn() -> bool) {
+        while !done() && from.elapsed() < std::time::Duration::from_secs(60) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     /// `Slow::OwnerFirstScan`, on the owner's thread in its first scan (no partition can fold
     /// past that strip, so the stage makes no progress once the helpers have scanned the strips
-    /// the window lets them): waits until a helper has scanned a strip (it is in the stage), then
-    /// until every other thread of the pool has run a job of `spawn_broadcast`. A helper's thread
-    /// runs that job only once its participant has returned (the participants of these stages
-    /// make no rayon calls, the test's scans and folds none without `nested`), and while the
-    /// owner holds the strip a helper returns only through the stall exit, so the hold ends
-    /// after every helper that came has left; how soon the OS runs the helpers does not matter.
-    /// The owner's own job runs after the hold. At most 60 s each (then the test's assertions
-    /// fail), so that a stall exit that never fires fails the test instead of hanging it.
+    /// the window lets them): waits until a helper has started a scan (it is in the stage; a
+    /// helper's scans wait for the owner's first one, so that the helpers cannot do the whole
+    /// stage before the owner holds a strip), then until every other thread of the pool has run
+    /// a job of `spawn_broadcast`. A helper's thread runs that job only once its participant has
+    /// returned (the participants of these stages make no rayon calls, the test's scans and
+    /// folds none without `nested`), and while the owner holds the strip a helper returns only
+    /// through the stall exit, so the hold ends after every helper that came has left; how soon
+    /// the OS runs the helpers does not matter. The owner's own job runs after the hold.
     fn hold_until_helpers_leave(pool: &rayon::ThreadPool, helper_scanned: &AtomicBool) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        let wait = |done: &dyn Fn() -> bool| {
-            while !done() && std::time::Instant::now() < deadline {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-        };
-        wait(&|| helper_scanned.load(Ordering::Acquire));
+        let from = std::time::Instant::now();
+        wait_until(from, || helper_scanned.load(Ordering::Acquire));
         let owner = rayon::current_thread_index();
         let others = Arc::new(AtomicUsize::new(0));
         let ran = Arc::clone(&others);
@@ -2176,7 +2180,9 @@ mod tests {
                 ran.fetch_add(1, Ordering::AcqRel);
             }
         });
-        wait(&|| others.load(Ordering::Acquire) + 1 >= pool.current_num_threads());
+        wait_until(from, || {
+            others.load(Ordering::Acquire) + 1 >= pool.current_num_threads()
+        });
     }
 
     /// `partitioned` with the stage's thread count given (`threads` participants whatever the
@@ -2291,8 +2297,9 @@ mod tests {
         let helper_folded = AtomicBool::new(false);
         let owner_waited = AtomicUsize::new(0);
         let owner_scanned = AtomicBool::new(false);
-        // (`Slow::OwnerFirstScan`: a thread other than the owner's has scanned a strip)
+        // (`Slow::OwnerFirstScan`: a thread other than the owner's has started a scan)
         let helper_scanned = AtomicBool::new(false);
+        let started = std::time::Instant::now();
         pool.install(|| {
             let owner = rayon::current_thread_index();
             let slow_scans = match slow {
@@ -2305,8 +2312,9 @@ mod tests {
                 }
                 if matches!(slow, Some(Slow::OwnerFirstScan)) {
                     if rayon::current_thread_index() != owner {
+                        wait_until(started, || owner_scanned.load(Ordering::Acquire));
                         helper_scanned.store(true, Ordering::Release);
-                    } else if !owner_scanned.swap(true, Ordering::Relaxed) {
+                    } else if !owner_scanned.swap(true, Ordering::AcqRel) {
                         hold_until_helpers_leave(pool, &helper_scanned);
                     }
                 }
@@ -3074,11 +3082,12 @@ mod tests {
     // progress for `HELPER_STALL` (`helpers_left`); the owner finishes the stage alone, with
     // LOSAT_X_PAIRPARHOME folding the helpers' home partitions away from home (they have no
     // participant at home any more). Both ways give the reference's hits and table. The owner
-    // holds the strip from the time a helper is in the stage until every helper has left
-    // (`hold_until_helpers_leave`), so one stage of each way shows it on any machine, whatever
-    // its CPU count and load: this test needs no stage in which the OS happens to run a helper
-    // while the owner sleeps. (`a_stall_is_seen_on_the_first_turn_after_helper_stall` checks
-    // when a helper looks.)
+    // holds the strip from the time a helper is in the stage until every helper has left, and
+    // the helpers' scans wait for the owner's first one (`hold_until_helpers_leave`), so one
+    // stage of each way shows it on any machine, whatever its CPU count and load: this test
+    // needs no stage in which the OS happens to run a helper while the owner sleeps, nor one in
+    // which the owner takes a strip before the helpers have done the whole stage.
+    // (`a_stall_is_seen_on_the_first_turn_after_helper_stall` checks when a helper looks.)
     #[test]
     fn a_stalled_stage_lets_the_helpers_leave() {
         let mut rng = Lcg(0x57A1_1ED0);

@@ -1,5 +1,5 @@
 //! BLASTP's refusals of a step where NCBI's search of a later query batch stops (line RG item X4,
-//! fix round 2; PD-LOSAT-NCBI-DEFECTS 1.51, decision D13): NCBI prints each batch's reports before
+//! fix round 2; PD-LOSAT-NCBI-DEFECTS 1.52, decision D13): NCBI prints each batch's reports before
 //! it searches the next, so where its search of batch 2 stops with an exception, batch 1's reports
 //! are printed (without the epilog). LOSAT refuses after them. `x4/chunk_second.faa`: a protein of
 //! PajaWSV (92 letters, `x4/chunk_first.faa`) and the TK-TMK protein of psiblast's rows (398

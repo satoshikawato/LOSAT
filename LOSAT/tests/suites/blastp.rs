@@ -3,6 +3,9 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+// integration tests run natively only (WASI has no `std::env::temp_dir()` or `std::process::id()`)
+#![allow(clippy::disallowed_methods)]
+
 #[path = "../blastp_batch_refusal.rs"]
 mod blastp_batch_refusal;
 #[path = "../blastp_culling.rs"]

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.51
+- Version: 1.52
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -155,7 +155,7 @@
   database's texts at the `Hit`s that NCBI loads, none of the throwing `Hit` or of those after it
   in that report; the refusal of 1.31 narrowed to the other formats; line DBID item pfoff, review 1
   fix included, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07)
+  2026-09-29, restated 2026-10-07);
   1.48 2026-11-17 (approved exception 3 extended from BLASTP to TBLASTN and BLASTX: the window of a
   one-hit gapped start reads the letters past NCBI's buffers as the sentinel, and the explicit
   rejections of 1.18 and 1.22 there are removed, with a narrower rule-3 rejection of a TBLASTN
@@ -168,12 +168,20 @@
   a feature's and a Seq-table's location; the PSSM's most negative Int4 and Int8 values written as
   their digits; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.48);
-  1.51 2026-11-18 (BLASTP `-use_sw_tback`, line RG item X4: the explicit rejection of 1.30 of a
+  1.50 2026-11-18 (outfmt 6, 7, 10 and 20 of such a sequence are written as NCBI writes them: a
+  field list of the subject block writes the row that its `catch` leaves and goes on, one that reads
+  the sequence after that block stops with `BLAST Database error`, `nident` alone only at a row with
+  identities; the organism report (outfmt 18) leaves such a sequence's HSPs out and goes on; the
+  refusal of 1.31 narrowed to the other formats and to the first row of a query's report with
+  `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
+  line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.49);
+  1.52 2026-11-18 (BLASTP `-use_sw_tback`, line RG item X4: the explicit rejection of 1.30 of a
   Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to BLASTP, rule 3,
   within the class of 1.30; it and BLASTP's rejections of a query chunk split again or without a
   query (decision D13) come after the reports of the query batches before, the form of 1.40 (the
   Owner's decision of 2026-11-16 on line RG's question Q-X2c); Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.50, which line RG item
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.51, which line RG item
   X-short-tbx holds on its branch)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -334,7 +342,7 @@ Explicit rejections (rule 3):
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
   kept the rejection for these programs. BLASTP's rejections of a chunk split again or of a
   chunk without a query come after the reports of the query batches before, where NCBI's
-  exception stops the search of the batch (version 1.51, the form of 1.40; psiblast's later
+  exception stops the search of the batch (version 1.52, the form of 1.40; psiblast's later
   rounds, the only ones it splits, and the negative `CHUNK_SIZE`, where NCBI does not always stop,
   keep the rejection before the first byte).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
@@ -1121,7 +1129,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.47,
   line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
   `Hit`s after it in that report, and a text that NCBI writes once at its next load, a later `Hit` or
-  a later batch's prefetch), a
+  a later batch's prefetch) or outfmt 6, 7, 10, 18 and 20 (since version 1.50, line DBID item
+  pfoff-2: the row that the `catch` of the subject block leaves, or the stop at a row that reads the
+  sequence after that block; the organism report leaves its HSPs out; a throwing row loads nothing,
+  and the names and tax ids are looked up only for the sequences that a report loads; refused at
+  the first row of a query's report with `sacc`, `saccver` or `staxid`, below), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more
@@ -1470,7 +1482,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).
 
-- BLASTP `-use_sw_tback` with composition-based statistics (version 1.51, 2026-11-18, line RG item
+- BLASTP `-use_sw_tback` with composition-based statistics (version 1.52, 2026-11-18, line RG item
   X4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of
   1.30; P2: no checkable result exists, P3: one round loop decides it for both programs,
   `core::composition_adjustment::smith_waterman::smith_waterman_redo_window`): a match (a subject's
@@ -1507,7 +1519,12 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). LOSAT
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
-  subjects: one alone, the first, the last or two give the same rows.
+  subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line
+  DBID item pfoff-2) also the first row of a query's report whose subject's load throws where the
+  batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
+  and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
+  before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
+  prints what the last loaded row set.
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

@@ -1057,6 +1057,10 @@ mod tests {
     /// fails, whichever fails first, and skips the subjects after it only, so every subject
     /// before it is searched at any number of threads.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn a_failed_read_of_the_stream_fails_the_batch_at_its_smallest_subject() {
         use crate::algorithm::common::x_db_stream::{XDbStream, XReadError};
         use crate::seqdb::{SeqDb, SeqType};

@@ -111,7 +111,7 @@ impl std::error::Error for SwRedoFailed {}
 /// NCBI's Smith-Waterman redo of a match that does not end: the score of 0 is significant, the
 /// window has two or more HSPs and the first query letter's row scores the subject's first letter
 /// above 0 (`SwWindowRedo::Endless`, the regime of RPS-BLAST's `SwEndless`; PD-LOSAT-NCBI-DEFECTS
-/// 1.51, within the class of 1.30).
+/// 1.52, within the class of 1.30).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwRedoEndless;
 

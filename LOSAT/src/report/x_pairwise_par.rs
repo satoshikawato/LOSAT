@@ -1222,6 +1222,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn the_parallel_writer_writes_the_serial_report_in_any_chunks() {
         let hits = report_hits();
         let by_query = by_query(&hits);
@@ -1264,6 +1268,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn the_texts_of_the_reads_come_where_the_serial_writer_reads_the_subjects() {
         let hits = report_hits();
         let by_query = by_query(&hits);
@@ -1348,6 +1356,10 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003 (quoted at
     // `write_serial`): the query-anchored reports load every aligned subject before the section.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_merged_section_is_one_piece_after_the_reads_of_its_subjects() {
         let hits = report_hits();
         let by_query = by_query(&hits);
@@ -1486,6 +1498,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn windows_of_queries_written_in_turn_write_the_whole_report() {
         let hits = report_hits();
         let by_query = by_query(&hits);
@@ -1572,6 +1588,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_failed_part_writes_its_bytes_before_the_error_as_the_serial_writer() {
         let hits = report_hits();
         let by_query = by_query(&hits);

@@ -1260,7 +1260,7 @@ fn sw_traceback_failed(batch_start: usize) -> anyhow::Error {
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.51, rule 3, within the class of
+/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.52, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
 /// printed the reports of the batches before (`blastp_app.cpp:257-276`, quoted at
 /// [`sw_traceback_failed`]): the refusal fails that batch as NCBI's own error of a batch's search

@@ -3166,6 +3166,75 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
         .sum()
 }
 
+/// The rows of subjects whose lookups fail where NCBI has no result
+/// (`report::tabular::check_failed_lookups`), before any format is written: each tabular
+/// format's refusal is that format's (`FormatRefusal::check`). `parsed`: the subjects' parsed
+/// Seq-ids (a database's listed titles'); `loads`: the reports' loads (`HitLoads::of`), whose
+/// throwing subjects are refused where the first row of a report stops NCBI
+/// (`TabularSpec::may_stop_at_failed_lookup`).
+#[allow(clippy::too_many_arguments)]
+fn check_tabular_lookups(
+    formats: &mut [crate::api::local_blast::FormatOutput<'_>],
+    format_plans: &[BlastpReport],
+    hit_lists: &[Option<BlastpHitList>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    loads: &crate::report::db_subject::HitLoads,
+    listed_titles: Option<&database::ListedTitles<'_>>,
+    subject_records: &[FastaRecord],
+    application: &str,
+) -> Result<()> {
+    for (format, outfmt) in formats
+        .iter_mut()
+        .zip(format_plans)
+        .filter(|(_, outfmt)| outfmt.is_tabular())
+    {
+        let spec = outfmt.tabular_spec();
+        if !crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            subject_ids,
+            parsed,
+            loads,
+        ) {
+            continue;
+        }
+        let checked = crate::report::tabular::check_failed_lookups(
+            spec,
+            hit_lists.iter().flatten().map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .filter_map(|hsp_list| hsp_list.hsps.first())
+                    .map(|hsp| hsp.s_idx as usize)
+            }),
+            |s_idx| {
+                crate::algorithm::common::tabular::subject_lookup_failure(
+                    spec,
+                    subject_ids,
+                    parsed,
+                    loads,
+                    listed_titles.is_some(),
+                    true,
+                    s_idx,
+                )
+            },
+            |s_idx| match listed_titles {
+                Some(titles) => crate::report::tabular::failed_database_subject(
+                    titles.oid(s_idx),
+                    loads.thrown(s_idx),
+                ),
+                None => crate::report::tabular::failed_record_title(
+                    s_idx,
+                    subject_records[s_idx].shown_id(),
+                ),
+            },
+            application,
+        );
+        format.refusal.check(checked)?;
+    }
+    Ok(())
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
@@ -3186,6 +3255,7 @@ fn write_blastp_tabular_hit_lists(
     query_titles: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     subject_accessions: &[Option<[Arc<[u8]>; 2]>],
+    loads: &crate::report::db_subject::HitLoads,
     query_batch_skipped: &[bool],
     hits_found: Option<&[usize]>,
     context: &ReportContext,
@@ -3223,7 +3293,16 @@ fn write_blastp_tabular_hit_lists(
         let Some(hit_list) = hit_list_opt else {
             continue;
         };
+        // The query's formatter (`report::tabular::TabularRows`): the subject that a row whose
+        // load throws keeps (`TabularRows::write_thrown_default`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+            // The subject's load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
+            let thrown = hsp_list
+                .hsps
+                .first()
+                .is_some_and(|first| loads.thrown(first.s_idx as usize).is_some());
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -3231,7 +3310,8 @@ fn write_blastp_tabular_hit_lists(
             // ```
             // The subject's first row (the default fields read it) loads it where the query's
             // batch did not prefetch it (`QueryWarnings::subject_read`).
-            if let (Some(first), Some(warnings)) = (hsp_list.hsps.first(), warnings.as_deref_mut())
+            if let (Some(first), Some(warnings), false) =
+                (hsp_list.hsps.first(), warnings.as_deref_mut(), thrown)
             {
                 warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
             }
@@ -3261,6 +3341,26 @@ fn write_blastp_tabular_hit_lists(
                 let query_id = query_ids
                     .get(hsp.q_idx as usize)
                     .map_or(&b""[..], |id| id.as_ref());
+                if thrown {
+                    rows.write_thrown_default(
+                        writer,
+                        query_id,
+                        |kept| {
+                            SubjectIdFields::of(subject_ids, subject_accessions, kept)
+                                .accession_version
+                        },
+                        hsp.e_value,
+                        hsp.bit_score,
+                        &config,
+                    )?;
+                    if let Some(probe) = probe.as_mut() {
+                        writer.flush()?;
+                        probe.end(hsp_index);
+                    }
+                    hsp_index += 1;
+                    continue;
+                }
+                rows.found(hsp.s_idx as usize);
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
                 crate::report::outfmt6::write_hit_fields_bytes(
@@ -5494,9 +5594,7 @@ pub fn run(
     // reads (`check_options`). `-in_pssm` excludes `-query` (blast_args.cpp:1242-1244, the
     // parser's exclusion), so the query is the default `-` (`kDfltArgQuery`,
     // blast_args.cpp:3425-3427), which NCBI takes as `&cin` (no platform refuses it) and never
-    // reads. LOSAT opens no query input then, as tblastn's `-in_pssm` (`tblastn_app`): its
-    // standard input is a copy of the descriptor (`input_files::open_input`), which the WASI
-    // targets cannot make.
+    // reads. LOSAT opens no query input then, as tblastn's `-in_pssm` (`tblastn_app`).
     let query_file = if pssm_query(&args) {
         None
     } else {
@@ -5600,8 +5698,10 @@ pub fn run(
     // ```
     // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
     // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-    if stream.failed && (pairwise || tax_report) {
+    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3). An insertion
+    // of the report that sets the stream's `badbit` throws the same way (`cli::BadbitInsertion`).
+    let badbit = result.as_ref().is_err_and(crate::cli::BadbitInsertion::is);
+    if (stream.failed || badbit) && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -5724,8 +5824,7 @@ fn read_cli_subjects(
     // there (`read_subjects`). Records without residues (and intervals without letters) are
     // read without a message and reported when the formatter sets up the subjects
     // (`search`).
-    let mut subject_source = FastaInputSource::from_argument(
-        subject_path,
+    let mut subject_source = FastaInputSource::from_file(
         subject_file,
         ReaderConfig::subject(args.app.name(), true, settings.data_loaders)
             .with_defline(keep_deflines)
@@ -5941,7 +6040,7 @@ fn subject_taxonomy(
 fn search_cli(
     args: BlastpArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: Option<std::fs::File>,
+    query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
     choice: crate::blastinput::app::FormatChoice,
@@ -6027,8 +6126,7 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
+    let mut query_source = FastaInputSource::from_file(
         query_file,
         ReaderConfig::query(args.app.name(), true, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -8963,7 +9061,19 @@ fn write_reports_without_queries(
                     database_name: blastp_database_name(args, subject_label),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
-                    matrix_name: args.matrix_name.clone(),
+                    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229
+                    // ```c++
+                    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+                    // ...
+                    //             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+                    //             	results = local_search.Run();
+                    // ...
+                    //         formatter.PrintEpilog(opt);
+                    // ```
+                    // rpsblast's options name a matrix once a query batch's search has set it up
+                    // (`CreateRpsStructures`): without a batch the epilog's matrix name is null
+                    // (`write_matrix_line`).
+                    matrix_name: args.rps_search.is_none().then(|| args.matrix_name.clone()),
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
@@ -11847,56 +11957,22 @@ fn run_call(
         } else {
             Vec::new().into()
         };
-    // The rows of subjects whose lookups fail where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before any format is written: each tabular
-    // format's refusal is that format's (`FormatRefusal::check`).
+    // The rows of subjects whose lookups fail where NCBI has no result, before any format is
+    // written (`check_tabular_lookups`).
     let parsed_for_checks: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
         .as_ref()
         .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
-    for (format, outfmt) in outputs
-        .formats
-        .iter_mut()
-        .zip(format_plans)
-        .filter(|(_, outfmt)| outfmt.is_tabular())
-    {
-        let spec = outfmt.tabular_spec();
-        if !crate::algorithm::common::tabular::checks_failed_lookups(
-            spec,
-            &subject_ids,
-            parsed_for_checks,
-        ) {
-            continue;
-        }
-        let checked = crate::report::tabular::check_failed_lookups(
-            spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
-            |s_idx| {
-                crate::algorithm::common::tabular::subject_lookup_failure(
-                    spec,
-                    &subject_ids,
-                    parsed_for_checks,
-                    listed_titles.is_some(),
-                    true,
-                    s_idx,
-                )
-            },
-            |s_idx| match listed_titles.as_ref() {
-                Some(titles) => crate::report::tabular::failed_database_title(titles.oid(s_idx)),
-                None => crate::report::tabular::failed_record_title(
-                    s_idx,
-                    subject_records[s_idx].shown_id(),
-                ),
-            },
-            args.app.name(),
-        );
-        format.refusal.check(checked)?;
-    }
+    check_tabular_lookups(
+        &mut outputs.formats,
+        format_plans,
+        &hit_lists,
+        &subject_ids,
+        parsed_for_checks,
+        &prefetched.hit_loads,
+        listed_titles.as_ref(),
+        subject_records,
+        args.app.name(),
+    )?;
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).
@@ -14706,6 +14782,10 @@ mod tests {
     //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
     // ```
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn test_x_block_search_refusals_of_the_search_of_all_queries() {
         let lengths = [1500usize, 2000, 1000];
         let records = x_block_test_records(&lengths);
@@ -14798,6 +14878,10 @@ mod tests {
     // `-sum_stats`; and a call of the preliminary stage only never plans
     // (`BlastpReports::prelim_only`), so a block is not split again on its own batches' words.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn x_prelim_block_plan_is_the_search_of_all_queries_of_blastp() {
         let records = x_block_test_records(&[3000; 30]);
         let input = seq_range::QueryInput::whole(&records);
@@ -14846,6 +14930,10 @@ mod tests {
     // default thresholds, with SEG and `-lcase_masking` on, on one thread and on three; queries
     // without letters, of X only, of one letter repeated, of every letter, with lower-case letters.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn x_blocks_contexts_are_the_builders_contexts() {
         let mut records = x_block_test_records(&[300, 0, 1200, 45, 700]);
         for (index, letters) in [
@@ -14987,6 +15075,10 @@ mod tests {
     // plus the words of the batch with the most (or one batch), on one thread and on three. The
     // standard table keeps the blocks it is given.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
         use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
         let lengths = [900usize, 1200, 700, 1100, 800, 1000];

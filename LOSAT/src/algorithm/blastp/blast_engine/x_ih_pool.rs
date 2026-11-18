@@ -265,6 +265,10 @@ mod tests {
     // every scratch has taken an array of the first size back (none is left in the pool) and the
     // pool holds no array twice.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn threads_sharing_the_pool_keep_their_own_hits() {
         let pool = Pool::new(Vec::new());
         std::thread::scope(|scope| {

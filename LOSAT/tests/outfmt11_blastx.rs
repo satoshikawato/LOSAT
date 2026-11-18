@@ -489,9 +489,11 @@ fn split_reals(bytes: &[u8]) -> (Vec<u8>, Vec<Real<'_>>) {
 
 /// Whether `got` is the archive `want`. Always: the same bytes. With `libm_last_digit` (the call
 /// sites pass `cfg!(target_os = "macos")`): also an archive that differs only in `real { M, 10, E }`
-/// tokens whose exponent and digit count are equal and whose mantissas differ by exactly 1. Apple's
-/// libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last of the
-/// 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property.
+/// tokens whose exponents are equal and whose mantissas have 15 digits and differ by exactly 1.
+/// Apple's libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last
+/// of the 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property. A shorter
+/// mantissa (NCBI drops its trailing zeros) 1 away is not that. The Python copy of the rule, for
+/// the WASI guard, is `libm_last_digit_differences` in `LOSAT/tests/xinclude_fixtures.py`.
 pub(crate) fn archives_match_allowing_libm_last_digit(
     got: &[u8],
     want: &[u8],
@@ -514,8 +516,10 @@ pub(crate) fn archives_match_allowing_libm_last_digit(
                     return true;
                 }
                 let value = |m: &[u8]| std::str::from_utf8(m).ok()?.parse::<i128>().ok();
+                let digits = |m: &[u8]| m.iter().filter(|b| b.is_ascii_digit()).count();
                 got_e == want_e
-                    && got_m.len() == want_m.len()
+                    && digits(got_m) == 15
+                    && digits(want_m) == 15
                     && matches!(
                         (value(got_m), value(want_m)),
                         (Some(a), Some(b)) if a.abs_diff(b) == 1
@@ -604,6 +608,10 @@ fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
     let accepts = |got: &[u8]| archives_match_allowing_libm_last_digit(got, &want_two, true);
     assert!(accepts(&two("100000000000002", "200000000000001")));
     assert!(!accepts(&two("100000000000002", "200000000000004")));
+    // A mantissa of fewer than 15 digits (its trailing zeros dropped) 1 away is not a last digit.
+    let short = |m: &str| format!("evalue real {{ {m}, 10, -1 }}").into_bytes();
+    assert!(!archives_match_allowing_libm_last_digit(&short("6"), &short("5"), true));
+    assert!(!archives_match_allowing_libm_last_digit(&short("0"), &short("1"), true));
 }
 
 #[test]

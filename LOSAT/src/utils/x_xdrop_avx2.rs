@@ -2566,6 +2566,120 @@ mod tests {
         }
     }
 
+    /// PROBE (BPF s17): `align8_pair` gives each problem what `align8` gives it alone: random
+    /// pairs of a reversed (left) and a forward (right) problem, empty sides, rows over the band.
+    #[test]
+    fn align8_pair_matches_align8_per_problem() {
+        if !available() {
+            eprintln!("no AVX2: skipped");
+            return;
+        }
+        let mut rng = Rng(0x5EED_0B9F_0017_0008);
+        let mut sc = [
+            XdropScratch::new(),
+            XdropScratch::new(),
+            XdropScratch::new(),
+            XdropScratch::new(),
+        ];
+        let (mut both, mut empty, mut taken) = (0usize, 0usize, 0usize);
+        for case in 0..800 {
+            let lanes = [Some(128), Some(320), None][case % 3];
+            for s in sc.iter_mut() {
+                s.x_test_rows(lanes);
+            }
+            let n = if rng.below(2) == 0 { 16 } else { 28 };
+            let mk = |rng: &mut Rng| {
+                let len = if rng.below(10) == 0 {
+                    0
+                } else {
+                    let top = if rng.below(6) == 0 { 1500 } else { 200 };
+                    1 + rng.below(top) as usize
+                };
+                if rng.below(4) == 0 {
+                    repeat_problem(rng, n, 1, len.max(1))
+                } else {
+                    random_problem(rng, n, 1, len.max(1))
+                }
+            };
+            let pa = mk(&mut rng);
+            let mut pb = mk(&mut rng);
+            pb.m = pa.m.clone();
+            let (go, ge, x) = match rng.below(4) {
+                0 => (11, 1, 38),
+                1 => (5, 2, 33),
+                2 => (rng.below(8) as i32, 1 + rng.below(4) as i32, 10 + rng.below(80) as i32),
+                _ => (9, 1, 3),
+            };
+            let scores = Scores::Flat { data: &pa.m, n };
+            let Some(m) = fits_8bit(&scores, go, ge, x) else {
+                continue;
+            };
+            let cut = |rng: &mut Rng, v: usize| if rng.below(12) == 0 { 0 } else { v };
+            let (l1a, l2a) = (cut(&mut rng, pa.q.len()), cut(&mut rng, pa.s.len()));
+            let (l1b, l2b) = (pb.q.len(), cut(&mut rng, pb.s.len()));
+            // A reversed (the left extension), B forward (the right one)
+            let mut rq: Vec<u8> = junk(&mut rng, 2);
+            rq.extend(pa.q.iter().rev());
+            let mut rs: Vec<u8> = junk(&mut rng, 2);
+            rs.extend(pa.s[..l2a].iter().rev());
+            rs.extend_from_slice(&junk(&mut rng, 3));
+            let qa = RowSeq::Bytes {
+                data: &rq,
+                base: (2 + l1a) as isize,
+                step: -1,
+            };
+            let sa = ColSeq {
+                data: &rs,
+                base: (2 + l2a) as isize - 1,
+                step: -1,
+                zero_from: l2a,
+            };
+            let mut fq: Vec<u8> = junk(&mut rng, 1);
+            fq.extend_from_slice(&pb.q);
+            let mut fs: Vec<u8> = junk(&mut rng, 1);
+            fs.extend_from_slice(&pb.s);
+            let qb = RowSeq::Bytes {
+                data: &fq,
+                base: 0,
+                step: 1,
+            };
+            let sb = ColSeq {
+                data: &fs,
+                base: 1,
+                step: 1,
+                zero_from: l2b,
+            };
+            let [s0, s1, s2, s3] = &mut sc;
+            for em in [false, true] {
+                // SAFETY: AVX2 detected above
+                let (one_a, one_b, pair) = unsafe {
+                    if em {
+                        (
+                            align8::<false, true, false>(&qa, &sa, &scores, m, l1a, l2a, go, ge, x, false, s0),
+                            align8::<false, true, false>(&qb, &sb, &scores, m, l1b, l2b, go, ge, x, false, s1),
+                            align8_pair::<true>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
+                        )
+                    } else {
+                        (
+                            align8::<false, false, false>(&qa, &sa, &scores, m, l1a, l2a, go, ge, x, false, s0),
+                            align8::<false, false, false>(&qb, &sb, &scores, m, l1b, l2b, go, ge, x, false, s1),
+                            align8_pair::<false>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
+                        )
+                    }
+                };
+                assert_eq!(pair.0, one_a, "case {case} em {em}: left");
+                assert_eq!(pair.1, one_b, "case {case} em {em}: right");
+                if l1a * l2a == 0 || l1b * l2b == 0 {
+                    empty += 1;
+                } else {
+                    both += 1;
+                }
+                taken += usize::from(one_a.is_some()) + usize::from(one_b.is_some());
+            }
+        }
+        assert!(both > 300 && empty > 10 && taken > 600, "{both} {empty} {taken}");
+    }
+
     /// Replay of captured problems (`LOSAT_X_DPCAPTURE` output): every problem through the scalar
     /// loops, the 128-bit and the 256-bit kernels, the 128-bit kernels with per-row savings
     /// (`x_xdrop_w128.rs`, "w128") and the `xdrop_align` dispatch, all compared with the recorded

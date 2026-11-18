@@ -55,16 +55,16 @@
 //! WebAssembly takes the same loops since 2026-11-18 (line W2). Until then wasm32 kept
 //! `x_scan_flat_bf` on every subject (`x_fseed_on`), as in Node the branch-free test had taken
 //! x1.06-1.09 the time of 3 proteins x UniRef50, and the staged loop x1.13-1.18 on 3 proteins and
-//! on 42 residues. Measured again on dev 7d968922d (the serial WASI command in Node 26.8.2, one
-//! process, rounds in rotating order, on a shared machine at load 35-81; blastp-fast,
-//! `-evalue 0.001`, proteins of one species of an OrthoFinder set against the 6,600 proteins of
-//! another; every report identical): 1,000 and 3,000 query proteins (3.85 hits per listed cell at
-//! 1,000) took x0.80 and x0.78 the time of the whole search (15/15 and 6/7 rounds faster), 1 to 100
-//! proteins and one of 1,806 residues x0.89-0.95. In callgrind (the compiled code alone) the
-//! instructions were x1.015 at 1,000 proteins and x0.91-0.98 on the smaller cases, the mispredicted
-//! branches of its model x0.72 at 1,000 proteins (the seed loop's own 19.3 M -> 1.9 M), x0.76-0.86
-//! on 10 and 100 proteins and the long one, x1.03 of 0.31 M on one protein: the time saved comes
-//! with fewer mispredicted branches, not fewer instructions.
+//! on 42 residues. Measured again on dev ad3fb1927 (the serial WASI command in Node 26.8.2, one
+//! process, 7 rounds in rotating order, one core of ws node 1; blastp-fast, `-evalue 0.001`,
+//! proteins of one species of an OrthoFinder set against the 6,600 proteins of another; every
+//! report identical): 8,000, 1,000 and 100 query proteins took x0.878, x0.896 and x0.889 the time
+//! of the whole search (7/7 rounds faster each), 10 and 1 proteins and one of 1,001 residues
+//! x0.918, x0.957 and x0.946 (runs of 0.04-0.08 s). In callgrind (the compiled code alone, dev
+//! 7d968922d) the instructions were x1.015 at 1,000 proteins and x0.91-0.98 on the smaller cases,
+//! the mispredicted branches of its model x0.72 at 1,000 proteins (the seed loop's own 19.3 M ->
+//! 1.9 M), x0.76-0.86 on 10 and 100 proteins and a long one, x1.03 of 0.31 M on one protein: the
+//! time saved comes with fewer mispredicted branches, not fewer instructions.
 
 use std::cell::Cell;
 

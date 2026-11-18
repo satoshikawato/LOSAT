@@ -1492,7 +1492,10 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   failed match that is not the batch's last redone one is dropped, and a failed last one fails the
   batch's traceback (`BLAST engine error: Traceback failed`, exit status 3, after the reports of
   the batches before), which LOSAT reproduces (rule 2; fixture rows `db.x4.rej.swendless`,
-  `db.x4.sw.zero.6` and `db.x4.sw.fail.*`; `LOSAT/tests/blastp_sw_tback.rs`).
+  `db.x4.sw.zero.6` and `db.x4.sw.fail.*`; `LOSAT/tests/blastp_sw_tback.rs`). Before that
+  round NCBI makes every positive alignment of the window, which takes it about a minute for a
+  subject of 1,200 letters against an 80-letter query; LOSAT gives the same outcome at the first
+  round.
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

@@ -729,6 +729,10 @@ fn a_value_is_small() {
 /// larger one: PD-LOSAT-NCBI-DEFECTS exception 15): 20,000 levels of each are read on a thread of
 /// 256 KiB, with the hooks of their classes.
 #[test]
+#[cfg_attr(
+    all(target_os = "wasi", not(target_feature = "atomics")),
+    ignore = "needs threads: wasm32-wasip1 has none"
+)]
 fn every_recursive_type_nests_to_any_depth() {
     std::thread::Builder::new()
         .stack_size(256 << 10)
@@ -817,6 +821,10 @@ fn every_recursive_type_nests_to_any_depth() {
 /// 116 MiB) are read, cloned and dropped on a thread of 256 KiB, as on the main thread of every
 /// target.
 #[test]
+#[cfg_attr(
+    all(target_os = "wasi", not(target_feature = "atomics")),
+    ignore = "needs threads: wasm32-wasip1 has none"
+)]
 fn a_nest_of_any_depth_is_read_without_recursion() {
     std::thread::Builder::new()
         .stack_size(256 << 10)

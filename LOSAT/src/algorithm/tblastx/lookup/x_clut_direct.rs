@@ -5930,6 +5930,10 @@ mod tests {
     // NCBI's tables, low-complexity ones whose cells pass 32 offsets (the scan order), and one of
     // `X_U16_LETTERS` letters.
     #[test]
+    #[cfg_attr(
+        target_pointer_width = "32",
+        ignore = "needs over 2 GiB: its record of appends (over 268 million u32) doubles past isize::MAX bytes, which a 32-bit target cannot"
+    )]
     fn pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors() {
         let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
         let segments = |length: usize, pieces: usize| -> Vec<(i32, i32)> {
@@ -5947,7 +5951,7 @@ mod tests {
                 .collect()
         };
         let wide = |query: &[u8], locations: &[(i32, i32)], tables: &[std::ops::Range<usize>]| {
-            match x_buckets_on(5, 1100, query, locations, tables, usize::MAX >> 8, false, 0) {
+            match x_buckets_on(5, 1100, query, locations, tables, usize::MAX, false, 0) {
                 XBucketBuild::Built(Some(XFlatBuild::Table(table))) => x_narrow_flat(table),
                 _ => panic!("the bucket fill builds this table"),
             }
@@ -5956,7 +5960,7 @@ mod tests {
                       locations: &[(i32, i32)],
                       tables: &[std::ops::Range<usize>],
                       pooled: bool| {
-            match x_bx_buckets_on::<5>(1100, query, locations, tables, usize::MAX >> 8, pooled, 1) {
+            match x_bx_buckets_on::<5>(1100, query, locations, tables, usize::MAX, pooled, 1) {
                 XBucketBuild::Built(Some(XFlatBuild::Table(table))) => table,
                 _ => panic!("BLASTX's bucket fill builds this table"),
             }
@@ -6032,6 +6036,10 @@ mod tests {
     // the count-and-fill builder's table (where the bucket fill declines) narrowed is the bucket
     // fill's, here on locations out of query order in two tables.
     #[test]
+    #[cfg_attr(
+        target_pointer_width = "32",
+        ignore = "needs over 2 GiB: its record of appends (over 268 million u32) doubles past isize::MAX bytes, which a 32-bit target cannot"
+    )]
     fn blastx_tables_take_u16_offsets_up_to_their_letters() {
         let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
         let query = random_subject(&mut rng, X_U16_LETTERS + 1, 0);
@@ -6054,7 +6062,7 @@ mod tests {
         let swapped = [(5_000, 9_999), (0, 4_999)];
         let tables = [0..1, 1..2];
         let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
-            x_bx_buckets_on::<5>(1100, query, &swapped, &tables, usize::MAX >> 8, false, 1)
+            x_bx_buckets_on::<5>(1100, query, &swapped, &tables, usize::MAX, false, 1)
         else {
             panic!("BLASTX's bucket fill builds this table");
         };
@@ -6152,11 +6160,10 @@ mod tests {
                     |word| word,
                 )
             };
-            let XBucketBuild::Built(Some(XFlatBuild::Table(want))) = narrow(1, usize::MAX >> 8)
-            else {
+            let XBucketBuild::Built(Some(XFlatBuild::Table(want))) = narrow(1, usize::MAX) else {
                 panic!("round {round}: BLASTX's bucket fill builds this table");
             };
-            let XBucketBuild::Built(Some(XFlatBuild::Table(want_wide))) = wide(1, usize::MAX >> 8)
+            let XBucketBuild::Built(Some(XFlatBuild::Table(want_wide))) = wide(1, usize::MAX)
             else {
                 panic!("round {round}: BLASTX's bucket fill builds BLOSUM45's table");
             };
@@ -6167,7 +6174,7 @@ mod tests {
                 &query,
                 &segments,
                 &tables,
-                usize::MAX >> 8,
+                usize::MAX,
             ) else {
                 panic!("round {round}: the record fill builds BLOSUM45's table");
             };
@@ -6183,7 +6190,7 @@ mod tests {
             for parts in [2, 3, 5, 64] {
                 let what = format!("round {round} in {parts} parts");
                 let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
-                    pool.install(|| narrow(parts, usize::MAX >> 8))
+                    pool.install(|| narrow(parts, usize::MAX))
                 else {
                     panic!("{what}: no table");
                 };
@@ -6193,7 +6200,7 @@ mod tests {
                 assert_eq!(got.longest_chain, want.longest_chain, "{what}");
                 assert_eq!(got.pv_array_bts, want.pv_array_bts, "{what}");
                 let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
-                    pool.install(|| wide(parts, usize::MAX >> 8))
+                    pool.install(|| wide(parts, usize::MAX))
                 else {
                     panic!("{what}: no BLOSUM45 table");
                 };
@@ -6347,16 +6354,7 @@ mod tests {
         let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
         let build = |query: &[u8], pooled: bool| {
             let locations = [(0, query.len() as i32 - 1)];
-            match x_buckets_on(
-                5,
-                1100,
-                query,
-                &locations,
-                &[0..1],
-                usize::MAX >> 8,
-                pooled,
-                0,
-            ) {
+            match x_buckets_on(5, 1100, query, &locations, &[0..1], usize::MAX, pooled, 0) {
                 XBucketBuild::Built(Some(XFlatBuild::Table(table))) => table,
                 _ => panic!("the bucket fill builds this table"),
             }

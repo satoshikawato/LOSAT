@@ -4305,6 +4305,7 @@ mod tests {
     /// The comparison finds one backbone cell, one overflow entry, one pv bit and one header field
     /// that differ, and names the first difference after its prefix.
     #[test]
+    #[cfg_attr(panic = "abort", ignore = "catches a panic: the build aborts on panic")]
     fn same_table_finds_one_cell_entry_bit_or_field() {
         let mut seed = 47u64;
         let queries = bp_queries(&mut seed);

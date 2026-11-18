@@ -1405,9 +1405,9 @@ mod tests {
     // end of `taxdb.btd`), `x16_taxid` (taxid 9606) with `bad_magic`.
     #[test]
     fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-db-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1475,9 +1475,9 @@ mod tests {
     // above; query 0 shows nothing (its HSP has no Seq-align), query 1 shows both sequences.
     #[test]
     fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-db-prefetch-off-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();

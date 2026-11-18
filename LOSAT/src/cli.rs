@@ -1536,7 +1536,35 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+/// Whether `error` is `NativeError::silent_end`.
+pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<NativeError>()
+        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
+}
+
 impl NativeError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
+    /// The end of a run by a `CIOException` other than `eFlush`, which `CATCH_ALL` ends without a
+    /// post and with the run's status, 0 (a `CEofException` of a PSSM file that ends after its
+    /// header; the failed write of the object manager's message after the diagnostic stream
+    /// failed). The programs that write an error archive write it of the messages saved before
+    /// (`is_silent_end`).
+    pub(crate) fn silent_end() -> Self {
+        Self {
+            exit: 0,
+            message: String::new(),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
     // ```c++
     //     catch (const CException& e) {                                           \

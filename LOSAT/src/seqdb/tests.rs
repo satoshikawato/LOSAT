@@ -664,43 +664,6 @@ fn a_seqid_rule_reads_ordinal_ids_as_oids_in_the_database() {
     assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and
-// seqdbatlas.cpp:114-127 (quoted at `Volume::protein_mapped_bytes_after`)
-/// After a protein's sentinel byte NCBI's mapping of the volume's sequence file holds the volume's
-/// next proteins, each with its sentinel, to the end of the file, then the zeros of the file's last
-/// memory page: after a volume's last protein only those zeros, nothing of the next volume.
-#[test]
-fn a_proteins_mapped_bytes_after_are_the_rest_of_its_volume_and_page() {
-    for name in ["prot_v4", "prot_mv"] {
-        let db = SeqDb::open(&db_name(name), SeqType::Protein).unwrap();
-        let mut seen_last = 0;
-        for ordinal in 0..db.num_seqs() {
-            let at = db.find_volume(ordinal).unwrap();
-            let vol = &db.volumes()[at.volume];
-            let psq = volume::with_extension(vol.base(), SeqType::Protein, "sq");
-            let psq = std::fs::metadata(psq).unwrap().len();
-            let page_rest = psq.next_multiple_of(super::file::MAP_PAGE) - psq;
-            let expected: u64 = (at.vol_oid + 1..vol.num_oids())
-                .map(|oid| u64::from(vol.protein_length(oid).unwrap()) + 1)
-                .sum();
-            let after = db.protein_mapped_bytes_after(ordinal).unwrap();
-            assert_eq!(after, expected + page_rest, "{name} {ordinal}");
-            if at.vol_oid == 0 {
-                // The file's first byte (a sentinel), the protein and its sentinel, the rest.
-                let length = u64::from(vol.protein_length(0).unwrap());
-                assert_eq!(1 + length + 1 + expected, psq, "{name} {ordinal}");
-            }
-            if at.vol_oid + 1 == vol.num_oids() {
-                assert_eq!(after, page_rest, "{name} {ordinal}");
-                assert_eq!((psq + after) % super::file::MAP_PAGE, 0, "{name} {ordinal}");
-                seen_last += 1;
-            }
-        }
-        assert_eq!(seen_last, db.volumes().len(), "{name}");
-        assert_eq!(db.volumes().len() > 1, name == "prot_mv");
-    }
-}
-
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
     // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids
@@ -1195,9 +1158,9 @@ fn index_file_errors() {
 
 fn temp_dir(tag: &str) -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat-seqdb-{tag}-{}-{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).unwrap();

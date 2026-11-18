@@ -4359,6 +4359,10 @@ mod tests {
     // and no refusal, on 1 and 4 threads, with unmasked and masked unit tables and with frame 1's
     // group cut into slices (LOSAT_X_TBXQSLICE), and the re-run alone into today's full lists.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_walk_past_a_nullb_into_another_group_is_seen_by_its_units() {
         let mut rng = Rng(0x5eed_02c3);
         let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
@@ -7296,6 +7300,10 @@ mod tests {
     //     for (i = 0; i < word_size; i++) {
     // ```
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn units_of_2_letter_words_equal_the_masked_reference() {
         let seen = units_equal_the_masked_reference(
             2,
@@ -7319,6 +7327,10 @@ mod tests {
     //     for (i = 0; i < word_size; i++) {
     // ```
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn units_of_4_letter_words_equal_the_masked_reference() {
         let seen = units_equal_the_masked_reference(
             4,

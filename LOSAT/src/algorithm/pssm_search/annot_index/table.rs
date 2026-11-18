@@ -1512,7 +1512,11 @@ impl Indexer<'_> {
             "bit-bvector" => {
                 let vector = self.bit_vector(value)?;
                 let row = row as u32;
-                (row < vector.size()).then(|| i64::from(vector.get_bit(row)))
+                if row < vector.size() {
+                    Some(i64::from(vector.get_bit(row).map_err(query_stop)?))
+                } else {
+                    None
+                }
             }
             "int1" => usize::try_from(row)
                 .ok()
@@ -1893,12 +1897,14 @@ impl Indexer<'_> {
             }
             _ => {
                 let vector = self.bit_vector(value)?;
-                if row >= u64::from(vector.size()) || !vector.get_bit(row as u32) {
+                if row >= u64::from(vector.size())
+                    || !vector.get_bit(row as u32).map_err(query_stop)?
+                {
                     return Ok(None);
                 }
                 Ok(Some(match row {
                     0 => 0,
-                    _ => vector.count_to(row as u32 - 1),
+                    _ => vector.count_to(row as u32 - 1).map_err(query_stop)?,
                 }))
             }
         }
@@ -1936,6 +1942,16 @@ impl Indexer<'_> {
             Err(Fail::Invalid) => Err(Stop::std_exception(bitmagic::INVALID)),
             Err(Fail::Refuse(_)) => Err(Stop::Refuse(Refusal::BitVector)),
         }
+    }
+}
+
+/// The refusal of a query (`BitVector::get_bit`, `count_to`) that reaches a block that NCBI keeps
+/// as a GAP block that is not one, at the row that NCBI's index asks: NCBI reads such a block only
+/// there, and its answer may depend on the build of BitMagic (`bitmagic::Rule::GapSearch`).
+fn query_stop(fail: Fail) -> Stop {
+    match fail {
+        Fail::Invalid => Stop::std_exception(bitmagic::INVALID),
+        Fail::Refuse(_) => Stop::Refuse(Refusal::BitVector),
     }
 }
 

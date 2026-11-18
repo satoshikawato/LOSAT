@@ -6,12 +6,16 @@
 //! bitmap, or the full block's pointer), by NCBI's steps for each, and stops at the first event of
 //! NCBI's that it does not port (`Fail::Refuse`): a read past the data, an XOR reference token, a
 //! step that NCBI runs with undefined behaviour or a write past its buffers, a read of memory that
-//! NCBI did not write in this decoding, or a search of a GAP block that is not one (BitMagic's
-//! scalar and SIMD searches differ there). NCBI's own checks throw
-//! `std::logic_error("BM::Invalid serialization format")` (`Fail::Invalid`).
+//! NCBI did not write in this decoding, or a decoding step that searches a GAP block that is not
+//! one. NCBI's own checks throw `std::logic_error("BM::Invalid serialization format")`
+//! (`Fail::Invalid`).
 //!
 //! The decoded vector keeps the size and the set bits, which is all that NCBI's index asks of it
-//! (`BitVector`: the size, a bit, and the count of set bits up to a bit; `bm/SPEC.md` §1.3).
+//! (`BitVector`: the size, a bit, and the count of set bits up to a bit; `bm/SPEC.md` §1.3). A GAP
+//! block that is not one (its ends do not increase up to 65535) is kept as NCBI keeps it; a query
+//! that reaches it runs the searches of NCBI's three builds of BitMagic (scalar, SSE2, SSE4.2:
+//! which one NCBI runs depends on the machine it was built for) and is answered where the three
+//! agree, refused (`Rule::GapSearch`) where they differ. Rows that do not reach it are answered.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqtable/BVector_data.cpp:73-82
 //! ```c++
@@ -82,9 +86,10 @@ pub(crate) enum Rule {
     /// A GAP block of length 0 that NCBI reads (U7, U9), or one whose length left the header's
     /// 13 bits before NCBI searches it.
     GapLength,
-    /// A GAP block that is not one (its ends do not increase up to 65535) that NCBI searches, or
-    /// a run of it that ends before it starts where NCBI's `or_bit_block` shifts by 32 or writes
-    /// past the block (U12).
+    /// A GAP block that is not one (its ends do not increase up to 65535) that a decoding step
+    /// of NCBI's searches (`gap_set_value` of a bit into it) or makes from memory the data does not
+    /// decide (an opaque GAP of token 61), or a run of it that ends before it starts where NCBI's
+    /// `or_bit_block` shifts by 32 or writes past the block (U12).
     GapOrder,
     /// An entry of NCBI's work arrays or of a GAP block that this decoding did not write.
     Unwritten,
@@ -92,6 +97,9 @@ pub(crate) enum Rule {
     Window,
     /// A run of bits past the block (U10).
     RunRange,
+    /// A query of a GAP block that is not one whose answer differs between NCBI's builds
+    /// (scalar, SSE2, SSE4.2): NCBI's result depends on the machine it was built for.
+    GapSearch,
 }
 
 /// The `what()` of NCBI's `std::logic_error` (`Fail::Invalid`).
@@ -103,20 +111,28 @@ const fn refuse(rule: Rule) -> Fail {
 
 /// The data's size and set bits as NCBI's index asks them (`bm::bvector<>::size`, `get_bit`,
 /// `count_range`), kept by blocks: runs of full blocks, blocks as runs of set bits, blocks as
-/// bitmaps.
+/// bitmaps, and the blocks that NCBI keeps as GAP blocks that are not one, which a query that
+/// reaches them searches as NCBI's builds do.
 #[derive(Debug)]
 pub(crate) struct BitVector {
     size: u32,
     segs: Vec<Seg>,
     count: u64,
+    /// The whole-block counts of the blocks that are not one, added as NCBI adds them
+    /// (`unsigned`), or the refusal of the first that has none.
+    other: Result<u32, Fail>,
+    /// Whether the vector has such a block (its counts are then NCBI's `unsigned` sums).
+    any_other: bool,
 }
 
 #[derive(Debug)]
 struct Seg {
     first: u32,
     last: u32,
-    /// The set bits of the segments before.
+    /// The set bits of the segments before, but the blocks that are not one.
     before: u64,
+    /// `BitVector::other` of the segments before.
+    other: Result<u32, Fail>,
     kind: Kind,
 }
 
@@ -128,6 +144,11 @@ enum Kind {
     Runs(Box<[(u16, u16)]>, Box<[u32]>),
     /// The words, and the set bits of the 16-word chunks before each.
     Bits(Box<Block>, Box<[u32; 64]>),
+    /// A GAP block that is not one: its entries `[0..=L]` as NCBI holds them.
+    Gap(Box<[u16]>),
+    /// A block whose entries depend on memory or code that the data does not decide: refused by
+    /// any query that reaches it.
+    Poison(Rule),
 }
 
 impl BitVector {
@@ -141,10 +162,10 @@ impl BitVector {
         (at, self.segs.get(at).filter(|seg| seg.first <= block))
     }
 
-    /// `bvector<>::get_bit(n)` (bm.h:3604-3631).
-    pub(crate) fn get_bit(&self, n: u32) -> bool {
+    /// `bvector<>::get_bit(n)` (bm.h:3604-3631): a GAP block's `gap_test_unr`.
+    pub(crate) fn get_bit(&self, n: u32) -> Result<bool, Fail> {
         let p = n & (BLOCK_BITS - 1);
-        match self.seg(n >> 16).1.map(|seg| &seg.kind) {
+        Ok(match self.seg(n >> 16).1.map(|seg| &seg.kind) {
             None => false,
             Some(Kind::Full) => true,
             Some(Kind::Runs(runs, _)) => {
@@ -152,16 +173,33 @@ impl BitVector {
                 runs.get(at).is_some_and(|run| u32::from(run.0) <= p)
             }
             Some(Kind::Bits(words, _)) => words[(p >> 6) as usize & 1023] >> (p & 63) & 1 != 0,
-        }
+            Some(Kind::Gap(gap)) => gap_test3(gap, p)?,
+            Some(Kind::Poison(rule)) => return Err(refuse(*rule)),
+        })
     }
 
+    // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:3258-3330
+    // (`count_range_no_check(0, right)`: the first block whole by `block_bitcount` when `right`
+    // is past it, else by `gap_bit_count_range`; the blocks between by `block_bitcount`; the
+    // last by `gap_bit_count_to`; summed as `unsigned`)
     /// `bvector<>::count_range(0, n)` (bm.h:3244-3254): the set bits of `[0, n]`.
-    pub(crate) fn count_to(&self, n: u32) -> u64 {
+    pub(crate) fn count_to(&self, n: u32) -> Result<u64, Fail> {
         let block = n >> 16;
         let p = n & (BLOCK_BITS - 1);
         let (at, seg) = self.seg(block);
+        let total = |valid: u64, other: Result<u32, Fail>, inside: u32| -> Result<u64, Fail> {
+            if !self.any_other {
+                return Ok(valid);
+            }
+            Ok(u64::from(
+                (valid as u32).wrapping_add(other?).wrapping_add(inside),
+            ))
+        };
         let Some(seg) = seg else {
-            return self.segs.get(at).map_or(self.count, |seg| seg.before);
+            return match self.segs.get(at) {
+                Some(seg) => total(seg.before, seg.other, 0),
+                None => total(self.count, self.other, 0),
+            };
         };
         let inside = match &seg.kind {
             Kind::Full => u64::from(block - seg.first) * u64::from(BLOCK_BITS) + u64::from(p) + 1,
@@ -184,8 +222,19 @@ impl BitVector {
                 sum += (words[w & 1023] & mask).count_ones();
                 u64::from(sum)
             }
+            Kind::Gap(gap) => {
+                let inside = if block != 0 {
+                    gap_count_to(gap, p)?
+                } else if p == BLOCK_BITS - 1 {
+                    gap_count3(gap)?
+                } else {
+                    gap_count_range(gap, 0, p)?
+                };
+                return total(seg.before, seg.other, inside);
+            }
+            Kind::Poison(rule) => return Err(refuse(*rule)),
         };
-        seg.before + inside
+        total(seg.before + inside, seg.other, 0)
     }
 
     /// All set bits.
@@ -194,7 +243,8 @@ impl BitVector {
         self.count
     }
 
-    /// The runs of set bits `(first, last)` in order.
+    /// The runs of set bits `(first, last)` in order, of a vector without blocks that are not
+    /// one.
     #[cfg(test)]
     pub(crate) fn ranges(&self) -> Vec<(u32, u32)> {
         let mut out: Vec<(u32, u32)> = Vec::new();
@@ -203,27 +253,32 @@ impl BitVector {
             _ => out.push((a, b)),
         };
         for seg in &self.segs {
-            match &seg.kind {
-                Kind::Full => push(seg.first << 16, (seg.last << 16) | 0xFFFF),
-                Kind::Runs(runs, _) => {
-                    for &(a, b) in runs.iter() {
-                        push(
-                            seg.first << 16 | u32::from(a),
-                            seg.first << 16 | u32::from(b),
-                        );
-                    }
-                }
-                Kind::Bits(words, _) => {
-                    for (a, b) in block_runs(words, usize::MAX).unwrap_or_default() {
-                        push(
-                            seg.first << 16 | u32::from(a),
-                            seg.first << 16 | u32::from(b),
-                        );
-                    }
-                }
+            for (a, b) in seg.runs() {
+                push(a, b);
             }
         }
         out
+    }
+}
+
+impl Seg {
+    /// The runs of set bits of a segment, in order (none for a block that is not one).
+    #[cfg(test)]
+    fn runs(&self) -> Vec<(u32, u32)> {
+        let base = self.first << 16;
+        match &self.kind {
+            Kind::Full => vec![(base, (self.last << 16) | 0xFFFF)],
+            Kind::Runs(runs, _) => runs
+                .iter()
+                .map(|&(a, b)| (base | u32::from(a), base | u32::from(b)))
+                .collect(),
+            Kind::Bits(words, _) => block_runs(words, usize::MAX)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(a, b)| (base | u32::from(a), base | u32::from(b)))
+                .collect(),
+            Kind::Gap(_) | Kind::Poison(_) => Vec::new(),
+        }
     }
 }
 
@@ -1043,8 +1098,10 @@ fn block_runs(block: &Block, limit: usize) -> Option<Vec<(u16, u16)>> {
 // of them 65535. LOSAT holds one as the entries that NCBI wrote and reads it entry by entry with
 // NCBI's functions; an entry past those refuses the data (`Rule::Unwritten`). A GAP block "is one"
 // when its ends increase up to 65535 (`gap_valid`); NCBI's searches of a block (`gap_bfind`,
-// `gap_test_unr`, `gap_bit_count_range`) run scalar or SIMD code by how BitMagic is compiled,
-// which agree only on such a block, so LOSAT refuses a search of one that is not.
+// `gap_test_unr`, `gap_bit_count_range`, `gap_bit_count_unr`) run scalar, SSE2 or SSE4.2 code by
+// the machine NCBI's BitMagic is built for, which agree on such a block. A query of one that is not
+// runs all three (`gap_test3`, `gap_bfind3`, `gap_count3`) and is refused where they differ
+// (`Rule::GapSearch`); a decoding step that searches one stays refused (`Rule::GapOrder`).
 
 /// Entry `i` of a GAP block, of the entries that NCBI wrote.
 fn gap_at(gap: &[u16], i: usize) -> Result<u16, Fail> {
@@ -1279,6 +1336,430 @@ fn gap_all(gap: &[u16], value: u16) -> bool {
     gap[0] & 1 == value && gap[1] == 65535
 }
 
+// ------------------------------------------------------------------------------------------------
+// NCBI's searches of a GAP block that is not one.
+//
+// NCBI keeps such a block and reads it in the queries that reach it (`get_bit`, `count_range`).
+// The search code is chosen when NCBI is built: scalar off x86-64, SSE2 on x86-64, SSE4.2 where
+// NCBI's configure adds `-msse4.2` (configure.ac:2285-2330, ncbiconf_impl.h:326-338, bmdef.h:46-55,
+// bmsimd.h:55-66). The three agree on a GAP block; on one that is not, LOSAT runs all three and
+// answers where they agree (`Rule::GapSearch` where they differ: NCBI's answer depends on the
+// machine it was built for). Each reads the block's entries with `gap_at` (an entry past the
+// block's length is memory that NCBI did not write); a block of length 0 makes NCBI's binary
+// searches run past the block or forever (`end - start` wraps), refused as `Rule::GapLength`.
+
+/// The block's last index (at least 1).
+fn gap_len(gap: &[u16]) -> Result<usize, Fail> {
+    match gap_last(gap)? {
+        0 => Err(refuse(Rule::GapLength)),
+        len => Ok(len),
+    }
+}
+
+/// One step of NCBI's binary searches: `if (buf[mid] < pos) start = mid + 1; else end = mid;`.
+fn gap_step(gap: &[u16], pos: u32, start: &mut usize, end: &mut usize) -> Result<(), Fail> {
+    let mid = (*start + *end) >> 1;
+    if u32::from(gap_at(gap, mid)?) < pos {
+        *start = mid + 1;
+    } else {
+        *end = mid;
+    }
+    Ok(())
+}
+
+/// The binary part that `gap_bfind`, `sse2_gap_bfind` and `sse42_gap_bfind` share: four steps
+/// while 64 entries or more are left, then two while 16 or more (`step16` of them; one in
+/// `sse42_gap_test`).
+fn gap_narrow(
+    gap: &[u16],
+    pos: u32,
+    mut start: usize,
+    mut end: usize,
+    step16: usize,
+) -> Result<(usize, usize), Fail> {
+    while end - start >= 64 {
+        for _ in 0..4 {
+            gap_step(gap, pos, &mut start, &mut end)?;
+        }
+    }
+    while end - start >= 16 {
+        for _ in 0..step16 {
+            gap_step(gap, pos, &mut start, &mut end)?;
+        }
+    }
+    Ok((start, end))
+}
+
+/// `is_set` of NCBI's searches: the value of the run that ends at entry `at`.
+fn gap_value_at(gap: &[u16], at: usize) -> u16 {
+    (gap[0] & 1) ^ ((at as u16).wrapping_sub(1) & 1)
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:1899-1933 (`gap_test`, quoted in
+// part)
+// ```c++
+//     unsigned start = 1;
+//     unsigned end = 1 + ((*buf) >> 3);
+//     if (end - start < 10)
+//     {
+//         unsigned sv = *buf & 1;
+//         unsigned sv1= sv ^ 1;
+//         if (buf[1] >= pos) return sv;
+//         if (buf[2] >= pos) return sv1;
+//         ...
+//         if (buf[8] >= pos) return sv1;
+//         BM_ASSERT(buf[9] >= pos);
+//         return sv;
+//     }
+//     else
+//     {
+//         do
+//         {
+//             if (unsigned mid = (start + end) >> 1; buf[mid] < pos)
+//                 start = mid + 1;
+//             else
+//                 end = mid;
+//         } while (start != end);
+//     }
+//     return ((*buf) & 1) ^ ((--start) & 1);
+// ```
+/// `gap_test(buf, pos)`: `gap_test_unr` of NCBI's scalar build (bmfunc.h:1943-1955).
+fn gap_test_scalar(gap: &[u16], pos: u32) -> Result<u16, Fail> {
+    let len = gap_len(gap)?;
+    if len < 10 {
+        for k in 1..=8 {
+            if u32::from(gap_at(gap, k)?) >= pos {
+                return Ok(gap_value_at(gap, k));
+            }
+        }
+        return Ok(gap[0] & 1);
+    }
+    let (mut start, mut end) = (1, 1 + len);
+    while start != end {
+        gap_step(gap, pos, &mut start, &mut end)?;
+    }
+    Ok(gap_value_at(gap, start))
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:1835-1886 (`gap_bfind` without
+// `VECT_GAP_BFIND`: the binary part of `gap_narrow`, then)
+// ```c++
+//     for(; true; ++start)
+//         if (buf[start] >= pos)
+//             break;
+//     *is_set = ((*buf) & 1) ^ ((start-1) & 1);
+//     return start;
+// ```
+/// `gap_bfind(buf, pos, &is_set)` of NCBI's scalar build: the entry of the run that holds `pos`.
+fn gap_bfind_scalar(gap: &[u16], pos: u32) -> Result<usize, Fail> {
+    let len = gap_len(gap)?;
+    let (mut start, _) = gap_narrow(gap, pos, 1, len, 2)?;
+    while u32::from(gap_at(gap, start)?) < pos {
+        start += 1;
+    }
+    Ok(start)
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmsse2.h:1378-1430 (`sse2_gap_find`; the
+// lanes from `size` on are set to 0xFFFF when `size` is below 8, none above), :1444-1499
+// (`sse2_gap_bfind`: `end = 1 + len`, the binary part of `gap_narrow`,
+// `size += (end != arr_end)`, `start += sse2_gap_find(buf + start, pos, size)`), :1501-1507
+// (`sse2_gap_test`: its `is_set`)
+/// `sse2_gap_bfind(buf, pos, &is_set)` of NCBI's SSE2 build.
+fn gap_bfind_sse2(gap: &[u16], pos: u32) -> Result<usize, Fail> {
+    let len = gap_len(gap)?;
+    let arr_end = 1 + len;
+    let (start, end) = gap_narrow(gap, pos, 1, arr_end, 2)?;
+    let size = end - start + usize::from(end != arr_end);
+    let at = |k: usize| gap_at(gap, start + k).map(u32::from);
+    let found = if size < 4 {
+        if at(0)? >= pos {
+            0
+        } else if at(1)? >= pos {
+            1
+        } else {
+            2
+        }
+    } else {
+        let mut found = None;
+        for k in 0..8 {
+            if (size < 8 && k >= size) || at(k)? >= pos {
+                found = Some(k);
+                break;
+            }
+        }
+        match found {
+            Some(k) => k,
+            None if size == 8 => 8,
+            None => {
+                let base = size - 8;
+                let mut k2 = size;
+                for k in 0..8 {
+                    if at(base + k)? >= pos {
+                        k2 = base + k;
+                        break;
+                    }
+                }
+                k2
+            }
+        }
+    };
+    Ok(start + found)
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmsse4.h:1339-1375 (`sse4_gap_find`: the
+// count of lanes at or above `pos`, the lanes from `size` on set to 0xFFFF when `size` is below
+// 8; `8 - count`, or with none, `size` less the count of the last 8 entries)
+/// `sse4_gap_find(buf + start, pos, size)`, `size` 4 to 16.
+fn sse4_gap_find(gap: &[u16], start: usize, pos: u32, size: usize) -> Result<usize, Fail> {
+    let at = |k: usize| gap_at(gap, start + k).map(u32::from);
+    let mut count = 0;
+    for k in 0..8 {
+        if (size < 8 && k >= size) || at(k)? >= pos {
+            count += 1;
+        }
+    }
+    if count != 0 {
+        return Ok(8 - count);
+    }
+    let base = size - 8;
+    let mut count = 0;
+    for k in 0..8 {
+        if at(base + k)? >= pos {
+            count += 1;
+        }
+    }
+    Ok(size - count)
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmsse4.h:1389-1455 (`sse42_gap_bfind`),
+// :1460-1526 (`sse42_gap_test`: one step per round while 16 or more are left)
+// ```c++
+//     unsigned start = 1;
+//     unsigned end = ((*buf) >> 3);
+//     unsigned size = end - start;
+//     ... (the binary part)
+//     ++size;
+//     if (size < 4) // for very short vector use conventional scan
+//     {
+//         const unsigned short* BMRESTRICT pbuf = buf + start;
+//         if (pbuf[0] >= pos) { }
+//         else if (pbuf[1] >= pos) { start++; }
+//         else
+//         {
+//             BM_ASSERT(pbuf[2] >= pos);
+//             start+=2;
+//         }
+//     }
+//     else
+//     {
+//         start += bm::sse4_gap_find(buf+start, (bm::gap_word_t)pos, size);
+//     }
+// ```
+/// `sse42_gap_bfind` (`step16` 2) and `sse42_gap_test` (`step16` 1) of NCBI's SSE4.2 build.
+fn gap_bfind_sse42(gap: &[u16], pos: u32, step16: usize) -> Result<usize, Fail> {
+    let len = gap_len(gap)?;
+    let (start, end) = gap_narrow(gap, pos, 1, len, step16)?;
+    let size = end - start + 1;
+    let at = |k: usize| gap_at(gap, start + k).map(u32::from);
+    Ok(if size < 4 {
+        if at(0)? >= pos {
+            start
+        } else if at(1)? >= pos {
+            start + 1
+        } else {
+            start + 2
+        }
+    } else {
+        start + sse4_gap_find(gap, start, pos, size)?
+    })
+}
+
+/// The one answer of NCBI's three builds, or `Rule::GapSearch`.
+fn agree<T: PartialEq>(answers: [T; 3]) -> Result<T, Fail> {
+    let [a, b, c] = answers;
+    if a == b && b == c {
+        Ok(a)
+    } else {
+        Err(refuse(Rule::GapSearch))
+    }
+}
+
+/// `gap_test_unr(buf, pos)` (bmfunc.h:1943-1955) of the three builds: `gap_test`,
+/// `sse2_gap_test`, `sse42_gap_test`.
+fn gap_test3(gap: &[u16], pos: u32) -> Result<bool, Fail> {
+    agree([
+        gap_test_scalar(gap, pos)?,
+        gap_value_at(gap, gap_bfind_sse2(gap, pos)?),
+        gap_value_at(gap, gap_bfind_sse42(gap, pos, 1)?),
+    ])
+    .map(|bit| bit != 0)
+}
+
+/// `gap_bfind(buf, pos, &is_set)` of the three builds (`VECT_GAP_BFIND`, bmfunc.h:1840-1841):
+/// the entry of the run that holds `pos`.
+fn gap_bfind3(gap: &[u16], pos: u32) -> Result<usize, Fail> {
+    agree([
+        gap_bfind_scalar(gap, pos)?,
+        gap_bfind_sse2(gap, pos)?,
+        gap_bfind_sse42(gap, pos, 2)?,
+    ])
+}
+
+/// `*pcurr - prev` of NCBI's count functions: an `int` difference added to an `unsigned`.
+fn gap_diff(to: u16, from: u32) -> u32 {
+    u32::from(to).wrapping_sub(from)
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3097-3150 (`gap_bit_count_unr`; the
+// scalar build's unrolled loop adds the same differences as its last loop), bmsse_util.h:1070-1091
+// (`sse2_gap_sum_arr`, the SSE2 and SSE4.2 builds above 18 entries)
+// ```c++
+//     unsigned dsize = (*pcurr >> 3);
+//     unsigned cnt = 0;
+//     pcurr = buf + 1; // set up start position
+//     T first_one = *buf & 1;
+//     if (first_one)
+//     {
+//         cnt += *pcurr + 1;
+//         ++pcurr;
+//     }
+//     ++pcurr;  // set GAP to 1
+//     #elif defined(BMSSE42OPT) || defined(BMSSE2OPT)
+//     if (dsize > 18)
+//     {
+//         const unsigned unr_factor = 16;
+//         unsigned waves = (dsize - 2) / unr_factor;
+//         pcurr = sse2_gap_sum_arr(pcurr, waves, &cnt);
+//     }
+//     ...
+//     const T* pend = buf + dsize;
+//     for ( ; pcurr <= pend ; pcurr+=2)
+//         cnt += *pcurr - *(pcurr - 1);
+// ```
+/// `gap_bit_count_unr(buf)` of the scalar build (`sse` false) or of the SSE2 and SSE4.2 builds,
+/// whose 16-bit lanes add the differences of 16 entries a wave modulo 2^16 in four sums.
+fn gap_count_unr(gap: &[u16], sse: bool) -> Result<u32, Fail> {
+    let len = gap_len(gap)?;
+    let mut count = 0u32;
+    let mut p = 1;
+    if gap[0] & 1 != 0 {
+        count = u32::from(gap_at(gap, 1)?) + 1;
+        p = 2;
+    }
+    p += 1;
+    if sse && len > 18 {
+        let waves = (len - 2) / 16;
+        let mut lanes = [0u16; 8];
+        for _ in 0..waves {
+            for (k, lane) in lanes.iter_mut().enumerate() {
+                let sum = gap_at(gap, p + k - 1)?.wrapping_add(gap_at(gap, p + k + 7)?);
+                *lane = lane.wrapping_add(sum);
+            }
+            p += 16;
+        }
+        for pair in lanes.chunks(2) {
+            count = count.wrapping_add(u32::from(pair[1].wrapping_sub(pair[0])));
+        }
+    }
+    while p <= len {
+        count = count.wrapping_add(gap_diff(gap_at(gap, p)?, u32::from(gap_at(gap, p - 1)?)));
+        p += 2;
+    }
+    Ok(count)
+}
+
+/// `block_bitcount` of a GAP block (bmblocks.h:1710-1720), the count of a whole block in
+/// `count_range`, of the three builds.
+fn gap_count3(gap: &[u16]) -> Result<u32, Fail> {
+    let scalar = gap_count_unr(gap, false)?;
+    let sse = gap_count_unr(gap, true)?;
+    agree([scalar, sse, sse])
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3163-3200 (`gap_bit_count_range`)
+// ```c++
+//     unsigned start_pos = bm::gap_bfind(buf, left, &is_set);
+//     is_set = ~(is_set - 1u); // 0xFFF.. if true (mask for branchless code)
+//     const T* pcurr = buf + start_pos;
+//     if (right <= *pcurr) // we are in the target gap right now
+//         bits_counter = unsigned(right - left + 1u) & is_set;
+//     else
+//     {
+//         bits_counter = unsigned(*pcurr - left + 1u) & is_set;
+//         ...
+//             for (prev_gap = *pcurr++; right > *pcurr; prev_gap = *pcurr++)
+//                 bits_counter += (is_set ^= ~0u) & (*pcurr - prev_gap);
+//             bits_counter += unsigned(right - prev_gap) & (is_set ^ ~0u);
+//     }
+// ```
+/// `gap_bit_count_range(buf, left, right)`, its `gap_bfind` of the three builds.
+fn gap_count_range(gap: &[u16], left: u32, right: u32) -> Result<u32, Fail> {
+    let mut p = gap_bfind3(gap, left)?;
+    let mut mask = 0u32.wrapping_sub(u32::from(gap_value_at(gap, p)));
+    let mut cur = u32::from(gap_at(gap, p)?);
+    if right <= cur {
+        return Ok(right.wrapping_sub(left).wrapping_add(1) & mask);
+    }
+    let mut count = cur.wrapping_sub(left).wrapping_add(1) & mask;
+    let mut prev = cur;
+    p += 1;
+    cur = u32::from(gap_at(gap, p)?);
+    while right > cur {
+        mask = !mask;
+        count = count.wrapping_add(mask & cur.wrapping_sub(prev));
+        prev = cur;
+        p += 1;
+        cur = u32::from(gap_at(gap, p)?);
+    }
+    Ok(count.wrapping_add(right.wrapping_sub(prev) & !mask))
+}
+
+// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3488-3517 (`gap_bit_count_to`, the
+// same in every build)
+// ```c++
+//     unsigned is_set = ~((unsigned(*buf) & 1u) - 1u); // 0xFFF.. if true (mask for branchless code)
+//     const T* pcurr = buf + 1;
+//     if (right <= *pcurr) // we are in the target block right now
+//     {
+//         bits_counter = (right + 1u) & is_set; // & is_set == if (is_set)
+//     }
+//     else
+//     {
+//         bits_counter = (*pcurr + 1u) & is_set;
+//         prev_gap = *pcurr++;
+//         for (is_set ^= ~0u; right > *pcurr; is_set ^= ~0u, prev_gap = *pcurr++)
+//         {
+//             bits_counter += (*pcurr - prev_gap) & is_set;
+//             if (*pcurr == bm::gap_max_bits-1)
+//                 goto cret;
+//         }
+//         bits_counter += (right - prev_gap) & is_set;
+//     }
+// ```
+/// `gap_bit_count_to(buf, right)`.
+fn gap_count_to(gap: &[u16], right: u32) -> Result<u32, Fail> {
+    gap_len(gap)?;
+    let mut mask = 0u32.wrapping_sub(u32::from(gap[0] & 1));
+    let mut cur = u32::from(gap_at(gap, 1)?);
+    if right <= cur {
+        return Ok(right.wrapping_add(1) & mask);
+    }
+    let mut count = cur.wrapping_add(1) & mask;
+    let mut prev = cur;
+    let mut p = 2;
+    mask = !mask;
+    cur = u32::from(gap_at(gap, p)?);
+    while right > cur {
+        count = count.wrapping_add(cur.wrapping_sub(prev) & mask);
+        mask = !mask;
+        prev = cur;
+        p += 1;
+        cur = u32::from(gap_at(gap, p)?);
+    }
+    Ok(count.wrapping_add(right.wrapping_sub(prev) & mask))
+}
+
 // NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4393-4438 (`gap_set_array`)
 // ```c++
 //     *buf = (T)((*buf & 6u) + (1u << 3)); // gap header setup
@@ -1475,8 +1956,8 @@ enum Slot {
     /// A GAP block: its entries `[0..=L]`, and whether it is one (`gap_valid`).
     Gap(Vec<u16>, bool),
     /// A GAP block that NCBI stored and cannot read back the same way each run: entries that it
-    /// did not write, or entries that it computed by how BitMagic is compiled. Refused when NCBI
-    /// reads the block, freed unread when it makes the block full.
+    /// did not write, or that the data does not decide. Refused when NCBI reads the block (a
+    /// query that reaches it, `Kind::Poison`), freed unread when it makes the block full.
     Poison(Rule),
     /// A bitmap, also one of all ones (which is not the full block).
     Bits(Box<Block>),
@@ -1865,8 +2346,8 @@ impl Store {
         *self.slot(nb) = Some(slot);
     }
 
-    /// The vector, refused when it holds a GAP block that is not one: NCBI's queries search it
-    /// (`gap_test_unr`, `gap_bit_count_range`).
+    /// The vector. A GAP block that is not one stays one, and a block whose entries the data does
+    /// not decide a refusal, for the queries that reach them (`BitVector::get_bit`, `count_to`).
     fn finish(self, size: u32) -> Result<BitVector, Fail> {
         let mut segs = Segs::default();
         for (i, lane) in self.lanes.into_iter().enumerate() {
@@ -1884,8 +2365,8 @@ impl Store {
                 match slot {
                     None => {}
                     Some(Slot::Full) => segs.full(nb, nb),
-                    Some(Slot::Poison(rule)) => return Err(refuse(rule)),
-                    Some(Slot::Gap(_, false)) => return Err(refuse(Rule::GapOrder)),
+                    Some(Slot::Poison(rule)) => segs.poison(nb, rule),
+                    Some(Slot::Gap(gap, false)) => segs.other_gap(nb, gap),
                     Some(Slot::Gap(gap, true)) => segs.runs(nb, gap_runs(&gap)),
                     Some(Slot::Bits(block)) => segs.bits(nb, block),
                 }
@@ -1895,16 +2376,30 @@ impl Store {
             size,
             segs: segs.segs,
             count: segs.count,
+            other: segs.other,
+            any_other: segs.any_other,
         })
     }
 }
 
 /// The decoded vector's segments as `finish` makes them: runs of full blocks, blocks of few runs,
-/// blocks as words.
-#[derive(Default)]
+/// blocks as words, GAP blocks that are not one.
 struct Segs {
     segs: Vec<Seg>,
     count: u64,
+    other: Result<u32, Fail>,
+    any_other: bool,
+}
+
+impl Default for Segs {
+    fn default() -> Self {
+        Segs {
+            segs: Vec::new(),
+            count: 0,
+            other: Ok(0),
+            any_other: false,
+        }
+    }
 }
 
 impl Segs {
@@ -1913,9 +2408,31 @@ impl Segs {
             first,
             last,
             before: self.count,
+            other: self.other,
             kind,
         });
         self.count += bits;
+    }
+
+    /// A block that NCBI keeps as a GAP block that is not one, and its whole-block count.
+    fn other_gap(&mut self, nb: u32, gap: Vec<u16>) {
+        let count = gap_count3(&gap);
+        self.push(nb, nb, Kind::Gap(gap.into_boxed_slice()), 0);
+        self.add_other(count);
+    }
+
+    /// A block that a query of it refuses.
+    fn poison(&mut self, nb: u32, rule: Rule) {
+        self.push(nb, nb, Kind::Poison(rule), 0);
+        self.add_other(Err(refuse(rule)));
+    }
+
+    fn add_other(&mut self, count: Result<u32, Fail>) {
+        self.any_other = true;
+        self.other = match (self.other, count) {
+            (Ok(sum), Ok(count)) => Ok(sum.wrapping_add(count)),
+            (Ok(_), Err(fail)) | (Err(fail), _) => Err(fail),
+        };
     }
 
     fn full(&mut self, first: u32, last: u32) {

@@ -152,12 +152,12 @@ fn block_runs_and_full_blocks() {
     assert_eq!(vector.size(), 6 << 16);
     assert_eq!(vector.ranges(), [(0, 0xFFFF), (4 << 16, (6 << 16) - 1)]);
     assert_eq!(vector.count(), 3 << 16);
-    assert_eq!(vector.count_to(5 << 16), (2 << 16) + 1);
+    assert_eq!(vector.count_to(5 << 16).unwrap(), (2 << 16) + 1);
     // aone from block 65534 leaves the size
     let vector = ok(10, &stream(&[5, 0xFE, 0xFF, 10]));
     assert_eq!((vector.size(), vector.count()), (10, 2 << 16));
-    assert_eq!(vector.count_to(u32::MAX), 2 << 16);
-    assert!(vector.get_bit(u32::MAX));
+    assert_eq!(vector.count_to(u32::MAX).unwrap(), 2 << 16);
+    assert!(vector.get_bit(u32::MAX).unwrap());
     // 8one with 0 blocks: `set_range(from, from - 1)` sets both bits, the size to `from + 1`
     let vector = ok(0, &stream(&[0x81, 4, 0, 0]));
     assert_eq!(vector.ranges(), [(0xFFFF, 0x10000)]);
@@ -307,11 +307,27 @@ fn gap_blocks_must_increase() {
     let vector = ok(0, &stream(&[14, 0x19, 0, 5, 0, 9, 0, 0]));
     assert_eq!(vector.ranges(), [(0, 5), (10, 65535)]);
     assert_eq!(vector.size(), 0);
-    let bad = stream(&[14, 0x19, 0, 9, 0, 5, 0, 0]);
-    assert_eq!(fail(0, &bad), Fail::Refuse(Rule::GapOrder));
-    // an id list (token 18) that does not increase makes a GAP that does not either
-    let bad = stream(&[18, 2, 0, 9, 0, 5, 0, 0]);
-    assert_eq!(fail(0, &bad), Fail::Refuse(Rule::GapOrder));
+    // a GAP block that is not one is kept; a query that reaches it runs the searches of NCBI's
+    // three builds (scalar, SSE2, SSE4.2), answered where they agree (the answers of NCBI's three
+    // builds of BitMagic 8.0.1), and counts as NCBI's `unsigned` sums do
+    let vector = ok(0, &stream(&[14, 0x19, 0, 9, 0, 5, 0, 0]));
+    for (n, bit, rank) in [
+        (0, true, 1),
+        (9, true, 10),
+        (10, true, 15),
+        (65535, true, 65540),
+        (65536, false, 65540),
+    ] {
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
+        assert_eq!(vector.count_to(n).unwrap(), rank, "{n}");
+    }
+    // an id list (token 18) that does not increase makes a GAP that does not either: bit 5 is 1
+    // in the SSE4.2 build, 0 in the others
+    let vector = ok(0, &stream(&[18, 2, 0, 9, 0, 5, 0, 0]));
+    assert_eq!(vector.get_bit(5), Err(Fail::Refuse(Rule::GapSearch)));
+    assert_eq!(vector.count_to(5).unwrap(), 0);
+    assert!(vector.get_bit(9).unwrap());
+    assert_eq!(vector.count_to(10).unwrap(), 2);
     // an empty id list reads `id_array_[0]`: memory that NCBI did not write, or the first id of
     // an earlier list (here block 0's, for block 1)
     assert_eq!(
@@ -323,7 +339,7 @@ fn gap_blocks_must_increase() {
     let vector = ok(0, &stream(&[18, 3, 0, 5, 0, 6, 0, 9, 0, 0]));
     assert_eq!(vector.ranges(), [(5, 6), (9, 9)]);
     let ranks: Vec<u64> = [4, 5, 7, 8, 9, 10, 70000]
-        .map(|n| vector.count_to(n))
+        .map(|n| vector.count_to(n).unwrap())
         .into();
     assert_eq!(ranks, [0, 1, 2, 2, 3, 3, 3]);
     // token 24 (ids off): an empty list is a full block
@@ -331,6 +347,39 @@ fn gap_blocks_must_increase() {
     assert_eq!(vector.ranges(), [(0, 65535)]);
     let vector = ok(0, &stream(&[24, 3, 0, 0, 0, 1, 0, 0xFF, 0xFF, 0]));
     assert_eq!(vector.ranges(), [(2, 65534)]);
+}
+
+#[test]
+fn only_a_query_that_reaches_a_block_that_is_not_one_is_refused() {
+    // block 3 is a GAP block that is not one (65535 is not its last entry): the rows of blocks 0
+    // to 2 are answered, as NCBI does not read it for them; in block 3 its answer splits NCBI's
+    // builds (bits 196708.. are 1 in the SSE4.2 build only) where it is refused, and the ranks
+    // past it are NCBI's `unsigned` sums
+    let data = hex("020180000001000200050000080013050007020000000E2000409C0A0050C300");
+    let vector = ok(524288, &data);
+    for (n, bit, rank) in [
+        (0, false, 0),
+        (5, true, 1),
+        (6, false, 1),
+        (65536, false, 1),
+        (196607, false, 1),
+        (196608, false, 1),
+        (262143, true, 4294942842),
+        (262144, false, 4294942842),
+    ] {
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
+        assert_eq!(vector.count_to(n).unwrap(), rank, "{n}");
+    }
+    for n in [196708, 196709, 196808] {
+        assert_eq!(vector.get_bit(n), Err(Fail::Refuse(Rule::GapSearch)), "{n}");
+        assert_eq!(vector.count_to(n).unwrap(), 1, "{n}");
+    }
+    // a block whose entries NCBI's decoding leaves to memory the data does not decide (an
+    // opaque GAP into a block not yet made): refused by a query that reaches it
+    let data = hex("02018000000100020005000000803DB050C800DEFC030082A915603C9E39000000000000");
+    let vector = ok(2147483648, &data);
+    assert_eq!(vector.get_bit(5), Err(Fail::Refuse(Rule::GapOrder)));
+    assert_eq!(vector.count_to(5), Err(Fail::Refuse(Rule::GapOrder)));
 }
 
 #[test]
@@ -353,7 +402,7 @@ fn long_gaps_are_converted_to_bits() {
         (11, true),
         (20, true),
     ] {
-        assert_eq!(vector.get_bit(n), bit, "{n}");
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
     }
     for (n, bit) in [
         (21, false),
@@ -362,7 +411,7 @@ fn long_gaps_are_converted_to_bits() {
         (1398, true),
         (1399, false),
     ] {
-        assert_eq!(vector.get_bit(n), bit, "{n}");
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
     }
     assert_eq!(vector.count(), 2 + 10 + 647 + (65535 - 1400 + 1));
     // a run of 1s from 41 back to 32 or 31: `or_bit_block(dest, 41, 2^32 - d)` writes nothing
@@ -387,7 +436,7 @@ fn long_gaps_are_converted_to_bits() {
         (60, true),
         (61, false),
     ] {
-        assert_eq!(vector.get_bit(n), bit, "{n}");
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
     }
     assert_eq!(
         fail(0, &gap14(&[40, 31, 50, 60])),
@@ -400,7 +449,23 @@ fn long_gaps_are_converted_to_bits() {
         tokens.extend(e.to_le_bytes());
     }
     tokens.push(0);
-    assert_eq!(fail(0, &stream(&tokens)), Fail::Refuse(Rule::GapOrder));
+    // with 1275 entries it stays a GAP block that is not one: bits 6 and 7 are 1 in the scalar and
+    // SSE4.2 builds, 11 and 20 in the SSE2 and SSE4.2 builds
+    let vector = ok(0, &stream(&tokens));
+    for n in [6, 7, 11, 20] {
+        assert_eq!(vector.get_bit(n), Err(Fail::Refuse(Rule::GapSearch)), "{n}");
+    }
+    for (n, bit, rank) in [
+        (5, false, 0),
+        (21, false, 12),
+        (106, true, 13),
+        (200, true, 60),
+        (65535, false, 647),
+    ] {
+        assert_eq!(vector.get_bit(n).unwrap(), bit, "{n}");
+        assert_eq!(vector.count_to(n).unwrap(), rank, "{n}");
+    }
+    assert_eq!(vector.count_to(20).unwrap(), 10);
     // token 18 with 4097 ids 1, 3, ..., 8193: a GAP of 8195 entries, whose header keeps 3; the
     // conversion reads the runs to entry 3 only
     let mut tokens = vec![18];
@@ -538,13 +603,13 @@ fn queries_match_a_plain_bitmap() {
     for (n, &bit) in bits.iter().enumerate() {
         rank += u64::from(bit);
         if n % 97 == 0 || n % 65536 < 3 || n % 65536 > 65533 {
-            assert_eq!(vector.get_bit(n as u32), bit, "{n}");
-            assert_eq!(vector.count_to(n as u32), rank, "{n}");
+            assert_eq!(vector.get_bit(n as u32).unwrap(), bit, "{n}");
+            assert_eq!(vector.count_to(n as u32).unwrap(), rank, "{n}");
         }
     }
     assert_eq!(vector.count(), rank);
-    assert_eq!(vector.count_to(u32::MAX), rank);
-    assert!(!vector.get_bit(4 << 16));
+    assert_eq!(vector.count_to(u32::MAX).unwrap(), rank);
+    assert!(!vector.get_bit(4 << 16).unwrap());
 }
 
 #[test]
@@ -555,11 +620,13 @@ fn big_endian_streams() {
     // token 16 (bits on) with 2 ids: read one by one
     let vector = ok(0, &[0x10, 0x00, 16, 0, 2, 0, 5, 0, 9, 0]);
     assert_eq!(vector.ranges(), [(5, 5), (9, 9)]);
-    // token 18 with 2 ids: both are the first one, a GAP that does not increase
-    assert_eq!(
-        fail(0, &[0x10, 0x00, 18, 0, 2, 0, 5, 0, 9, 0]),
-        Fail::Refuse(Rule::GapOrder)
-    );
+    // token 18 with 2 ids: both are the first one, a GAP that does not increase, whose bit 5 is 0
+    // in the SSE4.2 build and 1 in the others
+    let vector = ok(0, &[0x10, 0x00, 18, 0, 2, 0, 5, 0, 9, 0]);
+    assert_eq!(vector.get_bit(5), Err(Fail::Refuse(Rule::GapSearch)));
+    assert!(!vector.get_bit(6).unwrap());
+    assert_eq!(vector.count_to(5).unwrap(), 1);
+    assert_eq!(vector.count_to(6).unwrap(), 2);
     // ... with 1 id: one value, two bytes
     let vector = ok(0, &[0x10, 0x00, 18, 0, 1, 0, 5, 0]);
     assert_eq!(vector.ranges(), [(5, 5)]);
@@ -608,14 +675,34 @@ fn differential() {
             Err(Fail::Invalid) => out.push_str(&format!("{id} invalid\n")),
             Err(Fail::Refuse(rule)) => out.push_str(&format!("{id} refuse {rule:?}\n")),
             Ok((vector, end)) => {
-                let runs = vector.ranges();
-                let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-                for &(a, b) in &runs {
-                    for byte in a.to_le_bytes().into_iter().chain(b.to_le_bytes()) {
-                        hash ^= u64::from(byte);
-                        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                // the harness's walk of NCBI's blocks; `-` where a block's entries are unknown
+                let (count, hash, runs) = match harness_walk(&vector) {
+                    Some(runs) => {
+                        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                        for &(a, b) in &runs {
+                            for byte in (a as u32)
+                                .to_le_bytes()
+                                .into_iter()
+                                .chain((b as u32).to_le_bytes())
+                            {
+                                hash ^= u64::from(byte);
+                                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                            }
+                        }
+                        let count: u64 = runs.iter().map(|&(a, b)| b - a + 1).sum();
+                        (
+                            count.to_string(),
+                            format!("{hash:016x}"),
+                            runs.len().to_string(),
+                        )
                     }
-                }
+                    None => ("-".into(), "-".into(), "-".into()),
+                };
+                let answer = |result: Result<u64, Fail>| match result {
+                    Ok(value) => value.to_string(),
+                    Err(Fail::Refuse(rule)) => format!("?{rule:?}"),
+                    Err(Fail::Invalid) => "?Invalid".into(),
+                };
                 let queries: Vec<String> = rows
                     .split(',')
                     .filter(|row| *row != "-")
@@ -624,8 +711,12 @@ fn differential() {
                         // `count_range` counts to `bm::id_max - 1` at most (bm.h:3251-3252)
                         format!(
                             "{row}:{}:{}",
-                            u8::from(vector.get_bit(row)),
-                            vector.count_to(row.min(u32::MAX - 1)) as u32
+                            answer(vector.get_bit(row).map(u64::from)),
+                            answer(
+                                vector
+                                    .count_to(row.min(u32::MAX - 1))
+                                    .map(|n| n as u32 as u64)
+                            )
                         )
                     })
                     .collect();
@@ -635,13 +726,50 @@ fn differential() {
                     queries.join(",")
                 };
                 out.push_str(&format!(
-                    "{id} ok {} {} {end} {hash:016x} {} {queries}\n",
+                    "{id} ok {} {count} {end} {hash} {runs} {queries}\n",
                     vector.size(),
-                    vector.count(),
-                    runs.len()
                 ));
             }
         }
     }
     std::fs::write(output, out).unwrap();
+}
+
+/// The runs that the differential harness's walk of NCBI's blocks reports (`walk`, merging a run
+/// that starts right after the last): a GAP block's runs of 1s whose end is not before their start,
+/// up to its length or 65535; `None` for a block whose entries the data does not decide.
+fn harness_walk(vector: &BitVector) -> Option<Vec<(u64, u64)>> {
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    let mut put = |a: u64, b: u64| match out.last_mut() {
+        Some(last) if last.1 + 1 == a => last.1 = b,
+        _ => out.push((a, b)),
+    };
+    for seg in &vector.segs {
+        match &seg.kind {
+            Kind::Poison(_) => return None,
+            Kind::Gap(gap) => {
+                let base = u64::from(seg.first) << 16;
+                let mut value = gap[0] & 1 != 0;
+                let mut from = 0u64;
+                let ends = gap.get(1..=usize::from(gap[0] >> 3))?;
+                for &end in ends {
+                    let end = u64::from(end);
+                    if value && end >= from {
+                        put(base + from, base + end);
+                    }
+                    from = end + 1;
+                    value = !value;
+                    if end >= 65535 {
+                        break;
+                    }
+                }
+            }
+            _ => {
+                for (a, b) in seg.runs() {
+                    put(u64::from(a), u64::from(b));
+                }
+            }
+        }
+    }
+    Some(out)
 }

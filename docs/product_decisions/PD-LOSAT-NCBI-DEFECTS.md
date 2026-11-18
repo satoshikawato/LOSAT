@@ -181,8 +181,12 @@
   NCBI's exception `BM::Invalid serialization format`; the rule-2 rejection of well-formed BitMagic
   data removed and the rule-3 rejection narrowed to the streams that NCBI reads past, runs with
   undefined behaviour or a write past BitMagic's blocks or buffers, decodes from memory it did not
-  write or searches by how BitMagic is compiled for the machine; decided by the Owner on 2026-11-16
-  (「推奨通り」, Q-BM); numbered after 1.50)
+  write or searches a GAP block that is not one while decoding; porting the data and refusing its
+  broken streams decided by the Owner on 2026-11-16 (「推奨通り」, Q-BM). A row of the index that
+  reaches a GAP block that is not one is answered where NCBI's scalar, SSE2 and SSE4.2 builds of
+  BitMagic agree and refused under rule 3 only where they differ, as NCBI's answer then depends on
+  the machine it was built for (Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07); numbered after 1.50)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1533,14 +1537,20 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `or_bit_block` shifts by 32 bits or writes past the block, an index past BitMagic's arrays, a
     GAP block of length 0 or past 8191, a window of no words), that reads entries of BitMagic's
     work arrays that this decoding has not written (an empty little-endian id list that no earlier
-    list wrote the first entry for, run lengths that no array wrote), or that leaves a GAP block
-    whose ends do not increase up to 65535 where NCBI then searches it: BitMagic's search of a GAP
-    block is SSE2 or SSE4.2 code on x86-64
-    (`bmsse2.h:1638-1642`, `bmsse4.h:2260-2264`; NCBI's configure adds `-msse4.2` there) and
-    scalar code elsewhere (`bmfunc.h:1835-1955`), which find a block's bits only where its ends
-    increase; line RG D3-1 `bm/SPEC.md` §3.3 and §5.2 and line RG item Q-BM. A stream is refused
-    at the first such event; up to it LOSAT decodes as NCBI does, NCBI's exception included. A
-    `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
+    list wrote the first entry for, run lengths that no array wrote), or that searches a GAP
+    block whose ends do not increase up to 65535 while it decodes (a bit set into it, or an
+    interpolative GAP block that NCBI makes from memory the data does not decide); line RG D3-1
+    `bm/SPEC.md` §3.3 and §5.2 and line RG item Q-BM. A stream is refused at the first such event;
+    up to it LOSAT decodes as NCBI does, NCBI's exception included. A GAP block whose ends do not
+    increase up to 65535 stays in the vector as NCBI keeps it, and a row of the index that reaches
+    it (its bit, or a count of set bits up to a row in or past it) is refused where NCBI's answer
+    differs between its builds of BitMagic, as it then depends on the machine NCBI was built for:
+    BitMagic's search of a GAP block is SSE2 or SSE4.2 code on x86-64 (`bmsse2.h:1638-1642`,
+    `bmsse4.h:2260-2264`; NCBI's configure adds `-msse4.2` there) and scalar code elsewhere
+    (`bmfunc.h:1835-1955`), which find a block's bits the same way only where its ends increase.
+    LOSAT runs the three searches and answers where they agree; rows that do not reach the block
+    are answered (line RG item Q-BM, Owner-delegated, standing instruction 2026-09-29, restated
+    2026-10-07). A `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
 
   The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
   tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line
@@ -1809,4 +1819,6 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   the index reads the value, and is the `NCBI_CATCH` message of the `Sorted, max length` and
   `Seq-table location` columns (`Error: [<program>] [Bad '<column>' column] Exception: ...`),
   after which the run goes on. A stream that reaches one of the events of the rule-3 rejection
-  (above) is refused at that event. Version 1.45 refused all such data.
+  (above) is refused at that event; a row of a GAP block that is not one is answered where NCBI's
+  scalar, SSE2 and SSE4.2 builds agree and refused (rule 3) where they differ. Version 1.45
+  refused all such data.

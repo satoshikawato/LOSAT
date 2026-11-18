@@ -914,6 +914,9 @@ class AggregateTests(unittest.TestCase):
             for claim in contract["platform_claims"]:
                 self.assertIn(claim["platform"], text)
                 self.assertIn(claim["wording"], text)
+            # RC-HANDOFF.md is published with the release: the internal `claim` key
+            # ("certified") stays out of it, as README.md's words do.
+            self.assertNotIn("certified", text.lower())
 
     def test_aggregate_refuses_a_dry_run_sidecar(self) -> None:
         contract = filled_contract("d" * 40)

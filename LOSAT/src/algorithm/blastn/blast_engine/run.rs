@@ -7651,7 +7651,11 @@ fn post_process_hits_and_write(
                         anchored.as_ref().map(|sequences| {
                             sequences as &dyn crate::report::query_anchored::ReportSequences
                         }),
+                        report.database_loads,
                     )
+                    // A subject whose load throws may end the run there
+                    // (`x_pairwise_par::alignment_end`).
+                    .map_err(crate::cli::NativeError::of_writer)
                 };
                 match pairwise_hits.as_deref() {
                     Some(hits) => write(hits, 0..queries.len())?,
@@ -10577,8 +10581,10 @@ fn run_in_pool(
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
-    let run_loads =
-        crate::report::db_subject::RunLoads::new(database::after_throw(&output_formats));
+    let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
+        &output_formats,
+        args.report_counts,
+    ));
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
     // ```c
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
@@ -11543,7 +11549,7 @@ fn run_in_pool(
                                 &titles,
                                 &hit_lists,
                                 &batch_spans,
-                                database::after_throw(&output_formats),
+                                database::after_throw(&output_formats, args.report_counts),
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &prefetch_queries,
@@ -12184,7 +12190,10 @@ fn write_reports_untimed(
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
-                database::after_throw(output_formats),
+                (
+                    database::after_throw(output_formats, args.report_counts),
+                    database::pairwise_sort(output_formats, args.formatting.report_sort()),
+                ),
                 results.batches,
                 written.queries,
                 !args.ungapped,

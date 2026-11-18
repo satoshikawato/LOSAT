@@ -1,0 +1,50 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: multidb pa; noacc_v5 (no parsed Seq-ids)
+           15 sequences; 1,920 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 Unknown                                                      286     2e-105
+P01923.1 Unknown                                                      282     1e-103
+Q9TS35.2 Unknown                                                      281     2e-103
+P63107.2 Unknown                                                      278     3e-102
+P67818.1 Unknown                                                      275     1e-100
+P01935.1 Unknown                                                      266     4e-97 
+P01942.2 Unknown                                                      253     5e-92 
+P01966.2 Unknown                                                      252     1e-91 
+P07405.1 Unknown                                                      251     3e-91 
+P60529.1 Unknown                                                      243     4e-88 
+P01946.3 Unknown                                                      209     1e-74 
+P01994.2 Unknown                                                      207     3e-74 
+
+

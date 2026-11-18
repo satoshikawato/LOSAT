@@ -470,6 +470,15 @@ pub(crate) trait QuerySections: Sync {
         false
     }
 
+    /// The load of subject `s_idx` where it throws (its batch's prefetch is off and its lookup
+    /// fails, `report::db_subject::HitLoads::thrown`): its exception, and whether its Seq-align id
+    /// is a local id (`pairwise::thrown_load`); `None` by default (every subject loads). Its
+    /// description line and alignments are written as NCBI's `catch`es write them, and the
+    /// query's alignments may end the run there (`alignment_end`).
+    fn thrown(&self, _s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        None
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
     // ```c++
     //             const CBioseq_Handle& subj_handle =
@@ -575,6 +584,54 @@ pub(crate) fn write<S: QuerySections, W: Write>(
     written
 }
 
+/// Where the alignments of the query of `group` end the run (`aligned_end` of the report's
+/// writer, `PairwiseView::after_throw`, and of the loads of its aligned subjects,
+/// `QuerySections::thrown`).
+fn alignment_end<'s, S: QuerySections>(
+    sections: &'s S,
+    group: &QueryGroup<'_>,
+) -> Option<(usize, &'s crate::ncbi_exception::NcbiException)> {
+    use crate::report::db_subject::AfterThrow;
+    let after = if sections.merges_alignments() {
+        AfterThrow::EndsAtAlignment
+    } else {
+        AfterThrow::SkipsAlignment
+    };
+    aligned_end(after, group.aligned(sections.num_alignments()), |s_idx| {
+        sections.thrown(s_idx)
+    })
+}
+
+/// Where the alignments of the subjects `aligned` (in their order) of a report whose writer does
+/// `after` after a throw end the run (`AfterThrow::alignment_end` of the loads `thrown`: the
+/// exception of a subject whose load throws, and whether its Seq-align id is local): the position
+/// among the aligned subjects and the exception, which the writers return there (`end_here`)
+/// after the loads before it, as NCBI's application ends with it (`CATCH_ALL`).
+pub(super) fn aligned_end<'t>(
+    after: crate::report::db_subject::AfterThrow,
+    aligned: &[u32],
+    thrown: impl Fn(u32) -> Option<(&'t crate::ncbi_exception::NcbiException, bool)>,
+) -> Option<(usize, &'t crate::ncbi_exception::NcbiException)> {
+    let end = after.alignment_end(
+        aligned.iter().copied(),
+        |s_idx| thrown(s_idx).is_some(),
+        |s_idx| thrown(s_idx).is_some_and(|(_, local)| local),
+    )?;
+    Some((end, thrown(aligned[end])?.0))
+}
+
+/// The exception of `end` (`alignment_end`) as the writer's error where the alignments reach its
+/// position `position` (before the load of that aligned subject).
+pub(super) fn end_here(
+    end: Option<(usize, &crate::ncbi_exception::NcbiException)>,
+    position: usize,
+) -> io::Result<()> {
+    match end {
+        Some((at, exception)) if at == position => Err(exception.clone().into_io_error()),
+        _ => Ok(()),
+    }
+}
+
 /// The serial writer: each query's warnings and parts on `writer`, in order.
 fn write_serial<S: QuerySections, W: Write>(
     writer: &mut W,
@@ -614,17 +671,26 @@ fn write_serial<S: QuerySections, W: Write>(
                 // ```
                 // The merge loads every aligned subject before the section's first byte
                 // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
-                // no section (`DisplaySeqalign` returns at once).
+                // no section (`DisplaySeqalign` returns at once). A load that throws ends the run
+                // there (`alignment_end`).
                 let aligned = group.aligned(sections.num_alignments());
+                let end = alignment_end(sections, group);
                 if !aligned.is_empty() {
-                    for &s_idx in aligned {
+                    for (position, &s_idx) in aligned.iter().enumerate() {
+                        end_here(end, position)?;
                         read(s_idx, &mut *writer)?;
                         sections.merged_subject(writer, group, s_idx)?;
                     }
                     sections.alignments(writer, q_idx, group)?;
                 }
             } else {
-                for &s_idx in group.aligned(sections.num_alignments()) {
+                // `GetDbType`'s load of the first alignment's subject may end the run before any
+                // alignment (`alignment_end`).
+                let end = alignment_end(sections, group);
+                for (position, &s_idx) in
+                    group.aligned(sections.num_alignments()).iter().enumerate()
+                {
+                    end_here(end, position)?;
                     read(s_idx, &mut *writer)?;
                     let hsps = group.subject_hits[&s_idx].len();
                     sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
@@ -847,6 +913,7 @@ fn format_piece<S: QuerySections>(
         Part::Alignments((first, first_hsp), (last, end_hsp)) => {
             let group = group.expect("a query with alignment pieces has hits");
             let aligned = group.aligned(sections.num_alignments());
+            let end = alignment_end(sections, group);
             for (position, &s_idx) in aligned.iter().enumerate().take(last + 1).skip(first) {
                 let from = if position == first { first_hsp } else { 0 };
                 let to = if position == last {
@@ -856,6 +923,7 @@ fn format_piece<S: QuerySections>(
                 };
                 if from < to {
                     if from == 0 {
+                        end_here(end, position)?;
                         mark(s_idx, &mut buffer)?;
                     }
                     sections.subject(&mut buffer, None, group, s_idx, from..to)?;
@@ -865,7 +933,9 @@ fn format_piece<S: QuerySections>(
         }
         Part::Section => {
             let group = group.expect("a query with a section has hits");
-            for &s_idx in group.aligned(sections.num_alignments()) {
+            let end = alignment_end(sections, group);
+            for (position, &s_idx) in group.aligned(sections.num_alignments()).iter().enumerate() {
+                end_here(end, position)?;
                 mark(s_idx, &mut buffer)?;
                 sections.merged_subject(&mut buffer, group, s_idx)?;
             }
@@ -1667,6 +1737,39 @@ mod tests {
         assert_eq!(
             query_estimate_of([10, 11], 7),
             QUERY_BYTES + 2 * DESCRIPTION_BYTES + 800 + 3 * 21 + 60 * 21 / 7
+        );
+    }
+
+    // DBID pfoff-3 (DECISIONS 62 (13)): the writers end the run before the load of the aligned
+    // subject whose lookup throws where the report's writer ends there (`aligned_end`): outfmt 0
+    // at its first alignment only, outfmt 1 to 4 at any; the error carries NCBI's exception
+    // (`NativeError::of_writer`: `BLAST Database error: ...`, exit status 2).
+    #[test]
+    fn the_writers_end_the_run_at_an_aligned_subject_whose_load_throws() {
+        use crate::report::db_subject::AfterThrow;
+        let exception = crate::report::db_subject::LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )
+        .exception()
+        .unwrap();
+        // 7 throws; 9 throws with a local Seq-align id.
+        let thrown = |s_idx: u32| match s_idx {
+            7 => Some((&exception, false)),
+            9 => Some((&exception, true)),
+            _ => None,
+        };
+        let end = |after, aligned: &[u32]| aligned_end(after, aligned, thrown).map(|(at, _)| at);
+        assert_eq!(end(AfterThrow::SkipsAlignment, &[7, 1]), Some(0));
+        assert_eq!(end(AfterThrow::SkipsAlignment, &[1, 7]), None);
+        assert_eq!(end(AfterThrow::SkipsAlignment, &[9, 7]), None);
+        assert_eq!(end(AfterThrow::EndsAtAlignment, &[1, 9, 7]), Some(1));
+        let at = aligned_end(AfterThrow::EndsAtAlignment, &[1, 7], thrown);
+        assert!(end_here(at, 0).is_ok());
+        let error = end_here(at, 1).unwrap_err();
+        let carried = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
+        assert_eq!(
+            carried.get_msg(),
+            crate::seqdb::tax_files::NO_ACCESSION_INFO
         );
     }
 }

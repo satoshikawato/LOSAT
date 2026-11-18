@@ -2066,6 +2066,7 @@ fn write_pairwise(
                         &crate::report::defline::UNNAMED_SOURCE,
                         parsed.shown(index),
                         true,
+                        false,
                     ))
                 })
                 .collect()
@@ -2196,6 +2197,8 @@ fn write_pairwise(
     let mut warnings =
         crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
             .with_subject_reads(&reads);
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
     write_blastx_pairwise_report(
         hits,
         writer,
@@ -2220,6 +2223,10 @@ fn write_pairwise(
             .as_ref()
             .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         pool.and_then(crate::report::x_pairwise_par::pool),
+        match shown {
+            ShownSubjects::Fasta { .. } => &every_loaded,
+            ShownSubjects::Database { reported, .. } => reported.loads(),
+        },
     )
     .map_err(empty_rows_stop)?;
     Ok(())
@@ -2230,7 +2237,8 @@ fn write_pairwise(
 /// read the HSP's empty rows (after the query's `Length=`), `CreateDensegFromStdseg` where they or
 /// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
-/// first byte); a write error stays.
+/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
+/// `x_pairwise_par::alignment_end`); a write error stays.
 fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
     use crate::report::pairwise::EmptyRowsStop;
     match error
@@ -2247,7 +2255,7 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
             super::empty_rows::UNPORTED_ANCHORED_FREE.to_string(),
         )
         .into(),
-        None => error.into(),
+        None => NativeError::of_writer(error),
     }
 }
 

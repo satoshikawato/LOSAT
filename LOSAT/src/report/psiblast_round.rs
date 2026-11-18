@@ -76,6 +76,7 @@ pub(crate) fn write_psiblast_round_report(
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     subject_sources: &[crate::report::defline::SourceTaxname],
+    loads: &crate::report::db_subject::HitLoads,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -115,6 +116,7 @@ pub(crate) fn write_psiblast_round_report(
         database,
         parsed_subjects,
         subject_sources,
+        loads,
         round,
     };
     let mut warnings = warnings;
@@ -138,10 +140,24 @@ pub(crate) fn write_psiblast_round_report(
         };
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
-            let aligned = group.subject_order.len().min(report.num_alignments);
-            for &s_idx in &group.subject_order[..aligned] {
+            // The first aligned subject's load may end the run (`BlastpSections`'s
+            // `x_pairwise_par::alignment_end`).
+            let aligned = group.aligned(report.num_alignments);
+            let end = crate::report::x_pairwise_par::aligned_end(
+                crate::report::db_subject::AfterThrow::SkipsAlignment,
+                aligned,
+                |s_idx| sections.thrown(s_idx),
+            );
+            for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 read(s_idx, &mut *writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
+            }
+            if let Some((_, exception)) = end {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.end_run();
+                }
+                writer.flush()?;
+                return Err(exception.clone().into_io_error());
             }
             sections.foot(writer, q_idx)?;
         }
@@ -159,6 +175,8 @@ struct RoundSections<'a> {
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// The sources of the others' Bioseqs (`pairwise::stored_source`).
     subject_sources: &'a [crate::report::defline::SourceTaxname],
+    /// The loads of the report's subjects, by subject index (`BlastpSections::loads`).
+    loads: &'a crate::report::db_subject::HitLoads,
     round: ReportRound<'a>,
 }
 
@@ -171,6 +189,11 @@ impl RoundSections<'_> {
                 previous as usize,
                 s_idx as usize,
             )
+    }
+
+    /// `BlastpSections::thrown`.
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        super::thrown_load(self.loads, self.parsed_subjects, s_idx)
     }
 
     /// The subject of `s_idx` among the parsed subjects (`pairwise::parsed_subject`).
@@ -192,6 +215,7 @@ impl RoundSections<'_> {
             super::stored_source(self.subject_sources, s_idx),
             self.parsed(s_idx),
             true,
+            self.thrown(s_idx).is_some(),
         )
     }
 
@@ -482,7 +506,12 @@ impl RoundSections<'_> {
         let parsed = self.parsed(s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
+                Some(subject) => DatabaseHeading::loaded(
+                    subject,
+                    true,
+                    group.own_hsps(s_idx),
+                    self.thrown(s_idx).is_some(),
+                ),
                 None => DatabaseHeading::Title(
                     &group.subject_titles[&s_idx],
                     super::stored_source(self.subject_sources, s_idx),

@@ -2874,6 +2874,8 @@ fn write_tblastx_outputs(
                     // An exception of NCBI's merge in a query-anchored section ends the report after
                     // what it wrote before (`query_anchored::write_section`) with `CATCH_ALL`'s report
                     // (`NativeError::of_writer`), without the epilog or the later batches.
+                    // A subject set's subjects are all loaded.
+                    let every_loaded = crate::report::db_subject::HitLoads::default();
                     let mut write = |rows: &[crate::report::pairwise::PairwiseHit],
                                      range: std::ops::Range<usize>|
                      -> Result<()> {
@@ -2892,6 +2894,8 @@ fn write_tblastx_outputs(
                             anchored.as_ref().map(|sequences| {
                                 sequences as &dyn crate::report::query_anchored::ReportSequences
                             }),
+                            run.database
+                                .map_or(&every_loaded, |database| &database.reported.loads),
                         )
                         .map_err(crate::cli::NativeError::of_writer)
                     };
@@ -3813,6 +3817,7 @@ fn run_batch_loop(
     // (`database::report_loads`).
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
+        args.report_counts,
     ));
     let (query_code, db_code) = (
         crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
@@ -4365,6 +4370,7 @@ fn run_batch_loop(
                                 &run_loads,
                                 &ordered[from..to],
                                 &reports.titles.borrow(),
+                                pairwise,
                                 identities,
                             );
                             let shown: Vec<&TblastxHsp> = match rows {
@@ -4773,8 +4779,18 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    super::super::database::after_throw(
-                        outputs.formats.iter().map(|format| format.outfmt),
+                    (
+                        super::super::database::after_throw(
+                            outputs.formats.iter().map(|format| format.outfmt),
+                            self.args.report_counts,
+                        ),
+                        // The pairwise report's reads (as `run_batch_loop`'s).
+                        outputs
+                            .formats
+                            .first()
+                            .and_then(crate::api::local_blast::FormatOutput::report_format)
+                            .and_then(crate::report::pairwise::PairwiseView::of)
+                            .map(|view| view.report_sort(self.args.formatting.report_sort())),
                     ),
                     &|hsp| {
                         super::super::database::hit_identities(

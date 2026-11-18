@@ -1,0 +1,66 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb pa; noacc_v5 (no parsed Seq-ids)
+           15 sequences; 1,920 total letters
+
+
+
+Query= mix2_u qp1 of ids/noacc_v5 back-translated
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 293     7e-108
+
+
+
+Query_1  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+0        1    ............................................................  60
+
+Query_1  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+0        61   ............................................................  120
+
+Query_1  361  FEKLKIFHYMVGHGRTASEG  420
+0        121  ....................  140
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 155520
+
+
+Query= mix2_c the letters of taxfilter/q.fna, then qp1 back-translated
+
+Length=997
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 293     1e-104
+P69905.2 Unknown                                                      286     4e-102
+P01923.1 Unknown                                                      282     1e-100
+Q9TS35.2 Unknown                                                      281     3e-100
+P63107.2 Unknown                                                      278     5e-99 
+P67818.1 Unknown                                                      275     1e-97 
+P01935.1 Unknown                                                      265     5e-94 
+P01942.2 Unknown                                                      253     5e-89 
+P01966.2 Unknown                                                      252     9e-89 
+P07405.1 Unknown                                                      250     4e-88 
+P60529.1 Unknown                                                      242     7e-85 
+P01946.3 Unknown                                                      209     1e-71 
+P01994.2 Unknown                                                      208     2e-71 
+
+

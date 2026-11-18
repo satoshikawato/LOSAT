@@ -1,0 +1,141 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: multidb pa; noacc_v5 (no parsed Seq-ids)
+           15 sequences; 1,920 total letters
+
+
+
+Query= mix2_u qp1 of ids/noacc_v5 (no accession table)
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 293     6e-108
+
+
+>qp1 query protein one
+Length=140
+
+ Score = 293 bits (749),  Expect = 6e-108, Method: Compositional matrix adjust.
+ Identities = 140/140 (100%), Positives = 140/140 (100%), Gaps = 0/140 (0%)
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+            CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN
+Sbjct  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+
+Query  121  FEKLKIFHYMVGHGRTASEG  140
+            FEKLKIFHYMVGHGRTASEG
+Sbjct  121  FEKLKIFHYMVGHGRTASEG  140
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 155520
+
+
+Query= mix2_c the letters of taxfilter/q.faa, then qp1
+
+Length=282
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 302     3e-109
+sp|P69905.2|Unknown                                                   286     4e-103
+sp|P01923.1|Unknown                                                   283     2e-101
+sp|Q9TS35.2|Unknown                                                   282     3e-101
+sp|P63107.2|Unknown                                                   278     7e-100
+sp|P67818.1|Unknown                                                   275     1e-98 
+sp|P01935.1|Unknown                                                   265     1e-94 
+sp|P01942.2|Unknown                                                   253     6e-90 
+sp|P01966.2|Unknown                                                   253     6e-90 
+sp|P07405.1|Unknown                                                   249     3e-88 
+sp|P60529.1|Unknown                                                   243     9e-86 
+sp|P01994.2|Unknown                                                   208     4e-72 
+sp|P01946.3|Unknown                                                   207     8e-72 
+
+
+>qp1 query protein one
+Length=140
+
+ Score = 302 bits (774),  Expect = 3e-109, Method: Compositional matrix adjust.
+ Identities = 140/140 (100%), Positives = 140/140 (100%), Gaps = 0/140 (0%)
+
+Query  143  MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  202
+            MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  203  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  262
+            CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN
+Sbjct  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+
+Query  263  FEKLKIFHYMVGHGRTASEG  282
+            FEKLKIFHYMVGHGRTASEG
+Sbjct  121  FEKLKIFHYMVGHGRTASEG  140
+
+
+Sequence with id P69905 no longer exists in database...alignment skipped
+Sequence with id P01923 no longer exists in database...alignment skipped
+Sequence with id Q9TS35 no longer exists in database...alignment skipped
+Sequence with id P63107 no longer exists in database...alignment skipped
+Sequence with id P67818 no longer exists in database...alignment skipped
+Sequence with id P01935 no longer exists in database...alignment skipped
+Sequence with id P01942 no longer exists in database...alignment skipped
+Sequence with id P01966 no longer exists in database...alignment skipped
+Sequence with id P07405 no longer exists in database...alignment skipped
+Sequence with id P60529 no longer exists in database...alignment skipped
+Sequence with id P01994 no longer exists in database...alignment skipped
+Sequence with id P01946 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.322    0.133    0.441    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 334425
+
+
+  Database: multidb pa
+    Posted date:  Nov 1, 2026  11:22 AM
+  Number of letters in database: 1,699
+  Number of sequences in database:  12
+
+  Database: noacc_v5 (no parsed Seq-ids)
+    Posted date:  Oct 30, 2026  11:50 PM
+  Number of letters in database: 221
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

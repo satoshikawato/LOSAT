@@ -2202,27 +2202,36 @@ impl ListedTitles<'_> {
     /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
     /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded), at the rows
     /// that load it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
+    /// A pairwise run (outfmt 0 to 4) reads query `query`'s subjects in the ranks' order
+    /// `pairwise_order(query)` (its sorted groups), asked where its batch reads one by one.
     pub(super) fn hit_loads(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
         run: Option<crate::report::db_subject::RunThrow>,
+        pairwise_order: impl Fn(usize) -> Vec<usize>,
     ) -> HitLoads {
         let lists = |query: usize| {
             hit_lists[query].as_ref().map_or(&[][..], |hit_list| {
                 &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
             })
         };
+        let run = run.filter(|_| !self.parsed.is_empty());
+        let pairwise = run.is_some_and(|run| run.after.is_pairwise());
         HitLoads::of(
-            run.filter(|_| !self.parsed.is_empty()),
+            run,
             (0..hit_lists.len()).map(|query| {
-                (
-                    prefetch.reads_one_by_one(query),
+                // A batch that prefetches loads every subject, in any order.
+                let one_by_one = prefetch.reads_one_by_one(query);
+                let subjects = if pairwise && one_by_one {
+                    pairwise_order(query).into_iter().map(Some).collect()
+                } else {
                     lists(query)
                         .iter()
                         .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
-                        .collect(),
-                )
+                        .collect()
+                };
+                (one_by_one, subjects)
             }),
             |rank| self.parsed_subject(rank),
             |query, list| {
@@ -2289,17 +2298,20 @@ impl ListedTitles<'_> {
     /// NCBI's `x_CleanAndCompress` reads past the end of when it makes the title of the
     /// description table (NCBI BLAST+ 2.17.0 crashes there), as for the records of a
     /// subject set (`check_shown_subject_titles`), and a title that NCBI makes from a source
-    /// that LOSAT refuses (`shared::StoredTitle::check_shown_source`).
+    /// that LOSAT refuses (`shared::StoredTitle::check_shown_source`). A subject whose load
+    /// throws (`loads`) shows only its Seq-align id (`shared::check_pairwise_parsed`).
     pub(super) fn check_shown_titles(
         &self,
         database: &BlastpDatabase,
         shown: &std::collections::BTreeSet<usize>,
+        loads: &HitLoads,
     ) -> Result<()> {
         for &rank in shown {
             let ordinal = self.listed.ordinals[rank];
             match self.parsed_subject(rank) {
-                Some(subject) => shared::check_shown_parsed_subject(
+                Some(subject) => shared::check_pairwise_parsed(
                     subject,
+                    loads.load(rank),
                     true,
                     database.db.taxdb_found(),
                     || self.oids.oid(ordinal),
@@ -4084,7 +4096,11 @@ mod tests {
             b"p01 first protein [Test organism]"
         );
         titles
-            .check_shown_titles(&database, &[0usize, 1, 2, 3].into_iter().collect())
+            .check_shown_titles(
+                &database,
+                &[0usize, 1, 2, 3].into_iter().collect(),
+                &HitLoads::default(),
+            )
             .unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
     }
@@ -4139,8 +4155,12 @@ mod tests {
             lean.tabular_subject_ids(&hit_lists, true).unwrap(),
             records.tabular_subject_ids(&hit_lists, true).unwrap()
         );
-        lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
-            .unwrap();
+        lean.check_shown_titles(
+            &database,
+            &[0usize, 1].into_iter().collect(),
+            &HitLoads::default(),
+        )
+        .unwrap();
         lean.check_reported_titles(&hit_lists).unwrap();
         assert_eq!(lean.stitles(), records.stitles());
         // Titles, flags and every letter against the stored residues.

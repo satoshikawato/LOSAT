@@ -885,8 +885,8 @@ impl TabularSpec {
             FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
         } else if self.reads_subject(program) {
             FormatThrow::Writes(RunThrow {
-                after: AfterThrow::EndsRun,
                 rows: self.throw_rows(program),
+                ..RunThrow::every_row(AfterThrow::EndsRun)
             })
         } else {
             FormatThrow::Unread
@@ -3764,8 +3764,8 @@ mod tests {
         assert_eq!(
             spec("qseqid nident").format_throw(Program::Blastx),
             FormatThrow::Writes(RunThrow {
-                after: AfterThrow::EndsRun,
                 rows: SubjectFetch::WithIdentities,
+                ..RunThrow::every_row(AfterThrow::EndsRun)
             })
         );
         // `slen` and a field of the alignment block read the subject at every row.

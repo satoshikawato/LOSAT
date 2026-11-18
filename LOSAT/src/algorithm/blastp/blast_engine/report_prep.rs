@@ -169,6 +169,38 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// The ranks of the subjects that query `query`'s pairwise report (outfmt 0 to 4) of its hit
+/// list `shown` reads, in the order of its sorted groups (`QueryGroup::read_order` of the rows'
+/// hits, `-sorthits` `sort`): its description lines and alignments read them in that order.
+fn pairwise_read_order(
+    titles: &database::ListedTitles<'_>,
+    shown: &[Option<BlastpHitList>],
+    query: usize,
+    engine_counts: &EngineCounts,
+    sort: crate::report::hit_sort::ReportSort,
+) -> Vec<usize> {
+    let hits = collect_hits_and_methods_from_hit_lists(shown, query, engine_counts);
+    crate::report::x_pairwise_par::QueryGroup::read_order(
+        hits.into_iter()
+            .map(|(hit, _, seqalign_num_ident, _)| (hit.s_idx, (hit, seqalign_num_ident))),
+        |(hit, seqalign_num_ident)| {
+            crate::report::hit_sort::HspScores::of_hit(hit, *seqalign_num_ident)
+        },
+        |previous, s_idx| {
+            crate::report::db_subject::rank_joins_as_copy(
+                &titles.parsed,
+                previous as usize,
+                s_idx as usize,
+            )
+        },
+        sort,
+        false,
+    )
+    .into_iter()
+    .map(|rank| rank as usize)
+    .collect()
+}
+
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
 pub(super) struct ReportedPrefetch {
     /// The texts of the subjects that a query's report reads one by one where its batch's
@@ -280,7 +312,20 @@ pub(super) fn prefetch_reported_subjects(
                 crate::report::db_subject::FormatThrow::of_outfmts(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
+                    crate::report::db_subject::Shown {
+                        descriptions: args.num_descriptions,
+                        alignments: args.num_alignments,
+                    },
                 ),
+                |query| {
+                    pairwise_read_order(
+                        titles,
+                        std::slice::from_ref(&reported_lists[query]),
+                        query,
+                        engine_counts,
+                        args.sort,
+                    )
+                },
             )
         });
     if let Some(titles) = listed_titles.as_ref() {
@@ -553,8 +598,9 @@ pub(super) fn prefetch_reported_subjects(
                             // read none of a query whose HSPs have none, which looks no taxid up.
                             // A subject whose load throws loads nothing, nor does one that no
                             // report reaches after it (`HitLoads::loaded`).
+                            let loaded = |rank: &usize| hit_loads.loaded(*rank);
                             let mut fetched = database::ListedTitles::fetched_ranks(shown, rows)
-                                .filter(|&rank| hit_loads.loaded(rank))
+                                .filter(loaded)
                                 .peekable();
                             if rows == crate::report::tabular::SubjectFetch::Every
                                 || fetched.peek().is_some()
@@ -566,35 +612,15 @@ pub(super) fn prefetch_reported_subjects(
                                     // its sorted groups (`QueryGroup::read_order` of the rows'
                                     // hits, `-sorthits`), the other formats in their rows' order.
                                     let ranks: Vec<usize> = if pairwise_first {
-                                        let hits = collect_hits_and_methods_from_hit_lists(
+                                        pairwise_read_order(
+                                            titles,
                                             shown,
                                             query,
                                             engine_counts,
-                                        );
-                                        crate::report::x_pairwise_par::QueryGroup::read_order(
-                                            hits.into_iter().map(
-                                                |(hit, _, seqalign_num_ident, _)| {
-                                                    (hit.s_idx, (hit, seqalign_num_ident))
-                                                },
-                                            ),
-                                            |(hit, seqalign_num_ident)| {
-                                                crate::report::hit_sort::HspScores::of_hit(
-                                                    hit,
-                                                    *seqalign_num_ident,
-                                                )
-                                            },
-                                            |previous, s_idx| {
-                                                crate::report::db_subject::rank_joins_as_copy(
-                                                    &titles.parsed,
-                                                    previous as usize,
-                                                    s_idx as usize,
-                                                )
-                                            },
                                             args.sort,
-                                            false,
                                         )
                                         .into_iter()
-                                        .map(|rank| rank as usize)
+                                        .filter(loaded)
                                         .collect()
                                     } else {
                                         fetched.collect()

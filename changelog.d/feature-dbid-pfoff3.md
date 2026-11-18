@@ -1,0 +1,11 @@
+- A `-db` list of version 5 databases made with and without `makeblastdb -parse_seqids`, where `PRE_FETCH_SEQS_LIMIT`
+  turns a query batch's prefetch off and a query's report reads a parsed Seq-id that a database of the list cannot
+  look up: the pairwise report (`-outfmt 0`) and the query-anchored reports (`-outfmt 1` to `4`) now give the results
+  of NCBI BLAST+ instead of LOSAT's refusal, in BLASTP, psiblast (`-outfmt 0`, each round's report), BLASTN (every
+  task), BLASTX, TBLASTN and TBLASTX. The description line of such a sequence shows its Seq-align id and `Unknown`
+  (`NP_100001.1 Unknown`, with `-show_gis` `ref|NP_100001.1|Unknown`) with its scores. `-outfmt 0` stops after the
+  query's description lines with `BLAST Database error: DB contains no accession info.` (exit status 2) where the
+  first alignment it shows is of such a sequence under a parsed Seq-id (not a local one), and otherwise writes
+  `Sequence with id NP_100001 no longer exists in database...alignment skipped` for each of its alignments and goes
+  on; `-outfmt 1` to `4` stop there where any alignment they show is of such a sequence. The taxonomy database's texts
+  are those of the sequences that the report reads before it stops.

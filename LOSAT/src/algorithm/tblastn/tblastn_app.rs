@@ -2443,6 +2443,19 @@ fn search(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
                     &outputs.formats,
+                    (
+                        crate::report::db_subject::Shown {
+                            descriptions: resolved.num_descriptions,
+                            alignments: resolved.num_alignments,
+                        },
+                        // The pairwise report reads its subjects in the order of its sorts.
+                        outputs
+                            .formats
+                            .first()
+                            .and_then(crate::api::local_blast::FormatOutput::report_format)
+                            .and_then(crate::report::pairwise::PairwiseView::of)
+                            .map(|view| view.report_sort(resolved.formatting.report_sort())),
+                    ),
                     &batch_spans,
                 )
                 // A read of a reported sequence that

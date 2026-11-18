@@ -1,0 +1,64 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb ldpn; multidb ldrn; multidb ldan
+           4 sequences; 2,557 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NM_000001.1 Unknown                                                   286     8e-105
+NM_000002.1 Unknown                                                   286     8e-105
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 85560
+
+
+  Database: multidb ldpn
+    Posted date:  Nov 16, 2026  8:25 AM
+  Number of letters in database: 937
+  Number of sequences in database:  2
+
+  Database: multidb ldrn
+    Posted date:  Nov 16, 2026  11:11 PM
+  Number of letters in database: 577
+  Number of sequences in database:  1
+
+  Database: multidb ldan
+    Posted date:  Nov 16, 2026  8:25 AM
+  Number of letters in database: 1,043
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1603,7 +1603,19 @@ pub(super) fn reported_batch(
         asks.prefetched && !unfetched,
         asks.prefetch_runs && !unfetched,
         unfetched,
-        crate::report::db_subject::FormatThrow::of_run([asks.throw]),
+        (
+            crate::report::db_subject::FormatThrow::of_run(
+                [asks.throw],
+                crate::report::db_subject::Shown {
+                    descriptions: usize::try_from(options.num_descriptions).unwrap_or(0),
+                    alignments: usize::try_from(options.num_alignments).unwrap_or(0),
+                },
+            ),
+            // The pairwise report reads its subjects in the order of its sorts.
+            options
+                .pairwise_view()
+                .map(|view| view.report_sort(options.report_sort())),
+        ),
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -3353,6 +3365,7 @@ mod archive_error_tests {
                 0,
                 None,
                 None,
+                &crate::report::db_subject::HitLoads::default(),
             )
             .map(|()| out)
         };

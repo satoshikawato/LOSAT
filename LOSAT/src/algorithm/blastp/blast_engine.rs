@@ -9083,6 +9083,7 @@ fn write_reports_without_queries(
                     true,
                     true,
                     None,
+                    &crate::report::db_subject::HitLoads::default(),
                 )?;
             }
             OutputFormat::TabularWithComments => {
@@ -12186,6 +12187,7 @@ fn run_call(
                     Some(titles) => titles.check_shown_titles(
                         database.expect("listed titles are a database's"),
                         &shown,
+                        &prefetched.hit_loads,
                     ),
                     None => check_shown_subject_titles(shown.iter().copied(), subject_records),
                 };

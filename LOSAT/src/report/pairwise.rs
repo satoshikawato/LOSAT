@@ -152,6 +152,17 @@ impl PairwiseView {
         }
     }
 
+    /// What the format's report does after a subject whose lookup throws where its batch's
+    /// prefetch is off (`report::db_subject::AfterThrow`): outfmt 0 skips the alignments of such a
+    /// subject (or ends the run at its first alignment), 1 to 4 end the run at the first.
+    pub fn after_throw(self) -> crate::report::db_subject::AfterThrow {
+        use crate::report::db_subject::AfterThrow;
+        match self {
+            Self::Pairwise => AfterThrow::SkipsAlignment,
+            Self::QueryAnchored { .. } => AfterThrow::EndsAtAlignment,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2980-2987
     // ```c++
     //     if(args.Exist(kArgSortHSPs) && args[kArgSortHSPs])
@@ -880,6 +891,10 @@ pub enum DatabaseHeading<'a> {
     Title(&'a [u8], &'a super::defline::SourceTaxname),
     /// With whether every definition line is shown (`ParsedSubject::heading`).
     Parsed(&'a crate::report::db_subject::ParsedSubject, bool),
+    /// A sequence whose lookup throws where the alignment loads it (its batch's prefetch is off,
+    /// `report::db_subject::HitLoad::Throws`): the `catch` of each alignment writes NCBI's line in
+    /// its place (`skipped_id`, showalign.cpp:1976-1981), and no heading.
+    Thrown(&'a crate::report::db_subject::ParsedSubject),
 }
 
 impl<'a> DatabaseHeading<'a> {
@@ -895,6 +910,7 @@ impl<'a> DatabaseHeading<'a> {
             DatabaseHeading::Parsed(subject, every_line) => {
                 subject.heading_skipped_id(protein, every_line)
             }
+            DatabaseHeading::Thrown(subject) => Some(subject.skipped_id()),
         }
     }
 
@@ -936,6 +952,7 @@ impl<'a> DatabaseHeading<'a> {
                     Err(id) => Ok(Some(id)),
                 };
             }
+            DatabaseHeading::Thrown(subject) => return Ok(Some(subject.skipped_id())),
         };
         let generated;
         let heading: &[u8] = if title.is_empty() {
@@ -970,6 +987,37 @@ impl<'a> DatabaseHeading<'a> {
     ) -> Self {
         DatabaseHeading::Parsed(subject, !gapped && hsps > 1)
     }
+
+    /// The heading of a subject with parsed Seq-ids as `parsed` makes it, or `Thrown` where its
+    /// load throws (`thrown`, `x_pairwise_par::QuerySections::thrown`).
+    fn loaded(
+        subject: &'a crate::report::db_subject::ParsedSubject,
+        gapped: bool,
+        hsps: usize,
+        thrown: bool,
+    ) -> Self {
+        if thrown {
+            return DatabaseHeading::Thrown(subject);
+        }
+        Self::parsed(subject, gapped, hsps)
+    }
+}
+
+/// `x_pairwise_par::QuerySections::thrown` of a report whose subjects' loads are `loads` and whose
+/// subjects with parsed Seq-ids are `parsed`, by subject index: the exception of subject `s_idx`'s
+/// load where it throws (`HitLoads::thrown`), and whether its Seq-align id is local
+/// (`ParsedSubject::alignment_id_is_local`).
+fn thrown_load<'l>(
+    loads: &'l crate::report::db_subject::HitLoads,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> Option<(&'l crate::ncbi_exception::NcbiException, bool)> {
+    let exception = loads.thrown(s_idx as usize)?;
+    let local = parsed
+        .get(s_idx as usize)
+        .and_then(Option::as_deref)
+        .is_some_and(crate::report::db_subject::ParsedSubject::alignment_id_is_local);
+    Some((exception, local))
 }
 
 /// The source of the subject `s_idx` without parsed Seq-ids among `sources`, the sources of a
@@ -2993,6 +3041,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     write_blastp_pairwise_window(
         hits,
@@ -3013,6 +3062,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
         epilog,
         x_pool,
         None,
+        loads,
     )
 }
 
@@ -3041,6 +3091,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -3090,6 +3141,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
             parsed_subjects,
             subject_sources,
             anchored,
+            loads,
         },
         query_range.start,
         &hits_by_query,
@@ -3139,6 +3191,8 @@ struct BlastpSections<'a> {
     subject_sources: &'a [super::defline::SourceTaxname],
     /// The sequences of the query-anchored sections (outfmt 1 to 4).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// What the reports' loads do at each subject, by subject (`thrown_load`).
+    loads: &'a crate::report::db_subject::HitLoads,
 }
 
 /// The HSPs of a query-anchored section (outfmt 1 to 4), added to `hsps`: the first
@@ -3609,6 +3663,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                     stored_source(self.subject_sources, s_idx),
                     parsed_subject(self.parsed_subjects, s_idx),
                     true,
+                    self.thrown(s_idx).is_some(),
                 )
             },
             read,
@@ -3630,7 +3685,12 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let parsed = parsed_subject(self.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
+                Some(subject) => DatabaseHeading::loaded(
+                    subject,
+                    true,
+                    group.own_hsps(s_idx),
+                    self.thrown(s_idx).is_some(),
+                ),
                 None => DatabaseHeading::Title(
                     &group.subject_titles[&s_idx],
                     stored_source(self.subject_sources, s_idx),
@@ -3665,6 +3725,10 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 write_alignment(writer, hit, config)
             },
         )
+    }
+
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        thrown_load(self.loads, self.parsed_subjects, s_idx)
     }
 
     fn merges_alignments(&self) -> bool {
@@ -4314,15 +4378,21 @@ fn record_skipped_id(
 /// The description-table label of a database sequence (before the cut to the line): the title
 /// that `GenerateDefline` makes of the stored title `title` and the source `source` of the
 /// Bioseq, which an empty title is made from (`Unknown` where NCBI's `HtmlDecode` throws), or for
-/// a sequence with parsed Seq-ids its id and title (`ParsedSubject::description`).
+/// a sequence with parsed Seq-ids its id and title (`ParsedSubject::description`; where its load
+/// throws, `thrown`, the `catch`'s Seq-align id and `Unknown`, `ParsedSubject::thrown_description`).
 pub fn database_description_label(
     title: &[u8],
     source: &super::defline::SourceTaxname,
     parsed: Option<&crate::report::db_subject::ParsedSubject>,
     protein: bool,
+    thrown: bool,
 ) -> Vec<u8> {
     if let Some(subject) = parsed {
-        let (mut label, title) = subject.description(protein);
+        let (mut label, title) = if thrown {
+            subject.thrown_description()
+        } else {
+            subject.description(protein)
+        };
         label.extend_from_slice(&title.text);
         return label;
     }
@@ -4347,6 +4417,7 @@ fn write_blastn_description_table<W: Write>(
     protein: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -4368,12 +4439,14 @@ fn write_blastn_description_table<W: Write>(
             //     } catch (const CException&){
             //         sdl->defline = "Unknown";
             // ```
+            // (also the `catch` of a load that throws, `loads`, `thrown_description`)
             let title = subject_titles.get(&s_idx).map_or(&[][..], Vec::as_slice);
             database_description_label(
                 title,
                 stored_source(sources, s_idx),
                 parsed_subject(parsed, s_idx),
                 protein,
+                loads.thrown(s_idx as usize).is_some(),
             )
         },
         read,
@@ -4655,6 +4728,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -4690,6 +4764,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             queries,
             report,
             anchored,
+            loads,
         },
         query_range.start,
         &hits_by_query,
@@ -4720,6 +4795,8 @@ struct BlastnSections<'a> {
     report: &'a BlastnPairwiseReport,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// What the reports' loads do at each subject, by subject (`thrown_load`).
+    loads: &'a crate::report::db_subject::HitLoads,
 }
 
 impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
@@ -4795,6 +4872,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             read,
+            self.loads,
         )?;
         writeln!(writer)
     }
@@ -4814,9 +4892,12 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
         if self.report.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => {
-                    DatabaseHeading::parsed(subject, self.report.gapped, group.own_hsps(s_idx))
-                }
+                Some(subject) => DatabaseHeading::loaded(
+                    subject,
+                    self.report.gapped,
+                    group.own_hsps(s_idx),
+                    self.thrown(s_idx).is_some(),
+                ),
                 None => DatabaseHeading::Title(
                     &group.subject_titles[&s_idx],
                     stored_source(&self.report.subject_sources, s_idx),
@@ -4851,6 +4932,10 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
                 write_alignment(writer, hit, config)
             },
         )
+    }
+
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        thrown_load(self.loads, &self.report.parsed_subjects, s_idx)
     }
 
     fn merges_alignments(&self) -> bool {
@@ -5368,6 +5453,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
     // outfmt 0).
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -5402,6 +5488,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report,
             database,
             anchored,
+            loads,
         },
         query_range.start,
         &hits_by_query,
@@ -5431,6 +5518,8 @@ struct TblastxSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// What the reports' loads do at each subject, by subject (`thrown_load`).
+    loads: &'a crate::report::db_subject::HitLoads,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
@@ -5508,6 +5597,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             read,
+            self.loads,
         )?;
         writeln!(writer)
     }
@@ -5541,7 +5631,12 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, false, group.own_hsps(s_idx)),
+                Some(subject) => DatabaseHeading::loaded(
+                    subject,
+                    false,
+                    group.own_hsps(s_idx),
+                    self.thrown(s_idx).is_some(),
+                ),
                 None => DatabaseHeading::Title(
                     &group.subject_titles[&s_idx],
                     stored_source(&self.report.subject_sources, s_idx),
@@ -5570,6 +5665,10 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             part,
             write_hsp,
         )
+    }
+
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        thrown_load(self.loads, &self.report.parsed_subjects, s_idx)
     }
 
     fn merges_alignments(&self) -> bool {
@@ -6606,6 +6705,7 @@ mod tests {
                         None,
                         x_pool,
                         None,
+                        &crate::report::db_subject::HitLoads::default(),
                     )
                     .unwrap();
                     written
@@ -6684,6 +6784,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -6741,6 +6842,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             report,
             database,
             anchored,
+            loads,
         },
         0,
         &hits_by_query,
@@ -6780,6 +6882,8 @@ struct TblastnSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// What the reports' loads do at each subject, by subject (`thrown_load`).
+    loads: &'a crate::report::db_subject::HitLoads,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
@@ -6879,6 +6983,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             read,
+            self.loads,
         )?;
         writeln!(writer)
     }
@@ -6907,7 +7012,12 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         let parsed = parsed_subject(self.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
+                Some(subject) => DatabaseHeading::loaded(
+                    subject,
+                    true,
+                    group.own_hsps(s_idx),
+                    self.thrown(s_idx).is_some(),
+                ),
                 None => DatabaseHeading::Title(
                     &group.subject_titles[&s_idx],
                     stored_source(self.subject_sources, s_idx),
@@ -6936,6 +7046,10 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             part,
             write_hsp,
         )
+    }
+
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        thrown_load(self.loads, self.parsed_subjects, s_idx)
     }
 
     fn merges_alignments(&self) -> bool {
@@ -7303,6 +7417,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     // outfmt 0).
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let sections = BlastxSections {
         config,
@@ -7314,6 +7429,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         records_parsed,
         record_titles,
         anchored,
+        loads,
     };
     // `hits[i]` is HSP `first_hsp + i` of the run's hit list (LOSAT Web's `run_local` writes a run
     // batch by batch).
@@ -7379,6 +7495,8 @@ struct BlastxSections<'a> {
     record_titles: &'a [&'a [u8]],
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// What the reports' loads do at each database subject, by subject (`thrown_load`).
+    loads: &'a crate::report::db_subject::HitLoads,
 }
 
 impl BlastxSections<'_> {
@@ -7421,10 +7539,11 @@ impl BlastxSections<'_> {
             None => parsed_subject(self.records_parsed, s_idx),
         };
         let heading = match (parsed, self.database) {
-            (Some(subject), _) => Some(DatabaseHeading::parsed(
+            (Some(subject), _) => Some(DatabaseHeading::loaded(
                 subject,
                 self.options.gapped,
                 group.own_hsps(s_idx),
+                super::x_pairwise_par::QuerySections::thrown(self, s_idx).is_some(),
             )),
             (None, Some((_, titles, _, sources))) => Some(DatabaseHeading::Title(
                 &titles[s_idx as usize],
@@ -7575,6 +7694,11 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
         }
         Ok(())
+    }
+
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        let parsed = self.database.map_or(&[][..], |(_, _, parsed, _)| parsed);
+        thrown_load(self.loads, parsed, s_idx)
     }
 
     fn merges_alignments(&self) -> bool {
@@ -8298,6 +8422,7 @@ mod tblastx_tests {
                         )),
                         x_pool,
                         None,
+                        &crate::report::db_subject::HitLoads::default(),
                     )
                     .unwrap();
                     (written, diagnostics)
@@ -8401,6 +8526,7 @@ mod tblastx_tests {
             false,
             None,
             &mut crate::report::query_warnings::no_subject_reads,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8467,6 +8593,7 @@ mod tblastx_tests {
             true,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8515,6 +8642,7 @@ mod tblastx_tests {
             false,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8558,6 +8686,7 @@ mod tblastx_tests {
             true,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8606,6 +8735,7 @@ mod tblastx_tests {
                 true,
                 columns,
                 &mut crate::report::query_warnings::no_subject_reads,
+                &crate::report::db_subject::HitLoads::default(),
             )
             .map(|()| out)
         };
@@ -8780,6 +8910,7 @@ mod tblastx_tests {
                 0,
                 None,
                 pool,
+                &crate::report::db_subject::HitLoads::default(),
             )
             .unwrap_err();
             // The merged stream when the error comes back: the report's last bytes are there
@@ -8957,6 +9088,7 @@ mod tblastx_tests {
             false,
             None,
             &mut crate::report::query_warnings::no_subject_reads,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
         let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
@@ -8979,6 +9111,107 @@ mod tblastx_tests {
             out,
             b"Sequence with id Subject_1 no longer exists in database...alignment skipped\n\
               Sequence with id Subject_1 no longer exists in database...alignment skipped\n"
+        );
+    }
+
+    // DBID pfoff-3 (DECISIONS 62 (13); NCBI BLAST+ 2.17.0, probe `R/pfoff/p3`, `tx.U2.b1.dflt.0`):
+    // a subject whose load throws where its batch's prefetch is off has the description line of
+    // its Seq-align id and `Unknown`, and in outfmt 0 each of its HSPs one line that names the
+    // id's accession without its version, with no heading (`DatabaseHeading::Thrown`).
+    #[test]
+    fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
+        use crate::report::db_subject::{
+            AfterThrow, FoundInstead, HitLoads, LookupFailure, ParsedSubject, RunThrow,
+        };
+        let subject = |accession: &[u8], throws: bool| {
+            let subject = ParsedSubject::new(crate::seqid::DeflineSet {
+                deflines: vec![crate::seqid::BlastDefline {
+                    title: Some(b"ntitle".to_vec()),
+                    ids: vec![crate::seqid::ParsedSeqId::Other(
+                        crate::seqid::model::TextseqId {
+                            accession: Some(accession.to_vec()),
+                            version: Some(1),
+                            ..Default::default()
+                        },
+                    )],
+                    ..Default::default()
+                }],
+            })
+            .unwrap();
+            Some(Arc::new(if throws {
+                subject.found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+                    crate::seqdb::tax_files::NO_ACCESSION_INFO,
+                ))))
+            } else {
+                subject
+            }))
+        };
+        // 0 loads, 1 throws.
+        let parsed = vec![subject(b"NM_100000", false), subject(b"NM_100001", true)];
+        let loads = HitLoads::of(
+            Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),
+            [(true, vec![Some(0), Some(1)])],
+            |key| parsed[key].as_deref(),
+            |_, _| 0,
+        );
+        assert!(loads.loaded(0));
+        assert!(loads.thrown(1).is_some());
+        let mut second = tblastx_hit(1);
+        second.hit.s_idx = 1;
+        let mut third = second.clone();
+        third.hit.bit_score = 13.9;
+        let first = tblastx_hit(1);
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&first]), (1, vec![&second, &third])]
+                .into_iter()
+                .collect();
+        let titles: std::collections::HashMap<u32, Vec<u8>> =
+            [(0, b"ntitle".to_vec()), (1, b"ntitle".to_vec())]
+                .into_iter()
+                .collect();
+        let mut out = Vec::new();
+        write_blastn_description_table(
+            &mut out,
+            &[0, 1],
+            true,
+            &hits,
+            &titles,
+            &parsed,
+            &[],
+            false,
+            false,
+            None,
+            &mut crate::report::query_warnings::no_subject_reads,
+            &loads,
+        )
+        .unwrap();
+        let rows: Vec<&[u8]> = out.split(|&byte| byte == b'\n').skip(3).take(2).collect();
+        assert!(
+            rows[0].starts_with(b"NM_100000.1 ntitle "),
+            "{:?}",
+            String::from_utf8_lossy(rows[0])
+        );
+        assert!(
+            rows[1].starts_with(b"NM_100001.1 Unknown "),
+            "{:?}",
+            String::from_utf8_lossy(rows[1])
+        );
+        let mut out = Vec::new();
+        write_database_subject_alignments_part(
+            &mut out,
+            None,
+            DatabaseHeading::loaded(parsed[1].as_deref().unwrap(), false, 2, true),
+            false,
+            &hits[&1],
+            &[1, 2],
+            0..2,
+            |_, _| panic!("no HSP is written"),
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            b"Sequence with id NM_100001 no longer exists in database...alignment skipped\n\
+              Sequence with id NM_100001 no longer exists in database...alignment skipped\n"
         );
     }
 
@@ -9086,6 +9319,7 @@ mod tblastx_tests {
                 true,
                 None,
                 None,
+                &crate::report::db_subject::HitLoads::default(),
             )
             .unwrap();
         };
@@ -9127,6 +9361,7 @@ mod tblastx_tests {
                     &subject_titles,
                     &parsed,
                     &[],
+                    &crate::report::db_subject::HitLoads::default(),
                     &report,
                     None,
                     None,

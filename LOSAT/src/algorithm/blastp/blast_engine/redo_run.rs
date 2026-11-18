@@ -577,9 +577,11 @@ pub(super) fn plan_redo_and_expand_lists<P>(
             "LOSAT_X_SEGSHARE",
             x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
         );
+        // `-use_sw_tback` solves no Newton problem ahead (`x_newton_lanes_prefetch_matches`
+        // returns at once for the Smith-Waterman redo).
         crate::utils::xreach::x_reach!(
             "LOSAT_X_NEWTONLANES",
-            x_redo_par_run || !use_parallel_kappa_match_redo
+            (x_redo_par_run || !use_parallel_kappa_match_redo) && !args.use_sw_tback
         );
     }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
@@ -1214,12 +1216,17 @@ where
     Ok(())
 }
 
-/// LOSAT's refusal of a query batch whose Smith-Waterman redo fails in NCBI
-/// (`kappa::smith_waterman::SwRedoFailed`) at the batch's last redone match. LOSAT gives NCBI's
-/// one-thread output at every `-num_threads`, and NCBI's one-thread redo keeps the status of its
-/// last match (`status_code_tld[0]`): a failed earlier match is dropped, and a status other than
-/// 0 at the end fails the batch's traceback ("BLAST engine error: Traceback failed", exit
-/// status 3), which LOSAT does not write yet.
+/// NCBI's error of a query batch whose Smith-Waterman redo (`kappa::smith_waterman::SwRedoFailed`)
+/// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
+/// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
+/// the status again), a status other than 0 at the end fails the batch's traceback, and the
+/// application writes `BLAST engine error: Traceback failed` (exit status 3) after the reports of
+/// the batches before (without the epilog) and the failing batch's reader messages and search
+/// strategy request. LOSAT gives NCBI's one-thread output at every `-num_threads`. The error names
+/// the batch's first query (`batch_start`, a query of this call: the search of all queries, the only
+/// call that runs `-use_sw_tback`, `x_query_block_plan`), as the error of a header file that a
+/// batch reaches does (`database::HeaderReadError`), whose batches before `search` searches again
+/// and reports alone.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
 /// ```c
@@ -1229,23 +1236,48 @@ where
 ///         }
 ///     }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
 /// ```c++
 ///     if (status) {
 ///         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");
+///     }
 /// ```
-fn sw_traceback_failed() -> anyhow::Error {
-    anyhow::anyhow!(
-        "a query batch whose Smith-Waterman redo (-use_sw_tback) fails in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold and the alignment of the first query letter with the subject's first letter scores 0 or less) at its last redone match, with which NCBI's traceback fails (\"BLAST engine error: Traceback failed\"), is not supported by LOSAT's BLASTP yet"
-    )
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:274-276 (the exception leaves the
+/// batch loop before the batch's formatting and `PrintEpilog`)
+/// ```c++
+///                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+///                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+///                 results = lcl_blast.Run();
+/// ```
+#[cold]
+#[inline(never)]
+fn sw_traceback_failed(batch_start: usize) -> anyhow::Error {
+    super::database::HeaderReadError {
+        query: batch_start,
+        error: crate::blastinput::app::engine_error("Traceback failed"),
+    }
+    .into()
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`kappa::smith_waterman::SwRedoEndless`; RPS-BLAST's refusal, PD-LOSAT-NCBI-DEFECTS 1.30).
-fn sw_endless() -> anyhow::Error {
-    anyhow::anyhow!(
-        "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
-    )
+/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.51, rule 3, within the class of
+/// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
+/// printed the reports of the batches before (`blastp_app.cpp:257-276`, quoted at
+/// [`sw_traceback_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
+/// does, after those reports (without the epilog), as TBLASTX's and TBLASTN's refusals of a step
+/// where NCBI's search of a batch does not finish do (`blastinput::app::ErrorAfterBatchReports`,
+/// the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the results of the query batches before
+/// are written"). Exit status 1, its message.
+#[cold]
+#[inline(never)]
+fn sw_endless(batch_start: usize) -> anyhow::Error {
+    super::database::HeaderReadError {
+        query: batch_start,
+        error: anyhow::anyhow!(
+            "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
+        ),
+    }
+    .into()
 }
 
 /// The one-thread loop: the queries redone in order on the calling thread, each query's matches
@@ -1364,7 +1396,7 @@ where
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_last_failed && q_idx + 1 == batch.end {
-                return Err(sw_traceback_failed());
+                return Err(sw_traceback_failed(batch.start));
             }
             continue;
         };
@@ -1430,6 +1462,9 @@ where
                     .iter()
                     .map(preliminary_hit_from_local_match_hsp),
             );
+            // An empty match (NCBI's `hsp_array` not NULL with `hspcnt` 0) would reach NCBI's redo
+            // and set `status_code_tld` to 0 (`-use_sw_tback`: the batch's failure status); LOSAT's
+            // preliminary lists hold no match without HSPs, so this skip is never taken there.
             if kappa_preliminary_hits.is_empty() {
                 continue;
             }
@@ -1480,7 +1515,7 @@ where
             let subject = subjects.read(s_idx)?;
             let subject_raw = subject.residues();
             let postprocessed = if let Some(sw_scratch) = sw_scratch.as_mut() {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3640-3643,3730-3733
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646,3735-3737
                 // ```c
                 //                     if (*pStatusCode != 0) {
                 //                         goto match_loop_cleanup;
@@ -1520,7 +1555,7 @@ where
                         continue;
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
-                        return Err(sw_endless());
+                        return Err(sw_endless(batch.start));
                     }
                     Err(error) => return Err(error),
                 }
@@ -1565,10 +1600,10 @@ where
         //     for (i = 0; i < actual_num_threads; ++i) {
         //         if (seqSrc  &&  status_code == 0) {
         // ```
-        // A failed Smith-Waterman redo of the batch's last match fails NCBI's traceback of the
-        // batch (`Traceback failed`, traceback_stage.cpp:251-252).
+        // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
+        // the batch (`Traceback failed`, traceback_stage.cpp:250-252).
         if sw_last_failed && q_idx + 1 == batch.end {
-            return Err(sw_traceback_failed());
+            return Err(sw_traceback_failed(batch.start));
         }
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as

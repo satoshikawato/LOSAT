@@ -15,7 +15,7 @@ use super::RPS_K_MULT;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
-use crate::algorithm::pssm_search::redo1::smith_waterman::SwRedoScratch;
+use crate::algorithm::pssm_search::redo1::smith_waterman::RpsSwScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::traceback0::{trace_hsps, TraceHsps, TraceSubject};
 use crate::common::GapEditOp;
@@ -59,7 +59,7 @@ pub(crate) struct RpsTraceScratch {
     /// The bytes of those rows as the `.freq` file holds them.
     pub(super) freq_bytes: Vec<u8>,
     /// The Smith-Waterman redo's memory (`-use_sw_tback`).
-    pub(super) sw: SwRedoScratch,
+    pub(super) sw: RpsSwScratch,
 }
 
 impl RpsTraceScratch {
@@ -69,7 +69,7 @@ impl RpsTraceScratch {
             pssm: QueryPssm { rows: Vec::new() },
             ratios: Vec::new(),
             freq_bytes: Vec::new(),
-            sw: SwRedoScratch::new(),
+            sw: RpsSwScratch::new(),
         }
     }
 }

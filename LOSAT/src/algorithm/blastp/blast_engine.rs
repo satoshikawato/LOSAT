@@ -2660,17 +2660,18 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     //     }
     // ```
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
-    // statistics 1 to 3 (`kappa::smith_waterman`). With `-comp_based_stats 0` NCBI runs the redo
-    // too, without an adjustment, on the preliminary lists in subject order (the stream is not
-    // sorted by score), which LOSAT's redo loop does not read yet. psiblast's redo of a PSSM keeps
-    // its refusal (the position-based Smith-Waterman redo).
+    // statistics 1 to 3 (`kappa::smith_waterman`). Without them (`-comp_based_stats 0`, and
+    // IDENTITY's reset, `identity_cbs_reset`) NCBI runs the redo too,
+    // without an adjustment, on the preliminary lists in subject order (the stream is not sorted
+    // by score), which LOSAT's redo loop does not read yet (the next item, X4-c0). psiblast's redo
+    // of a PSSM keeps its refusal (the position-based Smith-Waterman redo).
     if args.use_sw_tback {
         if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
             bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
         }
         if !args.comp_based_stats.is_enabled() {
             bail!(
-                "-use_sw_tback with -comp_based_stats 0 (the Smith-Waterman redo without composition-based statistics) is not supported by LOSAT's {program} yet"
+                "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
             );
         }
     }
@@ -7984,10 +7985,15 @@ fn search(
             //                 results = lcl_blast.Run();
             // ```
             // A header file that NCBI cannot read (or rpsblast's profile sequences, read by a
-            // batch's traceback) fails the batch whose hit lists reach it first
-            // (`database::HeaderReadError`), after the outfmt 0 prolog, the reports of the
-            // batches before (without the epilog) and that batch's reader messages. LOSAT
-            // searches all batches together: the batches before are searched again alone.
+            // batch's traceback, or blastp's `-use_sw_tback` redo whose batch's last redone match
+            // fails, `Traceback failed`, `redo_run::sw_traceback_failed`) fails the batch whose
+            // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0 prolog,
+            // the reports of the batches before (without the epilog) and that batch's reader
+            // messages; so do LOSAT's refusals of a step where NCBI's search of the batch stops or
+            // never ends (`redo_run::sw_endless`, a query chunk split again or without a query in
+            // `search_split_query_batches`), as TBLASTX's and TBLASTN's
+            // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
+            // batches before are searched again alone.
             let failure = match result {
                 Err(error) if error.is::<database::HeaderReadError>() => error
                     .downcast::<database::HeaderReadError>()
@@ -8130,11 +8136,16 @@ fn x_query_block_plan(
 )> {
     use super::x_query_blocks::XBlockReport;
     super::x_query_blocks::x_bp_qblock()?;
-    // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
+    // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries. So is a
+    // `-use_sw_tback` search: a later batch's Smith-Waterman redo can fail NCBI's traceback
+    // (`redo_run::sw_traceback_failed`) or meet the redo that NCBI never ends (LOSAT's refusal,
+    // `redo_run::sw_endless`), which come after the reports of the batches before in the search of
+    // all queries (`search`).
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
+        || args.use_sw_tback
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -9746,11 +9757,30 @@ fn search_split_query_batches(
             "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
             args.app.name()
         );
-        anyhow::ensure!(
-            !protein_chunk_would_be_split(&chunks, sizes),
-            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
-            args.app.name()
-        );
+        // NCBI stops in the search of the batch (its exception) after it has printed the reports of
+        // the batches before (`blastp_app.cpp:257-276`, quoted in `search`): so do these refusals,
+        // as the batch's failure (`database::HeaderReadError`, the batch's first query; TBLASTN's
+        // and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). In psiblast's later rounds,
+        // the only ones it splits, NCBI has printed the rounds of the query before as well: those
+        // refusals come before the run's first byte. The negative CHUNK_SIZE above, where NCBI does
+        // not always stop, is refused before the first byte too, as TBLASTN's.
+        let batch_refusal = |refusal: anyhow::Error| -> anyhow::Error {
+            if args.psi_search.is_some() {
+                refusal
+            } else {
+                database::HeaderReadError {
+                    query: range.start,
+                    error: refusal,
+                }
+                .into()
+            }
+        };
+        if protein_chunk_would_be_split(&chunks, sizes) {
+            return Err(batch_refusal(anyhow::anyhow!(
+                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
+                args.app.name()
+            )));
+        }
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The options' search spaces of the batch's contexts (one per query), which every chunk
         // reads by its own context index (`SplitQuery_SetEffectiveSearchSpace`, quoted at
@@ -9763,11 +9793,12 @@ fn search_split_query_batches(
         for chunk in &chunks {
             // NCBI fails to make the query factory of a chunk without a query ("Empty
             // CBlastQueryVector"); `split_protein_batch` makes none.
-            anyhow::ensure!(
-                !chunk.queries.is_empty(),
-                "a query chunk without a query is not supported by LOSAT's {}",
-                args.app.name()
-            );
+            if chunk.queries.is_empty() {
+                return Err(batch_refusal(anyhow::anyhow!(
+                    "a query chunk without a query is not supported by LOSAT's {}",
+                    args.app.name()
+                )));
+            }
             let parts: Vec<FastaRecord> = chunk
                 .queries
                 .iter()

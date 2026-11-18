@@ -319,6 +319,14 @@ impl MaskPost {
             ),
         }
     }
+
+    /// Sets the stack trace that the post names (`Rd::read_str`).
+    fn set_trace(&mut self, trace: String) {
+        match self {
+            MaskPost::BadChar(replaced) => replaced.trace = trace,
+            MaskPost::Utf8Tag(text) => *text = trace,
+        }
+    }
 }
 
 /// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`).
@@ -371,11 +379,6 @@ pub(super) trait Input {
 /// The deepest nesting of object frames that LOSAT follows (NCBI's stack is only limited by memory).
 const MAX_DEPTH: usize = 400;
 
-/// The frames that a reader reserves room for at its start: a mask file's objects nest about 20
-/// deep (a `Dbtag` Seq-id of an interval of a `packed-int` mask), so the stack is not grown while
-/// they are read.
-const FRAMES_RESERVED: usize = 32;
-
 /// The refusal of a frame past [`MAX_DEPTH`].
 #[cold]
 #[inline(never)]
@@ -383,7 +386,10 @@ fn too_deep() -> Fail {
     Fail::Unsupported(format!("objects nested more than {MAX_DEPTH} levels deep"))
 }
 
-/// A frame of NCBI's object stack as the mask reader keeps it (`object_frame`).
+/// A frame of NCBI's object stack (`object_frame`). The reader keeps only the depth of its stack
+/// (`Rd::depth`): each frame is a value of the function that reads what it holds (`Rd::frame`),
+/// which hands it to `Rd::exit` when it is left, for the error that leaves it (`Rd::leave`) and
+/// the stack traces that wait for it (`Trace`).
 #[derive(Clone, Copy, Debug)]
 struct Frame {
     kind: FrameKind,
@@ -426,8 +432,22 @@ enum Pointee {
     Null,
     /// `eThisPointer`: it follows.
     This,
-    /// `eOtherPointer`: it follows inside `ReadPointer`'s named frame, entered at this depth.
-    Other(usize),
+    /// `eOtherPointer`: it follows inside `ReadPointer`'s named frame of the declared type,
+    /// entered at this depth.
+    Other(usize, &'static str),
+}
+
+/// The `GetStackTrace()` of the posts of one VisibleString (`Rd::read_str`), built as the frames
+/// that were on the stack when it was read give their steps: a member or variant frame when its
+/// member changes or it is left, any other frame when it is left; the frame at the bottom names
+/// the type, and fills the trace into the posts.
+struct Trace {
+    /// The posts in `Rd::posts`.
+    posts: std::ops::Range<usize>,
+    /// The frames below this depth have not given their steps yet.
+    level: usize,
+    /// The steps given so far, from the top of the stack down.
+    steps: Vec<StackStep<'static>>,
 }
 
 /// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, quoted at `read_seq_loc_parts`):
@@ -487,7 +507,11 @@ const LIST_PACKED_INT: &str = "a Packed-seqint (packed-int)";
 /// The state of one `CObjectIStream`: the primitives, the object stack and what was posted.
 pub(super) struct Rd<I: Input> {
     pub(super) inp: I,
-    frames: Vec<Frame>,
+    /// `GetStackDepth()`: the frames entered and not left.
+    depth: usize,
+    /// The stack traces that wait for frames still on the stack (empty but for a VisibleString
+    /// that posted).
+    traces: Vec<Trace>,
     /// The messages posted since the caller last took them (`MaskFileReader::take_posts`).
     pub(super) posts: Vec<MaskPost>,
 }
@@ -525,11 +549,26 @@ const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
     "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
 );
 
+/// What `ReadWithSetFlagMember` of the member `name` makes of `fail`.
+#[cold]
+#[inline(never)]
+fn set_flag_member_error(fail: Fail, name: &str) -> Fail {
+    match fail {
+        Fail::Serial(e) => {
+            let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
+            let message = format!("error while reading {name}");
+            Fail::serial(e.rethrow_same(file, line, function, message))
+        }
+        other => other,
+    }
+}
+
 impl<I: Input> Rd<I> {
     pub(super) fn new(inp: I) -> Self {
         Rd {
             inp,
-            frames: Vec::with_capacity(FRAMES_RESERVED),
+            depth: 0,
+            traces: Vec::new(),
             posts: Vec::new(),
         }
     }
@@ -551,52 +590,61 @@ impl<I: Input> Rd<I> {
         type_name: Option<&'static str>,
         f: impl FnOnce(&mut Self) -> R<T>,
     ) -> R<T> {
-        let depth = self.enter(Frame::new(kind, type_name))?;
-        let result = f(self);
-        self.exit(depth, result)
+        self.frame_with(Frame::new(kind, type_name), |s, _| f(s))
     }
 
-    /// `BEGIN_OBJECT_FRAME` of `frame`: the depth below it, which [`exit`](Self::exit) takes
+    /// [`frame`](Self::frame) of `frame`, which `f` may change (`set_member`).
+    #[inline(always)]
+    fn frame_with<T>(
+        &mut self,
+        mut frame: Frame,
+        f: impl FnOnce(&mut Self, &mut Frame) -> R<T>,
+    ) -> R<T> {
+        let depth = self.enter()?;
+        let result = f(self, &mut frame);
+        self.exit(depth, frame, result)
+    }
+
+    /// `BEGIN_OBJECT_FRAME`: the depth below the new frame, which [`exit`](Self::exit) takes
     /// once what the frame holds has been read. Every `enter` is followed by its `exit`, with no
     /// return between them.
     #[inline(always)]
-    fn enter(&mut self, frame: Frame) -> R<usize> {
-        let depth = self.frames.len();
+    fn enter(&mut self) -> R<usize> {
+        let depth = self.depth;
         if depth >= MAX_DEPTH {
             return Err(too_deep());
         }
-        self.frames.push(frame);
+        self.depth = depth + 1;
         self.inp.set_stack_depth(depth + 1);
         Ok(depth)
     }
 
-    /// `END_OBJECT_FRAME` of the frame that [`enter`](Self::enter) entered at `depth`, after
-    /// what it holds was read with `result` (an error gets [`leave`](Self::leave)).
+    /// `END_OBJECT_FRAME` of `frame`, which [`enter`](Self::enter) entered at `depth`, after
+    /// what it holds was read with `result`: the traces that wait for it take its step, and an
+    /// error gets [`leave`](Self::leave).
     #[inline(always)]
-    fn exit<T>(&mut self, depth: usize, result: R<T>) -> R<T> {
+    fn exit<T>(&mut self, depth: usize, frame: Frame, result: R<T>) -> R<T> {
+        self.depth = depth;
+        self.inp.set_stack_depth(depth);
+        if !self.traces.is_empty() {
+            self.trace_frame(depth, frame);
+        }
         match result {
-            Ok(value) => {
-                self.frames.truncate(depth);
-                self.inp.set_stack_depth(depth);
-                Ok(value)
-            }
-            Err(fail) => Err(self.leave(fail)),
+            Ok(value) => Ok(value),
+            Err(fail) => Err(self.leave(frame, fail)),
         }
     }
 
-    /// `END_OBJECT_FRAME` of the top frame for `fail`: the frame is left, then `fail` gets what
-    /// leaving it adds.
+    /// What leaving `frame` (the stack is below it now) adds to `fail`.
     #[cold]
     #[inline(never)]
-    fn leave(&mut self, fail: Fail) -> Fail {
-        let frame = self.frames.pop().expect("a frame to leave");
-        self.inp.set_stack_depth(self.frames.len());
+    fn leave(&mut self, frame: Frame, fail: Fail) -> Fail {
         match fail {
             Fail::Serial(mut e) => {
                 e.add_frame_info(frame_name(frame.kind, frame.type_name, frame.member));
                 Fail::Serial(e)
             }
-            Fail::Eof if self.frames.len() >= 2 => {
+            Fail::Eof if self.depth >= 2 => {
                 let info = frame_info(frame.kind, frame.type_name, frame.member);
                 Fail::serial(NcbiException::new(
                     HANDLE_EOF,
@@ -612,31 +660,52 @@ impl<I: Input> Rd<I> {
         }
     }
 
-    /// `SetTopMemberId`: the member or variant of the top frame.
-    fn set_member(&mut self, name: &'static str) {
-        if let Some(top) = self.frames.last_mut() {
-            top.member = Some(name);
+    /// `SetTopMemberId`: the member or variant of the top frame, `frame`. A trace that waits for
+    /// the frame takes the member it had.
+    #[inline(always)]
+    fn set_member(&mut self, frame: &mut Frame, name: &'static str) {
+        if !self.traces.is_empty() {
+            self.trace_frame(self.depth - 1, *frame);
+        }
+        frame.member = Some(name);
+    }
+
+    /// The step of `frame`, at `depth`, for the traces that wait for it (`GetStackTrace()`: the
+    /// type of the bottom frame, then the member of each member or variant frame and `E` of each
+    /// element frame above it). The bottom frame completes them.
+    #[cold]
+    #[inline(never)]
+    fn trace_frame(&mut self, depth: usize, frame: Frame) {
+        let mut i = 0;
+        while i < self.traces.len() {
+            if self.traces[i].level != depth + 1 {
+                i += 1;
+                continue;
+            }
+            if depth == 0 {
+                let trace = self.traces.remove(i);
+                self.complete_trace(trace, frame.type_name);
+                continue;
+            }
+            let trace = &mut self.traces[i];
+            trace.level = depth;
+            match frame.kind {
+                FrameKind::ClassMember | FrameKind::ChoiceVariant => {
+                    trace.steps.extend(frame.member.map(StackStep::Member));
+                }
+                FrameKind::ArrayElement => trace.steps.push(StackStep::Element),
+                _ => {}
+            }
+            i += 1;
         }
     }
 
-    /// `GetStackTrace()`: the path of the value being read (`Blast-db-mask-info.algo-options`).
-    fn stack_trace(&self) -> String {
-        object_stack_trace(
-            self.frames
-                .first()
-                .and_then(|frame| frame.type_name)
-                .unwrap_or("?"),
-            self.frames
-                .iter()
-                .skip(1)
-                .filter_map(|frame| match frame.kind {
-                    FrameKind::ClassMember | FrameKind::ChoiceVariant => {
-                        frame.member.map(StackStep::Member)
-                    }
-                    FrameKind::ArrayElement => Some(StackStep::Element),
-                    _ => None,
-                }),
-        )
+    /// Fills `trace`, whose bottom frame is of the type `root`, into its posts.
+    fn complete_trace(&mut self, trace: Trace, root: Option<&'static str>) {
+        let text = object_stack_trace(root.unwrap_or("?"), trace.steps.into_iter().rev());
+        for post in &mut self.posts[trace.posts] {
+            post.set_trace(text.clone());
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1038
@@ -740,10 +809,10 @@ impl<I: Input> Rd<I> {
         self.frame(FrameKind::Class, Some(def.name), |s| {
             s.inp.begin_class()?;
             let mut pos = 0usize;
-            s.frame(FrameKind::ClassMember, None, |s| {
+            s.frame_with(Frame::new(FrameKind::ClassMember, None), |s, frame| {
                 while let Some(index) = s.inp.begin_member(def, pos)? {
                     let member = &def.members[index];
-                    s.set_member(member.name);
+                    s.set_member(frame, member.name);
                     s.missing_members(&def.members[pos..index])?;
                     // `ReadPointer` of a member held by `CRef<>` around `read`, which is called at
                     // this one place. Such a member has no set flag (`Member::set_flag`): the
@@ -755,20 +824,13 @@ impl<I: Input> Rd<I> {
                     };
                     let result = match pointee {
                         Pointee::Null => Ok(()),
-                        Pointee::This | Pointee::Other(_) => {
+                        Pointee::This | Pointee::Other(..) => {
                             let result = read(s, index);
                             s.end_pointer(pointee, result)
                         }
                     };
                     if member.set_flag {
-                        result.map_err(|fail| match fail {
-                            Fail::Serial(e) => {
-                                let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-                                let message = format!("error while reading {}", member.name);
-                                Fail::serial(e.rethrow_same(file, line, function, message))
-                            }
-                            other => other,
-                        })?;
+                        result.map_err(|fail| set_flag_member_error(fail, member.name))?;
                     } else {
                         result?;
                     }
@@ -812,9 +874,9 @@ impl<I: Input> Rd<I> {
     ) -> R<T> {
         self.frame(FrameKind::Choice, Some(def.name), |s| {
             s.inp.begin_choice()?;
-            let value = s.frame(FrameKind::ChoiceVariant, None, |s| {
+            let value = s.frame_with(Frame::new(FrameKind::ChoiceVariant, None), |s, frame| {
                 let index = s.inp.begin_variant(def)?;
-                s.set_member(def.variants[index].name);
+                s.set_member(frame, def.variants[index].name);
                 let value = read(s, index)?;
                 s.inp.end_variant()?;
                 Ok(value)
@@ -952,21 +1014,22 @@ impl<I: Input> Rd<I> {
     /// `CPointerTypeInfo::ReadPointer` of a `CRef<>` to a value of the type named `declared` that
     /// is empty when NCBI reads it: an `OPTIONAL` member held by `CRef<>` (the generated classes
     /// preallocate the mandatory ones) and each element of a list of `CRef`s (`AddElementIn`
-    /// pushes an empty `CRef`, stltypes.hpp:246-263). `read` reads the value (`This`, and `Other`
-    /// naming `declared`, inside `ReadPointer`'s named frame); `None` is a `NULL`. `@n` is NCBI's
-    /// error; a value of another type is refused (`Fail::Unsupported`), as what NCBI does with
-    /// it depends on what its process has read before.
-    fn read_pointer<T>(
+    /// pushes an empty `CRef`, stltypes.hpp:246-263). `read` reads the value and takes what it
+    /// needs of it (`This`, and `Other` naming `declared`, inside `ReadPointer`'s named frame);
+    /// `false` is a `NULL`, which it does not read. `@n` is NCBI's error; a value of another type
+    /// is refused (`Fail::Unsupported`), as what NCBI does with it depends on what its process
+    /// has read before.
+    fn read_pointer(
         &mut self,
         declared: &'static str,
-        read: impl FnOnce(&mut Self) -> R<T>,
-    ) -> R<Option<T>> {
+        read: impl FnOnce(&mut Self) -> R<()>,
+    ) -> R<bool> {
         let pointee = self.begin_pointer(declared)?;
         if let Pointee::Null = pointee {
-            return Ok(None);
+            return Ok(false);
         }
         let result = read(self);
-        self.end_pointer(pointee, result).map(Some)
+        self.end_pointer(pointee, result).map(|()| true)
     }
 
     /// [`read_pointer`](Self::read_pointer) up to the value: where it is ([`Pointee`]), the named
@@ -988,11 +1051,7 @@ impl<I: Input> Rd<I> {
                 if name != declared.as_bytes() {
                     return Err(self.other_type(&name, declared));
                 }
-                let frame = Frame {
-                    read_pointer: true,
-                    ..Frame::new(FrameKind::Named, Some(declared))
-                };
-                Ok(Pointee::Other(self.enter(frame)?))
+                Ok(Pointee::Other(self.enter()?, declared))
             }
         }
     }
@@ -1014,8 +1073,12 @@ impl<I: Input> Rd<I> {
     #[inline(always)]
     fn end_pointer<T>(&mut self, pointee: Pointee, result: R<T>) -> R<T> {
         match pointee {
-            Pointee::Other(depth) => {
-                let value = self.exit(depth, result)?;
+            Pointee::Other(depth, declared) => {
+                let frame = Frame {
+                    read_pointer: true,
+                    ..Frame::new(FrameKind::Named, Some(declared))
+                };
+                let value = self.exit(depth, frame, result)?;
                 self.inp.read_other_pointer_end()?;
                 Ok(value)
             }
@@ -1037,21 +1100,32 @@ impl<I: Input> Rd<I> {
         let mut posts = Vec::new();
         let result = self.inp.read_string(&mut posts);
         if !posts.is_empty() {
-            let trace = self.stack_trace();
+            let start = self.posts.len();
             for post in posts {
                 self.posts.push(match post {
-                    StringPost::Utf8Tag => MaskPost::Utf8Tag(trace.clone()),
+                    StringPost::Utf8Tag => MaskPost::Utf8Tag(String::new()),
                     StringPost::BadChar {
                         position,
                         byte,
                         string,
                     } => MaskPost::BadChar(ReplacedChar {
-                        trace: trace.clone(),
+                        trace: String::new(),
                         byte,
                         position,
                         string: string.into(),
                     }),
                 });
+            }
+            // `GetStackTrace()` now: the frames on the stack give it as they are left.
+            let trace = Trace {
+                posts: start..self.posts.len(),
+                level: self.depth,
+                steps: Vec::new(),
+            };
+            if self.depth == 0 {
+                self.complete_trace(trace, None);
+            } else {
+                self.traces.push(trace);
             }
         }
         result
@@ -1535,11 +1609,10 @@ impl<I: Input> Rd<I> {
     /// One `Seq-loc` (any variant, nested `mix` and `equiv` included): appends the ranges
     /// `CSeq_loc_CI` visits to `parts`, in its order (a `whole` Seq-loc is the interval 0 to
     /// 4294967294, whose `CRange` is `TRange::GetWhole()`; a point the interval of one position),
-    /// and returns how far `CSeq_loc::CheckId` walks it ([`IdWalk`]). An element of `packed-int`,
-    /// `mix` or `equiv` stated as `NULL` (an empty `CRef<>`) is where the walk dereferences it,
-    /// if it gets that far (`**ii`, `(*li)->CheckId`).
-    fn read_seq_loc_parts(&mut self, parts: &mut Vec<MaskPart>) -> R<IdWalk> {
-        let mut walk = IdWalk::Same(None);
+    /// and walks it in `walk` (a new [`IdWalk`]) as `CSeq_loc::CheckId` does. An element of
+    /// `packed-int`, `mix` or `equiv` stated as `NULL` (an empty `CRef<>`) is where the walk
+    /// dereferences it, if it gets that far (`**ii`, `(*li)->CheckId`).
+    fn read_seq_loc_parts(&mut self, parts: &mut Vec<MaskPart>, walk: &mut IdWalk) -> R<()> {
         self.read_choice(&SEQ_LOC, |s, index| {
             match index {
                 SEQ_LOC_NULL => {
@@ -1567,12 +1640,14 @@ impl<I: Input> Rd<I> {
                 }
                 SEQ_LOC_PACKED_INT => {
                     s.read_container(false, |s| {
-                        match s.read_pointer(SEQ_INTERVAL.name, |s| s.read_seq_interval())? {
-                            Some((interval, seq_id)) => {
-                                walk.update(seq_id);
-                                parts.push(MaskPart::Interval(interval));
-                            }
-                            None => walk.null(s.null_element(LIST_PACKED_INT)),
+                        let read = s.read_pointer(SEQ_INTERVAL.name, |s| {
+                            let (interval, seq_id) = s.read_seq_interval()?;
+                            walk.update(seq_id);
+                            parts.push(MaskPart::Interval(interval));
+                            Ok(())
+                        })?;
+                        if !read {
+                            walk.null(s.null_element(LIST_PACKED_INT));
                         }
                         Ok(())
                     })?;
@@ -1617,9 +1692,14 @@ impl<I: Input> Rd<I> {
                         LIST_EQUIV
                     };
                     s.read_container(index == SEQ_LOC_EQUIV, |s| {
-                        match s.read_pointer(SEQ_LOC.name, |s| s.read_seq_loc_parts(parts))? {
-                            Some(inner) => walk.nested(inner),
-                            None => walk.null(s.null_element(list)),
+                        let read = s.read_pointer(SEQ_LOC.name, |s| {
+                            let mut inner = IdWalk::Same(None);
+                            s.read_seq_loc_parts(parts, &mut inner)?;
+                            walk.nested(inner);
+                            Ok(())
+                        })?;
+                        if !read {
+                            walk.null(s.null_element(list));
                         }
                         Ok(())
                     })?;
@@ -1638,19 +1718,20 @@ impl<I: Input> Rd<I> {
                     // `feat`: read; `x_CheckId` fails, so the Seq-loc has no Seq-id.
                     let mut scratch = Vec::new();
                     s.read_value(SEQ_LOC.variants[index].ty, &mut scratch)?;
-                    walk = IdWalk::Stopped;
+                    *walk = IdWalk::Stopped;
                 }
             }
             Ok(())
-        })?;
-        Ok(walk)
+        })
     }
 
     /// One `Seq-loc` of `masks`: the ranges `CSeq_loc_CI` visits and `CSeq_loc::GetId()`, or the
     /// element stated as `NULL` that `GetId` dereferences.
     fn read_seq_loc(&mut self) -> R<Result<MaskLoc, NullElement>> {
         let mut parts = Vec::new();
-        let id = match self.read_seq_loc_parts(&mut parts)? {
+        let mut walk = IdWalk::Same(None);
+        self.read_seq_loc_parts(&mut parts, &mut walk)?;
+        let id = match walk {
             IdWalk::Same(id) => id,
             IdWalk::Stopped => None,
             IdWalk::Null(null) => return Ok(Err(null)),
@@ -1668,15 +1749,18 @@ impl<I: Input> Rd<I> {
         self.read_class(&BLAST_MASK_LIST, |s, index| {
             if index == 0 {
                 s.read_container(false, |s| {
-                    let loc = match s.read_pointer(SEQ_LOC.name, |s| s.read_seq_loc())? {
-                        Some(loc) => loc,
-                        None => Err(s.null_element(LIST_MASKS)),
-                    };
-                    if null_element.is_none() {
-                        match loc {
-                            Ok(loc) => masks.push(loc),
-                            Err(null) => null_element = Some(null),
+                    let read = s.read_pointer(SEQ_LOC.name, |s| {
+                        let loc = s.read_seq_loc()?;
+                        if null_element.is_none() {
+                            match loc {
+                                Ok(loc) => masks.push(loc),
+                                Err(null) => null_element = Some(null),
+                            }
                         }
+                        Ok(())
+                    })?;
+                    if !read && null_element.is_none() {
+                        null_element = Some(s.null_element(LIST_MASKS));
                     }
                     Ok(())
                 })
@@ -1772,7 +1856,9 @@ impl<I: Input> Rd<I> {
     /// `file >> MSerial_Asn... >> *obj` of the type `def`: `SkipFileHeader`, then `Read` with
     /// `read`, each in a frame of its own.
     fn read_top(&mut self, def: &'static ClassDef, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
-        self.frames.clear();
+        // Every frame entered was left (`exit`), and with it every stack trace completed.
+        debug_assert!(self.depth == 0 && self.traces.is_empty());
+        self.depth = 0;
         self.frame(FrameKind::Named, Some(def.name), |s| {
             match s.inp.read_file_header()? {
                 Some(name) if !name.is_empty() && name != def.name.as_bytes() => Err(throw_error(

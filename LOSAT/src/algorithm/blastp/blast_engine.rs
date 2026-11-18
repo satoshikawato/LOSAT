@@ -3774,9 +3774,10 @@ impl<'a> ShownLetters<'a> {
     /// Whether a letter is a pyrrolysine (O).
     fn has_o(self) -> bool {
         match self {
-            Self::Ascii(letters) | Self::Bioseq(letters) => letters
-                .iter()
-                .any(|letter| letter.eq_ignore_ascii_case(&b'O')),
+            // Two byte searches (memchr) instead of one case-folding loop: the same answer.
+            Self::Ascii(letters) | Self::Bioseq(letters) => {
+                letters.contains(&b'O') || letters.contains(&b'o')
+            }
             Self::Stored(residues) => residues.contains(&STORED_O),
         }
     }

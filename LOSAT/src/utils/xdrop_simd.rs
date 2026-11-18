@@ -5680,8 +5680,9 @@ pub(crate) fn xdrop_align(
     }
 }
 
-/// PROBE (BPF s17, not for merge): two score-only problems (a seed's left and right extensions)
-/// in one 256-bit 8-bit-lane kernel, their rows in turn (`x_avx2::align8_pair`). `None` when that
+/// PROBE (BPF s17 / s18, not for merge): two score-only problems (a seed's left and right
+/// extensions) in one 256-bit 8-bit-lane kernel, their rows in turn or (`blocks`, s18) the blocks
+/// of each pair of rows in turn (`x_avx2::align8_pair`). `None` when that
 /// kernel would not be the one `xdrop_align` runs; a problem's `None` inside means that kernel
 /// declined it, and the caller runs `xdrop_align` for it.
 pub(crate) fn xdrop_align_pair_so(
@@ -5699,6 +5700,7 @@ pub(crate) fn xdrop_align_pair_so(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
+    blocks: bool,
 ) -> Option<(Option<XdropResult>, Option<XdropResult>)> {
     #[cfg(target_arch = "x86_64")]
     {
@@ -5715,16 +5717,23 @@ pub(crate) fn xdrop_align_pair_so(
         }
         // SAFETY: bit 0 is set only when `x_avx2::available()` held (AVX2 detected).
         let r = unsafe {
-            if on & 16 != 0 {
-                x_avx2::align8_pair::<true>(
+            match (on & 16 != 0, blocks) {
+                (true, false) => x_avx2::align8_pair::<true, false>(
                     qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores, m, gap_open,
                     gap_extend, x_drop, false,
-                )
-            } else {
-                x_avx2::align8_pair::<false>(
+                ),
+                (true, true) => x_avx2::align8_pair::<true, true>(
                     qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores, m, gap_open,
                     gap_extend, x_drop, false,
-                )
+                ),
+                (false, false) => x_avx2::align8_pair::<false, false>(
+                    qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores, m, gap_open,
+                    gap_extend, x_drop, false,
+                ),
+                (false, true) => x_avx2::align8_pair::<false, true>(
+                    qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores, m, gap_open,
+                    gap_extend, x_drop, false,
+                ),
             }
         };
         Some(r)
@@ -5732,7 +5741,7 @@ pub(crate) fn xdrop_align_pair_so(
     #[cfg(not(target_arch = "x86_64"))]
     {
         let _ = (qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores);
-        let _ = (gap_open, gap_extend, x_drop);
+        let _ = (gap_open, gap_extend, x_drop, blocks);
         None
     }
 }

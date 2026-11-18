@@ -1942,10 +1942,303 @@ unsafe fn row8p<const EM: bool>(
     0
 }
 
-/// PROBE (BPF s17): `align8::<false, EM, false>` of problem A and of problem B, their rows in
-/// turn. `None` for a problem that `align8` declines (the caller then runs its full dispatch).
+// PROBE (BPF s18, LOSAT_BPF_S17 bit 16; not for merge): one row of one problem while it runs (the
+// locals of `row8p` between its head and its end), so that the blocks of two problems' rows can
+// be taken in turn: A's 32-lane block, B's 32-lane block, ..., then the 16-lane tails the same way.
+struct R8 {
+    hr: *mut u8,
+    hw: *mut u8,
+    e: *mut u8,
+    sb: *const u8,
+    t0: W,
+    t1: W,
+    bend: usize,
+    limit: usize,
+    fence_row: bool,
+    rs: Row,
+    hpm: W,
+    lo_surv: usize,
+    hi_surv: usize,
+    b0: usize,
+}
+
+// PROBE (BPF s18): the 16-lane tail state of `R8` (`row8p`'s `rx`, `rec_b`, `slow`).
+struct T8 {
+    rx: RowX,
+    rec_b: usize,
+    slow: bool,
+}
+
+/// PROBE (BPF s18): `row8p` up to its 32-lane block loop. Err(1) done, Err(2) declined.
+#[inline(always)]
+unsafe fn head8p(
+    p: &mut P8,
+    k: &K8,
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Result<R8, u8> {
+    let a = p.a;
+    if a > p.len1 {
+        return Err(1);
+    }
+    let c = &k.c;
+    let num_extra = k.num_extra;
+    if !sc.fits(p.b_size + num_extra + 64) {
+        let d = sc.x_room(p.first, p.b_size + num_extra + 64, false);
+        p.first -= d;
+        p.b_size -= d;
+        p.len2 -= d;
+        p.wend[0] = p.wend[0].saturating_sub(d);
+        p.wend[1] = p.wend[1].saturating_sub(d);
+    }
+    let first = p.first;
+    let b_size = p.b_size;
+    let len2 = p.len2;
+    if sc.sb_filled < b_size {
+        fill_cols(s, sc, (b_size + 64).min(len2 + 1), k.ncols, check_fence);
+    }
+    if sc.bad_k < b_size {
+        return Err(2);
+    }
+    let mut limit = len2 + 1;
+    let mut bend = b_size;
+    let mut fence_row = false;
+    if sc.fence_k < b_size {
+        limit = sc.fence_k;
+        bend = sc.fence_k;
+        fence_row = true;
+        if bend <= first {
+            p.fence_hit = true;
+            return Err(1);
+        }
+    }
+    let qa = match q.get(a) {
+        Some(v) => v as usize,
+        None => return Err(2),
+    };
+    if qa >= k.ncols {
+        return Err(2);
+    }
+    p.cells += (b_size - first) as u64;
+    let t: *const u8 = if let Some(tabs) = k.static_tabs {
+        tabs.add(qa * TAB)
+    } else {
+        if sc.tab_ok & (1u32 << qa) == 0 {
+            if !build_row(scores, qa, &mut sc.tabs[qa * TAB..(qa + 1) * TAB]) {
+                return Err(2);
+            }
+            sc.tab_ok |= 1u32 << qa;
+        }
+        sc.tabs.as_ptr().add(qa * TAB)
+    };
+    let (hr, hw) = if p.cur == 0 {
+        (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD))
+    } else {
+        (sc.h8b.as_mut_ptr().add(PAD), sc.h8a.as_mut_ptr().add(PAD))
+    };
+    let e = sc.e8.as_mut_ptr().add(PAD);
+    let sb = sc.sb.as_ptr().add(PAD);
+    let t0 = bcast128(t.add(64));
+    let t1 = bcast128(t.add(80));
+
+    if p.best_rel > k.limit_rebase {
+        let dv = _mm256_set1_epi8(p.best_rel as u8 as i8);
+        let mut b = first;
+        while b < b_size {
+            st(hr.add(b), _mm256_subs_epu8(ld(hr.add(b)), dv));
+            st(e.add(b), _mm256_subs_epu8(ld(e.add(b)), dv));
+            b += 32;
+        }
+        p.base += p.best_rel;
+        p.best_rel = 0;
+    }
+    let bestv0 = _mm256_set1_epi8((k.bias + p.best_rel) as u8 as i8);
+    Ok(R8 {
+        hr,
+        hw,
+        e,
+        sb,
+        t0,
+        t1,
+        bend,
+        limit,
+        fence_row,
+        rs: Row {
+            carry: k.zero,
+            bestv: bestv0,
+            thrv: _mm256_subs_epu8(bestv0, c.xv),
+            rec_b: 0,
+            slow: false,
+        },
+        hpm: k.lane0,
+        lo_surv: usize::MAX,
+        hi_surv: 0,
+        b0: first,
+    })
+}
+
+/// PROBE (BPF s18): one 32-lane block of `row8p`'s block loop (taken while `b0 + 16 < bend`).
+#[inline(always)]
+unsafe fn blk8p<const EM: bool>(r: &mut R8, k: &K8) {
+    let b0 = r.b0;
+    let idx = ld(r.sb.add(b0));
+    let sv = if k.small_alphabet {
+        _mm256_shuffle_epi8(r.t0, idx)
+    } else {
+        lut32(r.t0, r.t1, _mm256_add_epi8(idx, k.k70), _mm256_sub_epi8(idx, k.k10))
+    };
+    let mask = if b0 + 32 <= r.limit {
+        None
+    } else {
+        Some(ld(LANE_MASK8.as_ptr().add(32 - (r.limit - b0))))
+    };
+    let (d0, _) = block8::<false, EM>(&k.c, &mut r.rs, r.hr, r.hw, r.e, b0, sv, mask, r.hpm);
+    r.hpm = k.zero;
+    let live = !(_mm256_movemask_epi8(d0) as u32);
+    if live != 0 {
+        if r.lo_surv == usize::MAX {
+            r.lo_surv = b0 + live.trailing_zeros() as usize;
+        }
+        r.hi_surv = b0 + (31 - live.leading_zeros() as usize);
+    }
+    r.b0 = b0 + 32;
+}
+
+/// PROBE (BPF s18): the 16-lane state after the 32-lane blocks (`row8p`'s `rx`).
+#[inline(always)]
+unsafe fn tail8p_start(r: &R8) -> T8 {
+    T8 {
+        rx: RowX {
+            carry: _mm256_castsi256_si128(r.rs.carry),
+            bestv: _mm256_castsi256_si128(r.rs.bestv),
+            thrv: _mm256_castsi256_si128(r.rs.thrv),
+        },
+        rec_b: r.rs.rec_b,
+        slow: r.rs.slow,
+    }
+}
+
+/// PROBE (BPF s18): one pass of `row8p`'s 16-lane loop; false when the row stops before it.
+#[inline(always)]
+unsafe fn tail8p<const EM: bool>(r: &mut R8, t: &mut T8, k: &K8) -> bool {
+    let b0 = r.b0;
+    if b0 >= r.bend {
+        if b0 >= r.limit {
+            return false;
+        }
+        if (_mm_cvtsi128_si32(t.rx.carry) & 0xFF) < (_mm_cvtsi128_si32(t.rx.thrv) & 0xFF) {
+            return false;
+        }
+    }
+    let idx = ldx(r.sb.add(b0));
+    let t0x = _mm256_castsi256_si128(r.t0);
+    let sv = if k.small_alphabet {
+        _mm_shuffle_epi8(t0x, idx)
+    } else {
+        lut32x(t0x, _mm256_castsi256_si128(r.t1), idx)
+    };
+    let mask = if b0 + 16 <= r.limit {
+        None
+    } else {
+        Some(ldx(LANE_MASK8X.as_ptr().add(16 - (r.limit - b0))))
+    };
+    let (d0, _) = block8x::<false, EM>(
+        &k.c,
+        &mut t.rx,
+        &mut t.rec_b,
+        &mut t.slow,
+        r.hr,
+        r.hw,
+        r.e,
+        b0,
+        sv,
+        mask,
+        _mm256_castsi256_si128(r.hpm),
+    );
+    r.hpm = k.zero;
+    let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
+    if live != 0 {
+        if r.lo_surv == usize::MAX {
+            r.lo_surv = b0 + live.trailing_zeros() as usize;
+        }
+        r.hi_surv = b0 + (31 - live.leading_zeros() as usize);
+    }
+    r.b0 = b0 + 16;
+    true
+}
+
+/// PROBE (BPF s18): `row8p` after its 16-lane loop: 0 go on, 1 done.
+#[inline(always)]
+unsafe fn end8p<const EM: bool>(
+    p: &mut P8,
+    r: &R8,
+    t: &T8,
+    k: &K8,
+    sc: &mut XdropScratch,
+) -> u8 {
+    let zero = k.zero;
+    let proc_end = r.b0;
+    if EM {
+        sc.dirty8 = sc.dirty8.max(proc_end);
+    } else if proc_end > sc.dirty8 {
+        sc.dirty8 = proc_end;
+    }
+    let wi = 1 - p.cur;
+    let mut b = proc_end;
+    while b < p.wend[wi] {
+        st(r.hw.add(b), zero);
+        b += 32;
+    }
+    p.wend[wi] = proc_end;
+    p.cur = wi;
+    if t.slow {
+        p.b_off = t.rec_b + sc.x_sh;
+        p.a_off = p.a;
+        p.best_rel = (_mm_cvtsi128_si32(t.rx.bestv) & 0xFF) - k.bias;
+    }
+    if r.fence_row {
+        p.fence_hit = true;
+        return 1;
+    }
+    if r.lo_surv == usize::MAX {
+        return 1;
+    }
+    let last = r.hi_surv;
+    if !EM {
+        let mut b = last + 1;
+        while b < proc_end {
+            st(r.e.add(b), zero);
+            b += 32;
+        }
+    }
+    p.first = r.lo_surv;
+    p.b_size = last + 1;
+    if p.b_size <= p.len2 {
+        p.b_size += 1;
+    }
+    p.a += 1;
+    0
+}
+
+/// PROBE (BPF s18): the rest of one problem's row after `head8p`, alone (`row8p`'s loops and end).
+#[inline(always)]
+unsafe fn rest8p<const EM: bool>(p: &mut P8, mut r: R8, k: &K8, sc: &mut XdropScratch) -> u8 {
+    while r.b0 + 16 < r.bend {
+        blk8p::<EM>(&mut r, k);
+    }
+    let mut t = tail8p_start(&r);
+    while tail8p::<EM>(&mut r, &mut t, k) {}
+    end8p::<EM>(p, &r, &t, k, sc)
+}
+
+/// PROBE (BPF s17 / s18): `align8::<false, EM, false>` of problem A and of problem B. `BLK`
+/// false: their rows in turn (s17, bit 8); true: in each pair of rows, their blocks in turn (s18,
+/// bit 16). `None` for a problem that `align8` declines (the caller then runs its full dispatch).
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-pub(super) unsafe fn align8_pair<const EM: bool>(
+pub(super) unsafe fn align8_pair<const EM: bool, const BLK: bool>(
     qa: &RowSeq<'_>,
     sa: &ColSeq<'_>,
     len1a: usize,
@@ -2033,6 +2326,95 @@ pub(super) unsafe fn align8_pair<const EM: bool>(
     let mut pa = init8p(&k, len1a, len2a, goe, x, gap_extend, sca);
     let mut pb = init8p(&k, len1b, len2b, goe, x, gap_extend, scb);
     let (mut ra, mut rb) = (0u8, 0u8);
+    if BLK {
+        // both problems' rows, their blocks in turn
+        while la && lb {
+            let ha = head8p(&mut pa, &k, qa, sa, scores, check_fence, sca);
+            let hb = head8p(&mut pb, &k, qb, sb, scores, check_fence, scb);
+            match (ha, hb) {
+                (Ok(mut x), Ok(mut y)) => {
+                    while x.b0 + 16 < x.bend && y.b0 + 16 < y.bend {
+                        blk8p::<EM>(&mut x, &k);
+                        blk8p::<EM>(&mut y, &k);
+                    }
+                    while x.b0 + 16 < x.bend {
+                        blk8p::<EM>(&mut x, &k);
+                    }
+                    while y.b0 + 16 < y.bend {
+                        blk8p::<EM>(&mut y, &k);
+                    }
+                    let mut tx = tail8p_start(&x);
+                    let mut ty = tail8p_start(&y);
+                    let (mut gx, mut gy) = (true, true);
+                    while gx && gy {
+                        gx = tail8p::<EM>(&mut x, &mut tx, &k);
+                        gy = tail8p::<EM>(&mut y, &mut ty, &k);
+                    }
+                    while gx {
+                        gx = tail8p::<EM>(&mut x, &mut tx, &k);
+                    }
+                    while gy {
+                        gy = tail8p::<EM>(&mut y, &mut ty, &k);
+                    }
+                    let r = end8p::<EM>(&mut pa, &x, &tx, &k, sca);
+                    if r != 0 {
+                        la = false;
+                        ra = r;
+                    }
+                    let r = end8p::<EM>(&mut pb, &y, &ty, &k, scb);
+                    if r != 0 {
+                        lb = false;
+                        rb = r;
+                    }
+                }
+                (Ok(x), Err(r)) => {
+                    lb = false;
+                    rb = r;
+                    let r = rest8p::<EM>(&mut pa, x, &k, sca);
+                    if r != 0 {
+                        la = false;
+                        ra = r;
+                    }
+                }
+                (Err(r), Ok(y)) => {
+                    la = false;
+                    ra = r;
+                    let r = rest8p::<EM>(&mut pb, y, &k, scb);
+                    if r != 0 {
+                        lb = false;
+                        rb = r;
+                    }
+                }
+                (Err(r1), Err(r2)) => {
+                    la = false;
+                    ra = r1;
+                    lb = false;
+                    rb = r2;
+                }
+            }
+        }
+        // one problem left: the same row code alone
+        while la {
+            let r = match head8p(&mut pa, &k, qa, sa, scores, check_fence, sca) {
+                Ok(x) => rest8p::<EM>(&mut pa, x, &k, sca),
+                Err(r) => r,
+            };
+            if r != 0 {
+                la = false;
+                ra = r;
+            }
+        }
+        while lb {
+            let r = match head8p(&mut pb, &k, qb, sb, scores, check_fence, scb) {
+                Ok(y) => rest8p::<EM>(&mut pb, y, &k, scb),
+                Err(r) => r,
+            };
+            if r != 0 {
+                lb = false;
+                rb = r;
+            }
+        }
+    }
     while la || lb {
         if la {
             let r = row8p::<EM>(&mut pa, &k, qa, sa, scores, check_fence, sca);
@@ -2566,7 +2948,8 @@ mod tests {
         }
     }
 
-    /// PROBE (BPF s17): `align8_pair` gives each problem what `align8` gives it alone: random
+    /// PROBE (BPF s17 / s18): `align8_pair` (rows in turn, and blocks in turn) gives each problem
+    /// what `align8` gives it alone: random
     /// pairs of a reversed (left) and a forward (right) problem, empty sides, rows over the band.
     #[test]
     fn align8_pair_matches_align8_per_problem() {
@@ -2652,23 +3035,27 @@ mod tests {
             let [s0, s1, s2, s3] = &mut sc;
             for em in [false, true] {
                 // SAFETY: AVX2 detected above
-                let (one_a, one_b, pair) = unsafe {
+                let (one_a, one_b, pair, blk) = unsafe {
                     if em {
                         (
                             align8::<false, true, false>(&qa, &sa, &scores, m, l1a, l2a, go, ge, x, false, s0),
                             align8::<false, true, false>(&qb, &sb, &scores, m, l1b, l2b, go, ge, x, false, s1),
-                            align8_pair::<true>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
+                            align8_pair::<true, false>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
+                            align8_pair::<true, true>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
                         )
                     } else {
                         (
                             align8::<false, false, false>(&qa, &sa, &scores, m, l1a, l2a, go, ge, x, false, s0),
                             align8::<false, false, false>(&qb, &sb, &scores, m, l1b, l2b, go, ge, x, false, s1),
-                            align8_pair::<false>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
+                            align8_pair::<false, false>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
+                            align8_pair::<false, true>(&qa, &sa, l1a, l2a, s2, &qb, &sb, l1b, l2b, s3, &scores, m, go, ge, x, false),
                         )
                     }
                 };
                 assert_eq!(pair.0, one_a, "case {case} em {em}: left");
                 assert_eq!(pair.1, one_b, "case {case} em {em}: right");
+                assert_eq!(blk.0, one_a, "case {case} em {em}: left, blocks in turn");
+                assert_eq!(blk.1, one_b, "case {case} em {em}: right, blocks in turn");
                 if l1a * l2a == 0 || l1b * l2b == 0 {
                     empty += 1;
                 } else {

@@ -1328,6 +1328,7 @@ fn align_ex_protein_score_only_pair(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
+    blocks: bool,
     scratch: &mut GapAlignScratch,
 ) -> ((usize, usize, i32), (usize, usize, i32)) {
     let mut got = (None, None);
@@ -1363,7 +1364,7 @@ fn align_ex_protein_score_only_pair(
         if let Some(v) = with_x_scores(score_matrix, |scores| {
             xdrop_align_pair_so(
                 &qa, &sa, l.2, l.3, fast, &qb, &sb, r.2, r.3, &mut fast2, scores, gap_open,
-                gap_extend, x_drop,
+                gap_extend, x_drop, blocks,
             )
         }) {
             got = v;
@@ -1413,14 +1414,22 @@ fn align_ex_protein_score_only_pair(
     (left, right)
 }
 
-// PROBE (BPF s17): LOSAT_BPF_S17 bit 8 runs `align_ex_protein_score_only_pair`.
-fn x_bpf_s17_pair() -> bool {
-    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+// PROBE (BPF s17 / s18): LOSAT_BPF_S17 bit 8 runs `align_ex_protein_score_only_pair` with the rows
+// in turn (1), bit 16 with the blocks in turn (2; bit 16 wins); 0 neither.
+fn x_bpf_s17_pair() -> u8 {
+    static V: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
-        std::env::var("LOSAT_BPF_S17")
+        let v = std::env::var("LOSAT_BPF_S17")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
-            .is_some_and(|v| v & 8 != 0)
+            .unwrap_or(0);
+        if v & 16 != 0 {
+            2
+        } else if v & 8 != 0 {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -3203,7 +3212,8 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
     //                                    q_length, s_length, ...);
     // ```
     let right_side = q_length < query.len() && subject_offset < subject_length;
-    let pair = if mode == BlastpGappedAlignmentMode::Exact && right_side && x_bpf_s17_pair() {
+    let pair_arm = x_bpf_s17_pair();
+    let pair = if mode == BlastpGappedAlignmentMode::Exact && right_side && pair_arm != 0 {
         Some(align_ex_protein_score_only_pair(
             query,
             subject,
@@ -3218,6 +3228,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             gap_open,
             gap_extend,
             x_drop,
+            pair_arm == 2,
             scratch,
         ))
     } else {

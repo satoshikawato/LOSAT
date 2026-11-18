@@ -16,10 +16,10 @@
 
 use super::{
     blast_hsp_test_identity_and_length, blastn_trace, calculate_blastn_context_statistics,
-    format_gap_edit_ops_for_trace, hsp_survives_evalue_reap, purge_hsps_with_common_endpoints,
-    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    sort_hsps_by_score, BlastIntervalTree, BlastnHsp, BlastnTiming, ContextKarlin, IndexMethod,
-    QueryContext, ReevalParams, TreeHsp,
+    context_query, format_gap_edit_ops_for_trace, hsp_survives_evalue_reap,
+    purge_hsps_with_common_endpoints, purge_hsps_with_common_endpoints_ex,
+    reevaluate_hsp_with_ambiguities_gapped_ex, sort_hsps_by_score, BlastIntervalTree, BlastnHsp,
+    BlastnTiming, ContextKarlin, IndexMethod, QueryContext, ReevalParams, TreeHsp,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 
@@ -47,6 +47,10 @@ pub(super) struct TracebackCtx<'a> {
     /// context.
     pub(super) encoded_queries_blastna: &'a Vec<&'a [u8]>,
     pub(super) encoded_queries_nomask: &'a [&'a [u8]],
+    /// The same letters concatenated, with masks and without
+    /// (`TraceBatch::encoded_query_concat_blastna`, `TraceBatch::encoded_query_concat_nomask`).
+    pub(super) encoded_query_concat_blastna: &'a [u8],
+    pub(super) encoded_query_concat_nomask: &'a [u8],
     pub(super) query_contexts: &'a [QueryContext],
     /// The queries' lengths, by query.
     pub(super) query_lengths: &'a [usize],
@@ -91,8 +95,9 @@ pub(super) fn traceback_post_purge(
         s_idx,
         s_id,
         s_seq_blastna,
-        encoded_queries_blastna,
-        encoded_queries_nomask,
+        encoded_query_concat_blastna,
+        encoded_query_concat_nomask,
+        query_contexts,
         cutoff_scores,
         hit_saving_cutoff_scores,
         query_eff_searchsp,
@@ -185,8 +190,12 @@ pub(super) fn traceback_post_purge(
         };
 
         // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
-        let q_seq_blastna = encoded_queries_blastna[context_idx];
-        let q_seq_nomask_blastna = encoded_queries_nomask[context_idx];
+        // NCBI's `query` and `query_nomask` (blast_traceback.c:386-389): the context in the
+        // concatenated query, with masks and without, read at the HSP's offsets, which lie
+        // outside the context for an HSP outside it.
+        let ctx = &query_contexts[context_idx];
+        let query = context_query(encoded_query_concat_blastna, ctx);
+        let query_nomask = context_query(encoded_query_concat_nomask, ctx);
         let s_seq_eval = s_seq_blastna;
         let reeval_start = if timing_enabled {
             Some(std::time::Instant::now())
@@ -195,7 +204,7 @@ pub(super) fn traceback_post_purge(
         };
         let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
             hit,
-            q_seq_blastna,
+            query,
             s_seq_eval,
             reward,
             penalty,
@@ -265,12 +274,8 @@ pub(super) fn traceback_post_purge(
         } else {
             None
         };
-        let delete_identity_length = blast_hsp_test_identity_and_length(
-            hit,
-            q_seq_nomask_blastna,
-            s_seq_eval,
-            percent_identity,
-        );
+        let delete_identity_length =
+            blast_hsp_test_identity_and_length(hit, query_nomask, s_seq_eval, percent_identity);
         if let (Some(timing), Some(identity_length_start)) = (timing_ref, identity_length_start) {
             BlastnTiming::record_duration(&timing.identity_length_test_ns, identity_length_start);
         }
@@ -472,8 +477,8 @@ pub(super) fn traceback_final_list(
         // NCBI uses canonical coordinates: subject.offset < subject.end always
         let query_context_offset = hit.internal_query_context_offset;
         let tree_hsp = TreeHsp {
-            query_offset: hit.internal_q_offset_0 as i32,
-            query_end: hit.internal_q_end_0 as i32,
+            query_offset: hit.internal_q_offset_0,
+            query_end: hit.internal_q_end_0,
             subject_offset: hit.internal_s_offset_0 as i32,
             subject_end: hit.internal_s_end_0 as i32,
             score: hit.raw_score,

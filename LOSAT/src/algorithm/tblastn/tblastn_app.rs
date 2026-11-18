@@ -306,7 +306,7 @@ impl TblastnArgs {
                     && args.strategy.is_none();
                 match subject_input {
                     Input::File(file) => read_subject_input(
-                        FastaInputSource::from_argument(&subject_path, file, config),
+                        FastaInputSource::from_file(file, config),
                         &args,
                         subject_range.as_ref(),
                         x_packed,
@@ -877,7 +877,7 @@ fn search_cli(
                     .subject
                     .as_deref()
                     .is_some_and(|path| path.as_os_str() == "-");
-            let mut source = FastaInputSource::from_argument(&args.query, query_file, config);
+            let mut source = FastaInputSource::from_file(query_file, config);
             source.set_id_scope(args.id_scope.clone());
             let empty = !shared_standard_input && source.stream_is_empty();
             (QuerySource::File(source), empty)
@@ -2539,12 +2539,7 @@ fn search(
                         .as_ref()
                         .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    if plural_names
-                        && hitlists
-                            .iter()
-                            .flat_map(super::stage_d_results::KappaResultHitList::lists)
-                            .any(|list| !list.hsps.hsps.is_empty())
-                    {
+                    if plural_names && reported.loads_a_row(hitlists) {
                         database.open_for_tabular_rows()?;
                     }
                     Ok::<(), anyhow::Error>(())

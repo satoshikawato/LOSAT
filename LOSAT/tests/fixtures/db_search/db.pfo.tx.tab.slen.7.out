@@ -1,0 +1,12 @@
+# TBLASTX 2.17.0+
+# Query: mix2_u glob1 of multidb/nnp (no accession table)
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject length, evalue
+# 1 hits found
+mix2_u	1043	0.0
+# TBLASTX 2.17.0+
+# Query: ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC Symbol;Acc:HGNC:4823]
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject length, evalue
+# 14 hits found
+ENST00000320868.9	577	3.39e-133

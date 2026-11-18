@@ -1327,8 +1327,10 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
     ));
     assert_eq!(records[0].sequence.len(), 85);
     assert_eq!(hyphen_lines(&messages), vec![2, 3]);
-    let (records, messages) = read_source(FastaInputSource::from_standard_input(
-        std::fs::File::open(&path).unwrap(),
+    let (records, messages) = read_source(FastaInputSource::from_file(
+        crate::blastinput::input_files::InputFile::as_standard_input(
+            std::fs::File::open(&path).unwrap(),
+        ),
         config,
     ));
     assert_eq!(records[0].sequence, kept);
@@ -1341,7 +1343,10 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
         std::io::Write::write_all(&mut writer, text).unwrap();
         drop(writer);
         let file = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
-        let (records, _) = read_source(FastaInputSource::from_standard_input(file, config));
+        let (records, _) = read_source(FastaInputSource::from_file(
+            crate::blastinput::input_files::InputFile::as_standard_input(file),
+            config,
+        ));
         assert_eq!(records[0].sequence, kept);
     }
 }

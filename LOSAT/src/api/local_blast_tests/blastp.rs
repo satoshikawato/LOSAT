@@ -440,6 +440,10 @@ fn a_batch_of_queries_without_residues_stops() {
 // outfmt 0), and some subjects hold lower-case letters (`-lcase_masking`: the lowercase subject
 // rows).
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn rows_made_per_window_write_the_bytes_of_rows_made_up_front() {
     let inputs = WindowInputs::new();
     let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTP", true, true));

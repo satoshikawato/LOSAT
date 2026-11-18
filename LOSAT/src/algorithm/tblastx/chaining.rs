@@ -184,8 +184,6 @@ impl UngappedHit {
 
 #[cfg(test)]
 mod tests {
-    use super::UngappedHit;
-
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:98-100
     // ```c
     //    Int4 offset; /**< Start of hsp */
@@ -199,6 +197,6 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn ungapped_hit_is_88_bytes_on_64_bit_targets() {
-        assert_eq!(std::mem::size_of::<UngappedHit>(), 88);
+        assert_eq!(std::mem::size_of::<super::UngappedHit>(), 88);
     }
 }

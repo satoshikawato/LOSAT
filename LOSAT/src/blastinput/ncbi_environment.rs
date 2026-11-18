@@ -3518,9 +3518,9 @@ mod tests {
     // [BLAST] DATA_LOADERS is NCBI_CONFIG__BLAST__DATA_LOADERS).
     #[test]
     fn application_settings_read_the_environment_and_the_registry_files() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-data-loaders-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let ini = dir.join("blastn.ini");
@@ -3614,9 +3614,9 @@ mod tests {
     // for the other programs.
     #[test]
     fn max_seqid_length_is_reported_from_every_layer() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-max-seqid-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let ini = dir.join("makeblastdb.ini");
@@ -3711,9 +3711,9 @@ mod tests {
         let table = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/seqdb/expected/search_path/registry.tsv");
         let text = std::fs::read_to_string(&table).unwrap();
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-blastdb-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let place = |value: &str| value.replace("{R}", "/sandbox");
         let mut cases = 0;
@@ -3766,9 +3766,9 @@ mod tests {
         let table =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/winmask/expected/taxid_path.tsv");
         let text = std::fs::read_to_string(&table).unwrap();
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-window-masker-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let (cwd, home) = (dir.join("cwd"), dir.join("home"));
         let place = |value: &str| value.replace("{R}", "/sandbox");
@@ -3844,9 +3844,9 @@ mod tests {
     /// too (`api::start`, line RG item E1w-2).
     #[test]
     fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-window-masker-kept-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let config_path = dir.display().to_string();
@@ -4067,9 +4067,9 @@ mod tests {
     /// that opens no database: it is kept as the reason for the program that does.
     #[test]
     fn an_unreadable_blastdb_value_is_kept_for_the_program_that_opens_a_database() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-blastdb-unreadable-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let settings = |pairs: &[(&str, &str)]| {
@@ -4154,9 +4154,9 @@ mod tests {
     fn writes_of(start: &ApplicationStart, target: &str) -> (String, String, Option<i32>) {
         let mut stderr = Vec::new();
         stderr.extend_from_slice(start.usage_report().unwrap().as_bytes());
-        let file = std::env::temp_dir().join(format!(
+        let file = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-start-{target}-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let _ = std::fs::remove_file(&file);
         let mut diag = match target {
@@ -4277,9 +4277,9 @@ mod tests {
     // `c_ini_bad`, `c_conf_bad`).
     #[test]
     fn rpsbproc_starts_without_the_usage_report() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-rpsbproc-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -4330,9 +4330,9 @@ mod tests {
     // whose posts go to the diagnostics as blastdbcmd's do.
     #[test]
     fn dustmasker_starts_without_the_usage_report() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-dustmasker-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -4373,9 +4373,9 @@ mod tests {
     // b1ini, inib1r): what each read writes.
     #[test]
     fn the_start_reads_the_files_as_ncbi_reads_them() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-start-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -4541,7 +4541,10 @@ mod tests {
     // c++/src/corelib/metareg.cpp `x_FindRegistry` (quoted at `conf_file_path`).
     #[test]
     fn the_conffile_is_found_as_ncbi_finds_it() {
-        let dir = std::env::temp_dir().join(format!("losat-conffile-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-conffile-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("in_path")).unwrap();
         std::fs::write(dir.join("c.ini"), "[BLAST]\n").unwrap();

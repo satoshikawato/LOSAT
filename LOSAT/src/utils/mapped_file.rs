@@ -215,9 +215,9 @@ mod tests {
 
     #[test]
     fn a_mapped_file_has_the_files_bytes_and_aligned_views() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-mapped-file-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();

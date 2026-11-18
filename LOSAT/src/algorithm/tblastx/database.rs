@@ -1121,9 +1121,9 @@ mod tests {
     // `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
     #[test]
     fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-tblastx-db-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1160,6 +1160,10 @@ mod tests {
     // tabular formats and outfmt 0, and two sequences whose Seq-align ids match (njoined, in two
     // volumes) refuse outfmt 0 only, read on one thread and on four.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_report_of_any_sequence_that_could_be_refused_is_found() {
         let open = |name: &str| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

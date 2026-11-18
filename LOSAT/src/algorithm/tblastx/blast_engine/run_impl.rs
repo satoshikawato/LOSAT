@@ -1695,7 +1695,7 @@ fn subject_taxonomy(
 fn search_cli(
     mut args: TblastxArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_file: crate::blastinput::input_files::InputFile,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
     x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,

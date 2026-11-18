@@ -480,9 +480,9 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat_tblastn_titles_{}_{nanos}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let query = dir.join("query.faa");

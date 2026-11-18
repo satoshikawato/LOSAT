@@ -2715,11 +2715,12 @@ Rebuilding less:
   s4): the serial WASI command under Node 26.8.2 (V8 TurboFan, `--no-liftoff --single-threaded`), the
   instructions of the compiled module under callgrind against `dev` c648413ac, outputs identical in every
   arm, query sets of Species4 x Species6 (`-subject`, `-evalue 0.001`): 1,000 proteins (122 hits per used
-  cell) 0.823 (138.3 -> 113.9 G) with 23 % fewer simulated branch mispredicts, 100 proteins (118) 0.844, 10 (14.7)
-  0.888, 3 (6.37) 0.936, 1 (3.72) 0.962, single proteins at 3.10 and 2.52 1.004 and 0.995; below the cutoff
-  the per-hit loop as before (with `LOSAT_X_BPMASKEDMIN=0`: 2.42 1.014, 1.97 1.012, 1.25 1.024). Wall time
+  cell) 0.821 (138.3 -> 113.6 G) with 23 % fewer simulated branch mispredicts, 100 proteins (118) 0.842, 10
+  (14.7) 0.889, 3 (6.37) 0.940, 1 (3.72) 0.968, single proteins at 3.10 and 2.52 hits 1.013 and 1.002 (5-7 %
+  more simulated mispredicts from 3.10 to 6.37); below the cutoff the per-hit loop as before (2.42: 1.001;
+  with `LOSAT_X_BPMASKEDMIN=0` a prototype build gave 2.42 1.014, 1.97 1.012, 1.25 1.024). Wall time
   of the same commands in one Node process (rotating rounds, load 20-45): 100 proteins x0.83-0.88 of `dev`
-  for the forms tried, 7/7 rounds faster. Native AVX2 code is unchanged (machine code compared function by
+  for the prototype forms tried, 7/7 rounds faster. Native AVX2 code is unchanged (machine code compared function by
   function with `dev`); natively with `=2` (SSE) the 100-protein case runs 1.07 of the AVX2 default's
   instructions.
 - BPSCANBF (graduated 2026-10-26, in the set since 2026-10-17; no variable; always on) (BLASTP, speed; acts in

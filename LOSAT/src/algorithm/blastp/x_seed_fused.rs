@@ -236,11 +236,12 @@
 //! the compiled module under callgrind, V8 TurboFan, one thread, 1-100 queries of Species4 x
 //! Species6: at 118 hits per used cell the batches with deferred calls 0.887 of the per-hit loop's,
 //! with calls at once 0.831, at 3.10 the masked last batch 1.059 against 1.004 for the last hits
-//! one after the other). A table with fewer hits per used cell than LOSAT_X_BPMASKEDMIN (250
+//! one after the other; prototype builds). A table with fewer hits per used cell than LOSAT_X_BPMASKEDMIN (250
 //! hundredths, the masked batch's value) keeps the per-hit loop ([`x_bp_table_mode`]): most of its
 //! cells hold one or two hits, which the batches' loop only adds to (with every table batched
-//! 1.012-1.024 of the per-hit loop's instructions at 1.25-2.42 hits per used cell; from 2.52 hits
-//! 0.995-1.004, 3.72 0.962, 6.37 0.936, 14.7 0.888, 118 0.844, 122 0.823).
+//! 1.012-1.024 of the per-hit loop's instructions at 1.25-2.42 hits per used cell; the final build
+//! at 2.52 and 3.10 hits 1.002 and 1.013, 3.72 0.968, 6.37 0.940, 14.7 0.889, 118 0.842, 122
+//! 0.821).
 //! `LOSAT_X_BPCELL128` is a switch of the strict set (class platform): on unless it is `0`; on,
 //! where LOSAT_X_BPDIAG is on and the AVX2 batches do not run, the 128-bit batches are the cell
 //! test of the tables LOSAT_X_BPMASKEDMIN gives them; `=2` (a diagnostic) runs them in place of the

@@ -4,6 +4,6 @@
   `tblastn` error at a step where NCBI BLAST+ crashes, does not finish or stops: an alignment on a subject shorter
   than 12 bases, two `-window_size 0` alignments on which NCBI BLAST+ never finishes, the overflow banks of the
   compressed lookup table, a query chunk that NCBI splits again (also with a negative `CHUNK_SIZE`) or that holds no
-  query, and with `-in_pssm` a window past the PSSM, a gapped start past the subject's translation or a traceback
-  that starts past the end of its frame (these write the prologs first). Searches without such an error are
-  unchanged.
+  query, and with `-in_pssm` a window past the PSSM, a gapped start past the subject's translation, a traceback
+  that starts past the end of its frame or a PSSM query that `-seg` masks completely (these write the prologs
+  first). Searches without such an error are unchanged.

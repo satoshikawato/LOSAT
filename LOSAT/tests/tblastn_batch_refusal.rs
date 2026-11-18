@@ -6,7 +6,8 @@
 //! of the refused batch or of the batches after it is written, at every `-num_threads`. The single
 //! searches are rows `db.xs.tblastn.bat.*` of `tests/db_search_manifest/tblastn.tsv`; here what
 //! those rows cannot hold: every format, the batches searched ahead (side by side, on their own
-//! pools, one after another), `-db`, and the query chunk refusals.
+//! pools, one after another), `-db`, the query chunk refusals, and those of `-in_pssm` (one batch:
+//! after the prolog).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302
 //! ```c++
@@ -499,22 +500,35 @@ fn a_query_chunk_split_again_is_refused_after_the_reports_before() {
     }
 }
 
+/// The refusal of a PSSM query whose letters give no Karlin-Altschul parameters (one that `-seg`
+/// masks completely), with which NCBI crashes in the setup of its preliminary search.
+const MASKED_PSSM: &str = "a PSSM query whose letters give no Karlin-Altschul parameters (one \
+that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by \
+LOSAT's TBLASTN";
+
+/// The PSSM `tests/fixtures/pssm/NAME.asn.gz` written to `dir/NAME.asn`.
+fn pssm_file(dir: &Path, name: &str) -> PathBuf {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut pssm = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(
+            std::fs::File::open(tests.join(format!("fixtures/pssm/{name}.asn.gz"))).unwrap(),
+        ),
+        &mut pssm,
+    )
+    .unwrap();
+    let path = dir.join(format!("{name}.asn"));
+    std::fs::write(&path, pssm).unwrap();
+    path
+}
+
 /// `-in_pssm` is one batch: its refusal comes after the `-outfmt 0` prolog, and with `-outfmt 6`
 /// nothing is written (row `db.xs.tblastn.h11.rej`).
 #[test]
 fn a_pssm_query_is_refused_after_the_prolog() {
     let temp = TempDir::new("pssm");
     let dir = temp.0.as_path();
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let mut pssm = Vec::new();
-    std::io::Read::read_to_end(
-        &mut flate2::read::GzDecoder::new(
-            std::fs::File::open(tests.join("fixtures/pssm/x2d_d50.asn.gz")).unwrap(),
-        ),
-        &mut pssm,
-    )
-    .unwrap();
-    std::fs::write(dir.join("x2d_d50.asn"), pssm).unwrap();
+    pssm_file(dir, "x2d_d50");
     let subject = fasta(dir, "h11.fna", &[("h11", "ATGCATTATTT")]);
     for (outfmt, threads) in [("0", "1"), ("0", "4"), ("6", "1")] {
         let case = format!("outfmt {outfmt} threads {threads}");
@@ -534,6 +548,44 @@ fn a_pssm_query_is_refused_after_the_prolog() {
             );
         } else {
             assert!(text.is_empty(), "{case}: {text}");
+        }
+    }
+}
+
+/// A PSSM query whose letters give no Karlin-Altschul parameters (`ps7_gs_masked`, which the
+/// default SEG masks completely) on the database `tslice`, as the probe `pssmmasked.f0` of line RG
+/// X-short-bat: NCBI crashes in the setup of its preliminary search, after its prolog, so LOSAT
+/// writes the `-outfmt 0` prolog (that of the same search with `-seg no`, which NCBI runs, up to its
+/// query's report) and then refuses; with `-outfmt 6` nothing is written (row
+/// `db.tbn.inpssm.rej.masked`).
+#[test]
+fn a_masked_pssm_query_is_refused_after_the_prolog() {
+    let temp = TempDir::new("pssm-masked");
+    let dir = temp.0.as_path();
+    let pssm = pssm_file(dir, "ps7_gs_masked");
+    let db = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tslice");
+    let run = |extra: &[&str], outfmt: &str, threads: &str| {
+        let mut args = vec!["tblastn", "-in_pssm", pssm.to_str().unwrap()];
+        args.extend(["-db", db.to_str().unwrap(), "-evalue", "1000"]);
+        args.extend(extra);
+        args.extend(["-outfmt", outfmt, "-num_threads", threads]);
+        losat(dir, &[], &args)
+    };
+    let searched = run(&["-seg", "no"], "0", "1");
+    let text = String::from_utf8_lossy(&searched.stdout);
+    assert!(searched.status.success(), "-seg no: {text}");
+    let prolog = &searched.stdout[..text.find("\n\nQuery=").expect("the query's report")];
+    assert!(
+        prolog.starts_with(b"PSITBLASTN 2.17.0+\n") && prolog.ends_with(b" total letters\n\n"),
+        "-seg no: {text}"
+    );
+    for outfmt in ["0", "6"] {
+        for threads in ["1", "4"] {
+            let case = format!("outfmt {outfmt} threads {threads}");
+            let refused = run(&[], outfmt, threads);
+            assert_refused(&refused, MASKED_PSSM, &case);
+            let expected: &[u8] = if outfmt == "0" { prolog } else { b"" };
+            assert_bytes(&refused.stdout, expected, &case);
         }
     }
 }

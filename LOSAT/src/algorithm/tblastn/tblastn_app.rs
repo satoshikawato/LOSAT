@@ -2228,22 +2228,6 @@ fn search(
             query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2777-2792
-        // ```c
-        //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-        //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-        //       if (loop_status) {
-        //           contexts[context].is_valid = FALSE;
-        // ```
-        // A PSSM query whose letters give no Karlin-Altschul parameters (one that `-seg` masks
-        // completely) makes NCBI BLAST+ 2.17.0's tblastn crash (SIGSEGV, probe `gs.masked`): LOSAT
-        // refuses it (DECISIONS 35 Q5 of line PS, as psiblast's, DECISIONS 12 S4), before
-        // anything is written.
-        if pssm.is_some() && query_validity.iter().any(|&valid| !valid) {
-            anyhow::bail!(
-                "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
-            );
-        }
         // A run without a searched query has no parameters of a query set.
         let mut lengths = lengths.unwrap_or(LocalSubjectParameters {
             lengths: Vec::new(),

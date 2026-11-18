@@ -2698,6 +2698,60 @@ impl LocalParameterRecipe<'_> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2782-2791
+// ```c
+//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+//       if (loop_status) {
+//           contexts[context].is_valid = FALSE;
+//           sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
+//           sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
+//           if (!Blast_QueryIsTranslated(program) ) {
+//              Blast_MessageWrite(blast_message, eBlastSevWarning, context,
+//              kBlastErrMsg_CantCalculateUngappedKAParams);
+//           }
+//           continue;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:171-172
+// ```c++
+//     if (status != 0 &&
+//         (!(blast_msg.Get()) || (blast_msg.Get() && blast_msg.Get()->severity == eBlastSevError)))
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:192-197
+// ```c++
+//     if (pssm.NotEmpty()) {
+//         ...
+//         PsiBlastSetupScoreBlock(sbp, pssm, retval->m_Messages, options);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:90-93
+// ```c++
+//     if (pssm->GetPssm().GetLambdaUngapped() != CPssm::kInvalidStat) {
+//         score_blk->kbp_psi[0]->Lambda = pssm->GetPssm().GetLambdaUngapped();
+//     } else if (score_blk->kbp_std[0]->Lambda > 0.0) {
+//         score_blk->kbp_psi[0]->Lambda = score_blk->kbp_std[0]->Lambda;
+// ```
+/// The refusal of a PSSM query (`-in_pssm`) whose letters give no Karlin-Altschul parameters (one
+/// that `-seg` masks completely; NCBI 2.17.0 SIGSEGV, probes `gs.masked` of line PS and
+/// `pssmmasked.f0` of line RG X-short-bat). `Blast_ScoreBlkKbpUngappedCalc` invalidates its one
+/// context, frees its `kbp_std` and makes no `kbp_psi`; `BLAST_MainSetUp` then fails with that
+/// warning alone (blast_setup.c:652-664), which `CSetupFactory::CreateScoreBlock` does not throw,
+/// and `PsiBlastSetupScoreBlock` reads the block that is not there. NCBI crashes in the setup of
+/// the preliminary search (`CBlastPrelimSearch`, psiblast_impl.cpp:132-135, in `CPsiBlast::Run`,
+/// tblastn_app.cpp:327), after the prolog (`PrintProlog`, tblastn_app.cpp:270) and the search
+/// strategy (:307), before the database's first read and the setup checks of the search's run
+/// (`BLAST_GapAlignSetUp`: OID 0's length, `SetupEngineError`). The refusal comes after the
+/// prolog, as every refusal of a step where NCBI's search of a batch crashes
+/// (`blastinput::app::ErrorAfterBatchReports`): line PS's DECISIONS 35 Q5 (as psiblast's,
+/// DECISIONS 12 S4) refused it before anything was written; line RG item X-short-bat moved it after
+/// the prolog for TBLASTN on 2026-11-18 (the bytes that NCBI's crash loses from its output buffer
+/// are not imitated).
+#[cold]
+#[inline(never)]
+fn x_masked_pssm_query() -> anyhow::Error {
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+        "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
+    )))
+}
+
 // NCBI c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
 // BlastSetUp_MaskQuery(...); BlastSetup_ScoreBlkInit(...); BLAST_CalcEffLengths(...);
 // BlastHitSavingParametersNew(...); the score block, effective lengths and cutoffs of a
@@ -2943,6 +2997,12 @@ fn query_set_setup<'a>(
         // the effective lengths keep `kbp_gap_std` and the gap trigger `kbp_std`
         // (`LocalKarlinBlocks`).
         Some(psi) => {
+            // A PSSM query without a valid context (its letters give no Karlin-Altschul
+            // parameters: one that `-seg` masks completely) is the one that NCBI crashes with, in
+            // the setup of its preliminary search (`x_masked_pssm_query`).
+            if !valid_contexts.iter().any(|&valid| valid) {
+                return Err(x_masked_pssm_query());
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-961
             // ```c
             //    if((status=BlastExtensionParametersNew(program_number, ext_options, sbp,
@@ -2954,13 +3014,10 @@ fn query_set_setup<'a>(
             // context a valid `kbp_std` but whose file's ungapped values make `kbp_psi` invalid
             // (`lambdaUngapped`, `kappaUngapped` or `hUngapped` negative) stops the search's
             // setup, before any subject is read, with NCBI's engine error of an invalid query
-            // (probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review). A PSSM query without a
-            // valid context is the one that NCBI crashes with, refused after the batches.
-            if valid_contexts.iter().any(|&valid| valid)
-                && !contexts.iter().any(|context| {
-                    context.is_valid && psi.ungapped_karlin_valid(&context.karlin_params)
-                })
-            {
+            // (probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review).
+            if !contexts.iter().any(|context| {
+                context.is_valid && psi.ungapped_karlin_valid(&context.karlin_params)
+            }) {
                 return Err(SetupEngineError::NO_VALID_KARLIN_BLOCK.into());
             }
             LocalParameterRecipe {

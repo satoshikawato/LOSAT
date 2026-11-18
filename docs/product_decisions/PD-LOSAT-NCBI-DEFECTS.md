@@ -171,10 +171,11 @@
   1.52 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
   of a query batch crashes, does not finish or stops come after the reports of the query
   batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
-  Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.50 and
-  1.51, which line RG items X-short-tbx and X4 hold on their branches: the first of them to merge
-  renumbers)
+  Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops and,
+  with `-in_pssm`, that of a query whose letters give no Karlin-Altschul parameters, which came
+  before the run's first byte; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.50 and 1.51, which line RG items X-short-tbx and X4 hold on their
+  branches: the first of them to merge renumbers)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1617,10 +1618,18 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   chunk or past it, which NCBI's interval tree splits without end; the overflow banks of the seed
   search; a query chunk split again (also with a negative `CHUNK_SIZE` whose first wrapped range
   covers the batch) or holding no query (D13); and with `-in_pssm` (one batch: the prologs) a
-  window past the PSSM (1.18), a gapped start past the subject's translation (1.48) and a traceback
-  that starts past its frame's NULLB (1.44). Before the run's first byte stay the refusal of a
-  reported column of that NULLB (1.44), whose alignment NCBI reports, and that of a negative
-  `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on (D13).
+  query whose letters give no Karlin-Altschul parameters (one that `-seg` masks completely: NCBI's
+  `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc` did not
+  make, in the setup of its preliminary search, `psiblast_aux_priv.cpp:90-93`; refused before the
+  run's first byte until this version, line PS DECISIONS 35 Q5), a window past the PSSM (1.18), a
+  gapped start past the subject's translation (1.48) and a traceback that starts past its frame's
+  NULLB (1.44). LOSAT writes what NCBI has formatted before the failing step; what NCBI's crash
+  loses from its output buffer is not imitated (NCBI's file lacks the end of the text that buffer
+  held: 21 bytes of the `-in_pssm` prolog reach it in the probe of 2026-11-18; decision S1 (a) of
+  line RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07). Before the run's first byte stay the refusal of a reported column of that NULLB
+  (1.44), whose alignment NCBI reports, and that of a negative `CHUNK_SIZE` whose wrapped ranges
+  leave gaps between them, which NCBI searches on (D13).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

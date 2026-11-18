@@ -626,7 +626,19 @@ impl<S: AsnSource> Reader<S> {
     //             }
     //         }
     // ```
+    #[inline]
     pub(crate) fn skip_white_space(&mut self) -> Result<u8> {
+        // A value or a punctuation mark at the position: nothing to skip.
+        match self.src.byte_at(self.pos) {
+            Some(c) if !matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-') => Ok(c),
+            _ => self.skip_white_space_from_here(),
+        }
+    }
+
+    /// [`skip_white_space`](Self::skip_white_space) from a byte that may be white space, a
+    /// comment or the end of the text.
+    #[inline(never)]
+    fn skip_white_space_from_here(&mut self) -> Result<u8> {
         loop {
             let Some(c) = self.src.byte_at(self.pos) else {
                 return Err(self.end_of_text_in_white_space());

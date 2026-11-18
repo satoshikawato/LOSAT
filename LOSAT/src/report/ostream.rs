@@ -1103,6 +1103,17 @@ impl Core {
         ))
     }
 
+    /// An insertion that sets the stream's `badbit` itself (`ReportWrite::badbit`): the stream
+    /// throws, and NCBI's end is the application's `CATCH_ALL`; the bytes held reach the device
+    /// at `finish`, as NCBI's stdio does at exit.
+    #[cold]
+    fn badbit(&mut self) -> std::io::Result<()> {
+        self.failure.get_or_insert(Failure::Thrown {
+            posts: String::new(),
+        });
+        Err(write_failure())
+    }
+
     /// NCBI's end of an object whose whole insertion failed at the device
     /// (`Site::Serial { whole: true }`, `undecided`), from NCBI's pieces of it (`pieces`): from
     /// NCBI's buffer before the object, a piece that the buffer writes past the bytes the device
@@ -1547,6 +1558,10 @@ impl ReportHandle {
         lock(&self.0).write_fault(position)
     }
 
+    fn badbit(&self) -> std::io::Result<()> {
+        lock(&self.0).badbit()
+    }
+
     /// The insertions from here on are made in NCBI's region `site` (`ReportWrite::site`, for a
     /// hold that keeps the regions in order with its bytes).
     pub(crate) fn declare(&self, site: Site) -> std::io::Result<()> {
@@ -1592,6 +1607,16 @@ pub trait ReportWrite: std::io::Write {
     /// whole (`Site::Serial { whole: true }`), which decide NCBI's end (an error: the run stops).
     fn resolve_object(&mut self, _pieces: &[usize]) -> std::io::Result<()> {
         Ok(())
+    }
+
+    /// An insertion of the report that sets the stream's `badbit` itself (a null `const char*`:
+    /// the epilog's matrix name, `report::pairwise::write_matrix_line`), which throws on NCBI's
+    /// stream (`exceptions(NcbiBadbit)`, blast_format.cpp:118-119): the bytes the stream holds
+    /// are written, the run stops, and the application reports "BLAST failed to write output",
+    /// exit status 6 (blast_app_util.hpp:252-255). A writer that is no stream of NCBI's gives the
+    /// error of a failed write.
+    fn badbit(&mut self) -> std::io::Result<()> {
+        Err(write_failure())
     }
 
     /// After `is_undecided_report_write_failure` of an object written once the formatter ended
@@ -1649,6 +1674,10 @@ impl ReportWrite for ReportStream {
     fn write_fault(&mut self, position: usize) -> std::io::Result<()> {
         lock(&self.0).write_fault(position)
     }
+
+    fn badbit(&mut self) -> std::io::Result<()> {
+        lock(&self.0).badbit()
+    }
 }
 
 impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
@@ -1666,6 +1695,10 @@ impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
 
     fn write_fault(&mut self, position: usize) -> std::io::Result<()> {
         (**self).write_fault(position)
+    }
+
+    fn badbit(&mut self) -> std::io::Result<()> {
+        (**self).badbit()
     }
 
     fn insert_cut_run(
@@ -1693,6 +1726,11 @@ impl<W: ReportWrite> ReportWrite for std::io::BufWriter<W> {
 
     fn resolve_object(&mut self, pieces: &[usize]) -> std::io::Result<()> {
         self.get_mut().resolve_object(pieces)
+    }
+
+    fn badbit(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(self)?;
+        self.get_mut().badbit()
     }
 }
 
@@ -2251,6 +2289,14 @@ impl ReportWrite for NcbiOstream<'_> {
         match &self.report {
             Some(report) => report.write_fault(position),
             None => Ok(()),
+        }
+    }
+
+    fn badbit(&mut self) -> std::io::Result<()> {
+        match (&self.report, &mut self.hold) {
+            (_, Some(hold)) => hold.badbit(),
+            (Some(report), None) => report.badbit(),
+            (None, None) => Err(write_failure()),
         }
     }
 }

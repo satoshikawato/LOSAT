@@ -50,9 +50,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, FailedLookup,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
-    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
+    TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec,
+    TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -127,6 +127,10 @@ pub(super) enum TabularSubjects<'a> {
         sources: &'a [crate::report::defline::SourceTaxname],
         length: &'a dyn Fn(usize) -> usize,
         taxonomy: &'a [TabularTaxonomy],
+        /// What the reports do at each subject, by rank (`report::db_subject::HitLoads`): a
+        /// subject whose load throws writes its rows as NCBI's `catch` leaves them
+        /// (`report::tabular::SubjectLookup::Throws`).
+        loads: &'a crate::report::db_subject::HitLoads,
     },
 }
 
@@ -142,6 +146,28 @@ struct SubjectValues<'a> {
     taxonomy: Cow<'a, TabularTaxonomy>,
     /// How the lookups of a subject fail (an empty id: `SetSubjectId`), `None` where they do not.
     failed: Option<FailedValues<'a>>,
+}
+
+impl<'a> SubjectValues<'a> {
+    /// The values of the database sequence `subject` whose load throws with `exception`
+    /// (`common::tabular::SubjectValues::thrown`): its rows print none of its own values, and
+    /// NCBI reads none of its ids, titles or taxonomy.
+    fn thrown(
+        subject: &ParsedSubject,
+        exception: &'a crate::ncbi_exception::NcbiException,
+    ) -> Self {
+        SubjectValues {
+            id: &[],
+            accession: &[],
+            accession_version: &[],
+            gi: 0,
+            all_ids: Vec::new(),
+            titles: None,
+            length: 0,
+            taxonomy: Cow::Owned(TabularTaxonomy::default()),
+            failed: Some(FailedValues::thrown(subject, exception)),
+        }
+    }
 }
 
 impl SubjectValues<'_> {
@@ -174,12 +200,7 @@ impl SubjectValues<'_> {
     /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
     fn lookup(&self) -> SubjectLookup<'_> {
         match &self.failed {
-            Some(failed) => SubjectLookup::Failed(FailedLookup {
-                full: &failed.align_id[0],
-                accession: &failed.align_id[1],
-                subject_id: failed.subject_id,
-                all_ids: failed.all_ids.then_some(self.all_ids.as_slice()),
-            }),
+            Some(failed) => failed.lookup(&self.all_ids),
             None => SubjectLookup::Found,
         }
     }
@@ -266,6 +287,7 @@ impl<'a> TabularSubjects<'a> {
                             align_id: [local.clone(), local],
                             subject_id: true,
                             all_ids: false,
+                            thrown: None,
                         })
                     }
                     _ => None,
@@ -291,8 +313,15 @@ impl<'a> TabularSubjects<'a> {
                 parsed,
                 length,
                 taxonomy,
+                loads,
                 ..
             } => {
+                if let (Some(exception), Some(subject)) = (
+                    loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
+                ) {
+                    return Ok(SubjectValues::thrown(subject, exception));
+                }
                 // `None`: the lookup throws (`common::tabular::SubjectId`).
                 let found = ids.get(s_idx).and_then(Option::as_deref);
                 let id: &[u8] = found.unwrap_or_default();
@@ -361,6 +390,7 @@ impl<'a> TabularSubjects<'a> {
                                 align_id: [Cow::Owned(full), Cow::Owned(accession)],
                                 subject_id: true,
                                 all_ids: true,
+                                thrown: None,
                             }
                         }),
                     }),
@@ -444,12 +474,7 @@ pub(super) fn write_tabular_prolog_warning(
 
 /// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
 pub(super) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    TabularWriter {
-        spec,
-        program_version: "",
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, "", None).prolog(writer)?;
     Ok(())
 }
 
@@ -480,12 +505,7 @@ pub(super) fn write_tabular_without_queries(
             diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
             diagnostics.flush()?;
         }
-        TabularWriter {
-            spec,
-            program_version: "",
-            matrix: None,
-        }
-        .epilog(writer, 0)?;
+        TabularWriter::new(spec, "", None).epilog(writer, 0)?;
         // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
         writer.ncbi_flush()?;
     }
@@ -515,12 +535,7 @@ pub(super) fn write_tabular_round_epilog(
         diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter {
-        spec,
-        program_version: "",
-        matrix: None,
-    }
-    .epilog(writer, rounds)?;
+    TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
     writer.ncbi_flush()?;
     Ok(())
 }
@@ -607,7 +622,19 @@ pub(super) fn write_blastp_tax_report(
             taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
         },
     };
-    let report = report_batch(&queries, parsed, plain, true, tab.names, tab.app.name())?;
+    let loads = match &tab.subjects {
+        TabularSubjects::Records { .. } => None,
+        TabularSubjects::Database { loads, .. } => Some(*loads),
+    };
+    let report = report_batch(
+        &queries,
+        parsed,
+        plain,
+        true,
+        loads,
+        tab.names,
+        tab.app.name(),
+    )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())
 }
@@ -679,11 +706,11 @@ fn write_tabular_rows<const RPS: bool>(
     //                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
     //                         ++num_positives;
     // ```
-    let table = TabularWriter {
+    let table = TabularWriter::new(
         spec,
-        program_version: tab.program_version,
-        matrix: (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
-    };
+        tab.program_version,
+        (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
+    );
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -706,6 +733,8 @@ fn write_tabular_rows<const RPS: bool>(
     if tab.prolog {
         table.prolog(writer)?;
     }
+    // The bytes of one comment block or one row, written to the report stream as soon as they
+    // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
     let mut buf: Vec<u8> = Vec::new();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     // The index of the next HSP in the final hit lists (the probe's HSP number).
@@ -731,7 +760,6 @@ fn write_tabular_rows<const RPS: bool>(
             tab.query_ids.get(q_idx).map_or(&b""[..], |id| id.as_ref()),
             query_length,
         );
-        buf.clear();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
         // ```c++
         //     if (align_set) {
@@ -757,12 +785,9 @@ fn write_tabular_rows<const RPS: bool>(
             tab.database.as_bytes(),
             num_hits,
         )?;
-        if probe.is_some() {
-            writer.write_all(&buf)?;
-            buf.clear();
-        }
+        writer.write_all(&buf)?;
+        buf.clear();
         let Some(hit_list) = hit_list else {
-            writer.write_all(&buf)?;
             // `~CBlastTabularInfo` of the query's report flushes the stream.
             writer.ncbi_flush()?;
             continue;
@@ -836,6 +861,24 @@ fn write_tabular_rows<const RPS: bool>(
                     (q_idx as u32, list_index as u32, index_in_list as u32),
                     hsp.num_ident,
                 );
+                // A row that reads a subject whose load throws outside the subject block ends
+                // the run (`TabularWriter::ends_run`).
+                if let Some(exception) = table.ends_run(
+                    &subject,
+                    crate::blastinput::app::Program::Blastp,
+                    seqalign_num_ident,
+                ) {
+                    return Err(crate::report::tabular::run_end(
+                        writer,
+                        &buf,
+                        exception,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
                 //        		const CBioseq_Handle& subject_bh =
@@ -845,9 +888,10 @@ fn write_tabular_rows<const RPS: bool>(
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
                 // (`QueryWarnings::subject_read`), before those of the row's own lookups.
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(seqalign_num_ident) {
-                        writer.write_all(&buf)?;
-                        buf.clear();
+                    if warnings.reads_with_texts(q_idx)
+                        && fetch.reads(seqalign_num_ident)
+                        && !subject.throws()
+                    {
                         warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
                     }
                 }
@@ -860,8 +904,6 @@ fn write_tabular_rows<const RPS: bool>(
                 ) {
                     let text = names.row_messages(spec, &values.taxonomy);
                     if !text.is_empty() {
-                        writer.write_all(&buf)?;
-                        buf.clear();
                         writer.flush()?;
                         warnings.sink.write_all(&text)?;
                         warnings.sink.flush()?;
@@ -881,38 +923,28 @@ fn write_tabular_rows<const RPS: bool>(
                 if !spec.opens_counts(&seqalign_num_ident) {
                     row.num_ident = seqalign_num_ident;
                 }
-                match probe.as_deref_mut() {
-                    // One printed row is one HSP; the probe marks it without changing it.
-                    Some(probe) => {
-                        buf.clear();
-                        table.row(
-                            &mut buf,
-                            &mut table_rows,
-                            &query,
-                            &subject,
-                            kept.as_ref(),
-                            &row,
-                        );
-                        writer.flush()?;
-                        probe.begin(hsp_index);
-                        writer.write_all(&buf)?;
-                        writer.flush()?;
-                        probe.end(hsp_index);
-                        buf.clear();
-                    }
-                    None => table.row(
-                        &mut buf,
-                        &mut table_rows,
-                        &query,
-                        &subject,
-                        kept.as_ref(),
-                        &row,
-                    ),
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
+                table.row(
+                    &mut buf,
+                    &mut table_rows,
+                    &query,
+                    &subject,
+                    kept.as_ref(),
+                    &row,
+                );
+                writer.write_all(&buf)?;
+                buf.clear();
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
                 }
                 hsp_index += 1;
             }
         }
-        writer.write_all(&buf)?;
         writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236

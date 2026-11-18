@@ -17,7 +17,7 @@ trait NativeRead: Read + Seek {
     fn available(&mut self) -> std::io::Result<usize>;
 }
 
-impl NativeRead for std::fs::File {
+impl NativeRead for crate::blastinput::input_files::InputFile {
     fn available(&mut self) -> std::io::Result<usize> {
         file_available(self)
     }
@@ -128,14 +128,16 @@ fn stream_matches_the_pinned_cpp_oracle() {
             .iter()
             .flat_map(|error| [(error, true), (error, false)])
         {
-            let temporary = std::env::temp_dir().join(format!(
+            let temporary = crate::utils::test_dir::temp_dir().join(format!(
                 "losat-fasta-reader-stream-{}-{}",
-                std::process::id(),
+                crate::utils::test_dir::process_id(),
                 fields[0]
             ));
             let input: Box<dyn NativeRead> = if file_backend {
                 std::fs::write(&temporary, &data).unwrap();
-                Box::new(std::fs::File::open(&temporary).unwrap())
+                Box::new(crate::blastinput::input_files::InputFile::from(
+                    std::fs::File::open(&temporary).unwrap(),
+                ))
             } else {
                 Box::new(Input {
                     data: Cursor::new(data.clone()),
@@ -194,9 +196,9 @@ fn file_rows_through_from_file_and_from_bytes() {
         } else {
             fields[7].split('|').map(decode).collect()
         };
-        let temporary = std::env::temp_dir().join(format!(
+        let temporary = crate::utils::test_dir::temp_dir().join(format!(
             "losat-fasta-reader-from-file-{}-{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             fields[0]
         ));
         std::fs::write(&temporary, &data).unwrap();

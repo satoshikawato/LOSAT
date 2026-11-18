@@ -1995,8 +1995,10 @@ mod held_side_files_tests {
     use std::path::{Path, PathBuf};
 
     fn work(stem: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("losat_held_side_{stem}_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_held_side_{stem}_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir

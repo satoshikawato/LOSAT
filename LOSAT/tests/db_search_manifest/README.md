@@ -45,3 +45,6 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   psiblast losat-rejection row of a subject set); `extra_args` is split like a shell line; `outfmt` is one argument;
   `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.
 - A row runs `LOSAT PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT` from `LOSAT/`.
+- `query`: a path relative to LOSAT/; `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`); `stdin:pipe:PATH`,
+  `stdin:file:PATH` or `stdin:empty` is `-query -` with PATH's bytes through a pipe, the file PATH itself, or an empty pipe
+  as standard input (`db_search_fixtures.query_stdin`; such a row has no PSSM or XInclude files and the library skips it).

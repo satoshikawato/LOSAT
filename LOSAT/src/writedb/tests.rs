@@ -39,9 +39,9 @@ impl TempDir {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos());
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-writedb-{label}-{}-{}-{nanos}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1539,6 +1539,10 @@ fn run_v5_cases(prefix: &str) {
 /// standard streams, as without `-logfile`), a warning and an error that go to the file, the
 /// empty name (exit status 1, nothing shown) and a file in a missing directory.
 #[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
 fn logfile_runs_as_makeblastdb() {
     run_v5_cases("L_");
 }
@@ -1547,6 +1551,10 @@ fn logfile_runs_as_makeblastdb() {
 /// value, a quoted name, a record without data in the second file, a missing and an empty
 /// second file.
 #[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
 fn several_input_files_run_as_makeblastdb() {
     run_v5_cases("M_");
 }
@@ -1554,6 +1562,10 @@ fn several_input_files_run_as_makeblastdb() {
 /// The metadata file of version 5 (every field and the list of files, the LMDB and lookup
 /// files included) for protein and nucleotide databases of one volume and of several.
 #[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
 fn the_metadata_files_of_version_5_are_makeblastdb_s() {
     run_v5_cases("J_");
 }
@@ -1800,11 +1812,11 @@ fn run_fix_case(case: &FixCase) {
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let err = build_tree_masked(&v5_markers(&err, &dir));
     let out = v5_markers(&out, &dir);
-    // A directory as the map: Unix opens it (`ifstream::open`, `File::open`) and reads an empty
-    // map, which is what the case expects; Windows refuses to open a directory, so there the
+    // A directory as the map: Unix and WASI open it (`ifstream::open`, `File::open`) and read an
+    // empty map, which is what the case expects; Windows refuses to open a directory, so there the
     // map is "File is not accessible", as for any file that cannot be opened (NCBI's own
     // answer on Windows is not measured).
-    if case.mapdir && !cfg!(unix) {
+    if case.mapdir && !cfg!(any(unix, target_os = "wasi")) {
         assert_eq!(status, 1, "{name}: exit status");
         assert!(
             show(&err).contains("Argument \"taxid_map\". File is not accessible:  `<D>/mapdir'"),

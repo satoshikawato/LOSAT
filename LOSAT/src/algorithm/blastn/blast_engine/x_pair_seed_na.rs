@@ -57,8 +57,8 @@
 //!
 //! Scope (anything else returns `false`, and the reference code runs): no two-stage table,
 //! the diagonal hash (query longer than 8000), `window_size == 0` (one hit), `scan_range ==
-//! 0`, an unmasked subject, no debug, trace or window diagnostics, one subject searched by the
-//! owner of a pool of two threads or more.
+//! 0`, no debug, trace or window diagnostics, one subject (masked or not: the strips cover its
+//! scan ranges) searched by the owner of a pool of two threads or more.
 //!
 //! Strip size: a lookup hit is a seed here (no word extension filters it), about 100 per
 //! subject offset for 30,000 24-mers against a 3 Mb genome (297.7 M pairs), so the strips are
@@ -119,7 +119,7 @@ pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) scan_step: usize,
     pub(in super::super) query_context_index: &'a QueryContextIndex,
     pub(in super::super) query_contexts: &'a [QueryContext],
-    pub(in super::super) encoded_queries_blastna: &'a [&'a [u8]],
+    pub(in super::super) encoded_query_concat_blastna: &'a [u8],
     pub(in super::super) cutoff_scores: &'a [i32],
     pub(in super::super) x_dropoff_scores: &'a [i32],
     pub(in super::super) reduced_cutoff_scores: &'a [i32],
@@ -169,7 +169,6 @@ fn in_scope(x: &NaInputs<'_>) -> bool {
         x.use_array_indexing,
         x.window_size,
         x.scan_range,
-        x.subject_masked,
         x.diagnostics,
         x.one_subject_owner,
     )
@@ -181,16 +180,10 @@ fn scope(
     use_array_indexing: bool,
     window_size: usize,
     scan_range: usize,
-    subject_masked: bool,
     diagnostics: bool,
     one_subject_owner: bool,
 ) -> bool {
-    !use_array_indexing
-        && window_size == 0
-        && scan_range == 0
-        && !subject_masked
-        && !diagnostics
-        && one_subject_owner
+    !use_array_indexing && window_size == 0 && scan_range == 0 && !diagnostics && one_subject_owner
 }
 
 /// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
@@ -203,7 +196,6 @@ pub(in super::super) fn wants(
     use_array_indexing: bool,
     window_size: usize,
     scan_range: usize,
-    subject_masked: bool,
     diagnostics: bool,
     one_subject_owner: bool,
 ) -> bool {
@@ -214,7 +206,6 @@ pub(in super::super) fn wants(
         use_array_indexing,
         window_size,
         scan_range,
-        subject_masked,
         diagnostics,
         one_subject_owner,
     ) && pool_threads().is_some();
@@ -242,7 +233,7 @@ pub(in super::super) fn wants(
 ///         Int4 context = BSearchContextInfo(q_off, query_info);
 /// ```
 /// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
-/// word length and step (unmasked subject), from `job.start` to `job.end`; every lookup hit of
+/// word length and step (masked subject or not), from `job.start` to `job.end`; every lookup hit of
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
 /// becomes a `Seed` with the context of its query offset.
 fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
@@ -442,11 +433,6 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
-        // ```c
-        // Uint1 *q_start = query->sequence;
-        // ```
-        let q_seq_blastna = x.encoded_queries_blastna[context_idx];
         let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
         // Use pre-computed cutoff score (computed once per query-subject pair)
@@ -565,6 +551,14 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         //             /* perform ungapped extension */
         //             s_NuclUngappedExtend(query, subject, matrix, q_off, s_off, ...
         // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+        // ```c
+        // Uint1 *q_start = query->sequence;
+        // ```
+        // NCBI's `query` is the concatenated query and `q_off` an offset in it
+        // (na_ungapped.c:164-206 too): a walk that does not stop at the context's sentinel (a
+        // raw X-drop of 2^30 or more) reads the contexts before it.
+        let q_off_concat = ctx.query_offset as usize + q_off;
         let x_dropoff = x.x_dropoff_scores[context_idx];
         let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
         let ungapped_start = if timing_enabled {
@@ -574,9 +568,9 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         };
         let ungapped = if safe_k < 11 {
             extend_hit_ungapped_exact_ncbi(
-                q_seq_blastna,
+                x.encoded_query_concat_blastna,
                 search_seq_packed,
-                q_off,
+                q_off_concat,
                 s_off,
                 s_len,
                 x_dropoff,
@@ -584,9 +578,9 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             )
         } else {
             extend_hit_ungapped_approx_ncbi(
-                q_seq_blastna,
+                x.encoded_query_concat_blastna,
                 search_seq_packed,
-                q_off,
+                q_off_concat,
                 s_off,
                 s_end,
                 s_len,
@@ -607,9 +601,6 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             }
             *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
         }
-        let qs = ungapped.q_start;
-        let qe = ungapped.q_start + ungapped.length;
-        let ss = ungapped.s_start;
         let ungapped_se = ungapped.s_start + ungapped.length;
         let ungapped_score = ungapped.score;
 
@@ -655,21 +646,12 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         }
 
         // NCBI architecture: Collect ungapped hit for batch processing
+        // `UngappedHit::saved` holds NCBI's saving of the hit (`BLAST_SaveInitialHit`) and its
+        // offsets in the context (`s_AdjustInitialHSPOffsets`, a negative `Int4` start for a hit
+        // that starts left of its context).
         super::super::x_push_ungapped(
             ungapped_hits,
-            UngappedHit {
-                context_idx: q_idx,
-                query_idx: ctx.query_idx,
-                query_frame: ctx.frame,
-                query_context_offset: ctx.query_offset,
-                seed_q_off: q_off as u32,
-                seed_s_off: s_off as u32,
-                qs: qs as u32,
-                qe: qe as u32,
-                ss: ss as u32,
-                se: ungapped_se as u32,
-                score: ungapped_score,
-            },
+            UngappedHit::saved(q_idx, ctx, q_off_concat, s_off, &ungapped),
         );
         if PT {
             out.hit_keys.push(x_key);
@@ -704,8 +686,8 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
 ///         hits_extended += extend(offset_pairs, hitsfound, word_params,
 /// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
-/// its pool): the scan ranges of `scan_subject_kmers_with_ranges` (an unmasked subject,
-/// `word_length == lut_word_length`) cut into strips scanned by any thread, folded here in
+/// its pool): the scan ranges of `scan_subject_kmers_with_ranges` (`word_length ==
+/// lut_word_length`) cut into strips scanned by any thread, folded here in
 /// strip order into `hash` and `hits`. With `fold_part` (LOSAT_X_PAIRPARFOLD,
 /// `x_pair_seed_part.rs`) the fold is split by diagonal-hash bucket over the threads instead.
 /// `target_strips` is `plan_strips`'s target (`STRIPS_PER_THREAD` per thread in `run`).
@@ -1044,7 +1026,11 @@ mod tests {
     #[test]
     fn seed_stage_on_strips_equals_one_scan() {
         let mut rng = Lcg(0x0B13_5EED);
-        for word_length in [6usize, 7, 8] {
+        // each word size on an unmasked and a masked subject
+        for (word_length, masked) in [6usize, 7, 8]
+            .into_iter()
+            .flat_map(|w| [(w, false), (w, true)])
+        {
             let q_len = 3000 + rng.below(3000) as usize;
             let mut query = random_dna(&mut rng, q_len);
             // a repeat inside the query (long lookup lists)
@@ -1097,6 +1083,8 @@ mod tests {
                 Vec::new(),
             ];
             let ctx_refs: Vec<&[u8]> = ctx_seqs.iter().map(Vec::as_slice).collect();
+            // The concatenated query (the contexts at `offsets`, a sentinel between them).
+            let concat: Vec<u8> = [ctx_seqs[0].as_slice(), &[15], ctx_seqs[1].as_slice()].concat();
             let lookup = build_pv_direct_lookup(
                 &ctx_refs,
                 &offsets,
@@ -1120,7 +1108,26 @@ mod tests {
             let index = QueryContextIndex::new(&contexts, false);
             let score_matrix = build_blastna_matrix(1, -3);
             let nucl_score_table = build_nucl_score_table(1, -3);
-            let seq_ranges = [(0i32, s_len as i32)];
+            // a masked subject's scan ranges (NCBI's `seq_ranges`, right end exclusive) cover most
+            // of it with gaps of 1 to 120 bases, some shorter than a word (the scan skips them)
+            let seq_ranges = if masked {
+                let mut ranges = Vec::new();
+                let mut at = rng.below(30) as usize;
+                while at < s_len {
+                    let len = if rng.below(10) == 0 {
+                        1 + rng.below(20) as usize
+                    } else {
+                        30 + rng.below(2000) as usize
+                    };
+                    let end = (at + len).min(s_len);
+                    ranges.push((at as i32, end as i32));
+                    at = end + 1 + rng.below(120) as usize;
+                }
+                assert!(ranges.len() > 10);
+                ranges
+            } else {
+                vec![(0i32, s_len as i32)]
+            };
             let diag_offset = 37 + rng.below(1000) as isize;
             let x = NaInputs {
                 pv_direct_lookup: Some(&lookup),
@@ -1130,11 +1137,11 @@ mod tests {
                 search_seq_packed: &packed,
                 s_len,
                 subject_seq_ranges: &seq_ranges,
-                subject_masked: false,
+                subject_masked: masked,
                 scan_step: 1,
                 query_context_index: &index,
                 query_contexts: &contexts,
-                encoded_queries_blastna: &ctx_refs,
+                encoded_query_concat_blastna: &concat,
                 cutoff_scores: &[16, 16],
                 x_dropoff_scores: &[20, 20],
                 reduced_cutoff_scores: &[16, 16],
@@ -1163,8 +1170,8 @@ mod tests {
                 word_length,
                 1,
                 &seq_ranges,
-                false,
-                select_mb_scan_kind(word_length, 1, false),
+                masked,
+                select_mb_scan_kind(word_length, 1, masked),
                 |kmer_start, s_range, kmer| {
                     for &q_off_1 in x.hits(kmer) {
                         if q_off_1 == 0 {
@@ -1198,7 +1205,7 @@ mod tests {
             let below_cutoff = seeds.len() as u64 - counts.skipped - serial_hits.len() as u64;
             assert!(
                 serial_hits.len() > 5 && counts.skipped > 0 && below_cutoff > 0,
-                "word {word_length}: the test sequences give too few cases ({} hits, {} skipped, {} other)",
+                "word {word_length} masked {masked}: the test sequences give too few cases ({} hits, {} skipped, {} other)",
                 serial_hits.len(),
                 counts.skipped,
                 below_cutoff
@@ -1225,7 +1232,11 @@ mod tests {
                 .filter(|&t| grid.div_ceil(t) > 512 && grid.div_ceil(t) % 4 != 0)
                 .take(2)
                 .collect();
-            assert_eq!(odd_targets.len(), 2, "word {word_length}: grid {grid}");
+            assert_eq!(
+                odd_targets.len(),
+                2,
+                "word {word_length} masked {masked}: grid {grid}"
+            );
             for threads in 1..=6usize {
                 let pool = rayon::ThreadPoolBuilder::new()
                     .num_threads(threads)
@@ -1256,7 +1267,7 @@ mod tests {
                         }
                         scratch.x_pieces = Some(pieces);
                         let at =
-                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned} lists {lists} pieces {pieces}");
+                            format!("word {word_length} masked {masked} threads {threads} target {target} partitioned {partitioned} lists {lists} pieces {pieces}");
                         let (state, keys, stats_seeds, strips) = pool.install(|| {
                             let mut hash = new_hash();
                             let mut hits = Vec::new();
@@ -1276,7 +1287,10 @@ mod tests {
                             )
                         });
                         assert_eq!(stats_seeds, seeds.len() as u64, "{at}");
-                        assert_eq!(strips, grid.div_ceil(per), "{at}");
+                        // (a masked subject's plan has a strip or more per scan range)
+                        if !masked {
+                            assert_eq!(strips, grid.div_ceil(per), "{at}");
+                        }
                         assert_eq!(keys, serial_keys, "{at}");
                         assert_eq!(state, hash_state(&serial_hash), "{at}");
                     }

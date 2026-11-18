@@ -215,6 +215,7 @@ pub(super) fn write_tblastx_tabular(
             sources: &database.reported.sources,
             lengths: &lengths,
             taxonomy: run.tabular_taxonomy,
+            loads: &database.reported.loads,
         },
     };
     // The subjects of the report's rows in report order, each once per run of its HSPs.
@@ -276,11 +277,7 @@ pub(super) fn write_tblastx_tabular(
         TblastxMatrix::Table(matrix) => matrix,
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
     };
-    let table = TabularWriter {
-        spec,
-        program_version: PROGRAM_VERSION,
-        matrix: Some(matrix),
-    };
+    let table = TabularWriter::new(spec, PROGRAM_VERSION, Some(matrix));
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -322,6 +319,8 @@ pub(super) fn write_tblastx_tabular(
     let counts_block = spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field));
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Tblastx);
+    // The bytes of one comment block or one row, written to the report stream as soon as they
+    // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
     let mut buf: Vec<u8> = Vec::new();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let (mut window, mut qrow, mut srow): (Vec<u8>, Vec<u8>, Vec<u8>) =
@@ -366,7 +365,6 @@ pub(super) fn write_tblastx_tabular(
             query_length,
         );
         let query_hits = &by_query[q_idx];
-        buf.clear();
         // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
         // null alignment set, so outfmt 7 has no count line (`report::write_tabular`).
         table.query_header(
@@ -375,10 +373,8 @@ pub(super) fn write_tblastx_tabular(
             tab.database.as_bytes(),
             (!tab.unsearched[q_idx]).then_some(query_hits.len()),
         )?;
-        if probe.is_some() {
-            writer.write_all(&buf)?;
-            buf.clear();
-        }
+        writer.write_all(&buf)?;
+        buf.clear();
         // The query's formatter (`TabularRows`).
         let mut rows = TabularRows::default();
         let mut first = 0usize;
@@ -453,7 +449,9 @@ pub(super) fn write_tblastx_tabular(
                 } else {
                     0
                 };
-                let rows_read = reads_rows && (counts_block || engine_ident > 0);
+                // A row whose subject's load throws prints none of its letters.
+                let rows_read =
+                    reads_rows && !subject.throws() && (counts_block || engine_ident > 0);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
                 //        		const CBioseq_Handle& subject_bh =
@@ -462,11 +460,25 @@ pub(super) fn write_tblastx_tabular(
                 // A row that reads the subject (`TabularSpec::subject_fetch`, by the engine's
                 // identities for `nident` alone) loads it first where the query's batch did not
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
-                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups. A row
+                // that reads a subject whose load throws outside the subject block ends the run
+                // (`TabularWriter::ends_run`).
+                if let Some(end) = table.ends_run(
+                    &subject,
+                    crate::blastinput::app::Program::Tblastx,
+                    engine_ident,
+                ) {
+                    return Err(crate::report::tabular::run_end(writer, &buf, end, || {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.end_run();
+                        }
+                    }));
+                }
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident) {
-                        writer.write_all(&buf)?;
-                        buf.clear();
+                    if warnings.reads_with_texts(q_idx)
+                        && fetch.reads(engine_ident)
+                        && !subject.throws()
+                    {
                         warnings.subject_read(q_idx, hit.s_idx, &mut *writer)?;
                     }
                 }
@@ -477,8 +489,6 @@ pub(super) fn write_tblastx_tabular(
                 {
                     let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
-                        writer.write_all(&buf)?;
-                        buf.clear();
                         writer.flush()?;
                         warnings.sink.write_all(&text)?;
                         warnings.sink.flush()?;
@@ -608,37 +618,27 @@ pub(super) fn write_tblastx_tabular(
                         )
                     },
                 };
-                match probe.as_deref_mut() {
-                    // One printed row is one HSP; the probe marks it without changing it.
-                    Some(probe) => {
-                        buf.clear();
-                        table.row(
-                            &mut buf,
-                            &mut rows,
-                            &tabular_query,
-                            &subject,
-                            kept.as_ref(),
-                            &row,
-                        );
-                        writer.flush()?;
-                        probe.begin(hsp_index);
-                        writer.write_all(&buf)?;
-                        writer.flush()?;
-                        probe.end(hsp_index);
-                        buf.clear();
-                    }
-                    None => table.row(
-                        &mut buf,
-                        &mut rows,
-                        &tabular_query,
-                        &subject,
-                        kept.as_ref(),
-                        &row,
-                    ),
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
+                table.row(
+                    &mut buf,
+                    &mut rows,
+                    &tabular_query,
+                    &subject,
+                    kept.as_ref(),
+                    &row,
+                );
+                writer.write_all(&buf)?;
+                buf.clear();
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
                 }
             }
         }
-        writer.write_all(&buf)?;
         // `~CBlastTabularInfo` of the query's report flushes the stream.
         crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
     }

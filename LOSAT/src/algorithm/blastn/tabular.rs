@@ -104,12 +104,7 @@ pub(crate) struct BlastnTabular<'a> {
 /// ```
 pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
     let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
-    TabularWriter {
-        spec,
-        program_version: &version,
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, &version, None).prolog(writer)?;
     Ok(())
 }
 
@@ -156,11 +151,7 @@ pub(crate) fn write_blastn_tabular(
         }
     }
     let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
-    let table = TabularWriter {
-        spec,
-        program_version: &version,
-        matrix: None,
-    };
+    let table = TabularWriter::new(spec, &version, None);
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -292,8 +283,21 @@ pub(crate) fn write_blastn_tabular(
             // A table whose rows read the subject (every row or none in BLASTN,
             // `TabularSpec::subject_fetch`) loads it at its first row where the query's batch
             // did not prefetch it: the texts of its taxonomy lookups follow the rows before it
-            // (`QueryWarnings::subject_read`), before those of the row's own lookups.
-            if fetches && !hsp_list.hsps.is_empty() {
+            // (`QueryWarnings::subject_read`), before those of the row's own lookups. A table
+            // that reads a subject whose load throws outside the subject block ends the run at
+            // its first row (`TabularWriter::ends_run`).
+            if let Some(end) = table.ends_run(
+                &subject,
+                crate::blastinput::app::Program::Blastn,
+                first.num_ident,
+            ) {
+                return Err(crate::report::tabular::run_end(writer, &buf, end, || {
+                    if let Some(warnings) = warnings.as_deref_mut() {
+                        warnings.end_run();
+                    }
+                }));
+            }
+            if fetches && !subject.throws() {
                 if let Some(warnings) = warnings.as_deref_mut() {
                     if warnings.reads_with_texts(q_idx) {
                         writer.write_all(&buf)?;
@@ -319,7 +323,8 @@ pub(crate) fn write_blastn_tabular(
                         warnings.sink.flush()?;
                     }
                 }
-                if needs.rows {
+                // A row whose subject's load throws prints none of its letters.
+                if needs.rows && !subject.throws() {
                     xml_rows_into(
                         hsp,
                         tab.queries,
@@ -926,7 +931,7 @@ mod tests {
             s_idx: 0,
             raw_score: 0,
             internal_q_offset_0: 0,
-            internal_q_end_0: q.1 - q.0 + 1,
+            internal_q_end_0: (q.1 - q.0 + 1) as i32,
             internal_s_offset_0: 0,
             internal_s_end_0: s.0.max(s.1) - s.0.min(s.1) + 1,
             internal_query_context_offset: 0,

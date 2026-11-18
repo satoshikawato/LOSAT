@@ -106,21 +106,15 @@ impl Xml2Kind {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417, 750-760
     // (quoted at `report::db_subject::HitLoads`: the `Hit` whose lookup throws, and the report
     // function that catches it)
-    /// Whether every format of a run, `kinds` (the document form of each, `Xml2Kind::of`; `None`
-    /// for a format that is not an XML2 or JSON document), writes a `Hit` whose subject's lookup
-    /// throws as NCBI does: its XML2 and JSON documents leave the query's report out (15 and 16)
-    /// or end the run (13 and 14) with the exception, where every other format is refused
-    /// (`report::db_subject::HitLoads::of`, `ParsedSubject::fetched`). The one answer of every
-    /// program; false for a run of no format.
-    pub fn every(kinds: impl IntoIterator<Item = Option<Self>>) -> bool {
-        let mut any = false;
-        for kind in kinds {
-            if kind.is_none() {
-                return false;
-            }
-            any = true;
+    /// What the document does after a `Hit` whose subject's lookup throws
+    /// (`report::db_subject::AfterThrow`): the stream forms (15 and 16) leave the query's report
+    /// out with the exception's post, the forms of side files (13 and 14) end the run with it.
+    pub fn after_throw(self) -> crate::report::db_subject::AfterThrow {
+        if self.is_files() {
+            crate::report::db_subject::AfterThrow::EndsRun
+        } else {
+            crate::report::db_subject::AfterThrow::EndsReport
         }
-        any
     }
 }
 

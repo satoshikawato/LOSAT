@@ -53,7 +53,9 @@ LOSAT/tests/db_search (README.md there says how they were built).
   `-out_pssm` file that cannot be written: NCBI stops after that query's report with its own error)
   has a non-empty `stdout_bytes` cell: its stdout must be NCBI's of the same command, frozen as
   <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
-  against `stdout_sha256`. Its `rc` and stderr are LOSAT's.
+  against `stdout_sha256`. Its `rc` and stderr are LOSAT's. Where NCBI crashes on such a row, the frozen
+  stdout is the part of the report that LOSAT writes before it refuses; `freeze` keeps it when NCBI's
+  stdout stops earlier or later but agrees up to that point (`frozen_stdout`).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -382,18 +384,29 @@ def strip_sam_cl(data: bytes) -> bytes:
     return data if end < 0 else data[:start] + data[end:]
 
 
-def frozen_stdout(row: dict[str, str], stdout: bytes) -> bytes:
-    """The stdout that `freeze` writes for `row`: NCBI's, except that a SAM document (outfmt 17) whose bytes
-    differ from the frozen file's only in the CL tag of its @PG line keeps the frozen bytes.
+def frozen_stdout(row: dict[str, str], stdout: bytes, returncode: int = 0) -> bytes:
+    """The stdout that `freeze` writes for `row`: NCBI's, except in two cases that keep the frozen bytes.
 
-    NCBI writes its argv[0] in that tag, the path of the NCBI build that ran (the oracle, Bioconda's, ws's).
-    Without this rule a freeze with another build of the same NCBI release would rewrite the file and its
-    sha256 and byte cells although the search output is the same by the rule that `check` (and set D's
-    `run_oracle.py`) compares with, and a freeze of the candidate would leave `git status` dirty."""
-    if not is_sam_outfmt(row["outfmt"]):
-        return stdout
+    1. A SAM document (outfmt 17) whose bytes differ from the frozen file's only in the CL tag of its @PG
+       line. NCBI writes its argv[0] in that tag, the path of the NCBI build that ran (the oracle,
+       Bioconda's, ws's). Without this rule a freeze with another build of the same NCBI release would
+       rewrite the file and its sha256 and byte cells although the search output is the same by the rule
+       that `check` (and set D's `run_oracle.py`) compares with, and a freeze of the candidate would leave
+       `git status` dirty.
+    2. A run that NCBI ends by a signal (`returncode` < 0) whose stdout and the frozen file are the same
+       up to where the shorter one stops. Such rows are `losat-rejection` rows of a crash (a segment that
+       NCBI frees and still walks): how much of its report NCBI writes before the crash depends on its
+       heap and the environment (the same official 2.17.0 binary wrote 17 bytes of
+       db.x2g.bx.of.p0127.nd0.1 on ws and 349 on this machine), so a freeze cannot reproduce the cut,
+       and the frozen file holds the bytes that LOSAT writes before it refuses. A stdout that differs
+       before that point is a new answer and replaces the file."""
     path = FROZEN / f"{row['row_id']}.out"
     if not path.is_file():
+        return stdout
+    if returncode < 0:
+        frozen = path.read_bytes()
+        return frozen if frozen.startswith(stdout) or stdout.startswith(frozen) else stdout
+    if not is_sam_outfmt(row["outfmt"]):
         return stdout
     frozen = path.read_bytes()
     return frozen if strip_sam_cl(frozen) == strip_sam_cl(stdout) else stdout
@@ -481,7 +494,7 @@ def freeze(args: argparse.Namespace) -> int:
             else:
                 run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))
-            out = frozen_stdout(row, run.stdout)
+            out = frozen_stdout(row, run.stdout, run.returncode)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
             row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
             print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
@@ -513,13 +526,13 @@ def freeze(args: argparse.Namespace) -> int:
             run = pssms.run
             refuse_valgrind_messages(row, run.stderr)
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
-            out = frozen_stdout(row, run.stdout)
+            out = frozen_stdout(row, run.stdout, run.returncode)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
                              preexec_fn=ncbi_stack(row))
             refuse_valgrind_messages(row, run.stderr)
-            out = frozen_stdout(row, run.stdout)
+            out = frozen_stdout(row, run.stdout, run.returncode)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:

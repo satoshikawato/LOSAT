@@ -127,7 +127,6 @@ pub(super) fn trace_hsp_list(
         blastn_trace_enabled,
         s_idx,
         s_id,
-        encoded_queries_blastna,
         encoded_queries_nomask,
         query_contexts,
         min_diag_separation,
@@ -375,8 +374,8 @@ pub(super) fn trace_hsp_list(
                     x_ahead.announce(prelim_index, prelim_hits.len(), |x_index| {
                         let p = &prelim_hits[x_index];
                         let h = TreeHsp {
-                            query_offset: p.prelim_qs as i32,
-                            query_end: p.prelim_qe as i32,
+                            query_offset: p.prelim_qs,
+                            query_end: p.prelim_qe,
                             subject_offset: p.prelim_ss as i32,
                             subject_end: p.prelim_se as i32,
                             score: p.prelim_score,
@@ -438,7 +437,6 @@ pub(super) fn trace_hsp_list(
 
                 let prelim = &prelim_hits[prelim_index];
                 let ctx = &query_contexts[prelim.context_idx as usize];
-                let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize];
                 let q_seq_nomask_blastna = encoded_queries_nomask[prelim.context_idx as usize];
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
@@ -454,8 +452,8 @@ pub(super) fn trace_hsp_list(
                 };
                 let subject_frame_sign = 1i32;
                 let prelim_tree_hsp = TreeHsp {
-                    query_offset: prelim.prelim_qs as i32,
-                    query_end: prelim.prelim_qe as i32,
+                    query_offset: prelim.prelim_qs,
+                    query_end: prelim.prelim_qe,
                     subject_offset: prelim.prelim_ss as i32,
                     subject_end: prelim.prelim_se as i32,
                     score: prelim.prelim_score,
@@ -620,7 +618,7 @@ pub(super) fn trace_hsp_list(
                     feature = "parallel",
                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
                 )))]
-                let precomputed: Option<((usize, usize, usize, usize, usize), _)> = None;
+                let precomputed: Option<(traceback_hsp::TraceStart, _)> = None;
                 let start_offsets_start = timing_enabled.then(std::time::Instant::now);
                 let prepared = precomputed
                     .as_ref()
@@ -649,7 +647,6 @@ pub(super) fn trace_hsp_list(
                 let trace_hsp = traceback_hsp::TraceHsp {
                     prelim,
                     ctx,
-                    q_seq_blastna,
                     q_seq_nomask_blastna,
                     trace_traceback_seed,
                     subject_frame_sign,

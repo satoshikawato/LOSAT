@@ -78,6 +78,23 @@ class SamClRuleTests(unittest.TestCase):
             (Path(tmp) / "t.6.out").write_bytes(self.WITH)
             self.assertEqual(db_fixtures.frozen_stdout({"row_id": "t.6", "outfmt": "6"}, other_build), other_build)
 
+    def test_a_freeze_keeps_the_frozen_report_of_a_run_that_ncbi_ends_by_a_signal(self):
+        # NCBI's crash in a refused row (SIGSEGV) cuts its report at a point that depends on its heap and
+        # the environment: the same binary wrote 17 bytes on ws where the frozen prolog has 349.
+        prolog = b"BLASTX 2.17.0+\n\n\nReference: ...\n\nDatabase: x2g\n"
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(db_fixtures, "FROZEN", Path(tmp)):
+            (Path(tmp) / "c.1.out").write_bytes(prolog)
+            row = {"row_id": "c.1", "outfmt": "1"}
+            shorter, longer = prolog[:17], prolog + b"\nQuery= q1\n"
+            for cut in (shorter, longer, prolog):
+                self.assertEqual(db_fixtures.frozen_stdout(row, cut, -11), prolog)
+            # A report that differs before the cut is a new answer, and a run that exits is frozen as it is.
+            other = prolog.replace(b"x2g", b"x3g")
+            self.assertEqual(db_fixtures.frozen_stdout(row, other, -11), other)
+            self.assertEqual(db_fixtures.frozen_stdout(row, shorter, 1), shorter)
+            self.assertEqual(db_fixtures.frozen_stdout(row, shorter), shorter)
+            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "new.1", "outfmt": "1"}, shorter, -11), shorter)
+
     def test_the_rule_applies_to_outfmt_17_only(self):
         for outfmt in ("17", "17 SQ", " 17 SR ", "17 SQ SR"):
             self.assertTrue(db_fixtures.is_sam_outfmt(outfmt), outfmt)

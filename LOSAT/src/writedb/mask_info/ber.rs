@@ -137,9 +137,11 @@ impl<'a> BerIn<'a> {
         }
     }
 
-    /// `ThrowError(fFormatError or fOverflow, message)` at `site` at the current position.
+    /// `ThrowError(fFormatError or fOverflow, message)` at `site` at the current position
+    /// (returned as the [`Fail`]: `return Err(self.throw(..))`, see [`throw_error`]).
     #[cold]
-    fn throw<T>(&self, site: ThrowSite, message: impl std::fmt::Display) -> R<T> {
+    #[inline(never)]
+    fn throw(&self, site: ThrowSite, message: impl std::fmt::Display) -> Fail {
         throw_error(site, &self.position(), message)
     }
 
@@ -209,7 +211,7 @@ impl<'a> BerIn<'a> {
         let mut i = 1;
         loop {
             if tag >= (1 << 24) {
-                return self.throw(PEEK_LONG_TAG, format_args!("tag number is too big: {tag}"));
+                return Err(self.throw(PEEK_LONG_TAG, format_args!("tag number is too big: {tag}")));
             }
             let byte = self.peek(i)?;
             i += 1;
@@ -247,16 +249,23 @@ impl<'a> BerIn<'a> {
     fn peek_tag_of_class(&mut self, class_and_constructed: u8) -> R<i32> {
         let first = self.peek(0)?;
         if first & CLASS_AND_CONSTRUCTED_MASK != class_and_constructed {
-            return self.throw(
-                UNEXPECTED_TAG_CLASS_BYTE,
-                format_args!(
-                    "unexpected tag: {}, should be {}",
-                    tag_to_string(first),
-                    tag_to_string(class_and_constructed)
-                ),
-            );
+            return Err(self.unexpected_tag_class_byte(first, class_and_constructed));
         }
         self.peek_tag()
+    }
+
+    /// `UnexpectedTagClassByte(first_tag_byte, expected_class_byte)`.
+    #[cold]
+    #[inline(never)]
+    fn unexpected_tag_class_byte(&self, first: u8, class_and_constructed: u8) -> Fail {
+        self.throw(
+            UNEXPECTED_TAG_CLASS_BYTE,
+            format_args!(
+                "unexpected tag: {}, should be {}",
+                tag_to_string(first),
+                tag_to_string(class_and_constructed)
+            ),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:171-178
@@ -282,14 +291,20 @@ impl<'a> BerIn<'a> {
     fn expect_tag(&mut self, class_and_constructed: u8, value: i32) -> R<()> {
         let tag = self.peek_tag_of_class(class_and_constructed)?;
         if tag != value {
-            // The class was checked (universal or context specific): no "Application " or
-            // "Private " before the number.
-            return self.throw(
-                UNEXPECTED_TAG_VALUE,
-                format_args!("Unexpected tag: {tag}, expected: {value}"),
-            );
+            return Err(self.unexpected_tag_value(tag, value));
         }
         Ok(())
+    }
+
+    /// `UnexpectedTagValue(tag_class, tag, tag_value)`. The class was checked (universal or
+    /// context specific): no "Application " or "Private " before the number.
+    #[cold]
+    #[inline(never)]
+    fn unexpected_tag_value(&self, tag: i32, value: i32) -> Fail {
+        self.throw(
+            UNEXPECTED_TAG_VALUE,
+            format_args!("Unexpected tag: {tag}, expected: {value}"),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:237-256
@@ -316,23 +331,23 @@ impl<'a> BerIn<'a> {
     fn read_length_long(&mut self, byte: u8) -> R<u64> {
         let mut length_length = usize::from(byte - 0x80);
         if length_length == 0 {
-            return self.throw(
+            return Err(self.throw(
                 asnb_site(398, FORMAT_ERROR, Some(READ_LENGTH_LONG)),
                 "unexpected indefinite length",
-            );
+            ));
         }
         if length_length > 8 {
-            return self.throw(
+            return Err(self.throw(
                 asnb_site(401, OVERFLOW, Some(READ_LENGTH_LONG)),
                 "length overflow",
-            );
+            ));
         }
         let mut length = u64::from(self.byte()?);
         if length == 0 {
-            return self.throw(
+            return Err(self.throw(
                 asnb_site(405, FORMAT_ERROR, Some(READ_LENGTH_LONG)),
                 "illegal length start",
-            );
+            ));
         }
         loop {
             length_length -= 1;
@@ -468,15 +483,15 @@ impl<'a> BerIn<'a> {
     fn expect_end_of_content(&mut self) -> R<()> {
         if self.limit != 0 {
             if self.limit != self.pos as i64 {
-                return self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected");
+                return Err(self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected"));
             }
         } else {
             if self.peek(0)? != 0 {
-                return self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected");
+                return Err(self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected"));
             }
             self.pos += 1;
             if self.peek(0)? != 0 {
-                return self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected");
+                return Err(self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected"));
             }
             self.pos += 1;
         }
@@ -512,7 +527,7 @@ impl<'a> BerIn<'a> {
         self.tag_len = 0;
         let byte = self.byte()?;
         if byte >= 0x80 {
-            return self.throw(UNEXPECTED_LONG_LENGTH, "ShortLength expected");
+            return Err(self.throw(UNEXPECTED_LONG_LENGTH, "ShortLength expected"));
         }
         Ok(usize::from(byte))
     }
@@ -528,7 +543,8 @@ impl<'a> BerIn<'a> {
     // ```
     /// `UnexpectedSysTagByte(byte)`: the tag at the current position is not `byte`.
     #[cold]
-    fn unexpected_sys_tag_byte<T>(&self, got: u8, byte: u8) -> R<T> {
+    #[inline(never)]
+    fn unexpected_sys_tag_byte(&self, got: u8, byte: u8) -> Fail {
         self.throw(
             UNEXPECTED_SYS_TAG_BYTE,
             format_args!(
@@ -543,7 +559,7 @@ impl<'a> BerIn<'a> {
     fn expect_sys_tag_byte(&mut self, byte: u8) -> R<()> {
         let got = self.peek(0)?;
         if got != byte {
-            return self.unexpected_sys_tag_byte(got, byte);
+            return Err(self.unexpected_sys_tag_byte(got, byte));
         }
         self.tag_len = 1;
         Ok(())
@@ -577,7 +593,7 @@ impl<'a> BerIn<'a> {
                 self.tag_len = 1;
                 Ok(())
             }
-            got => self.unexpected_sys_tag_byte(got, TAG_INTEGER),
+            got => Err(self.unexpected_sys_tag_byte(got, TAG_INTEGER)),
         }
     }
 
@@ -588,10 +604,10 @@ impl<'a> BerIn<'a> {
         let result = crate::seqid::ber::read_std_signed(length, size, || self.byte());
         result.or_else(|error| match error {
             StdSignedError::ZeroLength => {
-                self.throw(asnb_site(480, FORMAT_ERROR, None), "zero length of number")
+                Err(self.throw(asnb_site(480, FORMAT_ERROR, None), "zero length of number"))
             }
             StdSignedError::Overflow { line } => {
-                self.throw(asnb_site(line, OVERFLOW, None), "overflow error")
+                Err(self.throw(asnb_site(line, OVERFLOW, None), "overflow error"))
             }
             StdSignedError::Read(fail) => Err(fail),
         })
@@ -639,14 +655,14 @@ impl<'a> BerIn<'a> {
     fn read_std_unsigned32(&mut self) -> R<u32> {
         let mut length = self.read_short_length()?;
         if length == 0 {
-            return self.throw(asnb_site(519, FORMAT_ERROR, None), "zero length of number");
+            return Err(self.throw(asnb_site(519, FORMAT_ERROR, None), "zero length of number"));
         }
         let mut n: u32;
         if length > 4 {
             while length > 4 {
                 length -= 1;
                 if self.byte()? != 0 {
-                    return self.throw(asnb_site(527, OVERFLOW, None), "overflow error");
+                    return Err(self.throw(asnb_site(527, OVERFLOW, None), "overflow error"));
                 }
             }
             length -= 1;
@@ -655,7 +671,7 @@ impl<'a> BerIn<'a> {
             length -= 1;
             n = u32::from(self.byte()?);
             if n & 0x80 != 0 {
-                return self.throw(asnb_site(537, OVERFLOW, None), "overflow error");
+                return Err(self.throw(asnb_site(537, OVERFLOW, None), "overflow error"));
             }
         } else {
             n = 0;
@@ -755,7 +771,7 @@ impl Input for BerIn<'_> {
         self.expect_indefinite_length()?;
         match usize::try_from(tag) {
             Ok(index) if index >= pos && index < def.members.len() => Ok(Some(index)),
-            _ => self.unexpected_member(tag, def.members.iter().map(|m| m.name)),
+            _ => Err(self.unexpected_member(tag, def.members.iter().map(|m| m.name))),
         }
     }
 
@@ -790,7 +806,7 @@ impl Input for BerIn<'_> {
         self.expect_indefinite_length()?;
         match usize::try_from(tag) {
             Ok(index) if index < def.variants.len() => Ok(index),
-            _ => self.unexpected_member(tag, def.variants.iter().map(|v| v.name)),
+            _ => Err(self.unexpected_member(tag, def.variants.iter().map(|v| v.name))),
         }
     }
 
@@ -862,10 +878,10 @@ impl Input for BerIn<'_> {
         self.expect_sys_tag_byte(TAG_BOOLEAN)?;
         let length = self.read_short_length()?;
         if length != 1 {
-            return self.throw(
+            return Err(self.throw(
                 UNEXPECTED_SHORT_LENGTH,
                 format_args!("unexpected length: {length}, should be: 1"),
-            );
+            ));
         }
         Ok(self.byte()? != 0)
     }
@@ -883,10 +899,10 @@ impl Input for BerIn<'_> {
         self.expect_sys_tag_byte(TAG_NULL)?;
         let length = self.read_short_length()?;
         if length != 0 {
-            return self.throw(
+            return Err(self.throw(
                 UNEXPECTED_SHORT_LENGTH,
                 format_args!("unexpected length: {length}, should be: 0"),
-            );
+            ));
         }
         Ok(())
     }
@@ -925,7 +941,7 @@ impl Input for BerIn<'_> {
         match self.peek(0)? {
             TAG_VISIBLE_STRING => {}
             TAG_UTF8_STRING => posts.push(StringPost::Utf8Tag),
-            got => return self.unexpected_sys_tag_byte(got, TAG_VISIBLE_STRING),
+            got => return Err(self.unexpected_sys_tag_byte(got, TAG_VISIBLE_STRING)),
         }
         self.pos += 1;
         self.tag_len = 0;
@@ -1090,7 +1106,7 @@ impl Input for BerIn<'_> {
                 break;
             }
             if i > 1024 {
-                return self.throw(PEEK_CLASS_TAG, "tag number is too big (greater than 1024)");
+                return Err(self.throw(PEEK_CLASS_TAG, "tag number is too big (greater than 1024)"));
             }
         }
         self.tag_len = i;
@@ -1127,7 +1143,8 @@ impl BerIn<'_> {
     /// `UnexpectedMember(tag, items)` of a SEQUENCE or CHOICE whose members or variants are
     /// `names` (their automatic tags are 0, 1, ... in order).
     #[cold]
-    fn unexpected_member<T>(&self, tag: i32, names: impl Iterator<Item = &'static str>) -> R<T> {
+    #[inline(never)]
+    fn unexpected_member(&self, tag: i32, names: impl Iterator<Item = &'static str>) -> Fail {
         let mut message = format!("unexpected member: [{tag}], should be one of: ");
         for (tag, name) in names.enumerate() {
             message.push_str(&format!("{name}[{tag}] "));

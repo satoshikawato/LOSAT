@@ -77,13 +77,13 @@ impl<S: AsnSource> TextIn<S> {
             }
             (AsnTextErrorKind::Eof, _) => Fail::Eof,
             (AsnTextErrorKind::Format, Some(NcbiThrow::Stream(site))) => Fail::serial(
-                NcbiException::new(*site, format!("line {line}: {}", error.message)),
+                NcbiException::new(site, format!("line {line}: {}", error.message)),
             ),
             (AsnTextErrorKind::Format, Some(NcbiThrow::Plain(site))) => {
-                Fail::serial(NcbiException::new(*site, error.message))
+                Fail::serial(NcbiException::new(site, error.message))
             }
             (AsnTextErrorKind::Format, Some(NcbiThrow::Buffer(site))) => Fail::exception(
-                NcbiException::new(*site, format!("{} in line {line}", error.message)),
+                NcbiException::new(site, format!("{} in line {line}", error.message)),
             ),
             // Every error of the lexical reader that this reader meets names NCBI's throw; one
             // that did not would be refused, not reported in LOSAT's words.
@@ -176,25 +176,32 @@ impl<S: AsnSource> TextIn<S> {
             MemberId::Name(id) => {
                 let id = self.r.bytes(id);
                 if choice && id.is_empty() {
-                    return throw_error(
+                    return Err(throw_error(
                         BEGIN_CHOICE_VARIANT,
                         &self.position(),
                         "choice variant id expected",
-                    );
+                    ));
                 }
                 let found = (pos..count).find(|&i| name(i).as_bytes() == id);
                 (id, found)
             }
         };
-        if let Some(index) = found {
-            return Ok(index);
+        match found {
+            Some(index) => Ok(index),
+            None => Err(self.unexpected_member(id, (0..count).map(name))),
         }
+    }
+
+    /// `UnexpectedMember(id, items)` of the members or variants `names`.
+    #[cold]
+    #[inline(never)]
+    fn unexpected_member(&self, id: &[u8], names: impl Iterator<Item = &'static str>) -> Fail {
         let mut message = format!(
             "\"{}\": unexpected member, should be one of: ",
             String::from_utf8_lossy(id)
         );
-        for i in 0..count {
-            message.push_str(&format!("\"{}\" ", name(i)));
+        for name in names {
+            message.push_str(&format!("\"{name}\" "));
         }
         throw_error(UNEXPECTED_MEMBER, &self.position(), message)
     }
@@ -324,11 +331,11 @@ impl<S: AsnSource> Input for TextIn<S> {
     fn begin_variant(&mut self, def: &'static ChoiceDef) -> R<usize> {
         let more = self.r.next_element(&mut self.block_start);
         if !more.map_err(|e| self.fail(e))? {
-            return throw_error(
+            return Err(throw_error(
                 READ_CHOICE_SIMPLE,
                 &self.position(),
                 "choice variant id expected",
-            );
+            ));
         }
         self.find_member(def.variants.len(), |i| def.variants[i].name, 0, true)
     }

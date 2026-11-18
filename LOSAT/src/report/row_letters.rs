@@ -45,14 +45,9 @@ pub(crate) enum QueryCase {
 }
 
 impl QueryCase {
-    /// The letter of the query's Bioseq that NCBI compares for the row letter `letter`.
-    #[inline(always)]
-    pub(crate) fn compared(self, letter: u8) -> u8 {
-        self.compared_letters()[usize::from(letter)]
-    }
-
-    /// [`compared`](Self::compared) of every byte, by byte: a loop over a row's letters takes it
-    /// once and then looks each letter up, with no test of the case per letter.
+    /// The letter of the query's Bioseq that NCBI compares for each row letter, by byte: a loop
+    /// over a row's letters takes the table once and looks each letter up, with no test of the
+    /// case per letter.
     #[inline(always)]
     pub(crate) fn compared_letters(self) -> &'static [u8; 256] {
         match self {
@@ -285,8 +280,18 @@ mod tests {
         let record = QueryLetters::new(b"aKv", None);
         assert_eq!((record.get(0), record.get(2)), (Some(b'A'), Some(b'V')));
         assert_eq!(record.case(), QueryCase::Masked);
-        assert_eq!(QueryCase::Masked.compared(b'k'), b'K');
-        assert_eq!(QueryCase::Bioseq.compared(b'k'), b'k');
+        assert_eq!(
+            QueryCase::Masked.compared_letters()[usize::from(b'k')],
+            b'K'
+        );
+        assert_eq!(
+            QueryCase::Bioseq.compared_letters()[usize::from(b'k')],
+            b'k'
+        );
+        assert_eq!(
+            QueryCase::Masked.compared_letters()[usize::from(b'-')],
+            b'-'
+        );
         assert!(pssm.shows_other_letters());
         assert!(QueryLetters::new(b"A-K", None).shows_other_letters());
         assert!(!record.shows_other_letters());

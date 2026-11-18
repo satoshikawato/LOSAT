@@ -137,14 +137,13 @@ impl Fail {
 
 /// `ThrowError(flag, message)` of NCBI's object stream at `site` (`ThrowError1`,
 /// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position
-/// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`.
+/// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`. It returns the
+/// [`Fail`], not an `R`: the path that calls it ends there (`return Err(throw_error(..))`), so
+/// the reading path around it keeps nothing for its return.
 #[cold]
 #[inline(never)]
-pub(super) fn throw_error<T>(site: ThrowSite, position: &str, message: impl fmt::Display) -> R<T> {
-    Err(Fail::serial(NcbiException::new(
-        site,
-        format!("{position}: {message}"),
-    )))
+pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl fmt::Display) -> Fail {
+    Fail::serial(NcbiException::new(site, format!("{position}: {message}")))
 }
 
 /// A `ThrowError` of `CObjectIStream` (objistr.cpp) at `line` of `function`.
@@ -248,12 +247,20 @@ pub(super) fn reserve_string(length: u64) -> R<()> {
         return Err(Fail::OutOfMemory);
     }
     if bytes >= HOST_DEPENDENT_BYTES {
-        return Err(Fail::Unsupported(format!(
-            "a string whose length ({length} bytes) passes the end of the file: makeblastdb \
-             allocates {bytes} bytes for it, which succeeds or fails by the host's memory"
-        )));
+        return Err(host_dependent_string(length));
     }
     Ok(())
+}
+
+/// The refusal of a string of `length` bytes that `reserve_string` leaves to the host.
+#[cold]
+#[inline(never)]
+fn host_dependent_string(length: u64) -> Fail {
+    let bytes = length + 1;
+    Fail::Unsupported(format!(
+        "a string whose length ({length} bytes) passes the end of the file: makeblastdb \
+         allocates {bytes} bytes for it, which succeeds or fails by the host's memory"
+    ))
 }
 
 /// What reading a VisibleString posts, in the order NCBI posts it.
@@ -364,6 +371,11 @@ pub(super) trait Input {
 /// The deepest nesting of object frames that LOSAT follows (NCBI's stack is only limited by memory).
 const MAX_DEPTH: usize = 400;
 
+/// The frames that a reader reserves room for at its start: a mask file's objects nest about 20
+/// deep (a `Dbtag` Seq-id of an interval of a `packed-int` mask), so the stack is not grown while
+/// they are read.
+const FRAMES_RESERVED: usize = 32;
+
 /// The refusal of a frame past [`MAX_DEPTH`].
 #[cold]
 #[inline(never)]
@@ -371,20 +383,51 @@ fn too_deep() -> Fail {
     Fail::Unsupported(format!("objects nested more than {MAX_DEPTH} levels deep"))
 }
 
-/// The source file, line and function of an `END_OBJECT_FRAME` (`object_frame::text_frame_site`).
-type FrameEnd = (&'static str, u32, &'static str);
-
 /// A frame of NCBI's object stack as the mask reader keeps it (`object_frame`).
 #[derive(Clone, Copy, Debug)]
 struct Frame {
     kind: FrameKind,
+    /// The named frame of `ReadPointer`, whose `END_OBJECT_FRAME` is not the text reader's for
+    /// its kind (`end`).
+    read_pointer: bool,
     /// The type of a named, class, choice or container frame (`Object type= `).
     type_name: Option<&'static str>,
     /// The member or variant of a member or variant frame (`SetTopMemberId`).
     member: Option<&'static str>,
-    /// The `END_OBJECT_FRAME` that leaves the frame when it is not the text reader's for its kind
-    /// (`text_frame_site`): the named frame of `ReadPointer` (`READ_POINTER_FRAME_END`).
-    end: Option<&'static FrameEnd>,
+}
+
+impl Frame {
+    /// A frame of `kind` of the type `type_name`.
+    fn new(kind: FrameKind, type_name: Option<&'static str>) -> Frame {
+        Frame {
+            kind,
+            read_pointer: false,
+            type_name,
+            member: None,
+        }
+    }
+
+    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves the frame: the
+    /// text reader's for its kind (`text_frame_site`), `READ_POINTER_FRAME_END` for the named
+    /// frame of `ReadPointer`.
+    fn end(self) -> (&'static str, u32, &'static str) {
+        if self.read_pointer {
+            READ_POINTER_FRAME_END
+        } else {
+            text_frame_site(self.kind, false)
+        }
+    }
+}
+
+/// Where [`Rd::begin_pointer`] found the value of a `CRef<>`.
+#[derive(Clone, Copy)]
+enum Pointee {
+    /// `NULL`: there is none.
+    Null,
+    /// `eThisPointer`: it follows.
+    This,
+    /// `eOtherPointer`: it follows inside `ReadPointer`'s named frame, entered at this depth.
+    Other(usize),
 }
 
 /// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, quoted at `read_seq_loc_parts`):
@@ -486,7 +529,7 @@ impl<I: Input> Rd<I> {
     pub(super) fn new(inp: I) -> Self {
         Rd {
             inp,
-            frames: Vec::new(),
+            frames: Vec::with_capacity(FRAMES_RESERVED),
             posts: Vec::new(),
         }
     }
@@ -508,30 +551,30 @@ impl<I: Input> Rd<I> {
         type_name: Option<&'static str>,
         f: impl FnOnce(&mut Self) -> R<T>,
     ) -> R<T> {
-        self.frame_ended_at(kind, type_name, None, f)
+        let depth = self.enter(Frame::new(kind, type_name))?;
+        let result = f(self);
+        self.exit(depth, result)
     }
 
-    /// [`frame`](Self::frame) whose `END_OBJECT_FRAME` is at `end` rather than the text reader's
-    /// for its kind (`text_frame_site`).
-    fn frame_ended_at<T>(
-        &mut self,
-        kind: FrameKind,
-        type_name: Option<&'static str>,
-        end: Option<&'static FrameEnd>,
-        f: impl FnOnce(&mut Self) -> R<T>,
-    ) -> R<T> {
+    /// `BEGIN_OBJECT_FRAME` of `frame`: the depth below it, which [`exit`](Self::exit) takes
+    /// once what the frame holds has been read. Every `enter` is followed by its `exit`, with no
+    /// return between them.
+    #[inline(always)]
+    fn enter(&mut self, frame: Frame) -> R<usize> {
         let depth = self.frames.len();
         if depth >= MAX_DEPTH {
             return Err(too_deep());
         }
-        self.frames.push(Frame {
-            kind,
-            type_name,
-            member: None,
-            end,
-        });
+        self.frames.push(frame);
         self.inp.set_stack_depth(depth + 1);
-        match f(self) {
+        Ok(depth)
+    }
+
+    /// `END_OBJECT_FRAME` of the frame that [`enter`](Self::enter) entered at `depth`, after
+    /// what it holds was read with `result` (an error gets [`leave`](Self::leave)).
+    #[inline(always)]
+    fn exit<T>(&mut self, depth: usize, result: R<T>) -> R<T> {
+        match result {
             Ok(value) => {
                 self.frames.truncate(depth);
                 self.inp.set_stack_depth(depth);
@@ -561,10 +604,7 @@ impl<I: Input> Rd<I> {
                 ))
             }
             Fail::Exception(e) => {
-                let (file, line, function) = frame
-                    .end
-                    .copied()
-                    .unwrap_or_else(|| text_frame_site(frame.kind, false));
+                let (file, line, function) = frame.end();
                 let info = frame_info(frame.kind, frame.type_name, frame.member);
                 Fail::exception(e.rethrow_same(file, line, function, info))
             }
@@ -614,7 +654,7 @@ impl<I: Input> Rd<I> {
     #[inline]
     fn missing_members(&self, missing: &[Member]) -> R<()> {
         match missing.iter().find(|m| !m.optional) {
-            Some(m) => self.expected_member(m),
+            Some(m) => Err(self.expected_member(m)),
             None => Ok(()),
         }
     }
@@ -622,7 +662,7 @@ impl<I: Input> Rd<I> {
     /// `ExpectedMember` of the member `m`.
     #[cold]
     #[inline(never)]
-    fn expected_member(&self, m: &Member) -> R<()> {
+    fn expected_member(&self, m: &Member) -> Fail {
         throw_error(
             EXPECTED_MEMBER,
             &self.inp.position(),
@@ -705,11 +745,20 @@ impl<I: Input> Rd<I> {
                     let member = &def.members[index];
                     s.set_member(member.name);
                     s.missing_members(&def.members[pos..index])?;
-                    let result = if member.pointer {
-                        s.read_pointer(member.ty.type_name(), |s| read(s, index))
-                            .map(|_| ())
+                    // `ReadPointer` of a member held by `CRef<>` around `read`, which is called at
+                    // this one place. Such a member has no set flag (`Member::set_flag`): the
+                    // errors of `begin_pointer` are not `ReadWithSetFlagMember`'s.
+                    let pointee = if member.pointer {
+                        s.begin_pointer(member.ty.type_name())?
                     } else {
-                        read(s, index)
+                        Pointee::This
+                    };
+                    let result = match pointee {
+                        Pointee::Null => Ok(()),
+                        Pointee::This | Pointee::Other(_) => {
+                            let result = read(s, index);
+                            s.end_pointer(pointee, result)
+                        }
                     };
                     if member.set_flag {
                         result.map_err(|fail| match fail {
@@ -912,37 +961,65 @@ impl<I: Input> Rd<I> {
         declared: &'static str,
         read: impl FnOnce(&mut Self) -> R<T>,
     ) -> R<Option<T>> {
+        let pointee = self.begin_pointer(declared)?;
+        if let Pointee::Null = pointee {
+            return Ok(None);
+        }
+        let result = read(self);
+        self.end_pointer(pointee, result).map(Some)
+    }
+
+    /// [`read_pointer`](Self::read_pointer) up to the value: where it is ([`Pointee`]), the named
+    /// frame of `Other` entered. [`end_pointer`](Self::end_pointer) follows the value.
+    fn begin_pointer(&mut self, declared: &'static str) -> R<Pointee> {
         match self.inp.read_pointer_type()? {
-            PointerType::Null => Ok(None),
-            PointerType::This => read(self).map(Some),
+            PointerType::Null => Ok(Pointee::Null),
+            PointerType::This => Ok(Pointee::This),
             PointerType::Object => {
                 self.inp.read_object_pointer()?;
-                throw_error(
+                Err(throw_error(
                     GET_REGISTERED_OBJECT,
                     &self.inp.position(),
                     "invalid object index: NO_COLLECT defined",
-                )
+                ))
             }
             PointerType::Other => {
                 let name = self.inp.read_other_pointer()?;
                 if name != declared.as_bytes() {
-                    let name = String::from_utf8_lossy(&name);
-                    return Err(Fail::Unsupported(format!(
-                        "':{name}', a value of the type {name} where a {declared} belongs ({}): \
-                         whether makeblastdb reads it depends on the types its process has met \
-                         before",
-                        self.inp.position()
-                    )));
+                    return Err(self.other_type(&name, declared));
                 }
-                let value = self.frame_ended_at(
-                    FrameKind::Named,
-                    Some(declared),
-                    Some(&READ_POINTER_FRAME_END),
-                    read,
-                )?;
-                self.inp.read_other_pointer_end()?;
-                Ok(Some(value))
+                let frame = Frame {
+                    read_pointer: true,
+                    ..Frame::new(FrameKind::Named, Some(declared))
+                };
+                Ok(Pointee::Other(self.enter(frame)?))
             }
+        }
+    }
+
+    /// The refusal of `:name` (a value of the type `name`) where a `declared` belongs.
+    #[cold]
+    #[inline(never)]
+    fn other_type(&self, name: &[u8], declared: &'static str) -> Fail {
+        let name = String::from_utf8_lossy(name);
+        Fail::Unsupported(format!(
+            "':{name}', a value of the type {name} where a {declared} belongs ({}): whether \
+             makeblastdb reads it depends on the types its process has met before",
+            self.inp.position()
+        ))
+    }
+
+    /// [`read_pointer`](Self::read_pointer) after the value of `pointee`, read with `result`: the
+    /// `END_OBJECT_FRAME` of the named frame of `Other` and `ReadOtherPointerEnd`.
+    #[inline(always)]
+    fn end_pointer<T>(&mut self, pointee: Pointee, result: R<T>) -> R<T> {
+        match pointee {
+            Pointee::Other(depth) => {
+                let value = self.exit(depth, result)?;
+                self.inp.read_other_pointer_end()?;
+                Ok(value)
+            }
+            Pointee::Null | Pointee::This => result,
         }
     }
 
@@ -1698,7 +1775,7 @@ impl<I: Input> Rd<I> {
         self.frames.clear();
         self.frame(FrameKind::Named, Some(def.name), |s| {
             match s.inp.read_file_header()? {
-                Some(name) if !name.is_empty() && name != def.name.as_bytes() => throw_error(
+                Some(name) if !name.is_empty() && name != def.name.as_bytes() => Err(throw_error(
                     SKIP_FILE_HEADER,
                     &s.inp.position(),
                     format_args!(
@@ -1706,7 +1783,7 @@ impl<I: Input> Rd<I> {
                         String::from_utf8_lossy(&name),
                         def.name
                     ),
-                ),
+                )),
                 _ => Ok(()),
             }
         })?;

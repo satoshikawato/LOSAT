@@ -2351,15 +2351,20 @@ impl FormatThrow {
     }
 
     /// What the `-outfmt` value `outfmt` does in `program`'s reports, as NCBI reads it
-    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused).
-    pub fn of_outfmt(outfmt: &str, program: crate::blastinput::app::Program) -> Self {
+    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused) and `app`'s
+    /// formatter writes it (`TabularSpec::of_app`).
+    pub fn of_outfmt(
+        outfmt: &str,
+        program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Self {
         use crate::blastinput::app::{parse_formatting_string, ReportFormat};
         let Some((format, choice)) = parse_formatting_string(outfmt).ok().and_then(|choice| {
             ReportFormat::from_number(choice.number).map(|format| (format, choice))
         }) else {
             return FormatThrow::Refused;
         };
-        let spec = super::tabular::TabularSpec::of(format, &choice);
+        let spec = super::tabular::TabularSpec::of_app(format, &choice, app);
         Self::of(format, spec.as_ref(), program)
     }
 
@@ -2397,15 +2402,17 @@ impl FormatThrow {
         }
     }
 
-    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run.
+    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
+    /// application.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
     ) -> Option<RunThrow> {
         Self::of_run(
             outfmts
                 .into_iter()
-                .map(|outfmt| Self::of_outfmt(outfmt, program)),
+                .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
         )
     }
 }
@@ -2672,6 +2679,7 @@ pub fn scope_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::archive::options::RequestKind;
     use crate::seqdb::{SeqDb, SeqType};
     use crate::seqid::model::ObjectId;
     use crate::seqid::model::{Dbtag, PdbSeqId};
@@ -3333,7 +3341,8 @@ mod tests {
         assert_eq!(report.load(3), HitLoad::Throws);
         assert_eq!(report.load(4), HitLoad::Unread);
         // The formats' answers.
-        let of = |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp);
+        let of =
+            |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp, RequestKind::Blastp);
         let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
         for rows in [
             "6",
@@ -3365,14 +3374,19 @@ mod tests {
         // BLASTN's `pident` and `nident` read nothing of the subject.
         for unread in ["6 qseqid pident", "6 qseqid nident"] {
             assert_eq!(
-                FormatThrow::of_outfmt(unread, Program::Blastn),
+                FormatThrow::of_outfmt(unread, Program::Blastn, RequestKind::Blastn),
                 FormatThrow::Unread,
                 "{unread}"
             );
         }
         // A run's answer: a refusal refuses, a format that reads nothing leaves the other's.
-        let after =
-            |outfmts: &[&str]| FormatThrow::of_outfmts(outfmts.iter().copied(), Program::Blastp);
+        let after = |outfmts: &[&str]| {
+            FormatThrow::of_outfmts(
+                outfmts.iter().copied(),
+                Program::Blastp,
+                RequestKind::Blastp,
+            )
+        };
         assert_eq!(
             after(&["6", "8"]),
             Some(RunThrow::every_row(AfterThrow::WritesRow))
@@ -3519,13 +3533,14 @@ mod tests {
         assert_eq!(every[0].taxid, 9606);
         // The names of the rows: no lookup asks a taxid of a subject that is not loaded, so the
         // damaged taxonomy database (`bad_magic`, whose open writes a text) is not opened for it.
-        let spec = super::super::tabular::TabularSpec::of(
+        let spec = super::super::tabular::TabularSpec::of_app(
             crate::blastinput::app::ReportFormat::Tabular,
             &crate::blastinput::app::FormatChoice {
                 number: 6,
                 spec: "qseqid sseqid ssciname".to_string(),
                 delimiter: String::new(),
             },
+            RequestKind::Blastp,
         )
         .unwrap();
         let damaged =

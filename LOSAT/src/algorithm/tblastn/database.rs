@@ -824,6 +824,7 @@ fn after_throw(
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,
+        crate::report::archive::options::RequestKind::Tblastn,
     )
 }
 

@@ -6,7 +6,7 @@
 //! the rows.
 //!
 //! The default reports (outfmt 6 and 7 with the `std` fields and a tab) keep each program's own
-//! writer: `TabularSpec::of` returns `None` for them.
+//! writer: `TabularSpec::of_app` returns `None` for them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 //! ```c++
@@ -477,14 +477,6 @@ impl TabularNeeds {
 }
 
 impl TabularSpec {
-    /// The tabular report of `format` with the custom specification of `choice`, or `None` for
-    /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
-    /// tab), which the programs write with their own writers. The delimiter is the custom one:
-    /// the report of an application whose formatter gets it (`TabularSpec::of_app`).
-    pub fn of(format: ReportFormat, choice: &FormatChoice) -> Option<Self> {
-        Self::of_fields(format, &choice.spec, &choice.delimiter)
-    }
-
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
     // ```c++
     //         formatter.SetQueryRange(query_opts->GetRange());
@@ -515,15 +507,18 @@ impl TabularSpec {
     //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
     //         	formatter.SetBaseFile(args[kArgOutput].AsString());
     // ```
-    /// The tabular report of `format` as the formatter of `app`'s application writes it
-    /// ([`TabularSpec::of`]). The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN
-    /// too) and tblastx hand `-outfmt`'s custom delimiter to their formatter
-    /// (`SetCustomDelimiter`, blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266,
-    /// tblastx_app.cpp:169); psiblast's, rpsblast's and rpstblastn's never do, so their reports
-    /// keep the format's own delimiter, the tab or the comma (blast_format.cpp:783-785 above), and
-    /// a `delim=` with the `std` fields leaves the default outfmt 6 and 7 (`None`). Their `delim=`
-    /// is still checked against the fields (`custom_delimiter_conflict`). The one rule of the
-    /// command line and the library, for every program.
+    /// The tabular report of `format` with the custom specification of `choice` as the formatter
+    /// of `app`'s application writes it, or `None` for a format that is not tabular and for the
+    /// default outfmt 6 and 7 (the `std` fields and a tab), which the programs write with their
+    /// own writers. The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN too) and
+    /// tblastx hand `-outfmt`'s custom delimiter to their formatter (`SetCustomDelimiter`,
+    /// blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266, tblastx_app.cpp:169);
+    /// psiblast's, rpsblast's and rpstblastn's never do, so their reports keep the format's own
+    /// delimiter, the tab or the comma (blast_format.cpp:783-785 above), and a `delim=` with the
+    /// `std` fields leaves the default outfmt 6 and 7 (`None`). Their `delim=` is still checked
+    /// against the fields (`custom_delimiter_conflict`). The one reading of a tabular `-outfmt`
+    /// value, of the command line and the library, for every program: no other function makes a
+    /// spec of a format choice.
     pub fn of_app(
         format: ReportFormat,
         choice: &FormatChoice,
@@ -542,7 +537,7 @@ impl TabularSpec {
         Self::of_fields(format, &choice.spec, delimiter)
     }
 
-    /// [`TabularSpec::of`] with the delimiter `delimiter` (empty: the format's own).
+    /// [`TabularSpec::of_app`] with the delimiter `delimiter` (empty: the format's own).
     fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
         let (kind, default_delimiter) = match format {
             ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
@@ -2946,6 +2941,15 @@ pub fn hsp_coverage(query_span: i32, query_length: i32) -> i32 {
 mod tests {
     use super::*;
 
+    /// The spec of an application whose formatter gets the custom delimiter (blastp's).
+    fn blastp_spec(format: ReportFormat, choice: &FormatChoice) -> Option<TabularSpec> {
+        TabularSpec::of_app(
+            format,
+            choice,
+            crate::report::archive::options::RequestKind::Blastp,
+        )
+    }
+
     #[test]
     fn fields_follow_ncbis_rules() {
         assert_eq!(parse_fields(""), STD_FIELDS.to_vec());
@@ -3119,12 +3123,12 @@ mod tests {
             spec: spec.to_string(),
             delimiter: delimiter.to_string(),
         };
-        assert!(TabularSpec::of(ReportFormat::Tabular, &choice("", "")).is_none());
-        assert!(TabularSpec::of(ReportFormat::Tabular, &choice("std", "\t")).is_none());
-        assert!(TabularSpec::of(ReportFormat::TabularWithComments, &choice("", "")).is_none());
-        let csv = TabularSpec::of(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
+        assert!(blastp_spec(ReportFormat::Tabular, &choice("", "")).is_none());
+        assert!(blastp_spec(ReportFormat::Tabular, &choice("std", "\t")).is_none());
+        assert!(blastp_spec(ReportFormat::TabularWithComments, &choice("", "")).is_none());
+        let csv = blastp_spec(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
         assert_eq!((csv.delimiter.as_str(), csv.fields.len()), (",", 12));
-        let piped = TabularSpec::of(ReportFormat::Tabular, &choice("std", "|")).unwrap();
+        let piped = blastp_spec(ReportFormat::Tabular, &choice("std", "|")).unwrap();
         assert_eq!(piped.delimiter, "|");
     }
 
@@ -3151,12 +3155,12 @@ mod tests {
             RequestKind::PsiTblastn,
             RequestKind::Tblastx,
         ] {
-            let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app);
+            let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
             assert_eq!(
-                spec,
-                TabularSpec::of(ReportFormat::CommaSeparatedValues, &csv)
+                (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
+                (TabularKind::Csv, "@", 3),
+                "{app:?}"
             );
-            assert_eq!(spec.unwrap().delimiter, "@", "{app:?}");
             let spec = TabularSpec::of_app(ReportFormat::Tabular, &std6, app).unwrap();
             assert_eq!(spec.delimiter, "@", "{app:?}");
         }
@@ -3205,7 +3209,7 @@ mod tests {
                 spec: fields.to_string(),
                 delimiter: String::new(),
             };
-            let spec = TabularSpec::of(format, &choice).unwrap();
+            let spec = blastp_spec(format, &choice).unwrap();
             let writer = TabularWriter {
                 spec: &spec,
                 program_version: "BLASTN 2.17.0+",
@@ -3351,7 +3355,7 @@ mod tests {
     // texts at each lookup: the plural names' lookups before the singular one's.
     #[test]
     fn row_messages_follow_the_lookups() {
-        let spec = TabularSpec::of(
+        let spec = blastp_spec(
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
@@ -3395,7 +3399,7 @@ mod tests {
     #[test]
     fn protein_rows_frames_and_rounds_are_ncbis() {
         let spec = |format: ReportFormat, fields: &str| {
-            TabularSpec::of(
+            blastp_spec(
                 format,
                 &FormatChoice {
                     number: 6,
@@ -3489,7 +3493,7 @@ mod tests {
     // query's id is its `qseqid`, `qacc` and `qaccver` alike.
     #[test]
     fn id_columns_are_the_subject_s_own() {
-        let spec = TabularSpec::of(
+        let spec = blastp_spec(
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
@@ -3557,7 +3561,7 @@ mod tests {
     /// The rows of `subjects` (failed or found, in order) of one query under `fields`, with a
     /// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900.
     fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
-        let spec = TabularSpec::of(
+        let spec = blastp_spec(
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
@@ -3776,7 +3780,7 @@ mod tests {
         // The refusals before the report: a first row with `sacc`, `saccver` (the default fields)
         // or `staxid`; a later one has a result.
         let spec = |fields: &str| {
-            TabularSpec::of(
+            blastp_spec(
                 ReportFormat::Tabular,
                 &FormatChoice {
                     number: 6,
@@ -3848,7 +3852,7 @@ mod tests {
         use crate::blastinput::app::Program;
         use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
         let spec = |fields: &str| {
-            TabularSpec::of(
+            blastp_spec(
                 ReportFormat::CommaSeparatedValues,
                 &FormatChoice {
                     number: 10,
@@ -3899,7 +3903,7 @@ mod tests {
             );
         }
         // The organism report (outfmt 18) leaves out the HSPs of a throwing subject and goes on.
-        let report = TabularSpec::of(
+        let report = blastp_spec(
             ReportFormat::TaxFormat,
             &FormatChoice {
                 number: 18,
@@ -4020,7 +4024,7 @@ mod tests {
     #[test]
     fn failed_lookups_stop_where_ncbi_has_no_result() {
         let spec = |fields: &str| {
-            TabularSpec::of(
+            blastp_spec(
                 ReportFormat::CommaSeparatedValues,
                 &FormatChoice {
                     number: 10,

@@ -484,10 +484,18 @@ impl RpsblastArgs {
 /// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). Outfmt
 /// 17 goes on to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt
 /// 13 and 14 too (to the standard output: NCBI's "Please provide a file name",
-/// `app::xinclude_check_for`).
+/// `app::xinclude_check_for`). So does a custom delimiter that the field list uses (outfmt 20's
+/// `delim=;` with `staxids`): NCBI refuses the value itself where it checks the formatting
+/// arguments (`s_ValidateCustomDelim`, blast_args.cpp:2887 at `formatting_handler_check`), after
+/// the arguments' own errors (`-query` not accessible: NCBI 2.17.0, line RG F/d36 probes
+/// rps.conf20, rps.conf20.q, rpst.conf20, rpst.conf20.q), and never runs the format.
 pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bool) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
     let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+    if crate::report::tabular::custom_delimiter_conflict(&choice.spec, &choice.delimiter).is_some()
+    {
+        return Ok(());
+    }
     if let Some(format) = ReportFormat::from_number(choice.number) {
         let ncbi_error =
             xinclude_to_ncbi && matches!(format, ReportFormat::Json | ReportFormat::Xml2);

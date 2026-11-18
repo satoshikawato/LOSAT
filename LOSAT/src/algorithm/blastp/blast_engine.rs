@@ -2759,8 +2759,9 @@ enum BlastpReport {
     /// Outfmt 0 to 4 (`Text` holds 6 and 7 only).
     Pairwise(crate::report::pairwise::PairwiseView),
     Text(OutputFormat),
-    /// NCBI's `CBlastTabularInfo` with a field list or a delimiter (`TabularSpec::of`), through
-    /// the shared writer (`report::tabular`, `tabular::write_blastp_tabular`).
+    /// NCBI's `CBlastTabularInfo` with a field list or a delimiter
+    /// (`tabular::custom_tabular_spec`, `TabularSpec::of_app`), through the shared writer
+    /// (`report::tabular`, `tabular::write_blastp_tabular`).
     CustomTabular(&'static crate::report::tabular::TabularSpec),
     Seqalign(crate::report::serial::SerialFormat),
     Xml,
@@ -2873,6 +2874,28 @@ fn blastp_pairwise_view_of(
         .filter(|view| {
             *view == crate::report::pairwise::PairwiseView::Pairwise || app == BlastpApp::Blastp
         })
+}
+
+/// The format of a `-outfmt` value that is outfmt 0, 6 or 7 to LOSAT's own writers (not a custom
+/// table, `tabular::custom_tabular_spec`), its number read as NCBI reads it
+/// (`app::parse_formatting_string`: `06` and `+6` are 6), on the command line (its value
+/// `FormatChoice::normalized`) and in the library (the caller's value as given) alike; an error
+/// for the other numbers.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2829
+/// ```c++
+///         int val = NStr::StringToInt(fmt_choice);
+/// ```
+fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String> {
+    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+        Ok(0) => Ok(OutputFormat::Pairwise),
+        Ok(6) => Ok(OutputFormat::Tabular),
+        Ok(7) => Ok(OutputFormat::TabularWithComments),
+        _ => Err(format!(
+            "Unsupported output format: {}. Supported: 0, 6, 7",
+            OutputFormat::split_fields(outfmt).0
+        )),
+    }
 }
 
 /// The query-anchored view of a `-outfmt` value of 1 to 4 that `app` writes
@@ -5593,11 +5616,10 @@ pub fn run(
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; a custom
     // tabular report of a delimiter, which `normalized` drops, reads the value as given, as the
     // library's: whether the app's formatter gets the delimiter (blastp's does, psiblast's and
-    // rpsblast's do not) is the spec's (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
+    // rpsblast's do not, so their `6 delim=@` is the default outfmt 6) is the spec's, the one
+    // that the reports read (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
     let custom_delimiter = !choice.delimiter.is_empty()
-        && format.is_some_and(|format| {
-            crate::report::tabular::TabularSpec::of(format, &choice).is_some()
-        });
+        && super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_some();
     let outfmt = if custom_delimiter {
         args.outfmt.clone()
     } else {
@@ -8216,7 +8238,7 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // Outfmt 1 to 4, 8, 9, 12, 5, 15 and 16 are the ones `OutputFormat::parse` does not know.
+    // Outfmt 1 to 4, 8, 9, 12, 5, 15 and 16 are the ones `blastp_text_format` does not know.
     // The custom tabular reports of outfmt 6 and 7 (a field list or a delimiter, `tabular`) as
     // the default ones: each query's lines depend only on its final list and fixed inputs (the
     // subjects' ids, lengths and titles, a `-subject` search's taxonomy database warning), outfmt
@@ -8232,11 +8254,11 @@ fn x_query_block_plan(
             subject_source.database().is_some() && (needs.all_deflines || needs.taxonomy);
         (!db_reads_more).then_some(spec.kind)
     };
-    let default_kind = |outfmt: &str| match OutputFormat::parse(outfmt) {
-        Ok((OutputFormat::Tabular | OutputFormat::TabularWithComments, _)) => {
+    let default_kind = |outfmt: &str| match blastp_text_format(outfmt) {
+        Ok(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
             Some(XBlockReport::Tabular)
         }
-        Ok((OutputFormat::Pairwise, _)) => Some(XBlockReport::Pairwise),
+        Ok(OutputFormat::Pairwise) => Some(XBlockReport::Pairwise),
         // Outfmt 1 to 4 (BLASTP's, `blastp_pairwise_view_of`): outfmt 0's report with each
         // query's alignments as one section, which reads only that query's hits and the
         // sequences (`report::query_anchored`).
@@ -8992,11 +9014,7 @@ fn write_reports_without_queries(
         let view = blastp_query_anchored_view(args.app, format.outfmt)?;
         let outfmt = match view {
             Some(_) => OutputFormat::Pairwise,
-            None => {
-                OutputFormat::parse(format.outfmt)
-                    .map_err(anyhow::Error::msg)?
-                    .0
-            }
+            None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,
         };
         let mut writer = format.sink.open()?;
         match outfmt {
@@ -11031,6 +11049,9 @@ fn run_call(
             query_batches: &query_batches,
             query_batch_skipped: &query_batch_skipped,
             query_chunk,
+            rps_recount_identities: requested_formats
+                .iter()
+                .all(|report| !matches!(report, BlastpReport::CustomTabular(_))),
             database,
             subjects,
             x_soft_subjects,
@@ -12341,6 +12362,33 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
     use std::path::PathBuf;
+
+    // NCBI 2.17.0 (line RG F/d36 probes ps.06, ps.06std, ps.p7, ps.00, bp.06, bp.p0; rows
+    // db.dlm.ps.n06, db.dlm.bp.p0): `-outfmt 06`, `"06 std"`, `+7` and `00` are outfmt 6, 7 and 0
+    // (`NStr::StringToInt`), the library's value as given as the command line's.
+    #[test]
+    fn text_formats_read_the_number_as_ncbi() {
+        for (outfmt, format) in [
+            ("0", OutputFormat::Pairwise),
+            ("6", OutputFormat::Tabular),
+            ("7", OutputFormat::TabularWithComments),
+            ("06", OutputFormat::Tabular),
+            ("06 std", OutputFormat::Tabular),
+            (" +7 ", OutputFormat::TabularWithComments),
+            ("00", OutputFormat::Pairwise),
+            ("6 qaccver saccver", OutputFormat::Tabular),
+        ] {
+            assert_eq!(blastp_text_format(outfmt), Ok(format), "{outfmt}");
+        }
+        for outfmt in ["99", "5", "10", "x6"] {
+            let error = blastp_text_format(outfmt).unwrap_err();
+            assert!(error.starts_with("Unsupported output format: "), "{outfmt}");
+        }
+        assert_eq!(
+            blastp_text_format("10 qseqid").unwrap_err(),
+            "Unsupported output format: 10. Supported: 0, 6, 7"
+        );
+    }
 
     // EXPERIMENT (LOSAT_X_BPRECOUNTO): each index is tested once, its answer kept, whatever the order
     // of the questions.

@@ -877,7 +877,7 @@ pub struct ResolvedOptions {
     /// fields), by name; empty for outfmt 0.
     pub fields: Vec<String>,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
-    /// 20 (`TabularSpec::of`), which the shared writer writes (`tabular.rs`); `None` for the
+    /// 20 (`TabularSpec::of_app`), which the shared writer writes (`tabular.rs`); `None` for the
     /// default outfmt 6 and 7 and the other formats.
     pub tabular: Option<&'static crate::report::tabular::TabularSpec>,
     /// Whether `taxdb.bti` is on NCBI's search path, for a `tabular` field list that shows a

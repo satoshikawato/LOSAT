@@ -1810,7 +1810,7 @@ impl TblastxOutputFormat {
 /// ```
 ///
 /// A tabular format with a field list or a delimiter, and every outfmt 10 and 20, is the custom
-/// tabular report (`report::tabular::TabularSpec::of`); the default outfmt 6 and 7 (the `std`
+/// tabular report (`report::tabular::TabularSpec::of_app`); the default outfmt 6 and 7 (the `std`
 /// fields with a tab) are `Tabular` and `TabularWithComments`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
@@ -1832,7 +1832,13 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     if let Ok(choice) = &choice {
         if choice.custom() || matches!(choice.number, 10 | 18 | 20) {
             if let Some(spec) = crate::blastinput::app::ReportFormat::from_number(choice.number)
-                .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+                .and_then(|format| {
+                    crate::report::tabular::TabularSpec::of_app(
+                        format,
+                        choice,
+                        crate::report::archive::options::RequestKind::Tblastx,
+                    )
+                })
             {
                 return TblastxOutputFormat::CustomTabular(spec.intern());
             }

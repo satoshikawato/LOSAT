@@ -762,6 +762,7 @@ pub(crate) fn after_throw<'a>(
     crate::report::db_subject::FormatThrow::of_outfmts(
         outfmts,
         crate::blastinput::app::Program::Tblastx,
+        crate::report::archive::options::RequestKind::Tblastx,
     )
 }
 

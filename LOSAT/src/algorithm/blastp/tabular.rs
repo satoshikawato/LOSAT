@@ -1134,13 +1134,14 @@ mod tests {
         hit_lists: &[Option<BlastpHitList>],
     ) -> (String, String) {
         let format = ReportFormat::from_number(number).unwrap();
-        let spec = TabularSpec::of(
+        let spec = TabularSpec::of_app(
             format,
             &FormatChoice {
                 number,
                 spec: fields.to_string(),
                 delimiter: String::new(),
             },
+            app.request_kind(),
         )
         .unwrap();
         let ids: Vec<crate::algorithm::common::tabular::SubjectId> =
@@ -1240,6 +1241,11 @@ mod tests {
             custom_tabular_spec("6 delim=@", BlastpApp::Blastp).map(|spec| spec.delimiter.as_str()),
             Some("@")
         );
+        assert_eq!(
+            custom_tabular_spec("10 delim=@ qseqid", BlastpApp::Blastp)
+                .map(|spec| spec.delimiter.as_str()),
+            Some("@")
+        );
         for app in [BlastpApp::Psiblast, BlastpApp::Rpsblast] {
             let spec = custom_tabular_spec("20 delim=@ qseqid evalue", app).unwrap();
             assert_eq!(
@@ -1247,7 +1253,7 @@ mod tests {
                 (TabularKind::CsvWithHeader, ",", 2),
                 "{app:?}"
             );
-            let spec = custom_tabular_spec(" 10  delim=@ qseqid", app).unwrap();
+            let spec = custom_tabular_spec("10 delim=@ qseqid", app).unwrap();
             assert_eq!(spec.delimiter, ",", "{app:?}");
             assert!(custom_tabular_spec("6 delim=@", app).is_none(), "{app:?}");
             assert!(custom_tabular_spec("7 delim=,", app).is_none(), "{app:?}");

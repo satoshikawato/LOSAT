@@ -31,27 +31,6 @@ impl OutputFormat {
             None => (s, None),
         }
     }
-
-    /// Parse output format from string (e.g., "0", "6", "7")
-    /// Returns the format and any custom field specifications
-    pub fn parse(s: &str) -> Result<(Self, Option<String>), String> {
-        let (fmt_str, fields) = Self::split_fields(s);
-        let fields = fields.map(str::to_string);
-
-        let format = match fmt_str {
-            "0" => OutputFormat::Pairwise,
-            "6" => OutputFormat::Tabular,
-            "7" => OutputFormat::TabularWithComments,
-            _ => {
-                return Err(format!(
-                    "Unsupported output format: {}. Supported: 0, 6, 7",
-                    fmt_str
-                ))
-            }
-        };
-
-        Ok((format, fields))
-    }
 }
 
 /// Output format configuration
@@ -721,34 +700,6 @@ mod tests {
         // ```
         assert_eq!(format_percent_identity_ncbi(179, 320, 3), "55.937");
         assert_eq!(format_percent_identity_ncbi(0, 0, 3), "0.000");
-    }
-
-    // ==========================================================================
-    // OutputFormat tests
-    // ==========================================================================
-
-    #[test]
-    fn test_output_format_parse() {
-        assert_eq!(
-            OutputFormat::parse("0").unwrap(),
-            (OutputFormat::Pairwise, None)
-        );
-        assert_eq!(
-            OutputFormat::parse("6").unwrap(),
-            (OutputFormat::Tabular, None)
-        );
-        assert_eq!(
-            OutputFormat::parse("7").unwrap(),
-            (OutputFormat::TabularWithComments, None)
-        );
-
-        // With custom fields
-        let (fmt, fields) = OutputFormat::parse("6 qaccver saccver").unwrap();
-        assert_eq!(fmt, OutputFormat::Tabular);
-        assert_eq!(fields, Some("qaccver saccver".to_string()));
-
-        // Invalid format
-        assert!(OutputFormat::parse("99").is_err());
     }
 
     // NCBI BLAST+ 2.17.0, `blastn -outfmt 7` (inventory range RP,

@@ -48,6 +48,7 @@ use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
 };
 use crate::cli::Commands;
+use crate::report::archive::options::RequestKind;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -749,18 +750,21 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // the taxonomy database up themselves, through the search path of NCBI's databases: a search of
 // records reads the application settings for them, as the command line does, and the search asks
 // where the command line asks (`common::database::subject_taxonomy`).
-/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
-/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
-/// without reading the settings.
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` (as `app`'s
+/// formatter writes it, `TabularSpec::of_app`) looks every taxid up (the plural names of the
+/// taxonomy database, the organism report); `None` otherwise, without reading the settings.
 fn taxdb_setting(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
+    app: RequestKind,
 ) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     let looks_up = outputs.formats.iter().any(|format| {
         parse_formatting_string(format.outfmt).is_ok_and(|choice| {
             ReportFormat::from_number(choice.number)
-                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .and_then(|report| {
+                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
+                })
                 .is_some_and(|spec| spec.looks_up_every_taxid())
         })
     });
@@ -860,15 +864,15 @@ fn run_local_entry(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastp)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
             run_local_tblastn(args, query, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // ```c++
             //     if (args.Exist(kArgWindowMaskerDatabase) &&
@@ -905,11 +909,11 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
@@ -919,7 +923,7 @@ fn run_local_entry(
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)

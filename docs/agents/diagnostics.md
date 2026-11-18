@@ -6170,8 +6170,8 @@ Scheduling (each value computed by one thread with the original function; order 
   gave nothing more (x0.991-1.023).
 - `LOSAT_X_TBXCTXTABLE=1` TBLASTX (speed; in the strict set from the pull request that added it, 2026-11-17, on by
   default; `=0` turns it off; `tblastx/x_pair_par.rs` `x_ctx_table`, `x_context_of`): the units' two-hit test finds the
-  context of a hit that passes it (NCBI's `BSearchContextInfo`, `blast_query_info.c:219-243`) in blastp's
-  `XContextTable` (`blastp/x_seed_fused.rs`, the table blastx's fused loop takes), made once per query batch from the
+  context of a hit that passes it (NCBI's `BSearchContextInfo`, `blast_query_info.c:219-243`) in the
+  `XContextTable` (`common/x_context_table.rs`, the table blastp's and blastx's fused loops take), made once per query batch from the
   frame bases in `XPairPar::prepare`: a coarse table of at most 16,384 entries gives the context at the start of the
   offset's block, and a walk over the frame bases moves on to the last context that starts at or before the offset.
   Cause removed: the binary search over every context of the batch (`BlastAaLookupTable::get_context_idx`; NCBI's

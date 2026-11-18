@@ -1,4 +1,4 @@
-//! The context of a hit in the TBLASTX unit path from blastp's `XContextTable`
+//! The context of a hit in the TBLASTX unit path from the `XContextTable` of blastp and blastx
 //! (`LOSAT_X_TBXCTXTABLE`, `src/algorithm/tblastx/x_pair_par.rs`, module doc) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It acts on the

@@ -185,7 +185,8 @@
 //! switch.
 //!
 //! `LOSAT_X_TBXCTXTABLE` (in the strict set: on unless it is `0`): the units' two-hit test finds
-//! the context of a hit that passes it (NCBI's `BSearchContextInfo`) in blastp's `XContextTable`,
+//! the context of a hit that passes it (NCBI's `BSearchContextInfo`) in the `XContextTable` of
+//! blastp's and blastx's fused loops (`common/x_context_table.rs`),
 //! made once per batch from the frame bases (`x_ctx_table`): a coarse table of at most 16,384
 //! entries gives the context at the start of the offset's block and a walk over the frame bases
 //! moves on to the last context that starts at or before it, the index of the binary search
@@ -247,7 +248,7 @@
 //! `[X_STATS] TBXUNITMASK` line counts the units with a masked table.
 
 use super::*;
-use crate::algorithm::blastp::x_seed_fused::XContextTable;
+use crate::algorithm::common::x_context_table::XContextTable;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
 use crate::algorithm::tblastx::lookup::x_pair_lut::{XPairLutGroup, XPairLutQuery};
 use crate::algorithm::tblastx::lookup::{BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL};
@@ -1902,7 +1903,7 @@ impl<M: TbxScore> XHitCtx<'_, M> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (as `context_of`)
 /// LOSAT_X_TBXCTXTABLE: the context of `query_offset` from `table` (the binary search's index,
-/// blastp/x_seed_fused.rs), or from the binary search over `lookup`'s frame bases for an offset
+/// common/x_context_table.rs), or from the binary search over `lookup`'s frame bases for an offset
 /// outside it (every offset with `=0`, whose table covers none).
 #[inline(always)]
 fn x_context_of(table: &XContextTable, lookup: &BlastAaLookupTable, query_offset: u32) -> usize {
@@ -1912,8 +1913,8 @@ fn x_context_of(table: &XContextTable, lookup: &BlastAaLookupTable, query_offset
     }
 }
 
-// No NCBI counterpart: the table behind `XHitCtx::context_of` (blastp's, as blastx's fused loop
-// takes it), built once per batch from the frame bases `get_context_idx` searches.
+// No NCBI counterpart: the table behind `XHitCtx::context_of` (the one blastp's and blastx's fused
+// loops take), built once per batch from the frame bases `get_context_idx` searches.
 /// LOSAT_X_TBXCTXTABLE: the `XContextTable` of a batch's contexts (`lookup.frame_bases`,
 /// `num_contexts` of them) over its `query_length` offsets with the switch `on`, over none without
 /// it (every offset then takes the binary search).
@@ -2219,8 +2220,8 @@ pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     sent: bool,
     /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
     sc: M,
-    /// LOSAT_X_TBXCTXTABLE: the context of a query offset of the batch (blastp's `XContextTable`
-    /// over the batch's frame bases, `x_ctx_table`), which the units' two-hit test reads for every
+    /// LOSAT_X_TBXCTXTABLE: the context of a query offset of the batch (`XContextTable`, as blastp's
+    /// and blastx's, over the batch's frame bases, `x_ctx_table`), which the units' two-hit test reads for every
     /// hit that passes it.
     ctx_of: XContextTable,
 }

@@ -152,8 +152,7 @@ pub(super) fn serial_subjects(
 // No NCBI counterpart: the shape of the search (scheduling); it changes no value NCBI computes.
 /// Whether a batch of chunks of these lengths (with their overlaps), which one subject's owner
 /// searches on a pool of `threads` threads, searches its chunks one at a time (the caller has
-/// checked that the strips would run and that the subject has no lowercase mask): two chunks or
-/// more, and `serial` with the longest chunk.
+/// checked that the strips would run): two chunks or more, and `serial` with the longest chunk.
 #[cfg(any(
     test,
     all(

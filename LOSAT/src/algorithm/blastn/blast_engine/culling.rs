@@ -38,16 +38,16 @@ fn int4(length: usize) -> i32 {
 ///     	  A.end   = A.hsp->query.end;
 ///       }
 /// ```
-/// `query_offset` and `query_end` are the HSP's offsets within its context.
+/// `query_offset` and `query_end` are the HSP's offsets within its context, NCBI's `Int4` ones
+/// (outside the context for an HSP from a hit that passes an end of it, `PrelimHit::prelim_qs`).
 fn cull_key(
     minus: bool,
     qlen: i32,
-    query_offset: usize,
-    query_end: usize,
+    query_offset: i32,
+    query_end: i32,
     score: i32,
     subject_offset: usize,
 ) -> CullKey {
-    let (query_offset, query_end) = (query_offset as i32, query_end as i32);
     let (begin, end) = if minus {
         (qlen - query_end, qlen - query_offset)
     } else {
@@ -341,8 +341,8 @@ mod tests {
     fn prelim(
         query: u32,
         minus: bool,
-        qs: usize,
-        qe: usize,
+        qs: i32,
+        qe: i32,
         ss: usize,
         score: i32,
         evalue: f64,
@@ -355,7 +355,7 @@ mod tests {
             prelim_qs: qs,
             prelim_qe: qe,
             prelim_ss: ss,
-            prelim_se: ss + (qe - qs),
+            prelim_se: ss + (qe - qs) as usize,
             prelim_score: score,
             seed_qs: qs,
             seed_ss: ss,
@@ -409,14 +409,22 @@ mod tests {
                     prelim(
                         0,
                         false,
-                        100 + 50 * oid,
-                        120 + 50 * oid,
+                        100 + 50 * oid as i32,
+                        120 + 50 * oid as i32,
                         1,
                         40 - oid as i32,
                         1e-5,
                     ),
                     prelim(1, false, 10, 30, 1, 30, 1e-3),
-                    prelim(0, false, 100 + 50 * oid, 110 + 50 * oid, 2, 20, 1e-2),
+                    prelim(
+                        0,
+                        false,
+                        100 + 50 * oid as i32,
+                        110 + 50 * oid as i32,
+                        2,
+                        20,
+                        1e-2,
+                    ),
                 ],
             );
         }

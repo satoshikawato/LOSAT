@@ -110,9 +110,48 @@ fn formats_that_read_the_query_twice_refuse_standard_input() {
     assert!(output.stderr.is_empty());
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2536-2537
+// ```c++
+//         else {
+//             subj_input_stream = &args[kArgSubject].AsInputFile();
+// ```
+// `-subject -` is `cin`, read to its end before the query (`ReadSequencesToBlast`). The query
+// `-` is the same stream, which then has failed: no position, so not "Query is Empty!" even
+// when the standard input is a regular file, and no query batch (blast_app_util.cpp:856-859).
+// The frozen NCBI rows: `blastx.stdin_s_*` and `blastx.stdin_qs_*` of
+// fasta_input_fixtures/blastx.tsv.
 #[test]
-fn a_subject_on_standard_input_stays_refused() {
-    let output = run_with_stdin(&["blastx", "-subject", "-", "-outfmt", "6"], b">q\nACGT\n");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unsupported BLASTX stdin subject"));
+fn a_subject_on_standard_input_reads_as_ncbis_cin() {
+    const QUERY: &str = "tests/fixtures/fasta_input/base.q.nuc.fa";
+    const SUBJECT: &str = "tests/fixtures/fasta_input/base.s.prot.faa";
+    let subject = std::fs::read(root().join(SUBJECT)).unwrap();
+    let named = run_with_stdin(
+        &[
+            "blastx", "-query", QUERY, "-subject", SUBJECT, "-outfmt", "6",
+        ],
+        b"",
+    );
+    assert!(named.status.success() && !named.stdout.is_empty());
+    let piped = run_with_stdin(
+        &["blastx", "-query", QUERY, "-subject", "-", "-outfmt", "6"],
+        &subject,
+    );
+    assert!(
+        piped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&piped.stderr)
+    );
+    assert_eq!((piped.stdout, piped.stderr), (named.stdout, named.stderr));
+    // Both from standard input, a regular file there: the subjects take all of it.
+    let both = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .current_dir(root())
+        .args(["blastx", "-query", "-", "-subject", "-", "-outfmt", "7"])
+        .stdin(Stdio::from(
+            std::fs::File::open(root().join(SUBJECT)).unwrap(),
+        ))
+        .output()
+        .unwrap();
+    assert!(both.status.success());
+    assert_eq!(both.stdout, b"# BLAST processed 0 queries\n");
+    assert!(both.stderr.is_empty());
 }

@@ -1,0 +1,12 @@
+# TBLASTN 2.17.0+
+# Query: mix2_u the glob1 ORF of multidb/nnp
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject length, evalue
+# 1 hits found
+mix2_u	1043	2.90e-113
+# TBLASTN 2.17.0+
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject length, evalue
+# 14 hits found
+P69905.2	577	3.57e-104

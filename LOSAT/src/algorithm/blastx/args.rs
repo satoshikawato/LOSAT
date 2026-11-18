@@ -577,6 +577,23 @@ impl ResolvedOptions {
         ProgramName::of(&self.rpstblastn)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81 (quoted at
+    // `report::tabular::TabularSpec::std`)
+    /// The report the tabular writer writes (`tabular::write_blastx_tabular`): `tabular`, or for
+    /// the default outfmt 6 and 7 the `std` fields and a tab of the same formatter
+    /// (`TabularSpec::std`); `None` for a format that is not tabular. `tabular` itself stays
+    /// `None` for the default report, as the shared rules of the default fields read it
+    /// (`report::tabular::check_failed_lookups`, `TabularIds::of`).
+    pub(crate) fn tabular_report(&self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self.tabular {
+            Some(spec) => Some(spec),
+            None if matches!(self.outfmt, 6 | 7) => {
+                Some(crate::report::tabular::TabularSpec::std(self.outfmt == 7))
+            }
+            None => None,
+        }
+    }
+
     /// Whether the run's results are merged over several volumes (`RpsTblastnSearch::merges_volumes`).
     pub(crate) fn merged_volumes(&self) -> bool {
         self.rpstblastn
@@ -874,12 +891,10 @@ pub struct ResolvedOptions {
     pub outfmt: u8,
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
-    /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
-    /// fields), by name; empty for outfmt 0.
-    pub fields: Vec<String>,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
-    /// 20 (`TabularSpec::of`), which the shared writer writes (`tabular.rs`); `None` for the
-    /// default outfmt 6 and 7 and the other formats.
+    /// 20 (`TabularSpec::of`); `None` for the default outfmt 6 and 7 (the `std` fields and a
+    /// tab, `TabularSpec::std`, which the reports write with the same shared writer, `tabular.rs`)
+    /// and the other formats.
     pub tabular: Option<&'static crate::report::tabular::TabularSpec>,
     /// Whether `taxdb.bti` is on NCBI's search path, for a `tabular` field list that shows a
     /// plural name of the taxonomy database (its formatters warn without it) or the organism
@@ -1064,13 +1079,6 @@ impl BlastxArgs {
         // not (the task: `run_local`, first).
         crate::algorithm::blastn::args::QueryStrand::parse(&self.strand)?;
         let outfmt = u8::try_from(choice.number)?;
-        if self
-            .subject
-            .as_deref()
-            .is_some_and(|subject| subject.as_os_str() == "-")
-        {
-            bail!("unsupported BLASTX stdin subject");
-        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:872-877
         // ```c++
         //         if (ungapped && *ungapped && compo_mode != eNoCompositionBasedStats) {
@@ -1360,35 +1368,6 @@ impl BlastxArgs {
         )?;
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-99
-        // ```c++
-        //     vector<string> format_tokens;
-        //     NStr::Split(format, " ", format_tokens);
-        //
-        //     if (format_tokens.empty())
-        //         x_AddDefaultFieldsToShow();
-        //
-        //     ITERATE (vector<string>, iter, format_tokens) {
-        //         if (*iter == kDfltArgTabularOutputFmtTag)
-        //             x_AddDefaultFieldsToShow();
-        //         else if ((*iter)[0] == '-') {
-        // ...
-        //     if (m_FieldsToShow.empty()) {
-        //         x_AddDefaultFieldsToShow();
-        //     }
-        // ```
-        // The fields as NCBI reads them (`report::tabular::parse_fields`: unknown words are
-        // dropped, `-name` removes a field). A list that is not the `std` fields with a tab, and
-        // outfmt 10 and 20, are written by the shared writer (`tabular`); the default report
-        // writes the `std` fields (`fields`).
-        let fields = if outfmt > 4 {
-            crate::report::tabular::parse_fields(&choice.spec)
-                .into_iter()
-                .map(|field| field.name().to_string())
-                .collect()
-        } else {
-            Vec::new()
-        };
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
         // ```c++
         //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
@@ -1540,7 +1519,6 @@ impl BlastxArgs {
             formatting: self.formatting,
             outfmt,
             show_gis: self.show_gis,
-            fields,
             tabular,
             taxdb_found: false,
             subject_taxdb: None,
@@ -1913,23 +1891,48 @@ mod tests {
         assert_eq!(error.to_string(), "No hits are being saved");
     }
 
-    // NCBI blast_args.cpp:2801-2855 and tabular.cpp:76-99: BLASTX reads -outfmt and its
+    // NCBI blast_args.cpp:2801-2855 and tabular.cpp:70-99: BLASTX reads -outfmt and its
     // fields as NCBI (a specification counts only for the tabular formats; unknown words are
-    // dropped, `-name` removes a field); a list other than the `std` fields with a tab, and
-    // outfmt 10 and 20, go to the shared writer (`tabular`).
+    // dropped, `-name` removes a field). Every tabular report goes to the shared writer
+    // (`tabular_report`): a list other than the `std` fields with a tab, and outfmt 10 and 20,
+    // with its spec (`tabular`), the default outfmt 6 and 7 with the `std` spec (`tabular` None).
     #[test]
     fn outfmt_and_fields_are_read_as_ncbi() {
-        use crate::report::tabular::{TabularKind, STD_FIELDS};
+        use crate::report::tabular::TabularKind;
+        // The fields of the report the tabular writer writes (`tabular_report`), none for the
+        // formats that are not tabular.
         let fields = |outfmt: &str| {
             let resolved = parse(&["-outfmt", outfmt]).resolve().unwrap();
-            (resolved.outfmt, resolved.fields)
+            let names: Vec<String> = resolved.tabular_report().map_or(Vec::new(), |spec| {
+                spec.fields.iter().map(|f| f.name().to_string()).collect()
+            });
+            (resolved.outfmt, names)
         };
-        let std: Vec<String> = STD_FIELDS.iter().map(|f| f.name().to_string()).collect();
+        // NCBI format_flags.cpp:38-40 (`kDfltArgTabularOutputFmt`, the `std` fields).
+        let std: Vec<String> =
+            "qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore"
+                .split(' ')
+                .map(String::from)
+                .collect();
         assert_eq!(fields("0 std"), (0, Vec::new()));
         assert_eq!(fields("0 foo"), (0, Vec::new()));
         assert_eq!(fields(" 6 delim="), (6, std.clone()));
         assert_eq!(fields("7"), (7, std.clone()));
         assert_eq!(fields("6 foo"), (6, std.clone()));
+        // The default reports' kind and delimiter (outfmt 6: rows; 7: with its comment lines).
+        let report = |outfmt: &str| {
+            parse(&["-outfmt", outfmt])
+                .resolve()
+                .unwrap()
+                .tabular_report()
+                .map(|spec| (spec.kind, spec.delimiter.clone()))
+        };
+        assert_eq!(report("6"), Some((TabularKind::Tabular, "\t".to_string())));
+        assert_eq!(
+            report("7 std"),
+            Some((TabularKind::Commented, "\t".to_string()))
+        );
+        assert_eq!(report("5"), None);
         // Words between single spaces; an empty word names no field.
         let mut listed = vec!["qseqid".to_string(), "sseqid".to_string()];
         listed.extend(std.iter().cloned());

@@ -389,10 +389,12 @@ fn run_inner(
         write_run_error_archive(args, archive.as_ref(), &error);
         error
     };
+    // `-subject -` is `cin` (ncbiargs.cpp:717-721, quoted at `input_files::open_input`), the
+    // stream that `-query -` names too: one owner opens both (`open_input`).
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
         (None, Some(path)) => Some(
-            crate::blastinput::input_files::open_file_input(path, "subject")
+            crate::blastinput::input_files::open_input(path, "subject", program.upper)
                 .map_err(early_archive_error)?,
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -826,7 +828,21 @@ fn run_inner(
     if args.db.is_none() {
         query_stream.around = super::empty_rows::query_letters_around(&options, &subjects);
     }
-    if stream_is_empty(&mut query_stream) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-245
+    // ```c++
+    //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+    //     CRef<CBlastInput> input(new CBlastInput(fasta));
+    //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+    //     sequences = input->GetAllSeqs(*scope);
+    // ```
+    // With `-query -` and `-subject -` the subjects were read from `cin` to its end above: the
+    // stream has failed, its `tellg()` is negative, and the test above answers "not empty" even
+    // for a regular file as the standard input. No query batch is read then: outfmt 7 writes
+    // `# BLAST processed 0 queries`, never `Query is Empty!` (blastp's `shared_standard_input`,
+    // the same rule).
+    let shared_standard_input =
+        args.query.as_os_str() == "-" && subject_path.is_some_and(|path| path.as_os_str() == "-");
+    if !shared_standard_input && stream_is_empty(&mut query_stream) {
         stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
@@ -1282,9 +1298,9 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
-    /// Whether every report is outfmt 13 to 16, which write a lookup that throws where a batch's
-    /// prefetch is off as NCBI does (`Xml2Kind::every`, for `HitLoads::of`).
-    writes_thrown: bool,
+    /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
+    /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
+    throw: crate::report::db_subject::FormatThrow,
 }
 
 impl ReportedAsks {
@@ -1324,9 +1340,14 @@ impl ReportedAsks {
                 outfmt => i32::from(outfmt),
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
-            writes_thrown: crate::report::blast_xml2::Xml2Kind::every([
-                super::blast_xml::xml2_kind(options.outfmt),
-            ]),
+            throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
+                .map_or(crate::report::db_subject::FormatThrow::Refused, |format| {
+                    crate::report::db_subject::FormatThrow::of(
+                        format,
+                        options.tabular,
+                        crate::blastinput::app::Program::Blastx,
+                    )
+                }),
         }
     }
 
@@ -1343,11 +1364,6 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
-        asks.writes_thrown = crate::report::blast_xml2::Xml2Kind::every(
-            options
-                .iter()
-                .map(|options| super::blast_xml::xml2_kind(options.outfmt)),
-        );
         asks
     }
 
@@ -1364,8 +1380,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
-            // `Xml2Kind::every` of the two.
-            writes_thrown: self.writes_thrown && other.writes_thrown,
+            throw: self.throw.and(other.throw),
         }
     }
 }
@@ -1598,7 +1613,7 @@ pub(super) fn reported_batch(
         asks.prefetch_runs && !unfetched,
         unfetched,
         options.shown_lists(),
-        asks.writes_thrown,
+        crate::report::db_subject::FormatThrow::of_run([asks.throw]),
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -1839,20 +1854,17 @@ pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
 //         		ERR_POST(Warning << warning);
 //         		continue;
 // ```
-/// The warning of each `-subject` record without letters.
+/// The warning of each `-subject` record without letters, as every program writes it
+/// (`input_files::write_empty_subject_warnings_of`: the id, then the title's bytes as read).
 pub(super) fn write_empty_subject_warnings(
     subjects: &[FastaRecord],
     stderr: &mut dyn Write,
 ) -> Result<()> {
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        write!(
-            stderr,
-            "Warning: [blastx] {} ",
-            String::from_utf8_lossy(s.warning_id())
-        )?;
-        stderr.write_all(&s.title)?;
-        writeln!(stderr, ": Subject sequence contains no data")?;
-    }
+    crate::blastinput::input_files::write_empty_subject_warnings_of(
+        subjects.iter().map(|s| (s.names(), s.sequence.len())),
+        "blastx",
+        stderr,
+    )?;
     Ok(())
 }
 
@@ -3309,7 +3321,7 @@ mod archive_error_tests {
             database_name: String::new(),
             database_num_sequences: 1,
             database_total_letters: 50_000,
-            matrix_name: "BLOSUM62".into(),
+            matrix_name: Some("BLOSUM62".into()),
             gap_open: 11,
             gap_extend: 1,
             word_threshold: 12.0,

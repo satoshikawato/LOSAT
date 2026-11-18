@@ -94,6 +94,10 @@ enum InputHandle {
     Own(std::fs::File),
     /// The process's standard input (`standard_input`), never closed by LOSAT.
     StandardInput(std::mem::ManuallyDrop<std::fs::File>),
+    /// A test's file read as the standard input is read (`InputFile::as_standard_input`), closed
+    /// when dropped.
+    #[cfg(test)]
+    TestStandardInput(std::fs::File),
 }
 
 impl InputFile {
@@ -103,11 +107,33 @@ impl InputFile {
         Self(InputHandle::StandardInput(file))
     }
 
+    /// A test's `file` read as `-` reads the standard input (`is_standard_input`), but closed
+    /// when dropped.
+    #[cfg(test)]
+    pub(crate) fn as_standard_input(file: std::fs::File) -> Self {
+        Self(InputHandle::TestStandardInput(file))
+    }
+
     /// The file to read, seek and ask about.
     fn file(&self) -> &std::fs::File {
         match &self.0 {
             InputHandle::Own(file) => file,
             InputHandle::StandardInput(file) => file,
+            #[cfg(test)]
+            InputHandle::TestStandardInput(file) => file,
+        }
+    }
+
+    /// Whether this is the standard input that `-` names, which NCBI reads through `cin`
+    /// (`m_Ios = &cin`, quoted at `InputFile`), not through a `CNcbiIfstream` of a path (a path
+    /// such as `/dev/stdin` is a file of its own). The FASTA readers read the two as NCBI's two
+    /// streams answer a refill (`fasta_reader::stream::InputBackend::of`).
+    pub(crate) fn is_standard_input(&self) -> bool {
+        match self.0 {
+            InputHandle::Own(_) => false,
+            InputHandle::StandardInput(_) => true,
+            #[cfg(test)]
+            InputHandle::TestStandardInput(_) => true,
         }
     }
 }
@@ -510,9 +536,30 @@ pub fn write_empty_subject_warnings_by_length(
     program: &str,
     diagnostics: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
-    for (index, record) in records.iter().enumerate() {
-        if length(index) == 0 {
-            let mut text = match record.believed() {
+    write_empty_subject_warnings_of(
+        records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (record.names(), length(index))),
+        program,
+        diagnostics,
+    )
+}
+
+/// `write_empty_subject_warnings` of the subjects whose names (`fasta_reader::RecordNames`) and
+/// numbers of letters `records` gives, in their order: the shared reader's records and BLASTX's
+/// (`algorithm::blastx::input::FastaRecord::names`).
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (quoted at
+/// `write_empty_subject_warnings`)
+pub fn write_empty_subject_warnings_of<'a>(
+    records: impl IntoIterator<Item = (crate::blastinput::fasta_reader::RecordNames<'a>, usize)>,
+    program: &str,
+    diagnostics: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    for (index, (record, length)) in records.into_iter().enumerate() {
+        if length == 0 {
+            let mut text = match record.believed {
                 Some(ids) => {
                     let mut text = ids.warning_id.clone();
                     text.push(b' ');
@@ -520,7 +567,7 @@ pub fn write_empty_subject_warnings_by_length(
                 }
                 None => format!("Subject_{} ", index + 1).into_bytes(),
             };
-            text.extend_from_slice(&record.title);
+            text.extend_from_slice(record.title);
             text.extend_from_slice(b": Subject sequence contains no data");
             // A post of NCBI's main thread (`ncbi_exception::post_line`; tblastn's formatter, which
             // makes it, comes after the PSSM query's annotations are indexed).

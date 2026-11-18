@@ -644,6 +644,7 @@ impl<M: TbxScore> XPairPar<M> {
             // `get_context_idx` reads only the batch's context bounds (`frame_bases`,
             // `num_contexts`), which every slice table carries.
             lookup: &group.slices[0].lookup,
+            ctx_of: &self.ctx_of,
             contexts: inp.contexts,
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
@@ -1109,6 +1110,7 @@ mod tests {
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             let window = [40, 3 + BATCH as i32, 64][case % 3];
             let inp = XSubject {

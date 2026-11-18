@@ -847,52 +847,75 @@ impl FastaStream<crate::blastinput::input_files::InputFile> {
     //     x_FillBuffer((size_t) m_Sb->in_avail());
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
+    /// A stream over an opened input, whose refills read as NCBI's stream of it answers them
+    /// (`InputBackend::of`: `cin` for `-`, a `CNcbiIfstream` for a path).
     pub(crate) fn from_file(input: impl Into<crate::blastinput::input_files::InputFile>) -> Self {
         let input = input.into();
         let no_position = !crate::blastinput::input_files::has_stream_position(&input);
+        let backend = InputBackend::of(&input);
         let mut stream = Self::new(input);
         stream.no_position = no_position;
-        stream.backend_available = Some(file_available);
+        stream.backend_available = Some(backend.available);
+        stream.get_area = backend.get_area;
         stream
     }
+}
 
-    /// A stream over standard input (`-`), which NCBI reads through `cin`.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
-    /// ```c++
-    ///     if (AsString() == "-") {
-    /// #if defined(NCBI_OS_MSWIN)
-    ///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-    /// #endif
-    ///         m_Ios  = &cin;
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1342-1344
-    /// ```c++
-    ///     if ((m_StdioFlags & fNoSyncWithStdio) != 0) {
-    ///         IOS_BASE::sync_with_stdio(false);
-    ///     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-    /// ```c++
-    ///     x_FillBuffer((size_t) m_Sb->in_avail());
-    ///     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    /// ```
-    /// The BLAST applications keep `cin` synchronised with stdio, so its streambuf (libstdc++'s
-    /// `stdio_sync_filebuf`) has no get area and the default `showmanyc` of 0: `in_avail` is
-    /// always 0, and each refill of a pushback buffer reads one byte (`x_FillBuffer` raises 0
-    /// to 1), whether standard input is a pipe or a regular file (fixture rows
-    /// `stdin_q_lost_g55_pipe` and `stdin_q_lost_g55_file` keep the tail that a file named by
-    /// its path loses).
-    pub(crate) fn from_standard_input(
-        input: impl Into<crate::blastinput::input_files::InputFile>,
-    ) -> Self {
-        let input = input.into();
-        let no_position = !crate::blastinput::input_files::has_stream_position(&input);
-        let mut stream = Self::new(input);
-        stream.no_position = no_position;
-        stream.backend_available = Some(|_| Ok(0));
-        stream.get_area = false;
-        stream
+/// How NCBI's stream over an opened input answers the refill of a pushback buffer, which asks
+/// for `in_avail()` bytes, at least one (`CPushback_Streambuf::underflow`, `x_FillBuffer`, quoted
+/// at `raw_peek`). The one place that tells standard input from a file for every FASTA reader
+/// of an opened input (`FastaStream::from_file` here and BLASTX's and RPSTBLASTN's
+/// `algorithm::blastx::input::FastaStream::from_file`).
+#[derive(Clone, Copy)]
+pub(crate) struct InputBackend {
+    /// `in_avail()` once the get area is used up (`backend_available`).
+    pub(crate) available:
+        fn(&mut crate::blastinput::input_files::InputFile) -> std::io::Result<usize>,
+    /// Whether the stream's buffered bytes count as readable (`get_area`).
+    pub(crate) get_area: bool,
+}
+
+impl InputBackend {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
+    // ```c++
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios  = &cin;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1342-1344
+    // ```c++
+    //     if ((m_StdioFlags & fNoSyncWithStdio) != 0) {
+    //         IOS_BASE::sync_with_stdio(false);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
+    // ```c++
+    //     x_FillBuffer((size_t) m_Sb->in_avail());
+    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
+    // ```
+    /// The backend of `input`. Standard input (`-`, `InputFile::is_standard_input`) is `cin`,
+    /// which the BLAST applications keep synchronised with stdio: its streambuf (libstdc++'s
+    /// `stdio_sync_filebuf`) has no get area and the default `showmanyc` of 0, so `in_avail` is
+    /// always 0 and each refill reads one byte (`x_FillBuffer` raises 0 to 1), whether standard
+    /// input is a pipe or a regular file. A file named by its path is a `CNcbiIfstream`, whose
+    /// buffered bytes and then the bytes left in the file (a pipe's queued bytes) are readable
+    /// (`file_available`). The two read the same bytes into different lines where a refill ends
+    /// inside a line end (fixture rows `stdin_q_lost_g55_pipe` and `stdin_q_lost_g55_file` keep
+    /// the tail that the same file named by its path loses).
+    pub(crate) fn of(input: &crate::blastinput::input_files::InputFile) -> Self {
+        if input.is_standard_input() {
+            Self {
+                available: |_| Ok(0),
+                get_area: false,
+            }
+        } else {
+            Self {
+                available: file_available,
+                get_area: true,
+            }
+        }
     }
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-174

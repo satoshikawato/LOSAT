@@ -8233,9 +8233,9 @@ mod taxdb_prepass_tests {
     /// (`None`: not set), from an empty current directory.
     fn database(name: &str, taxdb: Option<&Path>) -> Opened {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat_prepass_cwd_{}_{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -8251,7 +8251,10 @@ mod taxdb_prepass_tests {
 
     /// An empty current directory of the test `tag`, which the test removes at its end.
     fn empty_cwd(tag: &str) -> PathBuf {
-        let cwd = std::env::temp_dir().join(format!("losat_{tag}_cwd_{}", std::process::id()));
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_{tag}_cwd_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&cwd).unwrap();
         cwd
     }
@@ -8735,9 +8738,9 @@ mod taxdb_prepass_tests {
         // which a version 4 database does not look up (no Bioseq), 0 `gb|AF000070.1|`; every
         // sequence with taxid 99990, whose lookup in `offset_last_past_end` writes the offset
         // error.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-batch-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -8895,9 +8898,9 @@ mod taxdb_prepass_tests {
         // Line DBID loadord (tests/db_search/make_multidb.py --loadord-only): `ldp` holds
         // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|`; the unparsed `qp1` is
         // `gnl|BL_ORD_ID|0` beside it in `lda ldp`, `|1` in `ldb ldp` and `|2` in `ldp ldu`.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-load-order-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -9314,9 +9317,9 @@ mod taxdb_prepass_tests {
         // `multidb` (make_multidb.py --loadord-only): `lda` (no accession table) beside `ldp`'s
         // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|` (packed 900), `ldq`'s
         // `lcl|Query_1` (not packed), `ldg`'s `gi|1|ref|NP_000002.1|` and the unparsed `ldu`.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-two-stops-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -9534,9 +9537,9 @@ mod taxdb_prepass_tests {
         // `ldp`'s stopping `ref|NP_000002.1|`), `lda`'s OID 0 (`|0`, after it), `ldu`'s OID 2
         // (`|2`, the same packed number), `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the
         // stopping accession) and `lds`'s stopping `ref|NP_000003.1|`.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-e2-placed-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -9790,9 +9793,9 @@ mod taxdb_prepass_tests {
         // `multidb` (make_multidb.py --loadord-only): `ldb`'s unparsed OID 1 (`gnl|BL_ORD_ID|1`),
         // `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the stopping accession), `ldp`'s
         // stopping `ref|NP_000002.1|` (no accession table); taxid 9606, BLASTDB=bad_magic.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-record-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -9958,9 +9961,9 @@ mod taxdb_prepass_tests {
         // table), whose parsed Seq-ids' lookups fail with NCBI's `DB contains no accession
         // info.`, and `taxfilter/tfu_n` (-input_type blastdb: the table of its ordinal ids; taxids
         // 7955 and 9606), whose loads look the taxonomy up.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-prefetch-stop-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -10536,7 +10539,10 @@ mod taxdb_prepass_tests {
         // tabs are inside the mapping (its scientific name too): nothing holds. From 4096 the
         // record lies wholly past the mapping: its names, which XML2 and JSON write, hold (the
         // check does not tell the formats apart: a run whose loads write no name holds too).
-        let dir = std::env::temp_dir().join(format!("losat_prepass_btd_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_prepass_btd_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::copy(variant("good").join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
         let mut index = std::fs::read(variant("good").join("taxdb.bti")).unwrap();
@@ -10622,7 +10628,7 @@ mod taxdb_prepass_tests {
         let Some(dir) = std::env::var_os("LOSAT_TEST_NCBI_TAXDB") else {
             return;
         };
-        let cwd = std::env::temp_dir();
+        let cwd = crate::utils::test_dir::temp_dir();
         let search = SearchPath::new(&cwd, Some(&dir), None).unwrap();
         let taxdb = LazyTaxDb::new(search);
         let entries = taxdb.entry_count().unwrap();

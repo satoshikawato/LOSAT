@@ -257,6 +257,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "the Node WASI host can sleep less than asked: a 1 ms sleep timed under 1 ms in 1 run of 6"
+    )]
     fn the_stages_of_a_subject_add_up_to_its_time() {
         let times = XSearchTimes::new(true);
         for _ in 0..3 {

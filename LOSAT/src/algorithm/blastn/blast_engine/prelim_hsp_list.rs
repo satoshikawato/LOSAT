@@ -40,13 +40,13 @@
 //! look-ahead helpers `x_prelim_extend`, on the threads of the pool, so what they read is `Sync`.
 
 use super::prelim_subject::PrelimBatch;
-use super::x_greedy_prelim::XPrelimSubject;
+use super::x_greedy_prelim::{GreedyPrelim, XPrelimSubject};
 use super::{
-    blastn_trace, extend_gapped_heuristic_with_scratch, purge_prelim_hits_with_common_endpoints,
-    score_compare_prelim_hits, score_compare_ungapped_hits, sort_prelim_hits_by_score, x_bn_mapped,
-    x_bn_mapped_reach, x_qgroup_par, BlastIntervalTree, FastaRecord, GapAlignScratch,
-    GreedyAlignScratch, IndexMethod, PrelimHit, SubjectChunk, TreeHsp, UngappedHit, XAheadScratch,
-    COMPRESSION_RATIO, X_SORT,
+    blastn_trace, context_query, extend_gapped_heuristic_with_scratch,
+    purge_prelim_hits_with_common_endpoints, score_compare_prelim_hits,
+    score_compare_ungapped_hits, sort_prelim_hits_by_score, x_bn_mapped, x_bn_mapped_reach,
+    x_qgroup_par, BlastIntervalTree, FastaRecord, GapAlignScratch, GreedyAlignScratch, IndexMethod,
+    PrelimHit, SubjectChunk, TreeHsp, UngappedHit, XAheadScratch, COMPRESSION_RATIO, X_SORT,
 };
 use std::sync::atomic::AtomicU64;
 
@@ -131,19 +131,30 @@ pub(super) fn ungapped_hsp_list(
     );
     let mut chunk_prelim_hits: Vec<PrelimHit> = ungapped_hits
         .iter()
-        .map(|uh| PrelimHit {
-            context_idx: uh.context_idx,
-            query_idx: uh.query_idx,
-            query_frame: uh.query_frame,
-            query_context_offset: uh.query_context_offset,
-            prelim_qs: uh.qs as usize,
-            prelim_qe: uh.qe as usize,
-            prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
-            prelim_se: (uh.se as usize).saturating_add(chunk.offset),
-            prelim_score: uh.score,
-            seed_qs: uh.seed_q_off as usize,
-            seed_ss: (uh.seed_s_off as usize).saturating_add(chunk.offset),
-            prelim_evalue: 0.0,
+        .map(|uh| {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
+            // ```c
+            //       Blast_HSPInit(ungapped_data->q_start,
+            //                     ungapped_data->length+ungapped_data->q_start,
+            //                     ungapped_data->s_start,
+            //                     ungapped_data->length+ungapped_data->s_start,
+            // ```
+            // NCBI's HSP of a hit that passes an end of its context (`UngappedHit::saved`) has
+            // the hit's `Int4` offsets, outside the context.
+            PrelimHit {
+                context_idx: uh.context_idx,
+                query_idx: uh.query_idx,
+                query_frame: uh.query_frame,
+                query_context_offset: uh.query_context_offset,
+                prelim_qs: uh.qs,
+                prelim_qe: uh.qe,
+                prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
+                prelim_se: (uh.se as usize).saturating_add(chunk.offset),
+                prelim_score: uh.score,
+                seed_qs: uh.seed_q_off as i32,
+                seed_ss: (uh.seed_s_off as usize).saturating_add(chunk.offset),
+                prelim_evalue: 0.0,
+            }
         })
         .collect();
     sort_prelim_hits_by_score(&mut chunk_prelim_hits);
@@ -353,7 +364,7 @@ pub(super) fn x_prelim_extend(
     gapped: &GappedPrelim<'_>,
     uh: &UngappedHit,
     x_scratch: &mut XAheadScratch<'_>,
-) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
+) -> Option<GreedyPrelim> {
     let &GappedPrelim {
         batch,
         x_prelim_subject,
@@ -363,7 +374,9 @@ pub(super) fn x_prelim_extend(
         ..
     } = gapped;
     let &PrelimBatch {
+        encoded_query_concat_blastna,
         encoded_queries_blastna,
+        query_contexts,
         reward,
         penalty,
         gap_open,
@@ -398,18 +411,31 @@ pub(super) fn x_prelim_extend(
             &mut *x_scratch.gap,
             true,
         );
-        Some((p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss))
+        // The dynamic-programming alignment runs on the context (`query_tmp`), from a seed in it.
+        Some((
+            p_qs as i32,
+            p_qe as i32,
+            p_ss,
+            p_se,
+            p_score,
+            seed_qs as i32,
+            seed_ss,
+        ))
     } else {
-        let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
-        let seed_qs = uh.qs as usize + ungapped_len / 2;
-        let seed_ss = uh.ss as usize + ungapped_len / 2;
+        // NCBI's `Int4` seed, outside the context for a hit that passes an end of it
+        // (`UngappedHit::greedy_seed`); the alignment reads the concatenated query there
+        // (`greedy_gapped_alignment_internal`).
+        let (seed_qs, seed_ss) = uh.greedy_seed();
         x_prelim_subject.score_only(
             chunk.offset,
             s_len,
             (uh.ss as usize, uh.se as usize),
-            q_seq_blastna,
+            context_query(
+                encoded_query_concat_blastna,
+                &query_contexts[uh.context_idx as usize],
+            ),
             seed_qs,
-            seed_ss,
+            seed_ss as usize,
             reward,
             penalty,
             gap_open,
@@ -452,6 +478,7 @@ pub(super) fn gapped_score_list(
     let &PrelimBatch {
         blastn_trace_enabled,
         verbose,
+        encoded_query_concat_blastna,
         encoded_queries_blastna,
         query_contexts,
         hit_saving_cutoff_scores,
@@ -537,8 +564,8 @@ pub(super) fn gapped_score_list(
                 x_ahead.announce(idx, x_ungapped.len(), |x_index| {
                     let u = &x_ungapped[x_index];
                     let h = TreeHsp {
-                        query_offset: u.qs as i32,
-                        query_end: u.qe as i32,
+                        query_offset: u.qs,
+                        query_end: u.qe,
                         subject_offset: u.ss as i32,
                         subject_end: u.se as i32,
                         score: u.score,
@@ -585,11 +612,14 @@ pub(super) fn gapped_score_list(
             // tmp_hsp.subject.offset = s_start;
             // tmp_hsp.subject.end = s_end;
             // ```
-            // NCBI uses 0-based coordinates internally for the tree
+            // NCBI uses 0-based coordinates internally for the tree: the `Int4` offsets in the
+            // context, outside it for a hit that passes an end of it (`UngappedHit::saved`), and
+            // so for a greedy alignment from such a hit (`x_prelim_extend`); the tree holds them
+            // at the context's offset (`BlastIntervalTreeAddHSP`), inside the concatenated query.
             let subject_frame_sign = 1i32;
             let ungapped_tree_hsp = TreeHsp {
-                query_offset: uh.qs as i32,
-                query_end: uh.qe as i32,
+                query_offset: uh.qs,
+                query_end: uh.qe,
                 subject_offset: uh.ss as i32,
                 subject_end: uh.se as i32,
                 score: uh.score,
@@ -623,8 +653,8 @@ pub(super) fn gapped_score_list(
                     uh.context_idx,
                     s_idx,
                     s_id,
-                    uh.qs as usize,
-                    uh.qe as usize,
+                    uh.qs,
+                    uh.qe,
                     (uh.ss as usize).saturating_add(chunk.offset),
                     (uh.se as usize).saturating_add(chunk.offset),
                     ctx.len,
@@ -638,8 +668,8 @@ pub(super) fn gapped_score_list(
                     s_id,
                     s_idx,
                     uh.context_idx,
-                    uh.qs as usize,
-                    uh.qe as usize,
+                    uh.qs,
+                    uh.qe,
                     (uh.ss as usize).saturating_add(chunk.offset),
                     (uh.se as usize).saturating_add(chunk.offset),
                     uh.score,
@@ -758,7 +788,7 @@ pub(super) fn gapped_score_list(
                             uh.context_idx,
                             s_idx,
                             s_id,
-                            seed_qs,
+                            seed_qs as i32,
                             seed_ss.saturating_add(chunk.offset),
                         )
                     {
@@ -808,21 +838,31 @@ pub(super) fn gapped_score_list(
                             gap_scratch,
                             true,
                         );
-                    (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
+                    // The dynamic-programming alignment runs on the context (`query_tmp`), from a
+                    // seed in it.
+                    (
+                        p_qs as i32,
+                        p_qe as i32,
+                        p_ss,
+                        p_se,
+                        p_score,
+                        seed_qs as i32,
+                        seed_ss,
+                    )
                 } else {
                     // Greedy seed selection (megablast)
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
-                    let ungapped_len = uh.qe.saturating_sub(uh.qs) as usize;
-                    let seed_qs = uh.qs as usize + ungapped_len / 2;
-                    let seed_ss = uh.ss as usize + ungapped_len / 2;
+                    // (`UngappedHit::greedy_seed`: NCBI's `Int4` seed, outside the context for a
+                    // hit that passes an end of it).
+                    let (seed_qs, seed_ss) = uh.greedy_seed();
 
                     let prelim = match x_prelim_subject.score_only(
                         chunk.offset,
                         subject_len,
                         (uh.ss as usize, uh.se as usize),
-                        q_seq_blastna,
+                        context_query(encoded_query_concat_blastna, ctx),
                         seed_qs,
-                        seed_ss,
+                        seed_ss as usize,
                         reward,
                         penalty,
                         gap_open,
@@ -910,8 +950,8 @@ pub(super) fn gapped_score_list(
             // tmp_hsp.subject.end = s_end;
             // ```
             let gapped_tree_hsp = TreeHsp {
-                query_offset: prelim_qs as i32,
-                query_end: prelim_qe as i32,
+                query_offset: prelim_qs,
+                query_end: prelim_qe,
                 subject_offset: prelim_ss as i32,
                 subject_end: prelim_se as i32,
                 score: prelim_score,

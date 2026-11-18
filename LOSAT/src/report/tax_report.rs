@@ -443,6 +443,12 @@ pub trait TaxSubjects {
 
     /// LOSAT's refusal of a title of `subject` (`TaxTitle::Refused`), which names it.
     fn refused(&self, subject: usize, reason: &str) -> anyhow::Error;
+
+    /// Whether the load of `subject` throws where its query's batch has its prefetch off
+    /// (`db_subject::HitLoads::thrown`): the report leaves its HSPs out (`organism_report`).
+    fn throws(&self, _subject: usize) -> bool {
+        false
+    }
 }
 
 /// LOSAT's refusal of an organism report that it does not write as NCBI (a title, a taxonomy
@@ -532,19 +538,22 @@ enum SubjectName {
 pub struct SubjectTable<'p> {
     subjects: std::collections::HashMap<usize, (Vec<TaxDefline>, SubjectName)>,
     parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    /// What the reports load of each subject (`db_subject::HitLoads`; `None`: every subject).
+    loads: Option<&'p crate::report::db_subject::HitLoads>,
     program: String,
 }
 
 impl<'p> SubjectTable<'p> {
     /// The table of the subjects of `queries`' HSPs: `parsed` are the parsed subjects by subject
     /// index (empty when none has parsed Seq-ids), `plain(index)` a subject as the adapter has it
-    /// (`TaxPlain`); the subjects are proteins where `protein`. `program` names the program in
-    /// LOSAT's refusals.
+    /// (`TaxPlain`); the subjects are proteins where `protein`; `loads` what the reports load of
+    /// each subject (`None`: every subject). `program` names the program in LOSAT's refusals.
     pub fn new<'a>(
         queries: &[TaxQuery<'_>],
         parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
         plain: impl Fn(usize) -> TaxPlain<'a>,
         protein: bool,
+        loads: Option<&'p crate::report::db_subject::HitLoads>,
         program: &str,
     ) -> Self {
         let mut subjects = std::collections::HashMap::new();
@@ -560,6 +569,7 @@ impl<'p> SubjectTable<'p> {
         SubjectTable {
             subjects,
             parsed,
+            loads,
             program: program.to_owned(),
         }
     }
@@ -603,6 +613,11 @@ impl TaxSubjects for SubjectTable<'_> {
             ),
             None => format!("a subject {reason}; this is not supported by LOSAT's {program}"),
         }))
+    }
+
+    fn throws(&self, subject: usize) -> bool {
+        self.loads
+            .is_some_and(|loads| loads.thrown(subject).is_some())
     }
 }
 
@@ -1088,17 +1103,19 @@ pub fn write_report(
 /// BLASTP's, BLASTX's): the table of the subjects of `queries`' HSPs (`SubjectTable::new` of
 /// `parsed`, `plain` and `protein`), the lookups of the run's database that
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
-/// batch's first byte. `program` names the program in LOSAT's refusals and NCBI's messages.
+/// batch's first byte; `loads` what the reports load of each subject (`None`: every subject).
+/// `program` names the program in LOSAT's refusals and NCBI's messages.
 #[allow(clippy::too_many_arguments)]
 pub fn report_batch<'a>(
     queries: &[TaxQuery<'_>],
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     plain: impl Fn(usize) -> TaxPlain<'a>,
     protein: bool,
+    loads: Option<&crate::report::db_subject::HitLoads>,
     names: Option<&TabularNames>,
     program: &str,
 ) -> Result<TaxReport> {
-    let table = SubjectTable::new(queries, parsed, plain, protein, program);
+    let table = SubjectTable::new(queries, parsed, plain, protein, loads, program);
     TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
 }
 
@@ -1152,7 +1169,9 @@ pub fn report_batch<'a>(
 /// skip, then the lookups of its definition lines (`lookups`: a taxid not yet in the query's map,
 /// at each definition line that reaches it). A title that throws drops the rest of its subject's
 /// HSP before it widens the columns; a lookup that throws drops it after; either way the subject
-/// is not the previous id, so its next HSP is read again. LOSAT's refusals: a title that it does
+/// is not the previous id, so its next HSP is read again. An HSP whose subject's load throws
+/// (`TaxSubjects::throws`, the load of `GetBioseqHandle` where its batch's prefetch is off) is
+/// left out at the load, and is not the previous id either. LOSAT's refusals: a title that it does
 /// not write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
 /// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there).
 fn organism_report(
@@ -1169,7 +1188,11 @@ fn organism_report(
         if previous.is_some_and(|previous| subjects.same(previous, hsp.subject)) {
             continue;
         }
-        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines.
+        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines; a
+        // load that throws goes to the `catch`, `continue`, and reads nothing.
+        if subjects.throws(hsp.subject) {
+            continue;
+        }
         steps.push(Step::Read(hsp.subject));
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:950-951
         // ```c++

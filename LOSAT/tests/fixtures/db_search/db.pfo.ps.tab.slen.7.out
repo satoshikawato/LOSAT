@@ -1,0 +1,14 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: mix2_u qp1 of ids/noacc_v5 (no accession table)
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject length, evalue
+# 1 hits found
+mix2_u	140	5.86e-108
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: mix2_c the letters of taxfilter/q.faa, then qp1
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject length, evalue
+# 13 hits found
+mix2_c	140	2.73e-109

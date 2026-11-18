@@ -79,14 +79,21 @@ impl TblastnArgs {
         subject: &[u8],
     ) -> Result<Vec<u8>> {
         let report = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        self.run_io(
+        let ran = self.run_io(
             settings,
             RunIo::Memory {
                 query,
                 subject,
                 report: report.clone(),
             },
-        )?;
+        );
+        // `CATCH_ALL`'s silent end returns 0 with what the run wrote (the error archive of the
+        // saved messages), as the library's call does (`api::run::run_local`).
+        if let Err(error) = ran {
+            if !crate::cli::is_silent_end(&error) {
+                return Err(error);
+            }
+        }
         let bytes = std::mem::take(&mut *report.lock().expect("report mutex poisoned"));
         Ok(bytes)
     }
@@ -299,7 +306,7 @@ impl TblastnArgs {
                     && args.strategy.is_none();
                 match subject_input {
                     Input::File(file) => read_subject_input(
-                        FastaInputSource::from_argument(&subject_path, file, config),
+                        FastaInputSource::from_file(file, config),
                         &args,
                         subject_range.as_ref(),
                         x_packed,
@@ -427,6 +434,16 @@ impl TblastnArgs {
                     let in_run = super::in_pssm::file_error_in_run(error);
                     if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
+                    } else if let Some(lines) =
+                        crate::report::archive::silent_end_lines(handle, error)
+                    {
+                        // An exception that `CATCH_ALL` ends without a post: the archive of the
+                        // messages saved before it, with no text before it.
+                        let _ = crate::report::archive::write_error_archive(
+                            handle,
+                            &lines,
+                            &mut stream,
+                        );
                     }
                 }
                 Ok(()) => {
@@ -481,13 +498,17 @@ enum RunIo<'a> {
 
 /// An input of `run`: the opened file of `-query` or `-subject`, or web ABI v1's bytes.
 enum Input<'a> {
-    File(std::fs::File),
+    File(crate::blastinput::input_files::InputFile),
     Bytes(&'a [u8]),
 }
 
 /// The reader of `search_cli`'s queries over an `Input`.
 enum QuerySource<'a> {
-    File(crate::blastinput::fasta_reader::FastaInputSource<std::fs::File>),
+    File(
+        crate::blastinput::fasta_reader::FastaInputSource<
+            crate::blastinput::input_files::InputFile,
+        >,
+    ),
     Bytes(crate::blastinput::fasta_reader::FastaInputSource<&'a [u8]>),
 }
 
@@ -856,7 +877,7 @@ fn search_cli(
                     .subject
                     .as_deref()
                     .is_some_and(|path| path.as_os_str() == "-");
-            let mut source = FastaInputSource::from_argument(&args.query, query_file, config);
+            let mut source = FastaInputSource::from_file(query_file, config);
             source.set_id_scope(args.id_scope.clone());
             let empty = !shared_standard_input && source.stream_is_empty();
             (QuerySource::File(source), empty)
@@ -961,7 +982,6 @@ fn search_pssm_query(
     database: Option<&TblastnDatabase>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    psi.refuse_request_members("TBLASTN")?;
     for &outfmt in outfmts {
         super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
     }
@@ -2519,12 +2539,7 @@ fn search(
                         .as_ref()
                         .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    if plural_names
-                        && hitlists
-                            .iter()
-                            .flat_map(super::stage_d_results::KappaResultHitList::lists)
-                            .any(|list| !list.hsps.hsps.is_empty())
-                    {
+                    if plural_names && reported.loads_a_row(hitlists) {
                         database.open_for_tabular_rows()?;
                     }
                     Ok::<(), anyhow::Error>(())

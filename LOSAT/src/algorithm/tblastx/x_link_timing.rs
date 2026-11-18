@@ -460,6 +460,10 @@ mod tests {
     // No NCBI counterpart (a timer). The stages of a call add up to its whole time, the call is
     // counted under the kind it was armed with, and the sizes and per-group times are its own.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "the Node WASI host can sleep less than asked: a 1 ms sleep timed under 1 ms in 1 run of 6"
+    )]
     fn the_stages_of_a_call_add_up_to_its_time() {
         let timer = XLinkTimer::new(true);
         one_call(&timer, LinkCall::Second);
@@ -555,6 +559,10 @@ mod tests {
     // No NCBI counterpart (a timer). The counters are shared by the threads of a search, and the
     // per-group timer by the threads of the pool.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn the_counters_are_shared_between_threads() {
         fn shared<S: Send + Sync>() {}
         shared::<XLinkTimer>();

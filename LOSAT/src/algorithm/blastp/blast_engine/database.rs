@@ -2054,18 +2054,22 @@ impl ListedTitles<'_> {
     /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported subjects (those with
     /// rows in `hit_lists`), by rank: from the definition lines of a subject with parsed Seq-ids,
     /// else from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a
-    /// `taxid`); the other ranks are left empty. A header that does not decode is refused before
-    /// the report, as BLASTN's (`BlastnDatabase::tabular_taxonomy`).
+    /// `taxid`); the other ranks are left empty, and so are those of the subjects that no report
+    /// loads (`loads`: one whose load throws, whose rows keep the taxonomy of the rows before, and
+    /// one that no report reaches; NCBI reads none of their definition lines and looks none of
+    /// their taxids up, `report::db_subject::HitLoads`). A header that does not decode is refused
+    /// before the report, as BLASTN's (`common::tabular::tabular_taxonomy`).
     pub(super) fn tabular_taxonomy(
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
+        loads: &HitLoads,
     ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
         use crate::report::tabular::TabularTaxonomy;
         let ranks = self.listed.ordinals.len();
         let mut taxonomy = vec![TabularTaxonomy::default(); ranks];
         for rank in Self::reported(hit_lists) {
-            if rank >= ranks {
+            if rank >= ranks || !loads.loaded(rank) {
                 continue;
             }
             taxonomy[rank] = match self.parsed_subject(rank) {
@@ -2195,30 +2199,40 @@ impl ListedTitles<'_> {
     /// reports) do at each subject's `Hit`, by rank (`HitLoads::of`, the one answer of the
     /// call): `prefetch` tells by query whether its batch reads one by one
     /// (`BatchPrefetch::reads_one_by_one`); the `Hit`s are those that `blast_xml::write_blastp_xml`
-    /// makes, of the lists with HSPs. `writes_thrown`: every format is outfmt 13 to 16
-    /// (`Xml2Kind::every`), else every subject is loaded.
+    /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
+    /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded), at the rows
+    /// that load it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
     pub(super) fn hit_loads(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
-        writes_thrown: bool,
+        run: Option<crate::report::db_subject::RunThrow>,
     ) -> HitLoads {
+        let lists = |query: usize| {
+            hit_lists[query].as_ref().map_or(&[][..], |hit_list| {
+                &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
+            })
+        };
         HitLoads::of(
-            writes_thrown && !self.parsed.is_empty(),
-            hit_lists.iter().enumerate().map(|(query, hit_list)| {
-                let lists = hit_list.as_ref().map_or(&[][..], |hit_list| {
-                    &hit_list.hsplist_array
-                        [..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
-                });
+            run.filter(|_| !self.parsed.is_empty()),
+            (0..hit_lists.len()).map(|query| {
                 (
                     prefetch.reads_one_by_one(query),
-                    lists
+                    lists(query)
                         .iter()
                         .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
                         .collect(),
                 )
             }),
             |rank| self.parsed_subject(rank),
+            |query, list| {
+                lists(query)[list]
+                    .hsps
+                    .iter()
+                    .map(|hsp| hsp.num_ident)
+                    .max()
+                    .unwrap_or(0)
+            },
         )
     }
 
@@ -2834,9 +2848,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_database_without_a_title_shows_its_name() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-notitle-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2866,9 +2880,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_first_header_of_each_volume_is_read_at_open() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-badheader-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3084,7 +3098,10 @@ mod tests {
     fn a_rejected_search_block_of_a_restricted_database_names_the_oid() {
         // prot_v4 through an alias whose range keeps OIDs 2 to 9 (line DBID ordnum): the block's
         // sequence 7 (rank 7) is OID 9.
-        let dir = std::env::temp_dir().join(format!("losat_bp_ordnum_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_bp_ordnum_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let alias = dir.join("prot_v4_r.pal");
         std::fs::write(
@@ -3239,6 +3256,10 @@ mod tests {
     // the diagonal offset of the one-thread order, whatever the block size and the thread
     // count, across the six volumes of the fixture.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blocks_give_every_sequence_the_diagonal_offset_of_the_one_thread_order() {
         let database = open("prot_mv");
         let single = open("prot_v4");
@@ -3524,8 +3545,10 @@ mod tests {
                     }
                 }
             }
-            let dir =
-                std::env::temp_dir().join(format!("losat-bpdbcut-{label}-{}", std::process::id()));
+            let dir = crate::utils::test_dir::temp_dir().join(format!(
+                "losat-bpdbcut-{label}-{}",
+                crate::utils::test_dir::process_id()
+            ));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let name = dir.join("gen").to_str().unwrap().to_string();
@@ -4132,9 +4155,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-nohdr-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4239,9 +4262,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-badtitle-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4359,12 +4382,16 @@ mod tests {
     // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
     // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn titles_and_taxids_in_one_pass_give_the_answers_of_the_two_checks() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let paja = manifest_dir.join("tests/db_search/paja_taxid");
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-qblock-onepass-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4437,9 +4464,9 @@ mod tests {
         };
         assert_eq!(allowed(&open("prot_v4")), [true, true]);
         assert_eq!(read_allowed(&open("prot_v4")), [true, true]);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-qblock-titles-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4557,12 +4584,16 @@ mod tests {
     // prefetch) and one whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`),
     // at one thread and in a pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         use crate::seqdb::alias::SearchPath;
         let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-db-qblock-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();

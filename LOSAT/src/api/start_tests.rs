@@ -50,7 +50,10 @@ fn nucleotides() -> (Vec<FastaRecord>, Vec<FastaRecord>) {
 
 /// A directory of the test `name`, empty.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-api-start-{name}-{}", std::process::id()));
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-api-start-{name}-{}",
+        crate::utils::test_dir::process_id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

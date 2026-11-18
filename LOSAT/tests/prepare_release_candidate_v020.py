@@ -728,9 +728,9 @@ def handoff_markdown(
         "`RC_HANDOFF_READY`",
         "",
         f"- Release-candidate SHA (R): `{candidate_sha}`",
-        f"- Certified candidate SHA (C): `{lineage['candidate_sha']}`",
+        f"- Candidate SHA tested (C): `{lineage['candidate_sha']}`",
         f"- Release-readiness workflow run (I): `{workflow_run_id}`",
-        "- Certification runs:",
+        "- Test runs on C:",
     ]
     for label in GATED_RUN_KEYS:
         lines.append(f"  - {label} `{runs[label]['workflow']}`: `{run_id_text(runs[label])}`")
@@ -744,13 +744,13 @@ def handoff_markdown(
         "",
         "## Platform claims",
         "",
-        "| Platform | Claim | Evidence sets | Wording |",
-        "| --- | --- | --- | --- |",
+        "| Platform | Status | Evidence sets |",
+        "| --- | --- | --- |",
     ]
     for claim in contract["platform_claims"]:
         evidence = ", ".join(str(item) for item in claim["evidence_sets"])
         lines.append(
-            f"| {claim['platform']} | {claim['claim']} | {evidence} | {claim['wording']} |"
+            f"| {claim['platform']} | {claim['wording']} | {evidence} |"
         )
     lines += [
         "",

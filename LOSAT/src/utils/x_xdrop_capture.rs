@@ -526,7 +526,10 @@ mod tests {
             &ops,
         )
         .unwrap();
-        let dir = std::env::temp_dir().join(format!("losat-xdp-test-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-xdp-test-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("xdp-test.xdp");
         std::fs::write(&path, [buf.clone(), buf].concat()).unwrap();

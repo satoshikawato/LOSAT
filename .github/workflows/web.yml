@@ -141,14 +141,13 @@ jobs:
       # without the other fails here, not as a missing browser): the image holds the browsers of
       # that version only.
       - name: Playwright image matches @playwright/test
-        env:
-          IMAGE: ${{ job.container.image }}
         run: |
           want="v$(node -p "require('@playwright/test/package.json').version")-noble"
-          case "$IMAGE" in
-            *":$want") ;;
-            *) echo "::error::job container is $IMAGE, but @playwright/test is $want: change the tag of the container image in .github/workflows/web.yml" ; exit 1 ;;
-          esac
+          images=$(grep -E '^ +image: mcr\.microsoft\.com/playwright:' ../../.github/workflows/web.yml | sed 's/.*playwright://')
+          test -n "$images" || { echo "::error::no Playwright image in .github/workflows/web.yml"; exit 1; }
+          for image in $images; do
+            [ "$image" = "$want" ] || { echo "::error::the container image is playwright:$image, but @playwright/test installs $want: change the tag in .github/workflows/web.yml"; exit 1; }
+          done
       - run: npm run e2e -- --project=${{ matrix.project }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
@@ -400,33 +399,32 @@ jobs:
         with:
           name: native
           path: ${{ runner.temp }}/native
-      - run: chmod +x ${{ runner.temp }}/native/losat
+      # A container's temp directory is /__w/_temp, not the host's ${{ runner.temp }}: shell
+      # code and `env:` values need $RUNNER_TEMP.
+      - run: |
+          echo "LOSAT_WEB_REACTORS=$RUNNER_TEMP/reactors" >> "$GITHUB_ENV"
+          echo "LOSAT_WEB_NATIVE=$RUNNER_TEMP/native/losat" >> "$GITHUB_ENV"
+          chmod +x "$RUNNER_TEMP/native/losat"
       - run: npm ci
       # The image's tag is the version of @playwright/test that `npm ci` installed (a bump of one
       # without the other fails here, not as a missing browser): the image holds the browsers of
       # that version only.
       - name: Playwright image matches @playwright/test
-        env:
-          IMAGE: ${{ job.container.image }}
         run: |
           want="v$(node -p "require('@playwright/test/package.json').version")-noble"
-          case "$IMAGE" in
-            *":$want") ;;
-            *) echo "::error::job container is $IMAGE, but @playwright/test is $want: change the tag of the container image in .github/workflows/web.yml" ; exit 1 ;;
-          esac
+          images=$(grep -E '^ +image: mcr\.microsoft\.com/playwright:' ../../.github/workflows/web.yml | sed 's/.*playwright://')
+          test -n "$images" || { echo "::error::no Playwright image in .github/workflows/web.yml"; exit 1; }
+          for image in $images; do
+            [ "$image" = "$want" ] || { echo "::error::the container image is playwright:$image, but @playwright/test installs $want: change the tag in .github/workflows/web.yml"; exit 1; }
+          done
       # Every unit test that needs the reactors (about 90 s): engine-runtime (the RecordScanner
       # contract, inflation, describe), hsp-correspondence (the HSP records against every outfmt 0
       # fixture), engine-memory and window-masker. Until 2026-11-14 only engine-runtime ran here, and
       # the PS7 rows of the manifest (2026-11-12) broke hsp-correspondence unseen.
       - name: Unit tests on the reactors (Node)
         if: matrix.project == 'chromium' && matrix.shard == '1/2'
-        env:
-          LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
         run: npx vitest run
       - name: V-BR and every E2E test with the engine in the build (${{ matrix.project }} ${{ matrix.shard }})
-        env:
-          LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
-          LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
         run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()

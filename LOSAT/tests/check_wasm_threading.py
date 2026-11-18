@@ -240,7 +240,7 @@ def main():
         # program, query, subjects (the file, or the RPS database), whether -subject - is read, regular-file case
         ("blastn", inputs["nuc1"], ["-subject", inputs["nuc3"]], True, True),
         ("blastp", inputs["aa3"], ["-subject", inputs["aa3"]], True, False),
-        ("blastx", inputs["blastx-query"], ["-subject", inputs["aa3"]], False, True),
+        ("blastx", inputs["blastx-query"], ["-subject", inputs["aa3"]], True, True),
         ("tblastn", inputs["aa1"], ["-subject", inputs["tblastn-subjects"]], True, False),
         ("tblastx", inputs["nuc1"], ["-subject", inputs["nuc3"]], True, False),
         ("psiblast", inputs["aa1"], ["-subject", inputs["aa3"]], True, False),

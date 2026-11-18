@@ -1,0 +1,24 @@
+# BLASTX 2.17.0+
+# Query: ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC Symbol;Acc:HGNC:4823]
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject id, evalue
+# 12 hits found
+ENST00000320868.9	Unknown	2.41e-104
+ENST00000320868.9	Unknown	7.71e-103
+ENST00000320868.9	Unknown	1.61e-102
+ENST00000320868.9	Unknown	2.91e-101
+ENST00000320868.9	Unknown	7.46e-100
+ENST00000320868.9	Unknown	3.14e-96
+ENST00000320868.9	Unknown	2.83e-91
+ENST00000320868.9	Unknown	5.84e-91
+ENST00000320868.9	Unknown	2.74e-90
+ENST00000320868.9	Unknown	4.82e-87
+ENST00000320868.9	Unknown	1.09e-73
+ENST00000320868.9	Unknown	1.60e-73
+# BLASTX 2.17.0+
+# Query: mix2_u qp1 of ids/noacc_v5 back-translated
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject id, evalue
+# 1 hits found
+mix2_u	qp1	6.52e-108
+# BLAST processed 2 queries

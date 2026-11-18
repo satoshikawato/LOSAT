@@ -227,8 +227,9 @@ impl TblastnDatabase {
 
     /// The taxonomy of the tabular fields (`staxid`, `staxids`) of the reported sequences, by
     /// rank, for the sequences of `hitlists` with HSPs (their subject index is the rank,
-    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`); the others are left
-    /// empty. A header that does not decode is refused before the report.
+    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`) that a report loads
+    /// (`ReportedSubjects::loads`); the others are left empty. A header that does not decode is
+    /// refused before the report.
     pub(super) fn tabular_taxonomy(
         &self,
         reported: &ReportedSubjects,
@@ -243,6 +244,7 @@ impl TblastnDatabase {
                 .flat_map(KappaResultHitList::lists)
                 .filter(|list| !list.hsps.hsps.is_empty())
                 .map(|list| list.oid as usize),
+            &reported.loads,
             PROGRAM,
         )
     }
@@ -287,6 +289,9 @@ impl TblastnDatabase {
             .iter()
             .flat_map(KappaResultHitList::lists)
             .filter(|list| reads_subject(list, rows))
+            // A subject whose load throws loads nothing, nor does one that no report reaches
+            // after it (`HitLoads::loaded`).
+            .filter(|list| reported.loads.loaded(list.oid as usize))
             .map(|list| {
                 let rank = list.oid as usize;
                 (reported.ordinals[rank], reported.parsed_subject(rank))
@@ -309,10 +314,13 @@ impl TblastnDatabase {
         rows_open: bool,
         pairwise: Option<crate::report::hit_sort::ReportSort>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
+        // A subject whose load throws loads nothing, nor does one that no report reaches after
+        // it (`HitLoads::loaded`).
         let lists = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
-            .filter(|list| reads_subject(list, rows));
+            .filter(|list| reads_subject(list, rows))
+            .filter(|list| reported.loads.loaded(list.oid as usize));
         let ranks: Vec<u32> = match pairwise {
             Some(sort) => {
                 let mut hits = Vec::new();
@@ -610,6 +618,19 @@ impl ReportedSubjects {
         self.parsed.get(rank).and_then(Option::as_deref)
     }
 
+    /// Whether a row of `hitlists` (subjects by rank) loads its subject in the reports: only such
+    /// a row looks a taxonomy name up, and a row whose load throws keeps the names of the rows
+    /// before (`loads`; review 1 of line DBID pfoff-2, H1).
+    pub(super) fn loads_a_row(
+        &self,
+        hitlists: &[super::stage_d_results::KappaResultHitList],
+    ) -> bool {
+        hitlists
+            .iter()
+            .flat_map(super::stage_d_results::KappaResultHitList::lists)
+            .any(|list| !list.hsps.hsps.is_empty() && self.loads.loaded(list.oid as usize))
+    }
+
     /// The reported sequences as the library's records name them (`shared::library_subjects`).
     pub(super) fn library_subjects(
         &self,
@@ -795,13 +816,14 @@ fn parsed_shown(
     }
 }
 
-/// Whether every format of `formats` writes a `Hit` whose subject's lookup throws as NCBI does
-/// (`Xml2Kind::every`, for `reported_subjects`'s loads).
-fn writes_thrown(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> bool {
-    crate::report::blast_xml2::Xml2Kind::every(
-        formats
-            .iter()
-            .map(|format| super::stage_e_report::xml2_kind(format.outfmt)),
+/// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
+/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
+fn after_throw(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> Option<crate::report::db_subject::RunThrow> {
+    crate::report::db_subject::FormatThrow::of_outfmts(
+        formats.iter().map(|format| format.outfmt),
+        crate::blastinput::app::Program::Tblastn,
     )
 }
 
@@ -855,7 +877,7 @@ pub(super) fn reported_subjects(
     let loads = hit_loads(
         hitlists,
         &prefetch,
-        writes_thrown(formats),
+        after_throw(formats),
         |ordinal| match titles.get(&u32::try_from(ordinal).ok()?) {
             Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
             _ => None,
@@ -993,11 +1015,11 @@ pub(super) fn reported_subjects(
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    writes_thrown: bool,
+    after: Option<crate::report::db_subject::RunThrow>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     HitLoads::of(
-        writes_thrown,
+        after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
             (
                 prefetch.reads_one_by_one(query),
@@ -1013,6 +1035,15 @@ fn hit_loads<'p>(
             )
         }),
         parsed,
+        // The most identities of a list's HSPs (`reads_subject`).
+        |query, list| {
+            hitlists[query].lists()[list]
+                .payloads
+                .iter()
+                .map(|payload| usize::try_from(payload.num_ident).unwrap_or(0))
+                .max()
+                .unwrap_or(0)
+        },
     )
 }
 

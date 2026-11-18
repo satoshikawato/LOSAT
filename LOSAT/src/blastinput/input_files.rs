@@ -94,6 +94,10 @@ enum InputHandle {
     Own(std::fs::File),
     /// The process's standard input (`standard_input`), never closed by LOSAT.
     StandardInput(std::mem::ManuallyDrop<std::fs::File>),
+    /// A test's file read as the standard input is read (`InputFile::as_standard_input`), closed
+    /// when dropped.
+    #[cfg(test)]
+    TestStandardInput(std::fs::File),
 }
 
 impl InputFile {
@@ -103,11 +107,33 @@ impl InputFile {
         Self(InputHandle::StandardInput(file))
     }
 
+    /// A test's `file` read as `-` reads the standard input (`is_standard_input`), but closed
+    /// when dropped.
+    #[cfg(test)]
+    pub(crate) fn as_standard_input(file: std::fs::File) -> Self {
+        Self(InputHandle::TestStandardInput(file))
+    }
+
     /// The file to read, seek and ask about.
     fn file(&self) -> &std::fs::File {
         match &self.0 {
             InputHandle::Own(file) => file,
             InputHandle::StandardInput(file) => file,
+            #[cfg(test)]
+            InputHandle::TestStandardInput(file) => file,
+        }
+    }
+
+    /// Whether this is the standard input that `-` names, which NCBI reads through `cin`
+    /// (`m_Ios = &cin`, quoted at `InputFile`), not through a `CNcbiIfstream` of a path (a path
+    /// such as `/dev/stdin` is a file of its own). The FASTA readers read the two as NCBI's two
+    /// streams answer a refill (`fasta_reader::stream::InputBackend::of`).
+    pub(crate) fn is_standard_input(&self) -> bool {
+        match self.0 {
+            InputHandle::Own(_) => false,
+            InputHandle::StandardInput(_) => true,
+            #[cfg(test)]
+            InputHandle::TestStandardInput(_) => true,
         }
     }
 }

@@ -1,5 +1,5 @@
 {% set name = "losat" %}
-{% set version = "0.1.0" %}
+{% set version = "0.2.0" %}
 
 package:
   name: {{ name }}
@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/satoshikawato/LOSAT/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: __REPLACE_WITH_V0_1_0_TAG_TARBALL_SHA256__
+  sha256: __REPLACE_WITH_V0_2_0_TAG_TARBALL_SHA256__
 
 build:
   number: 0
@@ -23,10 +23,26 @@ test:
     - losat --help
     - losat blastn --help
     - losat blastp --help
+    - losat blastx --help
+    - losat tblastn --help
     - losat tblastx --help
+    - losat psiblast --help
+    - losat rpsblast --help
+    - losat rpstblastn --help
     - blastn -version
+    - blastp -version
+    - blastx -version
+    - tblastn -version
+    - tblastx -version
+    - psiblast -version
+    - rpsblast -version
+    - rpstblastn -version
     - makeblastdb -version
     - blastdbcmd -version
+    - dustmasker -version
+    - segmasker -version
+    - convert2blastmask -version
+    - rpsbproc -version
 
 about:
   home: https://github.com/satoshikawato/LOSAT
@@ -35,13 +51,16 @@ about:
   license_file:
     - LICENSE
     - THIRDPARTY.yml
-  summary: Pure-Rust pairwise sequence alignment with bit-perfect NCBI BLAST+ parity
+  summary: Pure-Rust NCBI BLAST+ search programs with byte-identical output
   description: |
-    LOSAT is a standalone, pure-Rust implementation of NCBI BLAST+ local sequence
-    alignment designed for pairwise FASTA comparisons (-query vs -subject). It
-    provides drop-in CLI compatibility and bit-identical output (E-values, bit
-    scores, and coordinates) for BLASTN (including MegaBLAST), BLASTP, and
-    TBLASTX without requiring pre-formatted databases or external C/C++ runtimes.
+    LOSAT is a standalone, pure-Rust implementation of NCBI BLAST+ 2.17.0 local
+    sequence search. It runs NCBI's command lines for blastn, blastp, blastx,
+    tblastn, tblastx, psiblast, rpsblast and rpstblastn against FASTA subjects
+    (-subject) or BLAST databases (-db), and provides makeblastdb, blastdbcmd,
+    dustmasker, segmasker, convert2blastmask and rpsbproc. Its output equals
+    NCBI BLAST+ 2.17.0's on the release test set (E-values, bit scores,
+    coordinates and every output format byte for byte), without external C/C++
+    runtimes or a BLAST+ installation.
   dev_url: https://github.com/satoshikawato/LOSAT
   doc_url: https://github.com/satoshikawato/LOSAT/blob/v{{ version }}/README.md
 

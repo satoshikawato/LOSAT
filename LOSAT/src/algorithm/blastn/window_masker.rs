@@ -543,10 +543,6 @@ mod tests {
     // ascii counts are read (line NP M3d), their errors are NCBI's and their warnings come after
     // the registry's posts at each load.
     #[test]
-    #[cfg_attr(
-        target_os = "wasi",
-        ignore = "std::fs::File::open(\"\") succeeds on WASI, so the empty masker name is not \"could not open\": the wasm build differs here (reported)"
-    )]
     fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastn-window-masker-taxid-{}",

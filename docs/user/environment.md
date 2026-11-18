@@ -137,7 +137,7 @@ overflow`), and with `-outfmt 11` NCBI's error archive. The table says where eac
 
 | Variable | Effect |
 | :--- | :--- |
-| `TZ`, `TZDIR` | The time zone of the date stored in the database and of the times in the log, with `/etc/localtime` when `TZ` is unset (Unix, and the WASI command from what its host gives it, see below; on Windows LOSAT writes them in UTC, where NCBI BLAST+ uses the local time). |
+| `TZ`, `TZDIR` | The time zone of the date stored in the database and of the times in the log, with `/etc/localtime` when `TZ` is unset (Unix, and the WASI command from what its host gives it, see below). On Windows, as Microsoft's C runtime reads it for NCBI BLAST+: `TZ` in its form `tzn[+|-]hh[:mm[:ss]][dzn]` (hours west of UTC; a daylight-time name means the United States rules), else the zone of the Windows settings with its daylight-time rules; `TZDIR` is not read. |
 | `BLASTDB_LMDB_MAP_SIZE` | The map size of the LMDB index of a version 5 database. |
 | `MAX_LMDB_TXN_ENTRY`, `LMDB_MIN_SPLIT_SIZE`, `LMDB_SPLIT_CHUNK_SIZE` | How NCBI's makeblastdb splits the writes of the LMDB index. |
 

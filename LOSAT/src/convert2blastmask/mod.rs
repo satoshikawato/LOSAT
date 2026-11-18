@@ -12,8 +12,7 @@ mod work;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
-use crate::ncbi_app::args::{flag, key, mandatory_key, Constraint, Desc, Kind};
-use crate::ncbi_app::{no_dependencies, Tool};
+use crate::ncbi_app::Tool;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "CONVERT2BLASTMASK";
@@ -31,63 +30,6 @@ const PROGRAM: &str = "CONVERT2BLASTMASK";
 /// is the usage that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:154-186
-// ```c++
-//     arg_desc->AddDefaultKey("in", "input_file_name",
-//                             "Input file name",
-//                             CArgDescriptions::eInputFile, "-");
-//
-//     arg_desc->AddDefaultKey("out", "output_file_name",
-//                             "Output file name",
-//                             CArgDescriptions::eOutputFile, "-");
-//
-//     arg_desc->AddDefaultKey("outfmt", "output_format",
-//                             "Output file format",
-//                             CArgDescriptions::eString, "maskinfo_asn1_text");
-//
-//     CArgAllow_Strings* strings_allowed = new CArgAllow_Strings();
-//     strings_allowed->Allow("maskinfo_asn1_text");
-//     strings_allowed->Allow("maskinfo_asn1_bin");
-//     strings_allowed->Allow("maskinfo_xml");
-//     strings_allowed->Allow("interval");
-//     arg_desc->SetConstraint("outfmt", strings_allowed);
-//
-//     arg_desc->AddFlag      ( "parse_seqids",
-//                              "Parse Seq-ids in FASTA input", true );
-//
-//     arg_desc->AddKey       ("masking_algorithm", "mask_program_name",
-//                             "Masking algorithm name (e.g.: dust, seg, "
-//                             "windowmasker, repeat). Use 'other' for "
-//                             "user-defined type",
-//                             CArgDescriptions::eString);
-//
-//     arg_desc->AddKey     ("masking_options", "mask_program_options",
-//                           "Masking algorithm options to create the masked input"
-//                           " (free text to describe/include (command line) "
-//                           "options used to create the masking)",
-//                           CArgDescriptions::eString);
-// ```
-/// The arguments of `CConvert2BlastMaskApplication::Init` in the order it describes them; the
-/// values that `-outfmt` allows are listed in the order of their `std::set`.
-const DESCS: &[Desc] = &[
-    key("in", Kind::InputFile, Some("-"), None),
-    key("out", Kind::OutputFile, Some("-"), None),
-    key(
-        "outfmt",
-        Kind::Text,
-        Some("maskinfo_asn1_text"),
-        Some(Constraint::Strings(&[
-            "interval",
-            "maskinfo_asn1_bin",
-            "maskinfo_asn1_text",
-            "maskinfo_xml",
-        ])),
-    ),
-    flag("parse_seqids"),
-    mandatory_key("masking_algorithm", Kind::Text),
-    mandatory_key("masking_options", Kind::Text),
-];
-
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:111-120
 // ```c++
 //     CConvert2BlastMaskApplication() {
@@ -102,15 +44,13 @@ const DESCS: &[Desc] = &[
 //     }
 // ```
 /// convert2blastmask as NCBI's application runs it (`ncbi_app`): BLAST's version, BLAST's
-/// usage report (`ncbi_environment`), no dependencies between its arguments and no prefix on
-/// its diagnostics.
+/// usage report (`ncbi_environment`), the arguments of its XML
+/// (`ncbi_xmlhelp/convert2blastmask.xml`) and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "convert2blastmask",
     refusal_name: PROGRAM,
     version: crate::NCBI_BLAST_VERSION,
     help: HELP,
-    descs: DESCS,
-    dependencies: no_dependencies,
     post_prefix: None,
 };
 

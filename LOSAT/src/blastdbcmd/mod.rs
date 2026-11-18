@@ -40,8 +40,8 @@ const PROGRAM: &str = "BLASTDBCMD";
 //                   "BLAST database client, version " + CBlastVersion().Print());
 // ```
 /// The text of `blastdbcmd -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
-/// descriptions in `args`). Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the
-/// argument errors print.
+/// descriptions of `CBlastDBCmdApp::Init`). Its part before `OPTIONAL ARGUMENTS` is the usage
+/// that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
@@ -56,8 +56,6 @@ static TOOL: Tool = Tool {
     refusal_name: PROGRAM,
     version: crate::NCBI_BLAST_VERSION,
     help: HELP,
-    descs: args::DESCS,
-    dependencies: args::dependencies,
     post_prefix: Some("blastdbcmd"),
 };
 

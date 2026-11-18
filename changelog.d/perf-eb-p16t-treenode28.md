@@ -1,1 +1,0 @@
-- Less memory for searches whose interval trees hold many alignments: a tree node is now 28 bytes, as in NCBI BLAST+, instead of 64. blastn E. coli Sakai x EDL933 `-subject` at one thread peaks at 88.2 MiB instead of 90.5 MiB, blastn cDNA x genome at one thread 3.5-4.7 % lower, and TBLASTN `-db` at 64 threads 2 % lower. Reports do not change.

@@ -1,1 +1,0 @@
-- BLASTN's megablast scan hands the words it finds to the seeding 32 at a time once the lookup table's ring is full, so the ring's pushes and the words' seeding run back to back: BlobToolKit's and MOB-suite's searches run about 3 % faster (one thread), and ABRicate's and mlst's stay level. Reports do not change.

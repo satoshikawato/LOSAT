@@ -1,1 +1,0 @@
-- docs: `CITATION.cff` (author, ORCID, affiliation, MIT, repository) so the software can be cited from the repository page and by JOSS-style tooling.

@@ -1,1 +1,0 @@
-- README: on WASI with Node.js, a path such as `gone/../db` opens `db` even when `gone` does not exist (Node.js reads `..` as text); NCBI BLAST+ and native LOSAT on Linux stop with an error.

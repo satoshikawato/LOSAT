@@ -1,1 +1,0 @@
-- Web (WebAssembly): BLASTN no longer compares its 1 KiB score matrix one byte at a time before each gapped X-drop extension: a 1-thread search of 8,000 cDNAs against 3 Mb of the fly genome is about 5 % faster in Node; the native builds and the reports do not change.

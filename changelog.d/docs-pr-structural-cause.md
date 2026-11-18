@@ -1,1 +1,0 @@
-- docs(agents): a speed-up pull request names the structural cause it removes and the inputs where its form fails; no new rule-limited switch while the slot, per-unit table and OID-order-wait items are open (Owner 2026-10-27).

@@ -1,1 +1,0 @@
-- BLASTN: `-task blastn` of an assembly against a small gene database (ABRicate's form) is about 5 % faster at one thread with the same memory: the scan of a packed lookup table of 4^11 cells or fewer tests each word once (`LOSAT_X_BNPVONCE`, on by default); the reports do not change.

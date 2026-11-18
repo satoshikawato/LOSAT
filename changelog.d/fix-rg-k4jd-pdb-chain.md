@@ -1,1 +1,0 @@
-- A `pdb` Seq-id of a database whose chain is an integer outside 0-255 with no chain id (a crafted or old database) gets NCBI's title for an empty one: the chain's low byte (`Chain A` for 321), as NCBI's `isprint((unsigned char) m_PDBChain)` reads it, where LOSAT made no PDB title.

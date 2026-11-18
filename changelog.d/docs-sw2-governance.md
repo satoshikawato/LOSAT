@@ -1,1 +1,0 @@
-- docs: `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md` names private vulnerability reporting as the channel and GitHub security advisories for disclosure, and templates for pull requests and for bug reports and feature requests.

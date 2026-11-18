@@ -1,1 +1,0 @@
-- BLASTN counts the presence bits of a packed CSR lookup table with the CPU's `popcnt` instruction where an x86-64 CPU has it (the default x86-64 build counted them with a dozen instructions): mlst's searches run about 5 % faster, BlobToolKit 2.6 %, ABRicate, MOB-suite and Easyfig 1-1.2 % (one thread). Other CPUs and the browser build are unchanged. Reports do not change.

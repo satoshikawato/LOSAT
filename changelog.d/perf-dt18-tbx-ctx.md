@@ -1,1 +1,0 @@
-- TBLASTX: a seed hit finds its query frame from a small table instead of a search over all frames, so an all-against-all search of phage genomes spends less time on it: at one thread ViPTreeGen's searches of 40 genomes are 2-3 % faster, and memory stays within 0.3 %. Reports do not change.

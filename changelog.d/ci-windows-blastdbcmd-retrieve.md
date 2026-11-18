@@ -1,1 +1,0 @@
-- Test hygiene: the Windows `cargo test` job passes again: the `blastdbcmd` retrieval tests use plain (non-`\\?\`) paths and Windows-style expected paths, as the `blastdbcmd -info` tests do.

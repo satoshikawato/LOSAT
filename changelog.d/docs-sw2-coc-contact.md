@@ -1,1 +1,0 @@
-- docs: `CODE_OF_CONDUCT.md` names the contact for reports of unacceptable behavior (Satoshi Kawato) in place of the placeholder.

@@ -22,9 +22,9 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new(label: &str) -> Self {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-lmdb-{label}-{}-{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = std::fs::remove_dir_all(&dir);

@@ -1536,7 +1536,35 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+/// Whether `error` is `NativeError::silent_end`.
+pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<NativeError>()
+        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
+}
+
 impl NativeError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
+    /// The end of a run by a `CIOException` other than `eFlush`, which `CATCH_ALL` ends without a
+    /// post and with the run's status, 0 (a `CEofException` of a PSSM file that ends after its
+    /// header; the failed write of the object manager's message after the diagnostic stream
+    /// failed). The programs that write an error archive write it of the messages saved before
+    /// (`is_silent_end`).
+    pub(crate) fn silent_end() -> Self {
+        Self {
+            exit: 0,
+            message: String::new(),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
     // ```c++
     //     catch (const CException& e) {                                           \
@@ -1656,6 +1684,54 @@ impl std::io::Write for ReportStream {
         flushed
     }
 }
+
+// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/basic_ios.tcc:39-49
+// ```c++
+//   template<typename _CharT, typename _Traits>
+//     void
+//     basic_ios<_CharT, _Traits>::clear(iostate __state)
+//     {
+//       if (this->rdbuf())
+// 	_M_streambuf_state = __state;
+//       else
+// 	_M_streambuf_state = __state | badbit;
+//       if (this->exceptions() & this->rdstate())
+// 	__throw_ios_failure(__N("basic_ios::clear"));
+//     }
+// ```
+/// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
+/// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
+/// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
+/// `exceptions(NcbiBadbit)` (blast_format.cpp:118-119), and the application reports it as "BLAST
+/// failed to write output", exit status 6 (blast_app_util.hpp:252-255), after the bytes the report
+/// wrote before it. It travels as the `io::Error` of the report's writes (`error`), which a
+/// program reports as a failed write of the stream (`is`); the epilog's null matrix name raises it
+/// (`report::pairwise::write_matrix_line`).
+#[derive(Debug)]
+pub(crate) struct BadbitInsertion;
+
+impl BadbitInsertion {
+    /// The failure as the error of the report's writes.
+    pub(crate) fn error() -> std::io::Error {
+        std::io::Error::other(BadbitInsertion)
+    }
+
+    /// Whether `error` is this failure (an `io::Error` that holds it).
+    pub(crate) fn is(error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .is_some_and(|inner| inner.is::<BadbitInsertion>())
+    }
+}
+
+impl std::fmt::Display for BadbitInsertion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BLAST failed to write output")
+    }
+}
+
+impl std::error::Error for BadbitInsertion {}
 
 // NCBI reference (glibc 2.17 to 2.39): libio/filedoalloc.c `_IO_file_doallocate`
 // ```c

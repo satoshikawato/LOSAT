@@ -344,9 +344,9 @@ mod tests {
                 format!("Critical: (106.23) Registry file \"{missing}\" not found, aborting.\n")
             )
         );
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-dustmasker-unit-conffile-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let conffile = dir.join("c.ini");

@@ -442,8 +442,10 @@ mod tests {
     }
 
     fn temp_dir(stem: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("losat_isam_num_{stem}_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_isam_num_{stem}_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

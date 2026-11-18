@@ -428,8 +428,10 @@ mod tests {
     #[test]
     fn a_file_reads_as_the_command_line_opens_it() {
         use std::io::Write;
-        let directory =
-            std::env::temp_dir().join(format!("losat-read-input-file-{}", std::process::id()));
+        let directory = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-read-input-file-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&directory).unwrap();
         let plain = directory.join("q.fa");
         std::fs::write(&plain, PROTEIN).unwrap();

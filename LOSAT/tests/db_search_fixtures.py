@@ -15,7 +15,9 @@ a larger one being compared by its SHA-256 in side_sha256). Every row runs from 
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (a psiblast or tblastn query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query: `-in_pssm FILE` in place of
 `-query QUERY`, the gzipped file PATH inflated into a temporary directory, or PATH as it is;
-xinclude_fixtures.py `query_argv`)
+xinclude_fixtures.py `query_argv`; a query cell `stdin:pipe:PATH`, `stdin:file:PATH` or `stdin:empty` is
+`-query -` with the file PATH's bytes through a pipe, the file PATH itself, or an empty pipe as the run's
+standard input, `query_stdin`)
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`, and a cell `subject:PATH` runs `-subject PATH` in place of `-db DB`: psiblast's refusal of a
 subject set whose sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
@@ -77,8 +79,9 @@ before it searches, so the reports of the batches before the error do not exist;
 row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
 (`-num_iterations` other than 1), its PSSM files (the PSSM kinds) and the PSSM queries of psiblast
 and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library as on the command line;
-the rows of rpsblast and rpstblastn (the library API has no such program) and those that give both
-`-query` and `-in_pssm` (the library's query is one or the other) are `library-skip`.
+the rows of rpsblast and rpstblastn (the library API has no such program), those that give both
+`-query` and `-in_pssm` (the library's query is one or the other) and those that read the query from
+standard input (the library's query is records) are `library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -280,10 +283,40 @@ def subjects_argv(cell: str) -> list[str]:
     return ["-db", cell]
 
 
+def query_stdin(row: dict[str, str]) -> tuple[str, Path | None] | None:
+    """The standard input of a row whose query cell is `stdin:pipe:PATH`, `stdin:file:PATH` or `stdin:empty`
+    (`-query -`): ("pipe", the file PATH relative to LOSAT/, whose bytes the run reads through a pipe),
+    ("file", PATH, the file itself as the run's standard input) or ("empty", None, an empty pipe). None for
+    any other cell (the run keeps the caller's standard input and reads none)."""
+    cell = row["query"]
+    if not cell.startswith("stdin:"):
+        return None
+    form = cell.removeprefix("stdin:")
+    if form == "empty":
+        return "empty", None
+    mode, _, path = form.partition(":")
+    if mode not in ("pipe", "file") or not path:
+        raise SystemExit(f"{row['row_id']}: query cell {cell!r} is not stdin:pipe:PATH, stdin:file:PATH or stdin:empty")
+    return mode, ENGINE / path
+
+
+def run_search(command: list[str], row: dict[str, str], **kw) -> subprocess.CompletedProcess:
+    """`subprocess.run` of a search with its output captured and the row's standard input (`query_stdin`)."""
+    form = query_stdin(row)
+    if form is None:
+        return subprocess.run(command, capture_output=True, **kw)
+    mode, path = form
+    if mode == "file":
+        with open(path, "rb") as handle:
+            return subprocess.run(command, capture_output=True, stdin=handle, **kw)
+    return subprocess.run(command, capture_output=True, input=path.read_bytes() if path else b"", **kw)
+
+
 def search_argv(row: dict[str, str]) -> list[str]:
     """The arguments after the program name (the same for NCBI and LOSAT)."""
     extra = [token for token in extra_tokens(row) if not is_env_token(token)]
-    return [*subjects_argv(row["db"]), *xinclude.query_argv(row["query"], ENGINE), *extra, "-outfmt", row["outfmt"]]
+    query = ["-query", "-"] if query_stdin(row) else xinclude.query_argv(row["query"], ENGINE)
+    return [*subjects_argv(row["db"]), *query, *extra, "-outfmt", row["outfmt"]]
 
 
 def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
@@ -446,8 +479,8 @@ def freeze(args: argparse.Namespace) -> int:
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
             else:
-                run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                     env=row_env(row, env), preexec_fn=ncbi_stack(row))
+                run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
+                                 preexec_fn=ncbi_stack(row))
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
             row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
@@ -462,6 +495,8 @@ def freeze(args: argparse.Namespace) -> int:
             command = [*shlex.split(args.valgrind), *command]
         files = xinclude.wants_files(row)
         pssm = xinclude.wants_pssm(row)
+        if (files or pssm) and query_stdin(row):
+            raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
         if rps_cell(row["db"]) is not None:
             freeze_rps(row, command, env)
             continue
@@ -481,8 +516,8 @@ def freeze(args: argparse.Namespace) -> int:
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
-            run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                 env=row_env(row, env), preexec_fn=ncbi_stack(row))
+            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
+                             preexec_fn=ncbi_stack(row))
             refuse_valgrind_messages(row, run.stderr)
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
@@ -521,8 +556,8 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
     written as `{db_dir}` where the row says so."""
     db_dir = inflate_rps(row["db"])
     try:
-        run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                             env={**row_env(row, env), "BLASTDB": str(db_dir)})
+        run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
+                         env={**row_env(row, env), "BLASTDB": str(db_dir)})
     finally:
         shutil.rmtree(db_dir, ignore_errors=True)
     stdout, stderr = run.stdout, run.stderr
@@ -554,14 +589,16 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call.
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
-                    or ("-query" in argv and "-in_pssm" in argv)):
+                    or ("-query" in argv and "-in_pssm" in argv) or query_stdin(row)):
         return "library-skip", ""
+    if (files or pssm) and query_stdin(row):
+        raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
     if db_dir is not None:
         try:
-            run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                 env={**row_env(row, env), "BLASTDB": str(db_dir)})
+            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
+                             env={**row_env(row, env), "BLASTDB": str(db_dir)})
         finally:
             shutil.rmtree(db_dir, ignore_errors=True)
         if rps_dir_token(row):
@@ -576,7 +613,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                                        env=row_env(row, env), timeout=TIMEOUT)
         run = pssms.run
     else:
-        run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
+        run = run_search(command, row, cwd=ENGINE, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.

@@ -1,0 +1,24 @@
+
+                                          Tax BLAST report                                          
+
+Query= mix2_u qp1 of ids/noacc_v5 back-translated
+
+Length=420
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 12        qp1 query protein one                                                       293   7e-108  
+
+                                          Tax BLAST report                                          
+
+Query= mix2_c the letters of taxfilter/q.fna, then qp1 back-translated
+
+Length=997
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 12        qp1 query protein one                                                       293   1e-104  

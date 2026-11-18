@@ -1829,13 +1829,16 @@ pub enum DiagTarget {
     /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
     Discard,
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host
-    /// (`report::run_files::RunFiles::Receiver`): its bytes, kept until the run ends.
-    Memory(Vec<u8>),
+    /// (`report::run_files::RunFiles::Receiver`): its bytes, kept until the run ends. A cell, so
+    /// that every target is written through a shared reference, as a file is (`Write for &File`).
+    Memory(std::cell::RefCell<Vec<u8>>),
 }
 
 impl DiagTarget {
-    /// Writes `text` where the diagnostics go (`stderr` for `cerr`).
-    pub fn write_text(&mut self, text: &[u8], stderr: &mut dyn Write) {
+    /// Writes `text` where the diagnostics go (`stderr` for `cerr`). A shared reference is enough:
+    /// makeblastdb writes its log through the target's file while its diagnostics go to the
+    /// target (`writedb::makeblastdb::run_with`).
+    pub fn write_text(&self, text: &[u8], stderr: &mut dyn Write) {
         match self {
             DiagTarget::File(_) | DiagTarget::Memory(_) => self.write_to_file(text),
             DiagTarget::Stderr => {
@@ -1848,12 +1851,14 @@ impl DiagTarget {
 
     /// Writes `text` to the file of `-logfile` (on disk or in memory); nothing for `cerr` and for
     /// no output.
-    pub fn write_to_file(&mut self, text: &[u8]) {
+    pub fn write_to_file(&self, text: &[u8]) {
         match self {
             DiagTarget::File(file) => {
+                // `Write for &File`: the one open file, written through a shared reference.
+                let mut file: &std::fs::File = file;
                 let _ = file.write_all(text);
             }
-            DiagTarget::Memory(bytes) => bytes.extend_from_slice(text),
+            DiagTarget::Memory(bytes) => bytes.borrow_mut().extend_from_slice(text),
             DiagTarget::Stderr | DiagTarget::Discard => {}
         }
     }
@@ -1975,9 +1980,11 @@ fn replace_standard_error(_file: std::fs::File) -> Result<(), String> {
 }
 
 /// No NCBI counterpart: a `DiagTarget` as a stream, each write going where the diagnostics go
-/// (`DiagTarget::write_text`; `stderr` stands for `cerr`).
+/// (`DiagTarget::write_text`; `stderr` stands for `cerr`). It holds the target by a shared
+/// reference, so that a log can write through the target's file at the same time
+/// (`writedb::makeblastdb::run_with`).
 pub struct DiagStream<'a> {
-    pub target: &'a mut DiagTarget,
+    pub target: &'a DiagTarget,
     pub stderr: &'a mut dyn Write,
 }
 

@@ -50,7 +50,7 @@ impl RunFiles {
                     "the -logfile name {} has a directory, which LOSAT Web does not have: give a file name without one",
                     name.to_string_lossy()
                 )),
-                (None, Some(_)) => Ok(DiagTarget::Memory(Vec::new())),
+                (None, Some(_)) => Ok(DiagTarget::Memory(Default::default())),
             },
         }
     }
@@ -60,7 +60,7 @@ impl RunFiles {
     pub fn deliver_log(&self, name: Option<&OsStr>, target: DiagTarget) -> io::Result<()> {
         match (self, name, target) {
             (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => {
-                receiver.receive(name.as_encoded_bytes(), &bytes)
+                receiver.receive(name.as_encoded_bytes(), &bytes.into_inner())
             }
             _ => Ok(()),
         }
@@ -106,7 +106,7 @@ mod tests {
                 )
             );
         }
-        let mut log = target(Some("run.log")).unwrap();
+        let log = target(Some("run.log")).unwrap();
         log.write_text(b"posted\n", &mut io::sink());
         files.deliver_log(Some(OsStr::new("run.log")), log).unwrap();
         // A target without a file hands nothing over.

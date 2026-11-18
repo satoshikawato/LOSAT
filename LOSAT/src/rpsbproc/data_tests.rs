@@ -154,9 +154,9 @@ fn fixture_data_loads_and_finds_its_rows() {
 /// A copy of the fixture data in a new directory of the system's temporary directory.
 fn fixture_copy(tag: &str) -> std::path::PathBuf {
     let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rpsbproc/data");
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat_rpsbproc_{tag}_{}_{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

@@ -140,6 +140,7 @@ use anyhow::{Context, Result};
 use crate::blastinput::fasta_reader::{
     FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, ReadError, ReaderConfig,
 };
+use crate::blastinput::input_files::InputFile;
 use crate::blastinput::seq_range::{
     record_interval, Placements, QueryInput, RecordInterval, RecordPlacement, SequenceRange,
 };
@@ -419,7 +420,7 @@ struct State {
 enum Second {
     /// One reader over the file, record after record (`State::read_one`), where the first reading
     /// was not read in parts.
-    Serial(FastaInputSource<File>),
+    Serial(FastaInputSource<InputFile>),
     /// The parts of the first reading (`x_query_scan_par::Span`), each read again by a reader of its
     /// own on the search's threads (`State::read_parts`): `next` is the first part not read.
     #[cfg(all(unix, feature = "parallel"))]
@@ -458,7 +459,7 @@ impl Store {
     /// on them, `x_query_scan_par.rs`).
     pub(super) fn read(
         opening: Opening,
-        source: &mut FastaInputSource<File>,
+        source: &mut FastaInputSource<InputFile>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
         threads: usize,
@@ -472,7 +473,7 @@ impl Store {
     /// the source starts from; the tests cut small parts).
     fn read_with(
         opening: Opening,
-        source: &mut FastaInputSource<File>,
+        source: &mut FastaInputSource<InputFile>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
         in_parts: impl FnOnce(&File, u64) -> Option<super::x_query_scan_par::Scan>,
@@ -1265,9 +1266,9 @@ mod tests {
     impl TempFile {
         fn new(tag: &str, bytes: &[u8]) -> Self {
             static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-            let path = std::env::temp_dir().join(format!(
+            let path = crate::utils::test_dir::temp_dir().join(format!(
                 "losat_qstream_{}_{}_{tag}.fa",
-                std::process::id(),
+                crate::utils::test_dir::process_id(),
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ));
             std::fs::write(&path, bytes).expect("write the test file");
@@ -1483,6 +1484,10 @@ mod tests {
     /// records, warnings, an error at the end): the second reading reads the records of the
     /// first, in batches of every size, with and without `-query_loc`.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "File::try_clone is unsupported on WASI, so LOSAT_X_QSTREAM never reads a file batch by batch there"
+    )]
     fn the_second_reading_reads_the_records_of_the_first() {
         let range = crate::blastinput::seq_range::parse_sequence_range("50-1200", RangeRole::Query)
             .unwrap();
@@ -1672,6 +1677,10 @@ mod tests {
     /// The warnings of every record read again (a search that reads its batches and searches
     /// none) are those of the first reading's records.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "File::try_clone is unsupported on WASI, so LOSAT_X_QSTREAM never reads a file batch by batch there"
+    )]
     fn the_input_warnings_are_those_of_the_records() {
         for seed in [3u64, 6, 12, 18] {
             let file = TempFile::new("warnings", &text(seed));
@@ -1704,6 +1713,10 @@ mod tests {
 
     /// A record whose length changed between the two readings ends the search with LOSAT's error.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "File::try_clone is unsupported on WASI, so LOSAT_X_QSTREAM never reads a file batch by batch there"
+    )]
     fn a_file_changed_between_the_readings_is_an_error() {
         let file = TempFile::new("changed", b">a\nACGTACGT\n>b\nACGT\n");
         let (store, _) = store(&file.0, None);
@@ -1720,6 +1733,10 @@ mod tests {
     /// call is LOSAT's error again, not a batch with records missing (the records before the
     /// failed one are lost, and the reader is past it).
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "File::try_clone is unsupported on WASI, so LOSAT_X_QSTREAM never reads a file batch by batch there"
+    )]
     fn a_read_error_fails_every_later_reading() {
         let mut bytes = Vec::new();
         for index in 0..6 {
@@ -1755,6 +1772,10 @@ mod tests {
     /// The loop's batch is released when the loop is done with it: no chunk of the window and no
     /// `current` holds it, and its records are freed with the loop's last handle.
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "File::try_clone is unsupported on WASI, so LOSAT_X_QSTREAM never reads a file batch by batch there"
+    )]
     fn done_releases_the_loops_batch() {
         let mut bytes = Vec::new();
         for index in 0..6 {
@@ -1783,6 +1804,10 @@ mod tests {
     /// Where the switch does not act: off, the reports after the loop, standard input, a directory
     /// (not a regular file).
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "File::try_clone is unsupported on WASI, so LOSAT_X_QSTREAM never reads a file batch by batch there"
+    )]
     fn inputs_that_cannot_be_read_again() {
         let file = TempFile::new("off", b">a\nACGT\n");
         let handle = File::open(&file.0).unwrap();
@@ -1816,9 +1841,17 @@ mod tests {
         }
         #[cfg(unix)]
         {
-            let dir = File::open(std::env::temp_dir()).unwrap();
+            let dir = File::open(crate::utils::test_dir::temp_dir()).unwrap();
             assert_eq!(
-                Opening::with_mode(true, &std::env::temp_dir(), &dir, false, true, NO_RULE).off,
+                Opening::with_mode(
+                    true,
+                    &crate::utils::test_dir::temp_dir(),
+                    &dir,
+                    false,
+                    true,
+                    NO_RULE
+                )
+                .off,
                 Some(Off::NotAFile)
             );
         }

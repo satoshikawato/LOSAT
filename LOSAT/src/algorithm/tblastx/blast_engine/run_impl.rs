@@ -1330,8 +1330,7 @@ fn read_subject_set(
     // record stops the reading there (`read_subjects`). Records without residues (and
     // intervals without letters) are read without a message and reported when the search
     // is set up (`search`).
-    let mut subject_source = FastaInputSource::from_argument(
-        &subject_path,
+    let mut subject_source = FastaInputSource::from_file(
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -1695,7 +1694,7 @@ fn subject_taxonomy(
 fn search_cli(
     mut args: TblastxArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_file: crate::blastinput::input_files::InputFile,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
     x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
@@ -1747,8 +1746,7 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
+    let mut query_source = FastaInputSource::from_file(
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
@@ -2579,6 +2577,12 @@ fn write_tblastx_outputs(
         Some(database) => &database.reported.parsed,
         None => &records_parsed,
     };
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = run
+        .database
+        .as_ref()
+        .map_or(&every_loaded, |database| &database.reported.loads);
     for (output, format) in outputs
         .formats
         .iter_mut()
@@ -2586,7 +2590,12 @@ fn write_tblastx_outputs(
         .filter(|(_, format)| format.is_tabular())
     {
         let spec = format.tabular_spec();
-        if crate::algorithm::common::tabular::checks_failed_lookups(spec, &subject_ids, parsed) {
+        if crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            &subject_ids,
+            parsed,
+            loads,
+        ) {
             let checked = crate::report::tabular::check_failed_lookups(
                 spec,
                 (0..run.queries.len()).map(|q_idx| {
@@ -2599,14 +2608,16 @@ fn write_tblastx_outputs(
                         spec,
                         &subject_ids,
                         parsed,
+                        loads,
                         run.database.is_some(),
                         false,
                         s_idx,
                     )
                 },
                 |s_idx| match &run.database {
-                    Some(database) => crate::report::tabular::failed_database_title(
+                    Some(database) => crate::report::tabular::failed_database_subject(
                         database.oids.oid(database.reported.ordinals[s_idx]),
+                        loads.thrown(s_idx),
                     ),
                     None => crate::report::tabular::failed_record_title(
                         s_idx,
@@ -3089,8 +3100,9 @@ fn write_tblastx_outputs(
                 report::TblastxOutputFormat::Tabular
                 | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                     // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
-                    // observer (which flushes around every row) the serial writer.
-                    Some(pool) if probe.is_none() => {
+                    // observer (which flushes around every row) the serial writer, which also
+                    // writes the rows of subjects whose load throws (`report::write_tabular`).
+                    Some(pool) if probe.is_none() && !loads.any_throws() => {
                         crate::algorithm::tblastx::x_rpt_par::write_tabular(
                             pool,
                             &hits,
@@ -3113,6 +3125,7 @@ fn write_tblastx_outputs(
                         &database,
                         run.query_ids,
                         &subject_ids,
+                        loads,
                         &unsearched,
                         run.epilog.then_some(run.queries_before),
                         probe.as_mut(),
@@ -3795,6 +3808,16 @@ fn run_batch_loop(
     let pairwise = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
         .map(|view| view.report_sort(args.formatting.report_sort()));
+    // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
+    // load throws, no report and no batch's prefetch after it loads anything
+    // (`database::report_loads`).
+    let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
+        outputs.formats.iter().map(|format| format.outfmt),
+    ));
+    let (query_code, db_code) = (
+        crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
+        crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
+    );
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
     // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -4265,6 +4288,7 @@ fn run_batch_loop(
                 }};
             }
             if xml2_prefetch
+                && !run_loads.ended()
                 && database.parsed_seqids()
                 && !ordered.is_empty()
                 && !crate::algorithm::common::database::prefetch_off(
@@ -4279,9 +4303,17 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    super::super::database::writes_thrown(
-                        outputs.formats.iter().map(|format| format.outfmt),
-                    ),
+                    run_loads.run(),
+                    &|hsp| {
+                        super::super::database::hit_identities(
+                            &reports.stores.borrow(),
+                            hsp,
+                            query_records[reports.queries_written.get() + hsp.hit.q_idx as usize]
+                                .seq(),
+                            &query_code,
+                            &db_code,
+                        )
+                    },
                     ordered,
                     &reports.titles.borrow(),
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
@@ -4290,7 +4322,7 @@ fn run_batch_loop(
                     prefetch_failed!(error);
                 }
             }
-            if prefetches && (taxdb_found || database.parsed_seqids()) {
+            if prefetches && !run_loads.ended() && (taxdb_found || database.parsed_seqids()) {
                 // The batch's Seq-aligns (`database::seq_aligns_of`).
                 let seq_aligns = super::super::database::seq_aligns_of(ordered);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
@@ -4310,38 +4342,45 @@ fn run_batch_loop(
                     // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
                     if taxdb_found {
                         debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                        let (query_code, db_code) = (
-                            crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
-                            crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
-                        );
                         let stores = reports.stores.borrow();
-                        let mut window = Vec::new();
                         for query in 0..(end - start) as u32 {
                             let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
                             let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
                             let query_letters = query_records[start + query as usize].seq();
+                            let identities = |hsp: &TblastxHsp| {
+                                super::super::database::hit_identities(
+                                    &stores,
+                                    hsp,
+                                    query_letters,
+                                    &query_code,
+                                    &db_code,
+                                )
+                            };
                             // The first HSP of each subject whose row reads it, in report order (a
                             // subject's HSPs follow each other): the engine's identities are counted
                             // only for `nident` alone, until one of the subject's rows reads it.
+                            // Not a subject whose load throws, nor one that no report reaches
+                            // after it (`database::report_loads`, after the reports before it).
+                            let loads = super::super::database::report_loads(
+                                &run_loads,
+                                &ordered[from..to],
+                                &reports.titles.borrow(),
+                                identities,
+                            );
                             let shown: Vec<&TblastxHsp> = match rows {
-                                SubjectFetch::Every => ordered[from..to].iter().collect(),
+                                SubjectFetch::Every => ordered[from..to]
+                                    .iter()
+                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize))
+                                    .collect(),
                                 SubjectFetch::Never => Vec::new(),
                                 SubjectFetch::WithIdentities => {
                                     let mut read = std::collections::HashSet::new();
                                     ordered[from..to]
                                         .iter()
                                         .filter(|hsp| {
-                                            !read.contains(&hsp.hit.s_idx)
-                                                && stores.get(&hsp.hit.s_idx).is_none_or(|store| {
-                                                    report::stored_engine_identities(
-                                                        hsp,
-                                                        store,
-                                                        query_letters,
-                                                        &query_code,
-                                                        &db_code,
-                                                        &mut window,
-                                                    ) > 0
-                                                })
+                                            loads.loaded(hsp.hit.s_idx as usize)
+                                                && !read.contains(&hsp.hit.s_idx)
+                                                && identities(hsp) > 0
                                                 && read.insert(hsp.hit.s_idx)
                                         })
                                         .collect()
@@ -4374,7 +4413,14 @@ fn run_batch_loop(
                                     &reports.titles.borrow(),
                                 )?
                             });
-                            if plural_names && from < to {
+                            // Only a row whose subject a report loads looks a name up: a row
+                            // whose load throws keeps the names of the rows before (review 1 of
+                            // line DBID pfoff-2, H1).
+                            if plural_names
+                                && ordered[from..to]
+                                    .iter()
+                                    .any(|hsp| loads.loaded(hsp.hit.s_idx as usize))
+                            {
                                 database.open_for_tabular_rows()?;
                             }
                         }
@@ -4714,7 +4760,12 @@ impl BatchReports<'_> {
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
                 };
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
-                // prefetch decides the subjects that only the prefetch reads.
+                // prefetch decides the subjects that only the prefetch reads; the hits' engine
+                // identities tell which rows of `nident` alone read a subject.
+                let (query_code, db_code) = (
+                    crate::utils::genetic_code::GeneticCode::from_id(self.args.query_gencode),
+                    crate::utils::genetic_code::GeneticCode::from_id(self.args.db_gencode),
+                );
                 reported_subjects = super::super::database::reported_subjects(
                     database,
                     &self.titles.borrow(),
@@ -4722,9 +4773,18 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    super::super::database::writes_thrown(
+                    super::super::database::after_throw(
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
+                    &|hsp| {
+                        super::super::database::hit_identities(
+                            &self.stores.borrow(),
+                            hsp,
+                            queries[hsp.hit.q_idx as usize].seq(),
+                            &query_code,
+                            &db_code,
+                        )
+                    },
                     done.searched.len(),
                     &done.spans,
                 )?;
@@ -4923,7 +4983,7 @@ impl BatchReports<'_> {
 /// Q-X2c: "the results of the query batches before are written"), a one-hit merge of lengths that
 /// add up to 0 (`OneHitChunkMerge::refuse`), the ungapped re-evaluation of HSPs on a subject (or its
 /// `-subject_loc` range) of fewer than 12 bases (`subject_loop::SubjectEmit::refuse_untranslated_frame`,
-/// PD-LOSAT-NCBI-DEFECTS 1.50) and the re-evaluation's fetch of a subject whose header cannot be read
+/// PD-LOSAT-NCBI-DEFECTS 1.51) and the re-evaluation's fetch of a subject whose header cannot be read
 /// under a negative seqid list (`subject_loop::x_fetch_keeps`, NCBI's engine error there; the inner
 /// error stays a `FetchRefusal`). The run then writes the same bytes whether its reports are
 /// streamed or held (`report_stream`).

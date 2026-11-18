@@ -1,6 +1,6 @@
 //! TBLASTX on a subject (or its `-subject_loc` range) of fewer than 12 bases whose HSPs reach the
 //! ungapped re-evaluation, where NCBI BLAST+ 2.17.0 reads the translation of a frame it never makes
-//! and dies with SIGSEGV: LOSAT refuses there (PD-LOSAT-NCBI-DEFECTS 1.50, rule 3). The single
+//! and dies with SIGSEGV: LOSAT refuses there (PD-LOSAT-NCBI-DEFECTS 1.51, rule 3). The single
 //! searches are rows `db.xs.tblastx.*` of `tests/db_search_manifest/tblastx.tsv`; here, at 1 and 4
 //! threads, what those rows cannot hold: the reports of the query batches before the refusal, a
 //! subject that the re-evaluation's fetch excludes (a negative seqid list), which NCBI never reads,

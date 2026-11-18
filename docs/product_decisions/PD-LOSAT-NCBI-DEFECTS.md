@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.50
+- Version: 1.51
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -168,10 +168,18 @@
   a feature's and a Seq-table's location; the PSSM's most negative Int4 and Int8 values written as
   their digits; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.48);
-  1.50 2026-11-17 (TBLASTX, the explicit rejection of the ungapped re-evaluation of HSPs on a subject
+  1.50 2026-11-18 (outfmt 6, 7, 10 and 20 of such a sequence are written as NCBI writes them: a
+  field list of the subject block writes the row that its `catch` leaves and goes on, one that reads
+  the sequence after that block stops with `BLAST Database error`, `nident` alone only at a row with
+  identities; the organism report (outfmt 18) leaves such a sequence's HSPs out and goes on; the
+  refusal of 1.31 narrowed to the other formats and to the first row of a query's report with
+  `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
+  line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.49)
+  1.51 2026-11-18 (TBLASTX, the explicit rejection of the ungapped re-evaluation of HSPs on a subject
   of fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3, and
   names X-short-bat open in 1.46; line RG item X-short-tbx, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.49, line RG item D3-2)
+  2026-09-29, restated 2026-10-07; numbered after 1.50, line DBID item pfoff-2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1114,7 +1122,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.47,
   line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
   `Hit`s after it in that report, and a text that NCBI writes once at its next load, a later `Hit` or
-  a later batch's prefetch), a
+  a later batch's prefetch) or outfmt 6, 7, 10, 18 and 20 (since version 1.50, line DBID item
+  pfoff-2: the row that the `catch` of the subject block leaves, or the stop at a row that reads the
+  sequence after that block; the organism report leaves its HSPs out; a throwing row loads nothing,
+  and the names and tax ids are looked up only for the sequences that a report loads; refused at
+  the first row of a query's report with `sacc`, `saccver` or `staxid`, below), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more
@@ -1473,7 +1485,12 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). LOSAT
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
-  subjects: one alone, the first, the last or two give the same rows.
+  subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line
+  DBID item pfoff-2) also the first row of a query's report whose subject's load throws where the
+  batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
+  and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
+  before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
+  prints what the last loaded row set.
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations
@@ -1583,7 +1600,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and `ALIGN_EX` (`blast_traceback.c:429-440,509-512`), the identities after the composition-based
   redo (`blast_kappa.c:527-528`, which run only for an alignment left by the redo's E-value purge,
   `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's TBLASTN refuses
-  `-ungapped`; TBLASTX reaches it in every search, version 1.50 below). NCBI BLAST+ 2.17.0 dies
+  `-ungapped`; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
   with SIGSEGV in every such run of ours (ws and the local
   official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject`, `-subject_loc` and `-db`,
   a matrix query at `-comp_based_stats` 0 to 3, `-in_pssm`, `-outfmt` 0, 5 and 6, a second query, a
@@ -1601,10 +1618,10 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   `-subject` search, translating in code 1, may find nothing there. LOSAT's TBLASTN refusals write
   no report, also where NCBI has written the reports of the query batches before when it crashes
   (but for what its output buffer still holds; 20,000 query letters a batch by default, or
-  `BATCH_SIZE`; open for this refusal, line RG item X-short-bat, version 1.50 below).
+  `BATCH_SIZE`; open for this refusal, line RG item X-short-bat, version 1.51 below).
 
 - TBLASTX, HSPs on a subject (or its `-subject_loc` range) of fewer than 12 bases that reach the
-  ungapped re-evaluation (version 1.50, 2026-11-17, line RG item X-short-tbx, Owner-delegated,
+  ungapped re-evaluation (version 1.51, 2026-11-17, line RG item X-short-tbx, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07). TBLASTX is always ungapped: after the
   first linking call and the preliminary E-value (`s_BlastSearchEngineCore`,
   `blast_engine.c:870-899`), `BLAST_PreliminarySearchEngine` re-evaluates the HSPs of every subject

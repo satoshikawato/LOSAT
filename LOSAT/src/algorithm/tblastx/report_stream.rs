@@ -374,6 +374,10 @@ mod tests {
     // whose headers refuse the reports, is not read above its bound), and reads it up to the
     // bound, at one thread and in a pool, for outfmt 6 and 0.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn a_database_with_parsed_seqids_beyond_the_bound_keeps_its_reports_after_the_loop() {
         let open = |name: &str| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

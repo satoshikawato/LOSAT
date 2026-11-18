@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "losat": "0.2.0",
-    "vue": "3.5.44"
+    "vue": "3.5.45"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
@@ -30,7 +30,7 @@
     "eslint-plugin-vue": "10.12.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
-    "vite": "8.3.5",
+    "vite": "8.3.6",
     "vitest": "5.1.0",
     "vue-tsc": "3.3.14"
   }

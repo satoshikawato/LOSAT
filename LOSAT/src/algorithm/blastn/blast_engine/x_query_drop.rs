@@ -976,6 +976,10 @@ mod tests {
     // with the ids `-parse_deflines` reads, across parts and batches of any size, by one thread and
     // the pool.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn records_read_into_parts_are_the_readers_records() {
         let plain = ReaderConfig::query("BLASTN", false, false);
         let parsed = plain.with_parse_deflines(true);

@@ -3644,6 +3644,14 @@ mod tests {
     use crate::utils::seg::{SegMasker, SegParams};
     use std::fs;
 
+    /// A file of `tests/fasta`, from the crate directory and not the working directory: a WASI
+    /// module has no working directory (the runner preopens "/").
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fasta")
+            .join(name)
+    }
+
     fn fasta_sequence_by_id(contents: &str, wanted_id: &str) -> Vec<u8> {
         let mut current_id = None::<&str>;
         let mut sequence = Vec::new();
@@ -4257,8 +4265,8 @@ mod tests {
     // ```
     #[test]
     fn test_traceback_score_matches_rescored_edit_script_wssv_537() {
-        let query_fasta = fs::read_to_string("tests/fasta/WSSV.faa").expect("query fasta");
-        let subject_fasta = fs::read_to_string("tests/fasta/PajaWSV.faa").expect("subject fasta");
+        let query_fasta = fs::read_to_string(fixture("WSSV.faa")).expect("query fasta");
+        let subject_fasta = fs::read_to_string(fixture("PajaWSV.faa")).expect("subject fasta");
         let query = mask_query_sequence(&fasta_sequence_by_id(&query_fasta, "YP_009220537.1"));
         let subject = mask_subject_sequence(&fasta_sequence_by_id(&subject_fasta, "BDT63528.1"));
 
@@ -4353,8 +4361,8 @@ mod tests {
             edit_script
         }
 
-        let query_fasta = fs::read_to_string("tests/fasta/WSSV.faa").expect("query fasta");
-        let subject_fasta = fs::read_to_string("tests/fasta/PajaWSV.faa").expect("subject fasta");
+        let query_fasta = fs::read_to_string(fixture("WSSV.faa")).expect("query fasta");
+        let subject_fasta = fs::read_to_string(fixture("PajaWSV.faa")).expect("subject fasta");
         let query = fasta_sequence_by_id(&query_fasta, "YP_009220488.1");
         let subject = mask_subject_sequence(&fasta_sequence_by_id(&subject_fasta, "BDT63510.1"));
 

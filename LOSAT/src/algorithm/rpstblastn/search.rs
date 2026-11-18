@@ -1492,7 +1492,10 @@ mod tests {
     ) -> (std::path::PathBuf, BlastxDatabase) {
         use std::io::Read;
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/rps");
-        let dir = std::env::temp_dir().join(format!("losat-rpstbn-{test}-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-rpstbn-{test}-{}",
+            crate::utils::test_dir::process_id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for entry in std::fs::read_dir(&fixtures).unwrap() {

@@ -1230,7 +1230,10 @@ fn file_names_follow_ncbis_base_name_rules() {
 
 #[test]
 fn side_files_on_the_file_system_are_truncated_and_numbered() {
-    let dir = std::env::temp_dir().join(format!("losat_xml2_files_{}", std::process::id()));
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat_xml2_files_{}",
+        crate::utils::test_dir::process_id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     // a stale file of an earlier run: a longer file is cut to the new report (`IOS_BASE::out`)
     std::fs::write(dir.join("o.out_1.xml"), "stale stale stale stale\n").unwrap();

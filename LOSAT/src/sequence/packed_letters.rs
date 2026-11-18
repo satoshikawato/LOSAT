@@ -666,12 +666,18 @@ mod tests {
         assert_eq!(PackedLetters::pack(&letters), None);
         let store = PackedLetters::pack(&[b'N'; 400]).expect("one run");
         assert_eq!(store.heap_bytes(), 100 + 12);
+        #[cfg(target_pointer_width = "64")]
         assert_eq!(std::mem::size_of::<PackedLetters>(), 32);
-        // a 32-byte chunk of letters against 40 bytes beside a store and its 32-byte chunk
-        assert_eq!(PackedLetters::pack(&[b'A'; 22]), None);
-        assert_eq!(PackedLetters::pack(&[b'A'; 50]), None);
-        // 80 bytes against 40 + 32: from about 60 letters a record packs
-        assert!(PackedLetters::pack(&[b'A'; 64]).is_some());
-        assert!(PackedLetters::pack(&[b'A'; 150]).is_some());
+        // The sizes below are the 64-bit ones (`HELD_BESIDE` and the chunks follow the pointer
+        // width, so a 32-bit target packs records of fewer letters).
+        #[cfg(target_pointer_width = "64")]
+        {
+            // a 32-byte chunk of letters against 40 bytes beside a store and its 32-byte chunk
+            assert_eq!(PackedLetters::pack(&[b'A'; 22]), None);
+            assert_eq!(PackedLetters::pack(&[b'A'; 50]), None);
+            // 80 bytes against 40 + 32: from about 60 letters a record packs
+            assert!(PackedLetters::pack(&[b'A'; 64]).is_some());
+            assert!(PackedLetters::pack(&[b'A'; 150]).is_some());
+        }
     }
 }

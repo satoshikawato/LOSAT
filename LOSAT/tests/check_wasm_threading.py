@@ -99,12 +99,17 @@ def main():
     (out / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     environment = {k: v for k, v in os.environ.items() if not k.startswith(("LOSAT_", "RAYON_")) and k != "BL2SEQ_LEGACY"}
     environment.update(NODE_NO_WARNINGS="1", LC_ALL="C")
+    # stdin: bytes through a pipe, or a Path opened as the standard input (a regular file); expected=None: any exit.
     def execute(label, argv, env=None, expected=0, timeout=60, stdin=None):
         directory = out / label; directory.mkdir(parents=True, exist_ok=True)
         result_path = directory / "result.out"
         argv = [str(x).replace("{out}", str(result_path)) for x in argv]
         try:
-            result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, input=stdin, capture_output=True, timeout=timeout)
+            if isinstance(stdin, Path):
+                with open(stdin, "rb") as handle:
+                    result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, stdin=handle, capture_output=True, timeout=timeout)
+            else:
+                result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, input=stdin, capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired as error:
             (directory / "stdout").write_bytes(error.stdout or b"")
             (directory / "stderr").write_bytes(error.stderr or b"")
@@ -116,7 +121,7 @@ def main():
         data = result_path.read_bytes() if result_path.exists() else result.stdout
         row = dict(label=label, argv=argv, cwd=str(ROOT), env=env or {}, exit=result.returncode, sha256=digest(data))
         rows.append(row); (out / "runs.json").write_text(json.dumps(rows, indent=2) + "\n")
-        assert (result.returncode == 0) == (expected == 0), (label, result.returncode, result.stderr.decode())
+        assert expected is None or (result.returncode == 0) == (expected == 0), (label, result.returncode, result.stderr.decode())
         return data, result.stderr.decode()
     prefixes = {
         "native": [args.native.resolve()],
@@ -193,8 +198,8 @@ def main():
     # -subject fixtures (outfmt0_manifest.tsv, 95 rows), compared by the checker of the native gates
     # (docs/evidence/losat_web_e2a/check_losat.py: stdout, stderr, the PSSM files), which runs a
     # wrapper that starts the command's runner in the place of the binary. Its PSSM queries (-in_pssm)
-    # open no query input, as NCBI reads none (WASI cannot copy the standard input's descriptor), and
-    # its ASN.1 PSSM files are staged under a name without a process id, which WASI does not have
+    # open no query input, as NCBI reads none, and its ASN.1 PSSM files are staged under a name
+    # without a process id, which WASI does not have
     # (LOSAT/src/utils/process_id.rs). The -db rows (db_search_manifest/psiblast*.tsv) are not run
     # here: in 14 of them the ASN.1 PSSM's informationContent differs in its last printed digit, the
     # bytes of NCBI BLAST+ 2.17.0 with glibc's FMA variant of log() off, which the frozen bytes had on.
@@ -212,6 +217,57 @@ def main():
             print("\n".join(line for line in lines if "\tDIFF\t" in line or line.startswith("# ")), flush=True)
             raise
         print(label, (out / label / "stdout").read_text().splitlines()[-1], flush=True)
+    # NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:715-721
+    # ```c++
+    #     m_DeleteFlag = false;
+    #
+    #     if (AsString() == "-") {
+    # #if defined(NCBI_OS_MSWIN)
+    #         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    # #endif
+    #         m_Ios  = &cin;
+    # ```
+    # Standard input through each WASI command at -num_threads 1, for every search program: -query -,
+    # no -query (its default is -), an empty pipe, -subject - and both (the subjects read standard input
+    # to its end, the query then reads nothing), and for blastn and blastx (the two FASTA streams) a
+    # regular file as the standard input, which has a position. Each run must give the native command's
+    # stdout, stderr and exit status of the same run, byte for byte. LOSAT reads the standard input in
+    # place, never a copy of its descriptor, which WASI cannot make (LOSAT/src/blastinput/input_files.rs
+    # `InputFile`); before, every such run stopped with "reading the query from standard input ('-') on
+    # this platform is not supported".
+    rps_db = db_search_fixtures.inflate_rps("rps-gz:rps_mini") / "rps_mini"
+    stdin_programs = [
+        # program, query, subjects (the file, or the RPS database), whether -subject - is read, regular-file case
+        ("blastn", inputs["nuc1"], ["-subject", inputs["nuc3"]], True, True),
+        ("blastp", inputs["aa3"], ["-subject", inputs["aa3"]], True, False),
+        ("blastx", inputs["blastx-query"], ["-subject", inputs["aa3"]], False, True),
+        ("tblastn", inputs["aa1"], ["-subject", inputs["tblastn-subjects"]], True, False),
+        ("tblastx", inputs["nuc1"], ["-subject", inputs["nuc3"]], True, False),
+        ("psiblast", inputs["aa1"], ["-subject", inputs["aa3"]], True, False),
+        ("rpsblast", inputs["aa1"], ["-db", rps_db], False, False),
+        # (LOSAT's rpstblastn refuses the default -comp_based_stats 1 before it reads a query.)
+        ("rpstblastn", inputs["blastx-query"], ["-db", rps_db, "-comp_based_stats", "0"], False, False),
+    ]
+    for program, query, subjects, subject_stdin, regular in stdin_programs:
+        cases = [("query", ["-query", "-", *subjects], query.read_bytes()),
+                 ("omitted", subjects, query.read_bytes()),
+                 ("empty", ["-query", "-", *subjects], b"")]
+        if regular:
+            cases.append(("query-file", ["-query", "-", *subjects], query))
+        if subject_stdin:
+            cases += [("subject", ["-query", query, "-subject", "-"], Path(subjects[1]).read_bytes()),
+                      ("both", ["-query", "-", "-subject", "-"], Path(subjects[1]).read_bytes())]
+        for case, argv, stdin in cases:
+            common = [program, *argv, "-outfmt", "7", "-num_threads", "1"]
+            reference, reference_log = execute(f"stdin/{program}-{case}/native", [*prefixes["native"], *common], expected=None, stdin=stdin)
+            reference_exit = rows[-1]["exit"]
+            for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+                data, log = execute(f"stdin/{program}-{case}/{kind}", [*prefixes[kind], *common], expected=None, stdin=stdin)
+                assert (data, log, rows[-1]["exit"]) == (reference, reference_log, reference_exit), \
+                    f"stdout, stderr or exit status differs from native: stdin/{program}-{case}/{kind}"
+        print(f"stdin/{program}", "native bytes PASS", flush=True)
+    import shutil
+    shutil.rmtree(rps_db.parent)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

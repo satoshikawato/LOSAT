@@ -2603,9 +2603,9 @@ mod tests {
 
     /// A temporary directory of this test (removed by the test).
     fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastn-db-{tag}-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2775,6 +2775,10 @@ mod tests {
     // every sequence once with its stored data, and merges what it keeps in ordinal order,
     // whatever the block size and the thread count, across the six volumes of the fixture.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blocks_give_every_sequence_once_and_merge_in_ordinal_order() {
         let database = open("nucl_mv");
         let single = open("nucl_v4");
@@ -2809,6 +2813,10 @@ mod tests {
     // again by ordinal id, in BLASTNA with its ambiguity codes; the results come in the
     // order of the listed ordinal ids at every thread count.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn listed_sequences_are_read_again_with_their_ambiguity_codes() {
         let database = open("nucl_mv");
         let entries = entries();
@@ -2851,6 +2859,10 @@ mod tests {
     // results come in the order of `listed`: at 1 to 8 threads, uneven work per sequence so that
     // the threads steal from each other.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn the_parallel_traceback_reuses_the_idle_scratches() {
         use std::sync::atomic::{AtomicU64, Ordering};
         let database = open("nucl_mv");
@@ -3219,6 +3231,10 @@ mod tests {
     // The records made on a pool are those made one at a time, and the error is the first one
     // in the order of the ordinal ids.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn reported_records_on_a_pool_are_the_serial_ones() {
         let ordinals: Vec<u32> = (0..500).collect();
         let record = |&ordinal: &u32| -> Result<Reported> {

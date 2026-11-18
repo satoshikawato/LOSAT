@@ -256,6 +256,19 @@ fn fixture_dir(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// `Path::canonicalize`, which WASI lacks (it returns "unsupported" there): the paths here are
+/// built from one absolute directory without links, so their components name them.
+fn canonical(path: &Path) -> PathBuf {
+    #[cfg(not(target_os = "wasi"))]
+    {
+        path.canonicalize().unwrap()
+    }
+    #[cfg(target_os = "wasi")]
+    {
+        path.components().collect()
+    }
+}
+
 /// Every case of both fixture sets that the reader decides, and every input of
 /// `tests/dustmasker/in` and of the reader's probes among them.
 #[test]
@@ -269,7 +282,7 @@ fn every_input_reads_as_the_masking_programs_read_it() {
             let problems = check(&case);
             checked += 1;
             if problems.is_empty() {
-                covered.insert(dir.join(&case.input).canonicalize().unwrap());
+                covered.insert(canonical(&dir.join(&case.input)));
             } else {
                 failures.push(format!("{}: {}", case.name, problems.join("; ")));
             }
@@ -279,7 +292,7 @@ fn every_input_reads_as_the_masking_programs_read_it() {
     assert!(checked > 150, "{checked} cases");
     for dir in &dirs {
         for entry in std::fs::read_dir(dir.join("in")).unwrap() {
-            let path = entry.unwrap().path().canonicalize().unwrap();
+            let path = canonical(&entry.unwrap().path());
             assert!(
                 covered.contains(&path),
                 "no case decides {}",

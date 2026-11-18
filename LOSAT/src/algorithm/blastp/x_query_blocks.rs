@@ -1499,6 +1499,10 @@ mod tests {
     // punctuation that `x_CleanAndCompress` reads past the end of (refused). A one-record check and the same record among
     // others, on a pool of 1 and 3 threads.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn the_xml_checks_agree_with_the_writers_functions() {
         use crate::report::blast_xml::{names, XmlSubjects};
         let titles: [&[u8]; 12] = [
@@ -1595,7 +1599,10 @@ mod tests {
 
     #[test]
     fn a_file_is_created_at_the_first_write_or_flush() {
-        let dir = std::env::temp_dir().join(format!("losat-x-qblock-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-x-qblock-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("out.tsv");
         let _ = std::fs::remove_file(&path);

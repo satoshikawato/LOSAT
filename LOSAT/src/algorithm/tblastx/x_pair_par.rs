@@ -184,6 +184,19 @@
 //! subjects run the scan without the hint (`PF` false), whose machine code is the one before the
 //! switch.
 //!
+//! `LOSAT_X_TBXCTXTABLE` (in the strict set: on unless it is `0`): the units' two-hit test finds
+//! the context of a hit that passes it (NCBI's `BSearchContextInfo`) in the `XContextTable` of
+//! blastp's and blastx's fused loops (`common/x_context_table.rs`),
+//! made once per batch from the frame bases (`x_ctx_table`): a coarse table of at most 16,384
+//! entries gives the context at the start of the offset's block and a walk over the frame bases
+//! moves on to the last context that starts at or before it, the index of the binary search
+//! (`BlastAaLookupTable::get_context_idx`). The binary search took every context of the batch
+//! (NCBI's narrowing by the shortest and longest context is not ported), and its comparison
+//! depends on the hit's query offset: on 40 phage genomes of 37 to 46 kb all against all (six
+//! contexts a batch) it was mispredicted about once per search, 27 % of the unit scan's
+//! mispredictions. With `=0` the table covers no offset and every hit takes the binary search, the
+//! path before the switch. Same index, so the same init HSPs.
+//!
 //! `LOSAT_X_TBXQSLICE` (in the strict set, a value switch: on unless it is `0`;
 //! x86-64 only): unset (or `=1`), a context group of more than
 //! 128 Ki letters whose span times the search's threads reaches 6 Mi letters is cut into slices of
@@ -235,6 +248,7 @@
 //! `[X_STATS] TBXUNITMASK` line counts the units with a masked table.
 
 use super::*;
+use crate::algorithm::common::x_context_table::XContextTable;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
 use crate::algorithm::tblastx::lookup::x_pair_lut::{XPairLutGroup, XPairLutQuery};
 use crate::algorithm::tblastx::lookup::{BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL};
@@ -650,6 +664,15 @@ fn x_prefetch_units(min_kib: Option<usize>, mut table_bytes: impl Iterator<Item 
         crate::utils::xreach::x_reach!("LOSAT_X_TBXPREFETCH", prefetch);
     }
     prefetch
+}
+
+// No NCBI counterpart: which LOSAT form finds a hit's context in the units' two-hit test (module
+// doc); both give `BSearchContextInfo`'s index. Read once per process, as the other modes of this
+// file.
+/// LOSAT_X_TBXCTXTABLE: a strict-set switch (`utils/xswitch.rs`).
+fn ctx_table_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXCTXTABLE"))
 }
 
 // No NCBI counterpart: LOSAT_TIMING read once; it does not change any value NCBI computes.
@@ -1835,6 +1858,9 @@ struct XHitCtx<'a, M: TbxScore = Blosum62Score> {
     window: i32,
     wordsize: i32,
     lookup: &'a BlastAaLookupTable,
+    /// LOSAT_X_TBXCTXTABLE: the batch's `x_ctx_table`, the context of a query offset without the
+    /// binary search (`context_of`).
+    ctx_of: &'a XContextTable,
     contexts: &'a [QueryContext],
     cutoff_scores: &'a [i32],
     x_dropoff_per_context: &'a [i32],
@@ -1852,6 +1878,54 @@ struct XHitCtx<'a, M: TbxScore = Blosum62Score> {
     /// The batch's contexts as the extensions read them past a context's ends, and the search's
     /// failure (extension/query_batch.rs).
     query_batch: QueryBatch<'a>,
+}
+
+impl<M: TbxScore> XHitCtx<'_, M> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
+    // ```c
+    // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+    // ...
+    //     while (b < e - 1) {
+    // 	m = (b + e) / 2;
+    // 	if (A->contexts[m].query_offset > n)
+    // 	    e = m;
+    // 	else
+    // 	    b = m;
+    //     }
+    //     return b;
+    // ```
+    /// `BSearchContextInfo` of a query offset (`x_context_of`).
+    #[inline(always)]
+    fn context_of(&self, query_offset: u32) -> usize {
+        x_context_of(self.ctx_of, self.lookup, query_offset)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (as `context_of`)
+/// LOSAT_X_TBXCTXTABLE: the context of `query_offset` from `table` (the binary search's index,
+/// common/x_context_table.rs), or from the binary search over `lookup`'s frame bases for an offset
+/// outside it (every offset with `=0`, whose table covers none).
+#[inline(always)]
+fn x_context_of(table: &XContextTable, lookup: &BlastAaLookupTable, query_offset: u32) -> usize {
+    match table.get(query_offset as i32) {
+        Some(idx) => idx,
+        None => lookup.get_context_idx(query_offset as i32),
+    }
+}
+
+// No NCBI counterpart: the table behind `XHitCtx::context_of` (the one blastp's and blastx's fused
+// loops take), built once per batch from the frame bases `get_context_idx` searches.
+/// LOSAT_X_TBXCTXTABLE: the `XContextTable` of a batch's contexts (`lookup.frame_bases`,
+/// `num_contexts` of them) over its `query_length` offsets with the switch `on`, over none without
+/// it (every offset then takes the binary search).
+fn x_ctx_table(lookup: &BlastAaLookupTable, on: bool) -> XContextTable {
+    let bases = &lookup.frame_bases[..lookup.num_contexts.min(lookup.frame_bases.len())];
+    let span = if on {
+        lookup.query_length.max(0) as usize
+    } else {
+        0
+    };
+    XContextTable::new(bases, span)
 }
 
 /// Which branch of the two-hit test a hit took (tests read it; the unit loop ignores it).
@@ -2146,6 +2220,10 @@ pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     sent: bool,
     /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
     sc: M,
+    /// LOSAT_X_TBXCTXTABLE: the context of a query offset of the batch (`XContextTable`, as blastp's
+    /// and blastx's, over the batch's frame bases, `x_ctx_table`), which the units' two-hit test reads for every
+    /// hit that passes it.
+    ctx_of: XContextTable,
 }
 
 impl<M: TbxScore> XPairPar<M> {
@@ -2210,6 +2288,9 @@ impl<M: TbxScore> XPairPar<M> {
         }
         if x_kmerge::on() {
             crate::utils::xreach::x_reach!("LOSAT_X_TBXKMERGE", units);
+        }
+        if ctx_table_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXCTXTABLE", units);
         }
         if !units {
             x_tbx_hitbf::x_reach_not_taken();
@@ -2312,6 +2393,7 @@ impl<M: TbxScore> XPairPar<M> {
         let sent = matches!(b.sc.word(), 2 | 3)
             && b.sc.x_sent_walks()
             && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
+        let ctx_of = x_ctx_table(b.lookup, ctx_table_on());
         Some(Self {
             groups,
             stub,
@@ -2320,6 +2402,7 @@ impl<M: TbxScore> XPairPar<M> {
             extents,
             sent,
             sc: b.sc,
+            ctx_of,
         })
     }
 
@@ -2595,6 +2678,7 @@ impl<M: TbxScore> XPairPar<M> {
             // `get_context_idx` reads only the batch's context bounds, which every group and
             // slice table carries.
             lookup: &tables(unit0.g)[0].lookup,
+            ctx_of: &self.ctx_of,
             contexts: inp.contexts,
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
@@ -3329,6 +3413,7 @@ impl<M: TbxScore> XPairPar<M> {
             window,
             wordsize,
             lookup: sub,
+            ctx_of: &self.ctx_of,
             contexts: inp.contexts,
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
@@ -3654,8 +3739,8 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
         }
 
         // [C] curr_context = BSearchContextInfo(query_offset, query_info);
-        let ctx_idx = h.lookup.get_context_idx(query_offset as i32);
-        // SAFETY: get_context_idx returns an index below num_contexts == contexts.len().
+        let ctx_idx = h.context_of(query_offset);
+        // SAFETY: context_of returns an index below num_contexts == contexts.len().
         let ctx = unsafe { h.contexts.get_unchecked(ctx_idx) };
         let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
         let query_full = &ctx.aa_seq;
@@ -4139,6 +4224,70 @@ mod tests {
             .unwrap_or(0)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
+    // ```c
+    //     while (b < e - 1) {
+    // 	m = (b + e) / 2;
+    // 	if (A->contexts[m].query_offset > n)
+    // 	    e = m;
+    // 	else
+    // 	    b = m;
+    //     }
+    //     return b;
+    // ```
+    // LOSAT_X_TBXCTXTABLE: the context the units' two-hit test takes (`x_context_of` on the
+    // batch's `x_ctx_table`) against the binary search `=0` runs (`get_context_idx`), for every
+    // offset from below the first frame base to past the batch's end, on 240 random layouts:
+    // 0 to 300 contexts, empty contexts (equal frame bases), a first frame base above 0, contexts
+    // of 1 to 9,000 letters and batches over 16,384 letters (coarse blocks of several offsets).
+    #[test]
+    fn the_context_table_gives_the_binary_search_index() {
+        let frames = [frame(1, &aa("MKVLAAGIVRSTWYHE"))];
+        let (mut lookup, _) = lookup_for(&frames);
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        for layout in 0..240 {
+            let contexts = rng.below(if layout % 3 == 0 { 300 } else { 12 }) as usize;
+            let mut bases = Vec::with_capacity(contexts);
+            let mut at = if layout % 5 == 0 {
+                rng.below(50) as i32
+            } else {
+                0
+            };
+            for _ in 0..contexts {
+                bases.push(at);
+                at += match rng.below(6) {
+                    0 => 0,
+                    1 => 1 + rng.below(3) as i32,
+                    2 => 1 + rng.below(9_000) as i32,
+                    _ => 1 + rng.below(400) as i32,
+                };
+            }
+            lookup.frame_bases = bases;
+            lookup.num_contexts = contexts;
+            lookup.query_length = at + rng.below(3) as i32;
+            let table = x_ctx_table(&lookup, true);
+            let off = x_ctx_table(&lookup, false);
+            for q in -3..lookup.query_length + 3 {
+                let reference = lookup.get_context_idx(q);
+                if q >= 0 {
+                    let q = q as u32;
+                    assert_eq!(
+                        x_context_of(&table, &lookup, q),
+                        reference,
+                        "layout {layout}, offset {q}: {:?}",
+                        lookup.frame_bases
+                    );
+                    assert_eq!(x_context_of(&off, &lookup, q), reference);
+                }
+                // The table answers every offset of the batch itself; with `=0` none.
+                if (0..lookup.query_length).contains(&q) {
+                    assert_eq!(table.get(q), Some(reference), "layout {layout}, offset {q}");
+                }
+                assert_eq!(off.get(q), None, "layout {layout}, offset {q}: `=0` table");
+            }
+        }
+    }
+
     fn diag_array_size_for(query_length: i32, window: i32) -> i32 {
         let mut size: i32 = 1;
         while size < query_length + window {
@@ -4182,11 +4331,13 @@ mod tests {
             let mut init_hsps = Vec::new();
             if subject.len() >= wordsize as usize {
                 let failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
+                let ctx_of = x_ctx_table(lookup, true);
                 let h = XHitCtx {
                     diag_offset: *diag_offset,
                     window,
                     wordsize,
                     lookup,
+                    ctx_of: &ctx_of,
                     contexts,
                     cutoff_scores,
                     x_dropoff_per_context,
@@ -4291,6 +4442,7 @@ mod tests {
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),
+            ctx_of: x_ctx_table(&lookup, true),
         };
         let mut diag_array = vec![start; size as usize];
         let mut diag_offset = start_offset;
@@ -4426,6 +4578,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(pp.x_group_count(), 2);
             assert!((0..2).all(|g| pp.x_group_has_entries(g)));
@@ -4869,6 +5022,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(
                 unit_lists(&pp, &inp),
@@ -5007,6 +5161,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             // Ratio 1: every unit whose unmasked table is at least the masked one's size.
             let pp = XPairPar {
@@ -5021,6 +5176,7 @@ mod tests {
                     band_cells: None,
                 }),
                 extents: x_group_extents(&contexts, X_MAX_GROUPS),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(pp.extents.len(), pp.groups.len());
             // Negative control: tables of half the masked size (below extent + window, against
@@ -5037,6 +5193,7 @@ mod tests {
                     .iter()
                     .map(|&e| (x_masked_cells(e, window) / 2).saturating_sub(window as usize))
                     .collect(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             let chunk = SubjectChunk {
                 offset: 0,
@@ -6120,6 +6277,7 @@ mod tests {
                     sliced: None,
                     mask_rule: None,
                     extents: Vec::new(),
+                    ctx_of: x_ctx_table(&lookup, true),
                 },
                 cutoff_scores: vec![12; contexts.len()],
                 x_dropoff_per_context: vec![16; contexts.len()],
@@ -6644,6 +6802,7 @@ mod tests {
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             },
             cutoff_scores: vec![12; contexts.len()],
             x_dropoff_per_context: vec![16; contexts.len()],
@@ -7108,6 +7267,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
+                ctx_of: x_ctx_table(&lookup, true),
             };
             assert_eq!(pp.sent, sent_expected, "case {case_no}");
             assert_eq!(

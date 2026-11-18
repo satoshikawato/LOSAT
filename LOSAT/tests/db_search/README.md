@@ -127,7 +127,7 @@ FASTA files:
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
   whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's
-  frames for its traceback only from 12 bases (blast_hits.c:1161-1163); with `-window_size 0` the one-hit HSP on `w11`
+  frames for its traceback only from 12 bases (blast_hits.c:1162-1164); with `-window_size 0` the one-hit HSP on `w11`
   reaches the traceback, which reads the translation never made (NCBI crashes, LOSAT refuses). `xs_*_s.fna` there:
   the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
   (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is

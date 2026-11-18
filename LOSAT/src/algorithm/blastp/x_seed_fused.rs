@@ -6841,6 +6841,6 @@ fn x_bpf_s17_cells() -> bool {
         std::env::var("LOSAT_BPF_S17")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
-            .is_some_and(|v| v >= 4)
+            .is_some_and(|v| v & 7 >= 4)
     })
 }

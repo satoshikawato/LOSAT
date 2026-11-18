@@ -1642,6 +1642,425 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
+// PROBE (BPF s17, LOSAT_BPF_S17 bit 8; not for merge): the score-only `align8::<false, EM, false>`
+// for two independent problems (a seed's left and right extensions), one row of each in turn, so
+// that the row chain of one overlaps the other's. Each problem computes exactly what `align8`
+// computes for it alone.
+struct P8 {
+    len1: usize,
+    len2: usize,
+    b_size: usize,
+    cells: u64,
+    base: i32,
+    best_rel: i32,
+    a_off: usize,
+    b_off: usize,
+    first: usize,
+    fence_hit: bool,
+    wend: [usize; 2],
+    cur: usize,
+    a: usize,
+}
+
+struct K8 {
+    c: C8,
+    zero: W,
+    lane0: W,
+    k70: W,
+    k10: W,
+    static_tabs: Option<*const u8>,
+    small_alphabet: bool,
+    ncols: usize,
+    num_extra: usize,
+    bias: i32,
+    limit_rebase: i32,
+}
+
+/// Row 0 of one problem (`align8`'s lines from `sc.reset()` to `sc.dirty8 = b_size`).
+#[inline(always)]
+unsafe fn init8p(
+    k: &K8,
+    len1: usize,
+    len2: usize,
+    goe: i32,
+    x: i32,
+    gap_extend: i32,
+    sc: &mut XdropScratch,
+) -> P8 {
+    sc.reset();
+    sc.ensure(k.num_extra.min(len2 + 2) + 16);
+    let mut b_size = 1usize;
+    {
+        let bias = k.bias;
+        let h = sc.h8a.as_mut_ptr().add(PAD);
+        let e = sc.e8.as_mut_ptr().add(PAD);
+        *h = bias as u8;
+        *e = (bias - goe) as u8;
+        let mut score = -goe;
+        for i in 1..=len2 {
+            if score < -x {
+                break;
+            }
+            *h.add(i) = (bias + score) as u8;
+            *e.add(i) = (bias + score - goe) as u8;
+            score -= gap_extend;
+            b_size = i + 1;
+        }
+        *h.add(b_size - 1) = 0;
+    }
+    sc.dirty8 = b_size;
+    P8 {
+        len1,
+        len2,
+        b_size,
+        cells: 0,
+        base: 0,
+        best_rel: 0,
+        a_off: 0,
+        b_off: 0,
+        first: 0,
+        fence_hit: false,
+        wend: [b_size, 0],
+        cur: 0,
+        a: 1,
+    }
+}
+
+/// One row of one problem (the body of `align8`'s row loop): 0 go on, 1 done, 2 declined.
+#[inline(always)]
+unsafe fn row8p<const EM: bool>(
+    p: &mut P8,
+    k: &K8,
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> u8 {
+    let a = p.a;
+    if a > p.len1 {
+        return 1;
+    }
+    let c = &k.c;
+    let zero = k.zero;
+    let num_extra = k.num_extra;
+    if !sc.fits(p.b_size + num_extra + 64) {
+        let d = sc.x_room(p.first, p.b_size + num_extra + 64, false);
+        p.first -= d;
+        p.b_size -= d;
+        p.len2 -= d;
+        p.wend[0] = p.wend[0].saturating_sub(d);
+        p.wend[1] = p.wend[1].saturating_sub(d);
+    }
+    let first = p.first;
+    let b_size = p.b_size;
+    let len2 = p.len2;
+    if sc.sb_filled < b_size {
+        fill_cols(s, sc, (b_size + 64).min(len2 + 1), k.ncols, check_fence);
+    }
+    if sc.bad_k < b_size {
+        return 2;
+    }
+    let mut limit = len2 + 1;
+    let mut bend = b_size;
+    let mut fence_row = false;
+    if sc.fence_k < b_size {
+        limit = sc.fence_k;
+        bend = sc.fence_k;
+        fence_row = true;
+        if bend <= first {
+            p.fence_hit = true;
+            return 1;
+        }
+    }
+    let qa = match q.get(a) {
+        Some(v) => v as usize,
+        None => return 2,
+    };
+    if qa >= k.ncols {
+        return 2;
+    }
+    p.cells += (b_size - first) as u64;
+    let t: *const u8 = if let Some(tabs) = k.static_tabs {
+        tabs.add(qa * TAB)
+    } else {
+        if sc.tab_ok & (1u32 << qa) == 0 {
+            if !build_row(scores, qa, &mut sc.tabs[qa * TAB..(qa + 1) * TAB]) {
+                return 2;
+            }
+            sc.tab_ok |= 1u32 << qa;
+        }
+        sc.tabs.as_ptr().add(qa * TAB)
+    };
+    let (hr, hw) = if p.cur == 0 {
+        (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD))
+    } else {
+        (sc.h8b.as_mut_ptr().add(PAD), sc.h8a.as_mut_ptr().add(PAD))
+    };
+    let e = sc.e8.as_mut_ptr().add(PAD);
+    let sb = sc.sb.as_ptr().add(PAD);
+    let t0 = bcast128(t.add(64));
+    let t1 = bcast128(t.add(80));
+
+    if p.best_rel > k.limit_rebase {
+        let dv = _mm256_set1_epi8(p.best_rel as u8 as i8);
+        let mut b = first;
+        while b < b_size {
+            st(hr.add(b), _mm256_subs_epu8(ld(hr.add(b)), dv));
+            st(e.add(b), _mm256_subs_epu8(ld(e.add(b)), dv));
+            b += 32;
+        }
+        p.base += p.best_rel;
+        p.best_rel = 0;
+    }
+    let mut hpm = k.lane0;
+    let bestv0 = _mm256_set1_epi8((k.bias + p.best_rel) as u8 as i8);
+    let mut rs = Row {
+        carry: zero,
+        bestv: bestv0,
+        thrv: _mm256_subs_epu8(bestv0, c.xv),
+        rec_b: 0,
+        slow: false,
+    };
+    let mut lo_surv = usize::MAX;
+    let mut hi_surv = 0usize;
+    let mut b0 = first;
+    while b0 + 16 < bend {
+        let idx = ld(sb.add(b0));
+        let sv = if k.small_alphabet {
+            _mm256_shuffle_epi8(t0, idx)
+        } else {
+            lut32(t0, t1, _mm256_add_epi8(idx, k.k70), _mm256_sub_epi8(idx, k.k10))
+        };
+        let mask = if b0 + 32 <= limit {
+            None
+        } else {
+            Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
+        };
+        let (d0, _) = block8::<false, EM>(c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+        hpm = zero;
+        let live = !(_mm256_movemask_epi8(d0) as u32);
+        if live != 0 {
+            if lo_surv == usize::MAX {
+                lo_surv = b0 + live.trailing_zeros() as usize;
+            }
+            hi_surv = b0 + (31 - live.leading_zeros() as usize);
+        }
+        b0 += 32;
+    }
+    let mut rx = RowX {
+        carry: _mm256_castsi256_si128(rs.carry),
+        bestv: _mm256_castsi256_si128(rs.bestv),
+        thrv: _mm256_castsi256_si128(rs.thrv),
+    };
+    let (mut rec_b, mut slow) = (rs.rec_b, rs.slow);
+    let t0x = _mm256_castsi256_si128(t0);
+    let t1x = _mm256_castsi256_si128(t1);
+    loop {
+        if b0 >= bend {
+            if b0 >= limit {
+                break;
+            }
+            if (_mm_cvtsi128_si32(rx.carry) & 0xFF) < (_mm_cvtsi128_si32(rx.thrv) & 0xFF) {
+                break;
+            }
+        }
+        let idx = ldx(sb.add(b0));
+        let sv = if k.small_alphabet {
+            _mm_shuffle_epi8(t0x, idx)
+        } else {
+            lut32x(t0x, t1x, idx)
+        };
+        let mask = if b0 + 16 <= limit {
+            None
+        } else {
+            Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
+        };
+        let (d0, _) = block8x::<false, EM>(
+            c,
+            &mut rx,
+            &mut rec_b,
+            &mut slow,
+            hr,
+            hw,
+            e,
+            b0,
+            sv,
+            mask,
+            _mm256_castsi256_si128(hpm),
+        );
+        hpm = zero;
+        let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
+        if live != 0 {
+            if lo_surv == usize::MAX {
+                lo_surv = b0 + live.trailing_zeros() as usize;
+            }
+            hi_surv = b0 + (31 - live.leading_zeros() as usize);
+        }
+        b0 += 16;
+    }
+    let proc_end = b0;
+    if EM {
+        sc.dirty8 = sc.dirty8.max(proc_end);
+    } else if proc_end > sc.dirty8 {
+        sc.dirty8 = proc_end;
+    }
+    let wi = 1 - p.cur;
+    let mut b = proc_end;
+    while b < p.wend[wi] {
+        st(hw.add(b), zero);
+        b += 32;
+    }
+    p.wend[wi] = proc_end;
+    p.cur = wi;
+    if slow {
+        p.b_off = rec_b + sc.x_sh;
+        p.a_off = a;
+        p.best_rel = (_mm_cvtsi128_si32(rx.bestv) & 0xFF) - k.bias;
+    }
+    if fence_row {
+        p.fence_hit = true;
+        return 1;
+    }
+    if lo_surv == usize::MAX {
+        return 1;
+    }
+    let last = hi_surv;
+    if !EM {
+        let mut b = last + 1;
+        while b < proc_end {
+            st(e.add(b), zero);
+            b += 32;
+        }
+    }
+    p.first = lo_surv;
+    p.b_size = last + 1;
+    if p.b_size <= len2 {
+        p.b_size += 1;
+    }
+    p.a = a + 1;
+    0
+}
+
+/// PROBE (BPF s17): `align8::<false, EM, false>` of problem A and of problem B, their rows in
+/// turn. `None` for a problem that `align8` declines (the caller then runs its full dispatch).
+#[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
+pub(super) unsafe fn align8_pair<const EM: bool>(
+    qa: &RowSeq<'_>,
+    sa: &ColSeq<'_>,
+    len1a: usize,
+    len2a: usize,
+    sca: &mut XdropScratch,
+    qb: &RowSeq<'_>,
+    sb: &ColSeq<'_>,
+    len1b: usize,
+    len2b: usize,
+    scb: &mut XdropScratch,
+    scores: &Scores<'_>,
+    max_m: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+) -> (Option<XdropResult>, Option<XdropResult>) {
+    crate::utils::x_frame::x_frame_align();
+    sca.ops.clear();
+    scb.ops.clear();
+    let empty = || {
+        Some(XdropResult {
+            a_offset: 0,
+            b_offset: 0,
+            score: 0,
+            fence_hit: false,
+            cells: 0,
+        })
+    };
+    let ea = len1a == 0 || len2a == 0;
+    let eb = len1b == 0 || len2b == 0;
+    let pass = |e: bool| if e { empty() } else { None };
+    let Some(goe) = gap_open.checked_add(gap_extend) else {
+        return (pass(ea), pass(eb));
+    };
+    let mut x = x_drop;
+    if x < goe {
+        x = goe;
+    }
+    if gap_extend < 1 || gap_open < 0 || max_m < 0 {
+        return (pass(ea), pass(eb));
+    }
+    let bias = x as i64 + goe as i64 + max_m as i64 + 1;
+    let limit_rebase = 127 - bias - max_m as i64;
+    if limit_rebase < 0 || gap_extend > 4 {
+        return (pass(ea), pass(eb));
+    }
+    let sat = |v: i32| v.min(255) as u8 as i8;
+    let mut ramp = [0u8; 32];
+    for (i, r) in ramp.iter_mut().enumerate() {
+        *r = (i as i32 * gap_extend) as u8;
+    }
+    let k = K8 {
+        c: C8 {
+            goe: _mm256_set1_epi8(sat(goe)),
+            ge1: _mm256_set1_epi8(sat(gap_extend)),
+            ge16: _mm256_set1_epi8(sat(16 * gap_extend)),
+            ge32: _mm256_set1_epi8(sat(32 * gap_extend)),
+            ramp: ld(ramp.as_ptr()),
+            xv: _mm256_set1_epi8(sat(x)),
+            kb15: _mm256_set1_epi8(15),
+            c3: _mm256_set1_epi8(const { script_codes(false).0 } as i8),
+            c10: _mm256_set1_epi8(const { script_codes(false).1 } as i8),
+            c40: _mm256_set1_epi8(const { script_codes(false).2 } as i8),
+        },
+        zero: _mm256_setzero_si256(),
+        lane0: _mm256_setr_epi8(
+            -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
+        ),
+        k70: _mm256_set1_epi8(0x70),
+        k10: _mm256_set1_epi8(0x10),
+        static_tabs: match scores {
+            Scores::Tables { t, .. } => Some(t.data.as_ptr()),
+            _ => None,
+        },
+        small_alphabet: scores.ncols() <= 16,
+        ncols: scores.ncols(),
+        num_extra: (x / gap_extend + 3) as usize,
+        bias: bias as i32,
+        limit_rebase: limit_rebase as i32,
+    };
+    let mut la = !ea;
+    let mut lb = !eb;
+    let mut pa = init8p(&k, len1a, len2a, goe, x, gap_extend, sca);
+    let mut pb = init8p(&k, len1b, len2b, goe, x, gap_extend, scb);
+    let (mut ra, mut rb) = (0u8, 0u8);
+    while la || lb {
+        if la {
+            let r = row8p::<EM>(&mut pa, &k, qa, sa, scores, check_fence, sca);
+            if r != 0 {
+                la = false;
+                ra = r;
+            }
+        }
+        if lb {
+            let r = row8p::<EM>(&mut pb, &k, qb, sb, scores, check_fence, scb);
+            if r != 0 {
+                lb = false;
+                rb = r;
+            }
+        }
+    }
+    let out = |e: bool, r: u8, p: &P8, sc: &mut XdropScratch| {
+        if e {
+            empty()
+        } else if r == 2 {
+            None
+        } else {
+            finish::<false, false>(sc, p.a_off, p.b_off, p.base + p.best_rel, p.fence_hit, p.cells)
+        }
+    };
+    (out(ea, ra, &pa, sca), out(eb, rb, &pb, scb))
+}
+
 #[cfg(test)]
 mod tests {
     //! The 256-bit kernels against the scalar transliteration of the NCBI loops and against the

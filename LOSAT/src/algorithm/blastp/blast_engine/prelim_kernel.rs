@@ -1766,7 +1766,7 @@ fn x_bpf_s17() -> u32 {
     *V.get_or_init(|| {
         std::env::var("LOSAT_BPF_S17")
             .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0)
+            .and_then(|v| v.parse::<u32>().ok())
+            .map_or(0, |v| v & 7)
     })
 }

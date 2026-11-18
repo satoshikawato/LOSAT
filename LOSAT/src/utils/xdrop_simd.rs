@@ -5680,6 +5680,63 @@ pub(crate) fn xdrop_align(
     }
 }
 
+/// PROBE (BPF s17, not for merge): two score-only problems (a seed's left and right extensions)
+/// in one 256-bit 8-bit-lane kernel, their rows in turn (`x_avx2::align8_pair`). `None` when that
+/// kernel would not be the one `xdrop_align` runs; a problem's `None` inside means that kernel
+/// declined it, and the caller runs `xdrop_align` for it.
+pub(crate) fn xdrop_align_pair_so(
+    qa: &RowSeq<'_>,
+    sa: &ColSeq<'_>,
+    len1a: usize,
+    len2a: usize,
+    sca: &mut XdropScratch,
+    qb: &RowSeq<'_>,
+    sb: &ColSeq<'_>,
+    len1b: usize,
+    len2b: usize,
+    scb: &mut XdropScratch,
+    scores: &Scores<'_>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+) -> Option<(Option<XdropResult>, Option<XdropResult>)> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if !fits_16bit(gap_open, gap_extend, x_drop) {
+            return None;
+        }
+        let on = x_extra_switches();
+        if on & 1 == 0 || on & 2 != 0 {
+            return None;
+        }
+        let m = fits_8bit(scores, gap_open, gap_extend, x_drop)?;
+        if !X_DP32_REF.load(std::sync::atomic::Ordering::Relaxed) {
+            x_dp32_mark_ref();
+        }
+        // SAFETY: bit 0 is set only when `x_avx2::available()` held (AVX2 detected).
+        let r = unsafe {
+            if on & 16 != 0 {
+                x_avx2::align8_pair::<true>(
+                    qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores, m, gap_open,
+                    gap_extend, x_drop, false,
+                )
+            } else {
+                x_avx2::align8_pair::<false>(
+                    qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores, m, gap_open,
+                    gap_extend, x_drop, false,
+                )
+            }
+        };
+        Some(r)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (qa, sa, len1a, len2a, sca, qb, sb, len1b, len2b, scb, scores);
+        let _ = (gap_open, gap_extend, x_drop);
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Differential test: the SIMD kernels against a plain scalar

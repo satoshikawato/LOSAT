@@ -352,6 +352,8 @@ pub(crate) struct GapAlignScratch {
     // gap_align->dp_mem); it does not change any value NCBI computes.
     // EXPERIMENT: SIMD X-drop kernel state.
     fast: crate::utils::xdrop_simd::XdropScratch,
+    // PROBE (BPF s17): the right extension's rows in the pair kernel (LOSAT_BPF_S17 bit 8).
+    x_fast2: Option<Box<crate::utils::xdrop_simd::XdropScratch>>,
     dp_mem: Vec<BlastGapDp>,
     dp_mem_alloc: usize,
     trace_rows: Vec<Vec<u8>>,
@@ -381,6 +383,7 @@ impl GapAlignScratch {
         let dp_mem_alloc = 1000usize;
         Self {
             fast: crate::utils::xdrop_simd::XdropScratch::for_search(),
+            x_fast2: None,
             dp_mem: vec![
                 BlastGapDp {
                     best: GAP_MININT,
@@ -1311,6 +1314,114 @@ fn align_ex_protein_score_only(
         reverse,
         scratch,
     )
+}
+
+// PROBE (BPF s17, LOSAT_BPF_S17 bit 8; not for merge): the left (reversed) and the right score-only
+// extension of one seed in the pair kernel (`xdrop_align_pair_so`). A side the kernel does not
+// take runs `align_ex_protein_score_only` as before, so each side's value is the one it gives.
+fn align_ex_protein_score_only_pair(
+    query: &[u8],
+    subject: &[u8],
+    l: (usize, usize, usize, usize),
+    r: (usize, usize, usize, usize),
+    score_matrix: BlastpScoreMatrix<'_>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    scratch: &mut GapAlignScratch,
+) -> ((usize, usize, i32), (usize, usize, i32)) {
+    let mut got = (None, None);
+    if crate::utils::xdrop_simd::KERNEL_COMPILED {
+        use crate::utils::xdrop_simd::{xdrop_align_pair_so, ColSeq, RowSeq, XdropScratch};
+        let qa = RowSeq::Bytes {
+            data: query,
+            base: (l.0 + l.2) as isize,
+            step: -1,
+        };
+        let sa = ColSeq {
+            data: subject,
+            base: (l.1 + l.3) as isize - 1,
+            step: -1,
+            zero_from: l.3,
+        };
+        let qb = RowSeq::Bytes {
+            data: query,
+            base: r.0 as isize,
+            step: 1,
+        };
+        let sb = ColSeq {
+            data: subject,
+            base: r.1 as isize + 1,
+            step: 1,
+            zero_from: usize::MAX,
+        };
+        let mut fast2 = scratch
+            .x_fast2
+            .take()
+            .unwrap_or_else(|| Box::new(XdropScratch::for_search()));
+        let fast = &mut scratch.fast;
+        if let Some(v) = with_x_scores(score_matrix, |scores| {
+            xdrop_align_pair_so(
+                &qa, &sa, l.2, l.3, fast, &qb, &sb, r.2, r.3, &mut fast2, scores, gap_open,
+                gap_extend, x_drop,
+            )
+        }) {
+            got = v;
+        }
+        scratch.x_fast2 = Some(fast2);
+    }
+    let left = match got.0 {
+        Some(v) => {
+            crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
+            (v.a_offset, v.b_offset, v.score)
+        }
+        None => align_ex_protein_score_only(
+            query,
+            l.0,
+            subject,
+            l.1,
+            l.2,
+            l.3,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            true,
+            scratch,
+        ),
+    };
+    let right = match got.1 {
+        Some(v) => {
+            crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
+            (v.a_offset, v.b_offset, v.score)
+        }
+        None => align_ex_protein_score_only(
+            query,
+            r.0,
+            subject,
+            r.1,
+            r.2,
+            r.3,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            false,
+            scratch,
+        ),
+    };
+    (left, right)
+}
+
+// PROBE (BPF s17): LOSAT_BPF_S17 bit 8 runs `align_ex_protein_score_only_pair`.
+fn x_bpf_s17_pair() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S17")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .is_some_and(|v| v & 8 != 0)
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:841-843,866
@@ -3091,7 +3202,29 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
     // score_left = Blast_SemiGappedAlign(query, subject+subject_shift,
     //                                    q_length, s_length, ...);
     // ```
+    let right_side = q_length < query.len() && subject_offset < subject_length;
+    let pair = if mode == BlastpGappedAlignmentMode::Exact && right_side && x_bpf_s17_pair() {
+        Some(align_ex_protein_score_only_pair(
+            query,
+            subject,
+            (0, subject_shift, q_length, subject_offset),
+            (
+                q_start,
+                s_start,
+                query.len() - q_length,
+                subject_length - subject_offset,
+            ),
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        ))
+    } else {
+        None
+    };
     let (private_q_start, private_s_start, score_left) = match mode {
+        _ if pair.is_some() => pair.unwrap().0,
         BlastpGappedAlignmentMode::Exact => align_ex_protein_score_only(
             query,
             0,
@@ -3144,8 +3277,9 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
     // gap_align->subject_stop += init_hsp->offsets.qs_offsets.s_off + 1;
     // ```
     let (query_hit_stop, subject_hit_stop, score_right) =
-        if q_length < query.len() && subject_offset < subject_length {
+        if right_side {
             let (private_q_stop, private_s_stop, score_right) = match mode {
+                _ if pair.is_some() => pair.unwrap().1,
                 BlastpGappedAlignmentMode::Exact => align_ex_protein_score_only(
                     query,
                     q_start,

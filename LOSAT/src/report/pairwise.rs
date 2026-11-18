@@ -287,7 +287,8 @@ pub struct PairwiseHit {
 impl PairwiseHit {
     /// Whether the rows of the HSP are empty: BLASTX's ungapped HSPs of length 0
     /// (`algorithm::blastx::empty_rows::rows_empty`), the only ones without a column, whose
-    /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227).
+    /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227). It reads the hit's
+    /// offsets, which a BLASTX hit takes from its Seq-align (`Hsp::seqalign_ends`).
     pub(crate) fn rows_empty(&self) -> bool {
         self.hit.has_sort_offsets
             && super::serial::seqalign::ungapped_rows_empty(

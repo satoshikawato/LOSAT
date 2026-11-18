@@ -2246,6 +2246,10 @@ pub(super) fn pairwise_hits(
                     }
                     let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
+                    // The report's hit is the HSP's Seq-align, so its offsets end where the
+                    // Seq-align does (`Hsp::seqalign_ends`); their one reader here is
+                    // `PairwiseHit::rows_empty`, NCBI's `CSeq_align::GetSeqRange` on these rows.
+                    let (q_end, s_end) = hsp.seqalign_ends();
                     let len = a.qseq.len();
                     let hit = Hit {
                         identity: 100.0 * a.identity as f64 / len as f64,
@@ -2265,9 +2269,9 @@ pub(super) fn pairwise_hits(
                         s_idx: u32::try_from(list.oid)?,
                         raw_score: raw.score,
                         sort_query_offset: usize::try_from(raw.q_start)?,
-                        sort_query_end: usize::try_from(raw.q_end)?,
+                        sort_query_end: usize::try_from(q_end)?,
                         sort_subject_offset: usize::try_from(raw.s_start)?,
-                        sort_subject_end: usize::try_from(raw.s_end)?,
+                        sort_subject_end: usize::try_from(s_end)?,
                         has_sort_offsets: true,
                         gap_info: Some(hsp.edit_script.clone()),
                         num_positives: a.positive,

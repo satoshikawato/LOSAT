@@ -4,3 +4,6 @@
   subject. The reports of the query batches before are written in full first (NCBI BLAST+ writes them before it
   crashes, except what its output buffer still holds: with `-outfmt 0`, the end of the last one); searches where
   no such alignment is found give NCBI BLAST+'s output as before.
+- A `tblastx` search of a database under `-negative_seqidlist` that stops at a sequence header it cannot read now
+  writes the reports of the query batches before it first, as NCBI BLAST+ does before its engine error; before, it
+  wrote none of them.

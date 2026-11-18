@@ -453,6 +453,12 @@ pub(super) fn render(
         ShownSubjects::Database { reported, .. } => &reported.parsed,
     };
     let database = matches!(shown, ShownSubjects::Database { .. });
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = match shown {
+        ShownSubjects::Fasta { .. } => &every_loaded,
+        ShownSubjects::Database { reported, .. } => &reported.loads,
+    };
     // Each tabular format's refusal is that format's (`FormatRefusal::check`).
     for format in outputs
         .formats
@@ -464,6 +470,7 @@ pub(super) fn render(
             spec.as_ref(),
             &subject_ids,
             parsed,
+            loads,
         ) {
             let checked = crate::report::tabular::check_failed_lookups(
                 spec.as_ref(),
@@ -479,6 +486,7 @@ pub(super) fn render(
                         spec.as_ref(),
                         &subject_ids,
                         parsed,
+                        loads,
                         database,
                         false,
                         s_idx,
@@ -486,8 +494,9 @@ pub(super) fn render(
                 },
                 |s_idx| match shown {
                     ShownSubjects::Database { reported, oids, .. } => {
-                        crate::report::tabular::failed_database_title(
+                        crate::report::tabular::failed_database_subject(
                             oids.oid(reported.ordinals[s_idx]),
+                            loads.thrown(s_idx),
                         )
                     }
                     ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
@@ -917,6 +926,13 @@ fn write_tabular(
     // The rows are printed in the order of the final HSP list, so a running count is
     // each row's HSP index.
     let mut hsp_index: HspIndex = 0;
+    // What the reports do at each subject (`report::db_subject::HitLoads`; a subject set's
+    // subjects are all loaded).
+    let every_loaded = crate::report::db_subject::HitLoads::default();
+    let loads = match shown {
+        ShownSubjects::Fasta { .. } => &every_loaded,
+        ShownSubjects::Database { reported, .. } => &reported.loads,
+    };
     for (q_idx, ((query, hitlist), &search_skipped)) in query_records
         .iter()
         .zip(hitlists)
@@ -957,11 +973,18 @@ fn write_tabular(
                 writeln!(writer, "# {hit_count} hits found")?;
             }
         }
+        // The query's formatter is new: its rows keep no subject before the first one that
+        // loads it (`TabularRows`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for list in hitlist.lists() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
             let _subject = subject_records
                 .get(oid)
                 .context("TBLASTN subject OID out of range")?;
+            // The subject's load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
+            // (`TabularRows::write_thrown_default`).
+            let thrown = loads.thrown(oid).is_some();
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -969,7 +992,7 @@ fn write_tabular(
             // ```
             // The subject's first row (the default fields read it) loads it where the query's
             // batch did not prefetch it (`QueryWarnings::subject_read`).
-            if !list.hsps.hsps.is_empty() {
+            if !list.hsps.hsps.is_empty() && !thrown {
                 if let Some(warnings) = warnings.as_deref_mut() {
                     warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
                 }
@@ -979,6 +1002,26 @@ fn write_tabular(
                 "TBLASTN report payload count mismatch"
             );
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                if thrown {
+                    if let Some(probe) = probe.as_mut() {
+                        writer.flush()?;
+                        probe.begin(hsp_index);
+                    }
+                    rows.write_thrown_default(
+                        writer,
+                        query.shown_id(),
+                        |kept| crate::algorithm::common::tabular::printed_id(subject_ids, kept),
+                        linked.evalue,
+                        payload.bit_score,
+                        &crate::report::outfmt6::OutputConfig::ncbi_compat(),
+                    )?;
+                    if let Some(probe) = probe.as_mut() {
+                        writer.flush()?;
+                        probe.end(hsp_index);
+                    }
+                    hsp_index += 1;
+                    continue;
+                }
                 let hsp = &linked.hsp;
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // if (segment->frame < 0) {
@@ -1040,6 +1083,7 @@ fn write_tabular(
                 writer.write_all(query.shown_id())?;
                 writer.write_all(b"\t")?;
                 // A failed lookup's rows are refused before (`check_failed_lookups`).
+                rows.found(oid);
                 writer.write_all(crate::algorithm::common::tabular::printed_id(
                     subject_ids,
                     oid,
@@ -1512,7 +1556,7 @@ fn write_pairwise(
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
-        matrix_name: matrix_name.to_string(),
+        matrix_name: Some(matrix_name.to_string()),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         word_threshold: scoring.threshold,

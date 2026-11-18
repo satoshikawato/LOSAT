@@ -1983,6 +1983,10 @@ pub(crate) struct FastaStream<R: Read> {
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
     backend_available: Option<fn(&mut R) -> std::io::Result<usize>>,
+    /// Whether the input's buffered bytes count as readable (`in_avail` of a `filebuf`'s get
+    /// area); false for `cin`, whose `stdio_sync_filebuf` has no get area
+    /// (`fasta_reader::stream::InputBackend::of`).
+    get_area: bool,
     /// Whether the input has no stream position, as a pipe has none (`tellg() < 0` of
     /// `IsIStreamEmpty`; `input_files::has_stream_position`): then it is never empty.
     no_position: bool,
@@ -2076,6 +2080,7 @@ impl<R: Read> FastaStream<R> {
             //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
             // ```
             backend_available: None,
+            get_area: true,
             no_position: false,
             parse_deflines: false,
             id_scope: None,
@@ -2207,7 +2212,11 @@ impl<R: Read> FastaStream<R> {
             //     }
             //
             // ```
-            let buffered = self.input.buffer().len();
+            let buffered = if self.get_area {
+                self.input.buffer().len()
+            } else {
+                0
+            };
             let available = if buffered != 0 {
                 buffered
             } else if let Some(in_avail) = self.backend_available {
@@ -2530,62 +2539,6 @@ impl<R: Read> FastaStream<R> {
 // typedef IO_PREFIX::ifstream      CNcbiIfstream;
 // #endif
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-// ```c++
-// CT_INT_TYPE CPushback_Streambuf::underflow(void)
-// {
-//     // we are here because there is no more data in the pushback buffer
-//     _ASSERT(gptr()  &&  gptr() >= egptr());
-//
-// #ifdef NCBI_COMPILER_MIPSPRO
-//     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-//         return CT_EOF;
-//     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-// #endif //NCBI_COMPILER_MIPSPRO
-//
-//     x_FillBuffer((size_t) m_Sb->in_avail());
-//     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-// ```
-// The registered std::ifstream backend reports buffered availability first,
-// then remaining regular-file bytes without forcing the next 8191-byte window.
-// Independent instrumented pinned CPushback_Streambuf calibrates this hint;
-// sgetn may span windows when the preserved allocation is larger than 8191.
-fn file_available(file: &mut crate::blastinput::input_files::InputFile) -> std::io::Result<usize> {
-    let metadata = file.metadata()?;
-    // Windows reports a pipe or a console as a file whose position can be read
-    // (`input_files::has_stream_position`); elsewhere `stream_position` below fails on one.
-    if metadata.is_file()
-        && (cfg!(not(windows)) || crate::blastinput::input_files::has_stream_position(file))
-    {
-        let position = file.stream_position()?;
-        Ok(metadata.len().saturating_sub(position) as usize)
-    } else {
-        // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-        // ```c++
-        //     x_FillBuffer((size_t) m_Sb->in_avail());
-        //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-        // ```
-        // The registered native CNcbiIfstream exposes queued pipe bytes via
-        // FIONREAD before forcing a file-buffer refill (independent C++ oracle).
-        #[cfg(unix)]
-        {
-            rustix::io::ioctl_fionread(&**file)
-                .map(|n| n as usize)
-                .map_err(Into::into)
-        }
-        #[cfg(not(unix))]
-        {
-            Ok(0)
-        }
-    }
-}
-// NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-// ```c++
-// #else
-// /// Portable alias for ifstream.
-// typedef IO_PREFIX::ifstream      CNcbiIfstream;
-// #endif
-// ```
 impl FastaStream<crate::blastinput::input_files::InputFile> {
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
     // ```c++
@@ -2603,12 +2556,16 @@ impl FastaStream<crate::blastinput::input_files::InputFile> {
     //     x_FillBuffer((size_t) m_Sb->in_avail());
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
+    /// A stream over an opened input, whose refills read as NCBI's stream of it answers them
+    /// (`fasta_reader::stream::InputBackend::of`: `cin` for `-`, a `CNcbiIfstream` for a path).
     pub(crate) fn from_file(input: impl Into<crate::blastinput::input_files::InputFile>) -> Self {
         let input = input.into();
         let no_position = !crate::blastinput::input_files::has_stream_position(&input);
+        let backend = crate::blastinput::fasta_reader::stream::InputBackend::of(&input);
         let mut stream = Self::new(input);
         stream.no_position = no_position;
-        stream.backend_available = Some(file_available);
+        stream.backend_available = Some(backend.available);
+        stream.get_area = backend.get_area;
         stream
     }
 }
@@ -3018,7 +2975,7 @@ mod stream_tests {
         //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
         // ```
         fn available(&mut self) -> std::io::Result<usize> {
-            file_available(self)
+            (crate::blastinput::fasta_reader::stream::InputBackend::of(self).available)(self)
         }
     }
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
@@ -4025,5 +3982,54 @@ mod query_settings_tests {
             "{error}"
         );
         std::fs::remove_dir_all(dir()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod standard_input_tests {
+    use super::*;
+    use crate::blastinput::input_files::InputFile;
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721 (`-` is `cin`) and
+    // c++/src/corelib/stream_utils.cpp:235-236 (a refill asks for `in_avail()` bytes), quoted at
+    // `fasta_reader::stream::InputBackend::of`.
+    /// BLASTX's and RPSTBLASTN's query stream reads standard input as NCBI reads `cin`, by the
+    /// readers' one rule (`InputBackend::of`): the tail that the same bytes lose in a file named by
+    /// its path is kept (NCBI BLAST+ 2.17.0, blastx and rpstblastn: `Length=107` from a pipe and
+    /// from a redirected file, 85 from the path; fixture rows `blastx.stdin_q_lost_g55_pipe`,
+    /// `blastx.stdin_q_lost_g55_file`, `db.rpstbn.g55.*`).
+    #[test]
+    fn standard_input_keeps_the_tail_that_a_named_file_loses() {
+        let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
+        let path = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-blastx-standard-input-{}",
+            crate::utils::test_dir::process_id()
+        ));
+        std::fs::write(&path, text).unwrap();
+        let lengths = |input: InputFile| {
+            let mut stream = FastaStream::from_file(input);
+            let records = parse_fasta_stream_keeping(
+                &mut stream,
+                false,
+                false,
+                usize::MAX,
+                false,
+                None,
+                &mut |_| Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+            records
+                .iter()
+                .map(|record| record.sequence.len())
+                .collect::<Vec<_>>()
+        };
+        let named = lengths(InputFile::from(std::fs::File::open(&path).unwrap()));
+        let standard_input = lengths(InputFile::as_standard_input(
+            std::fs::File::open(&path).unwrap(),
+        ));
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(named, vec![85]);
+        assert_eq!(standard_input, vec![107]);
     }
 }

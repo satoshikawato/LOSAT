@@ -1871,11 +1871,27 @@ fn x_table_fills_banks(
     !fits
 }
 
-// No NCBI counterpart: the most appends the flat table takes; past it the reference builder runs. A
-// query offset appends to each cell at most twice (its word and a neighbor), so the counts and the
-// slices' `u32` offsets stay below `i32::MAX` (`num_used` is an Int4).
+// No NCBI counterpart: the most appends the flat table takes; past it the reference builder runs
+// (`TooLarge`, the same table). Two facts bound it. A query offset appends to each cell at most
+// twice (its word and a neighbor), and the bound is tested after each query offset, so the
+// counts and the slices' `u32` offsets stay below `i32::MAX` (`num_used` is an Int4) and the
+// record holds at most the bound plus `2 * backbone_size` appends. And a `Vec` of `u32` grows
+// by doubling: a full capacity `c` asks for `2c`, which panics ("capacity overflow") when
+// `2c * 4` bytes pass `isize::MAX`, so a 32-bit target (isize::MAX = 2^31 - 1) must take the
+// fallback before the record gets there. `X_APPENDS_LIMIT` is the smaller of the two bounds
+// on the record's length: `i32::MAX` on a 64-bit target, 268,435,455 on a 32-bit one.
+const X_APPENDS_LIMIT: usize = {
+    let counts = i32::MAX as usize;
+    let growth = isize::MAX as usize / (2 * core::mem::size_of::<u32>());
+    if counts < growth {
+        counts
+    } else {
+        growth
+    }
+};
+
 fn x_max_appends(backbone_size: usize) -> usize {
-    (i32::MAX as usize).saturating_sub(2 * backbone_size)
+    X_APPENDS_LIMIT.saturating_sub(2 * backbone_size)
 }
 
 /// EXPERIMENT (LOSAT_X_BPCLUT): `try_build_blosum62_compressed_lookup` as a flat table. With
@@ -4865,6 +4881,22 @@ pub(crate) fn x_assert_same_compressed_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The bound on the appends leaves the record's doubling below `isize::MAX` bytes (a 32-bit
+    // target takes the `TooLarge` fallback instead of panicking), and is `i32::MAX` where
+    // `usize` has 64 bits.
+    #[test]
+    fn the_appends_bound_keeps_the_records_doubling_inside_isize() {
+        for backbone_size in [0, 1, 15usize.pow(5) + 2, 1 << 20] {
+            let record = x_max_appends(backbone_size) + 2 * backbone_size;
+            assert!(
+                record * 2 * core::mem::size_of::<u32>() <= isize::MAX as usize,
+                "{backbone_size}"
+            );
+        }
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(x_max_appends(0), i32::MAX as usize);
+    }
     use crate::utils::matrix::ncbistdaa;
 
     // A small deterministic generator (xorshift64).
@@ -5932,7 +5964,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         target_pointer_width = "32",
-        ignore = "needs over 2 GiB: its record of appends (over 268 million u32) doubles past isize::MAX bytes, which a 32-bit target cannot"
+        ignore = "builds a table of over 268 million appends (threshold 1100), the most a 32-bit target takes (`x_max_appends`: the record's doubling stays below isize::MAX bytes); there the product takes the TooLarge fallback, so this table is not built"
     )]
     fn pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors() {
         let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
@@ -6038,7 +6070,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         target_pointer_width = "32",
-        ignore = "needs over 2 GiB: its record of appends (over 268 million u32) doubles past isize::MAX bytes, which a 32-bit target cannot"
+        ignore = "builds a table of over 268 million appends (threshold 1100), the most a 32-bit target takes (`x_max_appends`: the record's doubling stays below isize::MAX bytes); there the product takes the TooLarge fallback, so this table is not built"
     )]
     fn blastx_tables_take_u16_offsets_up_to_their_letters() {
         let mut rng = XorShift(0x2545_F491_4F6C_DD1D);

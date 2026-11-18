@@ -728,8 +728,11 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 /// The engine's identities of the hit `hsp` (its subject named by ordinal id) of the query whose
 /// letters are `query` (`report::stored_engine_identities` against its subject's store in
 /// `stores`, which a report with `nident` reads): whether a row of `nident` alone reads its
-/// subject (`SubjectFetch::WithIdentities`). A subject without a store counts as one whose rows
-/// read it (1).
+/// subject (`SubjectFetch::WithIdentities`). A report whose fields include `nident` reads the
+/// letters of its subjects (`tabular::reads_letters`: `nident` is one of its `ROW_FIELDS`), so
+/// the subjects that this is asked for have a store; one without a store would count as a subject
+/// whose rows read it (1), which ends the run where NCBI's `nident` reads it (review 3 of line
+/// DBID pfoff-2, L3).
 pub(crate) fn hit_identities(
     stores: &ReportedStores,
     hsp: &TblastxHsp,

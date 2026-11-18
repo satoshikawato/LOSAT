@@ -9,12 +9,28 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "LOSAT/tests"
 sys.path.insert(0, str(TESTS))
 import db_search_fixtures
 from wasm_performance import validate_thread_evidence
+
+# The output formats in which blastx reads its query file before the search (BLAST XML 5, and XML2 and JSON 13 to
+# 16; LOSAT/src/algorithm/blastx/blast_xml.rs `prescan_queries`), whose frozen rows run through each WASI command
+# (`blastx_prescan_checkers`).
+BLASTX_PRESCAN_FORMATS = "5,13,14,15,16"
+
+
+def blastx_prescan_checkers(wrapper):
+    """The checkers of the native gates that run blastx's rows of BLASTX_PRESCAN_FORMATS through `wrapper` (a
+    LOSAT command), at -num_threads 1, exactly: (name, argv after the interpreter, the marker of a differing line)
+    for the -subject rows (docs/evidence/losat_web_e2a/check_losat.py) and the -db rows (db_search_fixtures.py)."""
+    return [("subject", [ROOT / "docs/evidence/losat_web_e2a/check_losat.py", "--losat", wrapper, "--programs", "blastx",
+                         "--threads", "1", "--outfmts", BLASTX_PRESCAN_FORMATS], "\tDIFF\t"),
+            ("db", [TESTS / "db_search_fixtures.py", "check", "--losat", wrapper, "--program", "blastx",
+                    "--threads", "1", "--outfmts", BLASTX_PRESCAN_FORMATS], "\tdiffers\t")]
 
 
 def digest(data):
@@ -268,6 +284,46 @@ def main():
         print(f"stdin/{program}", "native bytes PASS", flush=True)
     import shutil
     shutil.rmtree(rps_db.parent)
+    # NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
+    # ```c++
+    # 	char c;
+    # 	CNcbiStreampos orig_p = in.tellg();
+    # 	// Piped input
+    # 	if(orig_p < 0)
+    # 		return false;
+    #
+    # 	IOS_BASE::iostate orig_state = in.rdstate();
+    # 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
+    #
+    # 	if(! (in >> c))
+    # 		return true;
+    #
+    # 	in.seekg(orig_p);
+    # ```
+    # blastx's BLAST XML (outfmt 5), XML2 and JSON (13 to 16) through each WASI command, at -num_threads 1: every
+    # blastx row of these formats of the frozen NCBI -subject fixtures (outfmt0_manifest.tsv, 88 rows) and -db
+    # fixtures (db_search_manifest/blastx*.tsv, 211 rows), byte for byte, by the checkers of the native gates
+    # (`blastx_prescan_checkers`), which run a wrapper that starts the command's runner in the place of the binary.
+    # In these formats LOSAT reads the query file once before the search, for its refusals before the first byte
+    # (LOSAT/src/algorithm/blastx/blast_xml.rs `prescan_queries`): it reads the open file itself and puts it back
+    # where it was, as NCBI's IsIStreamEmpty reads ahead on its one stream. Before, it read a second handle on the
+    # file, which WASI cannot make, and every such run stopped with 'Argument "query". File is not accessible'.
+    for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+        wrapper = out / "blastx-xml-fixtures" / kind / "losat"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(str(x)) for x in prefixes[kind]) + ' "$@"\n')
+        wrapper.chmod(0o755)
+        for name, checker, differs in blastx_prescan_checkers(wrapper):
+            label = f"blastx-xml-fixtures/{kind}/{name}"
+            started = time.monotonic()
+            try:
+                execute(label, [sys.executable, *checker], timeout=3600)
+            except AssertionError:
+                lines = (out / label / "stdout").read_text(errors="replace").splitlines()
+                print("\n".join(line for line in lines if differs in line or line.startswith("# ")), flush=True)
+                raise
+            print(label, (out / label / "stdout").read_text().splitlines()[-1],
+                  f"({time.monotonic() - started:.0f} s)", flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

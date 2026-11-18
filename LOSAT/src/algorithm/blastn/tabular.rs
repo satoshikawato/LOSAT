@@ -60,8 +60,10 @@ const PROGRAM: &str = "BLASTN";
 /// What the report needs besides the final hit lists.
 pub(crate) struct BlastnTabular<'a> {
     pub spec: &'a TabularSpec,
-    /// The queries of this call (their searched letters, which the rows read).
+    /// The queries of this call.
     pub queries: &'a [FastaRecord],
+    /// The records whose letters the rows read (`pairwise::QueryRecords`).
+    pub query_records: super::pairwise::QueryRecords<'a>,
     /// By query: the shown id (the default outfmt 6 query id), the title (outfmt 7's
     /// `# Query:` line) and the searched length.
     pub query_ids: &'a [Arc<[u8]>],
@@ -334,7 +336,7 @@ pub(crate) fn write_blastn_tabular(
                 if needs.rows && !subject.throws() {
                     xml_rows_into(
                         hsp,
-                        tab.queries,
+                        tab.query_records,
                         tab.letters,
                         &mut query_row,
                         &mut subject_row,
@@ -343,7 +345,7 @@ pub(crate) fn write_blastn_tabular(
                 }
                 let row = tabular_hsp(
                     hsp,
-                    searched_length,
+                    coverage_length(hsp, hsp_list.hsps.len(), searched_length, query_length),
                     needs
                         .rows
                         .then_some((query_row.as_slice(), subject_row.as_slice())),
@@ -418,7 +420,7 @@ pub(crate) fn write_blastn_tabular(
 /// identities are the default row's (`write_hsp_rows`).
 fn tabular_hsp<'r>(
     hsp: &BlastnHsp,
-    searched_length: usize,
+    coverage_length: usize,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
     let gaps = hsp.gap_info.as_deref().map_or(0, |ops| {
@@ -457,8 +459,66 @@ fn tabular_hsp<'r>(
         // have no end gaps: a `-` at a row's end fills a segment past the query's end (an HSP that
         // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character.
         end_gaps: false,
-        // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
-        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
+        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, coverage_length as i32),
+    }
+}
+
+/// The query length of `hsp`'s `qcovhsp` in a subject whose Seq-align holds `hsps` HSPs:
+/// `searched_length`, that of the HSP's context, where the Seq-align that the formatter reads
+/// carries `hsp_percent_coverage` (`Blast_HSPGetQueryCoverage` of the context); `query_length`,
+/// the `-query_loc` range as given (`m_QueryLength`, tabular.cpp:787-790), where it carries none.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1308-1309
+/// ```c++
+///     CSeq_align::TScore& score_list = retval->SetScores();
+///     s_BuildScoreList(hsp, score_list, seqid_list, query_length);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3185-3205
+/// ```c++
+///         } else if(seg.Which() == CSeq_align::C_Segs::e_Dendiag){
+///             if(seg.GetDendiag().size() > 1){
+///                 //has more than one dendiag. Need to seperate as each is
+///                 //a distinct HSP
+///                 ITERATE (CSeq_align::C_Segs::TDendiag, iterDendiag,
+///                          seg.GetDendiag()){
+///                     CRef<CSeq_align> aln(new CSeq_align);
+///                     if((*iterDendiag)->IsSetScores()){
+///                         aln->SetScore() = (*iterDendiag)->GetScores();
+///                     }
+///                     ...
+///             } else {
+///                 alnSetRef->Set().push_back(*iter);
+///             }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
+/// ```c++
+/// void CBlastTabularInfo::x_SetQueryCovSeqalign(const CSeq_align & align, int query_len)
+/// {
+/// 	double tmp = 0;
+/// 	if(!align.GetNamedScore("hsp_percent_coverage", tmp)) {
+/// 		int len = abs((int) (align.GetSeqStop(0) - align.GetSeqStart(0))) + 1;
+/// 		tmp = 100.0 * len/(double) query_len;
+/// 		if(tmp  < 99)
+/// 			tmp +=0.5;
+/// 	}
+/// 	m_QueryCovSeqalign = (int)tmp;
+/// }
+/// ```
+/// An ungapped search (an HSP without an edit script) makes one Seq-align of a subject's
+/// HSPs, each a Dense-diag with its scores (`x_UngappedHSPToDenseDiag`); the formatter splits
+/// one of several into one per HSP with the Dense-diag's scores, and keeps one of a single
+/// HSP, which has no scores of its own: its span counts against `query_length` (the same
+/// formula). A gapped HSP's Seq-align has its scores. As BLASTX's `query_coverage_per_hsp`.
+fn coverage_length(
+    hsp: &BlastnHsp,
+    hsps: usize,
+    searched_length: usize,
+    query_length: usize,
+) -> usize {
+    if hsp.gap_info.is_none() && hsps == 1 {
+        query_length
+    } else {
+        searched_length
     }
 }
 
@@ -996,5 +1056,36 @@ mod tests {
         let partial = hsp((501, 600), (51, 150), false, None);
         assert_eq!(uniq_seq_coverage(&[a, partial]), 100 + 50);
         assert_eq!(uniq_subject_coverage(&[], 100), -1);
+    }
+
+    // NCBI blast_seqalign.cpp:1308-1309, showalign.cpp:3185-3205 and tabular.cpp:737-747: an
+    // ungapped subject's single Dense-diag counts against the range as given (-query_loc
+    // 1203-1000000 of a record of 2202 letters: 998798), several against the context (1000), as
+    // does a gapped HSP. NCBI BLAST+ 2.17.0 writes qcovhsp 0 for the first (200 letters), 20 for
+    // the others (x1bp fix 2 probe, d3mK; arch_multi with -query_loc 1-1000000).
+    #[test]
+    fn hsp_coverage_follows_the_seq_align_that_the_formatter_reads() {
+        let ungapped = hsp((1203, 1402), (1, 200), false, None);
+        let gapped = hsp(
+            (1203, 1402),
+            (1, 200),
+            false,
+            Some(vec![GapEditOp::Sub(200)]),
+        );
+        assert_eq!(coverage_length(&ungapped, 1, 1000, 998_798), 998_798);
+        assert_eq!(coverage_length(&ungapped, 2, 1000, 998_798), 1000);
+        assert_eq!(coverage_length(&gapped, 1, 1000, 998_798), 1000);
+        let row = tabular_hsp(
+            &ungapped,
+            coverage_length(&ungapped, 1, 1000, 998_798),
+            None,
+        );
+        assert_eq!(row.qcovhsp, 0);
+        let row = tabular_hsp(
+            &ungapped,
+            coverage_length(&ungapped, 2, 1000, 998_798),
+            None,
+        );
+        assert_eq!(row.qcovhsp, 20);
     }
 }

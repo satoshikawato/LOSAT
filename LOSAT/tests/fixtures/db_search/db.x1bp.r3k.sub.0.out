@@ -1,0 +1,101 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x1bo_r3_s.fna).
+           1 sequences; 794 total letters
+
+
+
+Query= qA
+
+Length=762
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+
+Effective search space used: 40035
+
+
+Query= qB
+
+Length=732
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_r3                                                                  577     2e-170
+
+
+> s_r3
+Length=794
+
+ Score = 577 bits (300),  Expect = 2e-170
+ Identities = 75/300 (25%), Gaps = 0/300 (0%)
+ Strand=Plus/Minus
+
+Query  1    TAGCGCGATTGATTTATTATGAATCGACGGTCTCCACTGCCACTGGCGCCGCTCGAACTC  60
+            | |    ||  |  | |    ||   || |         |      |  | | |      
+Sbjct  764  TGGACGAATCTAACTTTCTATAACGCACCGGTATGCAGCCTGAACTCCTCACACACCTGG  705
+
+Query  61   GTTCTTCGGATTGCCTAATGACCCCACTAGCAGGAGGGCGCCCTGTCGAGCCGTTCGATT  120
+            |||    |     |  | ||||     |    | ||         | || |      |  
+Sbjct  704  GTTTCGGGACGGCCTCACTGACATGTGTTAGGGTAGAAATAGAGATAGACCAAGGGCACA  645
+
+Query  121  GGGTATACAGGTCCTTGTCACCACTCAGCAGCCGTCTCTCCCTTCACCTGCGATGAGGGT  180
+             |          ||   |  |    |   ||||              |    |   |   
+Sbjct  644  TGCAGCTGGTTCCCGCTTAGCGGAGCCCTAGCCTGTATCTTGCAAGGCATGAAGATGTCA  585
+
+Query  181  ATTACAGGCGAGCCTGTTACCTTCGGCCAGAGCGACCGGGCATCGCTGCCCGCAAAGGTT  240
+                      | |     | |    |   |  |   ||        ||     |    ||
+Sbjct  584  TACGGTTCGCAACTCAAGAACCGTTGGACGGCCTGACGTTATCGCTTGATTTTAGCTATT  525
+
+Query  241  AAATATTCCGCACAAAGCTAAAGAAAGCGCCTATGACATTCTGCGATTTAACACCCGCTA  300
+              |     |     ||    |              |      | ||     ||  |    
+Sbjct  524  TGACCAGGCAAGGTAATGCGAGCCGTATCAGCCATAAGGCGGGTGAAGCCTCATACATAT  465
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+
+Effective search space used: 17292
+
+
+Query= qC
+
+Length=1102
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+
+Effective search space used: 305760
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x1bo_r3_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 794
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2

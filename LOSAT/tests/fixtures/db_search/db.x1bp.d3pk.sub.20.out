@@ -1,0 +1,6 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore
+qA,s_minus3,100.000,200,0,0,1203,1402,200,1,6.42e-105,367
+qA,s_plus3,100.000,200,0,0,2003,2202,1,200,6.42e-105,367
+qB,s_minus3,100.000,200,0,0,1805,2004,200,1,1.88e-105,367
+qB,s_plus3,100.000,200,0,0,1,200,1,200,1.88e-105,367
+qB,s_plus3,100.000,11,0,0,1451,1461,1190,1200,0.20,21.4

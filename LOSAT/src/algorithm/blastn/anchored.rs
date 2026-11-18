@@ -2,8 +2,9 @@
 //! the letters, labels and masks of a query's section, read where outfmt 0's rows read them
 //! (`pairwise::Rows`).
 //!
-//! - Letters: the searched letters of the queries and the subjects, upper case, in their records'
-//!   positions (the searched letters start at the `-query_loc` or `-subject_loc` interval); a
+//! - Letters: the letters of the queries' records (with `-query_loc` the whole record, as outfmt
+//!   0's rows read them, `pairwise::QueryRecords`) and the subjects' searched letters, upper case,
+//!   in their records' positions (the searched letters start at the `-subject_loc` interval); a
 //!   database's reported sequences are the letters that outfmt 0 reads (`SubjectLetters`).
 //! - Labels: `x_FillSeqid` of the Bioseq's Seq-ids (`query_anchored::record_label`,
 //!   `query_anchored::database_label`).
@@ -13,7 +14,7 @@
 use std::sync::Arc;
 
 use super::hsp::BlastnHitList;
-use super::pairwise::Rows;
+use super::pairwise::{QueryRecords, Rows};
 use super::x_subject_store::SubjectLetters;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
@@ -26,7 +27,8 @@ use crate::report::query_anchored::{
 /// What the sections of a BLASTN report read (module doc).
 pub(crate) struct AnchoredSequences<'a> {
     pub(crate) queries: &'a [FastaRecord],
-    pub(crate) query_placements: &'a Placements,
+    /// The records whose letters the sections read (`pairwise::QueryRecords`).
+    pub(crate) query_records: QueryRecords<'a>,
     /// The subjects' letters by subject index (a database's by rank).
     pub(crate) subjects: SubjectLetters<'a>,
     pub(crate) subject_placements: &'a Placements,
@@ -68,13 +70,16 @@ impl ReportSequences for AnchoredSequences<'_> {
     }
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
-        query_record_letters(
-            &self.queries[q_idx],
-            self.query_placements.offset(q_idx),
-            from,
-            to,
-            out,
-        );
+        // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:304-305
+        // ```c++
+        //         if (IsPositiveStrand(row)) {
+        //             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buffer);
+        // ```
+        // The letters of the query's Bioseq at record positions (`QueryRecord::letters`, from
+        // position 0), whose `CSeqVector` stops at the record's end.
+        if let Some(record) = self.query_records.record(q_idx) {
+            query_record_letters(record.letters, 0, from, to, out);
+        }
     }
 
     fn subject_letters(&self, s_idx: u32, from: u32, to: u32, out: &mut Vec<u8>) {

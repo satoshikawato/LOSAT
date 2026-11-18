@@ -17,8 +17,113 @@ use crate::utils::dust::MaskedInterval;
 
 use super::alignment::build_blastna_matrix;
 use super::hsp::{BlastnHitList, BlastnHsp, BlastnHspList};
-use super::lookup::{reverse_complement, reverse_complement_in_place};
+use super::lookup::reverse_complement_in_place;
 use super::x_subject_store::SubjectLetters;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+// ```c++
+// void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+// {
+//     _ASSERT(sar);
+//     const int query_row = 0;
+//
+//     TSeqPos q_shift = 0;
+//
+//     if (query.IsInt()) {
+//         q_shift = query.GetInt().GetFrom();
+//     }
+//
+//     if (q_shift > 0) {
+//         sar->OffsetRow(query_row, q_shift);
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:108-124
+// ```c++
+// CSeqVector& CAlnVec::x_GetSeqVector(TNumrow row) const
+// {
+//     TSeqVectorCache::iterator iter = m_SeqVectorCache.find(row);
+//     CRef<CSeqVector> seq_vec;
+//     if (iter != m_SeqVectorCache.end()) {
+//         seq_vec = iter->second;
+//     }
+//     else {
+//         CBioseq_Handle h = GetBioseqHandle(row);
+//         CSeqVector vec = h.GetSeqVector
+//             (CBioseq_Handle::eCoding_Iupac,
+//              IsPositiveStrand(row) ?
+//              CBioseq_Handle::eStrand_Plus :
+//              CBioseq_Handle::eStrand_Minus);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
+// ```c++
+//     // set sequence range
+//     retval->SetInt().SetFrom(from);
+//     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
+// ```
+/// The letters of a query's record as NCBI's reports read them (the `CSeqVector` of the query's
+/// Bioseq: the whole record, also where `-query_loc` searched an interval of it) and the record
+/// position of the searched letters' first (the interval's start, by which `RemapToQueryLoc`
+/// moves the query row of every Seq-align; 0 without `-query_loc`).
+#[derive(Clone, Copy)]
+pub(crate) struct QueryRecord<'a> {
+    pub letters: &'a [u8],
+    pub offset: usize,
+}
+
+/// The query records of a report call as its rows read them (`QueryRecord`): the searched records,
+/// and with `-query_loc` the input records, whole, whose intervals they are.
+#[derive(Clone, Copy)]
+pub(crate) struct QueryRecords<'a> {
+    /// The searched records (with `-query_loc`, the intervals' letters).
+    searched: &'a [FastaRecord],
+    /// Where each searched query lies in its record, and its input position.
+    query_input: &'a crate::blastinput::seq_range::QueryInput,
+    /// The input records from input position `first` on (read with `-query_loc` only).
+    input: &'a [FastaRecord],
+    first: usize,
+}
+
+impl<'a> QueryRecords<'a> {
+    /// The records of the searched queries `searched` placed by `query_input`, of which `input`
+    /// holds the input records from input position `first` on.
+    pub(crate) fn new(
+        searched: &'a [FastaRecord],
+        query_input: &'a crate::blastinput::seq_range::QueryInput,
+        input: &'a [FastaRecord],
+        first: usize,
+    ) -> Self {
+        Self {
+            searched,
+            query_input,
+            input,
+            first,
+        }
+    }
+
+    /// The searched records.
+    pub(crate) fn searched(&self) -> &'a [FastaRecord] {
+        self.searched
+    }
+
+    /// The record of searched query `q_idx` (`None` for a query the call does not hold).
+    pub(crate) fn record(&self, q_idx: usize) -> Option<QueryRecord<'a>> {
+        let searched = self.searched.get(q_idx)?;
+        if !self.query_input.placements.ranged() {
+            return Some(QueryRecord {
+                letters: searched.seq(),
+                offset: 0,
+            });
+        }
+        let record = self
+            .input
+            .get(self.query_input.ordinal(q_idx).checked_sub(self.first)?)?;
+        Some(QueryRecord {
+            letters: record.seq(),
+            offset: self.query_input.placements.offset(q_idx),
+        })
+    }
+}
 
 /// The regions that the report prints in lowercase.
 pub(crate) struct DisplayMasks<'a> {
@@ -41,14 +146,14 @@ impl<'a> Rows<'a> {
     // shared post-processing makes every BLASTN run compile it in Wasm hosts.
     #[inline(never)]
     pub(crate) fn new(
-        queries: &'a [FastaRecord],
+        queries: QueryRecords<'a>,
         subjects: SubjectLetters<'a>,
         masks: &DisplayMasks<'_>,
     ) -> Self {
         let query_masks: Vec<Vec<MaskedInterval>> = masks
             .query
             .iter()
-            .zip(queries)
+            .zip(queries.searched())
             .enumerate()
             .map(|(q_idx, (query_masks, query))| {
                 shown_query_masks(
@@ -162,13 +267,13 @@ pub(crate) fn pairwise_windows(
 /// outfmt 0 rows, without a `PairwiseHit`, written into two buffers that the caller reuses.
 pub(crate) fn xml_rows_into(
     hsp: &BlastnHsp,
-    queries: &[FastaRecord],
+    queries: QueryRecords<'_>,
     subjects: SubjectLetters<'_>,
     query_row: &mut Vec<u8>,
     subject_row: &mut Vec<u8>,
 ) -> Result<()> {
     let query = queries
-        .get(hsp.q_idx as usize)
+        .record(hsp.q_idx as usize)
         .context("BLASTN HSP of an unknown query")?;
     let s_idx = hsp.s_idx as usize;
     subjects
@@ -177,7 +282,7 @@ pub(crate) fn xml_rows_into(
         .context("BLASTN HSP of an unknown subject")?;
     displayed_rows_into(
         hsp,
-        query.seq(),
+        query,
         subjects.len(s_idx),
         |from, to| subjects.upper_letters(s_idx, from, to),
         query_row,
@@ -187,7 +292,7 @@ pub(crate) fn xml_rows_into(
 
 /// What the displayed rows of an HSP read besides the HSP (`pairwise_hits`).
 pub(crate) struct Rows<'a> {
-    queries: &'a [FastaRecord],
+    queries: QueryRecords<'a>,
     subjects: SubjectLetters<'a>,
     /// Per query, the shown masks (`shown_query_masks`).
     query_masks: Vec<Vec<MaskedInterval>>,
@@ -227,7 +332,7 @@ impl Rows<'_> {
         });
         for hsp in &hsp_list.hsps {
             let query = queries
-                .get(hsp.q_idx as usize)
+                .record(hsp.q_idx as usize)
                 .context("BLASTN HSP of an unknown query")?;
             let s_idx = hsp.s_idx as usize;
             let subject = subjects
@@ -236,7 +341,7 @@ impl Rows<'_> {
                 .context("BLASTN HSP of an unknown subject")?;
             let subject_length = subjects.len(s_idx);
             let (mut query_row, mut subject_row) =
-                displayed_rows(hsp, query.seq(), subject_length, |from, to| {
+                displayed_rows(hsp, query, subject_length, |from, to| {
                     subjects.upper_letters(s_idx, from, to)
                 })?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1796-1798
@@ -347,12 +452,12 @@ impl Rows<'_> {
 // Reversing the alignment of a minus-strand HSP reverse-complements both rows. The
 // residues are the input letters in uppercase (NCBI's IUPAC sequence data); masking is
 // applied afterwards. Only the aligned segments are read: the segment of the minus-strand
-// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`. The subject
-// has `subject_length` letters, and `subject_letters(from, to)` gives its letters
-// `[from, to)` in uppercase.
+// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`, read in the
+// query's record (`context_letters`). The subject has `subject_length` letters, and
+// `subject_letters(from, to)` gives its letters `[from, to)` in uppercase.
 fn displayed_rows(
     hsp: &BlastnHsp,
-    query: &[u8],
+    query: QueryRecord<'_>,
     subject_length: usize,
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -372,7 +477,7 @@ fn displayed_rows(
 /// reversed in place for a minus-strand HSP.
 fn displayed_rows_into(
     hsp: &BlastnHsp,
-    query: &[u8],
+    query: QueryRecord<'_>,
     subject_length: usize,
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
     query_row: &mut Vec<u8>,
@@ -444,37 +549,47 @@ fn displayed_rows_into(
 /// The query letters of an HSP's context offsets `[query.offset, query.end)`, in the context's
 /// direction (the complement for a minus-strand HSP, still to be reversed with the rows), as the
 /// reports read them through the Seq-align (`CAlnVec::GetWholeAlnSeqString` on the plus strand of
-/// the query, after `Reverse` for a minus-strand HSP): a letter whose position in the record lies
-/// past the record's end is not read (`CSeqVector` stops at its size), and its column shows the
-/// gap character. Only an HSP that NCBI keeps outside its query context (remaining-gaps X1b-o)
-/// reaches past the end: its query coordinates pass the query's end (`seqalign_query_start` is at
-/// least 0; one below 0 never reaches the rows), and every column of its query row is a gap
-/// character (X1b-p).
-fn context_letters(hsp: &BlastnHsp, query: &[u8]) -> Vec<u8> {
+/// the query's record, after `Reverse` for a minus-strand HSP): context offset `c` lies at record
+/// position `offset + c` on the plus strand and `offset + length - 1 - c` on the minus strand
+/// (`QueryRecord::offset`, `RemapToQueryLoc`; `length` the context's), and a position past the
+/// record's end is not read (`CSeqVector` stops at its size): its column shows the gap character.
+/// Only an HSP that NCBI keeps outside its query context (remaining-gaps X1b-o) reaches past the
+/// searched letters: with `-query_loc` it reads the record's letters outside the interval, and
+/// past the record's end every column is a gap character (X1b-p). A position below 0 never
+/// reaches the rows (`run::left_of_query_refusal`); it would be a gap character too.
+fn context_letters(hsp: &BlastnHsp, query: QueryRecord<'_>) -> Vec<u8> {
     let (qs, qe) = (
         i64::from(hsp.internal_q_offset_0),
         i64::from(hsp.internal_q_end_0),
     );
-    let len = query.len() as i64;
-    // The context offsets `[from, to)` lie in the record: plus strand offset `c` at position `c`,
-    // minus strand at `len - 1 - c` (its complement). The offsets below 0 come first in the
-    // context's direction and those from `len` on last; neither is read.
-    let (from, to) = (qs.max(0), qe.min(len));
-    let before = (qe.min(0) - qs).max(0);
-    let after = (qe - qs.max(len)).max(0);
+    let (shift, length) = (query.offset as i64, hsp.query_length as i64);
+    let record_length = query.letters.len() as i64;
+    let minus = hsp.query_frame < 0;
+    // The record positions `[from, to)` of the context offsets `[qs, qe)` on the plus strand.
+    let (from, to) = if minus {
+        (shift + length - qe, shift + length - qs)
+    } else {
+        (shift + qs, shift + qe)
+    };
+    // The positions below 0 and those from the record's end on are not read; in the context's
+    // direction the plus strand's low positions come first, the minus strand's high ones.
+    let below = (to.min(0) - from).max(0) as usize;
+    let past = (to - from.max(record_length)).max(0) as usize;
+    let (first, last) = if minus { (past, below) } else { (below, past) };
+    let (read_from, read_to) = (from.max(0), to.min(record_length));
     let mut context = Vec::with_capacity((qe - qs).max(0) as usize);
-    context.resize(before as usize, b'-');
-    if from < to {
-        let (from, to) = (from as usize, to as usize);
-        if hsp.query_frame < 0 {
-            context.extend(reverse_complement(
-                &query[query.len() - to..query.len() - from],
-            ));
+    context.resize(first, b'-');
+    if read_from < read_to {
+        let letters = &query.letters[read_from as usize..read_to as usize];
+        if minus {
+            let at = context.len();
+            context.extend_from_slice(letters);
+            reverse_complement_in_place(&mut context[at..]);
         } else {
-            context.extend(query[from..to].iter().map(u8::to_ascii_uppercase));
+            context.extend(letters.iter().map(u8::to_ascii_uppercase));
         }
     }
-    context.resize(context.len() + after as usize, b'-');
+    context.resize(context.len() + last, b'-');
     context
 }
 
@@ -482,7 +597,7 @@ fn context_letters(hsp: &BlastnHsp, query: &[u8]) -> Vec<u8> {
 /// kept): a minus-strand HSP's rows are still to be reverse-complemented.
 fn context_rows_into(
     hsp: &BlastnHsp,
-    query: &[u8],
+    query: QueryRecord<'_>,
     subject_length: usize,
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
     query_row: &mut Vec<u8>,
@@ -492,10 +607,13 @@ fn context_rows_into(
     subject_row.clear();
     let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
-    // An HSP whose Seq-align has a query start below 0 never reaches the rows
-    // (`run::left_of_query_refusal`, `BlastnHsp::seqalign_query_start`).
+    // An HSP whose Seq-align has a query start below 0 in the record never reaches the rows
+    // (`run::left_of_query_refusal`, `BlastnHsp::record_query_start`).
     ensure!(
-        qs <= qe && hsp.seqalign_query_start() >= 0 && ss <= se && se <= subject_length,
+        qs <= qe
+            && query.offset as i64 + hsp.seqalign_query_start() >= 0
+            && ss <= se
+            && se <= subject_length,
         "BLASTN HSP outside its sequences"
     );
     let context = context_letters(hsp, query);
@@ -836,6 +954,11 @@ mod tests {
         FastaRecord::new("Query_1", b"q", seq)
     }
 
+    /// The letters of a query searched whole (no `-query_loc`).
+    fn whole(letters: &[u8]) -> QueryRecord<'_> {
+        QueryRecord { letters, offset: 0 }
+    }
+
     fn hsp(
         frame: i32,
         q: (usize, usize),
@@ -920,7 +1043,7 @@ mod tests {
         let ops = vec![GapEditOp::Sub(4), GapEditOp::Ins(1), GapEditOp::Sub(3)];
         let (q, s) = displayed_rows(
             &hsp(1, (0, 8), (0, 7), Some(ops)),
-            query.seq(),
+            whole(query.seq()),
             subject.seq().len(),
             |from, to| subject.seq()[from..to].to_ascii_uppercase(),
         )
@@ -941,7 +1064,7 @@ mod tests {
         let ops = vec![GapEditOp::Ins(1), GapEditOp::Sub(4)];
         let (q, s) = displayed_rows(
             &hsp(-1, (1, 6), (0, 4), Some(ops)),
-            query.seq(),
+            whole(query.seq()),
             subject.seq().len(),
             |from, to| subject.seq()[from..to].to_ascii_uppercase(),
         )
@@ -982,7 +1105,8 @@ mod tests {
             ),
         ] {
             assert_eq!(hsp.seqalign_query_start(), start);
-            let (q, s) = displayed_rows(&hsp, query.seq(), subject.seq().len(), letters).unwrap();
+            let (q, s) =
+                displayed_rows(&hsp, whole(query.seq()), subject.seq().len(), letters).unwrap();
             assert_eq!(
                 (q.as_slice(), s.as_slice()),
                 (rows.0.as_bytes(), rows.1.as_bytes())
@@ -990,10 +1114,100 @@ mod tests {
         }
         let left = outside(1, -4, -1, (0, 3), vec![GapEditOp::Sub(3)]);
         assert_eq!(left.seqalign_query_start(), -4);
-        assert!(displayed_rows(&left, query.seq(), subject.seq().len(), letters).is_err());
+        assert!(displayed_rows(&left, whole(query.seq()), subject.seq().len(), letters).is_err());
         let right_minus = outside(-1, 9, 12, (0, 3), vec![GapEditOp::Sub(3)]);
         assert_eq!(right_minus.seqalign_query_start(), -4);
-        assert!(displayed_rows(&right_minus, query.seq(), subject.seq().len(), letters).is_err());
+        assert!(displayed_rows(
+            &right_minus,
+            whole(query.seq()),
+            subject.seq().len(),
+            letters
+        )
+        .is_err());
+    }
+
+    // remaining-gaps X1b-p review 1 (M1): with `-query_loc` NCBI moves the query row of the
+    // Seq-align by the interval's start (`RemapToQueryLoc`) and reads the letters of the query's
+    // Bioseq, the whole record (alnvec.cpp:108-124): an HSP outside its context shows the record's
+    // letters outside the interval, and the gap character only past the record's end. The record
+    // GGAACCGGTTAC is searched from position 2 (the interval AACCGGTT, the context of 8 letters):
+    // past the interval's end on the plus strand and left of the minus context (offsets below 0),
+    // then a start below 0 that the interval's start moves to the record's first letters (an
+    // ungapped search's Dense-diag, `BlastnHsp::record_query_start`), on both strands. A start
+    // that stays below 0 in the record never reaches the rows.
+    #[test]
+    fn query_letters_outside_the_interval_are_the_records() {
+        let query = record(b"GGAACCGGTTAC");
+        let in_record = QueryRecord {
+            letters: query.seq(),
+            offset: 2,
+        };
+        let subject = record(b"ACGTACGTAC");
+        let letters = |from: usize, to: usize| subject.seq()[from..to].to_ascii_uppercase();
+        let outside = |frame: i32, offset: i32, end: i32| {
+            let n = (end - offset) as usize;
+            let mut hsp = hsp(frame, (0, 0), (0, n), Some(vec![GapEditOp::Sub(n as u32)]));
+            (hsp.internal_q_offset_0, hsp.internal_q_end_0) = (offset, end);
+            hsp
+        };
+        for (hsp, start, row) in [
+            (outside(1, 6, 10), 8, "TTAC"),
+            (outside(1, 8, 11), 10, "AC-"),
+            (outside(1, 10, 14), 12, "----"),
+            // Context offsets -2..3: record positions 11 down to 7.
+            (outside(-1, -2, 3), 7, "GTTAC"),
+            (outside(1, -2, 1), 0, "GGA"),
+            // Context offsets 7..10: record positions 2 down to 0.
+            (outside(-1, 7, 10), 0, "GGA"),
+        ] {
+            assert_eq!(hsp.record_query_start(in_record.offset, true), start);
+            let (q, _) = displayed_rows(&hsp, in_record, subject.seq().len(), letters).unwrap();
+            assert_eq!(q.as_slice(), row.as_bytes());
+        }
+        let left = outside(1, -4, -1);
+        assert_eq!(left.record_query_start(2, true), -2);
+        assert!(displayed_rows(&left, in_record, subject.seq().len(), letters).is_err());
+        // A gapped search's Dense-seg keeps a start below 0 (`CDense_seg::OffsetRow`).
+        assert_eq!(outside(1, -2, 1).record_query_start(2, false), -2);
+    }
+
+    // The records the rows read (`QueryRecords::record`): the searched record itself without
+    // `-query_loc`; with it the input record of the query's input position (records that the
+    // interval leaves out counted), from the call's first input record, and the interval's start.
+    #[test]
+    fn query_records_map_searched_queries_to_their_input_records() {
+        use crate::blastinput::seq_range::{Placements, QueryInput, RecordPlacement};
+        let input = [record(b"AAAA"), record(b"CC"), record(b"GGGGGG")];
+        let searched = [record(b"AA"), record(b"GGG")];
+        let ranged = QueryInput {
+            placements: Placements(vec![
+                RecordPlacement {
+                    offset: 1,
+                    length: 4,
+                },
+                RecordPlacement {
+                    offset: 1,
+                    length: 6,
+                },
+            ]),
+            ordinals: vec![0, 2],
+            input_lengths: vec![4, 2, 6],
+            skipped: vec![false, true, false],
+            range_length: Some(2),
+        };
+        let records = QueryRecords::new(&searched, &ranged, &input, 0);
+        let second = records.record(1).unwrap();
+        assert_eq!((second.letters, second.offset), (&b"GGGGGG"[..], 1));
+        assert!(records.record(2).is_none());
+        // A batch's records from input record 2 on.
+        let batch = QueryRecords::new(&searched, &ranged, &input[2..], 2);
+        assert_eq!(batch.record(1).unwrap().letters, b"GGGGGG");
+        assert!(batch.record(0).is_none());
+        let plain = QueryInput::whole(&searched);
+        let unranged = QueryRecords::new(&searched, &plain, &[], 0)
+            .record(1)
+            .unwrap();
+        assert_eq!((unranged.letters, unranged.offset), (&b"GGG"[..], 0));
     }
 
     // The XML rows are written into buffers that the caller reuses: stale contents are cleared
@@ -1009,10 +1223,11 @@ mod tests {
         ] {
             let hsp = hsp(frame, window, (0, 4 + usize::from(frame > 0)), Some(ops));
             let letters = |from: usize, to: usize| subject.seq()[from..to].to_ascii_uppercase();
-            let once = displayed_rows(&hsp, query.seq(), subject.seq().len(), letters).unwrap();
+            let once =
+                displayed_rows(&hsp, whole(query.seq()), subject.seq().len(), letters).unwrap();
             displayed_rows_into(
                 &hsp,
-                query.seq(),
+                whole(query.seq()),
                 subject.seq().len(),
                 letters,
                 &mut q,

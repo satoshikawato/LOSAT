@@ -1865,9 +1865,12 @@ pub struct TabularHsp<'a> {
     /// shows as its end character, a space (`push_alignment_row`), as in the Smith-Waterman
     /// alignments of rpsblast's `-use_sw_tback`. NCBI decides by where the `-` comes from
     /// (alnvec.cpp:279-297): a gap segment outside the row's aligned segments is the end
-    /// character, a fill of a segment that has a start is the gap character. `true` for every
-    /// alignment of the engines; `false` only for `-subject`'s mapped row of BLASTX
-    /// (`blastx::empty_rows::MappedAlignment`), whose `-` past the query's end fills its segment.
+    /// character, a fill of a segment that has a start is the gap character. `true` for the
+    /// alignments of the engines other than BLASTN; `false` for every row of BLASTN (whose X-drop
+    /// and greedy alignments start and end with a substitution, so a `-` at a row's end fills a
+    /// segment past the query's end: `algorithm::blastn::tabular`, remaining-gaps X1b-p) and for
+    /// `-subject`'s mapped row of BLASTX (`blastx::empty_rows::MappedAlignment`), whose `-` past
+    /// the query's end fills its segment.
     pub end_gaps: bool,
     /// `qcovhsp` (the integer of NCBI's `hsp_percent_coverage`).
     pub qcovhsp: i32,

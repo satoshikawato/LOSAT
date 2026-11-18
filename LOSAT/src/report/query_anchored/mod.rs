@@ -801,18 +801,18 @@ pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out:
     }
 }
 
-/// Appends the searched letters `from..=to` (positions in the records, upper case) of the query
-/// `record`, whose searched letters start at the record position `shift` (the `-query_loc`
-/// interval's start; `Placements::offset`): the letters that the sections of BLASTN's and
-/// TBLASTN's reports read (`ReportSequences::query_letters`), as far as the record has them.
+/// Appends the letters `from..=to` (positions in the records, upper case) of a query whose
+/// `letters` start at the record position `shift` (the searched letters of TBLASTN and TBLASTX:
+/// the `-query_loc` interval's start, `Placements::offset`; BLASTN's whole record: 0,
+/// `algorithm::blastn::pairwise::QueryRecords`): the letters that the sections of the reports
+/// read (`ReportSequences::query_letters`), as far as the letters go.
 pub(crate) fn query_record_letters(
-    record: &crate::blastinput::fasta_reader::FastaRecord,
+    letters: &[u8],
     shift: usize,
     from: u32,
     to: u32,
     out: &mut Vec<u8>,
 ) {
-    let letters = record.seq();
     for position in from as usize - shift..=to as usize - shift {
         let Some(&letter) = letters.get(position) else {
             break;

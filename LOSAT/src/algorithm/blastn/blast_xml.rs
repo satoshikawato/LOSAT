@@ -46,6 +46,8 @@ pub(crate) struct BlastnXml<'a> {
     pub run: XmlRun<'a>,
     /// The queries of this call and their searched lengths.
     pub queries: &'a [FastaRecord],
+    /// The records whose letters the rows read (`pairwise::QueryRecords`).
+    pub query_records: super::pairwise::QueryRecords<'a>,
     pub searched_lengths: &'a [usize],
     /// By query: the statistics (`XmlStats::NONE` for a query without a valid context).
     pub stats: Vec<XmlStats>,
@@ -189,7 +191,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
                         xml_rows_into(
                             hsp,
-                            xml.queries,
+                            xml.query_records,
                             xml.letters,
                             &mut query_row,
                             &mut subject_row,
@@ -219,9 +221,9 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             // ```
                             // (blastxml2_format.cpp:212-222 the same.) An HSP without an edit
                             // script (`-ungapped`) is a Dense-diag: no gaps, one segment over
-                            // the row (`fill_segments` of an empty script), whatever `-` its
-                            // query row shows past the query's end (`pairwise::context_letters`).
-                            ops: Some(hsp.gap_info.as_deref().unwrap_or(&[])),
+                            // the row (`count_hsp` of no script), whatever `-` its query row
+                            // shows past the query's record (`pairwise::context_letters`).
+                            ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
                             query_step: 1,
                         })?;

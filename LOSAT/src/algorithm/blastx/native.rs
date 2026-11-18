@@ -3334,7 +3334,9 @@ mod archive_error_tests {
                 None,
                 &config,
                 std::slice::from_ref(&query),
-                &[std::sync::Arc::from(&b"s0"[..])],
+                &[crate::report::pairwise::DescriptionLabel::title_only(
+                    b"s0".to_vec(),
+                )],
                 &report,
                 &BlastxPairwiseOptions {
                     word_threshold: 12.0,

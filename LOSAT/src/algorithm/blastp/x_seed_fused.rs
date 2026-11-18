@@ -41,14 +41,16 @@
 //!
 //! `LOSAT_X_BPDIAG` is a switch of the strict set: on unless it is `0`.
 //! Without AVX2
-//! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop: the
+//! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop, except
+//! where LOSAT_X_BPCELL128's 128-bit batches run (below; WebAssembly, x86-64 with SSSE3, SSE4.1 and
+//! POPCNT): the
 //! scalar batch was slower than the per-hit loop on both machines it was timed on (2026-10-14,
 //! human block 1 x Species4, one thread, scan_ungapped: workstation 12.56 s against 11.59 s,
 //! local 7.53 / 7.08 s against 6.78 / 6.88 s). The scalar batch remains as the AVX2 path's handler
 //! of a cell's last batch of fewer than eight hits and as the cell-by-cell version the tests
 //! compare with; `LOSAT_X_BPDIAG_SIMD=0` forces it (diagnostic, used by the tests; not in the
 //! strict set). With `LOSAT_TIMING=1` each search of a query set prints
-//! `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|avx2-defer-masked|scalar|per-hit> cells=<n>
+//! `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|avx2-defer-masked|w128|scalar|per-hit> cells=<n>
 //! batched_hits=<m> candidates=<k>` (the path that ran, the cells tested in batches, their hits,
 //! and the hits passed to the closure; zeros with `per-hit`).
 //!
@@ -216,6 +218,36 @@
 //! The timing line names `mode=w128-cross` and counts `cross_splits=` (the windows with a repeated
 //! entry, which this kernel tests hit by hit) as for the AVX2 kernel.
 //!
+//! EXPERIMENT (LOSAT_X_BPCELL128): LOSAT_X_BPDIAG's batches of eight in 128-bit vectors, for the
+//! targets without AVX2: the WebAssembly build (simd128) and x86-64 with SSSE3, SSE4.1 and POPCNT
+//! but without AVX2, which ran the per-hit loop on every table before ([`XDiagMode::W128`],
+//! [`x_scan_cells_w128`], [`x_cell_w128`]). A cell's hits go in batches of eight, each the test of
+//! eight lanes of LOSAT_X_BXCROSS128's kernel ([`x_batch_lanes`] with [`XCrossW128`], every lane at
+//! the cell's subject offset, so its lane formulas are the AVX2 batch's, [`x_batch_avx2_at`]); a
+//! batch's candidates are called at once, in lane order ([`x_call_candidates`], as [`x_cell_avx2`]
+//! calls them); the fewer than eight hits after the last batch are tested one after the other,
+//! with LOSAT_X_BPHITBF's branch-free test where the per-hit loop takes it ([`XHitBf::new`] once
+//! per subject, with LOSAT_X_BPHITBF on) and with [`x_test_hit`] elsewhere. Why the outcome is the
+//! per-hit loop's: LOSAT_X_BPDIAG's argument above for the batches (the hits of one cell lie on
+//! distinct entries, a candidate's entry keeps its value in the test, the calls keep the cell's
+//! order), and the last hits are the per-hit loop's own tests (LOSAT_X_BPHITBF's argument below)
+//! on the same entries in the same order. LOSAT_X_BPDEFER's deferral and the masked last batch are
+//! not taken: in the WebAssembly build both cost more than they save (v4-W W2 s4, instructions of
+//! the compiled module under callgrind, V8 TurboFan, one thread, 1-100 queries of Species4 x
+//! Species6: at 118 hits per used cell the batches with deferred calls 0.887 of the per-hit loop's,
+//! with calls at once 0.831, at 3.10 the masked last batch 1.059 against 1.004 for the last hits
+//! one after the other). A table with fewer hits per used cell than LOSAT_X_BPMASKEDMIN (250
+//! hundredths, the masked batch's value) keeps the per-hit loop ([`x_bp_table_mode`]): most of its
+//! cells hold one or two hits, which the batches' loop only adds to (with every table batched
+//! 1.012-1.024 of the per-hit loop's instructions at 1.25-2.42 hits per used cell; from 2.52 hits
+//! 0.995-1.004, 3.72 0.962, 6.37 0.936, 14.7 0.888, 118 0.844, 122 0.823).
+//! `LOSAT_X_BPCELL128` is a switch of the strict set (class platform): on unless it is `0`; on,
+//! where LOSAT_X_BPDIAG is on and the AVX2 batches do not run, the 128-bit batches are the cell
+//! test of the tables LOSAT_X_BPMASKEDMIN gives them; `=2` (a diagnostic) runs them in place of the
+//! AVX2 batches on any x86-64 CPU with SSSE3, SSE4.1 and POPCNT (the tests); `=0` leaves the
+//! per-hit loop. The timing line names `mode=w128` and prints LOSAT_X_BPMASKEDMIN's line of tables
+//! (`tables_masked=` the tables batched, `tables_deferred=` those left to the per-hit loop).
+//!
 //! BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
 //! finds the cells with hits by the candidate loop of tblastn's branch-free scan
 //! (`tblastx/x_aascan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
@@ -226,7 +258,9 @@
 //! the same way under LOSAT_X_BPCLUTSCANBF (`x_seed_fused_clut.rs`).
 //!
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
-//! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)
+//! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64, and where
+//! LOSAT_X_BPCELL128's 128-bit batches do not take the table, i.e. WebAssembly's tables with few
+//! hits per used cell; LOSAT_X_BPCELL128 takes the same test for a cell's last hits)
 //! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (tblastn's
 //! tblastn's branch-free two-hit loop and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
 //! need no sign extension):
@@ -362,8 +396,14 @@ pub(crate) fn x_bp_masked() -> bool {
 /// hit per cell the masked last batch and the buffer cost more than the scalar batch they replace
 /// (one core, cycles against `LOSAT_X_BPMASKED=0` with the masked batch on every table: 1.11 hits
 /// per used cell x1.148, 2.08 x1.020, 2.60 x0.987, 4.52 x0.924; `docs/agents/diagnostics.md`).
-/// `0` takes it for every table; a value that is not a number takes the built-in one.
-#[cfg(target_arch = "x86_64")]
+/// The same value chooses the tables of LOSAT_X_BPCELL128's 128-bit batches; a table with fewer
+/// keeps the per-hit loop, which the batches' cells of one or two hits only add to (module
+/// header). `0` takes the batches for every table; a value that is not a number takes the
+/// built-in one.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 fn x_bp_masked_min() -> u64 {
     use std::sync::OnceLock;
     static MIN: OnceLock<u64> = OnceLock::new();
@@ -377,10 +417,16 @@ fn x_bp_masked_min() -> u64 {
 
 /// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the built-in value of [`x_bp_masked_min`], between the
 /// measured loss at 2.08 hits per used cell and the gain at 2.60.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 const X_BP_MASKED_MIN: u64 = 250;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 thread_local! {
     /// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the last lookup table this thread chose a cell test for
     /// (its address, its backbone's address and its overflow length) and its hits per used cell
@@ -392,14 +438,23 @@ thread_local! {
 // No NCBI counterpart: counters of LOSAT_X_BPMASKEDMIN for its timing line: the (thread, table)
 // choices of the masked batch and of the deferred calls, and the least and most hits per used
 // cell (hundredths) of the tables.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 static X_BP_TABLES: [std::sync::atomic::AtomicU64; 2] = [
     std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
 ];
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 static X_BP_RATIO_MIN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 static X_BP_RATIO_MAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // No NCBI counterpart: a property of the lookup table that chooses LOSAT's cell test; it does
@@ -409,7 +464,10 @@ static X_BP_RATIO_MAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 /// per table and thread (the table's addresses and overflow length identify it; a later table
 /// that matched all three would reuse the value, which changes only the speed), and whether this
 /// call worked it out.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
 fn x_bp_table_ratio<K: XCell>(table: &BlastAaLookupTable<K>) -> (u64, bool) {
     let key = (
         table as *const BlastAaLookupTable<K> as usize,
@@ -431,9 +489,10 @@ fn x_bp_table_ratio<K: XCell>(table: &BlastAaLookupTable<K>) -> (u64, bool) {
 // No NCBI counterpart: chooses LOSAT's cell test; every cell test gives the reference's hits and
 // table.
 /// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the cell test for the subjects of `table`: `mode`, but
-/// LOSAT_X_BPDEFER's deferred calls instead of LOSAT_X_BPMASKED's masked batch where the table has
-/// fewer hits per used cell than [`x_bp_masked_min`]. Counted for the timing line and marked for
-/// `LOSAT_X_REACH` once per table and thread.
+/// where the table has fewer hits per used cell than [`x_bp_masked_min`] LOSAT_X_BPDEFER's
+/// deferred calls instead of LOSAT_X_BPMASKED's masked batch, and the per-hit loop instead of
+/// LOSAT_X_BPCELL128's 128-bit batches. Counted for the timing line once per table and thread,
+/// and the masked batch's choice marked for `LOSAT_X_REACH`.
 fn x_bp_table_mode<K: XCell>(mode: XDiagMode, table: &BlastAaLookupTable<K>) -> XDiagMode {
     #[cfg(target_arch = "x86_64")]
     if mode == XDiagMode::Avx2DeferMasked {
@@ -450,9 +509,62 @@ fn x_bp_table_mode<K: XCell>(mode: XDiagMode, table: &BlastAaLookupTable<K>) -> 
             return XDiagMode::Avx2Defer;
         }
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    // EXPERIMENT (LOSAT_X_BPCELL128): the 128-bit batches on the tables the masked batch would
+    // take; a table with fewer hits per used cell keeps the per-hit loop (module header).
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    if mode == XDiagMode::W128 {
+        let (ratio, first) = x_bp_table_ratio(table);
+        let batched = ratio >= x_bp_masked_min();
+        if first {
+            use std::sync::atomic::Ordering::Relaxed;
+            X_BP_TABLES[usize::from(!batched)].fetch_add(1, Relaxed);
+            X_BP_RATIO_MIN.fetch_min(ratio, Relaxed);
+            X_BP_RATIO_MAX.fetch_max(ratio, Relaxed);
+        }
+        if !batched {
+            return XDiagMode::PerHit;
+        }
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
     let _ = table;
     mode
+}
+
+// No NCBI counterpart: whether LOSAT's cell test is chosen per table; it computes no value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPMASKEDMIN): whether [`x_bp_table_mode`] chooses the cell test of `mode`
+/// per table: LOSAT_X_BPMASKED's masked batch and LOSAT_X_BPCELL128's 128-bit batches.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+fn x_bp_ruled(mode: XDiagMode) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if mode == XDiagMode::Avx2DeferMasked {
+        return true;
+    }
+    mode == XDiagMode::W128
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPCELL128 switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPCELL128): 0 = off, 1 = the 128-bit batches where the AVX2 batches do not
+/// run, 2 = those in place of the AVX2 batches too (a diagnostic, for the tests); a switch of the
+/// strict set (class platform), on unless it is `0`.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+fn x_bp_cell128() -> usize {
+    use std::sync::OnceLock;
+    static ON: OnceLock<usize> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPCELL128", 1..=2, 1).unwrap_or(0))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPHITBF switch once; it does not change any value NCBI
@@ -566,6 +678,14 @@ pub(crate) enum XDiagMode {
     /// than eight hits as one masked AVX2 batch ([`x_cell_avx2_defer_masked`]).
     #[cfg(target_arch = "x86_64")]
     Avx2DeferMasked,
+    /// LOSAT_X_BPCELL128: batches of eight in two 128-bit vectors of four lanes, their calls at
+    /// once, and a cell's last hits one after the other ([`x_cell_w128`]), where the AVX2 batches
+    /// do not run; LOSAT_X_BPMASKEDMIN's tables (fewer hits per used cell keep the per-hit loop).
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    W128,
 }
 
 impl XDiagMode {
@@ -580,6 +700,11 @@ impl XDiagMode {
             XDiagMode::Avx2Defer => "avx2-defer",
             #[cfg(target_arch = "x86_64")]
             XDiagMode::Avx2DeferMasked => "avx2-defer-masked",
+            #[cfg(any(
+                target_arch = "x86_64",
+                all(target_arch = "wasm32", target_feature = "simd128")
+            ))]
+            XDiagMode::W128 => "w128",
         }
     }
 }
@@ -643,10 +768,11 @@ fn x_cross_available() -> bool {
     x_avx2_available() && std::arch::is_x86_feature_detected!("popcnt")
 }
 
-// No NCBI counterpart: whether the CPU has what LOSAT_X_BXCROSS128's functions are compiled for; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BXCROSS128): SSSE3, SSE4.1 and POPCNT on x86-64 (the 128-bit layer of
-/// `utils/xdrop_simd.rs`, and `popcnt` as for LOSAT_X_BXCROSS); always on wasm32 simd128.
+// No NCBI counterpart: whether the CPU has what LOSAT_X_BXCROSS128's (and LOSAT_X_BPCELL128's)
+// functions are compiled for; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXCROSS128, LOSAT_X_BPCELL128): SSSE3, SSE4.1 and POPCNT on x86-64 (the
+/// 128-bit layer of `utils/xdrop_simd.rs`, and `popcnt` as for LOSAT_X_BXCROSS); always on wasm32
+/// simd128.
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -666,8 +792,9 @@ fn x_cross128_available() -> bool {
 
 // No NCBI counterpart: chooses LOSAT's code path once (LOSAT_X_BPDIAG; the AVX2 batch where the
 // CPU has AVX2, with LOSAT_X_BPDEFER the deferred calls, with LOSAT_X_BPMASKED also the masked
-// batch, otherwise the per-hit loop; LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does not
-// change any value NCBI computes.
+// batch; without AVX2 LOSAT_X_BPCELL128's 128-bit batches where the target has them; otherwise
+// the per-hit loop; LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does not change any value
+// NCBI computes.
 fn x_diag_mode() -> XDiagMode {
     use std::sync::OnceLock;
     static MODE: OnceLock<XDiagMode> = OnceLock::new();
@@ -678,6 +805,15 @@ fn x_diag_mode() -> XDiagMode {
         if std::env::var_os("LOSAT_X_BPDIAG_SIMD").is_some_and(|v| v.as_os_str() == "0") {
             return XDiagMode::Scalar;
         }
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        // EXPERIMENT (LOSAT_X_BPCELL128, `=2`, a diagnostic): the 128-bit batches in place of the
+        // AVX2 ones.
+        if x_bp_cell128() == 2 && x_cross128_available() {
+            return XDiagMode::W128;
+        }
         #[cfg(target_arch = "x86_64")]
         if x_avx2_available() {
             return match (x_bp_defer(), x_bp_masked()) {
@@ -686,7 +822,16 @@ fn x_diag_mode() -> XDiagMode {
                 (false, _) => XDiagMode::Avx2,
             };
         }
-        // Without AVX2 the scalar batch would be slower than the per-hit loop (module header).
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        // EXPERIMENT (LOSAT_X_BPCELL128): without AVX2, the 128-bit batches where the target has
+        // them (wasm32 simd128; x86-64 with SSSE3, SSE4.1 and POPCNT).
+        if x_bp_cell128() != 0 && x_cross128_available() {
+            return XDiagMode::W128;
+        }
+        // Elsewhere the scalar batch would be slower than the per-hit loop (module header).
         XDiagMode::PerHit
     })
 }
@@ -882,10 +1027,14 @@ pub(crate) fn x_bp_diag_print_timing() {
             X_DIAG_HITS.swap(0, Relaxed),
             X_DIAG_CANDIDATES.swap(0, Relaxed)
         );
-        // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the tables that took the masked batch and those its
-        // rule gave the deferred calls (once per thread and table).
-        #[cfg(target_arch = "x86_64")]
-        if x_diag_mode() == XDiagMode::Avx2DeferMasked {
+        // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the tables that took the masked batch (or
+        // LOSAT_X_BPCELL128's 128-bit batches) and those its rule gave the deferred calls (or the
+        // per-hit loop), once per thread and table.
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        if x_bp_ruled(x_diag_mode()) {
             let least = X_BP_RATIO_MIN.swap(u64::MAX, Relaxed);
             eprintln!(
                 "[TIMING] x_bpmasked: min_hits_per_cell={} tables_masked={} tables_deferred={} hits_per_cell={}-{}",
@@ -1115,10 +1264,14 @@ pub(crate) fn x_scan_two_hit<K: XCell, F>(
         prefetch: X_PREFETCH_DISTANCE,
     };
     let table = &mut XDiagTable::new(diag_array, diag_mask);
+    // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the masked batch (or LOSAT_X_BPCELL128's 128-bit batches)
+    // only on tables with enough hits per cell; chosen before the per-hit loop's test, which the
+    // tables it gives the per-hit loop take too.
+    let mode = x_bp_table_mode(x_diag_mode(), lookup);
     // EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop with the branch-free two-hit test, where it
     // gives the reference's outcomes (module header).
     if let Some(bf) = x_hit_bf_for(
-        x_diag_mode() == XDiagMode::PerHit,
+        mode == XDiagMode::PerHit,
         diag_offset,
         subject_length,
         window,
@@ -1135,8 +1288,6 @@ pub(crate) fn x_scan_two_hit<K: XCell, F>(
         );
         return;
     }
-    // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the masked batch only on tables with enough hits per cell.
-    let mode = x_bp_table_mode(x_diag_mode(), lookup);
     // The cells are found without a branch on the presence bit ([`x_scan_cells_bf`]).
     let counts = x_scan_two_hit_bf(
         mode,
@@ -1405,6 +1556,28 @@ where
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
                 x_scan_cells_avx2_defer_masked::<BRANCH_FREE, K, F>(
+                    lookup,
+                    subject,
+                    subject_length,
+                    table,
+                    test,
+                    candidate,
+                    &mut counts,
+                )
+            }
+        }
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        XDiagMode::W128 => {
+            assert!(
+                x_cross128_available(),
+                "the 128-bit batches need SSSE3, SSE4.1 and POPCNT"
+            );
+            // SAFETY: on x86-64 the CPU has SSSE3, SSE4.1 and POPCNT (asserted above).
+            unsafe {
+                x_scan_cells_w128::<BRANCH_FREE, K, F>(
                     lookup,
                     subject,
                     subject_length,
@@ -4367,6 +4540,158 @@ where
     candidates
 }
 
+/// EXPERIMENT (LOSAT_X_BPCELL128): the scan of [`XDiagMode::W128`]: each cell's hits by
+/// [`x_cell_w128`], with LOSAT_X_BPHITBF's branch-free test for the hits after the cell's last
+/// batch of eight where it is on and [`XHitBf::new`] finds the subject in range (once per
+/// subject, as the per-hit loop does, [`x_hit_bf_for`]). Adds the cells, their hits and the
+/// candidates to `counts`. Out of line, compiled for the 128-bit layer's instructions on x86-64.
+///
+/// # Safety
+/// On x86-64 the CPU must have SSSE3, SSE4.1 and POPCNT ([`x_cross128_available`]).
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-552 (the scan's cells, quoted at
+// `x_scan_two_hit`; the test of each hit, quoted at `x_test_hit`)
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+#[inline(never)]
+unsafe fn x_scan_cells_w128<const BRANCH_FREE: bool, K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XDiagCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let bf = if x_bp_hit_bf() {
+        XHitBf::new(
+            test.diag_offset,
+            subject_length,
+            test.window,
+            test.word_size,
+        )
+    } else {
+        None
+    };
+    x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
+        // SAFETY: this function's contract; the lookup's query offsets are at most the table's
+        // mask (`XDiagTable::new` and the lookup's build).
+        let candidates = unsafe { x_cell_w128(hits, s, table, test, bf, candidate) };
+        counts.add_cell(hits.len(), candidates);
+    });
+}
+
+/// EXPERIMENT (LOSAT_X_BPCELL128): the hits of one cell (subject offset `s`) in batches of eight,
+/// each the test of eight lanes of the 128-bit kernel ([`x_batch_lanes`] with [`XCrossW128`],
+/// LOSAT_X_BXCROSS128's batch, every lane at `s`: the lane formulas of [`x_batch_avx2_at`]), its
+/// candidates called in lane order at once ([`x_call_candidates`], as [`x_cell_avx2`] calls them);
+/// the fewer than eight hits after the last batch one after the other, with `bf`
+/// ([`XHitBf::test`], then [`x_test_hit`] for a flag-1 entry or a candidate: LOSAT_X_BPHITBF's
+/// per-hit loop, [`x_hit_bf`]) or without it ([`x_test_hit`]). Returns the number of candidates.
+///
+/// # Safety
+/// Inlined into code compiled for the 128-bit layer (on x86-64 SSSE3, SSE4.1 and POPCNT); every
+/// hit's query offset must be at most `table.mask`; with `bf`, [`XHitBf::fits`] must hold for the
+/// subject the cell is in.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): the
+// hits of the cell in order, each tested on its entry; a hit that passes reaches the context check
+// with `last_hit` and `diff`.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+unsafe fn x_cell_w128<H: XHit, F>(
+    hits: &[H],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    bf: Option<XHitBf>,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use crate::utils::xdrop_simd::arch::splat_i32;
+    let mask = table.mask;
+    let lanes_s = [splat_i32(s), splat_i32(s)];
+    let mut batches = hits.chunks_exact(X_DIAG_LANES);
+    let mut candidates = 0u32;
+    for batch in &mut batches {
+        let p = batch.as_ptr();
+        // SAFETY: i < X_DIAG_LANES = batch.len().
+        let lane_coords: [u32; X_DIAG_LANES] =
+            std::array::from_fn(|i| (unsafe { (*p.add(i)).q() }.wrapping_sub(s) & mask) as u32);
+        debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
+        // SAFETY: this function's contract (the coordinates are masked).
+        let lanes = unsafe { x_batch_lanes::<XCrossW128>(lane_coords, lanes_s, table, test) };
+        x_call_candidates(lanes, batch, s, table, test, candidate);
+        candidates += lanes.count_ones();
+    }
+    let rest = batches.remainder();
+    match bf {
+        Some(bf) => {
+            let here = bf.here(s);
+            for &hit in rest {
+                let query_offset = hit.q();
+                let entry = table.entry_bf(query_offset, s);
+                if bf.test(entry, here) {
+                    continue;
+                }
+                if let Some((last_hit, diff)) =
+                    x_test_hit(entry, s, test.diag_offset, test.window, test.word_size)
+                {
+                    candidate(query_offset, s, last_hit, diff, entry);
+                    candidates += 1;
+                }
+            }
+        }
+        None => {
+            for &hit in rest {
+                let query_offset = hit.q();
+                let entry = table.entry(query_offset, s);
+                if let Some((last_hit, diff)) =
+                    x_test_hit(entry, s, test.diag_offset, test.window, test.word_size)
+                {
+                    candidate(query_offset, s, last_hit, diff, entry);
+                    candidates += 1;
+                }
+            }
+        }
+    }
+    candidates
+}
+
+// No NCBI counterpart: a test hook; it computes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPCELL128): [`x_cell_w128`] compiled for the 128-bit layer, for the tests.
+///
+/// # Safety
+/// [`x_cell_w128`]'s contract; on x86-64 the CPU must have SSSE3, SSE4.1 and POPCNT.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[cfg(test)]
+#[cfg_attr(target_arch = "x86_64", target_feature(enable = "ssse3,sse4.1,popcnt"))]
+unsafe fn x_cell_w128_test<H: XHit, F>(
+    hits: &[H],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    bf: Option<XHitBf>,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    // SAFETY: this function's contract.
+    unsafe { x_cell_w128(hits, s, table, test, bf, candidate) }
+}
+
 /// EXPERIMENT (LOSAT_X_BPDIAG): the cell's hits in batches of eight by [`x_test_batch_avx2`], the
 /// last batch of fewer than eight by [`x_test_batch_scalar`]; returns the number of candidates.
 /// No entry is read ahead (see [`x_cell_scalar`]).
@@ -4538,6 +4863,13 @@ mod tests {
             modes.push(XDiagMode::Avx2DeferMasked);
         } else {
             eprintln!("no AVX2 on this CPU: the AVX2 batch is not compared");
+        }
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        if x_cross128_available() {
+            modes.push(XDiagMode::W128);
         }
         #[allow(unused_mut)]
         let mut modes: Vec<XCellTest> = modes.into_iter().map(XCellTest::Diag).collect();
@@ -4856,6 +5188,20 @@ mod tests {
                             &mut candidate,
                             &mut buffer,
                         )
+                    };
+                }
+                #[cfg(any(
+                    target_arch = "x86_64",
+                    all(target_arch = "wasm32", target_feature = "simd128")
+                ))]
+                XDiagMode::W128 => {
+                    assert!(x_cross128_available());
+                    // SAFETY: on x86-64 the CPU has SSSE3, SSE4.1 and POPCNT (asserted above).
+                    // Without LOSAT_X_BPHITBF's test: these tables hold any entries, and the test
+                    // is exact only on those a scan leaves (module header); the test with it is
+                    // `the_branch_free_per_hit_loop_equals_the_per_hit_loop`'s.
+                    counted += unsafe {
+                        x_cell_w128_test(hits, *s, &mut table, test, None, &mut candidate)
                     };
                 }
             }
@@ -5244,6 +5590,37 @@ mod tests {
         calls
     }
 
+    /// LOSAT_X_BPCELL128's cell test with LOSAT_X_BPHITBF's test for the last hits
+    /// ([`x_cell_w128`] with `bf`) over `cells`; checks its count of candidates.
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    fn run_cells_w128_bf(
+        entries: &mut [DiagStruct],
+        mask: i32,
+        test: XDiagTest,
+        bf: XHitBf,
+        cells: &[(i32, Vec<i32>)],
+    ) -> Vec<Call> {
+        assert!(x_cross128_available());
+        let mut calls = Vec::new();
+        let mut counted = 0u32;
+        let mut table = XDiagTable::new(entries, mask);
+        let mut candidate = |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {
+            calls.push((q, s, last_hit, diff, entry.raw_bits()));
+            extend(q, s, entry, test.diag_offset);
+        };
+        for (s, hits) in cells {
+            // SAFETY: on x86-64 the CPU has SSSE3, SSE4.1 and POPCNT (asserted above); the
+            // offsets are below the table's size, and the caller's `bf` fits the subject.
+            counted +=
+                unsafe { x_cell_w128_test(hits, *s, &mut table, test, Some(bf), &mut candidate) };
+        }
+        assert_eq!(counted as usize, calls.len(), "{test:?}: candidate count");
+        calls
+    }
+
     // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
     #[test]
     fn the_branch_free_per_hit_loop_equals_the_per_hit_loop() {
@@ -5302,6 +5679,22 @@ mod tests {
                         .zip(&reference)
                         .position(|(a, b)| a.raw_bits() != b.raw_bits());
                     assert!(at.is_none(), "{test:?}: entry {at:?}");
+                    // LOSAT_X_BPCELL128: the batches of eight, then the same test for the last
+                    // hits of each cell.
+                    #[cfg(any(
+                        target_arch = "x86_64",
+                        all(target_arch = "wasm32", target_feature = "simd128")
+                    ))]
+                    if x_cross128_available() {
+                        let mut got = entries.clone();
+                        let got_calls = run_cells_w128_bf(&mut got, mask, test, bf, &cells);
+                        assert_eq!(got_calls, expected, "{test:?}: 128-bit candidate calls");
+                        let at = got
+                            .iter()
+                            .zip(&reference)
+                            .position(|(a, b)| a.raw_bits() != b.raw_bits());
+                        assert!(at.is_none(), "{test:?}: 128-bit entry {at:?}");
+                    }
                     calls += expected.len();
                 }
             }

@@ -182,7 +182,8 @@
   query (decision D13) come after the reports of the query batches before, the form of 1.40 (the
   Owner's decision of 2026-11-16 on line RG's question Q-X2c); Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.51, which line RG item
-  X-short-tbx holds on its branch)
+  X-short-tbx holds on its branch; the same day, X4 fix round 3: also the explicit rejection of a
+  failed batch whose first query holds a redone match, on which NCBI crashes, rule 3)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1507,7 +1508,16 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   `db.x4.sw.zero.6` and `db.x4.sw.fail.*`; `LOSAT/tests/blastp_sw_tback.rs`). Before that
   round NCBI makes every positive alignment of the window, which takes it about a minute for a
   subject of 1,200 letters against an 80-letter query; LOSAT gives the same outcome at the first
-  round.
+  round. A failed batch whose first query holds a redone match crashes NCBI instead (rule 3,
+  2026-11-18, X4 fix round 3): its clean-up frees the arrays of every query's heap of redone
+  matches and then pops the first query's heap, whose count it left, through the freed array
+  (`blast_kappa.c:3796-3802`, `compo_heap.c:444-457`; SIGSEGV in `BlastCompo_HeapPop` called
+  from `Blast_RedoAlignmentCore_MT`, with `-subject` and `-db`), and LOSAT refuses that batch
+  (exit 1, "a query batch whose last match fails its Smith-Waterman redo (-use_sw_tback) after a
+  match of the batch's first query was redone and kept, with which NCBI BLAST+ 2.17.0's blastp
+  crashes, is not supported by LOSAT's BLASTP") after what NCBI formats before that step, as
+  above (fixture rows `db.x4.sw.fail.c.*` and `db.x4.sw.fail.h.*`; `db.x4.sw.fail.f.6` and
+  `db.x4.sw.fail.g.6`, whose first query holds none, end in `Traceback failed`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

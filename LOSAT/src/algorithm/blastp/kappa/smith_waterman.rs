@@ -85,7 +85,8 @@ pub(crate) type SwMatchScratch = SwRedoScratch<SquareWindow>;
 /// traceback has no operation (`GapEditScriptNew(0)` is NULL, `s_NewAlignmentUsingXdrop` returns
 /// -1). NCBI frees the match's alignments and keeps the status -1 (`*pStatusCode`) until the next
 /// match that it redoes sets it again; a status left by the last match of a query batch fails the
-/// traceback (`Traceback failed`, traceback_stage.cpp:251-252).
+/// traceback (`Traceback failed`, traceback_stage.cpp:251-252), or crashes NCBI's clean-up when
+/// the batch's first query holds a redone match (`blast_engine::redo_run::sw_batch_failed`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1542-1548
 /// ```c

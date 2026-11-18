@@ -1249,12 +1249,77 @@ where
 ///                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
 ///                 results = lcl_blast.Run();
 /// ```
+///
+/// NCBI ends such a batch by `Traceback failed` only when the batch's first query holds no redone
+/// match (`first_query`, the heap of `batch_start`). With a status other than 0 the clean-up frees
+/// the arrays of every query's heap, leaving each heap's count, and then empties the heap of the
+/// first query alone (`s_ClearHeap(redoneMatches_tld[i])`, the address of its element 0):
+/// `BlastCompo_HeapPop` converts nothing (`array` is NULL) and, when the count is above 0, reads
+/// `heapArray[1]` through the NULL `heapArray` (SIGSEGV, at address 0x28 on ws, 2026-11-18). A
+/// heap's count is above 0 once `BlastCompo_HeapInsert` (blast_kappa.c:3705-3719) has put a match
+/// in it, and nothing pops it before the clean-up, so NCBI crashes exactly when a match of the
+/// batch's first query was redone and kept. The heaps of the other queries are freed without a
+/// pop; the heaps of the function's own `redoneMatches` (blast_kappa.c:3006, 3119-3130), which its
+/// clean-up empties at 3807-3813, receive no match (the loop inserts into its block's
+/// `redoneMatches`, :3472 and :3496, that thread's heaps), so they pop nothing. LOSAT refuses that
+/// batch (rule 3: NCBI crashes; PD-LOSAT-NCBI-DEFECTS 1.52), in the place of NCBI's error and
+/// after the same reports (the S1 form of 2026-11-18: what NCBI formats before its failing step,
+/// not the part of its stdio buffer that its crash loses). Exit status 1, its message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
+/// ```c
+///         } else {
+///             if (redoneMatches_tld[i] != NULL) {
+///                 int qi;
+///                 for (qi = 0; qi < numQueries; ++qi) {
+///                     sfree(redoneMatches_tld[i][qi].array);
+///                     sfree(redoneMatches_tld[i][qi].heapArray);
+///                 }
+///                 s_ClearHeap(redoneMatches_tld[i]);
+///             }
+///         }
+///         sfree(redoneMatches_tld[i]);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2518-2524
+/// ```c
+/// static void s_ClearHeap(BlastCompo_Heap * self)
+/// {
+///     BlastHSPList* hsp_list = NULL;   /* an element of the heap */
+///
+///     while (NULL != (hsp_list = BlastCompo_HeapPop(self))) {
+///         hsp_list = Blast_HSPListFree(hsp_list);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-457
+/// ```c
+/// BlastCompo_HeapPop(BlastCompo_Heap * self)
+/// {
+///     void * results = NULL;   /* the list of SeqAligns to be returned */
+///
+///     s_ConvertToHeap(self);
+///     if (self->n > 0) { /* The heap is not empty */
+///         BlastCompo_HeapRecord *first, *last; /* The first and last
+///                                                 elements of the array
+///                                                 that represents the
+///                                                 heap.  */
+///         first = &self->heapArray[1];
+///         last  = &self->heapArray[self->n];
+///
+///         results = first->theseAlignments;
+/// ```
 #[cold]
 #[inline(never)]
-fn sw_traceback_failed(batch_start: usize) -> anyhow::Error {
+fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::Error {
+    let error = if first_query.n > 0 {
+        anyhow::anyhow!(
+            "a query batch whose last match fails its Smith-Waterman redo (-use_sw_tback) after a match of the batch's first query was redone and kept, with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
+        )
+    } else {
+        crate::blastinput::app::engine_error("Traceback failed")
+    };
     super::database::HeaderReadError {
         query: batch_start,
-        error: crate::blastinput::app::engine_error("Traceback failed"),
+        error,
     }
     .into()
 }
@@ -1263,7 +1328,7 @@ fn sw_traceback_failed(batch_start: usize) -> anyhow::Error {
 /// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.52, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
 /// printed the reports of the batches before (`blastp_app.cpp:257-276`, quoted at
-/// [`sw_traceback_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
+/// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
 /// does, after those reports (without the epilog), as TBLASTX's and TBLASTN's refusals of a step
 /// where NCBI's search of a batch does not finish do (`blastinput::app::ErrorAfterBatchReports`,
 /// the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the results of the query batches before
@@ -1396,7 +1461,7 @@ where
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_last_failed && q_idx + 1 == batch.end {
-                return Err(sw_traceback_failed(batch.start));
+                return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
             }
             continue;
         };
@@ -1601,9 +1666,10 @@ where
         //         if (seqSrc  &&  status_code == 0) {
         // ```
         // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
-        // the batch (`Traceback failed`, traceback_stage.cpp:250-252).
+        // the batch (`Traceback failed`, traceback_stage.cpp:250-252), or crashes NCBI's clean-up
+        // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_last_failed && q_idx + 1 == batch.end {
-            return Err(sw_traceback_failed(batch.start));
+            return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
         }
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as

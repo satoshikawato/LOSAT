@@ -9,7 +9,10 @@
 //! gives tks_M the redo that NCBI never ends (M against M). NCBI's one-thread redo keeps the status of the batch's last redone
 //! match: a failed match before another is dropped, a failed last one fails the batch's traceback
 //! (`BLAST engine error: Traceback failed`, exit status 3) after the reports of the batches
-//! before. That the bytes equal NCBI's is the business of the fixture rows `db.x4.sw.fail.*`
+//! before, unless the batch's first query holds a redone match: NCBI's clean-up then reads that
+//! query's freed heap and crashes (SIGSEGV), and LOSAT refuses the batch after the same reports
+//! (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.52). `qnohit` (W 87 times) has no hit (the subjects
+//! have no W). That the bytes equal NCBI's is the business of the fixture rows `db.x4.sw.fail.*`
 //! (frozen on ws); these tests pin LOSAT's decisions and their independence of `-num_threads`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
@@ -25,6 +28,18 @@
 //!     if (status) {
 //!         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");
 //!     }
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3796-3802 (the arrays of
+//! every query's heap are freed, then the first query's heap is popped:
+//! `BlastCompo_HeapPop`, compo_heap.c:444-457, reads `heapArray[1]` when its count is above 0)
+//! ```c
+//!             if (redoneMatches_tld[i] != NULL) {
+//!                 int qi;
+//!                 for (qi = 0; qi < numQueries; ++qi) {
+//!                     sfree(redoneMatches_tld[i][qi].array);
+//!                     sfree(redoneMatches_tld[i][qi].heapArray);
+//!                 }
+//!                 s_ClearHeap(redoneMatches_tld[i]);
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -99,6 +114,8 @@ fn row_queries(stdout: &str) -> Vec<&str> {
 }
 
 const TRACEBACK_FAILED: &str = "BLAST engine error: Traceback failed\n";
+/// The part of LOSAT's refusal of a failed batch whose first query holds a redone match.
+const NCBI_CRASHES: &str = "with which NCBI BLAST+ 2.17.0's blastp crashes";
 
 // Case a of review 1: the batch's only match fails (two HSPs, W against D), so its traceback fails.
 #[test]
@@ -127,25 +144,38 @@ fn b_a_failed_match_before_a_redone_one_is_dropped() {
     }
 }
 
-// Case c, the mirror of b: the failing query is the batch's last, so the batch fails before any
+// Case c, the mirror of b: the failing query is the batch's last, and the batch's first query
+// (qok1) holds a redone match, on which NCBI's clean-up crashes: LOSAT refuses the batch before any
 // report (the outfmt 0 prolog is written).
 #[test]
-fn c_a_failed_last_match_fails_the_batch() {
+fn c_a_failed_last_match_after_a_kept_first_query_is_refused() {
     for threads in [1, 4] {
-        let run = sw_search("x4/sw_fail_last.faa", "6", threads, &[]);
-        assert_eq!(run.code, Some(3), "n{threads}: {}", run.stderr);
-        assert_eq!(run.stdout, "", "n{threads}");
-        assert_eq!(run.stderr, TRACEBACK_FAILED, "n{threads}");
-        let pairwise = sw_search("x4/sw_fail_last.faa", "0", threads, &[]);
-        assert_eq!(pairwise.code, Some(3), "n{threads}: {}", pairwise.stderr);
-        assert!(pairwise.stdout.starts_with("BLASTP "), "n{threads}");
-        assert!(!pairwise.stdout.contains("Query="), "n{threads}");
-        assert_eq!(pairwise.stderr, TRACEBACK_FAILED, "n{threads}");
+        for outfmt in ["6", "7", "0"] {
+            let run = sw_search("x4/sw_fail_last.faa", outfmt, threads, &[]);
+            assert_eq!(
+                run.code,
+                Some(1),
+                "n{threads} outfmt {outfmt}: {}",
+                run.stderr
+            );
+            assert!(
+                run.stderr.contains(NCBI_CRASHES),
+                "n{threads} outfmt {outfmt}: {}",
+                run.stderr
+            );
+            if outfmt == "0" {
+                assert!(run.stdout.starts_with("BLASTP "), "n{threads}");
+                assert!(!run.stdout.contains("Query="), "n{threads}");
+            } else {
+                assert_eq!(run.stdout, "", "n{threads} outfmt {outfmt}");
+            }
+        }
     }
 }
 
-// Case d: one query per batch (`BATCH_SIZE=1`), the failure in batch 2 of 3: batch 1's report is
-// written, without the epilog, then the error; batch 3 is not searched. In one batch (the default
+// Case d: one query per batch (`BATCH_SIZE=1`), the failure in batch 2 of 3 (whose first query,
+// tks_W, holds no redone match): batch 1's report is written, without the epilog, then the error;
+// batch 3 is not searched. In one batch (the default
 // batch size) the third query's match is the last and the run completes without the failed match.
 #[test]
 fn d_a_failure_in_batch_2_of_3_comes_after_batch_1() {
@@ -225,5 +255,55 @@ fn e_the_endless_redo_is_refused_after_the_batches_before() {
         let one_batch = sw_search_in(subjects, "x4/sw_endless_last.faa", "6", threads, &[]);
         assert_eq!(one_batch.code, Some(1), "n{threads}");
         assert_eq!(one_batch.stdout, "", "n{threads}");
+    }
+}
+
+// The batch's first query holds no redone match, so NCBI's clean-up pops an empty heap and the
+// batch ends with NCBI's error, as in case a: f, the first query has no hit (qnohit); g, its only
+// match fails (tks_W, then qok1's redone match, then tks_W2's failed match last). A redone match of
+// a later query (qok1) does not matter: NCBI pops the first query's heap alone.
+#[test]
+fn f_g_a_first_query_without_a_redone_match_ends_in_traceback_failed() {
+    for query in [
+        "x4/sw_fail_last_nohit_first.faa",
+        "x4/sw_fail_last_failed_first.faa",
+    ] {
+        for threads in [1, 4] {
+            let run = sw_search(query, "6", threads, &[]);
+            assert_eq!(run.code, Some(3), "{query} n{threads}: {}", run.stderr);
+            assert_eq!(run.stdout, "", "{query} n{threads}");
+            assert_eq!(run.stderr, TRACEBACK_FAILED, "{query} n{threads}");
+        }
+    }
+}
+
+// Case h: batch 1 is [qok2, qnohit] and batch 2 [qok1, tks_W] (`BATCH_SIZE=200`: 124 + 87, then
+// 124 + 80 letters): batch 1's report is written, without the epilog, then the refusal of batch 2,
+// on whose clean-up NCBI crashes.
+#[test]
+fn h_the_refusal_comes_after_the_batches_before() {
+    let batches = [("BATCH_SIZE", "200")];
+    let alone = sw_search("x4/sw_ok.faa", "6", 1, &[]);
+    for threads in [1, 4] {
+        let run = sw_search("x4/sw_crash_batch2.faa", "6", threads, &batches);
+        assert_eq!(run.code, Some(1), "n{threads}: {}", run.stderr);
+        assert!(
+            run.stderr.contains(NCBI_CRASHES),
+            "n{threads}: {}",
+            run.stderr
+        );
+        // qok2 is qok1's sequence: the same rows under its id.
+        assert!(!alone.stdout.is_empty());
+        assert_eq!(
+            run.stdout,
+            alone.stdout.replace("qok1\t", "qok2\t"),
+            "n{threads}"
+        );
+        let pairwise = sw_search("x4/sw_crash_batch2.faa", "0", threads, &batches);
+        assert_eq!(pairwise.code, Some(1), "n{threads}: {}", pairwise.stderr);
+        assert!(pairwise.stdout.contains("Query= qok2"), "n{threads}");
+        assert!(pairwise.stdout.contains("Query= qnohit"), "n{threads}");
+        assert!(!pairwise.stdout.contains("Query= qok1"), "n{threads}");
+        assert!(pairwise.stderr.contains(NCBI_CRASHES), "n{threads}");
     }
 }

@@ -8084,12 +8084,13 @@ fn search(
             // ```
             // A header file that NCBI cannot read (or rpsblast's profile sequences, read by a
             // batch's traceback, or blastp's `-use_sw_tback` redo whose batch's last redone match
-            // fails, `Traceback failed`, `redo_run::sw_traceback_failed`) fails the batch whose
+            // fails, `Traceback failed`, `redo_run::sw_batch_failed`) fails the batch whose
             // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0 prolog,
             // the reports of the batches before (without the epilog) and that batch's reader
             // messages; so do LOSAT's refusals of a step where NCBI's search of the batch stops or
-            // never ends (`redo_run::sw_endless`, a query chunk split again or without a query in
-            // `search_split_query_batches`), as TBLASTX's and TBLASTN's
+            // never ends or crashes (`redo_run::sw_endless`, `redo_run::sw_batch_failed` where the
+            // batch's first query holds a redone match, a query chunk split again or without a
+            // query in `search_split_query_batches`), as TBLASTX's and TBLASTN's
             // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
             // batches before are searched again alone.
             let failure = match result {
@@ -8236,9 +8237,9 @@ fn x_query_block_plan(
     super::x_query_blocks::x_bp_qblock()?;
     // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries. So is a
     // `-use_sw_tback` search: a later batch's Smith-Waterman redo can fail NCBI's traceback
-    // (`redo_run::sw_traceback_failed`) or meet the redo that NCBI never ends (LOSAT's refusal,
-    // `redo_run::sw_endless`), which come after the reports of the batches before in the search of
-    // all queries (`search`).
+    // (`redo_run::sw_batch_failed`; NCBI's crash there is LOSAT's refusal) or meet the redo that
+    // NCBI never ends (LOSAT's refusal, `redo_run::sw_endless`), which come after the reports of
+    // the batches before in the search of all queries (`search`).
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()

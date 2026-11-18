@@ -199,6 +199,8 @@ jobs:
       # loops are the Web's scan for sparse tables, with the index loop vectorized to simd128 and
       # 32-bit pointer and room arithmetic, which the native `cargo test` runs only in 64 bits
       # (about 2 s more, 2026-11-17).
+      # x_seed_fused_clut::tests: blastp-fast's staged loop on the flat table (its copy in 128-bit
+      # loads and stores on simd128), which wasm32 takes since 2026-11-18, against the reference.
       - name: SIMD kernel tests on wasm32-wasip1
         working-directory: LOSAT
         env:
@@ -207,7 +209,7 @@ jobs:
           cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
           x_restricted_gap::tests xdrop_simd::x_w128::tests
           tblastn::x_subject_translate::tests::x_w128_loops x_same_matrix
-          x_seed_fused::tests x_seed_diag::tests
+          x_seed_fused::tests x_seed_diag::tests x_seed_fused_clut::tests
           tblastx::x_scan_byte::tests tblastx::x_scan_bf::tests
 
   # The engine adapter (web/adapter) over five jobs that run side by side: the build identity

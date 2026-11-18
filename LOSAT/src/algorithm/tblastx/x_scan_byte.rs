@@ -62,8 +62,8 @@
 //! loops nothing changes. `LOSAT_X_CHAINRUN=0` runs the copy before.
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
-//! returned count are not part of the result. `presence` depends on the lookup table only; each
-//! thread builds it once per table (`presence_bytes`).
+//! returned count are not part of the result. `presence` depends on the lookup table only; the
+//! first thread that asks for a table builds it once and every thread reads it (`presence_bytes`).
 //!
 //! Probe and source of the form: line F s3 P3 V2 (candidates) and s5 P3b arm 7 (copy),
 //! `exp/f2-tbn-scan` ff918e61: HsG_p1 x hsap_dna `-db` n1 whole-run cycles x0.703 of dev, with
@@ -238,20 +238,40 @@ fn build_presence(lookup: &BlastAaLookupTable) -> XPresence {
     XPresence(bytes.try_into().expect("one byte per index"))
 }
 
-/// The table `presence_bytes` built last on this thread, its bytes and whether it is sparse. The
-/// `Weak` keeps the table's allocation, so no other table can have its address while the entry is
-/// kept.
-type KeptPresence = Option<(std::sync::Weak<BlastAaLookupTable>, XPresence, bool)>;
+/// A table, its presence bytes and whether it is sparse. The `Weak` keeps the table's allocation,
+/// so no other table can have its address while the entry is kept.
+type PresenceEntry = (std::sync::Weak<BlastAaLookupTable>, XPresence, bool);
+
+/// The entry `presence_bytes` gave last on this thread (its bytes are those of `SHARED`).
+type KeptPresence = Option<PresenceEntry>;
 
 thread_local! {
-    /// The presence bytes this thread built last (`KeptPresence`).
+    /// The presence bytes this thread read last (`KeptPresence`).
     static PRESENCE: std::cell::RefCell<KeptPresence> = const { std::cell::RefCell::new(None) };
 }
 
-// No NCBI counterpart: the presence vector in another layout, made once per table and thread; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`), built
-/// on this thread when it last saw another table. The table must `fit`.
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:95-140
+// ```c
+// typedef struct BlastAaLookupTable {
+// ...
+//     PV_ARRAY_TYPE *pv;     /**< Presence vector bitfield; bit positions that
+//                                 are set indicate that the corresponding thick
+//                                 backbone cell contains hits */
+// ...
+// } BlastAaLookupTable;
+// ```
+// NCBI's presence vector is part of its table, one array that every search thread reads. These
+// are the presence bytes of the live tables, one array per table that every thread reads: an
+// entry whose table is gone goes when a thread next looks up a table. It does not change any value
+// NCBI computes.
+static SHARED: std::sync::Mutex<Vec<PresenceEntry>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: the presence vector in another layout, made once per table; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`) and
+/// whether it is sparse, built by the first thread that asks for this table and read by every
+/// thread after it (`SHARED`); a thread asks again only when it saw another table last. The table
+/// must `fit`.
 pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
     PRESENCE.with(|kept| {
         let mut kept = kept.borrow_mut();
@@ -260,11 +280,31 @@ pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bo
                 return (bytes.clone(), *sparse);
             }
         }
-        let bytes = build_presence(lookup);
-        let sparse = sparse(&bytes, lookup);
+        let (bytes, sparse) = shared_presence(lookup);
         *kept = Some((Arc::downgrade(lookup), bytes.clone(), sparse));
         (bytes, sparse)
     })
+}
+
+// No NCBI counterpart: finds or makes the entry of `SHARED`; it does not change any value NCBI
+// computes.
+/// The `SHARED` entry of `lookup`, made now if there is none; the entries of tables that are gone
+/// go first.
+fn shared_presence(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
+    let mut shared = SHARED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    shared.retain(|(table, _, _)| table.strong_count() > 0);
+    if let Some((_, bytes, sparse)) = shared
+        .iter()
+        .find(|(table, _, _)| table.as_ptr() == Arc::as_ptr(lookup))
+    {
+        return (bytes.clone(), *sparse);
+    }
+    let bytes = build_presence(lookup);
+    let sparse = sparse(&bytes, lookup);
+    shared.push((Arc::downgrade(lookup), bytes.clone(), sparse));
+    (bytes, sparse)
 }
 
 // No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.

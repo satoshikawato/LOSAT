@@ -98,6 +98,41 @@ pub(crate) struct RpsPastRows<'a> {
     pub(crate) overran: std::sync::atomic::AtomicBool,
 }
 
+impl<'a> RpsRows<'a> {
+    /// The rows without NCBI's step past them (`RpsRowsWithin`) where there is none (`past` is
+    /// `None`: `Lc` at or below the rows), else `None`.
+    #[inline(always)]
+    pub(crate) fn within(&self) -> Option<RpsRowsWithin<'a>> {
+        self.past.is_none().then_some(RpsRowsWithin {
+            rows: self.rows,
+            length: self.length,
+        })
+    }
+}
+
+/// `RpsRows` whose `past` is `None` (`RpsRows::within`), as a type: the extensions read the rows
+/// up to `length` and have no step past it (`PssmRows::past_end` is `None`), so the word finders'
+/// loops instantiated with it carry no code of that step (`wordfinder::word_finder`; fix round 6
+/// of line RG D1a-4: the step's code in the hit loop of every search cost the RPS default path
+/// 1.3 % (rpsblast) to 2.9 % (rpstblastn) more instructions than dev, by the registers it took).
+#[derive(Clone, Copy)]
+pub(crate) struct RpsRowsWithin<'a> {
+    rows: &'a [[i32; BLASTAA_SIZE]],
+    length: usize,
+}
+
+impl PssmRows for RpsRowsWithin<'_> {
+    #[inline(always)]
+    fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {
+        &self.rows[pos]
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.length
+    }
+}
+
 impl PssmRows for RpsRows<'_> {
     #[inline(always)]
     fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {

@@ -20,6 +20,7 @@ use super::scan::{
 };
 use super::RpsRows;
 use crate::algorithm::blastp::extension::BlastpUngappedData;
+use crate::algorithm::pssm_search::rows::PssmRows;
 use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
 use crate::seqdb::rps::RPS_WORDSIZE;
 
@@ -270,18 +271,50 @@ impl RpsWordScratch {
 ///                                              init_hitlist, ungapped_stats);
 ///     }
 /// ```
+///
+/// The extensions read the rows as `RpsRowsWithin` where NCBI has no step past them (`past` is
+/// `None`, every search whose `Lc` is not above the rows), else as `RpsRows` with the step, out
+/// of line (`word_finder_past`): the same scan, whose common instantiation carries no code of the
+/// step (fix round 6 of line RG D1a-4).
 pub(crate) fn word_finder(
     params: &RpsWordParams<'_>,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    if params.window > 0 {
-        two_hit(params, scratch, subject, init_hsps);
-    } else {
-        one_hit(params, scratch, subject, init_hsps);
+    match params.rows.within() {
+        Some(rows) => scan(params, &rows, scratch, subject, init_hsps),
+        None => word_finder_past(params, scratch, subject, init_hsps),
     }
     scratch.diag.exit(subject.len() as i32);
+}
+
+/// `word_finder`'s scan with NCBI's step past the rows (`RpsRows::past`, an `Lc` above them).
+#[cold]
+#[inline(never)]
+fn word_finder_past(
+    params: &RpsWordParams<'_>,
+    scratch: &mut RpsWordScratch,
+    subject: &[u8],
+    init_hsps: &mut Vec<RpsInitHsp>,
+) {
+    scan(params, &params.rows, scratch, subject, init_hsps);
+}
+
+/// The two-hit or the one-hit finder (`-window_size` 0), whose extensions read `rows`.
+#[inline(always)]
+fn scan<R: PssmRows>(
+    params: &RpsWordParams<'_>,
+    rows: &R,
+    scratch: &mut RpsWordScratch,
+    subject: &[u8],
+    init_hsps: &mut Vec<RpsInitHsp>,
+) {
+    if params.window > 0 {
+        two_hit(params, rows, scratch, subject, init_hsps);
+    } else {
+        one_hit(params, rows, scratch, subject, init_hsps);
+    }
 }
 
 /// `s_BlastRPSWordFinder_TwoHit`.
@@ -383,8 +416,9 @@ pub(crate) fn word_finder(
 ///     }                           /* end while - done with the entire sequence.
 ///                                  */
 /// ```
-fn two_hit(
+fn two_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
+    rows: &R,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
@@ -455,7 +489,7 @@ fn two_hit(
                         let query_offset = q_base + q;
                         let subject_offset = s_base + s;
                         let hit = pssm_extend_two_hit(
-                            &params.rows,
+                            rows,
                             subject,
                             s_base + last_hit + wordsize,
                             subject_offset,
@@ -524,8 +558,9 @@ fn two_hit(
 ///         }                       /* end for (all buckets) */
 ///     }                           /* end while */
 /// ```
-fn one_hit(
+fn one_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
+    rows: &R,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
@@ -578,7 +613,7 @@ fn one_hit(
                         let query_offset = q_base + q;
                         let subject_offset = s_base + s;
                         let hit = pssm_extend_one_hit(
-                            &params.rows,
+                            rows,
                             subject,
                             subject_offset,
                             query_offset,

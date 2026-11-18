@@ -254,11 +254,11 @@ fn check_disabled_rows(case: &str, column: &str, rows: u64, read: &Rows<'_>) {
     }
 }
 
-// Line RG D3-1's `bm/` probes w01-w23, s01-s17 and p04 whose data is short (NCBI BLAST+ 2.17.0,
-// psiblast and tblastn: the rows of their `Empty region ... Seq-table row <row>` posts, which
-// LOSAT refuses for the memory address; `F/bm1/tools/gen_probe_tests.py` of line RG F writes the
-// table). s05 is a read error of the `size`; the cases of longer data are those of
-// `bm_probes_of_a_directory`.
+// The BitMagic probes w01-w23, s01-s17 and p04 whose data is short (PSSMs whose query's Seq-tables
+// hold bit vectors, run by NCBI BLAST+ 2.17.0 psiblast and tblastn; the rows are those of NCBI's
+// `Empty region ... Seq-table row <row>` posts, which LOSAT refuses for the memory address, taken
+// from NCBI's standard error case by case by a script outside this repository). s05 is a read error
+// of the `size`; the cases of longer data are those of `bm_probes_of_a_directory`.
 const PROBES: &[(&str, u64, &str, Rows<'static>)] = &[
     ("w01_1bit", 16, "data bit-bvector { size 16, data '020180000001000200051000000013030009'H }", Rows::Runs(&[(0, 2), (4, 15)])),
     ("w02_gap_v3s", 100, "data bit-bvector { size 100, data '02018000000100020005640000003E6608FE3F0900000009'H }", Rows::Runs(&[(1, 4), (6, 6), (8, 99)])),
@@ -303,9 +303,10 @@ fn bitmagic_probes_read_ncbis_rows() {
     }
 }
 
-/// The probes of the directory `BM_PROBES` (`F/d3a/bm` of line RG: `cases/index.tsv`,
-/// `cases/<case>.asn`, `ncbi/psiblast/<case>.err`): each case w*, s* (but s05) and p04 against the
-/// rows of NCBI's posts. Without `BM_PROBES` the test does nothing.
+/// The probes of the directory `BM_PROBES`, kept outside this repository (`cases/index.tsv`, the
+/// PSSMs `cases/<case>.asn` and NCBI psiblast's standard error `ncbi/psiblast/<case>.err`): each
+/// case w*, s* (but s05) and p04 against the rows of NCBI's posts. Without `BM_PROBES` the test
+/// does nothing.
 #[test]
 fn bm_probes_of_a_directory() {
     let Ok(dir) = std::env::var("BM_PROBES") else {

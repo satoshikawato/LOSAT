@@ -1,7 +1,8 @@
 //! Tests of the BitMagic decoder. The streams named `w..`, `s..`, `m..` are the Q-BM probes of
-//! line RG (`bm/cases`); their expected sizes and bits are what NCBI's BitMagic 8.0.1 decoded
-//! (`bm/tools/bmh dec`). `differential` is the driver of the differential test against NCBI's
-//! BitMagic (`F/bm1/tools/`): it does nothing unless `BM_DIFF_IN` names a case file.
+//! line RG; their expected sizes and bits are what NCBI's BitMagic 8.0.1 decoded (a harness
+//! built from NCBI's headers, outside this repository). `differential` is the driver of the
+//! differential test against that harness on generated streams: it does nothing unless
+//! `BM_DIFF_IN` names a case file.
 
 use super::*;
 
@@ -311,7 +312,14 @@ fn gap_blocks_must_increase() {
     // an id list (token 18) that does not increase makes a GAP that does not either
     let bad = stream(&[18, 2, 0, 9, 0, 5, 0, 0]);
     assert_eq!(fail(0, &bad), Fail::Refuse(Rule::GapOrder));
-    assert_eq!(fail(0, &stream(&[18, 0, 0, 0])), Fail::Refuse(Rule::IdList));
+    // an empty id list reads `id_array_[0]`: memory that NCBI did not write, or the first id of
+    // an earlier list (here block 0's, for block 1)
+    assert_eq!(
+        fail(0, &stream(&[18, 0, 0, 0])),
+        Fail::Refuse(Rule::Unwritten)
+    );
+    let vector = ok(0, &stream(&[18, 1, 0, 5, 0, 18, 0, 0, 0]));
+    assert_eq!(vector.ranges(), [(5, 5), (65541, 65541)]);
     let vector = ok(0, &stream(&[18, 3, 0, 5, 0, 6, 0, 9, 0, 0]));
     assert_eq!(vector.ranges(), [(5, 6), (9, 9)]);
     let ranks: Vec<u64> = [4, 5, 7, 8, 9, 10, 70000]
@@ -357,6 +365,34 @@ fn long_gaps_are_converted_to_bits() {
         assert_eq!(vector.get_bit(n), bit, "{n}");
     }
     assert_eq!(vector.count(), 2 + 10 + 647 + (65535 - 1400 + 1));
+    // a run of 1s from 41 back to 32 or 31: `or_bit_block(dest, 41, 2^32 - d)` writes nothing
+    // while `d` is below 41's bit in its word (9), shifts by 32 at 9 and writes past the block
+    // above
+    let gap14 = |head: &[u16]| {
+        let mut tokens = vec![14];
+        tokens.extend((1300u16 << 3).to_le_bytes());
+        for k in 0..1299 {
+            let end = head.get(k).copied().unwrap_or(100 + k as u16);
+            tokens.extend(end.to_le_bytes());
+        }
+        tokens.push(0);
+        stream(&tokens)
+    };
+    let vector = ok(0, &gap14(&[40, 32, 50, 60]));
+    for (n, bit) in [
+        (31, false),
+        (41, false),
+        (50, false),
+        (51, true),
+        (60, true),
+        (61, false),
+    ] {
+        assert_eq!(vector.get_bit(n), bit, "{n}");
+    }
+    assert_eq!(
+        fail(0, &gap14(&[40, 31, 50, 60])),
+        Fail::Refuse(Rule::GapOrder)
+    );
     // with 1275 entries it stays a GAP block, which must increase
     let mut tokens = vec![14];
     tokens.extend((1275u16 << 3).to_le_bytes());
@@ -433,8 +469,16 @@ fn bit_blocks() {
     // token 17: words 2..=3
     let vector = ok(0, &stream(&[17, 2, 0, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0x80, 0]));
     assert_eq!(vector.ranges(), [(64, 64), (127, 127)]);
+    // `tail == head - 1`: no word (little-endian), the block made empty
+    let vector = ok(0, &stream(&[17, 3, 0, 2, 0, 0]));
+    assert_eq!(vector.ranges(), []);
     assert_eq!(
-        fail(0, &stream(&[17, 3, 0, 2, 0, 0])),
+        fail(0, &stream(&[17, 5, 0, 2, 0, 0])),
+        Fail::Refuse(Rule::Interval)
+    );
+    // into a null block the first loop clears `head` words, past the block above 2048
+    assert_eq!(
+        fail(0, &stream(&[17, 1, 8, 0, 8, 0])),
         Fail::Refuse(Rule::Interval)
     );
     // token 22: a run of 1 zero word, 1 word, 2046 zero words
@@ -519,17 +563,23 @@ fn big_endian_streams() {
     // ... with 1 id: one value, two bytes
     let vector = ok(0, &[0x10, 0x00, 18, 0, 1, 0, 5, 0]);
     assert_eq!(vector.ranges(), [(5, 5)]);
-    // a GAP block of length 1 into an empty block reads nothing, into a block that exists it
-    // reads two bytes or none by how BitMagic holds it
+    // a GAP block of length 1 into a null block reads nothing; into a block that exists the
+    // big-endian `get_16(p, 0)` reads two bytes (the little-endian one none), and the GAP of all
+    // ones ORed into a GAP block makes it the full block
     let vector = ok(0, &[0x10, 0x00, 14, 0x00, 0x09, 0]);
     assert_eq!(vector.ranges(), [(0, 65535)]);
-    assert_eq!(
-        fail(
-            0,
-            &[0x10, 0x00, 19, 0, 1, 7, 0xFF, 0xFF, 0xFF, 0xFF, 14, 0x00, 0x09, 0]
-        ),
-        Fail::Refuse(Rule::Revisit)
+    let vector = ok(
+        0,
+        &[
+            0x10, 0x00, 19, 0, 1, 7, 0xFF, 0xFF, 0xFF, 0xFF, 14, 0x00, 0x09, 0xAB, 0xCD, 0,
+        ],
     );
+    assert_eq!(vector.ranges(), [(0, 65535)]);
+    let vector = ok(
+        0,
+        &stream(&[19, 1, 0, 7, 0xFF, 0xFF, 0xFF, 0xFF, 14, 0x09, 0x00, 0]),
+    );
+    assert_eq!(vector.ranges(), [(0, 65535)]);
 }
 
 /// The differential driver: each line of `BM_DIFF_IN` is `ID SIZE HEX ROWS` (ROWS a comma list

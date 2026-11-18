@@ -6,8 +6,9 @@
 //! exceptions, and the failed diagnostic stream after its "Failed to parse location of" message
 //! (`ncbi_exception::main_diag_failbit`), and BitMagic's decoding of a Seq-table's bit vectors
 //! (`bitmagic`). What NCBI does not do the same way on every run (a message with a memory address,
-//! a crash, BitMagic data that NCBI decodes past its checks, a signed overflow, the order of memory
-//! addresses) is LOSAT's refusal, each naming its condition (`Refusal`).
+//! a crash, BitMagic data that NCBI reads past, decodes with undefined behaviour or from memory it
+//! did not write, a signed overflow, the order of memory addresses) is LOSAT's refusal, each naming
+//! its condition (`Refusal`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (tblastn_app.cpp:222-226)
 //! ```c++
@@ -117,7 +118,7 @@ impl Refusal {
             Refusal::EmptyRegion => "a PSSM query whose annot has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)",
             Refusal::NullPointer => "a PSSM query whose annot has a Seq-table row without a Seq-id or a location (NCBI's object manager stops with a NULL pointer report of memory addresses)",
             Refusal::DivideByZero => "a PSSM query whose annot has a Dense-seg of no segments with starts or strands (NCBI's object manager divides by zero and crashes)",
-            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager decodes past its checks (a read past the data, an XOR block, a write past NCBI's buffers or a block whose bits depend on how BitMagic holds it)",
+            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager reads past, decodes with undefined behaviour (an XOR block, a shift of 32 bits or more, a write past BitMagic's blocks or buffers) or from memory it did not write, or keeps as a GAP block that is not one and searches by how BitMagic is compiled",
             Refusal::PackedOutOfBounds => "a PSSM query whose annot has a Packed-seg with fewer present, starts, ids or lens than its dim and numseg (NCBI's object manager reads past them)",
             Refusal::DeltaOverflow => "a PSSM query whose annot has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)",
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",

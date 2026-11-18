@@ -171,9 +171,10 @@
   1.50 2026-11-18 (psiblast and tblastn `-in_pssm`, line RG item Q-BM: the BitMagic data of a
   Seq-table of the PSSM query's annotations decoded as NCBI's object manager decodes it, with
   NCBI's exception `BM::Invalid serialization format`; the rule-2 rejection of well-formed BitMagic
-  data removed and the rule-3 rejection narrowed to the streams that NCBI reads past, crashes on,
-  runs with undefined behaviour or decodes by how BitMagic holds its blocks; decided by the Owner
-  on 2026-11-16 (「推奨通り」, Q-BM); numbered after 1.49)
+  data removed and the rule-3 rejection narrowed to the streams that NCBI reads past, runs with
+  undefined behaviour or a write past BitMagic's blocks or buffers, decodes from memory it did not
+  write or searches by how BitMagic is compiled for the machine; decided by the Owner on 2026-11-16
+  (「推奨通り」, Q-BM); numbered after 1.49)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1507,14 +1508,22 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     100,000,000 rows end in `BLAST ran out of memory`);
   - BitMagic data of a Seq-table that NCBI decodes (`bit-bvector` values, a `bit-set-bvector`'s
     sparse index; since version 1.50, line RG item Q-BM, LOSAT decodes it as NCBI does) in a
-    stream that NCBI reads past (empty or cut data), that dereferences NCBI's null reference
-    vector (an XOR block), that runs undefined behaviour or writes past BitMagic's buffers (an
-    Elias gamma code of 32 or more zeros, an interpolative value or a run past its block, an index
-    past BitMagic's arrays, a GAP block of length 0 or past 8191, an id list that is empty or does
-    not increase, a window of no words or wider than its array), or whose bits depend on how
-    BitMagic holds a block (a GAP block whose ends do not increase, fewer run lengths than runs, a
-    big-endian GAP block of length 1 in a block that may exist); line RG D3-1 `bm/SPEC.md` §3.3
-    and §5.2. A `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
+    stream that NCBI reads past (empty or cut data, a big-endian array whose length moves NCBI's
+    position past the data), that dereferences NCBI's null reference vector (an XOR block), that
+    runs undefined behaviour or writes past BitMagic's blocks or buffers (an Elias gamma code of
+    32 or more zeros, `bit_scan_reverse32(0)` in the interpolative decoder, an interpolative value,
+    a run or a bit interval past its block, a run of a GAP block that ends before it starts where
+    `or_bit_block` shifts by 32 bits or writes past the block, an index past BitMagic's arrays, a
+    GAP block of length 0 or past 8191, a window of no words), that reads entries of BitMagic's
+    work arrays that this decoding has not written (an empty little-endian id list that no earlier
+    list wrote the first entry for, run lengths that no array wrote), or that leaves a GAP block
+    whose ends do not increase up to 65535 where NCBI then searches it: BitMagic's search of a GAP
+    block is SSE2 or SSE4.2 code on x86-64
+    (`bmsse2.h:1638-1642`, `bmsse4.h:2260-2264`; NCBI's configure adds `-msse4.2` there) and
+    scalar code elsewhere (`bmfunc.h:1835-1955`), which find a block's bits only where its ends
+    increase; line RG D3-1 `bm/SPEC.md` §3.3 and §5.2 and line RG item Q-BM. A stream is refused
+    at the first such event; up to it LOSAT decodes as NCBI does, NCBI's exception included. A
+    `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
 
   The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
   tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line
@@ -1782,6 +1791,5 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   format` ends the run with `Error: BM::Invalid serialization format` and exit status 255 where
   the index reads the value, and is the `NCBI_CATCH` message of the `Sorted, max length` and
   `Seq-table location` columns (`Error: [<program>] [Bad '<column>' column] Exception: ...`),
-  after which the run goes on. A stream outside BitMagic's checked form is a rule-3 rejection
-  (above), also where NCBI throws after the event that LOSAT refuses. Version 1.45 refused all
-  such data.
+  after which the run goes on. A stream that reaches one of the events of the rule-3 rejection
+  (above) is refused at that event. Version 1.45 refused all such data.

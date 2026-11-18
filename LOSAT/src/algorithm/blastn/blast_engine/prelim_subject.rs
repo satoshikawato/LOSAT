@@ -134,6 +134,9 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) hit_saving_cutoff_scores: &'a [i32],
     pub(super) x_dropoff_scores: &'a [i32],
     pub(super) reduced_cutoff_scores: &'a [i32],
+    /// EXPERIMENT (LOSAT_X_FNCTX): the same cutoffs as one 16-byte row a context
+    /// (`batch_setup::XUngapCut`).
+    pub(super) x_cuts: &'a [super::batch_setup::XUngapCut],
     pub(super) timing_ref: Option<&'a BlastnTiming>,
     /// The word finder: the word size, the scan step, the off-diagonal range, the window (0: one
     /// hit), the size at which a batch of offset pairs goes to the steps of the pairs, whether a
@@ -262,6 +265,9 @@ pub(super) struct ScanBatch<'a> {
     pub(super) cutoff_scores: &'a [i32],
     pub(super) x_dropoff_scores: &'a [i32],
     pub(super) reduced_cutoff_scores: &'a [i32],
+    /// EXPERIMENT (LOSAT_X_FNCTX): the same cutoffs as one 16-byte row a context
+    /// (`batch_setup::XUngapCut`).
+    pub(super) x_cuts: &'a [super::batch_setup::XUngapCut],
     pub(super) score_matrix: &'a BlastnaMatrix,
     pub(super) nucl_score_table: &'a [i32; 256],
     /// The words: the word size capped at 31 letters (`safe_k`, the na tables' word), the word and
@@ -369,6 +375,7 @@ impl<'a> ScanBatch<'a> {
             cutoff_scores: batch.cutoff_scores,
             x_dropoff_scores: batch.x_dropoff_scores,
             reduced_cutoff_scores: batch.reduced_cutoff_scores,
+            x_cuts: batch.x_cuts,
             score_matrix: batch.score_matrix,
             nucl_score_table: batch.nucl_score_table,
             safe_k,

@@ -114,6 +114,18 @@ pub(crate) fn extend_hit_ungapped_exact_ncbi(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
+    // EXPERIMENT (LOSAT_X_FNEXK, line FN s1 probe): the unrolled loops; `=0` the counted ones.
+    if x_fnexk_on() {
+        return super::x_ungap_count::extend_hit_ungapped_exact_unrolled(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            subject_len,
+            x_dropoff,
+            matrix,
+        );
+    }
     super::x_ungap_count::extend_hit_ungapped_exact_counted(
         q_seq,
         s_seq_packed,
@@ -123,6 +135,24 @@ pub(crate) fn extend_hit_ungapped_exact_ncbi(
         x_dropoff,
         matrix,
     )
+}
+
+/// EXPERIMENT (LOSAT_X_FNEXK): the switch, read once into a static (default on).
+#[inline(always)]
+fn x_fnexk_on() -> bool {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static STATE: AtomicU8 = AtomicU8::new(0);
+    match STATE.load(Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => {
+            let on = std::env::var("LOSAT_X_FNEXK")
+                .map(|v| v.trim() != "0")
+                .unwrap_or(true);
+            STATE.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+    }
 }
 
 /// The port of `s_NuclUngappedExtendExact` above, loop for loop: the reference of the unit test of

@@ -348,6 +348,7 @@ impl SubjectPasses<'_> {
                 hit_saving_cutoff_scores: &cutoffs.1,
                 x_dropoff_scores: &cutoffs.2,
                 reduced_cutoff_scores: &cutoffs.3,
+                x_cuts: &cutoffs.4,
                 ..*self.prelim_batch
             };
             let scan = scan.map(|scan| ScanBatch {
@@ -355,6 +356,7 @@ impl SubjectPasses<'_> {
                 cutoff_scores: &cutoffs.0,
                 x_dropoff_scores: &cutoffs.2,
                 reduced_cutoff_scores: &cutoffs.3,
+                x_cuts: &cutoffs.4,
                 ..*scan
             });
             let passes = SubjectPasses {

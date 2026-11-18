@@ -549,7 +549,20 @@ pub(super) struct CutoffInputs<'a> {
 
 /// The cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the reduced cutoff scores
 /// of each context, in that order.
-pub(super) type BatchCutoffs = (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i32>);
+/// EXPERIMENT (LOSAT_X_FNCTX, line FN s1 probe): one context's cutoffs of the ungapped stage in
+/// one 16-byte row, as NCBI keeps them (`BlastUngappedCutoffs`, read as `word_params->cutoffs +
+/// context` once a hit is ready, na_ungapped.c:900-902): the cutoff, the X-dropoff and the
+/// reduced cutoff of `batch_cutoffs`, in that order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C, align(16))]
+pub(crate) struct XUngapCut {
+    pub(crate) cutoff: i32,
+    pub(crate) x_dropoff: i32,
+    pub(crate) reduced: i32,
+    pub(crate) pad: i32,
+}
+
+pub(super) type BatchCutoffs = (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i32>, Vec<XUngapCut>);
 
 /// The cutoffs of every context of the batch.
 ///
@@ -720,11 +733,23 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
             0
         });
     }
+    let x_cuts: Vec<XUngapCut> = cutoff_scores
+        .iter()
+        .zip(&x_dropoff_scores)
+        .zip(&reduced_cutoff_scores)
+        .map(|((&cutoff, &x_dropoff), &reduced)| XUngapCut {
+            cutoff,
+            x_dropoff,
+            reduced,
+            pad: 0,
+        })
+        .collect();
     Ok((
         cutoff_scores,
         hit_saving_cutoff_scores,
         x_dropoff_scores,
         reduced_cutoff_scores,
+        x_cuts,
     ))
 }
 

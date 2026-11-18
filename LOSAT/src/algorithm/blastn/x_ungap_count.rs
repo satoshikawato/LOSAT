@@ -192,6 +192,158 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     }
 }
 
+/// EXPERIMENT (LOSAT_X_FNEXK, line FN s1 probe): `extend_hit_ungapped_exact_counted` with each
+/// packed subject byte read once and its four bases taken with constant shifts (the loops unrolled
+/// by the four positions of a byte; the first, partial byte of each side is peeled). The steps,
+/// their order, the tests and the `i32` updates are those of the counted loops, so every exit and
+/// the four results are theirs.
+#[inline(never)]
+pub(crate) fn extend_hit_ungapped_exact_unrolled(
+    q_seq: &[u8],
+    s_seq_packed: &[u8],
+    q_off: usize,
+    s_off: usize,
+    subject_len: usize,
+    x_dropoff: i32,
+    matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
+) -> UngappedData {
+    let x = x_dropoff.wrapping_neg();
+    debug_assert!(q_off < q_seq.len() && s_off < subject_len);
+    debug_assert!(subject_len.div_ceil(4) <= s_seq_packed.len());
+    let q = q_seq.as_ptr();
+    let s = s_seq_packed.as_ptr();
+    let mut score: i32 = 0;
+    let mut sum: i32 = 0;
+
+    // Left: step i (from 1) reads subject position s_off - i, the base at shift 2 * (p % 4)
+    // from the right of byte p / 4 (positions 4b + 3, 4b + 2, 4b + 1, 4b: shifts 0, 2, 4, 6).
+    let left = q_off.min(s_off);
+    let mut q_beg = q_off;
+    let mut i = 0usize;
+    macro_rules! left_step {
+        ($ch:expr, $sh:expr, $l:lifetime) => {{
+            if i == left {
+                break $l;
+            }
+            i += 1;
+            // SAFETY: q_off - i < q_off < q_seq.len() (i <= left <= q_off).
+            let code = unsafe { *q.add(q_off - i) };
+            sum = sum.wrapping_add(cell(matrix, code, (($ch >> $sh) & 3) as usize));
+            if sum > 0 {
+                q_beg = q_off - i;
+                score = score.wrapping_add(sum);
+                sum = 0;
+            } else if sum < x {
+                break $l;
+            }
+        }};
+    }
+    'left: {
+        if left == 0 {
+            break 'left;
+        }
+        let first = s_off - 1;
+        let mut b = first >> 2;
+        // SAFETY: b = (s_off - 1) / 4 < subject_len.div_ceil(4) <= s_seq_packed.len().
+        let mut ch = unsafe { *s.add(b) };
+        let k = first & 3;
+        if k == 3 {
+            left_step!(ch, 0, 'left);
+        }
+        if k >= 2 {
+            left_step!(ch, 2, 'left);
+        }
+        if k >= 1 {
+            left_step!(ch, 4, 'left);
+        }
+        left_step!(ch, 6, 'left);
+        loop {
+            if i == left {
+                break 'left;
+            }
+            // i < left <= s_off - 1 - ..., so position s_off - 1 - i >= 0 lies in byte b - 1.
+            b -= 1;
+            // SAFETY: b < the previous b <= s_seq_packed.len() - 1.
+            ch = unsafe { *s.add(b) };
+            left_step!(ch, 0, 'left);
+            left_step!(ch, 2, 'left);
+            left_step!(ch, 4, 'left);
+            left_step!(ch, 6, 'left);
+        }
+    }
+    let q_start = q_beg;
+    let s_start = s_off - (q_off - q_start);
+
+    // Right: step i (from 0) reads subject position s_off + i (positions 4b .. 4b + 3: shifts 6,
+    // 4, 2, 0).
+    let right = (q_seq.len() - q_off).min(subject_len - s_off);
+    let mut q_end = q_off;
+    sum = 0;
+    let mut x_current = x;
+    let mut i = 0usize;
+    macro_rules! right_step {
+        ($ch:expr, $sh:expr, $l:lifetime) => {{
+            if i == right {
+                break $l;
+            }
+            // SAFETY: q_off + i < q_off + right <= q_seq.len().
+            let code = unsafe { *q.add(q_off + i) };
+            i += 1;
+            sum = sum.wrapping_add(cell(matrix, code, (($ch >> $sh) & 3) as usize));
+            if sum > 0 {
+                q_end = q_off + i;
+                score = score.wrapping_add(sum);
+                x_current = if score.wrapping_neg() > x {
+                    score.wrapping_neg()
+                } else {
+                    x
+                };
+                sum = 0;
+            } else if sum < x_current {
+                break $l;
+            }
+        }};
+    }
+    'right: {
+        if right == 0 {
+            break 'right;
+        }
+        let mut b = s_off >> 2;
+        // SAFETY: s_off < subject_len, so b < subject_len.div_ceil(4) <= s_seq_packed.len().
+        let mut ch = unsafe { *s.add(b) };
+        let k = s_off & 3;
+        if k == 0 {
+            right_step!(ch, 6, 'right);
+        }
+        if k <= 1 {
+            right_step!(ch, 4, 'right);
+        }
+        if k <= 2 {
+            right_step!(ch, 2, 'right);
+        }
+        right_step!(ch, 0, 'right);
+        loop {
+            if i == right {
+                break 'right;
+            }
+            b += 1;
+            // SAFETY: i < right, so position s_off + i < subject_len lies in byte b.
+            ch = unsafe { *s.add(b) };
+            right_step!(ch, 6, 'right);
+            right_step!(ch, 4, 'right);
+            right_step!(ch, 2, 'right);
+            right_step!(ch, 0, 'right);
+        }
+    }
+
+    UngappedData {
+        q_start,
+        s_start,
+        length: q_end - q_beg,
+        score,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::extension::extend_hit_ungapped_exact_ported;
@@ -233,6 +385,9 @@ mod tests {
         assert_eq!(key(counted), expected);
         let ported = extend_hit_ungapped_exact_ported(&query, &packed, 3, 3, 5, i32::MIN, &matrix);
         assert_eq!(key(ported), expected);
+        let unrolled =
+            extend_hit_ungapped_exact_unrolled(&query, &packed, 3, 3, 5, i32::MIN, &matrix);
+        assert_eq!(key(unrolled), expected);
     }
 
     /// Every hit offset of random query blocks (contexts of 1 to 40 letters between sentinels,
@@ -298,6 +453,27 @@ mod tests {
                                 &matrix
                             )),
                             "round {round} {args:?}"
+                        );
+                        assert_eq!(
+                            key(extend_hit_ungapped_exact_unrolled(
+                                &query,
+                                &packed,
+                                q_off,
+                                s_off,
+                                subject_len,
+                                x_dropoff,
+                                &matrix
+                            )),
+                            key(extend_hit_ungapped_exact_ported(
+                                &query,
+                                &packed,
+                                q_off,
+                                s_off,
+                                subject_len,
+                                x_dropoff,
+                                &matrix
+                            )),
+                            "unrolled round {round} {args:?}"
                         );
                         calls += 1;
                     }

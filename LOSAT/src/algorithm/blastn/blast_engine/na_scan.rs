@@ -173,6 +173,42 @@ pub(super) struct NaScanState<'s> {
 /// move of the two-stage scan ended the register spill this was `#[inline(always)]` for). The
 /// scan's callback stays a function of its own, as it was.
 pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) {
+    // EXPERIMENT (line FN s1 probe, branch exp/fn-ctxlate): LOSAT_X_FNCTX=1 reads a hit's context
+    // and its cutoffs only once the hit is ready, from one 16-byte row (NCBI's order,
+    // na_ungapped.c:900-902); LOSAT_X_FNPF=1 prefetches the query line of the hit four places
+    // ahead in the word's hit list. `=0` runs the path of dev.
+    match (x_env_on("LOSAT_X_FNCTX"), x_env_on("LOSAT_X_FNPF")) {
+        (true, true) => scan_na_lookup_impl::<true, true>(x, state),
+        (true, false) => scan_na_lookup_impl::<true, false>(x, state),
+        (false, true) => scan_na_lookup_impl::<false, true>(x, state),
+        (false, false) => scan_na_lookup_impl::<false, false>(x, state),
+    }
+}
+
+/// EXPERIMENT (line FN s1 probe): the probe's switches, read once (default on).
+fn x_env_on(name: &'static str) -> bool {
+    use std::sync::OnceLock;
+    static CTX: OnceLock<bool> = OnceLock::new();
+    static PF: OnceLock<bool> = OnceLock::new();
+    let cell = if name == "LOSAT_X_FNCTX" { &CTX } else { &PF };
+    *cell.get_or_init(|| std::env::var(name).map(|v| v.trim() != "0").unwrap_or(true))
+}
+
+#[inline(always)]
+fn x_prefetch(p: *const u8) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a prefetch is a hint; it never faults, whatever the address.
+    unsafe {
+        core::arch::x86_64::_mm_prefetch::<{ core::arch::x86_64::_MM_HINT_T0 }>(p as *const i8);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = p;
+}
+
+fn scan_na_lookup_impl<const FNCTX: bool, const FNPF: bool>(
+    x: &NaScanInputs<'_>,
+    state: &mut NaScanState<'_>,
+) {
     let &NaScanInputs {
         scan,
         search_seq_packed,
@@ -205,6 +241,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         scan_range,
         x_dropoff_scores,
         reduced_cutoff_scores,
+        x_cuts,
         score_matrix,
         nucl_score_table,
         debug_enabled,
@@ -287,7 +324,16 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     .unwrap_or(&[])
             };
 
-            for &q_off_1 in matches_slice {
+            for (x_j, &q_off_1) in matches_slice.iter().enumerate() {
+                if FNPF {
+                    if let Some(&q_ahead) = matches_slice.get(x_j + 4) {
+                        x_prefetch(
+                            encoded_query_concat_blastna
+                                .as_ptr()
+                                .wrapping_add((q_ahead as usize).saturating_sub(9)),
+                        );
+                    }
+                }
                 if debug_enabled {
                     *dbg_seeds_found += 1;
                 }
@@ -303,14 +349,22 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 // ```c
                 // Int4 context = BSearchContextInfo(q_off, query_info);
                 // ```
-                let context_idx = query_context_index.context_for_offset(q_off0);
-                let ctx = &query_contexts[context_idx];
-                let q_idx = context_idx as u32;
-
-                let q_pos_usize = q_off0 - ctx.query_offset as usize;
+                // EXPERIMENT (LOSAT_X_FNCTX=1): the context waits for the hit to be ready, unless
+                // the diagnostics need the hit's place in its context now.
+                let x_early = !FNCTX || debug_enabled || blastn_trace_enabled || debug_window.is_some();
+                let mut context_idx = if x_early {
+                    query_context_index.context_for_offset(q_off0)
+                } else {
+                    0
+                };
+                let q_pos_usize = if x_early {
+                    q_off0 - query_contexts[context_idx].query_offset as usize
+                } else {
+                    0
+                };
 
                 // Use pre-computed cutoff score (computed once per query-subject pair)
-                let cutoff_score = cutoff_scores[context_idx];
+                let x_cutoff_early = if FNCTX { 0 } else { cutoff_scores[context_idx] };
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
                 // ```c
@@ -359,7 +413,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 if blastn_trace_enabled
                     && blastn_trace::should_trace_range(
                         "seed",
-                        q_idx,
+                        context_idx as u32,
                         s_idx,
                         s_id,
                         q_pos_usize as i32,
@@ -368,8 +422,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                         kmer_start
                             .saturating_add(safe_k)
                             .saturating_add(chunk.offset),
-                        ctx.len,
-                        ctx.frame,
+                        query_contexts[context_idx].len,
+                        query_contexts[context_idx].frame,
                     )
                 {
                     blastn_trace::log(
@@ -378,7 +432,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                             "subject={}({}) context={} q_off={} s_off={} word_length={} lookup_index={} diag={} hits_for_lookup={}",
                             s_id,
                             s_idx,
-                            q_idx,
+                            (context_idx as u32),
                             q_pos_usize,
                             s_pos,
                             safe_k,
@@ -467,7 +521,15 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 let mut s_end_pos = s_end + diag_offset as usize;
                 let mut off_found = false;
                 let mut hit_ready = true;
-                let query_mask = ctx.masks.as_slice();
+                // EXPERIMENT (LOSAT_X_FNCTX=1): `type_of_word` returns before it reads the
+                // context's masks and length when the word is the lookup word (here always:
+                // both lengths are `safe_k`), so the late path hands it nothing to read.
+                let (x_has_locations, x_q_range) = if x_early {
+                    let ctx = &query_contexts[context_idx];
+                    (!ctx.masks.is_empty(), ctx.len)
+                } else {
+                    (false, 0)
+                };
                 let diag_hash_window = if !use_array_indexing {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
                     // ```c
@@ -531,7 +593,9 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
                     // mb_lt->hashtable[ecode] = index;
                     // ```
-                    let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
+                    let x_ctx_offset = query_contexts[query_context_index.context_for_offset(q_off0)]
+                        .query_offset as usize;
+                    let q_off_1 = (x_ctx_offset + q_pos + 1) as u32;
                     !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
                 };
 
@@ -558,8 +622,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                         q_off,
                         s_off,
-                        !query_mask.is_empty(),
-                        ctx.len,
+                        x_has_locations,
+                        x_q_range,
                         s_range,
                         safe_k, // word_length
                         safe_k, // lut_word_length (same for non-two-stage)
@@ -647,8 +711,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                         q_off,
                         s_off,
-                        !query_mask.is_empty(),
-                        ctx.len,
+                        x_has_locations,
+                        x_q_range,
                         s_range,
                         safe_k, // word_length
                         safe_k, // lut_word_length (same for non-two-stage)
@@ -735,9 +799,25 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 // NCBI's `query` is the concatenated query and `q_off` an offset in it
                 // (na_ungapped.c:164-206 too): a walk that does not stop at the context's
                 // sentinel (a raw X-drop of 2^30 or more) reads the contexts before it.
-                let q_off_concat = ctx.query_offset as usize + q_off;
-                let x_dropoff = x_dropoff_scores[context_idx];
-                let reduced_cutoff = reduced_cutoff_scores[context_idx];
+                // EXPERIMENT (LOSAT_X_FNCTX=1): the context of a ready hit, and its cutoffs from
+                // one row (NCBI: `context = BSearchContextInfo(q_off, query_info); cutoffs =
+                // word_params->cutoffs + context;`, na_ungapped.c:900-902). `q_off0 - q_pos_usize`
+                // is the context's offset in the concatenated query on the early path and 0 on the
+                // late one, where `q_off` counts from the hit's concatenated offset.
+                if !x_early {
+                    context_idx = query_context_index.context_for_offset(q_off0);
+                }
+                let q_off_concat = q_off0 - q_pos_usize + q_off;
+                let (x_dropoff, reduced_cutoff, cutoff_score) = if FNCTX {
+                    let cut = &x_cuts[context_idx];
+                    (cut.x_dropoff, cut.reduced, cut.cutoff)
+                } else {
+                    (
+                        x_dropoff_scores[context_idx],
+                        reduced_cutoff_scores[context_idx],
+                        x_cutoff_early,
+                    )
+                };
                 let ungapped_start = if timing_enabled {
                     Some(std::time::Instant::now())
                 } else {
@@ -795,11 +875,12 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     // No NCBI counterpart (LOSAT_TRACE_BLASTN_* diagnostics): the hit's
                     // context-relative range, NCBI's `Int4` one (below 0 for a hit that starts
                     // left of its context), computed only for the trace.
+                    let ctx = &query_contexts[context_idx];
                     let qs = (ungapped.q_start as isize - ctx.query_offset as isize) as i32;
                     let qe = qs + ungapped.length as i32;
                     if blastn_trace::should_trace_range(
                         "ungapped",
-                        q_idx,
+                        context_idx as u32,
                         s_idx,
                         s_id,
                         qs,
@@ -815,7 +896,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                             "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
                             s_id,
                             s_idx,
-                            q_idx,
+                            (context_idx as u32),
                             q_off,
                             s_off.saturating_add(chunk.offset),
                             qs,
@@ -922,7 +1003,13 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 // for a hit that starts left of its context).
                 x_push_ungapped(
                     ungapped_hits,
-                    UngappedHit::saved(q_idx, ctx, q_off_concat, s_off, &ungapped),
+                    UngappedHit::saved(
+                        context_idx as u32,
+                        &query_contexts[context_idx],
+                        q_off_concat,
+                        s_off,
+                        &ungapped,
+                    ),
                 );
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772

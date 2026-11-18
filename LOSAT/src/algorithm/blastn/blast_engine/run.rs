@@ -13308,6 +13308,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         hit_saving_cutoff_scores: &x_prelim_cutoffs.1,
         x_dropoff_scores: &x_prelim_cutoffs.2,
         reduced_cutoff_scores: &x_prelim_cutoffs.3,
+        x_cuts: &x_prelim_cutoffs.4,
         timing_ref: timing.as_deref(),
         effective_word_size,
         scan_step,

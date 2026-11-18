@@ -48,6 +48,18 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
     }
 }
 
+/// Whether the batches searched ahead (`stage_d_pipeline::x_search_batches`) that failed with
+/// `error` are searched again one at a time: a read of the database that failed (`XReadError`), a
+/// batch whose setup failed (`SetupEngineError`), or one whose search LOSAT refuses after the
+/// reports of the batches before (`ErrorAfterBatchReports`). The earliest batch that fails then
+/// fails after the reports of the batches before it, and nothing of it or of the batches after it
+/// is written (`batch_failure`).
+fn searched_again(error: &anyhow::Error) -> bool {
+    error.is::<XReadError>()
+        || error.is::<SetupEngineError>()
+        || error.is::<ErrorAfterBatchReports>()
+}
+
 impl TblastnArgs {
     // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run();
@@ -1940,11 +1952,6 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        // A read of the database that failed while the batches were searched ahead, a batch whose
-        // setup failed (`SetupEngineError`), or one whose search LOSAT refuses after the reports of
-        // the batches before (`ErrorAfterBatchReports`): they are searched again one at a time
-        // below, so that the earliest batch that fails does after the reports of the batches
-        // before, and nothing of it or of the batches after it is written.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -1970,13 +1977,7 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error)
-                if error.is::<XReadError>()
-                    || error.is::<SetupEngineError>()
-                    || error.is::<ErrorAfterBatchReports>() =>
-            {
-                None
-            }
+            Err(error) if searched_again(&error) => None,
             Err(error) => return Err(error),
         };
         for range in query_input

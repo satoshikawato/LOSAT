@@ -4,9 +4,9 @@
 //! batches before. LOSAT writes them whole, without the epilog (for the first batch, the prologs),
 //! and then refuses (`blastinput::app::ErrorAfterBatchReports`, line RG item X-short-bat); nothing
 //! of the refused batch or of the batches after it is written, at every `-num_threads`. The single
-//! searches are rows `db.xs.tblastn.*` and `db.xsb.tblastn.*` of
-//! `tests/db_search_manifest/tblastn.tsv`; here what those rows cannot hold: every format, the
-//! batches searched ahead (side by side, on their own pools), `-db`, and the query chunk refusal.
+//! searches are rows `db.xs.tblastn.bat.*` of `tests/db_search_manifest/tblastn.tsv`; here what
+//! those rows cannot hold: every format, the batches searched ahead (side by side, on their own
+//! pools, one after another), `-db`, and the query chunk refusals.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302
 //! ```c++
@@ -40,6 +40,16 @@ support it";
 /// The refusal of a query chunk that NCBI would split again (it stops with a null reference).
 const SPLIT_AGAIN: &str = "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would \
 split a query chunk again (it then stops with a null reference) is not supported by LOSAT's \
+TBLASTN";
+
+/// The refusal of a query chunk without a query (NCBI stops making its query factory).
+const EMPTY_CHUNK: &str = "a query chunk without a query is not supported by LOSAT's TBLASTN";
+
+/// The refusal of a negative `CHUNK_SIZE` whose wrapped chunk ranges leave gaps between them
+/// (NCBI searches on with the hits in the gaps lost: PD-LOSAT-NCBI-DEFECTS D13).
+const NEGATIVE_GAPS: &str =
+    "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this \
+query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's \
 TBLASTN";
 
 const SEARCH: [&str; 6] = ["-window_size", "0", "-seg", "no", "-evalue", "1e10"];
@@ -149,6 +159,16 @@ fn losat(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
         .expect("run LOSAT")
 }
 
+/// `actual` equals `expected`, both shown as text when they differ.
+fn assert_bytes(actual: &[u8], expected: &[u8], what: &str) {
+    assert!(
+        actual == expected,
+        "{what}:\n{}\n--- expected ---\n{}",
+        String::from_utf8_lossy(actual),
+        String::from_utf8_lossy(expected)
+    );
+}
+
 /// The output of a refused search: exit status 1, standard error ending with `message` once.
 fn assert_refused(output: &Output, message: &str, case: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -181,7 +201,9 @@ fn search(
 /// tabular reports, the Seq-annots and the archive of the batch are whole. The XML2 and JSON
 /// documents of a `-subject` search hold the first batch's report back (NCBI writes it with the
 /// second), so only their prolog is written. In one batch the refusal comes after the prologs alone
-/// (`-outfmt 0`'s, the XML2 and JSON documents' first lines, `-outfmt 20`'s field names).
+/// (`-outfmt 0`'s, the XML2 and JSON documents' first lines, `-outfmt 20`'s field names). Not here:
+/// `-outfmt 13` and `14`, which need `-out` and write each query's report to a file of its own,
+/// and 17, which TBLASTN does not write.
 #[test]
 fn the_reports_of_the_query_batches_before_the_refusal_are_written() {
     let temp = TempDir::new("formats");
@@ -192,13 +214,18 @@ fn the_reports_of_the_query_batches_before_the_refusal_are_written() {
     for outfmt in [
         "0",
         "1",
+        "2",
+        "3",
+        "4",
         "5",
         "6",
         "6 std",
         "7",
         "8",
+        "9",
         "10",
         "11",
+        "12",
         "15",
         "16",
         "18",
@@ -219,7 +246,7 @@ fn the_reports_of_the_query_batches_before_the_refusal_are_written() {
             let text = String::from_utf8_lossy(&alone.stdout);
             let report = text.find("\n\nQuery= qa");
             let (written, prolog): (&[u8], &[u8]) = match outfmt {
-                "0" | "1" => {
+                "0" | "1" | "2" | "3" | "4" => {
                     let report = report.expect("the report of qa");
                     let epilog = report + text[report..].find(EPILOG).expect("the epilog");
                     (&alone.stdout[..epilog], &alone.stdout[..report])
@@ -248,62 +275,108 @@ fn the_reports_of_the_query_batches_before_the_refusal_are_written() {
                 }
                 _ => (&alone.stdout, b""),
             };
-            assert_eq!(
-                String::from_utf8_lossy(&refused.stdout),
-                String::from_utf8_lossy(written),
-                "{case}: the report of qa"
+            assert_bytes(
+                &refused.stdout,
+                written,
+                &format!("{case}: the report of qa"),
             );
-            assert_eq!(
-                String::from_utf8_lossy(&one_batch.stdout),
-                String::from_utf8_lossy(prolog),
-                "{case}: one batch, the prologs"
+            assert_bytes(
+                &one_batch.stdout,
+                prolog,
+                &format!("{case}: one batch, the prologs"),
             );
         }
     }
 }
 
-/// Six batches, the fourth refused: the batches searched ahead (side by side at 2 threads, side by
-/// side and on pools of their own at 4) hand the refused batch to the loop, which writes the
-/// reports of the three before, as the three queries alone give them, and nothing of the fifth
-/// and sixth.
+/// The batches searched ahead hand the earliest refused batch to the loop, which writes the
+/// reports of the batches before it, as those queries alone give them, and nothing of it or of the
+/// batches after it. With two subjects, `x_search_batches` searches six batches side by side at 2
+/// threads; at 4 threads four side by side and the last two on pools of their own, and of five
+/// batches four side by side and the fifth after them (`one_after_another`): the refused batch is
+/// met in each of those places, and of two refused batches the earlier one fails.
 #[test]
 fn the_batches_searched_ahead_stop_at_the_earliest_refused_batch() {
     let temp = TempDir::new("ahead");
     let dir = temp.0.as_path();
     let inputs = inputs(dir);
     let subject = ["-subject", inputs.subject.to_str().unwrap()];
-    let six = fasta(
-        dir,
-        "q6.faa",
-        &[
-            ("q1", QA),
-            ("q2", QA),
-            ("q3", QA),
-            ("xs_q", "MHYWWW"),
-            ("q5", QA),
-            ("q6", QA),
-        ],
-    );
-    let three = fasta(dir, "q3.faa", &[("q1", QA), ("q2", QA), ("q3", QA)]);
-    let batch_one = [("BATCH_SIZE", "1")];
-    for outfmt in ["0", "6"] {
-        for threads in ["1", "2", "4"] {
-            let case = format!("outfmt {outfmt} threads {threads}");
-            let before = search(dir, &batch_one, &three, &subject, outfmt, threads);
-            assert!(before.status.success(), "{case}: the three queries");
-            let refused = search(dir, &batch_one, &six, &subject, outfmt, threads);
-            assert_refused(&refused, X_SHORT, &case);
-            let text = String::from_utf8_lossy(&before.stdout);
-            let written = match outfmt {
-                "0" => &before.stdout[..text.rfind(EPILOG).expect("the epilog")],
-                _ => &before.stdout[..],
-            };
-            assert!(!written.is_empty(), "{case}");
-            assert_eq!(
-                String::from_utf8_lossy(&refused.stdout),
-                String::from_utf8_lossy(written),
-                "{case}: the reports of q1 to q3"
-            );
+    const X: &str = "MHYWWW";
+    // (queries, the number before the first refused one, threads with the layout at 4 threads)
+    let cases: [(&[&str], usize, &[&str], &str); 4] = [
+        (
+            &[QA, QA, QA, X, QA, QA],
+            3,
+            &["1", "2", "4"],
+            "side_by_side=4 one_after_another=0 own_pools=2",
+        ),
+        (
+            &[QA, QA, QA, QA, X, QA],
+            4,
+            &["4"],
+            "side_by_side=4 one_after_another=0 own_pools=2",
+        ),
+        (
+            &[QA, QA, QA, QA, X],
+            4,
+            &["4"],
+            "side_by_side=4 one_after_another=1 own_pools=0",
+        ),
+        (
+            &[QA, QA, QA, X, QA, X],
+            3,
+            &["2", "4"],
+            "side_by_side=4 one_after_another=0 own_pools=2",
+        ),
+    ];
+    for (index, (letters, before, threads_list, layout)) in cases.into_iter().enumerate() {
+        let ids: Vec<String> = (1..=letters.len()).map(|n| format!("q{n}")).collect();
+        let records: Vec<(&str, &str)> = ids
+            .iter()
+            .map(String::as_str)
+            .zip(letters.iter().copied())
+            .collect();
+        let queries = fasta(dir, &format!("ahead{index}.faa"), &records);
+        let first = fasta(dir, &format!("before{index}.faa"), &records[..before]);
+        for outfmt in ["0", "6"] {
+            for &threads in threads_list {
+                let case = format!("case {index} outfmt {outfmt} threads {threads}");
+                let batch_one = [("BATCH_SIZE", "1")];
+                let alone = search(dir, &batch_one, &first, &subject, outfmt, threads);
+                assert!(alone.status.success(), "{case}: the queries before");
+                let refused = search(
+                    dir,
+                    &[("BATCH_SIZE", "1"), ("LOSAT_WASI_THREADS_DEBUG", "1")],
+                    &queries,
+                    &subject,
+                    outfmt,
+                    threads,
+                );
+                assert_refused(&refused, X_SHORT, &case);
+                if threads == "4" {
+                    let stderr = String::from_utf8_lossy(&refused.stderr);
+                    let stage = stderr
+                        .lines()
+                        .find(|line| {
+                            line.starts_with(
+                                "[losat-thread-stage] program=tblastn stage=query_batches ",
+                            )
+                        })
+                        .unwrap_or_else(|| panic!("{case}: no query_batches line: {stderr}"));
+                    assert!(stage.ends_with(layout), "{case}: {stage}");
+                }
+                let text = String::from_utf8_lossy(&alone.stdout);
+                let written = match outfmt {
+                    "0" => &alone.stdout[..text.rfind(EPILOG).expect("the epilog")],
+                    _ => &alone.stdout[..],
+                };
+                assert!(!written.is_empty(), "{case}");
+                assert_bytes(
+                    &refused.stdout,
+                    written,
+                    &format!("{case}: the reports of the queries before"),
+                );
+            }
         }
     }
 }
@@ -364,12 +437,16 @@ fn a_database_search_writes_the_reports_before_the_refusal() {
     }
 }
 
-/// The refusal of a query chunk that NCBI would split again (`CHUNK_SIZE=100
-/// OVERLAP_CHUNK_SIZE=80`: `qa`, 31 residues, is one chunk; a query of 310 residues is split into
-/// 15 chunks of 95, which NCBI would split again and stops with a null reference) comes after the
-/// report of the batch before, as NCBI's error does. A negative `CHUNK_SIZE` that splits a batch,
-/// where NCBI's wrapped chunk ranges either stop it or search with hits lost, is refused before
-/// any byte.
+/// The refusals of a query chunk where NCBI stops in the search of the batch come after the report
+/// of the batch before, as NCBI's error does (`qa`, 31 residues, is not split):
+/// - `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split a query of 310 residues into 15 chunks of 95,
+///   which NCBI would split again (it stops with a null reference);
+/// - `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` (NCBI's `size_t` ranges wrap) make the same query 3
+///   chunks, the first of which covers it and would be split again;
+/// - with those values a query of 200 residues is a chunk of 1 residue and a chunk without a query.
+///
+/// A query of 248 residues is 2 chunks of 25 and 23 residues with 200 between them, which NCBI
+/// searches on with the hits there lost: refused before any byte (PD-LOSAT-NCBI-DEFECTS D13).
 #[test]
 fn a_query_chunk_split_again_is_refused_after_the_reports_before() {
     let temp = TempDir::new("chunk");
@@ -378,25 +455,46 @@ fn a_query_chunk_split_again_is_refused_after_the_reports_before() {
     let subject = ["-subject", inputs.subject.to_str().unwrap()];
     let long = QA.repeat(10);
     let queries = fasta(dir, "ql.faa", &[("qa", QA), ("ql", &long)]);
+    let empty = fasta(dir, "qe.faa", &[("qa", QA), ("qe", &QA.repeat(7)[..200])]);
+    let gaps = fasta(dir, "qg.faa", &[("qa", QA), ("qg", &QA.repeat(8))]);
+    let positive = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "100"),
+        ("OVERLAP_CHUNK_SIZE", "80"),
+    ];
+    let negative = [
+        ("BATCH_SIZE", "1"),
+        ("CHUNK_SIZE", "-100"),
+        ("OVERLAP_CHUNK_SIZE", "-200"),
+    ];
     for threads in ["1", "4"] {
-        let case = format!("threads {threads}");
         let alone = search(dir, &[], &inputs.first, &subject, "6", threads);
-        assert!(alone.status.success() && !alone.stdout.is_empty(), "{case}");
-        let split = [
-            ("BATCH_SIZE", "1"),
-            ("CHUNK_SIZE", "100"),
-            ("OVERLAP_CHUNK_SIZE", "80"),
-        ];
-        let refused = search(dir, &split, &queries, &subject, "6", threads);
-        assert_refused(&refused, SPLIT_AGAIN, &case);
-        assert_eq!(refused.stdout, alone.stdout, "{case}: the report of qa");
-        let negative = [
-            ("BATCH_SIZE", "1"),
-            ("CHUNK_SIZE", "-100"),
-            ("OVERLAP_CHUNK_SIZE", "-200"),
-        ];
-        let refused = search(dir, &negative, &queries, &subject, "6", threads);
-        assert_eq!(refused.status.code(), Some(1), "{case}");
+        assert!(
+            alone.status.success() && !alone.stdout.is_empty(),
+            "threads {threads}"
+        );
+        for (name, env, query, message) in [
+            ("split again", &positive, &queries, SPLIT_AGAIN),
+            ("negative, split again", &negative, &queries, SPLIT_AGAIN),
+            (
+                "negative, a chunk without a query",
+                &negative,
+                &empty,
+                EMPTY_CHUNK,
+            ),
+        ] {
+            let case = format!("{name}, threads {threads}");
+            let refused = search(dir, env, query, &subject, "6", threads);
+            assert_refused(&refused, message, &case);
+            assert_bytes(
+                &refused.stdout,
+                &alone.stdout,
+                &format!("{case}: the report of qa"),
+            );
+        }
+        let case = format!("negative, gaps, threads {threads}");
+        let refused = search(dir, &negative, &gaps, &subject, "6", threads);
+        assert_refused(&refused, NEGATIVE_GAPS, &case);
         assert!(refused.stdout.is_empty(), "{case}: nothing before");
     }
 }

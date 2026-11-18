@@ -171,9 +171,10 @@
   1.52 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
   of a query batch crashes, does not finish or stops come after the reports of the query
   batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
-  Owner's decision of 2026-11-16 on line RG's question Q-X2c); Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.50 and 1.51, which line RG items
-  X-short-tbx and X4 hold on their branches: the first of them to merge renumbers)
+  Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.50 and
+  1.51, which line RG items X-short-tbx and X4 hold on their branches: the first of them to merge
+  renumbers)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -331,7 +332,11 @@ Explicit rejections (rule 3):
 - Query-split settings that NCBI fails on (BLASTP, TBLASTN; decision D13): a
   `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair with which a chunk would be split again, and a
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
-  kept the rejection for these programs.
+  kept the rejection for these programs. TBLASTN refuses where NCBI stops in the batch's
+  search (a chunk split again, also the first range of a negative `CHUNK_SIZE` that covers the
+  batch, and a chunk without a query) after the reports of the batches before, and a negative
+  `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on, before the
+  run's first byte (version 1.52).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
   exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit
@@ -1600,19 +1605,22 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   translates in the selected code (the approved deviation PD-TLOSAN-LOCAL-GENCODE-32, whose
   reference is NCBI's `-db` search) and refuses where NCBI's `-db` search crashes, although NCBI's
   `-subject` search, translating in code 1, may find nothing there. A refusal in a later query batch
-  (`BATCH_SIZE`, or a first query long enough to fill a batch) comes after the reports of the
-  batches before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it
-  searches the next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold a report
-  as NCBI's do, so only their start), for the first batch the prologs, and leaves the epilog out
-  (version 1.52, 2026-11-18, line RG item X-short-bat, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`).
-  TBLASTN's other rejections of a step where NCBI's search of a batch crashes, does not finish or
-  stops take the same form, TBLASTX's (version 1.40): a hit that the interval tree keeps, the
-  overflow banks of the seed search, a query chunk split again or holding no query, and with
-  `-in_pssm` (one batch: the prologs) a window past the PSSM (1.18), a gapped start past the
-  subject's translation (1.48) and a traceback that starts past its frame's NULLB (1.44). The
-  refusal of a reported column of that NULLB (1.44), whose alignment NCBI reports, comes before the
-  run's first byte.
+  (`BATCH_SIZE`, or queries whose letters fill a batch) comes after the reports of the batches
+  before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it searches the
+  next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold each query's report until
+  the next query's results arrive, as NCBI's do, so the last query before the refused batch is left
+  out), for the first batch the prologs, and leaves the epilog out (version 1.52, 2026-11-18, line
+  RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`). TBLASTN's other rejections of a
+  step where NCBI's search of a batch crashes, does not finish or stops take the same form,
+  TBLASTX's (version 1.40): two `-window_size 0` one-hit alignments at the end of their subject
+  chunk or past it, which NCBI's interval tree splits without end; the overflow banks of the seed
+  search; a query chunk split again (also with a negative `CHUNK_SIZE` whose first wrapped range
+  covers the batch) or holding no query (D13); and with `-in_pssm` (one batch: the prologs) a
+  window past the PSSM (1.18), a gapped start past the subject's translation (1.48) and a traceback
+  that starts past its frame's NULLB (1.44). Before the run's first byte stay the refusal of a
+  reported column of that NULLB (1.44), whose alignment NCBI reports, and that of a negative
+  `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on (D13).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

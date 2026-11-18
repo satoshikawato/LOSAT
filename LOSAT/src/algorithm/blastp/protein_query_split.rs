@@ -113,8 +113,8 @@ pub fn split_protein_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<P
     if num_chunks <= 1 {
         return None;
     }
-    // A split needs the variable's chunk size above the overlap, so the overlap is an ordinary
-    // `int` value here; the chunk size that `calculate_num_chunks` evens out can be below it.
+    // NCBI's `size_t` overlap: the variable's value, near 2^64 for a negative OVERLAP_CHUNK_SIZE
+    // (which splits a batch only below a negative CHUNK_SIZE).
     let overlap_size = sizes.overlap as usize;
 
     let mut chunk_ranges = vec![(0usize, 0usize); num_chunks];
@@ -125,8 +125,10 @@ pub fn split_protein_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<P
             chunk_end = total_length;
         }
         *range = (chunk_start, chunk_end);
-        // NCBI's `size_t` arithmetic: a chunk size below the overlap wraps the start past the
-        // queries' length at the first chunk, and the loop ends.
+        // NCBI's `size_t` arithmetic (split_query_cxx.cpp:166): an evened chunk size below a
+        // positive overlap wraps the start past the queries' length at the first chunk (the loop
+        // ends, the chunks after it keep no query); a negative overlap moves the start by the
+        // chunk size plus the overlap's magnitude (gaps between the chunks), or past the length.
         chunk_start = chunk_start.wrapping_add(chunk_size.wrapping_sub(overlap_size));
         if chunk_start > total_length || chunk_end == total_length {
             break;
@@ -396,6 +398,56 @@ mod tests {
         assert_eq!(offsets, vec![0, 19967, 39934]);
         assert!(split_protein_batch(&[39_799], sizes).is_none());
         assert!(!protein_chunk_would_be_split(&chunks, sizes));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:149,166-170
+    // ```c
+    //         size_t chunk_end = chunk_start + m_ChunkSize;
+    //         ...
+    //         chunk_start += (m_ChunkSize - kOverlapSize);
+    //         if (chunk_start > m_TotalQueryLength ||
+    //             chunk_end == m_TotalQueryLength) {
+    //             break;
+    // ```
+    // The chunk ranges in `size_t`, where a debug build's `usize` subtraction panicked:
+    // CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200 make 310 residues 3 chunks of 2^64 / 3 or so, the
+    // first of which covers the batch (and would be split again) while the others keep NCBI's empty
+    // bounds, and 248 residues 2 chunks of 25 with a gap of 200 between them; CHUNK_SIZE=100
+    // OVERLAP_CHUNK_SIZE=95 make 31 residues 6 chunks of 85, below the overlap, the first covering
+    // the batch.
+    #[test]
+    fn the_chunk_ranges_wrap_as_ncbis_size_t() {
+        let ranges = |lengths: &[usize], sizes| -> Vec<Vec<(usize, usize)>> {
+            split_protein_batch(lengths, sizes)
+                .unwrap()
+                .iter()
+                .map(|chunk| {
+                    chunk
+                        .queries
+                        .iter()
+                        .map(|part| (part.from, part.to))
+                        .collect()
+                })
+                .collect()
+        };
+        let negative = protein_split_sizes(20000, Some(-100), Some(-200));
+        assert_eq!(
+            ranges(&[310], negative),
+            vec![vec![(0, 310)], vec![], vec![]]
+        );
+        let chunks = split_protein_batch(&[310], negative).unwrap();
+        assert!(protein_chunk_would_be_split(&chunks, negative));
+        assert_eq!(
+            ranges(&[248], negative),
+            vec![vec![(0, 25)], vec![(225, 248)]]
+        );
+        let chunks = split_protein_batch(&[248], negative).unwrap();
+        assert!(!protein_chunk_would_be_split(&chunks, negative));
+        let close = protein_split_sizes(20000, Some(100), Some(95));
+        assert_eq!(
+            ranges(&[31], close),
+            vec![vec![(0, 31)], vec![], vec![], vec![], vec![], vec![]]
+        );
     }
 
     // Two queries share the first chunk (10051 residues, `calculate_num_chunks`); the

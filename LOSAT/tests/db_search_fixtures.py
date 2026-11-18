@@ -70,8 +70,10 @@ stderr and exit status with the frozen files (and checks that each frozen file's
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
-failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
-too (the library holds its output where the command line holds it), a row whose query the reader refuses is
+failure's exit status counts as any other failure's, a rejection row writes there what the command line
+writes before its refusal (the library writes to its writers as the command line does, and what was
+written before an error stays, `api::run`: nothing for most rows, the prolog for blastx's `db.x2g.*`
+rows, the reports of the query batches before for tblastn's `db.xs.tblastn.bat.*`), a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
 row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
@@ -586,10 +588,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        # A refusal follows no byte in either path (the library holds its output where the command
-        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
-        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
-        # library skips.
+        # Both paths write the same bytes before a refusal (the library writes to its writers as the
+        # command line does, BLASTX's XML documents through `blast_xml::documents_may_refuse`, and
+        # keeps what was written before an error, `api::run`): none for most rows; what NCBI wrote
+        # before its failing step for the others, whose stdout_bytes hold NCBI's frozen stdout
+        # (blastx's `db.x2g.*`: the prolog; tblastn's `db.xs.tblastn.bat.*`: the reports of the
+        # query batches before; psiblast's PSSM file and rounds rows, which the library skips).
         if row["stdout_bytes"]:
             out_path = FROZEN / f"{row['row_id']}.out"
             out = out_path.read_bytes() if out_path.exists() else b""

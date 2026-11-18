@@ -2501,14 +2501,11 @@ fn split_preliminary_hitlists(
     prelim_size: usize,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
-    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
-    // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
-    ensure!(
-        !sizes.negative_chunk_size(),
-        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
-    );
     // NCBI stops in the search of the batch (its `CCoreException`), after it has printed the
     // reports of the batches before: so does this refusal (`blastinput::app::ErrorAfterBatchReports`).
+    // A negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE wraps NCBI's `size_t` chunk ranges
+    // (split_query_cxx.cpp:145-171): where the first range covers the batch, it is split again
+    // (and the ranges after it keep no query), so NCBI stops there too.
     if protein_chunk_would_be_split(chunks, sizes) {
         return Err(anyhow::Error::new(
             crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
@@ -2516,6 +2513,23 @@ fn split_preliminary_hitlists(
             )),
         ));
     }
+    // NCBI fails to make the query factory of a chunk without a query ("Empty
+    // CBlastQueryVector"); `split_protein_batch` makes none. NCBI stops in the search of the
+    // batch, after the reports of the batches before (`ErrorAfterBatchReports`).
+    if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
+        return Err(anyhow::Error::new(
+            crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                "a query chunk without a query is not supported by LOSAT's TBLASTN"
+            )),
+        ));
+    }
+    // Otherwise the wrapped ranges of a negative CHUNK_SIZE leave gaps between them, which NCBI
+    // searches on with the hits in the gaps lost (PD-LOSAT-NCBI-DEFECTS D13: refused before the
+    // run's first byte).
+    ensure!(
+        !sizes.negative_chunk_size(),
+        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
+    );
     // The options' spaces of the chunks (`SplitQuery_SetEffectiveSearchSpace`): the batch's own,
     // or the preliminary stage's where they differ (`run_local_search_with_pool`).
     let batch_eff_searchsp: Vec<i64> = match option_spaces {
@@ -2529,16 +2543,6 @@ fn split_preliminary_hitlists(
     let per_subject = inputs.profile.subject_set.per_subject();
     let mut merged: Vec<Option<KappaResultHitList>> = (0..queries.len()).map(|_| None).collect();
     for chunk in chunks {
-        // NCBI fails to make the query factory of a chunk without a query ("Empty
-        // CBlastQueryVector"); `split_protein_batch` makes none. NCBI stops in the search of the
-        // batch, after the reports of the batches before (`ErrorAfterBatchReports`).
-        if chunk.queries.is_empty() {
-            return Err(anyhow::Error::new(
-                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
-                    "a query chunk without a query is not supported by LOSAT's TBLASTN"
-                )),
-            ));
-        }
         let parts: Vec<Vec<u8>> = chunk
             .queries
             .iter()

@@ -532,9 +532,9 @@ def main():
     # ```
     # makeblastdb's local time and absolute database name through each WASI command, in a working directory of
     # their own, with the zone of TZ as a zone file (Asia/Tokyo), as a POSIX rule (JST-9) and unset (the host's
-    # /etc/localtime): a new database, the same again ("Deleted existing ... named"), one in a new directory, one
-    # whose directory does not resolve (an error), blastdbcmd -info of two and a blastn report of one (the
-    # database's date, the volume paths). Each run's stdout, stderr and exit status must be the native command's
+    # /etc/localtime): a new database, the same again ("Deleted existing ... named"), one in two new directories,
+    # one whose directory is a file (an error), blastdbcmd -info of two and a blastn report of one (the database's
+    # date, the volume paths). Each run's stdout, stderr and exit status must be the native command's
     # of the same directory and zone, with the times put aside (`local_times`); each time must be the local time
     # of its build in the zone that the C library finds for the run's TZ (Python's time.localtime; the clock moves
     # between the runs, LOSAT has no fixed clock to test with); the files must have the native names. LOSAT reads
@@ -551,10 +551,10 @@ def main():
         # label, the words after the program, the step that built the database whose date the output prints
         ("new", [*makedb, "-out", "db", "-title", "t"], "new"),
         ("again", [*makedb, "-out", "db", "-title", "t"], "again"),
-        ("subdir", [*makedb, "-out", "sub/db2"], "subdir"),
-        ("unresolved-dir", [*makedb, "-out", "gone/../db3"], None),
+        ("subdir", [*makedb, "-out", "sub/new/db2"], "subdir"),
+        ("file-as-dir", [*makedb, "-out", "file/db3"], None),
         ("info", ["blastdbcmd", "-db", "db", "-info"], "again"),
-        ("info-subdir", ["blastdbcmd", "-db", "sub/db2", "-info"], "subdir"),
+        ("info-subdir", ["blastdbcmd", "-db", "sub/new/db2", "-info"], "subdir"),
         ("report", ["blastn", "-query", inputs["nuc1"], "-db", "db", "-outfmt", "0", "-num_threads", "1"], "again"),
     ]
     for zone, tz, fixed_offset in [("zone-file", "Asia/Tokyo", 32400), ("posix-rule", "JST-9", 32400),
@@ -566,6 +566,7 @@ def main():
         for kind in prefixes:
             shutil.rmtree(work, ignore_errors=True)
             work.mkdir(parents=True)
+            (work / "file").write_text("not a directory\n")
             results, built = [], {}
             for step, words, date_of in local_steps:
                 started = time.time()
@@ -584,12 +585,14 @@ def main():
             if reference is None:
                 assert kind == "native", list(prefixes)
                 reference = results
-                # makeblastdb's exception exits with 255 before its log; each other run prints one time.
+                # makeblastdb's exception ("Failed to create directory 'file'") exits with 255 before its log;
+                # each other run prints one time.
                 directory = str(work).encode()
                 assert [(r[3], r[4]) for r in results[:-1]] == [(0, 1), (0, 1), (0, 1), (255, 0), (0, 1), (0, 1), (0, 1)] \
                     and b"New DB name:   " + directory + b"/db\n" in results[0][1] \
                     and b"named " + directory + b"/db\n" in results[1][1] \
-                    and b"Volumes:\n\t" + directory + b"/sub/db2\n" in results[5][1], [r[0::3] for r in results]
+                    and b"Volumes:\n\t" + directory + b"/sub/new/db2\n" in results[5][1] \
+                    and b"Failed to create directory 'file'" in results[3][2].encode(), [r[0::3] for r in results]
                 continue
             for got, want in zip(results, reference):
                 assert got == want, f"stdout, stderr, exit status or files differ from native: " \

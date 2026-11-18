@@ -259,9 +259,14 @@ impl<'a> XPrelimSubject<'a> {
             self.enabled,
             "a score-only greedy call runs only in the preliminary stage of a greedy search"
         );
+        // Not reached: NCBI's seed is the middle of its ungapped hit, inside the subject
+        // (blast_gapalign.c:4012-4017). The window below holds `s_off` only inside the chunk; a
+        // test build stops here rather than drop the hit without a word.
+        debug_assert!(
+            s_off < subject_len,
+            "a greedy seed past the subject's end ({s_off} >= {subject_len})"
+        );
         if s_off >= subject_len {
-            // Not reached: NCBI's seed is the middle of its ungapped hit, inside the subject
-            // (blast_gapalign.c:4012-4017). The window below holds `s_off` only inside the chunk.
             return None;
         }
         let from = hit.0.min(s_off).saturating_sub(X_WINDOW_MARGIN) & !(COMPRESSION_RATIO - 1);

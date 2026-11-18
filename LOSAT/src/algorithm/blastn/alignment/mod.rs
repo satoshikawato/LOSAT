@@ -44,7 +44,8 @@ pub mod x_greedy_prelim;
 /// - `AdjustedSubject`: the subject range of a traceback, `subject + start_shift` with
 ///   `adjusted_s_length` from `AdjustSubjectRange`, in the whole subject. On a subject of 90000
 ///   letters or more a traceback start more than 3000 letters past an end of its context makes
-///   the length or the start in the range negative, and the shift can pass the subject's end
+///   the start in the range negative (left of the context) or the range shorter than the start,
+///   so that `len - off` is negative (right of it), and the shift can pass the subject's end
 ///   (remaining-gaps X1b-o review 2).
 #[derive(Clone, Copy, Debug)]
 pub struct SeqPointer<'a> {

@@ -4971,8 +4971,8 @@ pub(super) fn greedy_gapped_alignment_internal(
 /// Greedy gapped alignment with traceback, from NCBI's `Int4` start `q_off` of the context `query`
 /// and `s_off` of the subject range `subject` (`greedy_gapped_alignment_internal`); the offsets of
 /// the result are NCBI's `Int4` offsets in the context and in the range, outside them where the
-/// alignment is (a subject start below 0 in the range lies at or after the range's shift in the
-/// whole subject).
+/// alignment is (a subject start below 0 in the range lies before the range's start, its shift in
+/// the whole subject).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
 pub fn greedy_gapped_alignment_with_traceback(
     query: ContextQuery<'_>,
@@ -4986,8 +4986,10 @@ pub fn greedy_gapped_alignment_with_traceback(
     x_drop: i32,
     scratch: &mut GreedyAlignScratch,
 ) -> Option<(i32, i32, i32, i32, i32, usize, Vec<GapEditOp>)> {
-    // `max_dist` is sized by the whole subject, NCBI's `max_subject_length` of the traceback's
-    // `BlastGapAlignStruct` (blast_gapalign.c:323-330), not by the range of this call.
+    // `max_dist` is sized by the whole subject, not by the range of this call (NCBI sizes it by the
+    // longest subject of the search, `max_subject_length`, blast_setup.c:991 and
+    // blast_gapalign.c:323-330; it only bounds the work: a run that does not converge doubles it
+    // and runs again, so the result does not depend on it).
     let core = greedy_gapped_alignment_internal(
         query,
         subject,
@@ -5447,7 +5449,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2786,2836-2837
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2786,2839-2840
     // ```c
     //    q_avail = query_length - q_off;
     //    s_avail = subject_length - s_off;
@@ -5542,7 +5544,7 @@ mod tests {
         assert_eq!(before_start.6, vec![GapEditOp::Sub(31)]);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2787,2836-2837
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2787,2839-2840
     // ```c
     //    q_avail = query_length - q_off;
     //    s_avail = subject_length - s_off;

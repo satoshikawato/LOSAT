@@ -16064,7 +16064,7 @@ mod tests {
         assert_eq!(run(12, 12, 0.0), vec![(-13, -1, 8, 20, 24, 12)]);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-469,503-507,598
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-469,503-507,599
     // ```c
     //              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
     //                                 query_length, &start_shift);

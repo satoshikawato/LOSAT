@@ -5590,30 +5590,11 @@ pub fn run(
         format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
-    // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
-    // custom tabular report of a delimiter, which `normalized` drops, reads the value as given, as
-    // NCBI does (`tabular::custom_tabular_spec`).
-    //
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
-    // ```c++
-    //         formatter.SetQueryRange(query_opts->GetRange());
-    //         formatter.SetLineLength(fmt_args->GetLineLength());
-    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
-    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
-    //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
-    // ```
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
-    // ```c++
-    //         formatter.SetQueryRange(query_opts->GetRange());
-    //         formatter.SetLineLength(fmt_args->GetLineLength());
-    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
-    //         }
-    // ```
-    // psiblast's formatter gets no custom delimiter (its fields are checked against it,
-    // `formatting_handler_check`): its reports read the value without it.
-    let custom_delimiter = args.app == BlastpApp::Blastp
-        && !choice.delimiter.is_empty()
+    // LOSAT's reports read the format number and the custom fields that NCBI keeps; a custom
+    // tabular report of a delimiter, which `normalized` drops, reads the value as given, as the
+    // library's: whether the app's formatter gets the delimiter (blastp's does, psiblast's and
+    // rpsblast's do not) is the spec's (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
+    let custom_delimiter = !choice.delimiter.is_empty()
         && format.is_some_and(|format| {
             crate::report::tabular::TabularSpec::of(format, &choice).is_some()
         });
@@ -6002,7 +5983,7 @@ fn subject_taxonomy(
         outputs
             .formats
             .iter()
-            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt)),
+            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt, args.app)),
     )?;
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
@@ -7342,8 +7323,8 @@ fn search(
     // of the field names comes with the first report (or `write_pairwise_prologs`), after LOSAT's
     // refusals.
     for format in outputs.formats.iter() {
-        if let Some(spec) =
-            super::tabular::custom_tabular_spec(format.outfmt).filter(|spec| spec.checks_taxdb())
+        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app)
+            .filter(|spec| spec.checks_taxdb())
         {
             let taxdb_found = match database {
                 Some(database) => database.taxdb_found(),
@@ -8282,7 +8263,7 @@ fn x_query_block_plan(
         _ => None,
     };
     // A custom tabular report of outfmt 6 or 7 takes the default one's kind.
-    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt) {
+    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt, args.app) {
         Some(spec) => match custom_kind(spec) {
             Some(crate::report::tabular::TabularKind::Tabular) => default_kind("6"),
             Some(crate::report::tabular::TabularKind::Commented) => default_kind("7"),
@@ -8917,7 +8898,7 @@ fn write_pairwise_prologs(
             let mut writer = format.sink.open()?;
             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
             writer.flush()?;
-        } else if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt)
+        } else if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app)
             .filter(|spec| spec.kind == crate::report::tabular::TabularKind::CsvWithHeader)
         {
             let mut writer = format.sink.open()?;
@@ -8972,7 +8953,7 @@ fn write_reports_without_queries(
         }
         // The custom tabular reports: outfmt 20's line of the field names, outfmt 7's count of 0
         // queries (`tabular::write_tabular_without_queries`).
-        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt) {
+        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app) {
             let taxdb_found = spec.checks_taxdb()
                 && match subject_source.database() {
                     Some(database) => database.taxdb_found(),

@@ -137,7 +137,7 @@ pub(super) fn requested_reports(
         .iter()
         .map(|format| -> Result<BlastpReport> {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20.
-            if let Some(spec) = tabular::custom_tabular_spec(format.outfmt) {
+            if let Some(spec) = tabular::custom_tabular_spec(format.outfmt, args.app) {
                 return Ok(BlastpReport::CustomTabular(spec));
             }
             if let Some(serial) = blastp_seqalign_format(format.outfmt) {

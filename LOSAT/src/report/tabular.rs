@@ -479,8 +479,71 @@ impl TabularNeeds {
 impl TabularSpec {
     /// The tabular report of `format` with the custom specification of `choice`, or `None` for
     /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
-    /// tab), which the programs write with their own writers.
+    /// tab), which the programs write with their own writers. The delimiter is the custom one:
+    /// the report of an application whose formatter gets it (`TabularSpec::of_app`).
     pub fn of(format: ReportFormat, choice: &FormatChoice) -> Option<Self> {
+        Self::of_fields(format, &choice.spec, &choice.delimiter)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
+    // ```c++
+    //         formatter.SetQueryRange(query_opts->GetRange());
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
+    // ```c++
+    //         formatter.SetQueryRange(query_opts->GetRange());
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:186-189
+    // ```c++
+    //         formatter.SetQueryRange(query_opts->GetRange());
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:183-186
+    // ```c++
+    //         formatter.SetQueryRange(query_opts->GetRange());
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    // ```
+    /// The tabular report of `format` as the formatter of `app`'s application writes it
+    /// ([`TabularSpec::of`]). The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN
+    /// too) and tblastx hand `-outfmt`'s custom delimiter to their formatter
+    /// (`SetCustomDelimiter`, blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266,
+    /// tblastx_app.cpp:169); psiblast's, rpsblast's and rpstblastn's never do, so their reports
+    /// keep the format's own delimiter, the tab or the comma (blast_format.cpp:783-785 above), and
+    /// a `delim=` with the `std` fields leaves the default outfmt 6 and 7 (`None`). Their `delim=`
+    /// is still checked against the fields (`custom_delimiter_conflict`). The one rule of the
+    /// command line and the library, for every program.
+    pub fn of_app(
+        format: ReportFormat,
+        choice: &FormatChoice,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Option<Self> {
+        use crate::report::archive::options::RequestKind;
+        let delimiter = match app {
+            RequestKind::Psiblast | RequestKind::Rpsblast | RequestKind::Rpstblastn => "",
+            RequestKind::Blastn
+            | RequestKind::Blastp
+            | RequestKind::Blastx
+            | RequestKind::Tblastn
+            | RequestKind::PsiTblastn
+            | RequestKind::Tblastx => &choice.delimiter,
+        };
+        Self::of_fields(format, &choice.spec, delimiter)
+    }
+
+    /// [`TabularSpec::of`] with the delimiter `delimiter` (empty: the format's own).
+    fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
         let (kind, default_delimiter) = match format {
             ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
             ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
@@ -496,12 +559,13 @@ impl TabularSpec {
             }
             _ => return None,
         };
-        let fields = parse_fields(&choice.spec);
-        let delimiter = if choice.delimiter.is_empty() {
-            default_delimiter.to_string()
+        let fields = parse_fields(spec);
+        let delimiter = if delimiter.is_empty() {
+            default_delimiter
         } else {
-            choice.delimiter.clone()
-        };
+            delimiter
+        }
+        .to_string();
         let default_report = matches!(kind, TabularKind::Tabular | TabularKind::Commented)
             && fields == STD_FIELDS
             && delimiter == "\t";
@@ -3062,6 +3126,59 @@ mod tests {
         assert_eq!((csv.delimiter.as_str(), csv.fields.len()), (",", 12));
         let piped = TabularSpec::of(ReportFormat::Tabular, &choice("std", "|")).unwrap();
         assert_eq!(piped.delimiter, "|");
+    }
+
+    // NCBI 2.17.0 (line RG F/d36 probes ps.f10at, ps.f20at, ps.f6at, ps.pssm.f10at, bp.f20at,
+    // bp.f6at, rps.f10at, rps.f6at, rpst.f10at): `-outfmt "10 delim=@ qseqid sseqid evalue"`
+    // writes `,` in psiblast, rpsblast and rpstblastn, `@` in blastp; `6 delim=@` is the default
+    // outfmt 6 of the first three.
+    #[test]
+    fn only_the_apps_that_set_the_delimiter_take_it() {
+        use crate::report::archive::options::RequestKind;
+        let choice = |number: i32, spec: &str| FormatChoice {
+            number,
+            spec: spec.to_string(),
+            delimiter: "@".to_string(),
+        };
+        let csv = choice(10, "qseqid sseqid evalue");
+        let std6 = choice(6, "");
+        let header = choice(20, "qseqid");
+        for app in [
+            RequestKind::Blastn,
+            RequestKind::Blastp,
+            RequestKind::Blastx,
+            RequestKind::Tblastn,
+            RequestKind::PsiTblastn,
+            RequestKind::Tblastx,
+        ] {
+            let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app);
+            assert_eq!(
+                spec,
+                TabularSpec::of(ReportFormat::CommaSeparatedValues, &csv)
+            );
+            assert_eq!(spec.unwrap().delimiter, "@", "{app:?}");
+            let spec = TabularSpec::of_app(ReportFormat::Tabular, &std6, app).unwrap();
+            assert_eq!(spec.delimiter, "@", "{app:?}");
+        }
+        for app in [
+            RequestKind::Psiblast,
+            RequestKind::Rpsblast,
+            RequestKind::Rpstblastn,
+        ] {
+            let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
+            assert_eq!(
+                (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
+                (TabularKind::Csv, ",", 3),
+                "{app:?}"
+            );
+            let spec =
+                TabularSpec::of_app(ReportFormat::CommaSeparatedValuesWithHeader, &header, app);
+            assert_eq!(spec.unwrap().delimiter, ",", "{app:?}");
+            assert!(TabularSpec::of_app(ReportFormat::Tabular, &std6, app).is_none());
+            let commented = choice(7, "qseqid");
+            let spec = TabularSpec::of_app(ReportFormat::TabularWithComments, &commented, app);
+            assert_eq!(spec.unwrap().delimiter, "\t", "{app:?}");
+        }
     }
 
     #[test]

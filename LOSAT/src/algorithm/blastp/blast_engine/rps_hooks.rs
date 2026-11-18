@@ -439,7 +439,8 @@ pub(super) fn rps_search(
     // default tabular writers print the HSP's count, so the engine counts again for them; the
     // tabular writer of a field list or outfmt 10 counts on the rows itself and reads the
     // traceback's count for the block's gate (`tabular::needs_rows`).
-    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none();
+    let recount_identities =
+        super::super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
     // ```c
     //     if (backup->offset + MAX_DBSEQ_LEN <

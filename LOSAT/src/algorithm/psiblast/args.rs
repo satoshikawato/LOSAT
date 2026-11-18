@@ -659,7 +659,7 @@ impl PsiblastArgs {
     /// and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
     /// write yet are refused here. The tabular reports with a field list, and outfmt 10 and
     /// 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
-    /// formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
+    /// formatter does not get (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`).
     pub fn check_outfmt(outfmt: &str) -> Result<()> {
         let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
         if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {

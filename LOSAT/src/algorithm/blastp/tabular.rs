@@ -433,12 +433,14 @@ pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool
 }
 
 /// The spec of a tabular report with a field list or a delimiter, or of outfmt 10 or 20, of a
-/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`); `None` for the other
-/// formats and for the default outfmt 6 and 7 (`TabularSpec::of`).
-pub(super) fn custom_tabular_spec(outfmt: &str) -> Option<&'static TabularSpec> {
+/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`), as `app`'s formatter
+/// writes it (`TabularSpec::of_app`: psiblast's and rpsblast's without the custom delimiter);
+/// `None` for the other formats and for the default outfmt 6 and 7. Every report of the blastp
+/// engine reads its spec here, from the value of the command line or the library's as given.
+pub(super) fn custom_tabular_spec(outfmt: &str, app: BlastpApp) -> Option<&'static TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let format = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
-    TabularSpec::of(format, &choice).map(TabularSpec::intern)
+    TabularSpec::of_app(format, &choice, app.request_kind()).map(TabularSpec::intern)
 }
 
 /// Writes the warning of the formatter that NCBI makes for outfmt 20's header line, which it
@@ -1221,5 +1223,35 @@ mod tests {
         assert_eq!(err, format!("Warning: q1\n{warning}{warning}{warning}"));
         let (out, _) = report(20, "qseqid evalue", BlastpApp::Blastp, &lists);
         assert_eq!(out, "qseqid,evalue\nq1,1.00e-10\nq1,1.00e-10\n");
+    }
+
+    // NCBI 2.17.0 (line RG F/d36 probes bp.f20at, bp.f6at, ps.f20at, ps.f6at, ps.f7comma,
+    // rps.f10at, rps.f6at): blastp's reports take `delim=`, psiblast's and rpsblast's keep the
+    // format's delimiter, and their `6 delim=@` and `7 delim=,` are the default reports; the value
+    // is the command line's or the library's as given.
+    #[test]
+    fn the_spec_is_the_apps_formatters() {
+        let spec = custom_tabular_spec("20 delim=@ qseqid evalue", BlastpApp::Blastp).unwrap();
+        assert_eq!(
+            (spec.kind, spec.delimiter.as_str()),
+            (TabularKind::CsvWithHeader, "@")
+        );
+        assert_eq!(
+            custom_tabular_spec("6 delim=@", BlastpApp::Blastp).map(|spec| spec.delimiter.as_str()),
+            Some("@")
+        );
+        for app in [BlastpApp::Psiblast, BlastpApp::Rpsblast] {
+            let spec = custom_tabular_spec("20 delim=@ qseqid evalue", app).unwrap();
+            assert_eq!(
+                (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
+                (TabularKind::CsvWithHeader, ",", 2),
+                "{app:?}"
+            );
+            let spec = custom_tabular_spec(" 10  delim=@ qseqid", app).unwrap();
+            assert_eq!(spec.delimiter, ",", "{app:?}");
+            assert!(custom_tabular_spec("6 delim=@", app).is_none(), "{app:?}");
+            assert!(custom_tabular_spec("7 delim=,", app).is_none(), "{app:?}");
+            assert!(custom_tabular_spec("6", app).is_none(), "{app:?}");
+        }
     }
 }

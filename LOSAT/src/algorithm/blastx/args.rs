@@ -1381,24 +1381,16 @@ impl BlastxArgs {
         } else {
             Vec::new()
         };
-        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
-        // ```c++
-        //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
-        // ```
-        // rpstblastn_app.cpp does not set it (as rpsblast's and psiblast's apps): its tabular
-        // formats keep their own delimiter, the tab or the comma (`delim=` is still checked).
-        let without_delimiter;
-        let choice = if self.rpstblastn.is_some() && !choice.delimiter.is_empty() {
-            without_delimiter = crate::blastinput::app::FormatChoice {
-                delimiter: String::new(),
-                ..choice.clone()
-            };
-            &without_delimiter
+        // BLASTX's formatter gets the custom delimiter, RPSTBLASTN's does not: its tabular formats
+        // keep their own delimiter, the tab or the comma (`TabularSpec::of_app`; `delim=` is still
+        // checked).
+        let app = if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
         } else {
-            choice
+            crate::report::archive::options::RequestKind::Blastx
         };
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
-            .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+            .and_then(|format| crate::report::tabular::TabularSpec::of_app(format, choice, app))
             .map(crate::report::tabular::TabularSpec::intern);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
         // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)

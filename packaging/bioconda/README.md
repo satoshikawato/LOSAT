@@ -3,7 +3,7 @@
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](https://anaconda.org/bioconda/losat)
 [![Conda Version](https://img.shields.io/conda/vn/bioconda/losat.svg?style=flat)](https://anaconda.org/bioconda/losat)
 
-LOSAT is officially available on [Bioconda](https://anaconda.org/bioconda/losat) for Linux (`linux-64`, `linux-aarch64`) and macOS (`osx-64`, `osx-arm64`).
+LOSAT is available on [Bioconda](https://anaconda.org/bioconda/losat) for Linux (`linux-64`, `linux-aarch64`) and macOS (`osx-64`, `osx-arm64`).
 
 ```bash
 conda install -c bioconda -c conda-forge losat

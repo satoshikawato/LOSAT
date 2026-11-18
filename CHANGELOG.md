@@ -2577,7 +2577,7 @@ a release moves them under `[Unreleased]` below.
 - Test tooling: the pull request and nightly regressions (`ci_fast_regressions.py`) run the 75 frozen NCBI range-error
   fixtures of `range_regression_fixtures.py` (`-query_loc` / `-subject_loc`, all five classic programs) whenever one of
   those programs is selected. No workflow ran them before. No product change.
-- The v0.2.0 certification plan and release contract now match dev: the scope (cut from dev's head), the row counts of the fixture sets, set F (the nightly `full-regressions` job and the promotion PR's `regressions` job), blastp-short as an accepted task (`rmblastn` is the refused one), platform wording in README's form ("Supported"), the list of what v0.2.0 does not provide, and every GitHub run dispatched on `cert/<9 hex of C>`.
+- The v0.2.0 release test plan and release contract now match dev: the scope (cut from dev's head), the row counts of the fixture sets, set F (the nightly `full-regressions` job and the promotion PR's `regressions` job), blastp-short as an accepted task (`rmblastn` is the refused one), platform wording in README's form ("Supported"), the list of what v0.2.0 does not provide, and every GitHub run dispatched on `cert/<9 hex of C>`.
 - Test tooling: `db_search_fixtures.py freeze` keeps a frozen SAM (`-outfmt 17`) file whose NCBI bytes differ only in
   the `@PG` CL tag (NCBI's argv[0], the path of the NCBI build that ran), the rule `check` compares with. A freeze
   with the oracle no longer rewrites the 32 SAM rows frozen from other NCBI 2.17.0 builds. No product change.
@@ -2855,7 +2855,7 @@ a release moves them under `[Unreleased]` below.
 - Library: the engine modules `sequence` and `seqid`, and the Web ABI v1 module `web_api` (wasm32), are private to the crate (`pub(crate)`) instead of public and hidden from the docs, so no other crate can call their functions (line LIB, P-V1). The ABI v1 exports of the wasm modules and the command line's output are unchanged.
 - docs: the NCBI unit-case ledger (`docs/evidence/ncbi_unit_cases/LEDGER.tsv`) no longer gives reasons from before `-db`, `-parse_deflines`, `-strand`, psiblast and LOSAT's own FASTA reader: every `n-a` row and every other row that claimed a LOSAT limit was checked again, and 270 rows changed (`n-a` 324 -> 252, `ported` 60 -> 87, `partial` 200 -> 233, `e2e` 86 -> 96, `to-port` 26 -> 27, `superseded` 0 -> 1). The ledger README and AGENTS.md no longer give a BLAST database search or PSI-BLAST as a reason for `n-a`; they name sequences fetched by id (from GenBank or a BLAST database) instead.
 - tests: the WASI reactor check (`LOSAT/tests/check_wasi_reactor.js`, nightly `wasm / integration`) gives every program the query line `@@@@`, which NCBI BLAST+ 2.17.0 and LOSAT refuse with "doesn't look like plausible data". The old input of blastn, tblastx and blastp, `invalid FASTA`, is read by NCBI (a nucleotide query with an "Ignoring invalid residues" warning, or a protein) and now by the shared reader too, so the check failed on dev.
-- CI: `rust lint` runs the tests of the Gate A certification tools (`compare_blastn_parity.py`,
+- CI: `rust lint` runs the tests of the Gate A comparison tools (`compare_blastn_parity.py`,
   `certify_blastn_v010.py`, `audit_blastp_v010.py`, `audit_tblastx_v010.py`,
   `certify_integrated_runtime_v010.py`) and of `benchmark_wasm_threading.py`; five of these test
   files (35 tests) ran in no workflow, and the integrated-runtime one only in v0.1.0's dispatched
@@ -3055,15 +3055,15 @@ a release moves them under `[Unreleased]` below.
 - The 6.1 MB x86-64 ELF `LOSAT/matrix`, a local build output committed by mistake, is removed from the
   repository and ignored; `cargo package` leaves it out (`exclude`). No code or output change.
 - docs(agents): a speed-up pull request names the structural cause it removes and the inputs where its form fails; no new rule-limited switch while the slot, per-unit table and OID-order-wait items are open (Owner 2026-10-27).
-- Tests: on macOS the `blastx -outfmt 11` archive tests accept a last (15th) mantissa digit of a full-precision E value that differs by 1 (`real { M, 10, E }`; Apple's libm `exp` / `log` differ by 1 ULP, as in NCBI BLAST+ built on macOS); every other byte and every other OS stay exact. New `docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md` (Owner 2026-10-25, release board question 2 = (a)); README and the v0.2.0 certification plan point to it. No engine change.
+- Tests: on macOS the `blastx -outfmt 11` archive tests accept a last (15th) mantissa digit of a full-precision E value that differs by 1 (`real { M, 10, E }`; Apple's libm `exp` / `log` differ by 1 ULP, as in NCBI BLAST+ built on macOS); every other byte and every other OS stay exact. New `docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md` (Owner 2026-10-25, release board question 2 = (a)); README and the v0.2.0 release test plan point to it. No engine change.
 - Platform checks: `LOSAT/tests/platform_checks.py run` passes input files as paths relative to the working directory (`tests/fasta/...`) instead of absolute ones. `-outfmt 7` prints the input path in its `# Database:` line, so the two outfmt 7 cases (`blastp:blastp_fast_lone_hsp_window`, `blastx:multi_outfmt7`) gave a different hash on each runner OS (Linux, macOS, Windows). Test-only; no engine change.
 - A `window_masker` unit test no longer expects the unknown-format error for a directory given as the counts file on Windows, where the open fails first (exit 255, "could not open"). Test only; no output change.
 - CI: the manual workflow `release-readiness-v020.yml` builds the v0.2.0 release candidate from an exact SHA on GitHub (five native targets, serial and threaded Wasm, the crate), downloads each artifact on a fresh runner and checks it with the new `LOSAT/tests/verify_release_archive_v020.py` (sha256 against the sidecar, extract, `losat --version`, five smoke searches), and writes one exact-SHA handoff; it publishes nothing. The `rust-lint` job also runs the v0.2.0 release tooling tests. No LOSAT behaviour changes.
 - The v0.2.0 release-candidate assembler `LOSAT/tests/prepare_release_candidate_v020.py` (with its unit
-  tests) reads `docs/release/v0.2.0_rc_contract.json`: it builds and verifies the eight artifacts
+  tests) reads `docs/release/v0.2.0_rc_contract.json`: it builds and checks the eight artifacts
   (five native targets, serial and threaded Wasm, the source crate), runs one smoke search per program
-  (blastn, blastp, blastx, tblastn, tblastx) against NCBI-certified output hashes, and checks that the
-  release-candidate commit descends from the certified candidate with no runtime-input change. The
+  (blastn, blastp, blastx, tblastn, tblastx) against the frozen NCBI BLAST+ output hashes, and checks that the
+  release-candidate commit descends from the tested candidate with no runtime-input change. The
   v0.1.0 contract and tooling are unchanged. No LOSAT behaviour changes.
 - Test-only: the two macOS `cargo test` jobs of the platform checks no longer fail for reasons of the
   test environment. The blastp query-block test that links a side file to `/dev/full` runs on Linux only
@@ -3151,12 +3151,12 @@ Initial release candidate for LOSAT as a standalone, pure-Rust reimplementation 
   - **`blastn`**: Supports pairwise nucleotide alignment with `megablast` (default, word size 28, affine/linear penalties) and traditional `blastn` (word size 11, match/mismatch 2/-3, gaps 5/2).
   - **`blastp`**: Supports pairwise protein alignment using BLOSUM62 matrix and affine gap penalties (open 11, extend 1).
   - **`tblastx`**: Supports 6-frame translated pairwise nucleotide alignment with full genetic code customization.
-- **Bit-Perfect NCBI BLAST+ Parity**: Produces identical alignment boundaries, bit scores, and E-values matching official NCBI BLAST+ (v2.17.0+) across certified pairwise profiles.
+- **Bit-Perfect NCBI BLAST+ Parity**: Produces identical alignment boundaries, bit scores, and E-values matching official NCBI BLAST+ (v2.17.0+) across the tested pairwise profiles.
 - **Standard Output Formats**: Supports canonical tabular output (`-outfmt 6`) and commented tabular (`-outfmt 7`) reporting the standard 12 BLAST fields (`qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`), plus pairwise text alignment (`-outfmt 0`) for `blastp`.
 - **Pure-Rust Standalone Runtime**: Zero external C/C++ dependencies or shared libraries. Does not link, embed, wrap, or invoke NCBI BLAST+ binaries at runtime.
 - **Direct Pairwise Alignment**: Directly aligns sequences from FASTA files via `-query` and `-subject` without requiring database formatting (`makeblastdb`).
 - **WebAssembly & WASI Support**: Compiles to standalone WASI command-line binaries (`wasm32-wasip1`) and multithreaded WASI (`wasm32-wasip1-threads`) for sandboxed CLI and browser-based bioinformatics applications (such as [gbdraw](https://github.com/satoshikawato/gbdraw)).
-- **Cross-Platform Native Binaries**: Pre-compiled and verified binaries for Linux (x86_64, aarch64), macOS (Apple Silicon arm64 & Intel x86_64), and Windows (x86_64).
+- **Cross-Platform Native Binaries**: Pre-compiled binaries for Linux (x86_64, aarch64), macOS (Apple Silicon arm64 & Intel x86_64), and Windows (x86_64).
 - **Bioconda Distribution**: Officially available on Bioconda as `losat` (`conda install -c bioconda losat`) across Linux and macOS architectures.
 
 ### Changed
@@ -3176,6 +3176,6 @@ Initial release candidate for LOSAT as a standalone, pure-Rust reimplementation 
 - **Discontinuous MegaBLAST**: `dc-megablast` is not yet supported.
 - **Library API**: Rust crate library interfaces and embeddable Web/Wasm APIs are currently internal-only; stability is guaranteed at the CLI level.
 
-### Verification Authority
+### Records
 
-Governed by program certification records in `docs/release/` (`blastn_v0.1.0_certification.md`, `blastp_v0.1.0_certification.md`, `tblastx_v0.1.0_certification.md`) and the pure-Rust runtime authority in `docs/release/pure_rust_runtime_v0.1.0_certification.md`.
+Described by the program records in `docs/release/` (`blastn_v0.1.0_certification.md`, `blastp_v0.1.0_certification.md`, `tblastx_v0.1.0_certification.md`) and the pure-Rust runtime authority in `docs/release/pure_rust_runtime_v0.1.0_certification.md`.

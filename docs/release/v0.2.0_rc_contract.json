@@ -217,12 +217,12 @@
     {
       "id": "G",
       "title": "WASI threads and serial compatibility",
-      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
+      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; psiblast's -subject rows (outfmt0_manifest.tsv) and -db rows (db_search_manifest, PSSM files under PD-LOSAT-PLATFORM-LIBM) on both WASI commands; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
       "comparator": "mixed",
       "comparator_note": "NCBI executed (the workflow downloads and sha-verifies 2.17.0) + raw-byte equality",
       "tool": "wasm-threading.yml (candidate_sha=C, include_serial_compatibility=true) dispatched on cert/<9 hex of C>",
       "where": "github",
-      "expected_duration": "16-17 min per run",
+      "expected_duration": "about 30 min per run (16-17 min before the psiblast -db sections, which took 6-7 min per WASI command on ws)",
       "evidence_key": "runs.G"
     },
     {
@@ -324,7 +324,7 @@
         "G"
       ],
       "claim": "certified",
-      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (same bytes as the Linux x64 native binary on the Gate A set and the threading-regression set)"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (same bytes as the Linux x64 native binary on the Gate A set and the threading-regression set, except the last digit of a value in psiblast's ASN.1 PSSM, PD-LOSAT-PLATFORM-LIBM)"
     },
     {
       "platform": "WASI threads (wasm32-wasip1-threads)",

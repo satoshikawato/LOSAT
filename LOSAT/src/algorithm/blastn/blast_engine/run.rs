@@ -13589,15 +13589,6 @@ fn search_query_chunks(
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
         .collect();
-    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
-    // (`calculate_num_chunks`); NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:
-    // 145-171): NCBI stops with a CCoreException that names its build's files where a chunk
-    // would be split again, and otherwise searches chunk ranges with gaps between them.
-    if batching.split.negative_chunk_size() && splits(batching.split, lengths.iter().sum()) {
-        anyhow::bail!(
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped (NCBI stops with a CCoreException that names its build's source files, or searches chunks with gaps between them), which is not supported by LOSAT's BLASTN"
-        );
-    }
     let Some(chunks) = split_query_batch(
         &lengths,
         batching.split,
@@ -13605,10 +13596,64 @@ fn search_query_chunks(
     ) else {
         return Ok(None);
     };
-    // With an overlap close to the chunk size NCBI's setup of a chunk would split it again
-    // and stop with a CCoreException that names its build's files. LOSAT searches each chunk
-    // once, as NCBI does for every overlap that does not split a chunk again (approved
-    // exception 1 of PD-LOSAT-NCBI-DEFECTS).
+    // NCBI's stops of a split batch come in this order (`CBlastPrelimSearch::Run`, probes of line
+    // RG item X-chunk, 2026-11-18: the same for every task, `-db` and `-subject`).
+    //
+    // 1. `CQuerySplitter::Split` makes the query factory of every chunk before any chunk is set
+    //    up, and dereferences the missing query vector of a chunk that no query reaches:
+    //    `CCoreException::eNullPtr`, exit 3, at every thread count. Such a chunk comes where the
+    //    chunk ranges end before the last chunk: an evened chunk size below a positive overlap
+    //    wraps the start past the queries' length at the first chunk (`size_t`), and a negative
+    //    OVERLAP_CHUNK_SIZE below a negative CHUNK_SIZE (the only pair of the two signs that splits
+    //    a batch) moves the start by the chunk size plus the overlap's magnitude, past the length
+    //    or, with chunks short enough, over gaps (below).
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:232-236
+    // ```c
+    //     CRef<CQuerySplitter> query_splitter = setup_data->m_QuerySplitter;
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:234-249
+    // ```c
+    //     m_SplitQueriesInChunk.assign(m_NumChunks, CRef<CBlastQueryVector>());
+    //     ...
+    //             if (m_SplitQueriesInChunk[chunk_num].Empty()) {
+    //                 m_SplitQueriesInChunk[chunk_num].Reset(new CBlastQueryVector);
+    //             }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:876-880
+    // ```c
+    //         for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
+    //             CRef<IQueryFactory> qf
+    //                 (new CObjMgr_QueryFactory(*m_SplitQueriesInChunk[chunk_num]));
+    //             m_QueryChunkFactories.push_back(qf);
+    //         }
+    // ```
+    // NCBI stops in the batch's search, after it has printed the reports of the batches before
+    // and the batch's reader messages (`ErrorAfterInvalidBatches`).
+    if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
+        return Err(ErrorAfterInvalidBatches(anyhow::anyhow!(
+            "a query chunk without a query is not supported by LOSAT's BLASTN"
+        ))
+        .into());
+    }
+    // Otherwise the wrapped ranges of a negative CHUNK_SIZE leave gaps between the chunks, which
+    // NCBI searches on with the hits in the gaps lost (a deterministic result: rc 0). LOSAT
+    // refuses it before the run's first byte (an explicit rejection of
+    // PD-LOSAT-NCBI-DEFECTS, kept by the maintainer on 2026-10-02: a setting without a practical
+    // use; `x_rpt_stream` keeps every report after the loop for a negative CHUNK_SIZE).
+    anyhow::ensure!(
+        !batching.split.negative_chunk_size(),
+        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's BLASTN"
+    );
+    // 2. Then, chunk by chunk, the setup of a chunk that would be split again.
+    //    With an overlap close to the chunk size NCBI's setup of a chunk would split it again
+    //    and stop with a CCoreException that names its build's files (exit 3 at one thread; at
+    //    more threads NCBI logs it and goes on). LOSAT searches each chunk once, as NCBI does for
+    //    every overlap that does not split a chunk again (approved exception 1 of
+    //    PD-LOSAT-NCBI-DEFECTS).
     //
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
     // ```c
@@ -13627,12 +13672,6 @@ fn search_query_chunks(
     // kept from chunk to chunk (the batch's own buffer is in use until its traceback).
     let mut query_keep: Vec<u8> = Vec::new();
     for chunk in &chunks {
-        // NCBI fails to make the query factory of a chunk without a query ("Empty
-        // CBlastQueryVector"); `split_query_batch` makes none.
-        anyhow::ensure!(
-            !chunk.queries.is_empty(),
-            "a query chunk without a query is not supported by LOSAT's BLASTN"
-        );
         let parts: Vec<FastaRecord> = chunk
             .queries
             .iter()

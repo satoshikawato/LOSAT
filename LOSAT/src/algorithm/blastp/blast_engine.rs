@@ -3267,9 +3267,9 @@ fn write_blastp_tabular_hit_lists(
         let Some(hit_list) = hit_list_opt else {
             continue;
         };
-        // `saccver` of the query's last row that loaded its subject: what a row whose load
-        // throws prints (`outfmt6::write_thrown_hit_fields`; the query's formatter is new).
-        let mut kept: &[u8] = &[];
+        // The query's formatter (`report::tabular::TabularRows`): the subject that a row whose
+        // load throws keeps (`TabularRows::write_thrown_default`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             // The subject's load throws where the query's batch has its prefetch off
             // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
@@ -3316,10 +3316,13 @@ fn write_blastp_tabular_hit_lists(
                     .get(hsp.q_idx as usize)
                     .map_or(&b""[..], |id| id.as_ref());
                 if thrown {
-                    crate::report::outfmt6::write_thrown_hit_fields(
+                    rows.write_thrown_default(
                         writer,
                         query_id,
-                        kept,
+                        |kept| {
+                            SubjectIdFields::of(subject_ids, subject_accessions, kept)
+                                .accession_version
+                        },
                         hsp.e_value,
                         hsp.bit_score,
                         &config,
@@ -3331,9 +3334,9 @@ fn write_blastp_tabular_hit_lists(
                     hsp_index += 1;
                     continue;
                 }
+                rows.found(hsp.s_idx as usize);
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
-                kept = subject_id.accession_version;
                 crate::report::outfmt6::write_hit_fields_bytes(
                     writer,
                     query_id,

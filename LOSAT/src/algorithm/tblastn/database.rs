@@ -227,8 +227,9 @@ impl TblastnDatabase {
 
     /// The taxonomy of the tabular fields (`staxid`, `staxids`) of the reported sequences, by
     /// rank, for the sequences of `hitlists` with HSPs (their subject index is the rank,
-    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`); the others are left
-    /// empty. A header that does not decode is refused before the report.
+    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`) that a report loads
+    /// (`ReportedSubjects::loads`); the others are left empty. A header that does not decode is
+    /// refused before the report.
     pub(super) fn tabular_taxonomy(
         &self,
         reported: &ReportedSubjects,
@@ -243,6 +244,7 @@ impl TblastnDatabase {
                 .flat_map(KappaResultHitList::lists)
                 .filter(|list| !list.hsps.hsps.is_empty())
                 .map(|list| list.oid as usize),
+            &reported.loads,
             PROGRAM,
         )
     }
@@ -616,6 +618,19 @@ impl ReportedSubjects {
         self.parsed.get(rank).and_then(Option::as_deref)
     }
 
+    /// Whether a row of `hitlists` (subjects by rank) loads its subject in the reports: only such
+    /// a row looks a taxonomy name up, and a row whose load throws keeps the names of the rows
+    /// before (`loads`; review 1 of line DBID pfoff-2, H1).
+    pub(super) fn loads_a_row(
+        &self,
+        hitlists: &[super::stage_d_results::KappaResultHitList],
+    ) -> bool {
+        hitlists
+            .iter()
+            .flat_map(super::stage_d_results::KappaResultHitList::lists)
+            .any(|list| !list.hsps.hsps.is_empty() && self.loads.loaded(list.oid as usize))
+    }
+
     /// The reported sequences as the library's records name them (`shared::library_subjects`).
     pub(super) fn library_subjects(
         &self,
@@ -805,7 +820,7 @@ fn parsed_shown(
 /// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
 fn after_throw(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> Option<crate::report::db_subject::AfterThrow> {
+) -> Option<crate::report::db_subject::RunThrow> {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,
@@ -1000,7 +1015,7 @@ pub(super) fn reported_subjects(
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    after: Option<crate::report::db_subject::AfterThrow>,
+    after: Option<crate::report::db_subject::RunThrow>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     HitLoads::of(
@@ -1020,6 +1035,15 @@ fn hit_loads<'p>(
             )
         }),
         parsed,
+        // The most identities of a list's HSPs (`reads_subject`).
+        |query, list| {
+            hitlists[query].lists()[list]
+                .payloads
+                .iter()
+                .map(|payload| usize::try_from(payload.num_ident).unwrap_or(0))
+                .max()
+                .unwrap_or(0)
+        },
     )
 }
 

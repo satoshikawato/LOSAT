@@ -846,32 +846,48 @@ impl TabularSpec {
         use crate::report::db_subject::AfterThrow;
         if self.reads_subject_bioseq() {
             Some(AfterThrow::WritesRow)
-        } else if self.has(SubjectLength) || self.subject_fetch(program).reads(num_ident) {
+        } else if self.throw_rows(program).reads(num_ident) {
             Some(AfterThrow::EndsRun)
         } else {
             None
         }
     }
 
+    /// Which of `program`'s rows load the subject where its batch's prefetch is off, so that a
+    /// lookup that throws throws there (`row_throw`): every row of a field of the subject block,
+    /// of `slen` (`sequence::GetLength`, on every row) or of a field that reads the subject on
+    /// every row (`subject_fetch`); for `nident` alone among the fields that read the subject, the
+    /// rows of HSPs with identities (`SubjectFetch::WithIdentities`): a row of no identities reads
+    /// nothing of it and prints the 0 of `x_ResetFields`.
+    pub fn throw_rows(&self, program: crate::blastinput::app::Program) -> SubjectFetch {
+        if self.reads_subject_bioseq() || self.has(SubjectLength) {
+            SubjectFetch::Every
+        } else {
+            self.subject_fetch(program)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (quoted at
+    // `report::tax_report::organism_report`: the `catch` of each HSP's load, `continue`)
     /// What the report does with a subject whose lookup throws where its batch's prefetch is off
-    /// (`report::db_subject::FormatThrow`, `row_throw` of its rows): LOSAT refuses it in the
-    /// organism report (outfmt 18) and in outfmt 20; a table that reads nothing of the subject
-    /// never looks it up. A table of `nident` alone among the fields that read the subject reads
-    /// it on rows with identities only (`SubjectFetch::WithIdentities`), as `row_throw` decides.
+    /// (`report::db_subject::FormatThrow`, `row_throw` of its rows, at its `throw_rows`): a table
+    /// (outfmt 6, 7, 10 and 20) as its fields say, a table that reads nothing of the subject never
+    /// looks it up; the organism report (outfmt 18) leaves the HSPs of such a subject out and
+    /// goes on (`WritesRow`: each HSP looks its own Seq-align id up).
     pub fn format_throw(
         &self,
         program: crate::blastinput::app::Program,
     ) -> crate::report::db_subject::FormatThrow {
-        use crate::report::db_subject::{AfterThrow, FormatThrow};
-        if !matches!(
-            self.kind,
-            TabularKind::Tabular | TabularKind::Commented | TabularKind::Csv
-        ) {
-            FormatThrow::Refused
-        } else if self.reads_subject_bioseq() {
-            FormatThrow::Writes(AfterThrow::WritesRow)
+        use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
+        // The organism report's HSPs, and a table's rows with a field of the subject block, catch
+        // the throw and go on.
+        if self.kind == TabularKind::TaxReport || self.reads_subject_bioseq() {
+            FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
         } else if self.reads_subject(program) {
-            FormatThrow::Writes(AfterThrow::EndsRun)
+            FormatThrow::Writes(RunThrow {
+                after: AfterThrow::EndsRun,
+                rows: self.throw_rows(program),
+            })
         } else {
             FormatThrow::Unread
         }
@@ -1763,6 +1779,63 @@ impl TabularRows {
     pub fn last_found(&self) -> Option<usize> {
         self.last_found
     }
+
+    /// A row that finds its subject, of index `index`: it sets `m_SubjectId`, the titles, the
+    /// taxonomy and `m_SubjectIds` anew, which the rows after it keep where their lookups fail.
+    /// The one record of it for the custom fields (`TabularWriter::row`) and the default fields
+    /// (the programs' writers of `write_thrown_default` rows).
+    pub fn found(&mut self, index: usize) {
+        self.last_found = Some(index);
+        self.failed_ids = None;
+        self.subject_id_emptied = false;
+    }
+
+    /// The subject whose `m_SubjectId` a row whose load throws prints (`FailedStage::Bioseq`): the
+    /// result set's last row that found its subject, `None` (empty: `sseqid` `Unknown`, `sgi` 0)
+    /// before such a row or after a row that emptied it (`FailedStage::SubjectId`).
+    pub fn kept_id(&self) -> Option<usize> {
+        self.last_found.filter(|_| !self.subject_id_emptied)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-838, 862-875
+    // (quoted at `TabularSpec::row_throw`: the subject block's `catch`, `return -1`)
+    /// Writes the default fields' row (outfmt 6 and 7 without a field list,
+    /// `outfmt6::write_hit_fields_bytes`) of the query `query_id` whose subject's load throws where
+    /// its batch's prefetch is off (`report::db_subject::HitLoad::Throws`): the catch of the
+    /// subject block ends the fields after the scores (`e_value`, `bit_score`), so the counts and
+    /// coordinates keep the 0 of `x_ResetFields` (`pident` 0.000 of an alignment length 0), and
+    /// `saccver` prints `m_SubjectId` as the kept subject set it (`kept_id`, whose `saccver` the
+    /// caller gives, `saccver(index)`); before such a row `m_SubjectId` is NCBI's null pointer,
+    /// refused before the report (`failed_lookup_stop`). The one writer of such rows of every
+    /// program's default fields.
+    pub fn write_thrown_default<W: Write + ?Sized, S: AsRef<[u8]>>(
+        &self,
+        writer: &mut W,
+        query_id: &[u8],
+        saccver: impl FnOnce(usize) -> S,
+        e_value: f64,
+        bit_score: f64,
+        config: &crate::report::outfmt6::OutputConfig,
+    ) -> io::Result<()> {
+        let kept = self.kept_id().map(saccver);
+        crate::report::outfmt6::write_hit_fields_bytes(
+            writer,
+            query_id,
+            kept.as_ref().map_or(&[][..], AsRef::as_ref),
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            e_value,
+            bit_score,
+            config,
+        )
+    }
 }
 
 /// An HSP of the report, with the values as NCBI's tabular report shows them.
@@ -1827,33 +1900,15 @@ const NA: &[u8] = b"N/A";
 pub fn run_end(
     writer: &mut dyn Write,
     buffered: &[u8],
-    end: RowEnd<'_>,
+    exception: &crate::ncbi_exception::NcbiException,
     end_reads: impl FnOnce(),
 ) -> anyhow::Error {
-    let exception = match end {
-        RowEnd::Thrown(exception) => exception,
-        RowEnd::Unsupported => {
-            return FailedLookupRefusal(ROW_WITHOUT_IDENTITIES.to_string()).into();
-        }
-    };
     if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
         return error.into();
     }
     end_reads();
     crate::report::blast_xml::writer::run_ending_exception(exception)
 }
-
-/// How a row ends the run (`TabularWriter::ends_run`, `run_end`).
-#[derive(Clone, Copy, Debug)]
-pub enum RowEnd<'a> {
-    /// NCBI's exception of the subject's load (`ThrownLookup::exception`).
-    Thrown(&'a crate::ncbi_exception::NcbiException),
-    /// LOSAT's refusal of a row of no identities of a subject whose load throws, in a table whose
-    /// rows read the subject for `nident` alone (`ROW_WITHOUT_IDENTITIES`).
-    Unsupported,
-}
-
-const ROW_WITHOUT_IDENTITIES: &str = "a table whose rows read the subject for nident alone has a row of no identities of a subject whose lookup in the database fails where the query's batch has its prefetch off (NCBI BLAST+ 2.17.0 ends the run at the subject's first row with identities), which is not supported by LOSAT";
 
 /// The writer of a tabular report.
 pub struct TabularWriter<'a> {
@@ -1969,29 +2024,23 @@ impl TabularWriter<'_> {
 
     /// The exception that ends the run at `program`'s row of `subject` with the engine's
     /// identities `num_ident` (`TabularSpec::row_throw` is `EndsRun` for a subject whose load
-    /// throws, `SubjectLookup::Throws`): the row is not written, and the caller writes the rows
-    /// before it and returns the exception (`blast_xml::writer::run_ending_exception`); `None`
-    /// for every other row.
+    /// throws, `SubjectLookup::Throws`: its first row that reads it, the first row of HSPs with
+    /// identities where `nident` alone reads it, as `report::db_subject::HitLoads::of` takes the
+    /// run to end there): the row is not written, and the caller writes the rows before it and
+    /// returns the exception (`run_end`); `None` for every other row (a row of such a subject that
+    /// reads nothing of it is written as any other).
     pub fn ends_run<'s>(
         &self,
         subject: &TabularSubject<'s>,
         program: crate::blastinput::app::Program,
         num_ident: usize,
-    ) -> Option<RowEnd<'s>> {
-        use crate::report::db_subject::{AfterThrow, FormatThrow};
+    ) -> Option<&'s crate::ncbi_exception::NcbiException> {
         let SubjectLookup::Throws(thrown) = subject.lookup else {
             return None;
         };
-        match self.spec.row_throw(program, num_ident) {
-            Some(AfterThrow::EndsRun) => Some(RowEnd::Thrown(thrown.exception)),
-            // A row of no identities where `nident` alone reads the subject
-            // (`SubjectFetch::WithIdentities`) reads nothing, while the run's loads take the run to
-            // end at the subject's first row (`report::db_subject::HitLoads::of`, by subject).
-            None if self.spec.format_throw(program) == FormatThrow::Writes(AfterThrow::EndsRun) => {
-                Some(RowEnd::Unsupported)
-            }
-            _ => None,
-        }
+        (self.spec.row_throw(program, num_ident)
+            == Some(crate::report::db_subject::AfterThrow::EndsRun))
+        .then_some(thrown.exception)
     }
 
     /// Whether a row of `subject` fails its lookups (`TabularSpec::failed_stage`), so that it is
@@ -2018,9 +2067,7 @@ impl TabularWriter<'_> {
             self.failed_row(out, rows, query, subject, kept, hsp, stage);
             return;
         }
-        rows.last_found = Some(subject.index);
-        rows.failed_ids = None;
-        rows.subject_id_emptied = false;
+        rows.found(subject.index);
         self.found_row(out, query, subject, hsp);
     }
 
@@ -3632,13 +3679,57 @@ mod tests {
         assert!(may_stop_at_failed_lookup(Some(&spec("staxid ssciname"))));
     }
 
+    // NCBI tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
+    // line DBID pfoff-2, `R/pfoff/p2`, `*.U2.dflt.6`; review 2, M3): the one writer of the
+    // default tables' rows of a subject whose load throws (BLASTP's, BLASTN's, BLASTX's, TBLASTN's
+    // and TBLASTX's, `TabularRows::write_thrown_default`) prints `saccver` of the query's last
+    // loaded row (`TabularRows::found`), the counts and coordinates 0 and the scores; a new
+    // query's formatter keeps none. The end of the run (`run_end`) writes the rows before it,
+    // ends the reads and gives NCBI's exception (exit status 2).
+    #[test]
+    fn the_default_row_of_a_throw_keeps_the_last_loaded_subject() {
+        let config = crate::report::outfmt6::OutputConfig::ncbi_compat();
+        let saccver = |index: usize| ["AAA00001.1", "BBB00002.1"][index];
+        let mut rows = TabularRows::default();
+        assert!(rows.kept_id().is_none());
+        rows.found(1);
+        assert_eq!(rows.kept_id(), Some(1));
+        let mut out = Vec::new();
+        rows.write_thrown_default(&mut out, b"q1", saccver, 1e-30, 55.4, &config)
+            .unwrap();
+        rows.found(0);
+        rows.write_thrown_default(&mut out, b"q1", saccver, 0.5, 120.7, &config)
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "q1\tBBB00002.1\t0.000\t0\t0\t0\t0\t0\t0\t0\t1.00e-30\t55.4\n\
+             q1\tAAA00001.1\t0.000\t0\t0\t0\t0\t0\t0\t0\t0.50\t120\n"
+        );
+        let exception = crate::report::db_subject::LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )
+        .exception()
+        .unwrap();
+        let (mut written, mut ended) = (Vec::new(), false);
+        let error = run_end(&mut written, b"rows before\n", &exception, || ended = true);
+        assert_eq!(written, b"rows before\n");
+        assert!(ended);
+        let native = error.downcast::<crate::cli::NativeError>().unwrap();
+        assert_eq!(native.exit, 2);
+        assert!(
+            native.message.contains("DB contains no accession info."),
+            "{}",
+            native.message
+        );
+    }
+
     // NCBI tabular.cpp:833-898: which rows end the run where the load throws (`slen`, the
     // letters after the subject block), which are written (a field of that block), and which
     // read nothing; `nident` alone reads only on rows with identities.
     #[test]
     fn a_rows_fields_say_what_its_throw_does() {
         use crate::blastinput::app::Program;
-        use crate::report::db_subject::{AfterThrow, FormatThrow};
+        use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
         let spec = |fields: &str| {
             TabularSpec::of(
                 ReportFormat::CommaSeparatedValues,
@@ -3672,7 +3763,37 @@ mod tests {
         assert_eq!(row("qseqid evalue qcovs", Program::Tblastn, 1), None);
         assert_eq!(
             spec("qseqid nident").format_throw(Program::Blastx),
-            FormatThrow::Writes(AfterThrow::EndsRun)
+            FormatThrow::Writes(RunThrow {
+                after: AfterThrow::EndsRun,
+                rows: SubjectFetch::WithIdentities,
+            })
+        );
+        // `slen` and a field of the alignment block read the subject at every row.
+        for every in ["qseqid nident slen", "qseqid nident qstart"] {
+            assert_eq!(spec(every).throw_rows(Program::Blastx), SubjectFetch::Every);
+            assert_eq!(
+                spec(every).format_throw(Program::Blastx),
+                FormatThrow::Writes(RunThrow::every_row(AfterThrow::EndsRun)),
+                "{every}"
+            );
+            assert_eq!(
+                spec(every).row_throw(Program::Blastx, 0),
+                Some(AfterThrow::EndsRun)
+            );
+        }
+        // The organism report (outfmt 18) leaves out the HSPs of a throwing subject and goes on.
+        let report = TabularSpec::of(
+            ReportFormat::TaxFormat,
+            &FormatChoice {
+                number: 18,
+                spec: String::new(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            report.format_throw(Program::Blastp),
+            FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
         );
         assert_eq!(
             spec("qseqid evalue").format_throw(Program::Blastx),

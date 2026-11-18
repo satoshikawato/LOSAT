@@ -347,26 +347,24 @@ fn subject_values<'a>(
         }
         // A database sequence: the default report's ids (`ReportedSubjects::tabular_ids`), with
         // parsed Seq-ids the ids and titles of each definition line, else its one stored title.
-        // A subject whose load throws where the query's batch has its prefetch off
-        // (`report::db_subject::HitLoads::thrown`): NCBI reads none of its own values.
-        ShownSubjects::Database { reported, .. }
-            if reported.loads().thrown(oid).is_some() && reported.parsed_subject(oid).is_some() =>
-        {
-            let exception = reported.loads().thrown(oid).expect("the guard");
-            let subject = reported.parsed_subject(oid).expect("the guard");
-            SubjectValues {
-                id: std::borrow::Cow::Borrowed(&[]),
-                accession: &[],
-                accession_version: &[],
-                gi: 0,
-                all_ids: std::borrow::Cow::Borrowed(&[]),
-                titles: None,
-                length: 0,
-                taxonomy: no_taxonomy,
-                failed: Some(FailedValues::thrown(subject, exception)),
-            }
-        }
         ShownSubjects::Database { reported, .. } => {
+            // A subject whose load throws where the query's batch has its prefetch off
+            // (`report::db_subject::HitLoads::thrown`): NCBI reads none of its own values.
+            if let (Some(exception), Some(subject)) =
+                (reported.loads().thrown(oid), reported.parsed_subject(oid))
+            {
+                return SubjectValues {
+                    id: std::borrow::Cow::Borrowed(&[]),
+                    accession: &[],
+                    accession_version: &[],
+                    gi: 0,
+                    all_ids: std::borrow::Cow::Borrowed(&[]),
+                    titles: None,
+                    length: 0,
+                    taxonomy: no_taxonomy,
+                    failed: Some(FailedValues::thrown(subject, exception)),
+                };
+            }
             // No ids where the lookup fails (`ReportedSubjects::tabular_ids`).
             let found = reported.tabular_ids(oid);
             let [id, accession, accession_version] = found.unwrap_or([""; 3]);
@@ -1067,7 +1065,11 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
         ShownSubjects::Fasta { .. } => subject_names.as_ref(),
     };
-    let report = report_batch(&tax_queries, parsed, plain, true, names, program)?;
+    let loads = match shown {
+        ShownSubjects::Database { reported, .. } => Some(reported.loads()),
+        ShownSubjects::Fasta { .. } => None,
+    };
+    let report = report_batch(&tax_queries, parsed, plain, true, loads, names, program)?;
     let mut q_idx = 0;
     for batch in batches {
         for qidx in 0..batch.queries.len() {

@@ -178,7 +178,11 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
 ///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
 /// }
 /// ```
-fn write_scientific_ncbi<W: Write>(writer: &mut W, value: f64, precision: usize) -> io::Result<()> {
+fn write_scientific_ncbi<W: Write + ?Sized>(
+    writer: &mut W,
+    value: f64,
+    precision: usize,
+) -> io::Result<()> {
     let formatted = format_scientific_ncbi(value, precision);
     writer.write_all(formatted.as_bytes())
 }
@@ -357,7 +361,7 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0lf", evalue);
 /// }
 /// ```
-fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
+fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -384,7 +388,7 @@ fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<
 ///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
 /// }
 /// ```
-fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
+fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -408,7 +412,7 @@ fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Resu
 ///         bit_score);
 /// }
 /// ```
-fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<()> {
+fn write_bitscore_ncbi<W: Write + ?Sized>(writer: &mut W, bit_score: f64) -> io::Result<()> {
     if bit_score > 99999.0 {
         write_scientific_ncbi(writer, bit_score, 3)
     } else if bit_score > 99.9 {
@@ -437,7 +441,7 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
 /// }
 /// ```
 #[allow(clippy::too_many_arguments)]
-pub fn write_hit_fields_bytes<W: Write>(
+pub fn write_hit_fields_bytes<W: Write + ?Sized>(
     writer: &mut W,
     query_id: &[u8],
     subject_id: &[u8],
@@ -499,29 +503,6 @@ pub fn write_hit_fields_bytes<W: Write>(
         )?;
     }
     writeln!(writer)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:101-113 (quoted at
-// `report::tabular::TabularRows`: `x_ResetFields`) and 862-875 (quoted at
-// `report::tabular::TabularSpec::row_throw`: the subject block's `catch`, `return -1`)
-/// A default tabular row (`write_hit_fields_bytes`) whose subject's load throws where the query's
-/// batch has its prefetch off (`report::tabular::SubjectLookup::Throws`): the catch of the subject
-/// block ends the fields after the scores, so the counts and coordinates keep the 0 of
-/// `x_ResetFields` (`pident` 0.000 of an alignment length 0), and `saccver` prints `m_SubjectId`
-/// as the query's last row that loaded its subject set it, `kept_id` (the query's first rows
-/// throw before any such row: NCBI's null pointer, refused before the report,
-/// `report::tabular::failed_lookup_stop`).
-pub fn write_thrown_hit_fields<W: Write>(
-    writer: &mut W,
-    query_id: &[u8],
-    kept_id: &[u8],
-    e_value: f64,
-    bit_score: f64,
-    config: &OutputConfig,
-) -> io::Result<()> {
-    write_hit_fields_bytes(
-        writer, query_id, kept_id, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, e_value, bit_score, config,
-    )
 }
 
 /// The `# Query: ` line of the outfmt 7 header of a query with the title `query_title`

@@ -1052,7 +1052,7 @@ pub(super) fn write_custom_tabular(
     // first byte, so that their refusals come before it).
     let taxonomy = match (listed_titles.as_ref(), database) {
         (Some(titles), Some(database)) if needs.taxonomy => {
-            titles.tabular_taxonomy(database, hit_lists)?
+            titles.tabular_taxonomy(database, hit_lists, view.hit_loads)?
         }
         _ => Vec::new(),
     };

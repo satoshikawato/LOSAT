@@ -529,7 +529,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
-        after: Option<crate::report::db_subject::AfterThrow>,
+        after: Option<crate::report::db_subject::RunThrow>,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -564,20 +564,33 @@ impl ReportedSubjects {
         // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
         // of each query, `report::reported`).
+        let report_lists: Vec<&[super::results::HspList]> = batches
+            .iter()
+            .flat_map(|batch| batch.queries.iter().map(Vec::as_slice))
+            .collect();
         let loads = HitLoads::of(
             after,
-            batches.iter().flat_map(|batch| {
-                batch.queries.iter().map(|lists| {
-                    (
-                        one_by_one,
-                        lists
-                            .iter()
-                            .map(|list| super::report::reported(list, gapped).then_some(list.oid))
-                            .collect(),
-                    )
-                })
+            report_lists.iter().map(|lists| {
+                (
+                    one_by_one,
+                    lists
+                        .iter()
+                        .map(|list| super::report::reported(list, gapped).then_some(list.oid))
+                        .collect(),
+                )
             }),
             |oid| parsed.get(&oid).map(Arc::as_ref),
+            // A list's rows read its subject where one of the HSPs that they show has
+            // identities (`report::reads_list`).
+            |report, list| {
+                report_lists[report][list]
+                    .hsps
+                    .iter()
+                    .filter(|hsp| super::report::has_seqalign(hsp, gapped))
+                    .map(|hsp| hsp.identity)
+                    .max()
+                    .unwrap_or(0)
+            },
         );
         let taxdb_found = database.db.taxdb_found();
         let mut reported = ReportedSubjects::default();
@@ -1058,6 +1071,10 @@ impl ReportedSubjects {
             .flat_map(|batch| batch.queries.iter().flatten())
             .filter(|list| super::report::reported(list, gapped))
             .map(|list| list.oid)
+            // A subject that no report loads (`HitLoads::loaded`: one whose load throws, whose
+            // rows keep the names of the rows before, and one that no report reaches): NCBI reads
+            // none of its definition lines and looks none of its taxids up.
+            .filter(|&rank| self.loads.loaded(rank))
             .collect();
         let count = self.ordinals.len();
         if needs.all_deflines {

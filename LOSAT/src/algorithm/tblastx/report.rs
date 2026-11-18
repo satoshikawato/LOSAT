@@ -1552,12 +1552,13 @@ pub(crate) fn write_tabular<W: Write>(
             )?;
         }
         let mut previous: Option<u32> = None;
-        // `saccver` of the query's last row that loaded its subject: what a row whose load
-        // throws prints (`outfmt6::write_thrown_hit_fields`; the query's formatter is new).
-        let mut kept: &[u8] = &[];
+        // The query's formatter is new: its rows keep no subject before the first one that
+        // loads it (`TabularRows`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for &(hsp_index, hsp) in query_hits {
             // The subject's load throws where the query's batch has its prefetch off
-            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
+            // (`TabularRows::write_thrown_default`).
             let thrown = loads.thrown(hsp.hit.s_idx as usize).is_some();
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
@@ -1581,19 +1582,16 @@ pub(crate) fn write_tabular<W: Write>(
                 let query_id = query_ids
                     .get(hsp.hit.q_idx as usize)
                     .map_or(&b""[..], |id| id.as_ref());
-                crate::report::outfmt6::write_thrown_hit_fields(
+                rows.write_thrown_default(
                     writer,
                     query_id,
-                    kept,
+                    |kept| crate::algorithm::common::tabular::printed_id(subject_ids, kept),
                     hsp.hit.e_value,
                     hsp.hit.bit_score,
                     &config,
                 )?;
             } else {
-                kept = crate::algorithm::common::tabular::printed_id(
-                    subject_ids,
-                    hsp.hit.s_idx as usize,
-                );
+                rows.found(hsp.hit.s_idx as usize);
                 write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
             }
             if let Some(probe) = probe.as_mut() {

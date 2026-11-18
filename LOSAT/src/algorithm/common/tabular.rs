@@ -358,6 +358,15 @@ impl<'a> TabularSubjects<'a> {
         }
     }
 
+    /// What the reports load of each subject (`report::db_subject::HitLoads`; `None` for a
+    /// subject set, whose subjects are all loaded).
+    pub(crate) fn loads(&self) -> Option<&'a crate::report::db_subject::HitLoads> {
+        match *self {
+            TabularSubjects::Records { .. } => None,
+            TabularSubjects::Database { loads, .. } => Some(loads),
+        }
+    }
+
     /// Subject `s_idx` without its parsed Seq-ids as the organism report (outfmt 18,
     /// `report::tax_report`) reads it; `records` are the records of a subject set (a database's
     /// are its own).
@@ -615,19 +624,24 @@ impl<'a> TabularSubjects<'a> {
 /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals` of `db`,
 /// by rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
 /// from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a `taxid`), for
-/// the ranks `ranks` (the subjects of the report's rows); the others are left empty. A header
-/// that does not decode is refused before the report (`program` names the program).
+/// the ranks `ranks` (the subjects of the report's rows) that a report loads (`loads`, by rank);
+/// the others are left empty: NCBI reads no definition line of a subject whose load throws (its
+/// rows keep the taxonomy of the rows before) nor of one that no report reaches, and looks none
+/// of their taxids up (review 1 of line DBID pfoff-2, H1 and M1). A header that does not decode
+/// is refused before the report (`program` names the program).
 pub(crate) fn tabular_taxonomy(
     db: &SeqDb,
     ordinals: &[u32],
     parsed: &[Option<Arc<ParsedSubject>>],
     ranks: impl IntoIterator<Item = usize>,
+    loads: &crate::report::db_subject::HitLoads,
     program: &str,
 ) -> Result<Vec<TabularTaxonomy>> {
     let mut taxonomy = vec![TabularTaxonomy::default(); ordinals.len()];
     let mut read = vec![false; ordinals.len()];
     for rank in ranks {
-        if rank >= ordinals.len() || std::mem::replace(&mut read[rank], true) {
+        if rank >= ordinals.len() || !loads.loaded(rank) || std::mem::replace(&mut read[rank], true)
+        {
             continue;
         }
         taxonomy[rank] = match parsed.get(rank).and_then(Option::as_deref) {
@@ -710,6 +724,7 @@ pub(crate) fn write_tax_report(
         subjects.parsed(),
         |s_idx| subjects.tax_plain(s_idx, records),
         protein,
+        subjects.loads(),
         names,
         program,
     )?;

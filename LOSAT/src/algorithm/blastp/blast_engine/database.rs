@@ -2054,18 +2054,22 @@ impl ListedTitles<'_> {
     /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported subjects (those with
     /// rows in `hit_lists`), by rank: from the definition lines of a subject with parsed Seq-ids,
     /// else from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a
-    /// `taxid`); the other ranks are left empty. A header that does not decode is refused before
-    /// the report, as BLASTN's (`BlastnDatabase::tabular_taxonomy`).
+    /// `taxid`); the other ranks are left empty, and so are those of the subjects that no report
+    /// loads (`loads`: one whose load throws, whose rows keep the taxonomy of the rows before, and
+    /// one that no report reaches; NCBI reads none of their definition lines and looks none of
+    /// their taxids up, `report::db_subject::HitLoads`). A header that does not decode is refused
+    /// before the report, as BLASTN's (`common::tabular::tabular_taxonomy`).
     pub(super) fn tabular_taxonomy(
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
+        loads: &HitLoads,
     ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
         use crate::report::tabular::TabularTaxonomy;
         let ranks = self.listed.ordinals.len();
         let mut taxonomy = vec![TabularTaxonomy::default(); ranks];
         for rank in Self::reported(hit_lists) {
-            if rank >= ranks {
+            if rank >= ranks || !loads.loaded(rank) {
                 continue;
             }
             taxonomy[rank] = match self.parsed_subject(rank) {
@@ -2195,30 +2199,40 @@ impl ListedTitles<'_> {
     /// reports) do at each subject's `Hit`, by rank (`HitLoads::of`, the one answer of the
     /// call): `prefetch` tells by query whether its batch reads one by one
     /// (`BatchPrefetch::reads_one_by_one`); the `Hit`s are those that `blast_xml::write_blastp_xml`
-    /// makes, of the lists with HSPs. `after`: what the run's formats do after a subject whose
-    /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded).
+    /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
+    /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded), at the rows
+    /// that load it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
     pub(super) fn hit_loads(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
-        after: Option<crate::report::db_subject::AfterThrow>,
+        run: Option<crate::report::db_subject::RunThrow>,
     ) -> HitLoads {
+        let lists = |query: usize| {
+            hit_lists[query].as_ref().map_or(&[][..], |hit_list| {
+                &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
+            })
+        };
         HitLoads::of(
-            after.filter(|_| !self.parsed.is_empty()),
-            hit_lists.iter().enumerate().map(|(query, hit_list)| {
-                let lists = hit_list.as_ref().map_or(&[][..], |hit_list| {
-                    &hit_list.hsplist_array
-                        [..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
-                });
+            run.filter(|_| !self.parsed.is_empty()),
+            (0..hit_lists.len()).map(|query| {
                 (
                     prefetch.reads_one_by_one(query),
-                    lists
+                    lists(query)
                         .iter()
                         .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
                         .collect(),
                 )
             }),
             |rank| self.parsed_subject(rank),
+            |query, list| {
+                lists(query)[list]
+                    .hsps
+                    .iter()
+                    .map(|hsp| hsp.num_ident)
+                    .max()
+                    .unwrap_or(0)
+            },
         )
     }
 

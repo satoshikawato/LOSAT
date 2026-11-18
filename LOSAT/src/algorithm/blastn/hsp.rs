@@ -170,15 +170,17 @@ impl BlastnOutputFormat {
     /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says; the
     /// Seq-annots and the archive read nothing of the subject; LOSAT refuses it in the others.
     pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
-        use crate::report::db_subject::{AfterThrow, FormatThrow};
+        use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
         match *self {
             BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
-                FormatThrow::Writes(AfterThrow::WritesRow)
+                FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
             }
             BlastnOutputFormat::CustomTabular(spec) => {
                 spec.format_throw(crate::blastinput::app::Program::Blastn)
             }
-            BlastnOutputFormat::Xml2(kind) => FormatThrow::Writes(kind.after_throw()),
+            BlastnOutputFormat::Xml2(kind) => {
+                FormatThrow::Writes(RunThrow::every_row(kind.after_throw()))
+            }
             BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
             BlastnOutputFormat::Pairwise(_)
             | BlastnOutputFormat::Xml
@@ -1366,15 +1368,16 @@ pub(crate) fn write_query_rows<W: Write>(
         Some(value) => value,
         None => return Ok(()),
     };
-    // `saccver` of the query's last row that loaded its subject: what a row whose load throws
-    // prints (`outfmt6::write_thrown_hit_fields`; the query's formatter is new).
-    let mut kept: &[u8] = &[];
+    // The query's formatter is new: its rows keep no subject before the first one that loads
+    // it (`TabularRows`).
+    let mut rows = crate::report::tabular::TabularRows::default();
     for hsp_list in &hit_list.hsplist_array {
         let Some(first) = hsp_list.hsps.first() else {
             continue;
         };
         // The subject's load throws where the query's batch has its prefetch off
-        // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
+        // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
+        // (`TabularRows::write_thrown_default`).
         if loads.thrown(first.s_idx as usize).is_some() {
             for hsp in &hsp_list.hsps {
                 if let Some(probe) = probe.as_mut() {
@@ -1384,10 +1387,10 @@ pub(crate) fn write_query_rows<W: Write>(
                 let query_id = query_ids
                     .get(hsp.q_idx as usize)
                     .map_or(&b"unknown"[..], |id| id.as_ref());
-                crate::report::outfmt6::write_thrown_hit_fields(
+                rows.write_thrown_default(
                     writer,
                     query_id,
-                    kept,
+                    |kept| crate::algorithm::common::tabular::printed_id(subject_ids, kept),
                     hsp.e_value,
                     hsp.bit_score,
                     config,
@@ -1407,7 +1410,7 @@ pub(crate) fn write_query_rows<W: Write>(
         // ```
         // Every row of BLASTN's tables reads its subject: the first loads it.
         read(hsp_list.oid, writer)?;
-        kept = crate::algorithm::common::tabular::printed_id(subject_ids, first.s_idx as usize);
+        rows.found(first.s_idx as usize);
         write_hsp_rows(
             writer,
             &hsp_list.hsps,

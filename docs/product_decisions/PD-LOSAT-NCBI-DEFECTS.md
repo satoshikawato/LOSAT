@@ -168,12 +168,14 @@
   a feature's and a Seq-table's location; the PSSM's most negative Int4 and Int8 values written as
   their digits; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.48);
-  1.50 2026-11-18 (outfmt 6, 7 and 10 of such a sequence are written as NCBI writes them: a field
-  list of the subject block writes the row that its `catch` leaves and goes on, one that reads the
-  sequence after that block stops with `BLAST Database error`; the refusal of 1.31 narrowed to the
-  other formats and to the first row of a query's report with `sacc`, `saccver` or `staxid`, where
-  NCBI stops or prints an uninitialised number as in 1.37; line DBID item pfoff-2, Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.49)
+  1.50 2026-11-18 (outfmt 6, 7, 10 and 20 of such a sequence are written as NCBI writes them: a
+  field list of the subject block writes the row that its `catch` leaves and goes on, one that reads
+  the sequence after that block stops with `BLAST Database error`, `nident` alone only at a row with
+  identities; the organism report (outfmt 18) leaves such a sequence's HSPs out and goes on; the
+  refusal of 1.31 narrowed to the other formats and to the first row of a query's report with
+  `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
+  line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.49)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1116,10 +1118,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   writes NCBI's results where every report of the run is outfmt 13 to 16 (since version 1.47,
   line DBID item pfoff: the texts of the loads before the throwing `Hit`, none of its own or of the
   `Hit`s after it in that report, and a text that NCBI writes once at its next load, a later `Hit` or
-  a later batch's prefetch) or outfmt 6, 7 and 10 (since version 1.50, line DBID item pfoff-2: the
-  row that the `catch` of the subject block leaves, or the stop at a row that reads the sequence
-  after that block; a throwing row loads nothing; refused at the first row of a query's report with
-  `sacc`, `saccver` or `staxid`, below), a
+  a later batch's prefetch) or outfmt 6, 7, 10, 18 and 20 (since version 1.50, line DBID item
+  pfoff-2: the row that the `catch` of the subject block leaves, or the stop at a row that reads the
+  sequence after that block; the organism report leaves its HSPs out; a throwing row loads nothing,
+  and the names and tax ids are looked up only for the sequences that a report loads; refused at
+  the first row of a query's report with `sacc`, `saccver` or `staxid`, below), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

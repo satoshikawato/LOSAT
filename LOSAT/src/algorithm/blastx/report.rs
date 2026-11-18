@@ -1748,41 +1748,34 @@ pub(super) fn render_queries_with(
                 }
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
-                // `saccver` of the query's last row that loaded its subject: what a row whose
-                // load throws prints (the query's formatter is new).
-                let mut kept: std::borrow::Cow<'_, [u8]> = std::borrow::Cow::Borrowed(&[]);
+                // The query's formatter is new: its rows keep no subject before the first one
+                // that loads it (`TabularRows`).
+                let mut rows = crate::report::tabular::TabularRows::default();
+                let query_id = id_field(query, "qaccver");
+                let config = crate::report::outfmt6::OutputConfig::ncbi_compat();
                 for list in listed {
                     let subject = &subjects[list.oid];
                     // The subject's load throws where the query's batch has its prefetch off
                     // (`report::db_subject::HitLoads`): each row is written as the catch of
                     // the subject block leaves it, `saccver` as the kept subject set it and the
                     // counts and coordinates at `x_ResetFields`' 0 (an empty alignment).
+                    // The subject's load throws where the query's batch has its prefetch off
+                    // (`report::db_subject::HitLoads`): each row is written as the catch of the
+                    // subject block leaves it (`TabularRows::write_thrown_default`).
                     if shown.thrown(list.oid) {
-                        let thrown_subject = ShownSubject {
-                            saccver: kept.clone(),
-                        };
-                        let empty = DisplayAlignment::empty();
                         for hsp in list.hsps.iter().filter(|h| has_seqalign(h, options.gapped)) {
-                            let values: Vec<_> = options
-                                .fields
-                                .iter()
-                                .map(|f| {
-                                    field_value(
-                                        f,
-                                        query,
-                                        &thrown_subject,
-                                        (hsp.evalue, hsp.bit_score),
-                                        &empty,
-                                    )
-                                })
-                                .collect();
                             if let Some(probe) = probe.as_deref_mut() {
                                 writer.flush()?;
                                 probe.begin(next_hsp);
                             }
-                            let mut line = values.join(&b'\t');
-                            line.push(b'\n');
-                            writer.write_all(&line)?;
+                            rows.write_thrown_default(
+                                &mut *writer,
+                                &query_id,
+                                |kept| shown.subject_saccver(&subjects[kept], kept),
+                                hsp.evalue,
+                                hsp.bit_score,
+                                &config,
+                            )?;
                             if let Some(probe) = probe.as_deref_mut() {
                                 writer.flush()?;
                                 probe.end(next_hsp);
@@ -1795,7 +1788,7 @@ pub(super) fn render_queries_with(
                         saccver: shown.subject_saccver(subject, list.oid),
                     };
                     if list.hsps.iter().any(|h| has_seqalign(h, options.gapped)) {
-                        kept = shown_subject.saccver.clone();
+                        rows.found(list.oid);
                     }
                     let mut read = false;
                     for hsp in &list.hsps {

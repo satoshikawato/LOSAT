@@ -973,16 +973,17 @@ fn write_tabular(
                 writeln!(writer, "# {hit_count} hits found")?;
             }
         }
-        // `saccver` of the query's last row that loaded its subject: what a row whose load
-        // throws prints (`outfmt6::write_thrown_hit_fields`; the query's formatter is new).
-        let mut kept: &[u8] = &[];
+        // The query's formatter is new: its rows keep no subject before the first one that
+        // loads it (`TabularRows`).
+        let mut rows = crate::report::tabular::TabularRows::default();
         for list in hitlist.lists() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
             let _subject = subject_records
                 .get(oid)
                 .context("TBLASTN subject OID out of range")?;
             // The subject's load throws where the query's batch has its prefetch off
-            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it.
+            // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
+            // (`TabularRows::write_thrown_default`).
             let thrown = loads.thrown(oid).is_some();
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
@@ -1006,10 +1007,10 @@ fn write_tabular(
                         writer.flush()?;
                         probe.begin(hsp_index);
                     }
-                    crate::report::outfmt6::write_thrown_hit_fields(
+                    rows.write_thrown_default(
                         writer,
                         query.shown_id(),
-                        kept,
+                        |kept| crate::algorithm::common::tabular::printed_id(subject_ids, kept),
                         linked.evalue,
                         payload.bit_score,
                         &crate::report::outfmt6::OutputConfig::ncbi_compat(),
@@ -1082,8 +1083,11 @@ fn write_tabular(
                 writer.write_all(query.shown_id())?;
                 writer.write_all(b"\t")?;
                 // A failed lookup's rows are refused before (`check_failed_lookups`).
-                kept = crate::algorithm::common::tabular::printed_id(subject_ids, oid);
-                writer.write_all(kept)?;
+                rows.found(oid);
+                writer.write_all(crate::algorithm::common::tabular::printed_id(
+                    subject_ids,
+                    oid,
+                ))?;
                 writeln!(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",

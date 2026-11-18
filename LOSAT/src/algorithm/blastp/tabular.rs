@@ -634,7 +634,19 @@ pub(super) fn write_blastp_tax_report(
             taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
         },
     };
-    let report = report_batch(&queries, parsed, plain, true, tab.names, tab.app.name())?;
+    let loads = match &tab.subjects {
+        TabularSubjects::Records { .. } => None,
+        TabularSubjects::Database { loads, .. } => Some(*loads),
+    };
+    let report = report_batch(
+        &queries,
+        parsed,
+        plain,
+        true,
+        loads,
+        tab.names,
+        tab.app.name(),
+    )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())
 }

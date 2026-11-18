@@ -59,9 +59,13 @@ impl RunFiles {
     /// receiver. Nothing on `Disk` (the file is written) and for a target without a file.
     pub fn deliver_log(&self, name: Option<&OsStr>, target: DiagTarget) -> io::Result<()> {
         match (self, name, target) {
-            (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => {
-                receiver.receive(name.as_encoded_bytes(), &bytes.into_inner())
-            }
+            (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => receiver
+                .receive(
+                    name.as_encoded_bytes(),
+                    &bytes
+                        .into_inner()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                ),
             _ => Ok(()),
         }
     }

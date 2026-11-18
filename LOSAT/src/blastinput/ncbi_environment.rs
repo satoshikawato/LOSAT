@@ -1829,9 +1829,11 @@ pub enum DiagTarget {
     /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
     Discard,
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host
-    /// (`report::run_files::RunFiles::Receiver`): its bytes, kept until the run ends. A cell, so
-    /// that every target is written through a shared reference, as a file is (`Write for &File`).
-    Memory(std::cell::RefCell<Vec<u8>>),
+    /// (`report::run_files::RunFiles::Receiver`): its bytes, kept until the run ends. Behind a
+    /// lock, so that every target is written through a shared reference, as a file is
+    /// (`Write for &File`), and a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds
+    /// one; a `RefCell` would take both away from that public type).
+    Memory(std::sync::Mutex<Vec<u8>>),
 }
 
 impl DiagTarget {
@@ -1858,7 +1860,10 @@ impl DiagTarget {
                 let mut file: &std::fs::File = file;
                 let _ = file.write_all(text);
             }
-            DiagTarget::Memory(bytes) => bytes.borrow_mut().extend_from_slice(text),
+            DiagTarget::Memory(bytes) => bytes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(text),
             DiagTarget::Stderr | DiagTarget::Discard => {}
         }
     }

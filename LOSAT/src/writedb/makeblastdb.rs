@@ -1926,15 +1926,16 @@ mod tests {
             "the log is the target's own handle"
         );
         let mut stderr = Vec::new();
-        let mut diag = DiagStream {
-            target: &target,
-            stderr: &mut stderr,
-        };
-        log.write_all(b"log 1\n").unwrap();
-        diag.write_all(b"diagnostic\n").unwrap();
-        log.write_all(b"log 2\n").unwrap();
-        diag.write_all(b"diagnostic 2\n").unwrap();
-        drop(diag);
+        {
+            let mut diag = DiagStream {
+                target: &target,
+                stderr: &mut stderr,
+            };
+            log.write_all(b"log 1\n").unwrap();
+            diag.write_all(b"diagnostic\n").unwrap();
+            log.write_all(b"log 2\n").unwrap();
+            diag.write_all(b"diagnostic 2\n").unwrap();
+        }
         assert!(opened.is_none(), "no other file is opened");
         assert!(stderr.is_empty());
         assert_eq!(

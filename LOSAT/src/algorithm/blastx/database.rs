@@ -506,11 +506,11 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`). `writes_thrown`: every report is outfmt 13
-    /// to 16, which write a lookup that throws there as NCBI does (`HitLoads::of`: where
-    /// `one_by_one`, a report loads the subjects of its `Hit`s before the first whose lookup
-    /// throws, and none after it; the refusals, the names, the taxonomy reads and the run's
-    /// record of the loads, `note_loaded`, take that one answer).
+    /// one by one (`shared::ParsedShown::one_by_one`). `after`: what the reports do after a
+    /// subject whose lookup throws (`FormatThrow::of_run`; `None`: a report refuses it), for
+    /// `HitLoads::of` (where `one_by_one`, which subjects throw and which no report loads; the
+    /// refusals, the names, the tables' rows, the taxonomy reads and the run's record of the
+    /// loads, `note_loaded`, take that one answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -529,7 +529,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
-        writes_thrown: bool,
+        after: Option<crate::report::db_subject::RunThrow>,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -564,20 +564,33 @@ impl ReportedSubjects {
         // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
         // of each query, `report::reported`).
+        let report_lists: Vec<&[super::results::HspList]> = batches
+            .iter()
+            .flat_map(|batch| batch.queries.iter().map(Vec::as_slice))
+            .collect();
         let loads = HitLoads::of(
-            writes_thrown,
-            batches.iter().flat_map(|batch| {
-                batch.queries.iter().map(|lists| {
-                    (
-                        one_by_one,
-                        lists
-                            .iter()
-                            .map(|list| super::report::reported(list, gapped).then_some(list.oid))
-                            .collect(),
-                    )
-                })
+            after,
+            report_lists.iter().map(|lists| {
+                (
+                    one_by_one,
+                    lists
+                        .iter()
+                        .map(|list| super::report::reported(list, gapped).then_some(list.oid))
+                        .collect(),
+                )
             }),
             |oid| parsed.get(&oid).map(Arc::as_ref),
+            // A list's rows read its subject where one of the HSPs that they show has
+            // identities (`report::reads_list`).
+            |report, list| {
+                report_lists[report][list]
+                    .hsps
+                    .iter()
+                    .filter(|hsp| super::report::has_seqalign(hsp, gapped))
+                    .map(|hsp| hsp.identity)
+                    .max()
+                    .unwrap_or(0)
+            },
         );
         let taxdb_found = database.db.taxdb_found();
         let mut reported = ReportedSubjects::default();
@@ -963,13 +976,18 @@ impl ReportedSubjects {
                         .map(|list| list.oid as u32)
                         .collect(),
                 };
-                let subjects = ranks.into_iter().map(|rank| {
-                    (
-                        rank,
-                        self.ordinals[rank as usize],
-                        self.parsed_subject(rank as usize),
-                    )
-                });
+                // A subject whose load throws loads nothing, nor does one that no report
+                // reaches after it (`HitLoads::loaded`).
+                let subjects = ranks
+                    .into_iter()
+                    .filter(|&rank| self.loads.loaded(rank as usize))
+                    .map(|rank| {
+                        (
+                            rank,
+                            self.ordinals[rank as usize],
+                            self.parsed_subject(rank as usize),
+                        )
+                    });
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,
@@ -1053,6 +1071,10 @@ impl ReportedSubjects {
             .flat_map(|batch| batch.queries.iter().flatten())
             .filter(|list| super::report::reported(list, gapped))
             .map(|list| list.oid)
+            // A subject that no report loads (`HitLoads::loaded`: one whose load throws, whose
+            // rows keep the names of the rows before, and one that no report reaches): NCBI reads
+            // none of its definition lines and looks none of its taxids up.
+            .filter(|&rank| self.loads.loaded(rank))
             .collect();
         let count = self.ordinals.len();
         if needs.all_deflines {
@@ -1436,7 +1458,7 @@ mod tests {
                 false,
                 false,
                 false,
-                false,
+                None,
             )
             .unwrap();
             let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -1511,7 +1533,7 @@ mod tests {
                 false,
                 false,
                 false,
-                false,
+                None,
             )
             .unwrap();
             for hsp in batches

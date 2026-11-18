@@ -215,6 +215,7 @@ pub(super) fn write_tblastx_tabular(
             sources: &database.reported.sources,
             lengths: &lengths,
             taxonomy: run.tabular_taxonomy,
+            loads: &database.reported.loads,
         },
     };
     // The subjects of the report's rows in report order, each once per run of its HSPs.
@@ -453,7 +454,9 @@ pub(super) fn write_tblastx_tabular(
                 } else {
                     0
                 };
-                let rows_read = reads_rows && (counts_block || engine_ident > 0);
+                // A row whose subject's load throws prints none of its letters.
+                let rows_read =
+                    reads_rows && !subject.throws() && (counts_block || engine_ident > 0);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
                 //        		const CBioseq_Handle& subject_bh =
@@ -462,9 +465,25 @@ pub(super) fn write_tblastx_tabular(
                 // A row that reads the subject (`TabularSpec::subject_fetch`, by the engine's
                 // identities for `nident` alone) loads it first where the query's batch did not
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
-                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups. A row
+                // that reads a subject whose load throws outside the subject block ends the run
+                // (`TabularWriter::ends_run`).
+                if let Some(end) = table.ends_run(
+                    &subject,
+                    crate::blastinput::app::Program::Tblastx,
+                    engine_ident,
+                ) {
+                    return Err(crate::report::tabular::run_end(writer, &buf, end, || {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.end_run();
+                        }
+                    }));
+                }
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident) {
+                    if warnings.reads_with_texts(q_idx)
+                        && fetch.reads(engine_ident)
+                        && !subject.throws()
+                    {
                         writer.write_all(&buf)?;
                         buf.clear();
                         warnings.subject_read(q_idx, hit.s_idx, &mut *writer)?;

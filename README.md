@@ -42,7 +42,7 @@ On the pairwise profiles and fixtures of its [release test set](docs/release/v0.
 | **`blastx`** | `blastx` (default), `blastx-fast`; native and Wasm entry points | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
 | **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
 | **`tblastx`** | `tblastx` | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast`; a PSSM query (`-in_pssm`, PSI-TBLASTN) | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats); `-in_pssm`: `0` to `4`, `6`, `7`, `10`) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast`; a PSSM query (`-in_pssm`, PSI-TBLASTN) | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats); `-in_pssm`: `0` to `4`, `6`, `7`, `10`) | Protein query vs. translated nucleotide subject (see [section 4](#4-protein-vs-translated-nucleotide-tblastn)) |
 | **`psiblast`** | the rounds of FASTA queries (`-num_iterations N`, 0 until convergence); a PSSM query (`-in_pssm`, its rounds too) | `0`, `6`, `7`, `10`, `20` (`-in_pssm`: `0`, `6`, `7`) | Position-Specific Iterated BLAST: blastp's search in round 1, then the search of the PSSM made from each round's alignments, or the search of a PSSM (see [section 7](#7-psi-blast-psiblast)) |
 | **`rpsblast`** | composition-based statistics 0, 1, 2 and 3 (the default 1), profile databases of one or several volumes | `0`, `6`, `7`, `10` | Reverse Position-Specific BLAST: protein queries against a database of profiles such as CDD (see [section 8](#8-reverse-psi-blast-rpsblast)) |
 | **`rpstblastn`** | without composition-based statistics (`-comp_based_stats 0`; the default 1 comes with a later item) | `0`, `1`, `2`, `3`, `4`, `6`, `7`, `10` | Translated Reverse Position-Specific BLAST: the six frames of nucleotide queries against a database of profiles (see [section 9](#9-translated-reverse-psi-blast-rpstblastn)) |
@@ -211,7 +211,7 @@ losat tblastn \
   -outfmt 6
 ```
 
-The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). `-task tblastn-fast` and `-word_size 5`, `6` and `7` (NCBI's compressed-alphabet lookup table) run with every matrix but IDENTITY, which crashes NCBI BLAST+'s tblastn; database searches (`-db`) are described in section 6.
+The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. `-task tblastn-fast` and `-word_size 5`, `6` and `7` (NCBI's compressed-alphabet lookup table) run with every matrix but IDENTITY, which crashes NCBI BLAST+'s tblastn; database searches (`-db`) are described in section 6.
 
 With `-in_pssm FILE` (in place of `-query`; `-in_pssm -` reads the standard input) tblastn searches a PSSM as NCBI's PSI-TBLASTN does: the PSSM's scores replace the matrix in the lookup table, the extensions and the alignments, and its Karlin-Altschul values give the cutoffs, E-values and bit scores. As in NCBI, `-comp_based_stats` has no effect (no composition-based statistics), HSPs are linked only with `-sum_stats true`, the subjects are translated with the genetic code 1 whatever `-db_gencode` says (the value is still checked), `-task tblastn-fast` changes nothing, and the word size is 2 to 4 with one of the standard matrices (NCBI's errors for the others; a PSSM of frequency ratios only gets its scores from the `-matrix` with the gap costs 11/1). SEG (on by default) keeps the masked positions out of the lookup table and out of the ungapped Karlin-Altschul values, and the reports (`PSITBLASTN`; outfmt 0, 6, 7 and 10) show no query masks. The PSSM is read as psiblast's `-in_pssm` reads it (section 7).
 
@@ -582,7 +582,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 
 ## Documentation
 
-- [TLOSAN v0.2.0 release readiness and scope](docs/release/v0.2.0.md)
+- [v0.2.0 release record](docs/release/v0.2.0.md)
 - [v0.1.0 historical release scope](docs/archive/v0.1.0_scope.md)
 - [v0.1.0 NCBI Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
 - [CLI Migration Details](docs/cli_v2_migration.md)

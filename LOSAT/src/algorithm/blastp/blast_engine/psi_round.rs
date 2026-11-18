@@ -889,7 +889,7 @@ fn write_round_epilogs(
             database_name: blastp_database_name(args, subject_label),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,
-            matrix_name: args.matrix_name.clone(),
+            matrix_name: Some(args.matrix_name.clone()),
             gap_open: args.scoring.gap_open,
             gap_extend: args.scoring.gap_extend,
             word_threshold: args.threshold,

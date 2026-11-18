@@ -277,12 +277,10 @@ pub(super) fn prefetch_reported_subjects(
             titles.hit_loads(
                 reported_lists,
                 batch_prefetch,
-                crate::report::blast_xml2::Xml2Kind::every(format_plans.iter().map(|outfmt| {
-                    match outfmt {
-                        BlastpReport::Xml2(kind) => Some(*kind),
-                        _ => None,
-                    }
-                })),
+                crate::report::db_subject::FormatThrow::of_outfmts(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                    crate::blastinput::app::Program::Blastp,
+                ),
             )
         });
     if let Some(titles) = listed_titles.as_ref() {
@@ -457,6 +455,7 @@ pub(super) fn prefetch_reported_subjects(
     // that psiblast's PSSM includes (`PssmReads::one_by_one`, where a PSSM is made). Made only
     // where the batch at `start` stops, and for the run's record of psiblast's rounds where a
     // prefetch of the run can stop (`ListedTitles::note_loaded`).
+    let hit_loads_ref = &hit_loads;
     let loaded = |start: usize| {
         crate::algorithm::common::database::LoadedBefore {
             hits: &hit_lists[..start],
@@ -472,8 +471,11 @@ pub(super) fn prefetch_reported_subjects(
                     prefetched_ranks(span)
                 }
                 crate::algorithm::common::database::BatchLoads::Read(rows) => {
-                    let mut ranks: Vec<usize> =
-                        database::ListedTitles::fetched_ranks(hits, rows).collect();
+                    // Not a subject whose load throws, nor one that no report reaches after
+                    // such a subject (`HitLoads::loaded`).
+                    let mut ranks: Vec<usize> = database::ListedTitles::fetched_ranks(hits, rows)
+                        .filter(|&rank| hit_loads_ref.loaded(rank))
+                        .collect();
                     if pssm_made {
                         for query in span {
                             ranks.extend_from_slice(pssm_reads.one_by_one(query));
@@ -527,12 +529,11 @@ pub(super) fn prefetch_reported_subjects(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.looks_up_every_taxid()
             );
+            // A row whose subject's load throws looks nothing up (`HitLoads::loaded`).
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
-                    && lists
-                        .iter()
-                        .flatten()
-                        .any(|hit_list| hit_list.hsplist_count > 0)
+                    && database::ListedTitles::reported_ranks(lists)
+                        .any(|rank| hit_loads.loaded(rank))
                 {
                     database.open_for_tabular_rows(args.app.name())?;
                 }
@@ -550,8 +551,11 @@ pub(super) fn prefetch_reported_subjects(
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
                             // read none of a query whose HSPs have none, which looks no taxid up.
-                            let mut fetched =
-                                database::ListedTitles::fetched_ranks(shown, rows).peekable();
+                            // A subject whose load throws loads nothing, nor does one that no
+                            // report reaches after it (`HitLoads::loaded`).
+                            let mut fetched = database::ListedTitles::fetched_ranks(shown, rows)
+                                .filter(|&rank| hit_loads.loaded(rank))
+                                .peekable();
                             if rows == crate::report::tabular::SubjectFetch::Every
                                 || fetched.peek().is_some()
                             {

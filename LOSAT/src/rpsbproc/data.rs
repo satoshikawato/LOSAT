@@ -207,11 +207,18 @@ impl<'a> Line<'a> {
     // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 10)`
     // for a `cdtrack.txt` line of an accession alone, PS16a review oracle A4-1 case `ct3`.)
+    //
+    // The text is that of NCBI's build, whose `size_t` has 64 bits (NCBI BLAST+ 2.17.0 for Linux
+    // x64, the only reference): `pos` prints as `%zu` of its 64-bit value on every target, where
+    // `npos`, or the difference of two positions that wrapped below 0, is near 2^64 (not
+    // 4294967295 as a 32-bit `usize` would print). A line is shorter than 2 GiB, so a position
+    // of 2^31 or more is such a wrapped one: it takes its 64-bit value by sign extension.
     fn substr(&self, pos: usize, n: usize) -> Result<&'a [u8], DataError> {
         if pos > self.bytes.len() {
+            let pos = pos as isize as i64 as u64;
             return Err(DataError::Std(format!(
                 "basic_string::substr: __pos (which is {pos}) > this->size() (which is {})",
-                self.bytes.len()
+                self.bytes.len() as u64
             )));
         }
         let end = pos.saturating_add(n).min(self.bytes.len());

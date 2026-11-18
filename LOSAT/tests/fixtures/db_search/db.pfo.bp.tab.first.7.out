@@ -1,0 +1,24 @@
+# BLASTP 2.17.0+
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject id, evalue
+# 12 hits found
+P69905.2	Unknown	2.05e-105
+P69905.2	Unknown	1.10e-103
+P69905.2	Unknown	2.46e-103
+P69905.2	Unknown	3.43e-102
+P69905.2	Unknown	1.03e-100
+P69905.2	Unknown	3.61e-97
+P69905.2	Unknown	5.47e-92
+P69905.2	Unknown	9.57e-92
+P69905.2	Unknown	2.54e-91
+P69905.2	Unknown	4.22e-88
+P69905.2	Unknown	1.26e-74
+P69905.2	Unknown	3.12e-74
+# BLASTP 2.17.0+
+# Query: mix2_u qp1 of ids/noacc_v5 (no accession table)
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject id, evalue
+# 1 hits found
+mix2_u	qp1	5.86e-108
+# BLAST processed 2 queries

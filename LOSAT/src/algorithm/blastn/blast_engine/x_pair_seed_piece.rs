@@ -69,7 +69,7 @@ use super::super::super::{DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKETS};
 use super::super::{Resume, Seed, SeedOut};
 use super::{
     bucket_of, lock, merge, pause, run_participants, AtHome, Failing, InStage, OwnLines,
-    PartScratch, PartState, PartStats, Run, HELPER_STALL, IN_STAGE,
+    PartScratch, PartState, PartStats, Run, Stall, IN_STAGE,
 };
 use std::cell::{Cell, UnsafeCell};
 use std::mem::{size_of, MaybeUninit};
@@ -956,7 +956,7 @@ where
         let (mut my_runs, mut my_away) = (0u64, 0u64);
         let mut wait_start: Option<std::time::Instant> = None;
         let mut idle = 0u32;
-        let mut stall: Option<(std::time::Instant, u64)> = None;
+        let mut stall = Stall::default();
         // the slowest partition's next piece as this participant last read it (it only grows)
         let mut seen = 0u64;
 
@@ -1097,7 +1097,7 @@ where
             }
             if did {
                 idle = 0;
-                stall = None;
+                stall.reset();
                 if let Some(t0) = wait_start.take() {
                     wait_ns += t0.elapsed().as_nanos() as u64;
                 }
@@ -1106,23 +1106,19 @@ where
                     wait_start = Some(std::time::Instant::now());
                 }
                 idle = idle.saturating_add(1);
-                if !owner && idle.is_multiple_of(64) {
-                    // the owner can finish the stage alone; the stage's progress: pieces made
-                    // plus the partitions' next pieces
-                    let now = lanes
-                        .iter()
-                        .map(|lane| lane.0.load(Ordering::Relaxed))
-                        .fold(produced.load(Ordering::Relaxed), u64::wrapping_add);
-                    match stall {
-                        Some((since, seen_progress)) if seen_progress == now => {
-                            if since.elapsed() >= HELPER_STALL {
-                                left.fetch_add(1, Ordering::Relaxed);
-                                failing.done = true;
-                                break;
-                            }
-                        }
-                        _ => stall = Some((std::time::Instant::now(), now)),
-                    }
+                // (the owner can finish the stage alone; the stage's progress: pieces made plus
+                // the partitions' next pieces)
+                if !owner
+                    && stall.leaves(idle, || {
+                        lanes
+                            .iter()
+                            .map(|lane| lane.0.load(Ordering::Relaxed))
+                            .fold(produced.load(Ordering::Relaxed), u64::wrapping_add)
+                    })
+                {
+                    left.fetch_add(1, Ordering::Relaxed);
+                    failing.done = true;
+                    break;
                 }
                 pause(idle, owner);
             }

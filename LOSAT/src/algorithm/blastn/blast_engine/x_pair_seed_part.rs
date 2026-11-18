@@ -564,12 +564,57 @@ impl Drop for Failing<'_> {
 /// owner finishes the stage), but the stage is slower.
 const HELPER_STALL: std::time::Duration = std::time::Duration::from_millis(10);
 
+/// No NCBI counterpart (scheduling only): the turns without work in a row that a participant
+/// spends spinning (`pause`) before it yields or sleeps; a helper watches the stage for a stall
+/// (`Stall`) from the turn after them on.
+const SPIN_TURNS: u32 = 64;
+
+/// No NCBI counterpart (scheduling only): a helper's watch for a stalled stage, one form for the
+/// three stages (`seed_stage_part`, `seed_stage_home`, `piece::seed_stage_pieces`). On every turn
+/// without work after the `SPIN_TURNS` spinning ones (each such turn then yields or sleeps in
+/// `pause`) the helper reads the stage's progress, and it leaves once the progress has not
+/// changed for `HELPER_STALL` by the clock. It looks on every such turn, not on every 64th: a
+/// turn that yields can take up to a scheduler quantum on a loaded machine (macOS's
+/// `sched_yield`, libpthread's `swtch_pri(0)`, lowers the thread's priority for up to
+/// `thread_depress_time`, one quantum of 10 ms: XNU osfmk/kern/syscall_subr.c `swtch_pri`,
+/// osfmk/kern/sched_prim.c `sched_timeshare_timebase_init`), so 64 turns can take longer than
+/// a stall, the next look finds the stage moving again, and a stall of many times
+/// `HELPER_STALL` goes unseen. A look costs a clock read and the loads of the progress, beside
+/// the yield or the 50 us sleep of its turn; turns with work do not look.
+#[derive(Default)]
+struct Stall(Option<(std::time::Instant, u64)>);
+
+impl Stall {
+    /// The participant did some work: the stage moves, so the watch starts again.
+    #[inline]
+    fn reset(&mut self) {
+        self.0 = None;
+    }
+
+    /// After `idle` turns without work in a row: whether the stage, whose progress `progress`
+    /// reads (only on the turns that look), has made no progress for `HELPER_STALL`.
+    #[inline]
+    fn leaves(&mut self, idle: u32, progress: impl FnOnce() -> u64) -> bool {
+        if idle < SPIN_TURNS {
+            return false;
+        }
+        let now = progress();
+        match self.0 {
+            Some((since, seen)) if seen == now => since.elapsed() >= HELPER_STALL,
+            _ => {
+                self.0 = Some((std::time::Instant::now(), now));
+                false
+            }
+        }
+    }
+}
+
 /// No NCBI counterpart: a participant's wait when it found nothing to do. It spins a little,
 /// then yields; a native helper that keeps finding nothing sleeps 50 us between looks. On
 /// wasm32 it only yields: `std::thread::sleep` panics under the browser's WASI shim.
 #[inline]
 fn pause(idle: u32, owner: bool) {
-    if idle < 64 {
+    if idle < SPIN_TURNS {
         std::hint::spin_loop();
         return;
     }
@@ -833,7 +878,7 @@ where
         let (mut scan_ns, mut wait_ns, mut pause_ns) = (0u64, 0u64, 0u64);
         let mut wait_start: Option<std::time::Instant> = None;
         let mut idle = 0u32;
-        let mut stall: Option<(std::time::Instant, usize)> = None;
+        let mut stall = Stall::default();
         loop {
             if failed.load(Ordering::Acquire) {
                 if owner {
@@ -913,7 +958,7 @@ where
             }
             if did {
                 idle = 0;
-                stall = None;
+                stall.reset();
                 if let Some(t0) = wait_start.take() {
                     wait_ns += t0.elapsed().as_nanos() as u64;
                 }
@@ -922,20 +967,12 @@ where
                     wait_start = Some(std::time::Instant::now());
                 }
                 idle = idle.saturating_add(1);
-                if !owner && idle.is_multiple_of(64) {
-                    // the owner can finish the stage alone
-                    let now = progress.load(Ordering::Relaxed);
-                    match stall {
-                        Some((since, seen)) if seen == now => {
-                            if since.elapsed() >= HELPER_STALL {
-                                left.fetch_add(1, Ordering::Relaxed);
-                                failing.done = true;
-                                lock(&raw_spare).push(raw);
-                                return (scan_ns, wait_ns, pause_ns);
-                            }
-                        }
-                        _ => stall = Some((std::time::Instant::now(), now)),
-                    }
+                // (the owner can finish the stage alone)
+                if !owner && stall.leaves(idle, || progress.load(Ordering::Relaxed) as u64) {
+                    left.fetch_add(1, Ordering::Relaxed);
+                    failing.done = true;
+                    lock(&raw_spare).push(raw);
+                    return (scan_ns, wait_ns, pause_ns);
                 }
                 pause(idle, owner);
             }
@@ -1215,7 +1252,7 @@ where
         let (mut my_runs, mut my_away) = (0u64, 0u64);
         let mut wait_start: Option<std::time::Instant> = None;
         let mut idle = 0u32;
-        let mut stall: Option<(std::time::Instant, usize)> = None;
+        let mut stall = Stall::default();
         // the slowest partition's next strip as this participant last read it (it only grows)
         let mut seen = 0usize;
 
@@ -1331,7 +1368,7 @@ where
             }
             if did {
                 idle = 0;
-                stall = None;
+                stall.reset();
                 if let Some(t0) = wait_start.take() {
                     wait_ns += t0.elapsed().as_nanos() as u64;
                 }
@@ -1340,24 +1377,20 @@ where
                     wait_start = Some(std::time::Instant::now());
                 }
                 idle = idle.saturating_add(1);
-                if !owner && idle.is_multiple_of(64) {
-                    // the owner can finish the stage alone; the stage's progress: strips handed
-                    // out plus strips folded by each partition
-                    let now = cursor.load(Ordering::Relaxed)
-                        + lanes
-                            .iter()
-                            .map(|lane| lane.0.load(Ordering::Relaxed))
-                            .sum::<usize>();
-                    match stall {
-                        Some((since, seen_progress)) if seen_progress == now => {
-                            if since.elapsed() >= HELPER_STALL {
-                                left.fetch_add(1, Ordering::Relaxed);
-                                failing.done = true;
-                                break;
-                            }
-                        }
-                        _ => stall = Some((std::time::Instant::now(), now)),
-                    }
+                // (the owner can finish the stage alone; the stage's progress: strips handed out
+                // plus strips folded by each partition)
+                if !owner
+                    && stall.leaves(idle, || {
+                        (cursor.load(Ordering::Relaxed)
+                            + lanes
+                                .iter()
+                                .map(|lane| lane.0.load(Ordering::Relaxed))
+                                .sum::<usize>()) as u64
+                    })
+                {
+                    left.fetch_add(1, Ordering::Relaxed);
+                    failing.done = true;
+                    break;
                 }
                 pause(idle, owner);
             }
@@ -2113,8 +2146,37 @@ mod tests {
     enum Slow {
         /// every scan call on this pool thread sleeps 1 ms first
         Scans(usize),
-        /// the first scan on the owner's thread sleeps 60 ms (well past `HELPER_STALL`)
+        /// the first scan on the owner's thread holds the stage (`hold_until_helpers_leave`)
         OwnerFirstScan,
+    }
+
+    /// `Slow::OwnerFirstScan`, on the owner's thread in its first scan (no partition can fold
+    /// past that strip, so the stage makes no progress once the helpers have scanned the strips
+    /// the window lets them): waits until a helper has scanned a strip (it is in the stage), then
+    /// until every other thread of the pool has run a job of `spawn_broadcast`. A helper's thread
+    /// runs that job only once its participant has returned (the participants of these stages
+    /// make no rayon calls, the test's scans and folds none without `nested`), and while the
+    /// owner holds the strip a helper returns only through the stall exit, so the hold ends
+    /// after every helper that came has left; how soon the OS runs the helpers does not matter.
+    /// The owner's own job runs after the hold. At most 60 s each (then the test's assertions
+    /// fail), so that a stall exit that never fires fails the test instead of hanging it.
+    fn hold_until_helpers_leave(pool: &rayon::ThreadPool, helper_scanned: &AtomicBool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let wait = |done: &dyn Fn() -> bool| {
+            while !done() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        wait(&|| helper_scanned.load(Ordering::Acquire));
+        let owner = rayon::current_thread_index();
+        let others = Arc::new(AtomicUsize::new(0));
+        let ran = Arc::clone(&others);
+        pool.spawn_broadcast(move |ctx| {
+            if Some(ctx.index()) != owner {
+                ran.fetch_add(1, Ordering::AcqRel);
+            }
+        });
+        wait(&|| others.load(Ordering::Acquire) + 1 >= pool.current_num_threads());
     }
 
     /// `partitioned` with the stage's thread count given (`threads` participants whatever the
@@ -2229,6 +2291,8 @@ mod tests {
         let helper_folded = AtomicBool::new(false);
         let owner_waited = AtomicUsize::new(0);
         let owner_scanned = AtomicBool::new(false);
+        // (`Slow::OwnerFirstScan`: a thread other than the owner's has scanned a strip)
+        let helper_scanned = AtomicBool::new(false);
         pool.install(|| {
             let owner = rayon::current_thread_index();
             let slow_scans = match slow {
@@ -2239,11 +2303,12 @@ mod tests {
                 if slow_scans.is_some() && rayon::current_thread_index() == slow_scans {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
-                if matches!(slow, Some(Slow::OwnerFirstScan))
-                    && rayon::current_thread_index() == owner
-                    && !owner_scanned.swap(true, Ordering::Relaxed)
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(60));
+                if matches!(slow, Some(Slow::OwnerFirstScan)) {
+                    if rayon::current_thread_index() != owner {
+                        helper_scanned.store(true, Ordering::Release);
+                    } else if !owner_scanned.swap(true, Ordering::Relaxed) {
+                        hold_until_helpers_leave(pool, &helper_scanned);
+                    }
                 }
                 if nested {
                     use rayon::prelude::*;
@@ -3004,30 +3069,28 @@ mod tests {
         }
     }
 
-    // A stage that stalls for longer than `HELPER_STALL` (the owner's first scan sleeps 60 ms,
-    // and no partition can fold past that strip) makes the idle helpers leave
-    // (`helpers_left`); the owner finishes the stage alone, with LOSAT_X_PAIRPARHOME folding the
-    // helpers' home partitions away from home (they have no participant at home any more).
-    // Both ways give the reference's hits and table. (On a loaded machine the helper jobs may
-    // start only after the owner's sleep, and then nothing stalls, so each way gets up to 40
-    // stages or 20 s, whichever comes first, to see a helper leave; a pool with more threads than
-    // the machine has CPUs is skipped, as the helpers then may not run during the owner's sleep.)
+    // A stage that stalls (the owner holds its first strip, `Slow::OwnerFirstScan`, and no
+    // partition can fold past that strip) makes the idle helpers leave once it has made no
+    // progress for `HELPER_STALL` (`helpers_left`); the owner finishes the stage alone, with
+    // LOSAT_X_PAIRPARHOME folding the helpers' home partitions away from home (they have no
+    // participant at home any more). Both ways give the reference's hits and table. The owner
+    // holds the strip from the time a helper is in the stage until every helper has left
+    // (`hold_until_helpers_leave`), so one stage of each way shows it on any machine, whatever
+    // its CPU count and load: this test needs no stage in which the OS happens to run a helper
+    // while the owner sleeps. (`a_stall_is_seen_on_the_first_turn_after_helper_stall` checks
+    // when a helper looks.)
     #[test]
     fn a_stalled_stage_lets_the_helpers_leave() {
         let mut rng = Lcg(0x57A1_1ED0);
-        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
         for threads in [2usize, 4] {
-            if threads > cpus {
-                eprintln!("skipping threads {threads}: the machine has {cpus} CPUs");
-                continue;
-            }
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build()
                 .unwrap();
-            // (and LOSAT_X_SEEDPIECE's stage, in pieces of 37 seeds: the owner sleeps in its
-            // first piece, holding strip 0 half-scanned)
+            // (and LOSAT_X_SEEDPIECE's stage, in pieces of 37 seeds: the owner holds its first
+            // piece, strip 0 half-scanned)
             for (home, pieces) in [(false, None), (true, None), (true, Some(37))] {
+                let at = format!("threads {threads} home {home} pieces {pieces:?}");
                 let mut reference_hash = DiagHashTable::new(16);
                 let mut hash = copy_hash(&reference_hash);
                 let mut scratch = PartScratch {
@@ -3035,58 +3098,68 @@ mod tests {
                     ..PartScratch::default()
                 };
                 let mut s = 50i32;
-                let mut first = 0usize;
-                let mut left = false;
+                let n = 2000;
+                let ops = random_ops(&mut rng, n, &mut s, 300);
+                let expected = reference::<true>(&mut reference_hash, &ops, 0, 40);
+                let cuts: Vec<usize> = (0..=40).map(|k| k * n / 40).collect();
                 let started = std::time::Instant::now();
-                for attempt in 0..40 {
-                    let at = format!(
-                        "threads {threads} home {home} pieces {pieces:?} attempt {attempt}"
-                    );
-                    let n = 2000;
-                    let ops = random_ops(&mut rng, n, &mut s, 300);
-                    let expected = reference::<true>(&mut reference_hash, &ops, first, 40);
-                    let cuts: Vec<usize> = (0..=40).map(|k| k * n / 40).collect();
-                    let (got, stats, _) = partitioned_on(
-                        &pool,
-                        threads,
-                        Some(Slow::OwnerFirstScan),
-                        &mut hash,
-                        &mut scratch,
-                        &ops,
-                        first,
-                        &cuts,
-                        threads,
-                        2 * threads,
-                        40,
-                        false,
-                        false,
-                        home,
-                    );
-                    assert_eq!(got, expected, "{at}: hits");
-                    assert_eq!(
-                        hash_state(&hash),
-                        hash_state(&reference_hash),
-                        "{at}: table"
-                    );
-                    first += n;
-                    if stats.helpers_left > 0 {
-                        if home {
-                            assert!(stats.away > 0, "{at}: no strip folded away from home");
-                        }
-                        left = true;
-                        break;
-                    }
-                    if started.elapsed() > std::time::Duration::from_secs(20) {
-                        break;
-                    }
-                }
+                let (got, stats, _) = partitioned_on(
+                    &pool,
+                    threads,
+                    Some(Slow::OwnerFirstScan),
+                    &mut hash,
+                    &mut scratch,
+                    &ops,
+                    0,
+                    &cuts,
+                    threads,
+                    2 * threads,
+                    40,
+                    false,
+                    false,
+                    home,
+                );
+                assert_eq!(got, expected, "{at}: hits");
+                assert_eq!(
+                    hash_state(&hash),
+                    hash_state(&reference_hash),
+                    "{at}: table"
+                );
                 assert!(
-                    left,
-                    "threads {threads} home {home} pieces {pieces:?} ({cpus} CPUs): no helper left a stalled stage in {:?}",
+                    stats.helpers_left > 0,
+                    "{at}: no helper left the stalled stage in {:?}",
                     started.elapsed()
                 );
+                if home {
+                    assert!(stats.away > 0, "{at}: no strip folded away from home");
+                }
             }
         }
+    }
+
+    // A helper looks at the stage on every turn without work after the spinning ones (`Stall`),
+    // so it leaves on the first look after the stage has made no progress for `HELPER_STALL`,
+    // however few turns that took (one turn that yields can take a scheduler quantum on a loaded
+    // machine); the spinning turns do not read the progress, and a change of the progress or work
+    // done starts the watch again.
+    #[test]
+    fn a_stall_is_seen_on_the_first_turn_after_helper_stall() {
+        let mut stall = Stall::default();
+        for idle in 1..SPIN_TURNS {
+            assert!(!stall.leaves(idle, || unreachable!("a spinning turn reads the progress")));
+        }
+        assert!(!stall.leaves(SPIN_TURNS, || 7));
+        std::thread::sleep(HELPER_STALL);
+        // the stage moved: the watch starts again
+        assert!(!stall.leaves(SPIN_TURNS + 1, || 8));
+        assert!(!stall.leaves(SPIN_TURNS + 2, || 8));
+        std::thread::sleep(HELPER_STALL);
+        assert!(stall.leaves(SPIN_TURNS + 3, || 8));
+        // work done: the watch starts again
+        stall.reset();
+        assert!(!stall.leaves(SPIN_TURNS, || 8));
+        std::thread::sleep(HELPER_STALL);
+        assert!(stall.leaves(SPIN_TURNS + 1, || 8));
     }
 
     // Every stage starts from a copy of the stage's table: a change of the table between two

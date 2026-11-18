@@ -152,6 +152,8 @@ On WASI, a value in psiblast's ASN.1 PSSM file (`-out_pssm` with `-out_ascii_pss
 
 A WASI command learns the time zone and the working directory only from its host: makeblastdb writes local times when the host passes `TZ` or gives the module the zone files (`/etc/localtime`, `/usr/share/zoneinfo`), UTC otherwise, and relative file names and makeblastdb's `New DB name:` start from the `PWD` the host passes (`/` without it). `LOSAT/tests/run_losat_wasi.js` passes the environment and `PWD` and gives the module `/`.
 
+On WASI, the host program opens the files: Node.js (`node:wasi`) reads `..` in a path as text, without looking at the directory before it, so with Node.js `makeblastdb -out gone/../db` builds `db` and `-query gone/../q.fa` reads `q.fa` even when `gone` does not exist, where NCBI BLAST+ and native LOSAT on Linux stop with an error.
+
 ---
 
 ## Quick Start

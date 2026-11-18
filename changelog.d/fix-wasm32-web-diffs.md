@@ -5,4 +5,4 @@
   `4294967295`); a `-window_masker_taxid` run without a counts file reports NCBI's "could not open "
   where WASI used to open its root directory; and on WASI hosts `-export_search_strategy X -out X`
   and `-out_pssm X -out X` are refused as on Linux (a symbolic or hard link to the `-out` file is
-  not seen there, because WASI gives Rust no file identity).
+  not seen there, because Rust's standard library has no stable file identity on WASI).

@@ -100,10 +100,11 @@ impl fmt::Display for MaskFileError {
 impl std::error::Error for MaskFileError {}
 
 /// What a primitive or a frame reports: the class of what NCBI's reader throws. What a variant
-/// holds is boxed (`Fail::serial`, `Fail::exception`, `Fail::unsupported`), so `Fail` and every
-/// primitive's result (`R`) start with a tag (an unboxed `String` would make the result a niche
-/// of its capacity, a 64-bit constant at each `Ok` and `?`); no error is built on the paths
-/// that read a valid file.
+/// holds is in a box of one word (`Fail::serial`, `Fail::exception`, `Fail::unsupported`), so
+/// `Fail` is a tag and a word, and the result of a primitive (`R<u32>`, `R<()>`, `R<bool>`) is
+/// returned in two registers (an unboxed `String` made every result a niche of its capacity, a
+/// 64-bit constant at each `Ok` and `?`, returned through memory); no error is built on the
+/// paths that read a valid file.
 #[derive(Debug)]
 pub(super) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
@@ -118,8 +119,12 @@ pub(super) enum Fail {
     /// `std::length_error` of that `reserve`: `what()` is [`STRING_CREATE_LENGTH_ERROR`].
     LengthError,
     /// NCBI reads it; LOSAT does not.
-    Unsupported(Box<str>),
+    Unsupported(Box<Refusal>),
 }
+
+/// What [`Fail::Unsupported`] says of what LOSAT does not read.
+#[derive(Debug)]
+pub(super) struct Refusal(String);
 
 pub(super) type R<T> = Result<T, Fail>;
 
@@ -139,7 +144,7 @@ impl Fail {
     /// [`Fail::Unsupported`] of `what`.
     #[cold]
     pub(super) fn unsupported(what: String) -> Fail {
-        Fail::Unsupported(what.into_boxed_str())
+        Fail::Unsupported(Box::new(Refusal(what)))
     }
 }
 
@@ -2150,7 +2155,7 @@ impl MaskFileReader {
             Fail::LengthError => {
                 MaskFileError::Ncbi(WriteDbError::Other(STRING_CREATE_LENGTH_ERROR.to_string()))
             }
-            Fail::Unsupported(what) => MaskFileError::Unsupported(what.into_string()),
+            Fail::Unsupported(what) => MaskFileError::Unsupported(what.0),
             Fail::Eof => MaskFileError::EofInContinuation {
                 path: self.path.clone(),
             },

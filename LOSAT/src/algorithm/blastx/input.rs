@@ -4001,9 +4001,9 @@ mod standard_input_tests {
     #[test]
     fn standard_input_keeps_the_tail_that_a_named_file_loses() {
         let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
-        let path = std::env::temp_dir().join(format!(
+        let path = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-standard-input-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         std::fs::write(&path, text).unwrap();
         let lengths = |input: InputFile| {

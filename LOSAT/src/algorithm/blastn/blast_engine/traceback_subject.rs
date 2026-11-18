@@ -53,6 +53,13 @@ pub(super) struct TraceBatch<'a> {
     /// blocks by context and whether an e-value is rounded down from its score.
     pub(super) encoded_queries_blastna: &'a Vec<&'a [u8]>,
     pub(super) encoded_queries_nomask: &'a [&'a [u8]],
+    /// The same letters concatenated, with masks (`PrelimBatch::encoded_query_concat_blastna`,
+    /// NCBI's `query_blk->sequence`) and without (`PrelimBatch::encoded_query_concat_nomask`,
+    /// `query_blk->sequence_nomask`): what the greedy traceback, the reevaluation and the
+    /// identities read at an HSP's offsets, which can lie outside its context
+    /// (`ContextQuery`).
+    pub(super) encoded_query_concat_blastna: &'a [u8],
+    pub(super) encoded_query_concat_nomask: &'a [u8],
     pub(super) query_lengths: &'a [usize],
     pub(super) query_concat_length: usize,
     pub(super) search_karlin_ref: &'a Vec<ContextKarlin>,
@@ -149,6 +156,8 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         effective_word_size,
         encoded_queries_blastna,
         encoded_queries_nomask,
+        encoded_query_concat_blastna,
+        encoded_query_concat_nomask,
         query_lengths,
         query_concat_length,
         search_karlin_ref,
@@ -241,6 +250,8 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         x_fenced,
         encoded_queries_blastna,
         encoded_queries_nomask,
+        encoded_query_concat_blastna,
+        encoded_query_concat_nomask,
         query_contexts,
         query_lengths,
         cutoff_scores,
@@ -474,7 +485,7 @@ pub(super) fn ungapped_traceback_hits(
     let &TracebackCtx {
         s_idx,
         s_seq_blastna,
-        encoded_queries_nomask,
+        encoded_query_concat_nomask,
         query_eff_searchsp,
         search_karlin_ref,
         round_down_evalue_score,
@@ -485,11 +496,13 @@ pub(super) fn ungapped_traceback_hits(
     let mut final_hits: Vec<BlastnHsp> = Vec::with_capacity(combined_prelim_hits.len());
     for prelim in combined_prelim_hits.iter() {
         let context_idx = prelim.context_idx as usize;
-        let length = prelim.prelim_qe - prelim.prelim_qs;
+        let length = (prelim.prelim_qe - prelim.prelim_qs) as usize;
+        // In the concatenated letters from NCBI's start, which an HSP that NCBI keeps outside its
+        // context has outside it (`ungapped_subject_stage`).
         let matches = ungapped::count_identities_ungapped(
-            encoded_queries_nomask[context_idx],
+            encoded_query_concat_nomask,
             s_seq_blastna,
-            prelim.prelim_qs,
+            (prelim.query_context_offset as isize + prelim.prelim_qs as isize) as usize,
             prelim.prelim_ss,
             length,
         );

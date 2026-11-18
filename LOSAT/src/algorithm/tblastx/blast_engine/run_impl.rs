@@ -4921,10 +4921,12 @@ impl BatchReports<'_> {
 /// refusals of what the search meets, an ungapped extension that scores higher past the end of its
 /// query frame (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's
 /// Q-X2c: "the results of the query batches before are written"), a one-hit merge of lengths that
-/// add up to 0 (`OneHitChunkMerge::refuse`) and the ungapped re-evaluation of HSPs on a subject (or
-/// its `-subject_loc` range) of fewer than 12 bases
-/// (`subject_loop::SubjectEmit::refuse_untranslated_frame`, PD-LOSAT-NCBI-DEFECTS 1.50). The run
-/// then writes the same bytes whether its reports are streamed or held (`report_stream`).
+/// add up to 0 (`OneHitChunkMerge::refuse`), the ungapped re-evaluation of HSPs on a subject (or its
+/// `-subject_loc` range) of fewer than 12 bases (`subject_loop::SubjectEmit::refuse_untranslated_frame`,
+/// PD-LOSAT-NCBI-DEFECTS 1.50) and the re-evaluation's fetch of a subject whose header cannot be read
+/// under a negative seqid list (`subject_loop::x_fetch_keeps`, NCBI's engine error there; the inner
+/// error stays a `FetchRefusal`). The run then writes the same bytes whether its reports are
+/// streamed or held (`report_stream`).
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
 
@@ -5794,12 +5796,13 @@ fn search_query_batch<S: TbxScore>(
         //                 subject_start, word_params, sbp, kTranslateSubject);
         // ```
         // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
-        // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`).
+        // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`):
+        // the batch fails, and the subject goes on without HSPs to its end, which emits it.
         if !prelinked_ungapped_hits.is_empty()
             && crate::core::blast_hits::target_translation_never_made(s_len)
         {
-            subject_emit.refuse_untranslated_frame(st, s_idx);
-            return;
+            subject_emit.refuse_untranslated_frame(s_idx);
+            prelinked_ungapped_hits.clear();
         }
         // The re-evaluation with the subject's letters (`subject_link::reevaluate_subject_hits`).
         let ungapped_hits = subject_link::reevaluate_subject_hits(

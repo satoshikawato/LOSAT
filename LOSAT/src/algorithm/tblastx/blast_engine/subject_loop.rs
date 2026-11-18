@@ -212,8 +212,8 @@ impl SubjectEmit<'_> {
     // else of the re-evaluation is read; one whose header cannot be read ends NCBI's search.
     /// Whether the re-evaluation's fetch of subject `s_idx`, which still has HSPs, keeps it: not
     /// when the negative seqid list excludes it (`FetchExcluded`), nor when its header cannot be
-    /// read, which fails the batch with LOSAT's refusal (`XReadFailure`, as a subject whose read
-    /// failed fails it).
+    /// read, which fails the batch with LOSAT's refusal after the reports of the batches before
+    /// (`x_fetch_keeps`; `XReadFailure`, as a subject whose read failed fails it).
     #[inline]
     pub(super) fn reevaluation_fetch_keeps(&self, s_idx: usize) -> bool {
         match (self.fetch_excluded, u32::try_from(s_idx)) {
@@ -242,11 +242,13 @@ impl SubjectEmit<'_> {
     // first HSP of every such list. The query batch fails with LOSAT's refusal
     // (PD-LOSAT-NCBI-DEFECTS 1.50, rule 3) after the reports of the batches before
     // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).
-    /// The end of subject `s_idx`, whose HSPs reach the re-evaluation's read of the translation of a
-    /// subject of fewer than 12 bases: refused, then emitted without HSPs.
+    /// The refusal of subject `s_idx`, whose HSPs reach the re-evaluation's read of the translation
+    /// of a subject of fewer than 12 bases. The caller clears the subject's list and goes on to the
+    /// subject's end, which emits it without HSPs: one call out of line and no return of its own,
+    /// so the subject's path holds no second copy of its ending.
     #[cold]
     #[inline(never)]
-    pub(super) fn refuse_untranslated_frame<S>(&self, st: &mut WorkerState<S>, s_idx: usize) {
+    pub(super) fn refuse_untranslated_frame(&self, s_idx: usize) {
         self.x_read_failure.fail(
             s_idx,
             anyhow::Error::new(super::ErrorAfterBatchReports(
@@ -256,13 +258,27 @@ impl SubjectEmit<'_> {
                 ),
             )),
         );
-        st.hits.clear();
-        self.emit(st, s_idx);
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
+// ```c
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+//             }
+//         }
+//
+//         formatter.PrintEpilog(opt);
+// ```
+// A header that NCBI's fetch cannot read throws in `GetSeqIDs` (a `CSerialException`), which
+// NCBI reports as a `BLAST engine error` (exit 3) after it has printed the query batches before;
+// LOSAT's refusal comes there too (`ErrorAfterBatchReports`; the Owner's decision of 2026-11-16
+// on line RG's Q-X2c: "the results of the query batches before are written"). The run passes on
+// the refusal itself (`FetchRefusal`).
 /// The check of `reevaluation_fetch_keeps` under a negative seqid list with ids: whether the fetch
-/// of subject `ordinal` keeps it; a header that cannot be read is the batch's failure.
+/// of subject `ordinal` keeps it; a header that cannot be read is the batch's failure, after the
+/// reports of the batches before.
 #[inline(never)]
 fn x_fetch_keeps(
     excluded: &FetchExcluded<'_>,
@@ -274,7 +290,10 @@ fn x_fetch_keeps(
         Err(error) => {
             x_read_failure.fail(
                 ordinal as usize,
-                FetchExcluded::refusal((ordinal, error), "TBLASTX"),
+                anyhow::Error::new(super::ErrorAfterBatchReports(FetchExcluded::refusal(
+                    (ordinal, error),
+                    "TBLASTX",
+                ))),
             );
             false
         }

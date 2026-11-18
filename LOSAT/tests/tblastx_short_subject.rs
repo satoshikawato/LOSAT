@@ -19,10 +19,17 @@
 //! batches: NCBI formats the report of `qa` and dies in the second, and what reaches its standard
 //! output is what its output buffer had passed on before the crash: with `-outfmt 6` as many bytes
 //! as the report of `qa` alone (11,318), with `-outfmt 0` the prolog and the report of `qa` but its
-//! last few bytes (50,001 bytes); in one batch, nothing with `-outfmt 6` and the first 18 bytes of
-//! the prolog with `-outfmt 0`. LOSAT writes those reports and prologs whole. On a database of
-//! `w12` and `w11` with parsed Seq-ids, `-negative_seqidlist` of `w11` gives NCBI's report of `w12`
-//! (the same bytes as `-seqidlist` of `w12`), and of `w12` NCBI's crash.
+//! footer's last 86 bytes (50,001 of the 50,087 bytes LOSAT writes); in one batch, nothing with
+//! `-outfmt 6` and the first 18 bytes of the prolog with `-outfmt 0`. LOSAT writes those reports
+//! and prologs whole. On a database of `w12` and `w11` with parsed Seq-ids, `-negative_seqidlist`
+//! of `w11` gives NCBI's report of `w12` (the same bytes as `-seqidlist` of `w12`), and of `w12`
+//! NCBI's crash.
+//!
+//! The re-evaluation's fetch under a negative seqid list reads the header of each subject that
+//! still has HSPs (blast_hits.c:2651-2665, seqsrc_seqdb.cpp:306-311): one that cannot be read ends
+//! NCBI's search with an engine error (exit 3) after the reports of the query batches before, and
+//! LOSAT refuses there, after them too (line RG item X-short-tbx review 2, probes on ws
+//! 2026-11-18, whose NCBI bytes the test compares).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -171,10 +178,12 @@ fn the_reports_of_the_query_batches_before_the_refusal_are_written() {
 }
 
 /// `losat makeblastdb` of the nucleotide FASTA `records` as database `name` in `dir`, with parsed
-/// Seq-ids when `parse_seqids`.
+/// Seq-ids when `parse_seqids`. The FASTA file is named `{name}.fna` in `dir`, so the database's
+/// title (the `-in` argument) is that name.
 fn makeblastdb(dir: &Path, name: &str, records: &[(&str, &str)], parse_seqids: bool) {
-    let set = fasta(dir, &format!("{name}.fna"), records);
-    let mut args = vec!["makeblastdb", "-in", set.to_str().unwrap()];
+    let file = format!("{name}.fna");
+    fasta(dir, &file, records);
+    let mut args = vec!["makeblastdb", "-in", file.as_str()];
     args.extend(["-dbtype", "nucl", "-out", name]);
     if parse_seqids {
         args.push("-parse_seqids");
@@ -238,5 +247,98 @@ fn a_database_subject_with_ambiguous_bases_is_refused() {
         let output = losat(dir, None, &args);
         assert_refused(&output, &format!("threads {threads}"));
         assert!(output.stdout.is_empty(), "threads {threads}: no report");
+    }
+}
+
+/// The refusal of a header that the re-evaluation's fetch cannot read, sequence 1 of database `dbD`
+/// (after NCBI's warning of a seqid list in text).
+fn assert_fetch_refused(output: &Output, case: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{case}: {stderr}");
+    let last = stderr.lines().last().unwrap_or_default();
+    assert!(
+        stderr.ends_with('\n')
+            && last.starts_with(
+                "Error: under the negative seqid list NCBI reads the definition lines of each \
+                 sequence that its search aligns again, and those of sequence 1 cannot be read ("
+            )
+            && last.contains("dbD.nhr")
+            && last.ends_with("); this database is not supported by LOSAT's TBLASTX")
+            && stderr.matches("Error: ").count() == 1,
+        "{case}: {stderr}"
+    );
+}
+
+/// NCBI's `-outfmt 7` of `q8` and the database `dbD` before its engine error in the next query
+/// batch (61 bytes; probe of line RG item X-short-tbx review 2 on ws, 2026-11-18).
+const Q8_OUTFMT_7: &str = "# TBLASTX 2.17.0+\n# Query: q8\n# Database: dbD\n# 0 hits found\n";
+
+/// NCBI's `-outfmt 0` of `q8` and the database `dbD` before its engine error in the next query
+/// batch: the prolog and the report of `q8` with its footer, no epilog (478 bytes; the same probe).
+const Q8_OUTFMT_0: &str = concat!(
+    "TBLASTX 2.17.0+\n\n\n",
+    "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.\n",
+    "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.\n",
+    "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of\n",
+    "protein database search programs\", Nucleic Acids Res. 25:3389-3402.\n\n\n\n",
+    "Database: dbD.fna\n",
+    "           3 sequences; 56 total letters\n\n\n\n",
+    "Query= q8\n\n",
+    "Length=8\n\n\n",
+    "***** No hits found *****\n\n\n\n",
+    "Lambda      K        H\n",
+    "   0.318    0.134    0.401 \n\n\n",
+    "Effective search space used: 26\n",
+);
+
+/// A subject whose header the re-evaluation's fetch cannot read under a negative seqid list ends
+/// the search where NCBI's does, with an engine error (exit 3; LOSAT's refusal), after the reports
+/// of the query batches before (the Owner's decision of 2026-11-16 on line RG's Q-X2c). Database
+/// `dbD` of `w12`, `nn30` (30 N) and `z14` with parsed Seq-ids, 8 bytes 0xFF written over the start
+/// of `nn30`'s header (right after `w12`'s, whose length is the header file of a database of `w12`
+/// alone), and a negative seqid list of `z14`: at `-threshold 1` the query `nq` leaves preliminary
+/// HSPs on `nn30`, whose fetch reads its header. In one batch the search is refused (LOSAT wrote
+/// the rows of `w12` before this version); with `BATCH_SIZE=1` and `q8` (no word) before `nq`, the
+/// report of `q8` is written whole first, NCBI's bytes.
+#[test]
+fn a_header_the_fetch_cannot_read_fails_the_batch_after_the_batches_before() {
+    let temp = TempDir::new("header");
+    let dir = temp.0.as_path();
+    let w12 = ("w12", "TGGTGGTGGTTT");
+    makeblastdb(dir, "dbW", &[w12], true);
+    let n30 = "N".repeat(30);
+    let set = [w12, ("nn30", n30.as_str()), ("z14", "TGGTGGTGGTTTAA")];
+    makeblastdb(dir, "dbD", &set, true);
+    let first = std::fs::metadata(dir.join("dbW.nhr")).unwrap().len() as usize;
+    let headers = dir.join("dbD.nhr");
+    let mut bytes = std::fs::read(&headers).unwrap();
+    assert!(bytes.len() > first + 8, "nn30's header follows w12's");
+    bytes[first..first + 8].fill(0xFF);
+    std::fs::write(&headers, bytes).unwrap();
+    std::fs::write(dir.join("neg_z14.txt"), "z14\n").unwrap();
+    let nq = fasta(dir, "nq.fna", &[("nq", "ATGCATTATTGGTGGTGGTTT")]);
+    let q8nq = fasta(
+        dir,
+        "q8nq.fna",
+        &[("q8", "ATGCATTA"), ("nq", "ATGCATTATTGGTGGTGGTTT")],
+    );
+    for threads in ["1", "4"] {
+        let search = |query: &Path, batch_size, outfmt| {
+            let mut args = vec!["tblastx", "-query", query.to_str().unwrap()];
+            args.extend(["-db", "dbD", "-negative_seqidlist", "neg_z14.txt"]);
+            args.extend(SEARCH);
+            args.extend(["-threshold", "1"]);
+            args.extend(["-outfmt", outfmt, "-num_threads", threads]);
+            losat(dir, batch_size, &args)
+        };
+        let one_batch = search(&nq, None, "6");
+        assert_fetch_refused(&one_batch, &format!("threads {threads}: one batch"));
+        assert!(one_batch.stdout.is_empty(), "threads {threads}: one batch");
+        for (outfmt, before) in [("6", ""), ("7", Q8_OUTFMT_7), ("0", Q8_OUTFMT_0)] {
+            let case = format!("threads {threads}: q8 then nq, outfmt {outfmt}");
+            let batches = search(&q8nq, Some("1"), outfmt);
+            assert_fetch_refused(&batches, &case);
+            assert_eq!(String::from_utf8_lossy(&batches.stdout), before, "{case}");
+        }
     }
 }

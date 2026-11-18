@@ -569,6 +569,152 @@ impl BlastpPrelimKernel<'_> {
                 }
             };
         }
+        // PROBE (LOSAT_BPF_S17, exp/bpf-s17): `x_candidate_sent!` with `two_hit_v::<LIM>`, and (`_vi`) inlined.
+        macro_rules! x_candidate_sent_v {
+            ($sent_query:expr, $sent_subject:expr, $lim:expr) => {
+                |query_offset: i32,
+                 subject_offset: i32,
+                 last_hit: i32,
+                 diff: i32,
+                 diag_entry: &mut DiagStruct| {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,566-573
+                    // (as in the closure above)
+                    let (ctx_idx, frame_base) = x_context_table
+                        .get_with_start(query_offset)
+                        .unwrap_or_else(|| {
+                            let idx = blastp_context_idx_for_query_offset_with_bounds(
+                                contexts.as_slice(),
+                                context_lookup_bounds,
+                                query_offset,
+                            );
+                            (idx, contexts[idx].frame_base)
+                        });
+                    if query_offset - diff < frame_base {
+                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                        return;
+                    }
+                    let x_drop = x_dropoff_per_context[ctx_idx];
+                    let cutoff = word_cutoff_scores[ctx_idx];
+                    let s_left_off = usize::try_from(last_hit + word_size)
+                        .expect("NCBI BLAST two-hit seed boundary must be non-negative");
+                    let s_right_off = usize::try_from(subject_offset)
+                        .expect("NCBI BLAST two-hit subject offset must be non-negative");
+                    let q_right_off = usize::try_from(query_offset)
+                        .expect("NCBI BLAST two-hit query offset must be non-negative");
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+                    // (`x_ungapped_sent::two_hit`)
+                    // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` (or `new_of`)
+                    // checked.
+                    let extended = unsafe {
+                        blastp::x_ungapped_sent::two_hit_v::<{ $lim }>(
+                            $sent_query,
+                            $sent_subject,
+                            s_left_off,
+                            s_right_off,
+                            q_right_off,
+                            x_drop,
+                        )
+                    };
+                    let Some(ungapped_hit) = extended else {
+                        return;
+                    };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591,596-606
+                    // (as in the closure above)
+                    if ungapped_hit.ungapped_data.score >= cutoff {
+                        blastp_save_init_hsp(
+                            &mut init_hsps,
+                            ungapped_hit.ungapped_data.q_start,
+                            ungapped_hit.ungapped_data.s_start,
+                            query_offset,
+                            subject_offset,
+                            ungapped_hit.ungapped_data.length,
+                            ungapped_hit.ungapped_data.score,
+                        );
+                    }
+                    if ungapped_hit.right_extend {
+                        diag_entry.set_flag(1);
+                        diag_entry.set_last_hit(
+                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                        );
+                    } else {
+                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                    }
+                }
+            };
+        }
+        macro_rules! x_candidate_sent_vi {
+            ($sent_query:expr, $sent_subject:expr, $lim:expr) => {
+                #[inline(always)]
+                |query_offset: i32,
+                 subject_offset: i32,
+                 last_hit: i32,
+                 diff: i32,
+                 diag_entry: &mut DiagStruct| {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,566-573
+                    // (as in the closure above)
+                    let (ctx_idx, frame_base) = x_context_table
+                        .get_with_start(query_offset)
+                        .unwrap_or_else(|| {
+                            let idx = blastp_context_idx_for_query_offset_with_bounds(
+                                contexts.as_slice(),
+                                context_lookup_bounds,
+                                query_offset,
+                            );
+                            (idx, contexts[idx].frame_base)
+                        });
+                    if query_offset - diff < frame_base {
+                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                        return;
+                    }
+                    let x_drop = x_dropoff_per_context[ctx_idx];
+                    let cutoff = word_cutoff_scores[ctx_idx];
+                    let s_left_off = usize::try_from(last_hit + word_size)
+                        .expect("NCBI BLAST two-hit seed boundary must be non-negative");
+                    let s_right_off = usize::try_from(subject_offset)
+                        .expect("NCBI BLAST two-hit subject offset must be non-negative");
+                    let q_right_off = usize::try_from(query_offset)
+                        .expect("NCBI BLAST two-hit query offset must be non-negative");
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+                    // (`x_ungapped_sent::two_hit`)
+                    // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` (or `new_of`)
+                    // checked.
+                    let extended = unsafe {
+                        blastp::x_ungapped_sent::two_hit_v::<{ $lim }>(
+                            $sent_query,
+                            $sent_subject,
+                            s_left_off,
+                            s_right_off,
+                            q_right_off,
+                            x_drop,
+                        )
+                    };
+                    let Some(ungapped_hit) = extended else {
+                        return;
+                    };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591,596-606
+                    // (as in the closure above)
+                    if ungapped_hit.ungapped_data.score >= cutoff {
+                        blastp_save_init_hsp(
+                            &mut init_hsps,
+                            ungapped_hit.ungapped_data.q_start,
+                            ungapped_hit.ungapped_data.s_start,
+                            query_offset,
+                            subject_offset,
+                            ungapped_hit.ungapped_data.length,
+                            ungapped_hit.ungapped_data.score,
+                        );
+                    }
+                    if ungapped_hit.right_extend {
+                        diag_entry.set_flag(1);
+                        diag_entry.set_last_hit(
+                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                        );
+                    } else {
+                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                    }
+                }
+            };
+        }
         // Another matrix than BLOSUM62 (items SC2b, SC2c): the same two-hit tests on the same
         // scans, with the extension of the matrix's byte-table walks (the sentinel walks of
         // `x_candidate_sent!` where the block and the subject pass their checks, else
@@ -760,29 +906,99 @@ impl BlastpPrelimKernel<'_> {
                     x_candidate,
                 );
             } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent16 {
-                blastp::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate_sent!(sent_query, sent_subject),
-                );
+                match x_bpf_s17() {
+                    1 => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent_v!(sent_query, sent_subject, true),
+                    ),
+                    2 | 6 => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent_vi!(sent_query, sent_subject, false),
+                    ),
+                    3 | 5 => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent_vi!(sent_query, sent_subject, true),
+                    ),
+                    _ => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent!(sent_query, sent_subject),
+                    ),
+                }
             } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
-                blastp::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate_sent!(sent_query, sent_subject),
-                );
+                match x_bpf_s17() {
+                    1 => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent_v!(sent_query, sent_subject, true),
+                    ),
+                    2 | 6 => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent_vi!(sent_query, sent_subject, false),
+                    ),
+                    3 | 5 => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent_vi!(sent_query, sent_subject, true),
+                    ),
+                    _ => blastp::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent!(sent_query, sent_subject),
+                    ),
+                }
             } else {
                 match &lookup {
                     BlastpRuntimeLookup::Aa(aa_lookup) => blastp::x_seed_fused::x_scan_two_hit(
@@ -1541,4 +1757,16 @@ impl BlastpPrelimKernel<'_> {
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
     }
+}
+
+/// PROBE (LOSAT_BPF_S17, exp/bpf-s17): the arm of the probe. Closure: 0 and 4 dev's, 1 `two_hit_v::<true>`,
+/// 2 and 6 dev's walks inlined, 3 and 5 `two_hit_v::<true>` inlined; 4 to 6 also take `x_cell_avx2_dp`.
+fn x_bpf_s17() -> u32 {
+    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S17")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
 }

@@ -354,6 +354,132 @@ unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
     (best, len, off.unsigned_abs())
 }
 
+/// PROBE (LOSAT_BPF_S17, exp/bpf-s17): [`walk`] keeping `lim = best - drop` instead of the best.
+/// The stop test reads the `lim` before the step: a step whose key passes the best is never a stop
+/// (`key + drop > best` with `drop > 0`), and one that does not leaves the best as it is, so
+/// `key + drop <= best_after` exactly when `key <= lim_before`; `lim = max(lim, key - drop)` is
+/// `best = max(best, key)` shifted by `drop`. One instruction fewer per step (no `mov` + `add`
+/// for `key + drop`).
+// NCBI reference: aa_ungapped.c:804-883 (see the module comment).
+#[inline(always)]
+unsafe fn walk_lim<const RIGHT: bool, Q: XQueryCode>(
+    keys: *const i64,
+    qp: *const Q,
+    sp: *const u8,
+    dropoff: i32,
+    maxscore: i32,
+) -> (i32, i32, usize) {
+    let drop = (dropoff as i64) << 32;
+    let mut key = (maxscore as i64) << 32;
+    let mut lim = key - drop;
+    let mut off: isize = 0;
+    let dir: isize = if RIGHT { 1 } else { -1 };
+    macro_rules! step {
+        ($l:lifetime) => {{
+            let row = (*qp.offset(off)).row();
+            let sc = *sp.offset(off) as usize;
+            key += *keys.add(row | sc);
+            let stop = if RIGHT {
+                key <= 0 || key <= lim
+            } else {
+                key <= lim
+            };
+            if stop {
+                break $l;
+            }
+            let t = key - drop;
+            if t > lim {
+                lim = t;
+            }
+            off += dir;
+        }};
+    }
+    'w: loop {
+        step!('w);
+        step!('w);
+    }
+    let (best, len) = best_of(lim + drop);
+    (best, len, off.unsigned_abs())
+}
+
+/// PROBE (LOSAT_BPF_S17): [`two_hit`] with [`walk_lim`] (`LIM`) or [`walk`].
+#[inline(always)]
+pub(crate) unsafe fn two_hit_v<const LIM: bool>(
+    query: &XSentQuery,
+    subject: XSentSubject<'_>,
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+) -> Option<BlastpTwoHitUngappedResult> {
+    let keys = query.keys;
+    let query = &query.padded[..];
+    let subject = subject.aa_seq;
+    const TAIL: usize = 2;
+    const W: usize = WORD_SIZE;
+    let qlen = query.len() - TAIL;
+    let slen = subject.len() - TAIL;
+    if q_right_off + W > qlen || s_right_off + W > slen {
+        return None;
+    }
+    let tab = keys.as_ptr();
+    let qb = query.as_ptr().add(1);
+    let sb = subject.as_ptr().add(1);
+    let mut q_right_off = q_right_off as i32;
+    let s_left_off = s_left_off as i32;
+    let mut s_right_off = s_right_off as i32;
+    let mut key = 0i64;
+    let mut best = 0i64;
+    let qw = qb.add(q_right_off as usize);
+    let sw = sb.add(s_right_off as usize);
+    for i in 0..W {
+        key += *tab.add((*qw.add(i)).row() | *sw.add(i) as usize);
+        if key > best {
+            best = key;
+        }
+    }
+    let (_, right_d) = best_of(best);
+    q_right_off += right_d;
+    s_right_off += right_d;
+    let (left_score, left_d) = if q_right_off == 0 || s_right_off == 0 {
+        (0, 0)
+    } else {
+        let qp = qb.offset(q_right_off as isize - 1);
+        let sp = sb.offset(s_right_off as isize - 1);
+        let (best, len, _) = if LIM {
+            walk_lim::<false, u16>(tab, qp, sp, dropoff, 0)
+        } else {
+            walk::<false, u16>(tab, qp, sp, dropoff, 0)
+        };
+        (best, len)
+    };
+    let mut right_extend = false;
+    let mut s_last_off = s_right_off;
+    let mut right_score = 0i32;
+    let mut right_d = 0i32;
+    if left_d >= (s_right_off - s_left_off) {
+        right_extend = true;
+        let qp = qb.add(q_right_off as usize);
+        let sp = sb.add(s_right_off as usize);
+        let (best, len, end) = if LIM {
+            walk_lim::<true, u16>(tab, qp, sp, dropoff, left_score)
+        } else {
+            walk::<true, u16>(tab, qp, sp, dropoff, left_score)
+        };
+        (right_score, right_d, s_last_off) = (best, len, s_right_off + end as i32);
+    }
+    Some(BlastpTwoHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_right_off - left_d,
+            s_start: s_right_off - left_d,
+            length: left_d + right_d,
+            score: left_score.max(right_score),
+        },
+        right_extend,
+        s_last_off,
+    })
+}
+
 /// `s_BlastAaExtendTwoHit` for word size 3 on a checked query block and subject (`subject_raw`
 /// offsets, as `extend_two_hit_blosum62` takes them): the reference's result, `None` for its
 /// early return (a word that does not fit).

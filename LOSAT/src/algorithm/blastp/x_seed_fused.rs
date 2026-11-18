@@ -1404,15 +1404,27 @@ where
             assert!(x_avx2_available(), "the masked AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2_defer_masked::<BRANCH_FREE, K, F>(
-                    lookup,
-                    subject,
-                    subject_length,
-                    table,
-                    test,
-                    candidate,
-                    &mut counts,
-                )
+                if x_bpf_s17_cells() {
+                    x_scan_cells_avx2_dp::<BRANCH_FREE, K, F>(
+                        lookup,
+                        subject,
+                        subject_length,
+                        table,
+                        test,
+                        candidate,
+                        &mut counts,
+                    )
+                } else {
+                    x_scan_cells_avx2_defer_masked::<BRANCH_FREE, K, F>(
+                        lookup,
+                        subject,
+                        subject_length,
+                        table,
+                        test,
+                        candidate,
+                        &mut counts,
+                    )
+                }
             }
         }
     }
@@ -1665,6 +1677,35 @@ unsafe fn x_scan_cells_avx2_defer_masked<const BRANCH_FREE: bool, K: XCell, F>(
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates =
             unsafe { x_cell_avx2_defer_masked(hits, s, table, test, candidate, &mut buffer) };
+        counts.add_cell(hits.len(), candidates);
+    });
+    X_DEFER_BUFFER.set(buffer);
+}
+
+/// PROBE (LOSAT_BPF_S17 >= 4, exp/bpf-s17): [`x_scan_cells_avx2_defer_masked`] with [`x_cell_avx2_dp`].
+/// loop, and blastx's fused loop with a value of LOSAT_X_BXDIAG or LOSAT_X_BXDIAGSHADOW). Never inlined, and its cell test is a function of its own,
+/// so the loops of LOSAT_X_BPDEFER (`LOSAT_X_BPMASKED=0`) keep their code.
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline(never)]
+unsafe fn x_scan_cells_avx2_dp<const BRANCH_FREE: bool, K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XDiagCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut buffer = X_DEFER_BUFFER.take();
+    x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
+        // SAFETY: the CPU has AVX2 (this function's contract).
+        let candidates = unsafe { x_cell_avx2_dp(hits, s, table, test, candidate, &mut buffer) };
         counts.add_cell(hits.len(), candidates);
     });
     X_DEFER_BUFFER.set(buffer);
@@ -2595,6 +2636,116 @@ where
         ));
         // packed <= the hits of the batches before this one, so the eight stores stay inside
         // the reserved capacity.
+        _mm256_storeu_si256(
+            out.add(packed).cast(),
+            _mm256_permutevar8x32_epi32(query, order),
+        );
+        packed += lanes.count_ones() as usize;
+    }
+    let rest = batches.remainder();
+    if !rest.is_empty() {
+        let n = rest.len();
+        let in_rest = _mm256_cmpgt_epi32(
+            _mm256_set1_epi32(n as i32),
+            _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7),
+        );
+        // Lanes 0..n hold the hits (the masked load reads nothing past them), the others the
+        // first hit again: they read and store its entry as lane 0 does (x_batch_avx2_at).
+        // SAFETY (`x_load_tail`): the lanes below `n` are set in `in_rest`; for `u16` hits the 16
+        // bytes at `rest` lie inside the table's allocation (the cells and the overflow array
+        // are padded, `XCell::PAD_CELLS` and `XCell::PAD_HITS`).
+        let query = _mm256_blendv_epi8(
+            _mm256_set1_epi32(rest[0].q()),
+            H::x_load_tail(rest.as_ptr(), in_rest),
+            in_rest,
+        );
+        let mut lane_hits = [0i32; X_DIAG_LANES];
+        _mm256_storeu_si256(lane_hits.as_mut_ptr().cast(), query);
+        let lane_coords: [u32; X_DIAG_LANES] =
+            std::array::from_fn(|i| (lane_hits[i].wrapping_sub(s) & mask) as u32);
+        debug_assert!(x_batch_coords_distinct(
+            &lane_coords.map(|c| c as usize)[..n]
+        ));
+        // The repeated lanes' candidate bits are lane 0's; only lanes 0..n are hits.
+        let lanes = x_batch_avx2_at(lane_coords, s, table, test) & ((1u32 << n) - 1);
+        let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            X_PACK_LANES[lanes as usize].as_ptr().cast(),
+        ));
+        // packed <= hits.len() - n, so the eight stores end inside the reserved capacity.
+        _mm256_storeu_si256(
+            out.add(packed).cast(),
+            _mm256_permutevar8x32_epi32(query, order),
+        );
+        packed += lanes.count_ones() as usize;
+    }
+    // The first `packed` values were stored above.
+    buffer.set_len(packed);
+    for &query_offset in buffer.iter() {
+        let entry = table.entry(query_offset, s);
+        // The batch stored a candidate's old value back, and no other batch of the cell touches
+        // its entry, so this is the entry the test read.
+        let last_hit = entry.last_hit().wrapping_sub(test.diag_offset);
+        let diff = s.wrapping_sub(last_hit);
+        candidate(query_offset, s, last_hit, diff, entry);
+    }
+    packed as u32
+}
+
+/// PROBE (LOSAT_BPF_S17 >= 4, exp/bpf-s17): [`x_cell_avx2_defer_masked`] with the packing of the full
+/// batches after their tests (lane masks kept in the buffer past the candidates).
+/// batches (module header), for blastp's and blastx's fused loops: a batch of eight takes its
+/// lanes' entry coordinates from
+/// scalar loads of its hits, and the last batch of fewer than eight hits is one masked AVX2 batch
+/// (the missing lanes repeat the first hit, their candidate bits are dropped) whose candidates go
+/// into the buffer after the others'. The closure is then called for the buffer in order, so the
+/// calls are [`x_cell_avx2_defer`]'s, in the same order. Returns the number of candidates.
+///
+/// # Safety
+/// The CPU must have AVX2.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// that passes the test reaches the context check with `last_hit` and `diff`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_cell_avx2_dp<H: XHit, F>(
+    hits: &[H],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    buffer: &mut Vec<i32>,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use std::arch::x86_64::*;
+    let mut batches = hits.chunks_exact(X_DIAG_LANES);
+    let full = hits.len() / X_DIAG_LANES;
+    // Room for a full register past the last candidate (each batch stores eight lanes), then one
+    // lane mask per full batch.
+    buffer.clear();
+    buffer.reserve(hits.len() + X_DIAG_LANES + full);
+    let out = buffer.as_mut_ptr();
+    let masks = out.add(hits.len() + X_DIAG_LANES);
+    let mut packed = 0usize;
+    let mask = table.mask;
+    // The tests of the full batches keep only their lane masks: the packing (movemask, the
+    // permutation's load, vpermd, the store) leaves the chain of each batch.
+    for (k, batch) in (&mut batches).enumerate() {
+        let p = batch.as_ptr();
+        let lane_coords: [u32; X_DIAG_LANES] =
+            std::array::from_fn(|i| (H::x_read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32);
+        debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
+        *masks.add(k) = x_batch_avx2_at(lane_coords, s, table, test) as i32;
+    }
+    for (k, batch) in hits.chunks_exact(X_DIAG_LANES).enumerate() {
+        let lanes = *masks.add(k) as u32;
+        let p = batch.as_ptr();
+        // SAFETY: the batch has eight hits.
+        let query = H::x_load8(p);
+        let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            X_PACK_LANES[lanes as usize].as_ptr().cast(),
+        ));
         _mm256_storeu_si256(
             out.add(packed).cast(),
             _mm256_permutevar8x32_epi32(query, order),
@@ -6680,4 +6831,16 @@ mod tests {
             }
         }
     }
+}
+
+/// PROBE (LOSAT_BPF_S17, exp/bpf-s17): arms 4 and up take [`x_cell_avx2_dp`].
+#[cfg(target_arch = "x86_64")]
+fn x_bpf_s17_cells() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S17")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .is_some_and(|v| v >= 4)
+    })
 }

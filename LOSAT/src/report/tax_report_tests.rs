@@ -548,7 +548,10 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
         tax_browser_url(Some(&read)),
         b"http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
-    // An empty value is no entry (`HasEntry`, `Get(...).empty()`).
+    // An empty PROTOCOL is the scheme (`GetProtocol`'s `HasEntry` counts it); an empty browser URL
+    // is NCBI's (`Get(...).empty()`). NCBI BLAST+ 2.17.0, `./.ncbirc` `[BLASTFMTUTIL]` `PROTOCOL=`,
+    // outfmt 18 of a taxid whose name holds `<@taxBrowserURL@>` (line RG, review of T4a0 `pe`):
+    // `Url //www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi rid 0 ...`.
     let read = read_registry(
         b"[BLASTFMTUTIL]\nPROTOCOL=\n[TAX_BROWSER]\nBLASTFMTUTIL=\n",
         Layer::SystemWide,
@@ -556,7 +559,7 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
     .unwrap();
     assert_eq!(
         tax_browser_url(Some(&read)),
-        b"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
+        b"//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
     let read = read_registry(
         b"[TAX_BROWSER]\nBLASTFMTUTIL=<@protocol@>//x/<@rid@>\n",

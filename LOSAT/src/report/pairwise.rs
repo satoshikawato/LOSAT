@@ -2140,7 +2140,7 @@ fn write_blastp_pairwise_intro<W: Write>(
 // `NStr::Wrap` measures the `std::string` in bytes, so a line can end inside a UTF-8
 // sequence (`\xe6\xbc` and `\xa2` on two lines). Each line and its newline are NCBI's
 // insertions (`cli::insert`).
-pub(crate) fn write_flatfile_wrapped<W: Write + ?Sized>(
+fn write_flatfile_wrapped<W: Write + ?Sized>(
     writer: &mut W,
     text: &[u8],
     width: usize,
@@ -4181,8 +4181,9 @@ impl DescriptionLabel {
     ///         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
     /// ```
     /// String widths are byte counts, including non-ASCII FASTA titles. (NCBI cuts the title
-    /// alone, which is the same cut for an id text of up to 65 bytes; LOSAT keeps its cut of the
-    /// whole label for a longer one until line RG item T4a writes the parts.)
+    /// alone, which is the same cut for an id text of up to 65 bytes; a longer id is refused
+    /// before any output (`common/database.rs`, `report/db_subject.rs`), so the cut of the
+    /// whole label below never cuts the id.)
     fn write_cut<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         // A label of a title alone is written as the joined label was: one write of its letters.
         let len = self.id.len() + self.title.len();

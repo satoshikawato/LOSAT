@@ -6,8 +6,10 @@
 //!
 //! The organism report (outfmt 18, `report::tax_report`) reads `[TAX_BROWSER] BLASTFMTUTIL` and
 //! `[BLASTFMTUTIL] PROTOCOL` here. NCBI's `-html` forms read the same file for the references'
-//! scheme (`CBlastFormatUtil::BlastPrintReference`, `report::reference::write_reference`) and,
-//! through `CAlignFormatUtil::InitConfig`, for the `[LOCAL_ID]` links (line RG, item T4a).
+//! scheme (`CBlastFormatUtil::BlastPrintReference`, `report::reference::write_reference`); the
+//! `[LOCAL_ID]` links read another one, through `CAlignFormatUtil::InitConfig`: the file that
+//! `FMTCFG` names (default `.ncbirc`) in the current directory, else the one under `$NCBI`
+//! (line RG, item T4a).
 
 use crate::blastinput::ncbi_registry::RegistryRead;
 
@@ -73,8 +75,10 @@ pub(crate) fn registry_posts(read: &RegistryRead, program: &str) -> Vec<u8> {
     posts.into_bytes()
 }
 
-/// `Get(section, name)` of the read `registry` (`None`: no file) where `HasEntry` finds it: the
-/// last value of the entry, `None` where it is not set or empty.
+/// `Get(section, name)` of the read `registry` (`None`: no file) for a caller that takes an empty
+/// value as none (`Get(...).empty()`, as `[TAX_BROWSER] BLASTFMTUTIL` is read): the last value of
+/// the entry, `None` where it is not set or empty. (A `HasEntry` of NCBI's `CNcbiRegistry` counts
+/// an empty value as set: `protocol`.)
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:983-991
 /// ```c++
@@ -88,10 +92,6 @@ pub(crate) fn registry_posts(read: &RegistryRead, program: &str) -> Vec<u8> {
 ///         return !eit->second.value.empty();
 ///     }
 /// ```
-/// (The `-html` probes of line RG T4, `rc_p_empty`, show NCBI's references and organism report
-/// using an empty `PROTOCOL` as the scheme (`href="//www...`); the organism report's text, which
-/// shows the URL only through a title's `<@taxBrowserURL@>`, keeps this reading until item T4a
-/// settles the empty value with those probes.)
 pub(crate) fn value<'a>(
     registry: Option<&'a RegistryRead>,
     section: &str,
@@ -102,7 +102,11 @@ pub(crate) fn value<'a>(
         .filter(|value| !value.is_empty())
 }
 
-/// The scheme of NCBI's URLs: `[BLASTFMTUTIL] PROTOCOL` (`value`), else `https:`.
+/// The scheme of NCBI's URLs: the last value of `[BLASTFMTUTIL] PROTOCOL`, also an empty one, else
+/// `https:`. `CNcbiRegistry` is a compound registry, whose `HasEntry` asks its layers with
+/// `fCountCleared`, so an entry set to an empty value is found: NCBI BLAST+ 2.17.0 with
+/// `PROTOCOL=` writes `//www.ncbi.nlm.nih.gov/...` in the organism report's `<@taxBrowserURL@>`
+/// and in the `-html` references (line RG T4 probes `rc_p_empty`, review of T4a0 `pe`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3643-3655
 /// ```c++
@@ -119,8 +123,27 @@ pub(crate) fn value<'a>(
 ///     return httpProt;
 /// }
 /// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1236-1245, 1300-1303
+/// ```c++
+/// CConstRef<IRegistry> CCompoundRegistry::FindByContents(const string& section,
+///                                                        const string& entry,
+///                                                        TFlags flags) const
+/// {
+///     TFlags has_entry_flags = (flags | fCountCleared) & ~fJustCore;
+///     REVERSE_ITERATE(TPriorityMap, it, m_PriorityMap) {
+///         if (it->second->HasEntry(section, entry, has_entry_flags)) {
+///             return it->second;
+/// ...
+/// bool CCompoundRegistry::x_HasEntry(const string& section, const string& name,
+///                                    TFlags flags) const
+/// {
+///     return FindByContents(section, name, flags).NotEmpty();
+/// }
+/// ```
 pub(crate) fn protocol(registry: Option<&RegistryRead>) -> &[u8] {
-    value(registry, "BLASTFMTUTIL", "PROTOCOL").unwrap_or(super::reference::DEFAULT_PROTOCOL)
+    registry
+        .and_then(|read| read.last_value("BLASTFMTUTIL", "PROTOCOL"))
+        .unwrap_or(super::reference::DEFAULT_PROTOCOL)
 }
 
 /// The organism report's taxonomy browser URL before its `<@protocol@>` is replaced
@@ -162,7 +185,9 @@ mod tests {
             Layer::SystemWide,
         )
         .unwrap();
-        assert_eq!(protocol(Some(&read)), b"https:");
+        // An empty PROTOCOL is set (`HasEntry` with `fCountCleared`); an empty browser URL is not
+        // (`Get(...).empty()`).
+        assert_eq!(protocol(Some(&read)), b"");
         assert_eq!(value(Some(&read), "TAX_BROWSER", "BLASTFMTUTIL"), None);
     }
 

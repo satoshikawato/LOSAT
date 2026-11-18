@@ -12,7 +12,7 @@
 //!
 //! rpstblastn's redo is the same with the user query's six frames as the subject (series PR,
 //! item PS12b): NCBI's `one_query` is the query's translation buffer, the redo's subject is
-//! translated (`subject_is_translated`: windows in the frames, `RedoMatch::redo_match` with a
+//! translated (`subject_is_translated`: windows in the frames, `RedoMatch::redo_windows` with a
 //! `FrameSubject`), its subject length for the e-values is `s_GetSubjectLength`'s and every list
 //! writes `kbp_gap[0]`'s K, the one the query's batch may print.
 //!
@@ -292,7 +292,7 @@ impl RpsTraceback<'_> {
                     query,
                 )
             } else {
-                Ok(redo_match.redo_match(&mut run, list.oid, &hsps, query, kind))
+                Ok(kind.redo(&redo_match, &mut run, list.oid, &hsps, query))
             };
             let exceeded = run.bound_exceeded();
             let (matrix, gap) = run.into_buffers();

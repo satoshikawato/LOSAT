@@ -222,8 +222,13 @@ impl Align {
     ///                                     hsp->subject.offset, hsp->subject.end,
     ///                                     hsp->subject.frame, hsp);
     /// ```
-    #[inline(always)]
-    fn incoming(hsp: &BlastpPreliminaryHsp) -> Self {
+    /// `C`, the redo's instance, keeps each instance's own copy of the code that collects them
+    /// (psiblast's code as before the frames' instance; DECISIONS 63 S3).
+    #[expect(
+        clippy::extra_unused_type_parameters,
+        reason = "C only keeps one instance per redo instance (see above)"
+    )]
+    fn incoming<C: RedoInstance>(hsp: &BlastpPreliminaryHsp) -> Self {
         Align {
             score: (hsp.raw_score as f64 * SCALING_FACTOR) as i32,
             rule: EMatrixAdjustRule::DontAdjustMatrix,
@@ -614,7 +619,7 @@ impl PssmRedo1<'_> {
             matrix: self.matrix,
             link: self.link,
         }
-        .redo_match(run, oid, hsps, subject_read.residues(), ProteinSubject))
+        .redo_match(run, oid, hsps, subject_read.residues()))
     }
 }
 
@@ -628,6 +633,16 @@ pub(crate) trait RedoSubject<'a>: Copy {
     type Instance: RedoInstance;
     /// The letters an HSP of `frame` aligns to, as the redo's subject `subject` holds them.
     fn frame_letters(self, subject: &'a [u8], frame: i32) -> &'a [u8];
+    /// The redo of one match of this subject: `RedoMatch::redo_match` (a protein subject) or
+    /// `RedoMatch::redo_windows` (frames).
+    fn redo(
+        self,
+        matching: &RedoMatch<'_>,
+        run: &mut RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Option<(BlastpHspList, i32, f64)>;
 }
 
 /// A protein subject ([`RedoSubject`]): the redo's subject is its letters.
@@ -640,6 +655,17 @@ impl<'a> RedoSubject<'a> for ProteinSubject {
     #[inline(always)]
     fn frame_letters(self, subject: &'a [u8], _frame: i32) -> &'a [u8] {
         subject
+    }
+
+    fn redo(
+        self,
+        matching: &RedoMatch<'_>,
+        run: &mut RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Option<(BlastpHspList, i32, f64)> {
+        matching.redo_match(run, oid, hsps, subject)
     }
 }
 
@@ -655,6 +681,17 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
 
     fn frame_letters(self, _subject: &'a [u8], frame: i32) -> &'a [u8] {
         self.frames[crate::core::blast_util::frame_to_context(frame)]
+    }
+
+    fn redo(
+        self,
+        matching: &RedoMatch<'_>,
+        run: &mut RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Option<(BlastpHspList, i32, f64)> {
+        matching.redo_windows(run, oid, hsps, subject, self)
     }
 }
 
@@ -708,18 +745,14 @@ impl RedoMatch<'_> {
     ///                             localScalingFactor);
     ///                     s_ComputeNumIdentities(
     /// ```
-    ///
-    /// A translated subject (rpstblastn) compares the frames in the reap, its e-values read the
-    /// subject's length of `s_GetSubjectLength` and its HSPs keep their frames.
-    pub(crate) fn redo_match<'a, S: RedoSubject<'a>>(
+    pub(crate) fn redo_match(
         &self,
         run: &mut RedoRun<'_>,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
-        subject: &'a [u8],
-        kind: S,
+        subject: &[u8],
     ) -> Option<(BlastpHspList, i32, f64)> {
-        let alignments = self.redo_one_match::<S>(run, hsps, subject);
+        let alignments = self.redo_one_match(run, hsps, subject);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-354
         // ```c
         //     for (align = *alignments;  NULL != align;  align = align->next) {
@@ -739,7 +772,7 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained::<S::Instance>(&mut redone);
+            reap_contained::<XDropRedo>(&mut redone);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-446
         // ```c
@@ -766,19 +799,7 @@ impl RedoMatch<'_> {
         // psiblast's e-values are not adjusted by a composition p-value (that is blastp's and
         // blastx's, with `-comp_based_stats 2u`/`3u`).
         let query_length = self.query_length;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:364-368
-        // ```c
-        // Int4 s_GetSubjectLength(Int4 total_subj_length, EBlastProgramType program_number)
-        // {
-        // 	return ((program_number == eBlastTypeRpsTblastn) ?
-        // 				(GET_NUCL_LENGTH(total_subj_length) - 1 ) /3 : total_subj_length);
-        // }
-        // ```
-        let subject_length = if S::Instance::SUBJECT_IS_TRANSLATED {
-            (get_nucl_length(subject.len() as i32) - 1) / 3
-        } else {
-            subject.len() as i32
-        };
+        let subject_length = subject.len() as i32;
         let best_evalue = match &self.link {
             Some(link) => link_redone(&mut redone, link, run, subject_length)?,
             None => {
@@ -831,12 +852,7 @@ impl RedoMatch<'_> {
                 raw_score: score,
                 query_context: template.q_idx as i32,
                 query_frame: template.query_frame,
-                // (`Blast_HSPInit(.., (Int2) align->frame, ..)`, blast_kappa.c:326-330.)
-                subject_frame: if S::Instance::SUBJECT_IS_TRANSLATED {
-                    align.frame
-                } else {
-                    0
-                },
+                subject_frame: 0,
                 query_length: template.query_length,
                 q_idx: template.q_idx,
                 s_idx: template.s_idx,
@@ -845,7 +861,7 @@ impl RedoMatch<'_> {
                 &traced,
                 align.edit_script,
                 run.query_nomask,
-                kind.frame_letters(subject, align.frame),
+                subject,
                 self.matrix,
             );
             hsp.e_value = e_value;
@@ -872,68 +888,9 @@ impl RedoMatch<'_> {
         Some((hsp_list, best_score, best_evalue))
     }
 
-    /// `Blast_RedoOneMatch`: the distinct redone alignments, the list's head first. A protein
-    /// subject is one window, the whole subject with the alignments in their order
-    /// (`s_WindowsFromProteinAligns`); a translated subject's windows are its alignments' frames
-    /// around them (`s_WindowsFromTranslatedAligns` with a position-based matrix, `frame_windows`),
-    /// each with its alignments in `s_DistinctAlignmentsSort`'s order, and all windows add to the
-    /// one list (`alignments[query_index]`). NCBI keeps `matrix_adjust_rule` from one window to
-    /// the next.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1121-1141
-    /// ```c
-    ///     EMatrixAdjustRule matrix_adjust_rule = eDontAdjustMatrix;
-    ///     ...
-    ///     status =
-    ///             s_WindowsFromAligns(incoming_aligns, query_info, hspcnt, numQueries,
-    ///                     kWindowBorder, matchingSeq->length, &windows,
-    ///                     &nWindows, query_is_translated, subject_is_translated, params->positionBased);
-    ///     if (status != 0) {
-    ///         goto function_level_cleanup;
-    ///     }
-    ///     /* for all windows */
-    ///     for (window_index = 0;  window_index < nWindows;  window_index++) {
-    /// ```
-    fn redo_one_match<'a, S: RedoSubject<'a>>(
-        &self,
-        run: &mut RedoRun<'_>,
-        hsps: &[BlastpPreliminaryHsp],
-        subject: &'a [u8],
-    ) -> Vec<Align> {
-        let mut alignments: Vec<Align> = Vec::new();
-        let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
-        if S::Instance::SUBJECT_IS_TRANSLATED {
-            for (window, order) in frame_windows(hsps, run.query.len() as i32, subject.len() as i32)
-            {
-                let window_hsps: Vec<BlastpPreliminaryHsp> =
-                    order.iter().map(|&k| hsps[k]).collect();
-                self.redo_window::<S>(
-                    run,
-                    &window_hsps,
-                    subject,
-                    window,
-                    &mut alignments,
-                    &mut matrix_adjust_rule,
-                );
-            }
-        } else {
-            self.redo_window::<S>(
-                run,
-                hsps,
-                subject,
-                SubjectWindow::default(),
-                &mut alignments,
-                &mut matrix_adjust_rule,
-            );
-        }
-        alignments
-    }
-
-    /// The redo of one window of `Blast_RedoOneMatch` (`window`, whose alignments are `hsps` in
-    /// their order): the distinct redone alignments go to the head of `alignments`. A
-    /// translated subject's range is the window of its frame (`frame_range`), and the matrix is
-    /// adjusted for each alignment that is not contained, to the composition around it in the
-    /// window (`s_GetComposition`, `window_composition`).
+    /// `Blast_RedoOneMatch` for the one window of a protein query and subject (the whole query,
+    /// the whole subject, `s_WindowsFromProteinAligns`): the distinct redone alignments, the
+    /// list's head first.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1174-1286
     /// ```c
@@ -998,19 +955,321 @@ impl RedoMatch<'_> {
     /// ```
     /// `params->cutoff_s` is 1 without sum statistics, else `RedoLink::cutoff_s`
     /// (blast_kappa.c:2453-2461).
+    fn redo_one_match(
+        &self,
+        run: &mut RedoRun<'_>,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &[u8],
+    ) -> Vec<Align> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:788-797
+        // ```c
+        //         new_align =
+        //             BlastCompo_AlignmentNew((int) (hsp->score * localScalingFactor),
+        //                                     eDontAdjustMatrix,
+        //                                     hsp->query.offset, hsp->query.end, hsp->context,
+        //                                     hsp->subject.offset, hsp->subject.end,
+        //                                     hsp->subject.frame, hsp);
+        // ```
+        let incoming: Vec<Align> = hsps
+            .iter()
+            .map(|hsp| Align {
+                score: (hsp.raw_score as f64 * SCALING_FACTOR) as i32,
+                rule: EMatrixAdjustRule::DontAdjustMatrix,
+                query_start: hsp.query_start,
+                query_end: hsp.query_end,
+                match_start: hsp.subject_start,
+                match_end: hsp.subject_end,
+                frame: hsp.subject_frame,
+                edit_script: Vec::new(),
+            })
+            .collect();
+        let lambda = run.karlin.lambda;
+        let query_length = run.query.len() as i32;
+        let mut alignments: Vec<Align> = Vec::new();
+        let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
+        let mut subject_data: Vec<u8> = Vec::new();
+        let mut near_identical = true;
+        let mut old_near_identical = false;
+        let mut subject_maybe_biased = true;
+        let mut num_adjustments = 0;
+        for (hsp_index, in_align) in incoming.iter().enumerate() {
+            if hsp_index == 0 || subject_maybe_biased {
+                near_identical = preliminary_test_near_identical(
+                    query_length,
+                    in_align,
+                    run.near_identical_cutoff,
+                );
+            }
+            if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
+                subject_data = self.subject_range::<XDropRedo>(
+                    run,
+                    subject,
+                    &incoming[0],
+                    near_identical,
+                    &mut subject_maybe_biased,
+                );
+            }
+            if !is_contained::<XDropRedo>(in_align, &alignments, lambda) {
+                let mut adjust_search_failed = false;
+                if hsp_index == 0 || near_identical != old_near_identical {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1436-1442
+                    // ```c
+                    //     if (query_composition->numTrueAminoAcids == 0 ||
+                    //         subject_composition->numTrueAminoAcids == 0) {
+                    //         /* Either the query or subject contains only ambiguity
+                    //            characters, most likely because the entire subject has been
+                    //            SEGed.  Compositional adjustment is meaningless. */
+                    //         return 1;
+                    //     }
+                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1484-1529
+                    // ```c
+                    //     if (matrixInfo->positionBased ||
+                    //         composition_adjust_mode == eCompositionBasedStats) {
+                    //         /* Use old-style composition-based statistics unconditionally. */
+                    //         *matrix_adjust_rule =  eCompoScaleOldMatrix;
+                    //     ...
+                    //     *matrix_adjust_rule = eCompoScaleOldMatrix;
+                    //     return Blast_CompositionBasedStats(matrix, ratioToPassBack, matrixInfo,
+                    //                                        query_composition->prob,
+                    //                                        subject_composition->prob,
+                    //                                        calc_lambda,
+                    //                                        (compositionTestIndex > 0));
+                    // ```
+                    let subject_composition = read_aa_composition(&subject_data);
+                    if run.query_true_amino_acids == 0
+                        || subject_composition.num_true_amino_acids == 0
+                    {
+                        adjust_search_failed = true;
+                    } else {
+                        matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
+                        pssm_composition_based_stats::<XDropRedo>(
+                            &mut run.matrix.rows,
+                            self.info,
+                            &subject_composition.prob,
+                        );
+                        if run.bound_check && run.bound_exceeded.is_none() {
+                            let bound: i64 = run
+                                .matrix
+                                .rows
+                                .iter()
+                                .map(|row| i64::from(row.iter().copied().max().unwrap_or(0).max(0)))
+                                .sum();
+                            if bound > i64::from(i32::MAX) {
+                                run.bound_exceeded = Some(bound);
+                            }
+                        }
+                    }
+                    num_adjustments += 1;
+                }
+                if !adjust_search_failed {
+                    let new_align = self.redo_one_alignment(
+                        run,
+                        &hsps[hsp_index],
+                        matrix_adjust_rule,
+                        &subject_data,
+                    );
+                    if new_align.score >= self.link.map_or(1, |link| link.cutoff_s) {
+                        with_distinct_ends::<XDropRedo>(
+                            new_align,
+                            &mut alignments,
+                            num_adjustments == 1,
+                        );
+                    }
+                }
+            }
+            old_near_identical = near_identical;
+        }
+        alignments
+    }
+
+    /// The redo of one match of a translated subject (rpstblastn): `redo_match`'s steps (quoted
+    /// there) over the windows of the frames (`redo_frame_windows`), with the frames compared in
+    /// the reap, the subject's length of `s_GetSubjectLength` in the e-values and the frames kept
+    /// in the HSPs. A copy (DECISIONS 63 S3): psiblast's and rpsblast's `redo_match` stays dev's
+    /// code, which one generic form shared with the frames did not keep instruction for
+    /// instruction; its instance of a protein subject is `redo_match`'s for the equivalence test
+    /// (`the_window_copy_is_the_x_drop_redo`).
+    pub(crate) fn redo_windows<'a, S: RedoSubject<'a>>(
+        &self,
+        run: &mut RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+        kind: S,
+    ) -> Option<(BlastpHspList, i32, f64)> {
+        // A protein subject is one window, the whole subject (`s_WindowsFromProteinAligns`).
+        let alignments = if S::Instance::SUBJECT_IS_TRANSLATED {
+            self.redo_frame_windows::<S>(run, hsps, subject)
+        } else {
+            self.redo_window::<S>(run, hsps, subject, SubjectWindow::default(), None)
+        };
+        let mut redone: Vec<Redone> = alignments
+            .into_iter()
+            .map(|align| Redone {
+                align,
+                e_value: 0.0,
+                num: 1,
+            })
+            .collect();
+        redone.sort_by(|a, b| score_compare(&a.align, &b.align));
+        if redone.len() > 1 {
+            reap_contained::<S::Instance>(&mut redone);
+        }
+        let query_length = self.query_length;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:364-368
+        // ```c
+        // Int4 s_GetSubjectLength(Int4 total_subj_length, EBlastProgramType program_number)
+        // {
+        // 	return ((program_number == eBlastTypeRpsTblastn) ?
+        // 				(GET_NUCL_LENGTH(total_subj_length) - 1 ) /3 : total_subj_length);
+        // }
+        // ```
+        let subject_length = if S::Instance::SUBJECT_IS_TRANSLATED {
+            (get_nucl_length(subject.len() as i32) - 1) / 3
+        } else {
+            subject.len() as i32
+        };
+        let best_evalue = match &self.link {
+            Some(link) => {
+                // The RPS redo has no sum statistics (`rps_search::redo`): only psiblast links.
+                assert!(
+                    !S::Instance::SUBJECT_IS_TRANSLATED,
+                    "the redo of frames has no sum statistics"
+                );
+                link_redone(&mut redone, link, run, subject_length)?
+            }
+            None => {
+                let mut best_evalue = i32::MAX as f64;
+                for hsp in &mut redone {
+                    let (m, n) = if self.rps_roles {
+                        (subject_length, query_length)
+                    } else {
+                        (query_length, subject_length)
+                    };
+                    hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
+                    best_evalue = best_evalue.min(hsp.e_value);
+                }
+                best_evalue
+            }
+        };
+        redone.retain(|hsp| hsp.e_value <= self.expect_value);
+        let first = redone.first()?;
+        let best_score = first.align.score;
+        let template = &hsps[0];
+        let mut hsp_list = BlastpHspList {
+            oid,
+            query_index: template.q_idx,
+            hsps: Vec::with_capacity(redone.len()),
+            best_evalue,
+        };
+        for Redone {
+            align,
+            e_value,
+            num,
+        } in redone
+        {
+            let score = blast_nint(align.score as f64 / SCALING_FACTOR);
+            let traced = BlastpPreliminaryHsp {
+                query_start: align.query_start,
+                query_end: align.query_end,
+                subject_start: align.match_start,
+                subject_end: align.match_end,
+                gapped_query_start: align.query_start,
+                gapped_subject_start: align.match_start,
+                raw_score: score,
+                query_context: template.q_idx as i32,
+                query_frame: template.query_frame,
+                // (`Blast_HSPInit(.., (Int2) align->frame, ..)`, blast_kappa.c:326-330.)
+                subject_frame: if S::Instance::SUBJECT_IS_TRANSLATED {
+                    align.frame
+                } else {
+                    0
+                },
+                query_length: template.query_length,
+                q_idx: template.q_idx,
+                s_idx: template.s_idx,
+            };
+            let mut hsp = final_hsp(
+                &traced,
+                align.edit_script,
+                run.query_nomask,
+                kind.frame_letters(subject, align.frame),
+                self.matrix,
+            );
+            hsp.e_value = e_value;
+            hsp.num = num;
+            hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
+                / std::f64::consts::LN_2;
+            hsp.comp_adjustment_method = match align.rule {
+                EMatrixAdjustRule::DontAdjustMatrix => 0,
+                EMatrixAdjustRule::CompoScaleOldMatrix => 1,
+                _ => 2,
+            };
+            hsp_list.hsps.push(hsp);
+        }
+        Some((hsp_list, best_score, best_evalue))
+    }
+
+    /// `Blast_RedoOneMatch` of a translated subject: the distinct redone alignments, the list's
+    /// head first. (A protein subject is one window, the whole subject with the alignments in
+    /// their order, `s_WindowsFromProteinAligns`: [`Self::redo_window`].) The windows are the
+    /// alignments' frames around them (`s_WindowsFromTranslatedAligns` with a position-based
+    /// matrix, `frame_windows`), each with its alignments in `s_DistinctAlignmentsSort`'s order,
+    /// and all windows add to the one list (`alignments[query_index]`). NCBI keeps
+    /// `matrix_adjust_rule` from one window to the next; a translated subject's matrix is
+    /// adjusted for each alignment that is redone (`redo_window`), so the rule a window starts
+    /// with is never read.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1121-1141
+    /// ```c
+    ///     EMatrixAdjustRule matrix_adjust_rule = eDontAdjustMatrix;
+    ///     ...
+    ///     status =
+    ///             s_WindowsFromAligns(incoming_aligns, query_info, hspcnt, numQueries,
+    ///                     kWindowBorder, matchingSeq->length, &windows,
+    ///                     &nWindows, query_is_translated, subject_is_translated, params->positionBased);
+    ///     if (status != 0) {
+    ///         goto function_level_cleanup;
+    ///     }
+    ///     /* for all windows */
+    ///     for (window_index = 0;  window_index < nWindows;  window_index++) {
+    /// ```
+    fn redo_frame_windows<'a, S: RedoSubject<'a>>(
+        &self,
+        run: &mut RedoRun<'_>,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Vec<Align> {
+        let mut alignments: Vec<Align> = Vec::new();
+        for (window, order) in frame_windows(hsps, run.query.len() as i32, subject.len() as i32) {
+            let window_hsps: Vec<BlastpPreliminaryHsp> = order.iter().map(|&k| hsps[k]).collect();
+            alignments =
+                self.redo_window::<S>(run, &window_hsps, subject, window, Some(alignments));
+        }
+        alignments
+    }
+
+    /// The redo of one window of `Blast_RedoOneMatch` (`redo_one_match`'s steps, quoted there;
+    /// `window`, whose alignments are `hsps` in their order): the list of the windows before
+    /// (`before`, none for the first) with the window's distinct redone alignments at its head. A
+    /// translated subject's range is the window of its frame (`frame_range`), and the matrix is
+    /// adjusted for each alignment that is not contained, to the composition around it in the
+    /// window (`s_GetComposition`, `window_composition`).
     fn redo_window<'a, S: RedoSubject<'a>>(
         &self,
         run: &mut RedoRun<'_>,
         hsps: &[BlastpPreliminaryHsp],
         subject: &'a [u8],
         window: SubjectWindow,
-        alignments: &mut Vec<Align>,
-        matrix_adjust_rule: &mut EMatrixAdjustRule,
-    ) {
+        before: Option<Vec<Align>>,
+    ) -> Vec<Align> {
         // The incoming alignments (`Align::incoming`) in the window's order.
-        let incoming: Vec<Align> = hsps.iter().map(Align::incoming).collect();
+        let incoming: Vec<Align> = hsps.iter().map(Align::incoming::<S::Instance>).collect();
         let lambda = run.karlin.lambda;
         let query_length = run.query.len() as i32;
+        let mut alignments: Vec<Align> = before.unwrap_or_default();
+        let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
         let mut subject_data: Vec<u8> = Vec::new();
         let mut near_identical = true;
         let mut old_near_identical = false;
@@ -1051,36 +1310,12 @@ impl RedoMatch<'_> {
                     )
                 };
             }
-            if !is_contained(in_align, alignments, lambda) {
+            if !is_contained::<S::Instance>(in_align, &alignments, lambda) {
                 let mut adjust_search_failed = false;
                 if S::Instance::SUBJECT_IS_TRANSLATED
                     || hsp_index == 0
                     || near_identical != old_near_identical
                 {
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1436-1442
-                    // ```c
-                    //     if (query_composition->numTrueAminoAcids == 0 ||
-                    //         subject_composition->numTrueAminoAcids == 0) {
-                    //         /* Either the query or subject contains only ambiguity
-                    //            characters, most likely because the entire subject has been
-                    //            SEGed.  Compositional adjustment is meaningless. */
-                    //         return 1;
-                    //     }
-                    // ```
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1484-1529
-                    // ```c
-                    //     if (matrixInfo->positionBased ||
-                    //         composition_adjust_mode == eCompositionBasedStats) {
-                    //         /* Use old-style composition-based statistics unconditionally. */
-                    //         *matrix_adjust_rule =  eCompoScaleOldMatrix;
-                    //     ...
-                    //     *matrix_adjust_rule = eCompoScaleOldMatrix;
-                    //     return Blast_CompositionBasedStats(matrix, ratioToPassBack, matrixInfo,
-                    //                                        query_composition->prob,
-                    //                                        subject_composition->prob,
-                    //                                        calc_lambda,
-                    //                                        (compositionTestIndex > 0));
-                    // ```
                     let subject_composition = if S::Instance::SUBJECT_IS_TRANSLATED {
                         window_composition(&subject_data, window, in_align)
                     } else {
@@ -1091,7 +1326,7 @@ impl RedoMatch<'_> {
                     {
                         adjust_search_failed = true;
                     } else {
-                        *matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
+                        matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
                         pssm_composition_based_stats::<S::Instance>(
                             &mut run.matrix.rows,
                             self.info,
@@ -1116,7 +1351,7 @@ impl RedoMatch<'_> {
                         redo_window_alignment(
                             run,
                             &hsps[hsp_index],
-                            *matrix_adjust_rule,
+                            matrix_adjust_rule,
                             &subject_data,
                             window,
                         )
@@ -1124,17 +1359,22 @@ impl RedoMatch<'_> {
                         self.redo_one_alignment(
                             run,
                             &hsps[hsp_index],
-                            *matrix_adjust_rule,
+                            matrix_adjust_rule,
                             &subject_data,
                         )
                     };
                     if new_align.score >= self.link.map_or(1, |link| link.cutoff_s) {
-                        with_distinct_ends(new_align, alignments, num_adjustments == 1);
+                        with_distinct_ends::<S::Instance>(
+                            new_align,
+                            &mut alignments,
+                            num_adjustments == 1,
+                        );
                     }
                 }
             }
             old_near_identical = near_identical;
         }
+        alignments
     }
 
     /// `s_SequenceGetProteinRange` for the whole subject: its letters, masked by SEG ("S 10 1.8
@@ -1176,17 +1416,35 @@ impl RedoMatch<'_> {
     ) -> Vec<u8> {
         let mut data = subject.to_vec();
         if *subject_maybe_biased {
-            let test_identical = near_identical
-                && test_near_identical(
+            let test_identical = near_identical && {
+                let align = BlastCompoAlignment {
+                    score: window_align.score,
+                    matrix_adjust_rule: window_align.rule,
+                    query_index: 0,
+                    query_start: window_align.query_start,
+                    query_end: window_align.query_end,
+                    match_start: window_align.match_start,
+                    match_end: window_align.match_end,
+                    frame: window_align.frame,
+                    context: None,
+                    next: None,
+                };
+                test_near_identical(
                     &BlastCompoSequenceData::from_ncbistdaa(subject),
                     0,
                     &run.query_data,
                     0,
                     Some(&run.query_words),
-                    &window_align.compo(None),
-                );
+                    &align,
+                )
+            };
             if !test_identical {
-                seg_subject(&mut data, subject_maybe_biased);
+                let intervals =
+                    crate::utils::seg::SegMasker::new(10, 1.8, 2.1).mask_sequence(&data);
+                *subject_maybe_biased = !intervals.is_empty();
+                for interval in &intervals {
+                    data[interval.start..interval.end].fill(ncbistdaa::X);
+                }
             }
         }
         data
@@ -1287,7 +1545,8 @@ fn frame_windows(
     let mut list: Option<Box<BlastCompoAlignment>> = None;
     for (k, hsp) in hsps.iter().enumerate().rev() {
         let mut align = Box::new(
-            Align::incoming(hsp).compo(Some(BlastCompoAlignmentContext::PreliminaryHspIndex(k))),
+            Align::incoming::<FrameRedo>(hsp)
+                .compo(Some(BlastCompoAlignmentContext::PreliminaryHspIndex(k))),
         );
         align.next = list;
         list = Some(align);
@@ -1531,10 +1790,6 @@ fn redo_window_alignment(
 ///             hsp_list->best_evalue = hsp_list->hsp_array[index]->evalue;
 ///     }
 /// ```
-///
-/// Inlined in each instance of `RedoMatch::redo_match` (psiblast's code as before the frames'
-/// instance; DECISIONS 63 S3).
-#[inline(always)]
 fn link_redone(
     redone: &mut Vec<Redone>,
     link: &RedoLink,
@@ -1706,7 +1961,14 @@ fn contained_in_hsp(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> bool {
 ///     }
 ///     return 0;
 /// ```
-fn is_contained(in_align: &Align, alignments: &[Align], lambda: f64) -> bool {
+///
+/// `C`, the redo's instance, keeps each instance's own copy (psiblast's code as before the frames'
+/// instance; DECISIONS 63 S3).
+#[expect(
+    clippy::extra_unused_type_parameters,
+    reason = "C only keeps one instance per redo instance (see above)"
+)]
+fn is_contained<C: RedoInstance>(in_align: &Align, alignments: &[Align], lambda: f64) -> bool {
     let score_thresh = in_align.score as f64 + KAPPA_BIT_TOL * LOCAL_LN2 / lambda;
     alignments.iter().any(|align| {
         in_align.frame.signum() == align.frame.signum()
@@ -1772,10 +2034,17 @@ fn is_contained(in_align: &Align, alignments: &[Align], lambda: f64) -> bool {
 ///         *p_oldAlignments = newAlign;
 /// ```
 ///
-/// Inlined in each instance of `RedoMatch::redo_window` (psiblast's code as before the frames'
+/// `C`, the redo's instance, keeps each instance's own copy (psiblast's code as before the frames'
 /// instance; DECISIONS 63 S3).
-#[inline(always)]
-fn with_distinct_ends(new_align: Align, alignments: &mut Vec<Align>, is_same_adjustment: bool) {
+#[expect(
+    clippy::extra_unused_type_parameters,
+    reason = "C only keeps one instance per redo instance (see above)"
+)]
+fn with_distinct_ends<C: RedoInstance>(
+    new_align: Align,
+    alignments: &mut Vec<Align>,
+    is_same_adjustment: bool,
+) {
     let excluded = alignments.iter().any(|align| {
         align.frame == new_align.frame
             && if is_same_adjustment {
@@ -1975,15 +2244,15 @@ mod tests {
     #[test]
     fn distinct_ends_keep_the_best_of_a_shared_end() {
         let mut list = vec![align(100, (0, 50), (0, 50)), align(80, (60, 90), (60, 90))];
-        with_distinct_ends(align(90, (0, 40), (0, 40)), &mut list, true);
+        with_distinct_ends::<XDropRedo>(align(90, (0, 40), (0, 40)), &mut list, true);
         assert_eq!(list.len(), 2);
-        with_distinct_ends(align(120, (10, 90), (10, 90)), &mut list, true);
+        with_distinct_ends::<XDropRedo>(align(120, (10, 90), (10, 90)), &mut list, true);
         assert_eq!(
             list.iter().map(|a| a.score).collect::<Vec<_>>(),
             vec![120, 100]
         );
         // With different adjustments a similar end (contained, same diagonal) counts.
-        with_distinct_ends(align(110, (5, 45), (5, 45)), &mut list, false);
+        with_distinct_ends::<XDropRedo>(align(110, (5, 45), (5, 45)), &mut list, false);
         assert_eq!(list.len(), 2);
     }
 

@@ -185,10 +185,36 @@ fn the_evaluation_is_the_x_drop_redos() {
         for (search_space, expect) in [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)] {
             let matching = redo_match(&info, consensus.len(), search_space, expect);
             let mut run = run_of(&consensus);
-            let alignments = matching.redo_one_match::<ProteinSubject>(&mut run, &hsps, &subject);
+            let alignments = matching.redo_one_match(&mut run, &hsps, &subject);
             let copied = matching.evaluate(&run, 7, &hsps, &subject, alignments);
-            let original =
-                matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject, ProteinSubject);
+            let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject);
+            assert_eq!(format!("{copied:?}"), format!("{original:?}"));
+        }
+    }
+}
+
+// `redo_windows` (rpstblastn's redo) is a copy of `redo_match`'s steps (DECISIONS 63 S3): its
+// instance of a protein subject, one window over the whole subject, gives `redo_match`'s list.
+#[test]
+fn the_window_copy_is_the_x_drop_redo() {
+    let consensus = encode(PROFILE);
+    let info = info_of(&consensus);
+    let subject = two_copies();
+    let n = consensus.len() as i32;
+    for hsps in [
+        vec![
+            hsp((0, n), (10, 10 + n), 300),
+            hsp((0, n), (n + 24, 2 * n + 24), 250),
+        ],
+        vec![hsp((0, n), (n + 24, 2 * n + 24), 250)],
+        vec![hsp((0, 30), (10, 40), 90), hsp((20, n), (30, 10 + n), 120)],
+        vec![hsp((0, 30), (10, 40), 90), hsp((0, 30), (10, 40), 90)],
+    ] {
+        for (search_space, expect) in [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)] {
+            let matching = redo_match(&info, consensus.len(), search_space, expect);
+            let copied =
+                matching.redo_windows(&mut run_of(&consensus), 7, &hsps, &subject, ProteinSubject);
+            let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject);
             assert_eq!(format!("{copied:?}"), format!("{original:?}"));
         }
     }

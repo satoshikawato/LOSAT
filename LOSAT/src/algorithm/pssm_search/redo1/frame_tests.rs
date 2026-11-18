@@ -167,7 +167,7 @@ fn window(begin: i32, end: i32, frame: i32) -> SubjectWindow {
 }
 
 fn align_in(frame: i32, s: (i32, i32)) -> Align {
-    Align::incoming(&hsp(frame, s, 30))
+    Align::incoming::<FrameRedo>(&hsp(frame, s, 30))
 }
 
 // redo_alignment.c:921-936 and composition_adjustment.c:1204-1248 (`Blast_GetCompositionRange`,
@@ -206,7 +206,11 @@ fn the_old_near_identical_test_is_ncbis() {
     assert!(old_test_near_identical(25, 1, &align_in(-1, (10, 40))));
     let mut gapped = hsp(-1, (10, 70), 30);
     gapped.query_end += 1;
-    assert!(!old_test_near_identical(200, 1, &Align::incoming(&gapped)));
+    assert!(!old_test_near_identical(
+        200,
+        1,
+        &Align::incoming::<FrameRedo>(&gapped)
+    ));
     // The same alignment with the cutoff of a valid frame +1 (1.74 bits per position): 960 / 60.
     assert!(!preliminary_test_near_identical(200, &long, 144.548446));
 }

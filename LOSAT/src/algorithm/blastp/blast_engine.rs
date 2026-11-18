@@ -3791,15 +3791,13 @@ impl<'a> ShownLetters<'a> {
     /// the reports show a letter that the search did not read (`shows_other_letters`), or a gap
     /// character, a residue that shows as the letter of a gap (`-`: makeblastdb stores it in a
     /// protein database, a PSSM query holds it as the gap residue; a `-` of a FASTA input is
-    /// dropped as NCBI drops it). One read of the letters.
+    /// dropped as NCBI drops it). Each test is a byte search of the letters (`contains`).
     fn recounted(self) -> bool {
         match self {
-            Self::Ascii(letters) => letters
-                .iter()
-                .any(|&letter| letter == b'-' || letter.eq_ignore_ascii_case(&b'O')),
-            Self::Stored(residues) => residues
-                .iter()
-                .any(|&residue| residue == STORED_GAP || residue == STORED_O),
+            Self::Ascii(letters) => letters.contains(&b'-') || self.has_o(),
+            Self::Stored(residues) => {
+                residues.contains(&STORED_GAP) || residues.contains(&STORED_O)
+            }
             Self::Bioseq(_) => true,
         }
     }
@@ -4089,6 +4087,7 @@ fn recount_shown_identities(
             let mut q_index = hsp.q_start.saturating_sub(1);
             let mut s_index = hsp.s_start.saturating_sub(1);
             let mut complete = true;
+            let compared = query.case().compared_letters();
             for op in ops {
                 // A deletion is a gap in the query, an insertion a gap in the subject.
                 let (in_query, in_subject) = match *op {
@@ -4111,7 +4110,7 @@ fn recount_shown_identities(
                         complete = false;
                         break;
                     };
-                    query_row.push(query.case().compared(q) as char);
+                    query_row.push(compared[usize::from(q)] as char);
                     subject_row.push(s.to_ascii_uppercase() as char);
                     q_index += usize::from(in_query);
                     s_index += usize::from(in_subject);

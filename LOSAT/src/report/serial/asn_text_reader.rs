@@ -59,13 +59,13 @@ pub struct AsnTextError {
 pub(crate) enum NcbiThrow {
     /// `ThrowError(flag, message)` of the object stream (`ThrowError1`, objistr.cpp:828-853): a
     /// `CSerialException` whose message is the stream's position, `line N: `, then the error's.
-    Stream(ThrowSite),
+    Stream(&'static ThrowSite),
     /// `NCBI_THROW` of a `CSerialException` with the error's message as it is (the values of an
     /// enumerated type: `FindValue`, `FindName`).
-    Plain(ThrowSite),
+    Plain(&'static ThrowSite),
     /// `BadNumber` / `NumberOverflow` of the input buffer: a `CUtilException`, the error's message
     /// and ` in line N`.
-    Buffer(ThrowSite),
+    Buffer(&'static ThrowSite),
     /// The `CEofException` that `SkipWhiteSpace` catches (objistrasn.cpp:234-240): it goes on as
     /// it is at a stack depth of 2 or less, and becomes the `CSerialException` of
     /// [`SKIP_WHITE_SPACE_EOF`] deeper. Its kind is [`AsnTextErrorKind::Eof`].
@@ -475,6 +475,7 @@ impl<S: AsnSource> Reader<S> {
         self
     }
 
+    #[cold]
     pub(crate) fn error(&self, message: impl Into<String>) -> AsnTextError {
         AsnTextError {
             line: self.line,
@@ -485,6 +486,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `error`, with what NCBI throws there.
+    #[cold]
     pub(crate) fn error_at(&self, ncbi: NcbiThrow, message: impl Into<String>) -> AsnTextError {
         AsnTextError {
             ncbi: Some(ncbi),
@@ -493,6 +495,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// An explicit LOSAT refusal at the current line.
+    #[cold]
     pub(crate) fn unsupported(&self, message: impl Into<String>) -> AsnTextError {
         AsnTextError {
             line: self.line,
@@ -510,6 +513,8 @@ impl<S: AsnSource> Reader<S> {
         ))
     }
 
+    #[cold]
+    #[inline(never)]
     fn end_of_text(&self) -> AsnTextError {
         AsnTextError {
             line: self.line,
@@ -520,6 +525,8 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `end_of_text` inside `SkipWhiteSpace` ([`NcbiThrow::WhiteSpaceEof`]).
+    #[cold]
+    #[inline(never)]
     fn end_of_text_in_white_space(&self) -> AsnTextError {
         AsnTextError {
             ncbi: Some(NcbiThrow::WhiteSpaceEof),
@@ -666,16 +673,19 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `peek_char` inside `SkipWhiteSpace`.
+    #[inline]
     fn peek_white_space(&mut self, offset: usize) -> Result<u8> {
-        self.peek_char(offset)
-            .map_err(|_| self.end_of_text_in_white_space())
+        match self.src.byte_at(self.pos + offset) {
+            Some(c) => Ok(c),
+            None => Err(self.end_of_text_in_white_space()),
+        }
     }
 
     /// `Expect(c, true)`.
     pub(crate) fn expect(&mut self, c: u8) -> Result<()> {
         if self.skip_white_space()? != c {
             return Err(self.error_at(
-                NcbiThrow::Stream(EXPECT),
+                NcbiThrow::Stream(&EXPECT),
                 format!("'{}' expected", c as char),
             ));
         }
@@ -776,7 +786,7 @@ impl<S: AsnSource> Reader<S> {
             match self.peek_char(i)? {
                 b'\r' | b'\n' => {
                     return Err(self.error_at(
-                        NcbiThrow::Stream(READ_MEMBER_ID),
+                        NcbiThrow::Stream(&READ_MEMBER_ID),
                         "end of line: expected ']'",
                     ))
                 }
@@ -847,13 +857,13 @@ impl<S: AsnSource> Reader<S> {
                 match self.peek_char(i)? {
                     b'\r' | b'\n' => {
                         return Err(self.error_at(
-                            NcbiThrow::Stream(READ_TYPE_ID),
+                            NcbiThrow::Stream(&READ_TYPE_ID),
                             "end of line: expected ']'",
                         ))
                     }
                     b']' => {
                         return Err(
-                            self.error_at(NcbiThrow::Stream(READ_FILE_HEADER), "'::=' expected")
+                            self.error_at(NcbiThrow::Stream(&READ_FILE_HEADER), "'::=' expected")
                         )
                     }
                     _ => i += 1,
@@ -863,7 +873,7 @@ impl<S: AsnSource> Reader<S> {
             self.scan_end_of_id(is_first_id_char(c))?
         };
         if self.skip_white_space()? != b':' || self.peek_at(1) != b':' || self.peek_at(2) != b'=' {
-            return Err(self.error_at(NcbiThrow::Stream(READ_FILE_HEADER), "'::=' expected"));
+            return Err(self.error_at(NcbiThrow::Stream(&READ_FILE_HEADER), "'::=' expected"));
         }
         self.pos += 3;
         Ok(id)
@@ -883,9 +893,10 @@ impl<S: AsnSource> Reader<S> {
         loop {
             match self.peek_char(i)? {
                 b'\r' | b'\n' => {
-                    return Err(
-                        self.error_at(NcbiThrow::Stream(READ_TYPE_ID), "end of line: expected ']'")
-                    )
+                    return Err(self.error_at(
+                        NcbiThrow::Stream(&READ_TYPE_ID),
+                        "end of line: expected ']'",
+                    ))
                 }
                 b']' => {
                     let start = self.pos;
@@ -988,7 +999,7 @@ impl<S: AsnSource> Reader<S> {
             return Ok(true);
         }
         if c != b'}' {
-            return Err(self.error_at(NcbiThrow::Stream(NEXT_ELEMENT), "',' or '}' expected"));
+            return Err(self.error_at(NcbiThrow::Stream(&NEXT_ELEMENT), "',' or '}' expected"));
         }
         Ok(false)
     }
@@ -1073,7 +1084,7 @@ impl<S: AsnSource> Reader<S> {
             c = self.peek_char(0)?;
         }
         if !c.is_ascii_digit() {
-            return Err(self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number"));
+            return Err(self.error_at(NcbiThrow::Buffer(&BAD_NUMBER), "bad number"));
         }
         let mut n: i128 = 0;
         loop {
@@ -1083,13 +1094,13 @@ impl<S: AsnSource> Reader<S> {
             }
             n = n * 10 + i128::from(c - b'0');
             if n > max.max(-min) {
-                return Err(self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow"));
+                return Err(self.error_at(NcbiThrow::Buffer(&NUMBER_OVERFLOW), "number overflow"));
             }
             self.pos += 1;
         }
         let n = if negative { -n } else { n };
         if n < min || n > max {
-            return Err(self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow"));
+            return Err(self.error_at(NcbiThrow::Buffer(&NUMBER_OVERFLOW), "number overflow"));
         }
         Ok(n)
     }
@@ -1168,7 +1179,7 @@ impl<S: AsnSource> Reader<S> {
             c = self.peek_char(0)?;
         }
         if !c.is_ascii_digit() {
-            return Err(self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number"));
+            return Err(self.error_at(NcbiThrow::Buffer(&BAD_NUMBER), "bad number"));
         }
         let mut n: u32 = 0;
         loop {
@@ -1181,7 +1192,7 @@ impl<S: AsnSource> Reader<S> {
                 .checked_mul(10)
                 .and_then(|n| n.checked_add(u32::from(c - b'0')))
                 .ok_or_else(|| {
-                    self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow")
+                    self.error_at(NcbiThrow::Buffer(&NUMBER_OVERFLOW), "number overflow")
                 })?;
         }
     }
@@ -1227,7 +1238,7 @@ impl<S: AsnSource> Reader<S> {
             self.pos += 5;
             return Ok(false);
         }
-        Err(self.error_at(NcbiThrow::Stream(READ_BOOL), "TRUE or FALSE expected"))
+        Err(self.error_at(NcbiThrow::Stream(&READ_BOOL), "TRUE or FALSE expected"))
     }
 
     /// `ReadNull`: the word `NULL`.
@@ -1251,7 +1262,7 @@ impl<S: AsnSource> Reader<S> {
         if self.take_null_word(c) {
             return Ok(());
         }
-        Err(self.error_at(NcbiThrow::Stream(READ_NULL), "'NULL' expected"))
+        Err(self.error_at(NcbiThrow::Stream(&READ_NULL), "'NULL' expected"))
     }
 
     /// Whether the word `NULL`, not followed by an identifier byte, starts at the current byte `c`
@@ -1343,7 +1354,7 @@ impl<S: AsnSource> Reader<S> {
         match self.enum_item(values)? {
             Ok(item) => Ok(item),
             Err(value) => Err(self.error_at(
-                NcbiThrow::Plain(FIND_NAME),
+                NcbiThrow::Plain(&FIND_NAME),
                 format!("invalid value of enumerated type: {value}"),
             )),
         }
@@ -1382,7 +1393,7 @@ impl<S: AsnSource> Reader<S> {
                     "invalid value of enumerated type: {}",
                     String::from_utf8_lossy(text)
                 );
-                Err(self.error_at(NcbiThrow::Plain(FIND_VALUE), message))
+                Err(self.error_at(NcbiThrow::Plain(&FIND_VALUE), message))
             }
         }
     }
@@ -1491,7 +1502,7 @@ impl<S: AsnSource> Reader<S> {
     /// (`UnendedString`, quoted at [`UNENDED_STRING`]) at the line where the text ends.
     fn unended_string(&self, start_line: usize) -> AsnTextError {
         self.error_at(
-            NcbiThrow::Stream(UNENDED_STRING),
+            NcbiThrow::Stream(&UNENDED_STRING),
             format!("unclosed string starts at line {start_line}"),
         )
     }

@@ -144,8 +144,12 @@ impl<'a> BerIn<'a> {
     }
 
     /// `m_Input.PeekChar(i)`: the end of the data throws `CEofException`.
+    #[inline]
     fn peek(&self, i: usize) -> R<u8> {
-        self.data.get(self.pos + i).copied().ok_or(Fail::Eof)
+        match self.data.get(self.pos + i) {
+            Some(&byte) => Ok(byte),
+            None => Err(Fail::Eof),
+        }
     }
 
     /// `m_Input.GetChar()`
@@ -974,7 +978,7 @@ impl Input for BerIn<'_> {
         self.expect_sys_tag_byte(TAG_ENUMERATED)?;
         let value = self.read_std_signed(4)? as i32;
         if !def.values.iter().any(|&(_, v)| v == value) {
-            return Err(Fail::Serial(NcbiException::new(
+            return Err(Fail::serial(NcbiException::new(
                 FIND_NAME,
                 format!("invalid value of enumerated type: {value}"),
             )));

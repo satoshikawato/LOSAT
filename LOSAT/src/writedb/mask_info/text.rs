@@ -70,20 +70,20 @@ impl<S: AsnSource> TextIn<S> {
         match (error.kind, error.ncbi) {
             (AsnTextErrorKind::Eof, Some(NcbiThrow::WhiteSpaceEof)) if self.depth > 2 => {
                 let eof = NcbiException::new(FILL_BUFFER_EOF, "end of file").what();
-                Fail::Serial(NcbiException::new(
+                Fail::serial(NcbiException::new(
                     SKIP_WHITE_SPACE_EOF,
                     format!("line {line}: {eof}"),
                 ))
             }
             (AsnTextErrorKind::Eof, _) => Fail::Eof,
-            (AsnTextErrorKind::Format, Some(NcbiThrow::Stream(site))) => Fail::Serial(
-                NcbiException::new(site, format!("line {line}: {}", error.message)),
+            (AsnTextErrorKind::Format, Some(NcbiThrow::Stream(site))) => Fail::serial(
+                NcbiException::new(*site, format!("line {line}: {}", error.message)),
             ),
             (AsnTextErrorKind::Format, Some(NcbiThrow::Plain(site))) => {
-                Fail::Serial(NcbiException::new(site, error.message))
+                Fail::serial(NcbiException::new(*site, error.message))
             }
-            (AsnTextErrorKind::Format, Some(NcbiThrow::Buffer(site))) => Fail::Exception(
-                NcbiException::new(site, format!("{} in line {line}", error.message)),
+            (AsnTextErrorKind::Format, Some(NcbiThrow::Buffer(site))) => Fail::exception(
+                NcbiException::new(*site, format!("{} in line {line}", error.message)),
             ),
             // Every error of the lexical reader that this reader meets names NCBI's throw; one
             // that did not would be refused, not reported in LOSAT's words.
@@ -167,7 +167,7 @@ impl<S: AsnSource> TextIn<S> {
                 // `NStr::StringToInt(id)` of the tag's digits: a number that does not fit is its
                 // `CStringException`.
                 let id = self.r.bytes(digits);
-                let tag = string_to_int(id, 0).map_err(Fail::Exception)?;
+                let tag = string_to_int(id, 0).map_err(Fail::exception)?;
                 let found = usize::try_from(tag)
                     .ok()
                     .filter(|tag| (pos..count).contains(tag));

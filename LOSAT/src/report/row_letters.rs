@@ -48,12 +48,39 @@ impl QueryCase {
     /// The letter of the query's Bioseq that NCBI compares for the row letter `letter`.
     #[inline(always)]
     pub(crate) fn compared(self, letter: u8) -> u8 {
+        self.compared_letters()[usize::from(letter)]
+    }
+
+    /// [`compared`](Self::compared) of every byte, by byte: a loop over a row's letters takes it
+    /// once and then looks each letter up, with no test of the case per letter.
+    #[inline(always)]
+    pub(crate) fn compared_letters(self) -> &'static [u8; 256] {
         match self {
-            Self::Masked => letter.to_ascii_uppercase(),
-            Self::Bioseq => letter,
+            Self::Masked => &MASKED_COMPARED,
+            Self::Bioseq => &BIOSEQ_COMPARED,
         }
     }
 }
+
+/// The table of [`QueryCase::compared_letters`]: each byte, in upper case where `upper`.
+const fn compared_table(upper: bool) -> [u8; 256] {
+    let mut table = [0u8; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        table[byte] = if upper {
+            (byte as u8).to_ascii_uppercase()
+        } else {
+            byte as u8
+        };
+        byte += 1;
+    }
+    table
+}
+
+/// `QueryCase::Masked`'s letters: the capital of each lower-case letter.
+static MASKED_COMPARED: [u8; 256] = compared_table(true);
+/// `QueryCase::Bioseq`'s letters: each as it is.
+static BIOSEQ_COMPARED: [u8; 256] = compared_table(false);
 
 /// A query's letters as the reports read them: its Bioseq's (`CSeqVector` in Iupac coding), which
 /// are a FASTA record's letters in upper case, a PSSM query's record letters (the capitals, `*`,
@@ -215,11 +242,12 @@ pub(crate) fn display_positives(
     matrix: ScoringMatrix,
     case: QueryCase,
 ) -> usize {
+    let compared = case.compared_letters();
     query
         .iter()
         .zip(subject)
         .filter(|&(&q, &s)| {
-            let q = case.compared(q);
+            let q = compared[usize::from(q)];
             let s = s.to_ascii_uppercase();
             q == s || crate::utils::matrix::protein_display_score(matrix, q, s) > 0
         })

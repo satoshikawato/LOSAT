@@ -99,16 +99,18 @@ impl fmt::Display for MaskFileError {
 
 impl std::error::Error for MaskFileError {}
 
-/// What a primitive or a frame reports: the class of what NCBI's reader throws.
+/// What a primitive or a frame reports: the class of what NCBI's reader throws. The exceptions
+/// are boxed (`Fail::serial`, `Fail::exception`), which keeps every primitive's result (`R`) as
+/// small as a `String`: no exception is built on the paths that read a valid file.
 #[derive(Debug)]
 pub(super) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
     Eof,
     /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it.
-    Serial(NcbiException),
+    Serial(Box<NcbiException>),
     /// Another `CException` (the `CUtilException` of a number in text, the `CStringException` of
     /// a member's tag), with a line for each frame it leaves (`NCBI_RETHROW_SAME`).
-    Exception(NcbiException),
+    Exception(Box<NcbiException>),
     /// `std::bad_alloc` of the string that a length announces (`GetChars`' `reserve`).
     OutOfMemory,
     /// `std::length_error` of that `reserve`: `what()` is [`STRING_CREATE_LENGTH_ERROR`].
@@ -119,11 +121,27 @@ pub(super) enum Fail {
 
 pub(super) type R<T> = Result<T, Fail>;
 
+impl Fail {
+    /// [`Fail::Serial`] of `e`.
+    #[cold]
+    pub(super) fn serial(e: NcbiException) -> Fail {
+        Fail::Serial(Box::new(e))
+    }
+
+    /// [`Fail::Exception`] of `e`.
+    #[cold]
+    pub(super) fn exception(e: NcbiException) -> Fail {
+        Fail::Exception(Box::new(e))
+    }
+}
+
 /// `ThrowError(flag, message)` of NCBI's object stream at `site` (`ThrowError1`,
 /// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position
 /// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`.
+#[cold]
+#[inline(never)]
 pub(super) fn throw_error<T>(site: ThrowSite, position: &str, message: impl fmt::Display) -> R<T> {
-    Err(Fail::Serial(NcbiException::new(
+    Err(Fail::serial(NcbiException::new(
         site,
         format!("{position}: {message}"),
     )))
@@ -346,6 +364,16 @@ pub(super) trait Input {
 /// The deepest nesting of object frames that LOSAT follows (NCBI's stack is only limited by memory).
 const MAX_DEPTH: usize = 400;
 
+/// The refusal of a frame past [`MAX_DEPTH`].
+#[cold]
+#[inline(never)]
+fn too_deep() -> Fail {
+    Fail::Unsupported(format!("objects nested more than {MAX_DEPTH} levels deep"))
+}
+
+/// The source file, line and function of an `END_OBJECT_FRAME` (`object_frame::text_frame_site`).
+type FrameEnd = (&'static str, u32, &'static str);
+
 /// A frame of NCBI's object stack as the mask reader keeps it (`object_frame`).
 #[derive(Clone, Copy, Debug)]
 struct Frame {
@@ -356,7 +384,7 @@ struct Frame {
     member: Option<&'static str>,
     /// The `END_OBJECT_FRAME` that leaves the frame when it is not the text reader's for its kind
     /// (`text_frame_site`): the named frame of `ReadPointer` (`READ_POINTER_FRAME_END`).
-    end: Option<(&'static str, u32, &'static str)>,
+    end: Option<&'static FrameEnd>,
 }
 
 /// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, quoted at `read_seq_loc_parts`):
@@ -489,13 +517,12 @@ impl<I: Input> Rd<I> {
         &mut self,
         kind: FrameKind,
         type_name: Option<&'static str>,
-        end: Option<(&'static str, u32, &'static str)>,
+        end: Option<&'static FrameEnd>,
         f: impl FnOnce(&mut Self) -> R<T>,
     ) -> R<T> {
-        if self.frames.len() >= MAX_DEPTH {
-            return Err(Fail::Unsupported(format!(
-                "objects nested more than {MAX_DEPTH} levels deep"
-            )));
+        let depth = self.frames.len();
+        if depth >= MAX_DEPTH {
+            return Err(too_deep());
         }
         self.frames.push(Frame {
             kind,
@@ -503,16 +530,24 @@ impl<I: Input> Rd<I> {
             member: None,
             end,
         });
-        self.inp.set_stack_depth(self.frames.len());
-        let result = f(self);
-        let frame = self.frames.pop().expect("a frame to leave");
-        self.inp.set_stack_depth(self.frames.len());
-        result.map_err(|fail| self.leave(frame, fail))
+        self.inp.set_stack_depth(depth + 1);
+        match f(self) {
+            Ok(value) => {
+                self.frames.truncate(depth);
+                self.inp.set_stack_depth(depth);
+                Ok(value)
+            }
+            Err(fail) => Err(self.leave(fail)),
+        }
     }
 
-    /// `END_OBJECT_FRAME` of `frame` (already left) for `fail`.
+    /// `END_OBJECT_FRAME` of the top frame for `fail`: the frame is left, then `fail` gets what
+    /// leaving it adds.
     #[cold]
-    fn leave(&mut self, frame: Frame, fail: Fail) -> Fail {
+    #[inline(never)]
+    fn leave(&mut self, fail: Fail) -> Fail {
+        let frame = self.frames.pop().expect("a frame to leave");
+        self.inp.set_stack_depth(self.frames.len());
         match fail {
             Fail::Serial(mut e) => {
                 e.add_frame_info(frame_name(frame.kind, frame.type_name, frame.member));
@@ -520,7 +555,7 @@ impl<I: Input> Rd<I> {
             }
             Fail::Eof if self.frames.len() >= 2 => {
                 let info = frame_info(frame.kind, frame.type_name, frame.member);
-                Fail::Serial(NcbiException::new(
+                Fail::serial(NcbiException::new(
                     HANDLE_EOF,
                     format!("{}: {info}", self.inp.position()),
                 ))
@@ -528,9 +563,10 @@ impl<I: Input> Rd<I> {
             Fail::Exception(e) => {
                 let (file, line, function) = frame
                     .end
+                    .copied()
                     .unwrap_or_else(|| text_frame_site(frame.kind, false));
                 let info = frame_info(frame.kind, frame.type_name, frame.member);
-                Fail::Exception(e.rethrow_same(file, line, function, info))
+                Fail::exception(e.rethrow_same(file, line, function, info))
             }
             other => other,
         }
@@ -575,15 +611,23 @@ impl<I: Input> Rd<I> {
     // ```
     /// `ReadMissingSimpleMember` of the members `missing` (`ExpectedMember` of the first that is
     /// neither `OPTIONAL` nor has a `DEFAULT`).
+    #[inline]
     fn missing_members(&self, missing: &[Member]) -> R<()> {
         match missing.iter().find(|m| !m.optional) {
-            Some(m) => throw_error(
-                EXPECTED_MEMBER,
-                &self.inp.position(),
-                format_args!("member {} expected", m.name),
-            ),
+            Some(m) => self.expected_member(m),
             None => Ok(()),
         }
+    }
+
+    /// `ExpectedMember` of the member `m`.
+    #[cold]
+    #[inline(never)]
+    fn expected_member(&self, m: &Member) -> R<()> {
+        throw_error(
+            EXPECTED_MEMBER,
+            &self.inp.position(),
+            format_args!("member {} expected", m.name),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
@@ -672,7 +716,7 @@ impl<I: Input> Rd<I> {
                             Fail::Serial(e) => {
                                 let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
                                 let message = format!("error while reading {}", member.name);
-                                Fail::Serial(e.rethrow_same(file, line, function, message))
+                                Fail::serial(e.rethrow_same(file, line, function, message))
                             }
                             other => other,
                         })?;
@@ -893,7 +937,7 @@ impl<I: Input> Rd<I> {
                 let value = self.frame_ended_at(
                     FrameKind::Named,
                     Some(declared),
-                    Some(READ_POINTER_FRAME_END),
+                    Some(&READ_POINTER_FRAME_END),
                     read,
                 )?;
                 self.inp.read_other_pointer_end()?;
@@ -963,10 +1007,10 @@ impl<I: Input> Rd<I> {
         let (file, line, function) = READ_ENUM;
         self.inp.read_enum(def).map_err(|fail| match fail {
             Fail::Serial(e) => {
-                Fail::Serial(e.rethrow_same(file, line, function, "invalid enum value"))
+                Fail::serial(e.rethrow_same(file, line, function, "invalid enum value"))
             }
             Fail::Exception(e) => {
-                Fail::Exception(e.rethrow_same(file, line, function, "invalid enum value"))
+                Fail::exception(e.rethrow_same(file, line, function, "invalid enum value"))
             }
             other => other,
         })
@@ -1903,7 +1947,9 @@ impl MaskFileReader {
             State::Failed
         };
         match fail {
-            Fail::Serial(e) | Fail::Exception(e) => MaskFileError::Ncbi(WriteDbError::Exception(e)),
+            Fail::Serial(e) | Fail::Exception(e) => {
+                MaskFileError::Ncbi(WriteDbError::Exception(*e))
+            }
             Fail::OutOfMemory => MaskFileError::Ncbi(WriteDbError::OutOfMemory),
             Fail::LengthError => {
                 MaskFileError::Ncbi(WriteDbError::Other(STRING_CREATE_LENGTH_ERROR.to_string()))

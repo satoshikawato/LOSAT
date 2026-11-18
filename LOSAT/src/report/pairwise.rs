@@ -1374,12 +1374,13 @@ fn write_alignment_with_sequences<W: Write>(
     // row (showalign.cpp:2495-2521), so they are compared without case, and the protein
     // middle line shows the uppercase residue; a PSSM query's Bioseq letters compare as they are
     // (`row_letters::QueryCase`).
+    let compared = query_case.compared_letters();
     let write_middle = |writer: &mut W, columns: std::ops::Range<usize>| {
         let middle = q_chars[columns.clone()]
             .iter()
             .zip(s_chars[columns].iter())
             .map(|(&q, s)| {
-                let q = char::from(query_case.compared(q as u8));
+                let q = char::from(compared[usize::from(q as u8)]);
                 let s = s.to_ascii_uppercase();
                 if nucleotide {
                     if q == s {
@@ -1760,13 +1761,14 @@ fn write_protein_middle<W: Write>(
     upper_subject: bool,
     query_case: super::row_letters::QueryCase,
 ) -> io::Result<()> {
+    // A record's mask compares as its capital, a PSSM query's Bioseq letter as it is
+    // (`row_letters::QueryCase`).
+    let compared = query_case.compared_letters();
     let middle = query[columns.clone()]
         .iter()
         .zip(&subject[columns])
         .map(|(&q, &s)| {
-            // A record's mask compares as its capital, a PSSM query's Bioseq letter as it is
-            // (`row_letters::QueryCase`).
-            let q = query_case.compared(q);
+            let q = compared[usize::from(q)];
             let s = if upper_subject {
                 s.to_ascii_uppercase()
             } else {

@@ -279,7 +279,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         window_size,
         small_na_compressed_query,
         scan_range,
-        lcase_masking,
         debug_mode,
         blastn_debug,
         blastn_trace_enabled,
@@ -405,7 +404,6 @@ struct ScheduleInputs<'a> {
     window_size: usize,
     small_na_compressed_query: &'a [u8],
     scan_range: usize,
-    lcase_masking: bool,
     /// The diagnostic flags: a search with a diagnostic path on has no strips.
     debug_mode: bool,
     blastn_debug: bool,
@@ -438,14 +436,13 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
         window_size,
         small_na_compressed_query,
         scan_range,
-        lcase_masking,
         debug_mode,
         blastn_debug,
         blastn_trace_enabled,
         debug_window,
     } = inputs;
-    // EXPERIMENT (LOSAT_X_BNFEWSUBJ, x_few_subj.rs): whether the seed stage's strips would take an
-    // unmasked chunk of this `-subject` search that one subject's owner searches on this thread's
+    // EXPERIMENT (LOSAT_X_BNFEWSUBJ, x_few_subj.rs): whether the seed stage's strips would take a
+    // chunk (masked or not) of this `-subject` search that one subject's owner searches on this thread's
     // pool, and with it whether the search takes the shape of a one-subject search (`use_parallel`
     // false: the subjects one at a time). A batch split into query chunks has no lookup table
     // here (its traceback only), so it keeps its shape; each query chunk's call decides for itself.
@@ -466,7 +463,6 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
     );
     let x_serial_subjects = subjects_parallel
         && x_strips
-        && !lcase_masking
         && subjects.prepared().is_some_and(|prepared| {
             let letters = prepared.letters();
             x_few_subj::serial_subjects(

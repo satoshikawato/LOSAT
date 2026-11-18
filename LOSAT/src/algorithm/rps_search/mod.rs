@@ -112,9 +112,10 @@ impl<'a> RpsRows<'a> {
 
 /// `RpsRows` whose `past` is `None` (`RpsRows::within`), as a type: the extensions read the rows
 /// up to `length` and have no step past it (`PssmRows::past_end` is `None`), so the word finders'
-/// loops instantiated with it carry no code of that step (`wordfinder::word_finder`; fix round 6
-/// of line RG D1a-4: the step's code in the hit loop of every search cost the RPS default path
-/// 1.3 % (rpsblast) to 2.9 % (rpstblastn) more instructions than dev, by the registers it took).
+/// loops instantiated with it carry no code of that step. `wordfinder::word_finder` scans with
+/// it wherever `Lc` is at or below the rows (every search but an alias file's `Lc` above them),
+/// and with `RpsRows` (the step) out of line otherwise (`wordfinder::word_finder_past`): one
+/// generic scan, the same function wherever both are valid.
 #[derive(Clone, Copy)]
 pub(crate) struct RpsRowsWithin<'a> {
     rows: &'a [[i32; BLASTAA_SIZE]],

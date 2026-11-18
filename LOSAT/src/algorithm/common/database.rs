@@ -2871,12 +2871,45 @@ pub(crate) fn refuse_joined_hits<'a>(
 //                  break;
 //             }
 // ```
+/// NCBI's count of a cut to `cut` subjects (`PruneSeqalign`; `TrimSeqAlign` counts so too): the
+/// number of the entries at the start of `entries` (one for each HSP list of a hit list, in its
+/// order) that the cut keeps, where an entry that follows one of the same subject
+/// (`joined(previous, entry)`: their Seq-align ids match) is counted with it. An error of
+/// `entries` or `joined` (a caller's read, or its refusal of the pair) ends the count. The one
+/// count of that cut, which the reports (`joined_cut`) and RPS-BLAST's check of the profiles that
+/// the reports show (`rps_search::volumes::formatter_kept`) take.
+pub(crate) fn pruned_kept<T, E>(
+    cut: usize,
+    entries: impl IntoIterator<Item = std::result::Result<T, E>>,
+    mut joined: impl FnMut(&T, &T) -> std::result::Result<bool, E>,
+) -> std::result::Result<usize, E> {
+    let mut previous: Option<T> = None;
+    let mut counted = 0usize;
+    let mut kept = 0usize;
+    for entry in entries {
+        let entry = entry?;
+        let joins = match &previous {
+            Some(previous) => joined(previous, &entry)?,
+            None => false,
+        };
+        if !joins {
+            counted += 1;
+            if counted > cut {
+                break;
+            }
+        }
+        kept += 1;
+        previous = Some(entry);
+    }
+    Ok(kept)
+}
+
 /// The number of HSP lists of a hit list (query `query`; `subjects` and `oids`, as
-/// `refuse_joined_hits` takes them) that its cut to `max_target_seqs` subjects keeps, as NCBI's formatter cuts it
-/// (`PruneSeqalign`): it counts following Seq-aligns whose Seq-align ids match as those of one
-/// subject. A copy of one record that follows another (`joins_as_copy`) is kept with it; two
-/// other parsed subjects that the count reaches with matching Seq-align ids are LOSAT's refusal.
-/// psiblast cuts its traceback hit lists so, which are longer than `-max_target_seqs`.
+/// `refuse_joined_hits` takes them) that its cut to `max_target_seqs` subjects keeps, as NCBI's
+/// formatter cuts it (`pruned_kept`): following Seq-aligns whose Seq-align ids match count as
+/// those of one subject. A copy of one record that follows another (`joins_as_copy`) is kept with
+/// it; two other parsed subjects that the count reaches with matching Seq-align ids are LOSAT's
+/// refusal. psiblast cuts its traceback hit lists so, which are longer than `-max_target_seqs`.
 pub(crate) fn joined_cut<'a>(
     query: usize,
     max_target_seqs: usize,
@@ -2884,32 +2917,24 @@ pub(crate) fn joined_cut<'a>(
     oids: crate::seqdb::OidMap<'_>,
     program: &str,
 ) -> Result<usize> {
-    let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
-    let mut counted = 0usize;
-    let mut kept = 0usize;
-    for subject in subjects {
-        if let Some((before, ordinal)) = joined_apart(previous, subject) {
-            return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {} and {} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
-                oids.oid(before),
-                oids.oid(ordinal),
-                query + 1
-            ))));
-        }
-        let joined = matches!(
-            (previous, subject),
-            (Some((_, a)), Some((_, b))) if crate::report::db_subject::joins_as_copy(a, b)
-        );
-        if !joined {
-            counted += 1;
-            if counted > max_target_seqs {
-                break;
+    pruned_kept(
+        max_target_seqs,
+        subjects.into_iter().map(Ok),
+        |&previous, &subject| {
+            if let Some((before, ordinal)) = joined_apart(previous, subject) {
+                return Err(anyhow::Error::new(ParsedRefusal(format!(
+                    "database sequences {} and {} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
+                    oids.oid(before),
+                    oids.oid(ordinal),
+                    query + 1
+                ))));
             }
-        }
-        kept += 1;
-        previous = subject;
-    }
-    Ok(kept)
+            Ok(matches!(
+                (previous, subject),
+                (Some((_, a)), Some((_, b))) if crate::report::db_subject::joins_as_copy(a, b)
+            ))
+        },
+    )
 }
 
 /// The ordinal ids of `previous` and `subject`, parsed subjects that follow each other in a hit
@@ -4331,6 +4356,38 @@ mod tests {
         let abt = open("pjoin_abt");
         assert_eq!(copy(&abt, 0, 3), RecordCopy::OtherTaxids);
         assert_eq!(copy(&abt, 0, 7), RecordCopy::Same);
+    }
+
+    // Line RG D1a-4 (fix round 7, review F N3): the one count of NCBI's cut (`PruneSeqalign`),
+    // which `joined_cut` and RPS-BLAST's `formatter_kept` take: following entries of one subject
+    // count once, the entry past the cut ends the count unread by `joined`, and an error of an
+    // entry or of `joined` ends it.
+    #[test]
+    fn the_cut_counts_following_entries_of_one_subject_once() {
+        let ids = ["a", "a", "b", "c", "c", "c", "d"];
+        let count =
+            |cut: usize| pruned_kept(cut, ids.iter().map(Ok::<_, ()>), |a, b| Ok(a == b)).unwrap();
+        let kept: Vec<usize> = (0..6).map(count).collect();
+        assert_eq!(kept, [0, 2, 3, 6, 7, 7]);
+        let mut asked = Vec::new();
+        assert_eq!(
+            pruned_kept(2, ids.iter().map(Ok::<_, ()>), |a, b| {
+                asked.push((**a, **b));
+                Ok(a == b)
+            }),
+            Ok(3)
+        );
+        assert_eq!(asked, [("a", "a"), ("a", "b"), ("b", "c")]);
+        assert_eq!(
+            pruned_kept(9, ids.iter().map(Ok), |_, b| if **b == "c" {
+                Err(4)
+            } else {
+                Ok(false)
+            }),
+            Err(4)
+        );
+        let entries = [Ok("a"), Err(5), Ok("b")];
+        assert_eq!(pruned_kept(9, entries, |a, b| Ok(a == b)), Err(5));
     }
 
     // Line DBID N3: in NCBI's order of pjoin_abc's hits (r1 of c, r6, r1 of b and a, r2, r4,

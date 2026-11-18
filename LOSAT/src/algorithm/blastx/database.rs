@@ -1460,6 +1460,29 @@ mod tests {
         }]
     }
 
+    // Line RG D1a-4 (fix round 7, review F N2): the one owner of the formatter's cut of a query's
+    // lists, which every report that NCBI cuts reads (`BatchResults::shown_lists`) and the loads
+    // of `ReportedSubjects::for_batch`: `shown` (RPSTBLASTN's count over several volumes, which
+    // joins following lists of one Seq-align id) wins over the cut, the cut keeps at most the
+    // lists there are, and `usize::MAX` (every other search) keeps every list.
+    #[test]
+    fn the_cut_of_a_querys_lists_reads_shown_before_the_cut() {
+        let mut batches = one_query(&[(0, 90), (1, 80), (2, 70), (3, 60)]);
+        let batch = &mut batches[0];
+        let oids = |lists: &[super::super::results::HspList]| {
+            lists.iter().map(|list| list.oid).collect::<Vec<_>>()
+        };
+        assert_eq!(oids(batch.cut_lists(0, usize::MAX)), [0, 1, 2, 3]);
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1]);
+        assert_eq!(oids(batch.cut_lists(0, 9)), [0, 1, 2, 3]);
+        assert!(batch.cut_lists(0, 0).is_empty());
+        batch.shown = vec![3];
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1, 2]);
+        assert_eq!(oids(batch.cut_lists(0, usize::MAX)), [0, 1, 2]);
+        batch.shown = vec![9];
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1, 2, 3]);
+    }
+
     // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
     // Seq-align), once per volume and taxid over the batches of a run, and opens the taxonomy
     // database at the run's first lookup; nothing without `taxdb.bti`. `x16_taxid_99990` (two

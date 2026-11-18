@@ -827,7 +827,8 @@ fn found_as_copy(db: &SeqDb, oid: u32) -> Result<Found, crate::seqdb::SeqDbError
 /// Seq-align ids match count as one subject, as NCBI's Seq-aligns name them (the headers read by
 /// OID, `SeqDb::read_header_of_oid`). Two volumes that hold one profile (a volume given twice
 /// under two paths) give such lists; the reports keep the same number
-/// (`common::database::joined_cut`). A list of `cut` lists or fewer is kept whole, unread.
+/// (`common::database::joined_cut`): both take the one count, `common::database::pruned_kept`.
+/// A list of `cut` lists or fewer is kept whole, unread.
 fn formatter_kept(
     db: &SeqDb,
     list: &BlastpHitList,
@@ -838,23 +839,18 @@ fn formatter_kept(
     if lists.len() <= cut {
         return Ok(lists.len());
     }
-    let mut previous: Option<crate::seqid::ParsedSeqId> = None;
-    let mut counted = 0usize;
-    for (kept, hsp_list) in lists.iter().enumerate() {
-        let id = match db.read_header_of_oid(hsp_list.oid)? {
-            crate::seqdb::SequenceHeader::Parsed(set) => set.alignment_id().cloned(),
-            crate::seqdb::SequenceHeader::Ordinal(_) => None,
-        };
-        let joined = matches!((&previous, &id), (Some(a), Some(b)) if compare(a, b) == Sic::Yes);
-        if !joined {
-            counted += 1;
-            if counted > cut {
-                return Ok(kept);
-            }
-        }
-        previous = id;
-    }
-    Ok(lists.len())
+    crate::algorithm::common::database::pruned_kept(
+        cut,
+        lists.iter().map(|hsp_list| {
+            Ok(match db.read_header_of_oid(hsp_list.oid)? {
+                crate::seqdb::SequenceHeader::Parsed(set) => set.alignment_id().cloned(),
+                crate::seqdb::SequenceHeader::Ordinal(_) => None,
+            })
+        }),
+        |previous, id| {
+            Ok(matches!((previous, id), (Some(a), Some(b)) if compare(a, b) == Sic::Yes))
+        },
+    )
 }
 
 /// The consensus letters of a volume's profiles at their offsets (the traceback's letters and the

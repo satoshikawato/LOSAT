@@ -241,7 +241,7 @@ def main():
     # ```
     # blastx's BLAST XML (outfmt 5), XML2 and JSON (13 to 16) through each WASI command, at -num_threads 1: every
     # blastx row of these formats of the frozen NCBI -subject fixtures (outfmt0_manifest.tsv, 88 rows) and -db
-    # fixtures (db_search_manifest/blastx*.tsv, 211 rows), byte for byte, by the checkers of the native gates
+    # fixtures (db_search_manifest/blastx*.tsv, 230 rows), byte for byte, by the checkers of the native gates
     # (`blastx_prescan_checkers`), through the wrapper of psiblast's checks (above), in the same loop.
     # In these formats LOSAT reads the query file once before the search, for its refusals before the first byte
     # (LOSAT/src/algorithm/blastx/blast_xml.rs `prescan_queries`): it reads the open file itself and puts it back

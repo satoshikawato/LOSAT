@@ -417,6 +417,64 @@ def main():
         print(f"stdin/{program}", "native bytes PASS", flush=True)
     import shutil
     shutil.rmtree(rps_db.parent)
+    # NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
+    # ```c++
+    #     m_LogFile = & (args["logfile"].HasValue()
+    #                    ? args["logfile"].AsOutputFile()
+    #                    : cout);
+    # ```
+    # makeblastdb -logfile through each WASI command. First every makeblastdb -logfile row of the drop-in corpus
+    # against its frozen NCBI bytes, by the checker of the native gates (dropin_corpus.py check: the exit status,
+    # stdout, a quiet stderr, the log file and the database files, without the lines of the time and the path),
+    # through a wrapper that starts the command's runner in the place of the binary, as the psiblast rows above.
+    # Then two runs that append to one log file, the second with a warning and an error between the log's lines:
+    # each run's stdout, stderr and exit status, and the log file's bytes without the lines of the time and the
+    # path (dropin_corpus.report_without_time), must be the native command's. LOSAT writes the log through the
+    # open file of the diagnostics (LOSAT/src/writedb/makeblastdb.rs `log_of`); before, it wrote through a second
+    # handle of it, which WASI cannot make, and every such run stopped with 'Argument "logfile". File is not
+    # accessible'.
+    import dropin_corpus
+    logfile_rows = [row["row_id"] for row in dropin_corpus.read_manifest()[1]
+                    if shlex.split(row["command"])[0] == "makeblastdb" and "-logfile" in shlex.split(row["command"])]
+    assert logfile_rows, "no makeblastdb -logfile row in the drop-in corpus"
+    writedb_inputs = TESTS / "writedb_v5"
+    logfile_runs = [(["-in", writedb_inputs / "a.fa"], "db"),
+                    (["-in", f"{writedb_inputs / 'd.txt'} {writedb_inputs / 'a.fa'}"], "db2")]
+    def logfile_case(kind):
+        directory = out / "makeblastdb-logfile" / kind / "append"
+        directory.mkdir(parents=True, exist_ok=True)
+        log_path = directory / "mk.log"
+        log_path.unlink(missing_ok=True)
+        results = []
+        for index, (words, name) in enumerate(logfile_runs):
+            data, log = execute(f"makeblastdb-logfile/{kind}/append-{index}",
+                                [*prefixes[kind], "makeblastdb", *words, "-dbtype", "prot", "-out", directory / name,
+                                 "-title", "t", "-logfile", log_path], expected=None)
+            results.append((data, log, rows[-1]["exit"]))
+        return results, log_path.read_bytes()
+    reference_runs, reference_log = logfile_case("native")
+    assert [run[2] for run in reference_runs] == [0, 1] and reference_log.count(b"Building a new DB") == 2 \
+        and b"Warning: [makeblastdb]" in reference_log, (reference_runs, reference_log)
+    for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+        wrapper = out / "makeblastdb-logfile" / kind / "losat"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(str(x)) for x in prefixes[kind]) + ' "$@"\n')
+        wrapper.chmod(0o755)
+        for row_id in logfile_rows:
+            label = f"makeblastdb-logfile/{kind}/{row_id}"
+            try:
+                execute(label, [sys.executable, TESTS / "dropin_corpus.py", "check", "--losat", wrapper, "--only", row_id],
+                        timeout=600)
+            except AssertionError:
+                print((out / label / "stdout").read_text(errors="replace"), flush=True)
+                raise
+            lines = (out / label / "stdout").read_text().splitlines()
+            assert lines == [f"{row_id}\tsame", "1 / 1 same"], (label, lines)
+        runs, log = logfile_case(kind)
+        assert runs == reference_runs, f"stdout, stderr or exit status differs from native: makeblastdb-logfile/{kind}"
+        assert dropin_corpus.report_without_time(log) == dropin_corpus.report_without_time(reference_log), \
+            f"the -logfile file differs from native: makeblastdb-logfile/{kind}"
+        print(f"makeblastdb-logfile/{kind}", f"{len(logfile_rows)} drop-in rows same, appended log = native", flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

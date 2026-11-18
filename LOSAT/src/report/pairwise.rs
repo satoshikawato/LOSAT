@@ -288,7 +288,8 @@ pub struct PairwiseHit {
 impl PairwiseHit {
     /// Whether the rows of the HSP are empty: BLASTX's ungapped HSPs of length 0
     /// (`algorithm::blastx::empty_rows::rows_empty`), the only ones without a column, whose
-    /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227).
+    /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227). It reads the hit's
+    /// offsets, which a BLASTX hit takes from its Seq-align (`Hsp::seqalign_ends`).
     pub(crate) fn rows_empty(&self) -> bool {
         self.hit.has_sort_offsets
             && super::serial::seqalign::ungapped_rows_empty(
@@ -3372,13 +3373,23 @@ impl BlastpSections<'_> {
     /// The gapped Karlin block of query `q_idx`'s footer: the report's, with rpsblast's K of
     /// the query (the first query of a batch has the K that the RPS traceback wrote).
     fn gapped_karlin(&self, q_idx: usize) -> KarlinParams {
-        match self.query_gapped_k {
-            Some(gapped_k) => KarlinParams {
-                k: gapped_k[q_idx],
-                ..self.report.gapped_karlin
-            },
-            None => self.report.gapped_karlin,
-        }
+        query_gapped_karlin(self.report, self.query_gapped_k, q_idx)
+    }
+}
+
+/// The gapped Karlin block of query `q_idx`'s footer: the report's, with the query's K where
+/// the search gives each query its own (`query_gapped_k`: rpsblast's and RPSTBLASTN's).
+fn query_gapped_karlin(
+    report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
+    q_idx: usize,
+) -> KarlinParams {
+    match query_gapped_k {
+        Some(gapped_k) => KarlinParams {
+            k: gapped_k[q_idx],
+            ..report.gapped_karlin
+        },
+        None => report.gapped_karlin,
     }
 }
 
@@ -7325,6 +7336,8 @@ pub fn write_blastx_pairwise_report<W: Write>(
     database: Option<BlastxDatabaseSubjects<'_>>,
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     record_titles: &[&[u8]],
+    // Each query's gapped K where it is not the report's (`BatchResults::gapped_k`).
+    query_gapped_k: Option<&[f64]>,
     probe: Option<&mut FormatProbe<'_>>,
     first_hsp: HspIndex,
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
@@ -7338,6 +7351,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         queries,
         subject_labels,
         report,
+        query_gapped_k,
         database,
         records_parsed,
         record_titles,
@@ -7399,6 +7413,9 @@ struct BlastxSections<'a> {
     /// The description line of each subject, by subject index (`database_description_label`).
     subject_labels: &'a [DescriptionLabel],
     report: &'a BlastpPairwiseReport,
+    /// Each query's gapped K where it is not the report's (an RPSTBLASTN search with
+    /// composition-based statistics, `BatchResults::gapped_k`), as rpsblast's.
+    query_gapped_k: Option<&'a [f64]>,
     /// A `-db` report's subjects (`None` for `-subject`).
     database: Option<BlastxDatabaseSubjects<'a>>,
     /// A `-subject` report's records with parsed Seq-ids, by subject index.
@@ -7647,6 +7664,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             writer,
             &self.queries[q_idx],
             self.report,
+            query_gapped_karlin(self.report, self.query_gapped_k, q_idx),
             self.options.gapped,
         )
     }
@@ -7874,11 +7892,12 @@ pub fn write_blastx_epilog(
 //             out << buffer;
 // ```
 /// The footer of a BLASTX query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its Karlin
-/// blocks, `gapped`: the gapped one).
+/// blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
 fn write_blastx_query_footer(
     writer: &mut impl Write,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,
+    gapped_karlin: KarlinParams,
     gapped: bool,
 ) -> io::Result<()> {
     let (valid, skipped) = (query.valid, query.batch_skipped);
@@ -7889,7 +7908,7 @@ fn write_blastx_query_footer(
         return write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            report.gapped_karlin,
+            gapped_karlin,
             report.gumbel,
             query.effective_search_space,
             false,
@@ -8806,6 +8825,7 @@ mod tblastx_tests {
                 None,
                 &[],
                 &[],
+                None,
                 None,
                 0,
                 None,

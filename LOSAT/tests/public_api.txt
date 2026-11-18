@@ -153,7 +153,7 @@ pub fn losat::api::Batches<'_>::query_count(&self) -> usize
 impl core::iter::traits::iterator::Iterator for losat::api::Batches<'_>
 pub type losat::api::Batches<'_>::Item = core::result::Result<losat::api::Batch, losat::api::Error>
 pub fn losat::api::Batches<'_>::next(&mut self) -> core::option::Option<Self::Item>
-impl<'a> core::marker::Freeze for losat::api::Batches<'a>
+impl<'a> !core::marker::Freeze for losat::api::Batches<'a>
 impl<'a> core::marker::Send for losat::api::Batches<'a>
 impl<'a> core::marker::Sync for losat::api::Batches<'a>
 impl<'a> core::marker::Unpin for losat::api::Batches<'a>

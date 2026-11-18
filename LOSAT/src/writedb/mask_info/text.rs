@@ -87,7 +87,7 @@ impl<S: AsnSource> TextIn<S> {
             ),
             // Every error of the lexical reader that this reader meets names NCBI's throw; one
             // that did not would be refused, not reported in LOSAT's words.
-            _ => Fail::Unsupported(error.message),
+            _ => Fail::unsupported(error.message),
         }
     }
 

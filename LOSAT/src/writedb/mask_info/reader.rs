@@ -99,9 +99,11 @@ impl fmt::Display for MaskFileError {
 
 impl std::error::Error for MaskFileError {}
 
-/// What a primitive or a frame reports: the class of what NCBI's reader throws. The exceptions
-/// are boxed (`Fail::serial`, `Fail::exception`), which keeps every primitive's result (`R`) as
-/// small as a `String`: no exception is built on the paths that read a valid file.
+/// What a primitive or a frame reports: the class of what NCBI's reader throws. What a variant
+/// holds is boxed (`Fail::serial`, `Fail::exception`, `Fail::unsupported`), so `Fail` and every
+/// primitive's result (`R`) start with a tag (an unboxed `String` would make the result a niche
+/// of its capacity, a 64-bit constant at each `Ok` and `?`); no error is built on the paths
+/// that read a valid file.
 #[derive(Debug)]
 pub(super) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
@@ -116,7 +118,7 @@ pub(super) enum Fail {
     /// `std::length_error` of that `reserve`: `what()` is [`STRING_CREATE_LENGTH_ERROR`].
     LengthError,
     /// NCBI reads it; LOSAT does not.
-    Unsupported(String),
+    Unsupported(Box<str>),
 }
 
 pub(super) type R<T> = Result<T, Fail>;
@@ -132,6 +134,12 @@ impl Fail {
     #[cold]
     pub(super) fn exception(e: NcbiException) -> Fail {
         Fail::Exception(Box::new(e))
+    }
+
+    /// [`Fail::Unsupported`] of `what`.
+    #[cold]
+    pub(super) fn unsupported(what: String) -> Fail {
+        Fail::Unsupported(what.into_boxed_str())
     }
 }
 
@@ -257,7 +265,7 @@ pub(super) fn reserve_string(length: u64) -> R<()> {
 #[inline(never)]
 fn host_dependent_string(length: u64) -> Fail {
     let bytes = length + 1;
-    Fail::Unsupported(format!(
+    Fail::unsupported(format!(
         "a string whose length ({length} bytes) passes the end of the file: makeblastdb \
          allocates {bytes} bytes for it, which succeeds or fails by the host's memory"
     ))
@@ -383,7 +391,7 @@ const MAX_DEPTH: usize = 400;
 #[cold]
 #[inline(never)]
 fn too_deep() -> Fail {
-    Fail::Unsupported(format!("objects nested more than {MAX_DEPTH} levels deep"))
+    Fail::unsupported(format!("objects nested more than {MAX_DEPTH} levels deep"))
 }
 
 /// A frame of NCBI's object stack (`object_frame`). The reader keeps only the depth of its stack
@@ -1061,7 +1069,7 @@ impl<I: Input> Rd<I> {
     #[inline(never)]
     fn other_type(&self, name: &[u8], declared: &'static str) -> Fail {
         let name = String::from_utf8_lossy(name);
-        Fail::Unsupported(format!(
+        Fail::unsupported(format!(
             "':{name}', a value of the type {name} where a {declared} belongs ({}): whether \
              makeblastdb reads it depends on the types its process has met before",
             self.inp.position()
@@ -2117,7 +2125,7 @@ impl MaskFileReader {
             Fail::LengthError => {
                 MaskFileError::Ncbi(WriteDbError::Other(STRING_CREATE_LENGTH_ERROR.to_string()))
             }
-            Fail::Unsupported(what) => MaskFileError::Unsupported(what),
+            Fail::Unsupported(what) => MaskFileError::Unsupported(what.into_string()),
             Fail::Eof => MaskFileError::EofInContinuation {
                 path: self.path.clone(),
             },

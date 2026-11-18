@@ -1052,7 +1052,7 @@ pub(super) fn write_custom_tabular(
     // first byte, so that their refusals come before it).
     let taxonomy = match (listed_titles.as_ref(), database) {
         (Some(titles), Some(database)) if needs.taxonomy => {
-            titles.tabular_taxonomy(database, hit_lists)?
+            titles.tabular_taxonomy(database, hit_lists, view.hit_loads)?
         }
         _ => Vec::new(),
     };
@@ -1076,6 +1076,7 @@ pub(super) fn write_custom_tabular(
             sources: listed_sources,
             length: &subject_length,
             taxonomy: &taxonomy,
+            loads: view.hit_loads,
         },
         _ => tabular::TabularSubjects::Records {
             records: subject_records,
@@ -1234,6 +1235,7 @@ pub(super) fn write_text(
         query_titles,
         subject_ids,
         subject_accessions,
+        view.hit_loads,
         tabular_unsearched,
         psiblast_hits_found.as_deref(),
         context,

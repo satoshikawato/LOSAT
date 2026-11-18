@@ -150,6 +150,8 @@ On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can
 
 On WASI, a value in psiblast's ASN.1 PSSM file (`-out_pssm` with `-out_ascii_pssm`) can differ from other platforms by 1 in its last (15th) digit because WebAssembly's `log()` has no FMA, as in NCBI BLAST+ on an x86-64 CPU without FMA; see [PD-LOSAT-PLATFORM-LIBM](docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
+On WASI, the host program opens the files: Node.js (`node:wasi`) reads `..` in a path as text, without looking at the directory before it, so with Node.js `makeblastdb -out gone/../db` builds `db` and `-query gone/../q.fa` reads `q.fa` even when `gone` does not exist, where NCBI BLAST+ and native LOSAT on Linux stop with an error.
+
 ---
 
 ## Quick Start

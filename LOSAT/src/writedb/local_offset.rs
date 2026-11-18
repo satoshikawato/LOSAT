@@ -8,7 +8,11 @@
 //! The rule-string reader reproduces the C library's reader, including how it treats
 //! malformed strings and its use of the UTC year of the instant when it places the
 //! DST transitions, so that both give the same answer for every input.
-#![cfg_attr(not(unix), allow(dead_code))]
+//!
+//! The WASI targets read the zone the same way, from what their host gives the module: its
+//! environment (`TZ`, `TZDIR`) and the files of its preopened directories. WASI preview 1
+//! has no call for the time zone.
+#![cfg_attr(windows, allow(dead_code))]
 
 use std::ffi::OsStr;
 use std::io::Read;
@@ -30,11 +34,17 @@ use std::path::Path;
 // #else
 //     t = ( GetTimeZone() == eLocal ) ? localtime(&timer) : gmtime(&timer);
 // ```
-/// Seconds east of UTC of the system's local time zone at `unix_seconds`, as the C
-/// library's `localtime_r` gives it on Unix. `None` when the zone cannot be determined
-/// (the caller then uses UTC) and on platforms that are not Unix.
+// The reference platform is Unix (glibc). A WASI module has no time zone call (WASI
+// preview 1); it sees the environment and the directories its host gives it, and reading
+// `TZ`, `TZDIR` and `/etc/localtime` there as glibc reads them on the host gives the time
+// that NCBI's makeblastdb prints on that host. Windows' C library takes the zone from the
+// system's settings (and its own form of `TZ`), which LOSAT does not read.
+/// Seconds east of UTC of the local time zone at `unix_seconds`, as the C library's
+/// `localtime_r` gives it on Unix, from the process's environment and file system (on
+/// WASI, the host's environment and preopened directories). `None` when the zone cannot be
+/// determined (the caller then uses UTC) and on Windows.
 pub fn local_utc_offset(unix_seconds: i64) -> Option<i32> {
-    #[cfg(unix)]
+    #[cfg(not(windows))]
     {
         resolve(
             std::env::var_os("TZ").as_deref(),
@@ -43,7 +53,7 @@ pub fn local_utc_offset(unix_seconds: i64) -> Option<i32> {
             unix_seconds,
         )
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
         let _ = unix_seconds;
         None
@@ -1430,7 +1440,10 @@ mod tests {
 
     #[test]
     fn local_utc_offset_follows_the_platform() {
-        assert_eq!(local_utc_offset(1_700_000_000).is_some(), cfg!(unix));
+        assert_eq!(
+            local_utc_offset(1_700_000_000).is_some(),
+            cfg!(not(windows))
+        );
     }
 
     #[test]

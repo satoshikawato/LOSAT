@@ -6,6 +6,7 @@ import json
 import os
 import platform
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -92,6 +93,60 @@ DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "d
 # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
 # x_PrintField(*iter); m_Ostream << "\n";
 # Retain exact argv, stderr and outputs. No sorting or output normalization.
+# NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1104-1105
+# ```c++
+#     m_LogFile << "\n\nBuilding a new DB, current time: "
+#               << CTime(CTime::eCurrent).AsString() << endl;
+# ```
+# NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:88-97
+# ```c++
+#     CTime now(CTime::eCurrent);
+#
+#     m_Date = now.AsString("b d, Y  ");
+#     string t = now.AsString("H:m P");
+# ```
+# The local times that makeblastdb's log ("M/D/Y h:m:s", to the second) and the database's date (to the minute:
+# blastdbcmd -info's "Date:", a search report's "Posted date:") print, and the time that makeblastdb's log gives
+# for the build (`local_times`).
+LOG_TIME = re.compile(rb"(?<=^Building a new DB, current time: )(\d\d)/(\d\d)/(\d{4}) (\d\d):(\d\d):(\d\d)$", re.M)
+DB_DATE = re.compile(rb"(?<=^Date: )([A-Z][a-z]{2}) (\d{1,2}), (\d{4})  (\d{1,2}):(\d\d) ([AP]M)(?=\t)"
+                     rb"|(?<=^    Posted date:  )([A-Z][a-z]{2}) (\d{1,2}), (\d{4})  (\d{1,2}):(\d\d) ([AP]M)$", re.M)
+BUILD_SECONDS = re.compile(rb"(?<= sequences in )[0-9.e+-]+(?= seconds\.$)", re.M)
+MONTHS = [b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"]
+
+
+def local_times(data):
+    """`data` with each local time of LOG_TIME and DB_DATE replaced by `<time>` and the build's seconds by
+    `<seconds>`, and the times it printed: (seconds since 1970-01-01 of the printed calendar time, read as UTC;
+    the resolution in seconds: 1 for the log, 60 for the date)."""
+    import calendar
+    found = []
+
+    def log_time(match):
+        month, day, year, hour, minute, second = (int(x) for x in match.groups())
+        found.append((calendar.timegm((year, month, day, hour, minute, second)), 1))
+        return b"<time>"
+
+    def db_date(match):
+        groups = [x for x in match.groups() if x is not None]
+        month, day, year, hour12, minute, half = groups
+        hour = int(hour12) % 12 + (12 if half == b"PM" else 0)
+        found.append((calendar.timegm((int(year), MONTHS.index(month) + 1, int(day), hour, int(minute), 0)), 60))
+        return b"<time>"
+
+    data = BUILD_SECONDS.sub(b"<seconds>", DB_DATE.sub(db_date, LOG_TIME.sub(log_time, data)))
+    return data, found
+
+
+def is_local_time_of(printed, resolution, offset, started, ended):
+    """Whether a local time that `local_times` read (`printed`, to `resolution` seconds) is a time between the
+    instants `started` and `ended` (seconds since 1970, UTC; one second of slack) in the zone `offset` seconds
+    east of UTC."""
+    first = int(started - 1 + offset) // resolution * resolution
+    last = int(ended + 1 + offset) // resolution * resolution
+    return first <= printed <= last
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", type=Path, required=True)
@@ -123,26 +178,28 @@ def main():
     environment = {k: v for k, v in os.environ.items() if not k.startswith(("LOSAT_", "RAYON_")) and k != "BL2SEQ_LEGACY"}
     environment.update(NODE_NO_WARNINGS="1", LC_ALL="C")
     # stdin: bytes through a pipe, or a Path opened as the standard input (a regular file); expected=None: any exit.
-    def execute(label, argv, env=None, expected=0, timeout=60, stdin=None):
+    # cwd: the run's working directory (ROOT by default); a variable of env whose value is None is left out.
+    def execute(label, argv, env=None, expected=0, timeout=60, stdin=None, cwd=ROOT):
         directory = out / label; directory.mkdir(parents=True, exist_ok=True)
         result_path = directory / "result.out"
         argv = [str(x).replace("{out}", str(result_path)) for x in argv]
+        run_env = {k: v for k, v in {**environment, **(env or {})}.items() if v is not None}
         try:
             if isinstance(stdin, Path):
                 with open(stdin, "rb") as handle:
-                    result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, stdin=handle, capture_output=True, timeout=timeout)
+                    result = subprocess.run(argv, cwd=cwd, env=run_env, stdin=handle, capture_output=True, timeout=timeout)
             else:
-                result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, input=stdin, capture_output=True, timeout=timeout)
+                result = subprocess.run(argv, cwd=cwd, env=run_env, input=stdin, capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired as error:
             (directory / "stdout").write_bytes(error.stdout or b"")
             (directory / "stderr").write_bytes(error.stderr or b"")
-            rows.append(dict(label=label, argv=argv, cwd=str(ROOT), env=env or {}, status="TIMEOUT", timeout_seconds=timeout))
+            rows.append(dict(label=label, argv=argv, cwd=str(cwd), env=env or {}, status="TIMEOUT", timeout_seconds=timeout))
             (out / "runs.json").write_text(json.dumps(rows, indent=2) + "\n")
             raise
 
         (directory / "stdout").write_bytes(result.stdout); (directory / "stderr").write_bytes(result.stderr)
         data = result_path.read_bytes() if result_path.exists() else result.stdout
-        row = dict(label=label, argv=argv, cwd=str(ROOT), env=env or {}, exit=result.returncode, sha256=digest(data))
+        row = dict(label=label, argv=argv, cwd=str(cwd), env=env or {}, exit=result.returncode, sha256=digest(data))
         rows.append(row); (out / "runs.json").write_text(json.dumps(rows, indent=2) + "\n")
         assert expected is None or (result.returncode == 0) == (expected == 0), (label, result.returncode, result.stderr.decode())
         return data, result.stderr.decode()
@@ -464,6 +521,83 @@ def main():
             n = 1 if kind in ["serial", "native-serial"] else 4
             _, log = execute(f"output-error/{program}-{kind}", [*prefix, program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-num_threads", str(n), "-out", target], expected=1)
             assert "directory" in log.lower(), log
+    # NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1102-1107
+    # ```c++
+    #     CreateDirectories(dbname);
+    #     const string output_dbname = CDirEntry::CreateAbsolutePath(dbname);
+    #     m_LogFile << "\n\nBuilding a new DB, current time: "
+    #               << CTime(CTime::eCurrent).AsString() << endl;
+    #
+    #     m_LogFile << "New DB name:   " << output_dbname << endl;
+    # ```
+    # makeblastdb's local time and absolute database name through each WASI command, in a working directory of
+    # their own, with the zone of TZ as a zone file (Asia/Tokyo), as a POSIX rule (JST-9) and unset (the host's
+    # /etc/localtime): a new database, the same again ("Deleted existing ... named"), one in two new directories,
+    # one whose directory is a file (an error), blastdbcmd -info of two and a blastn report of one (the database's
+    # date, the volume paths). Each run's stdout, stderr and exit status must be the native command's
+    # of the same directory and zone, with the times put aside (`local_times`); each time must be the local time
+    # of its build in the zone that the C library finds for the run's TZ (Python's time.localtime; the clock moves
+    # between the runs, LOSAT has no fixed clock to test with); the files must have the native names. LOSAT reads
+    # the zone as glibc reads it on every target but Windows, on WASI from the environment and the directories the
+    # host gives (LOSAT/src/writedb/local_offset.rs), and makes a relative name absolute with wasi-libc's working
+    # directory, which the command sets from the host's PWD (LOSAT/src/writedb/build_db.rs
+    # `create_absolute_path`). Before, the WASI commands printed UTC and the name as given.
+    def libc_offset(tz):
+        probe = "import time; print(time.localtime().tm_gmtoff)"
+        run_env = {k: v for k, v in {**environment, "TZ": tz}.items() if v is not None}
+        return int(subprocess.check_output([sys.executable, "-c", probe], env=run_env, text=True))
+    makedb = ["makeblastdb", "-in", inputs["nuc3"], "-dbtype", "nucl"]
+    local_steps = [
+        # label, the words after the program, the step that built the database whose date the output prints
+        ("new", [*makedb, "-out", "db", "-title", "t"], "new"),
+        ("again", [*makedb, "-out", "db", "-title", "t"], "again"),
+        ("subdir", [*makedb, "-out", "sub/new/db2"], "subdir"),
+        ("file-as-dir", [*makedb, "-out", "file/db3"], None),
+        ("info", ["blastdbcmd", "-db", "db", "-info"], "again"),
+        ("info-subdir", ["blastdbcmd", "-db", "sub/new/db2", "-info"], "subdir"),
+        ("report", ["blastn", "-query", inputs["nuc1"], "-db", "db", "-outfmt", "0", "-num_threads", "1"], "again"),
+    ]
+    for zone, tz, fixed_offset in [("zone-file", "Asia/Tokyo", 32400), ("posix-rule", "JST-9", 32400),
+                                   ("host", None, None)]:
+        offset = libc_offset(tz)
+        assert fixed_offset is None or offset == fixed_offset, (zone, tz, offset)
+        work = out / "local-time-and-path" / zone / "work"
+        reference = None
+        for kind in prefixes:
+            shutil.rmtree(work, ignore_errors=True)
+            work.mkdir(parents=True)
+            (work / "file").write_text("not a directory\n")
+            results, built = [], {}
+            for step, words, date_of in local_steps:
+                started = time.time()
+                data, log = execute(f"local-time-and-path/{zone}/{kind}/{step}", [*prefixes[kind], *words],
+                                    {"TZ": tz}, expected=None, timeout=120, cwd=work)
+                ended = time.time()
+                if words[0] == "makeblastdb":
+                    built[step] = (started, ended)
+                data, printed = local_times(data)
+                for value, resolution in printed:
+                    at = (started, ended) if resolution == 1 else built[date_of]
+                    assert is_local_time_of(value, resolution, offset, *at), \
+                        f"not the local time of TZ={tz} (offset {offset} s): local-time-and-path/{zone}/{kind}/{step}"
+                results.append((step, data, log, rows[-1]["exit"], len(printed)))
+            results.append(("files", sorted(str(path.relative_to(work)) for path in work.rglob("*")), "", 0, 0))
+            if reference is None:
+                assert kind == "native", list(prefixes)
+                reference = results
+                # makeblastdb's exception ("Failed to create directory 'file'") exits with 255 before its log;
+                # each other run prints one time.
+                directory = str(work).encode()
+                assert [(r[3], r[4]) for r in results[:-1]] == [(0, 1), (0, 1), (0, 1), (255, 0), (0, 1), (0, 1), (0, 1)] \
+                    and b"New DB name:   " + directory + b"/db\n" in results[0][1] \
+                    and b"named " + directory + b"/db\n" in results[1][1] \
+                    and b"Volumes:\n\t" + directory + b"/sub/new/db2\n" in results[5][1] \
+                    and b"Failed to create directory 'file'" in results[3][2].encode(), [r[0::3] for r in results]
+                continue
+            for got, want in zip(results, reference):
+                assert got == want, f"stdout, stderr, exit status or files differ from native: " \
+                                    f"local-time-and-path/{zone}/{kind}/{got[0]}"
+        print(f"local-time-and-path/{zone}", f"TZ={tz} offset {offset} s", "native bytes PASS", flush=True)
     execute("reactor", [args.node, TESTS / "check_wasi_reactor.js", args.reactor.resolve(), out / "fixtures", out / "reactor-records"], {"LOSAT_WASI_THREADS_DEBUG": "1"}, timeout=90)
     for fault in ["startup-timeout", "startup-error", "trap", "abnormal-exit"]:
         _, log = execute("fault/" + fault, [args.node, TESTS / "check_wasi_fault.js", args.reactor.resolve(), inputs["nuc1"], fault], {"LOSAT_WASI_THREADS_DEBUG": "1"}, expected=1, timeout=15)

@@ -150,6 +150,8 @@ On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can
 
 On WASI, a value in psiblast's ASN.1 PSSM file (`-out_pssm` with `-out_ascii_pssm`) can differ from other platforms by 1 in its last (15th) digit because WebAssembly's `log()` has no FMA, as in NCBI BLAST+ on an x86-64 CPU without FMA; see [PD-LOSAT-PLATFORM-LIBM](docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
+A WASI command learns the time zone and the working directory only from its host: makeblastdb writes local times when the host passes `TZ` or gives the module the zone files (`/etc/localtime`, `/usr/share/zoneinfo`), UTC otherwise, and relative file names and makeblastdb's `New DB name:` start from the `PWD` the host passes (`/` without it). `LOSAT/tests/run_losat_wasi.js` passes the environment and `PWD` and gives the module `/`.
+
 ---
 
 ## Quick Start

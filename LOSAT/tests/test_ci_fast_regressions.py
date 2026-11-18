@@ -887,5 +887,57 @@ class WasmDbTotalRowsTests(unittest.TestCase):
             self.assertEqual([row["row_id"] for row in rows if row["row_id"].startswith(row_id)], [row_id])
 
 
+
+class WasmLocalTimeTests(unittest.TestCase):
+    """The local times that check_wasm_threading.py puts aside in the outputs of makeblastdb, blastdbcmd -info and
+    a search report of its local-time-and-path block (`local_times`), and its test that each is the local time of
+    its run (`is_local_time_of`)."""
+
+    def test_each_form_is_read_and_put_aside(self):
+        import calendar
+        import check_wasm_threading as watcher
+
+        log = (b"\n\nBuilding a new DB, current time: 11/18/2026 21:27:29\nNew DB name:   /w/db\n"
+               b"Adding sequences from FASTA; added 3 sequences in 0.00400209 seconds.\n")
+        self.assertEqual(watcher.local_times(log), (
+            b"\n\nBuilding a new DB, current time: <time>\nNew DB name:   /w/db\n"
+            b"Adding sequences from FASTA; added 3 sequences in <seconds> seconds.\n",
+            [(calendar.timegm((2026, 11, 18, 21, 27, 29)), 1)]))
+        # makeblastdb 2.17.0's form of a short build time.
+        self.assertEqual(watcher.local_times(b"added 1 sequences in 5.5e-05 seconds.\n")[0],
+                         b"added 1 sequences in <seconds> seconds.\n")
+        info = b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: Nov 8, 2026  9:07 PM\tLongest sequence: 900 bases\n"
+        self.assertEqual(watcher.local_times(info), (
+            b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: <time>\tLongest sequence: 900 bases\n",
+            [(calendar.timegm((2026, 11, 8, 21, 7, 0)), 60)]))
+        report = b"  Database: t\n    Posted date:  Jan 1, 2027  12:05 AM\n  Number of letters in database: 2,700\n"
+        self.assertEqual(watcher.local_times(report), (
+            b"  Database: t\n    Posted date:  <time>\n  Number of letters in database: 2,700\n",
+            [(calendar.timegm((2027, 1, 1, 0, 5, 0)), 60)]))
+        self.assertEqual(watcher.local_times(b"Date: Dec 31, 2026  12:59 PM\t")[1],
+                         [(calendar.timegm((2026, 12, 31, 12, 59, 0)), 60)])
+        # Text that only looks like a time stays.
+        other = b"Query= Date: Nov 8, 2026  9:07 PM\nbuilt 11/18/2026 21:27:29\n"
+        self.assertEqual(watcher.local_times(other), (other, []))
+
+    def test_a_time_is_the_local_time_of_its_run_in_the_zone(self):
+        import check_wasm_threading as watcher
+
+        started, ended = 1_795_000_000.4, 1_795_000_002.9
+        jst = 32400
+        # The log, to the second: any second of the run, one second of slack at each end.
+        for printed in [1_795_000_000 + jst, 1_795_000_002 + jst, 1_794_999_999 + jst, 1_795_000_003 + jst]:
+            self.assertTrue(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        for printed in [1_794_999_998 + jst, 1_795_000_004 + jst, 1_795_000_001]:
+            self.assertFalse(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        # The date, to the minute: the minute of the run's start or end.
+        minute = (1_795_000_000 + jst) // 60 * 60
+        self.assertTrue(watcher.is_local_time_of(minute, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - 60, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - jst, 60, jst, started, ended))
+        # UTC is the zone of offset 0.
+        self.assertTrue(watcher.is_local_time_of(1_795_000_001, 1, 0, started, ended))
+
+
 if __name__ == "__main__":
     unittest.main()

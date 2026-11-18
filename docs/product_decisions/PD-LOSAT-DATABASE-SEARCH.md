@@ -600,8 +600,9 @@ Undefined behaviour of NCBI that is not reproduced:
 - The test whether an input looks like FASTA does not read past the bytes it sampled.
 
 The creation date is the local time, found without the C library: the zone comes from `TZ`,
-`TZDIR` and `/etc/localtime` as glibc reads them. On Windows and under WASI, and when no
-zone can be read, the date is UTC. Zone files with leap-second records give a time 27
+`TZDIR` and `/etc/localtime` as glibc reads them, under WASI from the environment and the
+directories that the host gives the module. On Windows, and when no zone can be read, the date
+is UTC. Zone files with leap-second records give a time 27
 seconds later than the C library's, and a `TZ` value with a daylight-saving name but no
 rule follows the United States rules unless `posixrules` says otherwise.
 

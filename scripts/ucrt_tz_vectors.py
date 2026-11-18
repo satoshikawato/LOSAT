@@ -57,6 +57,10 @@ TZ_VALUES = [
 
 DAY = 86_400
 MAX_TIME64 = 0x7_9358_2AFF
+# Only instants of `localtime`'s first branch (ucrt/time/localtime.cpp:58: more than three days
+# after the epoch and before max_time_t, 3001-01-19 07:59:59 UTC): LOSAT does not port the branch
+# for the three days at either end (the current time is never there), so the vectors claim no
+# UCRT version's behaviour there.
 INSTANTS = [
     3 * DAY + 1, 946_684_799, 946_684_800, 1_000_000_000, 1_700_000_000, 1_795_000_000,
     1_798_761_599, 1_798_761_600, 2_147_483_647, 2_147_483_648, 4_102_444_799, 4_102_444_800,

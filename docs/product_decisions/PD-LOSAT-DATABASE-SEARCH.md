@@ -605,7 +605,7 @@ directories that the host gives the module, and on Windows from `TZ` and the sys
 Microsoft's C runtime (UCRT) reads them for NCBI's Windows build. A `TZ` offset beyond 596,523
 hours overflows UCRT's 32-bit arithmetic (undefined in C++); LOSAT takes the mathematical value.
 When no zone can be read, the date is UTC; so it is on Windows where UCRT's `localtime` fails (a
-`TZ` offset that puts the local time before 1969-12-31 12:00 or after 3001-01-01 13:59:59, where
+`TZ` offset that puts the local time before 1969-12-31 12:00 or after 3001-01-19 21:59:59, where
 NCBI's `CTime` throws).
 Zone files with leap-second records give a time 27 seconds later than the C library's, and a
 `TZ` value with a daylight-saving name but no rule follows the United States rules unless

@@ -10,6 +10,13 @@
 //! The oracle is the UCRT of the machine that runs the test: this test binary starts itself
 //! (`ucrt_child`) with `TZ` in its environment, as makeblastdb is started, and prints what
 //! `_localtime64_s` gives. Each process sets UCRT's zone once, at its first `localtime`.
+//!
+//! The instants of the vectors lie inside `localtime`'s first branch, more than three days after
+//! 1970-01-01 00:00:00 and more than three days before its last second, 3001-01-19 07:59:59 UTC
+//! (ucrt/time/localtime.cpp:58; corecrt_internal_time.h:98). That is where LOSAT's port is
+//! defined. The branch for the three days at either end is not ported: the current time is
+//! never there, and `local_offset.rs` gives UTC instead of one UCRT version's edge behaviour.
+//! The `ucrt/time` sources of the Windows SDKs 10.0.22621.0 and 10.0.26100.0 are identical.
 
 #![cfg(windows)]
 
@@ -102,6 +109,10 @@ fn ucrt_child() {
     let Some(instants) = std::env::var_os(CHILD_INSTANTS) else {
         return;
     };
+    // With one test thread libtest writes "test windows_local_time::ucrt_child ... " before the
+    // test runs and ends that line only after it (library/test/src/formatters/pretty.rs,
+    // `write_test_start`): the records start on a line of their own.
+    println!();
     for t in instants.to_str().unwrap().split(' ') {
         let t: i64 = t.parse().unwrap();
         match ucrt_local(t) {
@@ -122,9 +133,16 @@ fn ucrt_child() {
     println!("UCRT\tzone\t{timezone}\t{daylight}\t{dstbias}");
 }
 
-/// The lines of `ucrt_child` (after `UCRT\t`) in a process of this binary with `TZ` (`None`:
-/// unset).
-fn in_child(tz: Option<&[u16]>, instants: &[i64]) -> Vec<String> {
+/// The output of `ucrt_child` in a process of this binary.
+struct Child {
+    /// The records (the lines that start with `UCRT\t`, without it).
+    lines: Vec<String>,
+    /// The whole stdout and stderr, for failure messages.
+    raw: String,
+}
+
+/// `ucrt_child` in a process of this binary with `TZ` (`None`: unset) and `instants`.
+fn in_child(tz: Option<&[u16]>, instants: &[i64]) -> Child {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.args([
         "windows_local_time::ucrt_child",
@@ -140,16 +158,20 @@ fn in_child(tz: Option<&[u16]>, instants: &[i64]) -> Vec<String> {
     let list: Vec<String> = instants.iter().map(i64::to_string).collect();
     command.env(CHILD_INSTANTS, list.join(" "));
     let out = command.output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let raw = format!(
+        "child {:?} with TZ {tz:?}, {CHILD_INSTANTS}={:?}, {}\n--- stdout\n{stdout}--- stderr\n{}",
+        command.get_program(),
+        list.join(" "),
+        out.status,
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8(out.stdout)
-        .unwrap()
+    assert!(out.status.success(), "{raw}");
+    let lines = stdout
         .lines()
         .filter_map(|l| l.strip_prefix("UCRT\t").map(str::to_string))
-        .collect()
+        .collect();
+    Child { lines, raw }
 }
 
 /// A `TZ` value of the vector file as UTF-16 units: `\\` and `\u{XXXX}` escapes.
@@ -191,16 +213,19 @@ fn ucrt_of_this_machine_gives_the_vectors() {
     }
     assert!(zones.len() >= 70, "{} zones", zones.len());
     let mut bad = Vec::new();
+    // The child's whole output for the first zone that differs.
+    let mut first_raw = None;
     for (tz, globals, times) in &zones {
         let instants: Vec<i64> = times.iter().map(|(t, _)| *t).collect();
-        let lines = in_child(Some(&vector_tz(tz)), &instants);
+        let child = in_child(Some(&vector_tz(tz)), &instants);
+        let bad_before = bad.len();
         let want_zone = format!("zone\t{globals}");
-        if !lines.contains(&want_zone) {
-            bad.push(format!("{tz}: {want_zone:?}, UCRT {lines:?}"));
-            continue;
+        if !child.lines.contains(&want_zone) {
+            bad.push(format!("{tz}: {want_zone:?}, UCRT {:?}", child.lines));
         }
         for (t, want) in times {
-            let got = lines
+            let got = child
+                .lines
                 .iter()
                 .find_map(|l| l.strip_prefix(&format!("time\t{t}\t")))
                 .map(|rest| rest.split('\t').next().unwrap().to_string());
@@ -208,8 +233,16 @@ fn ucrt_of_this_machine_gives_the_vectors() {
                 bad.push(format!("{tz} at {t}: {want}, UCRT {got:?}"));
             }
         }
+        if bad.len() > bad_before && first_raw.is_none() {
+            first_raw = Some(child.raw);
+        }
     }
-    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+    assert!(
+        bad.is_empty(),
+        "\n{}\n{}",
+        bad.join("\n"),
+        first_raw.unwrap_or_default()
+    );
 }
 
 fn work_dir(tag: &str) -> PathBuf {
@@ -299,23 +332,27 @@ fn makeblastdb_writes_the_c_runtimes_local_time() {
         let units: Option<Vec<u16>> = tz.map(|v| v.encode_utf16().collect());
         let dir = work_dir(&i.to_string());
         let (log, date, seconds) = build(&dir, units.as_deref());
-        let lines = in_child(units.as_deref(), &seconds);
-        let forms: Vec<(&str, &str)> = lines
+        let child = in_child(units.as_deref(), &seconds);
+        let forms: Vec<(&str, &str)> = child
+            .lines
             .iter()
             .filter_map(|l| l.strip_prefix("time\t"))
             .map(|l| {
                 let f: Vec<&str> = l.split('\t').collect();
-                assert_eq!(f.len(), 4, "{tz:?}: no local time for {l}");
+                assert_eq!(f.len(), 4, "{tz:?}: no local time for {l}\n{}", child.raw);
                 (f[2], f[3])
             })
             .collect();
+        assert_eq!(forms.len(), seconds.len(), "{tz:?}\n{}", child.raw);
         assert!(
             forms.iter().any(|(l, _)| *l == log),
-            "{tz:?}: log {log:?}, UCRT {forms:?}"
+            "{tz:?}: log {log:?}, UCRT {forms:?}\n{}",
+            child.raw
         );
         assert!(
             forms.iter().any(|(_, d)| *d == date),
-            "{tz:?}: date {date:?}, UCRT {forms:?}"
+            "{tz:?}: date {date:?}, UCRT {forms:?}\n{}",
+            child.raw
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

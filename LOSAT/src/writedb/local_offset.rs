@@ -1458,8 +1458,9 @@ impl UcrtZone {
     // ```
     /// `_localtime64_s` of `t` as an offset: the local time is the calendar time of `t` plus
     /// the offset. `None` where `localtime` fails (NCBI's `CTime` then throws). The first and
-    /// last three days of `localtime`'s range take another branch of `localtime.cpp`, which is
-    /// not ported: the current time is past 1970-01-04 and before 3000-12-29.
+    /// last three days of `localtime`'s range (to 1970-01-04 00:00:00 and from 3001-01-16
+    /// 07:59:59 UTC on) take another branch of `localtime.cpp`, which is not ported: the current
+    /// time is never there, and `None` (UTC) claims no UCRT version's behaviour there.
     #[cfg_attr(not(windows), allow(dead_code))]
     fn offset_at(&self, t: i64) -> Option<i64> {
         if !(t > 3 * UCRT_DAY_SEC && t < UCRT_MAX_TIME64 - 3 * UCRT_DAY_SEC) {

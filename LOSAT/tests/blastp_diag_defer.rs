@@ -20,6 +20,12 @@
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines that the masked
 //! and the deferred paths ran and tested the same cells, hits and candidates as the batches.
 //!
+//! `LOSAT_X_BPCELL128` (strict set, class platform) runs the batches in 128-bit vectors where the
+//! AVX2 ones do not run (the WebAssembly build, x86-64 with SSSE3, SSE4.1 and POPCNT but no AVX2;
+//! `=2` on any x86-64 CPU with them): the calls at once, a cell's last hits one after the other,
+//! on the tables `LOSAT_X_BPMASKEDMIN` gives the masked batch (the others keep the per-hit loop).
+//! `the_128_bit_batches_give_the_reports_of_the_reference` compares it with `=2`.
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //! ```c
 //!             diag_coord = (query_offset - subject_offset) & diag_mask;
@@ -194,6 +200,21 @@ fn avx2() -> bool {
     }
 }
 
+/// Whether this CPU has what `LOSAT_X_BPCELL128`'s 128-bit batches need (SSSE3, SSE4.1 and
+/// POPCNT): they run by default without AVX2, and with `=2` in place of the AVX2 batches.
+fn cell128() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+            && std::arch::is_x86_feature_detected!("popcnt")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
 /// The one `[TIMING] x_bpdiag` line of a search.
 fn one_line(counts: &[DiagCounts], what: &str) -> DiagCounts {
     assert_eq!(counts.len(), 1, "{what}: {counts:?}");
@@ -287,9 +308,11 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
                     "{what}: {tables:?}"
                 );
             } else {
-                // Without AVX2 there is no AVX2 batch to defer: the per-hit loop runs.
+                // Without AVX2 there is no AVX2 batch to defer: LOSAT_X_BPCELL128's batches run
+                // where the CPU has their instructions, otherwise the per-hit loop.
+                let expected = if cell128() { "w128" } else { "per-hit" };
                 let modes = (b.mode.as_str(), d.mode.as_str(), m.mode.as_str());
-                assert_eq!(modes, ("per-hit", "per-hit", "per-hit"));
+                assert_eq!(modes, (expected, expected, expected));
             }
             // The same cells, hits and candidates: only the time of the calls and the form of the
             // batches changed.
@@ -348,22 +371,34 @@ fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
             "{what} {DEFERRED:?}: the report differs"
         );
         let d = one_line(&deferred_counts, &what);
-        // With the switch off the rule is never consulted.
+        // With the switch off the rule is never consulted, except by LOSAT_X_BPCELL128's batches
+        // (a CPU without AVX2), which LOSAT_X_BPMASKED does not turn off.
         let tables = masked_tables(&stderr);
-        assert_eq!(tables, None, "{what} {DEFERRED:?}: {tables:?}");
+        if !avx2() && cell128() {
+            assert!(
+                matches!(tables, Some((0, n)) if n > 0),
+                "{what} {DEFERRED:?}: {tables:?}"
+            );
+        } else {
+            assert_eq!(tables, None, "{what} {DEFERRED:?}: {tables:?}");
+        }
         for (vars, rule_masks) in [(DEFAULT, false), (FORCED, true)] {
             let what = format!("{what} {vars:?}");
             let (rows, counts, stderr, _log) =
                 blastp(&short, &subject, threads, vars, &["-outfmt", "6"]);
             assert!(rows == reference, "{what}: the report differs");
             let c = one_line(&counts, &what);
-            assert_eq!(
-                (c.cells, c.hits, c.candidates),
-                (d.cells, d.hits, d.candidates),
-                "{what}: counts"
-            );
+            // LOSAT_X_BPCELL128's batches count only the tables they take; the per-hit loop of
+            // the others counts nothing (the deferred calls count every table).
+            if avx2() || !cell128() || !rule_masks {
+                assert_eq!(
+                    (c.cells, c.hits, c.candidates),
+                    (d.cells, d.hits, d.candidates),
+                    "{what}: counts"
+                );
+            }
             let tables = masked_tables(&stderr);
-            if !avx2() {
+            if !avx2() && !cell128() {
                 assert_eq!(tables, None, "{what}: no masked batch without AVX2");
             } else if rule_masks {
                 assert!(
@@ -375,6 +410,63 @@ fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
                     matches!(tables, Some((0, n)) if n > 0),
                     "{what}: {tables:?}"
                 );
+            }
+        }
+    }
+}
+
+// EXPERIMENT (LOSAT_X_BPCELL128): the 128-bit batches (`=2`, in place of the AVX2 batches on this
+// CPU) give the per-hit loop's reports with LOSAT_X_BPMASKEDMIN's rule and on every table, and on
+// every table test the cells, hits and candidates of the scalar batch (`LOSAT_X_BPDIAG_SIMD=0`,
+// which counts every table too). The generated pair's queries have enough hits per used cell for
+// the batches on every table; the short query (about one hit per cell) keeps the per-hit loop
+// under the rule.
+#[test]
+fn the_128_bit_batches_give_the_reports_of_the_reference() {
+    if !cell128() {
+        eprintln!("no SSSE3, SSE4.1 and POPCNT on this CPU: the 128-bit batches are not compared");
+        return;
+    }
+    let (query, subject) = generated_pair("cell128");
+    let text = std::fs::read_to_string(&query).expect("read the query set");
+    let first = text.lines().nth(1).expect("the first protein");
+    let short = query.with_file_name("short.faa");
+    std::fs::write(&short, format!(">short\n{}\n", &first[..60])).expect("write FASTA");
+    const SCALAR: &[(&str, &str)] = &[("LOSAT_X_BPDIAG_SIMD", "0")];
+    const RULE: &[(&str, &str)] = &[("LOSAT_X_BPCELL128", "2")];
+    const EVERY: &[(&str, &str)] = &[("LOSAT_X_BPCELL128", "2"), ("LOSAT_X_BPMASKEDMIN", "0")];
+    for (q, threads, dense) in [(&query, 1, true), (&query, 4, true), (&short, 1, false)] {
+        let what = format!("{} threads {threads}", q.display());
+        let (reference, _, _, _log) = blastp(q, &subject, threads, REFERENCE, &["-outfmt", "6"]);
+        assert!(!reference.is_empty(), "{what}: the pair has a report");
+        let (rows, counts, _, _log) = blastp(q, &subject, threads, SCALAR, &["-outfmt", "6"]);
+        assert!(rows == reference, "{what} {SCALAR:?}: rows differ");
+        let scalar = one_line(&counts, &what);
+        for (vars, every) in [(RULE, false), (EVERY, true)] {
+            let what = format!("{what} {vars:?}");
+            let (rows, counts, stderr, _log) =
+                blastp(q, &subject, threads, vars, &["-outfmt", "6"]);
+            assert!(rows == reference, "{what}: rows differ");
+            let c = one_line(&counts, &what);
+            assert_eq!(c.mode, "w128", "{what}");
+            let tables = masked_tables(&stderr);
+            if every || dense {
+                assert!(
+                    matches!(tables, Some((n, 0)) if n > 0),
+                    "{what}: {tables:?}"
+                );
+                assert_eq!(
+                    (c.cells, c.hits, c.candidates),
+                    (scalar.cells, scalar.hits, scalar.candidates),
+                    "{what}: counts"
+                );
+                assert!(c.cells > 0 && c.candidates > 0, "{what}: {c:?}");
+            } else {
+                assert!(
+                    matches!(tables, Some((0, n)) if n > 0),
+                    "{what}: {tables:?}"
+                );
+                assert_eq!((c.cells, c.hits, c.candidates), (0, 0, 0), "{what}");
             }
         }
     }

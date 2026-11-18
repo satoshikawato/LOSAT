@@ -1263,18 +1263,17 @@ impl ReportedSubjects {
 
     /// The description-table labels by rank: the title as NCBI's defline generator makes it
     /// for the description table (as BLASTP's, BLASTN's and TBLASTN's `-db` reports).
-    pub(crate) fn descriptions(&self) -> Vec<Arc<[u8]>> {
+    pub(crate) fn descriptions(&self) -> Vec<crate::report::pairwise::DescriptionLabel> {
         self.titles
             .iter()
             .enumerate()
             .map(|(rank, title)| {
-                let label = crate::report::pairwise::database_description_label(
+                crate::report::pairwise::database_description_label(
                     title,
                     crate::report::pairwise::stored_source(&self.sources, rank as u32),
                     self.parsed_subject(rank),
                     true,
-                );
-                Arc::from(label)
+                )
             })
             .collect()
     }

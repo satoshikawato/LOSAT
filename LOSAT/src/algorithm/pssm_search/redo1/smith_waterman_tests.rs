@@ -193,31 +193,81 @@ fn the_evaluation_is_the_x_drop_redos() {
     }
 }
 
+/// `two_copies` with a stretch of one letter between the copies, which SEG masks (the redo's
+/// `subject_maybe_biased`).
+fn low_complexity_between() -> Vec<u8> {
+    let second = PROFILE
+        .replacen("WAAL", "WGAL", 1)
+        .replacen("RQQ", "RNQ", 1);
+    encode(&format!(
+        "HRDYCWTENI{PROFILE}QQQQQQQQQQQQQQ{second}YCHWRDTN"
+    ))
+}
+
 // `redo_windows` (rpstblastn's redo) is a copy of `redo_match`'s steps (DECISIONS 63 S3): its
 // instance of a protein subject, one window over the whole subject, gives `redo_match`'s list.
+// The subjects reach the copy's branches: SEG masks a stretch of `low_complexity_between`
+// (`subject_maybe_biased`), a subject of X alone has no true amino acid (`adjust_search_failed`),
+// and the redo links its alignments where psiblast's `-sum_stats true` does (`link`).
 #[test]
 fn the_window_copy_is_the_x_drop_redo() {
     let consensus = encode(PROFILE);
     let info = info_of(&consensus);
-    let subject = two_copies();
     let n = consensus.len() as i32;
-    for hsps in [
-        vec![
-            hsp((0, n), (10, 10 + n), 300),
-            hsp((0, n), (n + 24, 2 * n + 24), 250),
-        ],
-        vec![hsp((0, n), (n + 24, 2 * n + 24), 250)],
-        vec![hsp((0, 30), (10, 40), 90), hsp((20, n), (30, 10 + n), 120)],
-        vec![hsp((0, 30), (10, 40), 90), hsp((0, 30), (10, 40), 90)],
-    ] {
-        for (search_space, expect) in [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)] {
-            let matching = redo_match(&info, consensus.len(), search_space, expect);
-            let copied =
-                matching.redo_windows(&mut run_of(&consensus), 7, &hsps, &subject, ProteinSubject);
-            let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject);
-            assert_eq!(format!("{copied:?}"), format!("{original:?}"));
+    let biased = low_complexity_between();
+    assert!(!crate::utils::seg::SegMasker::new(10, 1.8, 2.1)
+        .mask_sequence(&biased)
+        .is_empty());
+    let all_x = vec![aa_char_to_ncbistdaa(b'X'); biased.len()];
+    let mut found = [0usize; 3];
+    for (index, subject) in [two_copies(), biased, all_x].iter().enumerate() {
+        for hsps in [
+            vec![
+                hsp((0, n), (10, 10 + n), 300),
+                hsp((0, n), (n + 24, 2 * n + 24), 250),
+            ],
+            vec![hsp((0, n), (n + 24, 2 * n + 24), 250)],
+            vec![hsp((0, 30), (10, 40), 90), hsp((20, n), (30, 10 + n), 120)],
+            vec![hsp((0, 30), (10, 40), 90), hsp((0, 30), (10, 40), 90)],
+            vec![
+                hsp((0, 30), (10, 40), 90),
+                hsp((0, 30), (n + 24, n + 54), 80),
+            ],
+        ] {
+            for (search_space, expect) in
+                [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)]
+            {
+                for cutoff in [None, Some(1), Some(100)] {
+                    let mut matching = redo_match(&info, consensus.len(), search_space, expect);
+                    matching.link = cutoff.map(|cutoff| {
+                        super::super::RedoLink::new(
+                            cutoff,
+                            crate::core::link_hsps::LinkContext {
+                                lambda: 0.267,
+                                log_k: 0.041f64.ln(),
+                                query_length: n,
+                                length_adjustment: 0,
+                                eff_searchsp: search_space,
+                            },
+                        )
+                    });
+                    let copied = matching.redo_windows(
+                        &mut run_of(&consensus),
+                        7,
+                        &hsps,
+                        subject,
+                        ProteinSubject,
+                    );
+                    let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, subject);
+                    assert_eq!(format!("{copied:?}"), format!("{original:?}"));
+                    found[index] += usize::from(original.is_some());
+                }
+            }
         }
     }
+    // Alignments on both subjects of letters; none where no letter is a true amino acid.
+    assert!(found[0] > 0 && found[1] > 0, "{found:?}");
+    assert_eq!(found[2], 0);
 }
 
 // One preliminary HSP: the redo stops after its first alignment (`window->hspcnt > 1`).

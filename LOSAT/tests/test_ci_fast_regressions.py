@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 sys.path.insert(0, str(fast.FIXTURE_DIR))
+import check_losat  # noqa: E402  (the -subject fixtures' checker)
 import run_oracle  # noqa: E402  (the outfmt 0 manifest's reader and writer)
 
 FROZEN, KNOWN, OTHER = "f" * 64, "a" * 64, "0" * 64
@@ -645,6 +647,64 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("tblastx", blastn)
         for program in fast.PROGRAMS:
             self.assertIn(program, fast.program_dependents()[program])
+
+
+class OutputFormatSelectionTests(unittest.TestCase):
+    """`--outfmts` of the two fixture checkers, and the rows that check_wasm_threading.py runs with it: blastx's
+    BLAST XML, XML2 and JSON rows through each WASI command (`blastx_prescan_checkers`)."""
+
+    CELLS = ["5", "1", "16", "13", "6 qseqid sseqid", "15", "14", "0"]
+
+    def test_a_row_is_kept_by_the_first_word_of_its_format_whole(self):
+        rows = [{"row_id": f"r{index}", "program": "blastx", "outfmt": cell} for index, cell in enumerate(self.CELLS)]
+
+        def kept(outfmts: str, program: str = "blastx") -> list[str]:
+            args = argparse.Namespace(only="", program=program, outfmts=outfmts)
+            return [row["outfmt"] for row in rows if db_fixtures.selected(row, args)]
+
+        self.assertEqual(kept("5,13,14,15,16"), ["5", "16", "13", "15", "14"])
+        self.assertEqual(kept("1"), ["1"])
+        self.assertEqual(kept("6"), ["6 qseqid sseqid"])
+        self.assertEqual(kept(""), self.CELLS)
+        self.assertEqual(kept("5", "blastp"), [])
+        # `freeze` has no --outfmts: every row.
+        self.assertEqual(sum(db_fixtures.selected(row, argparse.Namespace(only="", program="")) for row in rows), 8)
+        # check_losat.py: the same rule, an empty cell being outfmt 0.
+        rows = [{"fixture_id": f"x{index}", "program": "blastx", "outfmt": cell}
+                for index, cell in enumerate(["", *self.CELLS])]
+        rows.append({"fixture_id": "y", "program": "blastp", "outfmt": "5"})
+
+        def subject(outfmts: str, programs: str = "blastx", only: str = "") -> list[str]:
+            return [row["fixture_id"] for row in check_losat.selected_rows(rows, programs, only, outfmts)]
+
+        self.assertEqual(subject("0"), ["x0", "x8"])
+        self.assertEqual(subject("5,16"), ["x1", "x3"])
+        self.assertEqual(subject("5", "blastx,blastp"), ["x1", "y"])
+        self.assertEqual(subject("", "blastx", "x1"), ["x1"])
+        self.assertEqual(len(subject("")), 9)
+
+    def test_the_wasi_section_runs_every_blastx_xml_and_json_row_of_both_sets(self):
+        import check_wasm_threading as wasm
+
+        formats = wasm.BLASTX_PRESCAN_FORMATS.split(",")
+        self.assertEqual(formats, ["5", "13", "14", "15", "16"])
+        subject = check_losat.selected_rows(run_oracle.read_manifest()[2], "blastx", "", wasm.BLASTX_PRESCAN_FORMATS)
+        args = argparse.Namespace(only="", program="blastx", outfmts=wasm.BLASTX_PRESCAN_FORMATS)
+        db = [row for row in db_fixtures.read_manifest()[1] if db_fixtures.selected(row, args)]
+        # Every format, in the -subject and the -db rows; every blastx row of these formats and no other.
+        for rows, every, number in [
+                (subject, [row for row in run_oracle.read_manifest()[2] if row["program"] == "blastx"],
+                 lambda row: run_oracle.outfmt(row).split()[0]),
+                (db, [row for row in db_fixtures.read_manifest()[1] if row["program"] == "blastx"],
+                 db_fixtures.format_number)]:
+            self.assertEqual(sorted({number(row) for row in rows}, key=int), formats)
+            self.assertEqual(rows, [row for row in every if number(row) in formats])
+        # The section's command lines are the checkers' own: with a prefix that no row has, each selects nothing
+        # and passes (no LOSAT runs).
+        for name, checker, _ in wasm.blastx_prescan_checkers(Path("no-such-losat")):
+            run = subprocess.run([sys.executable, *checker, "--only", "no-such-row"], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, (name, run.stderr))
+            self.assertRegex(run.stdout.splitlines()[-1], r"^# (fixtures=0 differing=\[\]|rows=0 differing=0 )", name)
 
 
 class StartupTraceNoticeTests(unittest.TestCase):

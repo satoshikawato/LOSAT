@@ -44,12 +44,11 @@ use std::{
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    io::{self, Seek, SeekFrom, Write},
+    io::{self, Write},
     path::Path,
 };
 
 // The NCBI-style exit error is shared with the other programs' command lines.
-use crate::cli::inaccessible;
 pub use crate::cli::{exit_on_native_error, NativeError};
 
 // Parts of `run_inner` (the set-up of the options, the read of the `-subject` file, the archive of
@@ -472,7 +471,7 @@ fn run_inner(
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let query_file =
+    let mut query_file =
         crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
             .map_err(early_archive_error)?;
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
@@ -738,22 +737,19 @@ fn run_inner(
                 choice.number
             );
         }
-        // The read before the search goes through a second handle on the open file (a `.gz`
-        // query is an unnamed inflated file, `input_files::open_file_input`, which no path
-        // reaches); the handles share one position, put back where it was.
-        let start = (&query_file)
-            .stream_position()
-            .map_err(|_| inaccessible("query", &args.query))?;
+        // The read before the search reads the open file itself (a `.gz` query is an unnamed
+        // inflated file, `input_files::open_file_input`, which no path reaches) and gives it back
+        // at the position it had (`prescan_queries`): no second handle, which the WASI targets
+        // cannot make.
         // A `BATCH_SIZE` that the run refuses (below, before any query is read) leaves no title
         // to check, as a batch size of 0 does.
         // A `-subject` XML2 or JSON document holds each report back until the next query's
         // arrives (`blast_xml2::reports_held`).
         let holds_back = super::blast_xml::xml2_kind(options.outfmt).is_some()
             && crate::report::blast_xml2::reports_held(database.is_none(), false);
-        let scan = super::blast_xml::prescan_queries(
-            query_file
-                .try_clone()
-                .map_err(|_| inaccessible("query", &args.query))?,
+        let (scan, file) = super::blast_xml::prescan_queries(
+            query_file,
+            &args.query,
             &query_settings,
             &options,
             args.lcase_masking,
@@ -763,11 +759,9 @@ fn run_inner(
             xml_matrix.is_none(),
             query_scopes_of(),
         )?;
+        query_file = file;
         stops_after = scan.stops_after;
         read_ahead_scopes = scan.query_scopes;
-        (&query_file)
-            .seek(SeekFrom::Start(start))
-            .map_err(|_| inaccessible("query", &args.query))?;
         // A `-db` search in which a later batch can still refuse the taxonomy database or a
         // subject with parsed Seq-ids (outfmt 5 looks the batch's subjects up in its prefetch,
         // `ReportedSubjects::batch_prefetch`, DBID item T, and asks no scientific name), or whose
@@ -1039,7 +1033,7 @@ fn run_inner(
         if let Some(strategy) = &strategy {
             strategy.note_searched(
                 queries_before..queries_before + queries.len(),
-                archive::batch_searched_space(results),
+                archive::batch_searched_space(results, &options),
             )?;
         }
         if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
@@ -3349,6 +3343,7 @@ mod archive_error_tests {
                 &[],
                 &[],
                 None,
+                None,
                 0,
                 None,
                 None,
@@ -3424,6 +3419,7 @@ mod reader_batch_tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: skipped,
+            gapped_k: None,
         }]
     }
 

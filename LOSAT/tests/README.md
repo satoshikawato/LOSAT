@@ -302,10 +302,20 @@ It also runs every psiblast row of `outfmt0_manifest.tsv` (through
 `docs/evidence/losat_web_e2a/check_losat.py`) through each WASI command it is given (the
 threaded one, and `--serial`) at `-num_threads 1`, with a wrapper script in the place
 of the binary (`<output-dir>/psiblast-fixtures/<kind>/`).
+Its `makeblastdb-logfile/` section runs every makeblastdb `-logfile` row of the drop-in
+corpus (`dropin_corpus.py check`, frozen NCBI bytes) through each WASI command, then two
+runs that append a log, a warning and an error to one file, whose stdout, stderr, exit
+status and log bytes (without the lines of the time and the path) must be the native
+command's.
 Its `stdin/` section reads standard input in every search program through each WASI
 command (`-query -`, no `-query`, an empty pipe, `-subject -`, both, and a regular file as
 the standard input) and requires the native command's stdout, stderr and exit status of
 the same run.
+Its `blastx-xml-fixtures/` section runs every blastx row of BLAST XML, XML2 and JSON
+(`-outfmt` 5 and 13 to 16; `--outfmts` of the two checkers) of `outfmt0_manifest.tsv`
+(`check_losat.py`) and of `db_search_manifest/blastx*.tsv` (`db_search_fixtures.py check`)
+through each WASI command at `-num_threads 1`, exactly: in these formats blastx reads its
+query file before the search, on the open file itself.
 
 Every supported explicit N > 1 uses N total compute threads: the caller plus
 N-1 child workers. Diagnostics report pool_threads=N and caller_participates=true;

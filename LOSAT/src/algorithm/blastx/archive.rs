@@ -206,15 +206,30 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
 /// The `EffectiveSearchSpace` option of a reader batch whose results are `batches` (its units;
 /// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
 /// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
-/// `effective_lengths`) and that context's query length (0 for an invalid one;
-/// `archive::RequestLength::space`), when NCBI searched the batch (a unit was searched).
+/// `effective_lengths`; before the batch's first context, `-strand minus`, the option is
+/// `-searchsp` too: NCBI's `SplitQuery_SetEffectiveSearchSpace` leaves a set option as it is)
+/// and that context's query length (0 for an invalid one; `archive::RequestLength::space`), when
+/// NCBI searched the batch (a unit was searched).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:157-161
+/// ```c++
+///     // If the effective search options have been set, we don't need to
+///     // recompute those...
+///     if (options->GetEffectiveSearchSpace() != 0) {
+///         return;
+/// ```
 pub(crate) fn batch_searched_space(
     batches: &[BatchResults],
+    options: &ResolvedOptions,
 ) -> Option<crate::report::archive::SearchedContext0> {
     batches.iter().any(|batch| !batch.search_skipped).then(|| {
         let parameters = &batches[0].parameters[0];
         crate::report::archive::SearchedContext0 {
-            space: parameters.search_space,
+            space: if batches[0].prepared.first_context > 0 {
+                options.effective_search_space
+            } else {
+                parameters.search_space
+            },
             query_length: if parameters.valid {
                 batches[0].prepared.contexts[0].length as i64
             } else {
@@ -432,7 +447,7 @@ fn with_batch(
                 ka_blocks,
                 search_space: first.search_space,
                 length_adjustment: first.length_adjustment,
-                searched_space: batch_searched_space(call.batches),
+                searched_space: batch_searched_space(call.batches, options),
             })
         },
     )

@@ -2202,6 +2202,16 @@ impl<R: Read> FastaStream<R> {
             keep_skipped: false,
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873 (quoted at the read
+    // before the search, `blast_xml::prescan_queries`: NCBI reads ahead on the argument's one stream
+    // and puts it back at `orig_p`)
+    /// The input this stream reads, given back: the bytes it buffered are dropped, so the caller
+    /// puts the input's position where its next reading starts (`blast_xml::prescan_queries`, which
+    /// reads the query file before the search and hands the same open file to the search).
+    pub(crate) fn into_input(self) -> R {
+        self.input.into_inner()
+    }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
     // ```c++
     // CT_INT_TYPE CPushback_Streambuf::underflow(void)

@@ -224,10 +224,6 @@ impl Align {
     /// ```
     /// `C`, the redo's instance, keeps each instance's own copy of the code that collects them
     /// (psiblast's code as before the frames' instance; DECISIONS 63 S3).
-    #[expect(
-        clippy::extra_unused_type_parameters,
-        reason = "C only keeps one instance per redo instance (see above)"
-    )]
     fn incoming<C: RedoInstance>(hsp: &BlastpPreliminaryHsp) -> Self {
         Align {
             score: (hsp.raw_score as f64 * SCALING_FACTOR) as i32,
@@ -1964,10 +1960,6 @@ fn contained_in_hsp(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> bool {
 ///
 /// `C`, the redo's instance, keeps each instance's own copy (psiblast's code as before the frames'
 /// instance; DECISIONS 63 S3).
-#[expect(
-    clippy::extra_unused_type_parameters,
-    reason = "C only keeps one instance per redo instance (see above)"
-)]
 fn is_contained<C: RedoInstance>(in_align: &Align, alignments: &[Align], lambda: f64) -> bool {
     let score_thresh = in_align.score as f64 + KAPPA_BIT_TOL * LOCAL_LN2 / lambda;
     alignments.iter().any(|align| {
@@ -2036,10 +2028,6 @@ fn is_contained<C: RedoInstance>(in_align: &Align, alignments: &[Align], lambda:
 ///
 /// `C`, the redo's instance, keeps each instance's own copy (psiblast's code as before the frames'
 /// instance; DECISIONS 63 S3).
-#[expect(
-    clippy::extra_unused_type_parameters,
-    reason = "C only keeps one instance per redo instance (see above)"
-)]
 fn with_distinct_ends<C: RedoInstance>(
     new_align: Align,
     alignments: &mut Vec<Align>,

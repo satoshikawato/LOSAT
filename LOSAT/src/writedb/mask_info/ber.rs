@@ -602,14 +602,14 @@ impl<'a> BerIn<'a> {
     fn read_std_signed(&mut self, size: usize) -> R<i64> {
         let length = self.read_short_length()?;
         let result = crate::seqid::ber::read_std_signed(length, size, || self.byte());
-        result.or_else(|error| match error {
+        result.map_err(|error| match error {
             StdSignedError::ZeroLength => {
-                Err(self.throw(asnb_site(480, FORMAT_ERROR, None), "zero length of number"))
+                self.throw(asnb_site(480, FORMAT_ERROR, None), "zero length of number")
             }
             StdSignedError::Overflow { line } => {
-                Err(self.throw(asnb_site(line, OVERFLOW, None), "overflow error"))
+                self.throw(asnb_site(line, OVERFLOW, None), "overflow error")
             }
-            StdSignedError::Read(fail) => Err(fail),
+            StdSignedError::Read(fail) => fail,
         })
     }
 

@@ -136,7 +136,8 @@ FASTA files:
   is refused there. `xsb_qa.faa` is `qa` (31 residues); `xsb_s.fna` is `pa`, its back-translation (93 bases), then
   `w11`: `qa` hits only `pa`. `xsb_q.faa` is `qa` then `q` (`MHYWWW`), `xsb_k.faa` is `qk` (`SRPP`, which hits only
   `w12` of `xs_w12w11`) then `q`, and `xsb_ql.faa` is `qa` then `ql` (`qa` ten times, 310 residues, which
-  `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split into chunks that NCBI would split again).
+  `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split into chunks that NCBI would split again, and
+  `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` into a first wrapped chunk that covers it, which NCBI would split again).
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's

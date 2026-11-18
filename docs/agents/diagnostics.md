@@ -422,6 +422,7 @@ export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_BXW4CAP=1
 export LOSAT_X_CHAINRUN=1
+export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -2392,6 +2393,58 @@ Rebuilding less:
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_CLUTPAIRS=1` (BLASTP `-task blastp-fast` or a `-word_size` above 4, BLASTX and TBLASTN with a compressed
+  table (`-word_size` 5 to 7; their `-fast` tasks' 5), speed; in the strict set from the pull request that added it,
+  2026-11-17, line v4-BPF s14-s15; `=0` turns it off; acts in the serial builders and the pool's; class always: it
+  records nothing in `LOSAT_X_REACH`, its sides are `LOSAT_X_BPCLUT`'s) takes the cells of the two innermost
+  positions of a query word's neighbouring words from a row per pair of query letters, instead of the two innermost
+  loops of NCBI's `s_CompressedAddWordHitsCore` (`tblastx/lookup/x_clut_direct.rs` `XPairTable`, `XPairRow`,
+  `XWords::neighbors_paired` for positions w - 2 and w - 1, `neighbors_below_last_paired` for w - 3 and w - 2 of the
+  pool's waves; the exactness argument is in that file's header). The structural cause: at each node of the last two
+  positions the reference loops over the sorted letters of position w - 2 with a bound test per letter, and for each
+  over those of w - 1, a short pair of loops (blastp-fast, human x yeast proteomes `-db`: 643.9 M nodes,
+  964.7 M appends, 2.6 appends per node) whose tests and missed branches took about 33 cycles per append (line v4-BPF
+  s13). A row holds the pairs (i, j) of ranks in the two letters' sorted rows, in the order of the sum descending and
+  then of k = i * A + j (the stable sort by sum), as i16 sums and one-byte codes `char_a[i] + A * char_b[j]` in
+  groups of 16; the pairs a node reaches are a prefix of the row (sum >= threshold - (score - row_max[b])), which
+  `XPairRow::emit` counts 16 at a time without a branch, and their cells are `partial + code * A^(w-2)`. It holds
+  for every input: a query offset gets the loops' cells, each once, in another order within the offset, and every
+  test of the passes (the count chunks, the refusal, the bucket and piece cuts) runs at the end of an offset, so the
+  table is the same. A row is made when first read, 16 pairs at a time, by a merge of the two sorted rows that keeps
+  the key of each candidate row's next pair (`XPairRow::make`). The table depends only on the matrix and the
+  alphabet: the builds that run at once share one (BLASTX's query batches on the pool's tasks,
+  `LOSAT_X_BXCHUNKCROSS`), freed when the last of them ends; memory about 1 KiB per row read, at most 0.52 MiB and
+  12.25 KiB of `OnceLock`s (a table of each build had kept 184 tables' rows at 16 threads in blastx-fast, 800
+  queries: max RSS +5.2 MiB; one kept for the process kept its rows during the search: UniRef50, one thread, +292 KiB).
+  Tests: the lib tests `pair_tables_hold_every_matrix` (every NCBI matrix and compressed alphabet: the rows' order is
+  the stable sort's, and `emit` gives a scan's cells at every key, the ends of i32 included) and
+  `paired_cells_are_the_loops_cells` (word sizes 5 to 7, every matrix, thresholds from all words to few, letters
+  outside the alphabet, the waves' letter ranges: the same cells, each once), and `tests/compressed_clut_pairs.rs`
+  (common suite: blastp-fast, blastx-fast, blastx `-word_size 6`, tblastn-fast and tblastn `-word_size 6` at 1 and 2
+  threads, the default's reports and messages equal `=0`'s). With `LOSAT_X_STATS`, `main` prints `[X_STATS] CLUTPAIRS
+  tables= rows= groups=` (tables made, rows made, groups of 16 pairs made). Instructions, ws node 0 (2026-11-17, one
+  thread, dev d49e8e388 / this build with `=0` / this build, one run each, `perf stat -e instructions:u`): blastp-fast
+  human x yeast `-db` x0.935, 2,388 human queries x yeast x0.936, 2,763 Arabidopsis queries x zebrafish x0.986, 20
+  queries x WSSV `-subject` x0.814, one 318-letter human protein x WSSV x0.996 (BLOSUM45 x0.941),
+  UniRef50 `-db` with 3 and 10 queries x1.000 and x0.9999; blastx-fast 800 and 50 cDNAs x yeast `-db` x0.902 and x0.906, one cDNA x WSSV x0.909; tblastn-fast 30
+  C. elegans proteins x its genome x0.998, one x1.000; exact blastp (no compressed table) x1.000; outputs identical
+  in every arm (NCBI BLAST+ 2.17.0's bytes where it ran). Time, ws node 1 (2026-11-17, 16 cores, siblings idle, 8
+  rounds, arm order rotating, max RSS in the same runs), `-outfmt 6 -num_threads 16`, dev / `=0` / this build:
+  blastp-fast human x yeast `-subject` 4.388 / 4.389 / 4.280 s (x0.975, 8/8 rounds faster), its first 3,000 queries
+  0.416 / 0.416 / 0.401 s (x0.963, 7/8), the same pair `-db` 4.784 / 4.784 / 4.659 s (x0.974, 8/8), blastx-fast 800
+  cDNAs x yeast `-db` 1.157 / 1.163 / 1.093 s (x0.945, 8/8); the median per-round max RSS difference to dev -2.0,
+  +1.2, -1.0 and +1.5 MiB (108, 77, 98, 83 MiB); runs of tens of milliseconds within the null arm's spread (one cDNA
+  x WSSV, 40 rounds, mean 45.8 / 44.9 / 45.2 ms; one protein x WSSV, 24 rounds, 35.3 / 35.7 / 36.0 ms, CPU time
+  51.3 / 51.9 / 50.7 ms). WebAssembly (the serial WASI module, one core, 4 rounds, `=0` / this build): 2,388 human
+  queries x yeast x0.978, 3 queries x UniRef50 `-db` x0.960, 20 queries x WSSV x0.932. At one thread (ws node 1, one
+  core, sibling idle, dev / `=0` / this build): human x yeast `-db` 56.999 / 57.248 / 55.028 s (x0.965, 3/3 rounds),
+  2,388 human queries x yeast 5.670 / 5.670 / 5.446 s (x0.961, 8/8), 2,763 Arabidopsis queries x zebrafish 20.309 /
+  20.367 / 20.123 s (x0.991, 4/4), 20 queries x WSSV 1.048 / 1.050 / 0.930 s (x0.887, 8/8), blastx-fast 800 cDNAs x
+  yeast 14.250 / 14.354 / 13.578 s (x0.953, 4/4), max RSS -0.1 to +1.0 MiB of dev (at most +1.1 %); the runs of a
+  few queries (UniRef50 `-db` 3 and 10 queries, tblastn-fast 30 C. elegans proteins and one, one protein or cDNA x
+  WSSV) x0.984 to x1.007 of dev with the null arm x0.977 to x1.004, and the max RSS of `=0` in runs whose
+  environments have one length (UniRef50 10 queries 16,056 / 16,058 KiB, tblastn-fast 30 proteins 36,724 / 36,740
+  KiB, medians of 4; an environment variable of another length had moved it by up to 56 KiB).
 - `LOSAT_X_BPFFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-25, line v4-BPF K2-2; `=0` turns it off; acts where the serial builder makes the flat compressed table of
   `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly, and any thread count in builds without threads, such as

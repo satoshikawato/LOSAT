@@ -1163,6 +1163,19 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         self.write_string::<true>(value);
     }
 
+    /// The XML documents (outfmt 5, 14, 16 and the archive's object mode) have no NULL,
+    /// UTF8String or delayed member (the values of a PSSM file's members, `asn_types::write`:
+    /// psiblast and tblastn `-in_pssm` refuse `-outfmt 11`).
+    fn null(&mut self) {
+        self.fail(SerialError::Unwritten("a NULL value"));
+    }
+    fn utf8_str(&mut self, _value: &[u8]) {
+        self.fail(SerialError::Unwritten("a UTF8String"));
+    }
+    fn delayed(&mut self, _text: &[u8]) {
+        self.fail(SerialError::Unwritten("a member read into a delay buffer"));
+    }
+
     /// `WriteBytes` of the object mode: the bytes as upper-case hex digits, unwrapped
     /// (`WriteBytes`, objostrxml.cpp:1702-1709); the other pieces write no OCTET STRING.
     fn octets(&mut self, value: &[u8]) {

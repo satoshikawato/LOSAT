@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -123,6 +123,30 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   for that id (`s_SeqDB_SeqIdIn` stops at the first id, `oid headers do not contain target gi/seq_id`; review 1 of
   the item, H1). `make_multidb.py --v4late-only MAKEBLASTDB` builds only these (the databases before keep their
   dates).
+- `pfo_q.faa`, `pfo_qx.fna`, `pfo_q.fna`, `pfo_qt.faa` (line DBID pfoff): the two queries of mix2_q.faa, mix2_qx.fna,
+  mix2_q.fna and mix2_qt.faa in the other order, so that with `PRE_FETCH_SEQS_LIMIT=1 BATCH_SIZE=1` (the prefetch
+  off) the first query's report reads a parsed subject whose lookup throws (`DB contains no accession info.`) and the
+  second's does not. `pfo_qf.fna`, `pfo_qft.faa` (rows `.taxfirst.` of the nucleotide databases, review 1 of item
+  pfoff-1, L1): `na`'s HBB record (`ENST00000335295.4`; `pfo_qft.faa` its longest ORF, translated), then the query of
+  mix2_q.fna (mix2_qt.faa) that hits `nnp`/`nut` alone, so that the first query's first `Hit` is a parsed subject of
+  `na` whose lookup throws and no subject of `nut` (with a taxid) comes before it, where pfo_q.fna's first query
+  shows `nut`'s copy of HBA1 (`ENSTTEST0001.1`) first. `pfo_qs.faa`, `pfo_qsx.fna`, `pfo_qs.fna`, `pfo_qst.faa`,
+  `pfo_qss.fna` (rows `.taxstop.`, the same review): a first query whose report throws at its first `Hit` and shows a
+  subject of `put`/`nut` (with a taxid) after it, which NCBI never loads, with more Seq-aligns than the second, whose
+  batch's prefetch (on below the rows' `PRE_FETCH_SEQS_LIMIT`) loads such a subject and then stops at one whose lookup
+  throws: BLASTP's and BLASTX's first query the letters of mix2_q's (mix2_qx's) parsed query, then half of its other
+  query's, twice; the nucleotide programs' `na`'s HBB twice (its ORF for TBLASTN), then half of the query that hits
+  `nnp`; the second query that query's letters, then the parsed one's (TBLASTX: a third of them, then the first 200
+  of the parsed one's). `make_multidb.py --pfoff-only MAKEBLASTDB` writes only these (no database; MAKEBLASTDB is not
+  run).
+- `pfz`, `pfzq`, `pfo_qz.faa`, `pfo_qh.fna` (line DBID pfoff-2, review 2 of the item, M1, and review 1, H1): `pfz` (version
+  5, `-parse_seqids`) holds `ref|XP_900001.1|`, whose alignment to `pfo_qz.faa` (`-threshold 9 -comp_based_stats 0`)
+  has no identities, then `ref|XP_900002.1|`, whose alignment has some; `pfzq` the first alone. In a list with
+  `ids/noacc_v5` both throw where the batch's prefetch is off, so a row of `nident` alone reads nothing of the first
+  (it prints 0 and the run goes on) and ends the run at the second. `pfo_qh.fna`: `na`'s HBB record, whose rows all
+  throw in a list with `nut`, then twice the letters of the query of mix2_q.fna that hits `nnp`/`nut` alone, whose two
+  HSPs turn its batch's prefetch off at `PRE_FETCH_SEQS_LIMIT=1`, so that its rows load the subject and look its name
+  up. `make_multidb.py --pfoff2-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -557,6 +581,111 @@ def make_v4late(binary):
         os.remove(os.path.join(HERE, name + ".pjs"))
 
 
+def longest_orf(letters):
+    """The longest open reading frame (from an ATG to the stop) of the plus strand of `letters`, translated with the
+    standard genetic code, without the stop."""
+    bases = "TCAG"
+    amino = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
+    code = {a + b + c: amino[16 * i + 4 * j + k] for i, a in enumerate(bases) for j, b in enumerate(bases)
+            for k, c in enumerate(bases)}
+    best = ""
+    for frame in range(3):
+        protein = "".join(code.get(letters[at:at + 3], "X") for at in range(frame, len(letters) - 2, 3))
+        for piece in protein.split("*"):
+            start = piece.find("M")
+            if start >= 0 and len(piece) - start > len(best):
+                best = piece[start:]
+    return best
+
+
+def make_pfoff(_binary):
+    """Writes the queries pfo_q*.f* (line DBID pfoff): those of mix2_q*.f* in the other order, pfo_qf.fna and
+    pfo_qft.faa (na's HBB record, its ORF, then the query that hits nnp alone), and pfo_qs*.f* (the rows .taxstop.)."""
+    for source, name in (("mix2_q.faa", "pfo_q.faa"), ("mix2_qx.fna", "pfo_qx.fna"), ("mix2_q.fna", "pfo_q.fna"),
+                         ("mix2_qt.faa", "pfo_qt.faa")):
+        records = read_fasta_path(os.path.join(HERE, source))
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, lines in reversed(records):
+                f.write(header + "".join(lines))
+    hbb = next(lines for header, lines in read_fasta_path(os.path.join(HERE, "na.fa"))
+               if header.startswith(">ENST00000335295.4 "))
+    letters = "".join(line.strip() for line in hbb).upper()
+    for source, name, header, query in (
+            ("mix2_q.fna", "pfo_qf.fna", ">pfo_f the letters of multidb/na's ENST00000335295.4 (HBB)", letters),
+            ("mix2_qt.faa", "pfo_qft.faa", ">pfo_ft the longest ORF of multidb/na's ENST00000335295.4 (HBB)",
+             longest_orf(letters))):
+        unparsed = next((h, lines) for h, lines in read_fasta_path(os.path.join(HERE, source))
+                        if h.startswith(">mix2_u "))
+        with open(os.path.join(HERE, name), "w") as f:
+            f.write(header + "\n")
+            for at in range(0, len(query), 60):
+                f.write(query[at:at + 60] + "\n")
+            f.write(unparsed[0] + "".join(unparsed[1]))
+
+    def letters_of(source, unparsed):
+        """The letters of the query of `source` that hits nnp/noacc_v5 alone (`unparsed`) or of the other one."""
+        for header, lines in read_fasta_path(os.path.join(HERE, source)):
+            if header.startswith(">mix2_u ") == unparsed:
+                return "".join(line.strip() for line in lines)
+
+    def write_queries(name, queries):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, query in queries:
+                f.write(header + "\n")
+                for at in range(0, len(query), 60):
+                    f.write(query[at:at + 60] + "\n")
+
+    for source, name in (("mix2_q.faa", "pfo_qs.faa"), ("mix2_qx.fna", "pfo_qsx.fna")):
+        parsed, unparsed = letters_of(source, False), letters_of(source, True)
+        first = parsed + unparsed[:len(unparsed) // 2]
+        write_queries(name, ((">pfo_s1 twice the letters of the parsed query of " + source + ", then half of the other",
+                              first + first),
+                             (">pfo_s2 the letters of the other query of " + source + ", then those of the parsed one",
+                              unparsed + parsed)))
+    for source, name, hbb in (("mix2_q.fna", "pfo_qs.fna", letters), ("mix2_qt.faa", "pfo_qst.faa", longest_orf(letters))):
+        parsed, unparsed = letters_of(source, False), letters_of(source, True)
+        write_queries(name, ((">pfo_s1 twice multidb/na's ENST00000335295.4 (HBB" + (", its ORF" if hbb != letters else "")
+                              + "), then half of the query of " + source + " that hits nnp", hbb + hbb +
+                              unparsed[:len(unparsed) // 2]),
+                             (">pfo_s2 the letters of the query of " + source + " that hits nnp, then those of the other",
+                              unparsed + parsed)))
+    parsed, unparsed = letters_of("mix2_q.fna", False), letters_of("mix2_q.fna", True)
+    write_queries("pfo_qss.fna", ((">pfo_s1 twice multidb/na's ENST00000335295.4 (HBB), then half of the query of "
+                                   "mix2_q.fna that hits nnp", letters + letters + unparsed[:len(unparsed) // 2]),
+                                  (">pfo_s3 a third of the query of mix2_q.fna that hits nnp, then 200 letters of the "
+                                   "other", unparsed[:len(unparsed) // 3] + parsed[:200])))
+
+
+def make_pfoff2(binary):
+    """Builds pfz and pfzq and writes pfo_qz.faa and pfo_qh.fna (line DBID pfoff-2)."""
+    zero = "WWWWWWWWWWHHKYEVIMIKLVMFVIEEIFIMEVLIFLVLLEVFVMYREYMILRMYILLFKIMILVLFDMEKHHWWWWWWWWWW"
+    some = "CCCCCCCCCCRFDIVLVRMILYIVDCCCCCCCCCC"
+    for name, records in (("pfz", ((">ref|XP_900001.1| pfoff-2 an alignment of no identities", zero),
+                                   (">ref|XP_900002.1| pfoff-2 an alignment of identities", some))),
+                          ("pfzq", ((">ref|XP_900001.1| pfoff-2 an alignment of no identities", zero),))):
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            for header, letters in records:
+                f.write(header + "\n" + letters + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", "prot", "-out", name, "-parse_seqids", "-blastdb_version",
+                    "5", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + ".pjs"))
+    with open(os.path.join(HERE, "pfo_qz.faa"), "w") as f:
+        f.write(">pfo_z a query whose alignment to pfz's XP_900001.1 has no identities\n"
+                "PPPPPPPPPPGGRFDIVLVRMILYIVDDVYVLDIMVYMIMMDIYILFKDFLVMKLFVMMYRVLVMIMYELDRGGPPPPPPPPPP\n")
+    hbb = next(lines for header, lines in read_fasta_path(os.path.join(HERE, "na.fa"))
+               if header.startswith(">ENST00000335295.4 "))
+    letters = "".join(line.strip() for line in hbb).upper()
+    unparsed = next("".join(line.strip() for line in lines)
+                    for header, lines in read_fasta_path(os.path.join(HERE, "mix2_q.fna"))
+                    if header.startswith(">mix2_u "))
+    with open(os.path.join(HERE, "pfo_qh.fna"), "w") as f:
+        for header, query in ((">pfo_h1 the letters of multidb/na's ENST00000335295.4 (HBB)", letters),
+                              (">pfo_h2 twice the letters of the query of mix2_q.fna that hits nnp", unparsed + unparsed)):
+            f.write(header + "\n")
+            for at in range(0, len(query), 60):
+                f.write(query[at:at + 60] + "\n")
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -628,6 +757,10 @@ if __name__ == "__main__":
         make_loadord7(sys.argv[2])
     elif sys.argv[1] == "--v4late-only":
         make_v4late(sys.argv[2])
+    elif sys.argv[1] == "--pfoff-only":
+        make_pfoff(sys.argv[2])
+    elif sys.argv[1] == "--pfoff2-only":
+        make_pfoff2(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -642,3 +775,5 @@ if __name__ == "__main__":
         make_loadord6(sys.argv[1])
         make_loadord7(sys.argv[1])
         make_v4late(sys.argv[1])
+        make_pfoff(sys.argv[1])
+        make_pfoff2(sys.argv[1])

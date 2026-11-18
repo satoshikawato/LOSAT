@@ -126,9 +126,8 @@ pub struct PsiSearch {
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
 /// scores of a PSSM of frequency ratios only), which the search strategy's request holds
-/// (`report::archive::requests::RunRequests::with_pssm_query`), and the members of the file that
-/// LOSAT's PSSM writer does not write yet, which NCBI writes back into it
-/// (`PsiSearch::refuse_request_members`).
+/// (`report::archive::requests::RunRequests::with_pssm_query`) and writes back whole
+/// (`report::serial::pssm::write_value`).
 #[derive(Debug, Clone)]
 pub(crate) struct PssmQueryRequest {
     pub(crate) pssm: std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>,
@@ -280,20 +279,6 @@ impl PsiSearch {
         &self,
     ) -> Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>> {
         self.request.as_ref().map(|request| request.pssm.clone())
-    }
-
-    /// LOSAT's refusal of a request whose PSSM file has members that the PSSM writer does not
-    /// write yet, which NCBI writes back into the request (`in_pssm::refuse_unwritten_members`, the
-    /// predicate of
-    /// `-out_pssm`'s refusal); `program` names LOSAT's program. Made after the database is opened
-    /// (a database NCBI cannot open stops it first) and before the first byte of output.
-    pub(crate) fn refuse_request_members(&self, program: &str) -> anyhow::Result<()> {
-        match &self.request {
-            Some(request) => {
-                in_pssm::refuse_unwritten_members(&request.pssm, "-export_search_strategy", program)
-            }
-            None => Ok(()),
-        }
     }
 
     /// `kbp_psi[0]`: the file's ungapped values, or those of `kbp_std` (the query's composition

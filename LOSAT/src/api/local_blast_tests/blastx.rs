@@ -195,6 +195,10 @@ impl Drop for Batches {
 // there compares the reports and the warnings with the CLI runs). The reference is the entry's
 // own hit records.
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     let batches = Batches::new();
     // (inputs, whether they have hits)
@@ -255,6 +259,10 @@ fn assert_observer_ranges_of(inputs: &Inputs, extra: &[&str], hits: bool, contex
 // reach: the entry refuses formats that need different hit list sizes (the api splits them into
 // searches itself), and the formats searched by separate calls share one pool.
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn display_counts_of_the_pairwise_report() {
     let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
     let extra = [
@@ -559,6 +567,10 @@ fn short_subject_between_warnings() -> PathBuf {
 /// the minus strand and queries of several batches, at 1, 2 and 4 threads). The CLI half there
 /// compares the reports and the warnings with the CLI runs.
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn ranges_cut_the_records_as_the_command_line_does() {
     let batches = Batches::new();
     let whole_record_batch = whole_record_batch_query();
@@ -644,6 +656,10 @@ fn ranges_cut_the_records_as_the_command_line_does() {
 /// command line's message (the other half compares the output, the warnings and the message with
 /// the CLI runs).
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn errors_of_the_ranges_follow_the_command_line() {
     let batches = Batches::new();
     let short_subject = short_subject_between_warnings();

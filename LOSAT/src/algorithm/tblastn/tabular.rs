@@ -249,6 +249,7 @@ pub(super) fn write_tblastn_tabular(
             sources: &reported.sources,
             lengths: &lengths,
             taxonomy: &tab.inputs.taxonomy,
+            loads: &reported.loads,
         },
     };
     let names = tab.inputs.names.as_ref();
@@ -444,15 +445,26 @@ pub(super) fn write_tblastn_tabular(
                 // identities for `nident` alone, `database::reads_subject`) loads it first where
                 // the query's batch did not prefetch it: the texts of its taxonomy lookups follow
                 // the rows before it (`QueryWarnings::subject_read`), before those of the row's
-                // own lookups.
+                // own lookups. A row that reads a subject whose load throws outside the subject
+                // block ends the run (`TabularWriter::ends_run`).
+                let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx)
-                        && fetch.reads(usize::try_from(payload.num_ident).unwrap_or(0))
-                    {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident) {
                         writer.write_all(&buf)?;
                         buf.clear();
                         warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
                     }
+                }
+                if let Some(end) = table.ends_run(
+                    &subject,
+                    crate::blastinput::app::Program::Tblastn,
+                    engine_ident,
+                ) {
+                    return Err(crate::report::tabular::run_end(writer, &buf, end, || {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.end_run();
+                        }
+                    }));
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
@@ -491,9 +503,10 @@ pub(super) fn write_tblastn_tabular(
                 // decides with `TabularHsp::num_ident` and counts again from the rows when
                 // they are given: where the engine's identities are positive and the report's
                 // are 0, the rows are read and `num_ident` is the engine's.
-                let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
-                let rows_read = needs.rows
-                    || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0);
+                // A row whose subject's load throws prints none of its letters.
+                let rows_read = !subject.throws()
+                    && (needs.rows
+                        || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0));
                 if rows_read {
                     let translation = translation
                         .get_or_insert_with(|| TargetTranslation::of(tab.letters.nt(oid), &code));

@@ -102,6 +102,20 @@ impl Xml2Kind {
     pub fn is_files(self) -> bool {
         matches!(self, Self::Files14 | Self::Files13)
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417, 750-760
+    // (quoted at `report::db_subject::HitLoads`: the `Hit` whose lookup throws, and the report
+    // function that catches it)
+    /// What the document does after a `Hit` whose subject's lookup throws
+    /// (`report::db_subject::AfterThrow`): the stream forms (15 and 16) leave the query's report
+    /// out with the exception's post, the forms of side files (13 and 14) end the run with it.
+    pub fn after_throw(self) -> crate::report::db_subject::AfterThrow {
+        if self.is_files() {
+            crate::report::db_subject::AfterThrow::EndsRun
+        } else {
+            crate::report::db_subject::AfterThrow::EndsReport
+        }
+    }
 }
 
 /// A side file NCBI cannot open: `CArgException` "Cannot open output file", which the application
@@ -472,7 +486,8 @@ impl<F: SideFiles> Xml2Document<F> {
     /// separator before it stays, so a JSON document can hold `,\n,\n`); the stream forms catch
     /// the exception (`CaughtException`, the program posts its message and goes on), the file
     /// forms (outfmt 13 and 14) have opened the report's file, which stays empty, and end the
-    /// program with it (`CATCH_ALL`, exit status 255; the master file stays empty: no epilog)
+    /// program with it (`CATCH_ALL`, exit status 255, 2 for a `CSeqDBException` of a subject's
+    /// lookup, `cli::NativeError::exception`; the master file stays empty: no epilog)
     /// after what the making posted (the loads of its subjects): the exception is handed back
     /// after the posts (`DocumentPosts::ends_run`, by `query_warnings::write_hit_posts`).
     fn failed(&mut self, exception: crate::ncbi_exception::NcbiException) -> Result<()> {

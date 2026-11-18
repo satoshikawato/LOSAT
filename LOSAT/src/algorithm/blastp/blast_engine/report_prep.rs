@@ -182,6 +182,7 @@ fn xml2_scope_utf8(
     titles: &database::ListedTitles<'_>,
     database: &database::BlastpDatabase,
     query_batches: &[RangedBatch],
+    after: Option<crate::report::db_subject::RunThrow>,
     (prefetch_posts, subject_reads, hit_lists): (
         &mut Vec<(usize, crate::report::diag_log::Posts)>,
         &mut SubjectReads,
@@ -201,8 +202,11 @@ fn xml2_scope_utf8(
         if crate::algorithm::common::database::prefetch_off(seq_aligns(span.clone())) {
             for query in span {
                 let shown = std::slice::from_ref(&hit_lists[query]);
-                let reads = titles
-                    .scope_utf8_hit_reads(database, database::ListedTitles::reported_ranks(shown));
+                let reads = titles.scope_utf8_hit_reads(
+                    database,
+                    after,
+                    database::ListedTitles::reported_ranks(shown),
+                );
                 subject_reads.set(query, reads);
             }
             continue;
@@ -218,15 +222,30 @@ fn xml2_scope_utf8(
     Ok(())
 }
 
+/// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
+pub(super) struct ReportedPrefetch {
+    /// The texts of the subjects that a query's report reads one by one where its batch's
+    /// prefetch is off, where the first format places them (`ReportFormat::places_subject_reads`).
+    pub(super) subject_reads: SubjectReads,
+    /// The posts of each batch's prefetch, by the batch's first query, which go after the
+    /// reader's messages of the batch (`query_warnings::query_posts`).
+    pub(super) posts: Vec<(usize, crate::report::diag_log::Posts)>,
+    /// What the XML2 and JSON reports do at each subject's `Hit` (`ListedTitles::hit_loads`), for
+    /// the writer.
+    pub(super) hit_loads: crate::report::db_subject::HitLoads,
+}
+
 /// Check the reported subjects before any format is written and read each query batch's prefetch
 /// of them: the database titles and the subjects with parsed Seq-ids that the reports of the
 /// batches before a prefetch's stop show and LOSAT does not write as NCBI does are refused, and
 /// the stopping batch's prefetch returns NCBI's error. The texts of a batch's prefetch go to the
-/// warning lines of its first query, after the reader's messages of the batch; where a batch's
-/// prefetch is off, the texts of the subjects that a query's report reads go to the query's
-/// warning lines, or to the returned `SubjectReads` where the first format places them
-/// (`ReportFormat::places_subject_reads`), and the texts of the loads of a query's PSSM go to the
-/// PSSM files' read messages (`psiblast_pssms`) or to the round's outcome.
+/// returned posts (`ReportedPrefetch::posts`), with its first query, after the reader's messages
+/// of the batch; where a batch's prefetch is off, the texts of the subjects that a query's report
+/// reads go to the query's warning lines, or to the returned `ReportedPrefetch::subject_reads`
+/// where the first format places them (`ReportFormat::places_subject_reads`), and the texts of
+/// the loads of a query's PSSM go to the PSSM files' read messages (`psiblast_pssms`) or to the
+/// round's outcome. Also returned: what the XML2 and JSON reports do at each subject's `Hit`
+/// (`ListedTitles::hit_loads`), for the writer.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-772
 /// ```c++
@@ -240,9 +259,8 @@ fn xml2_scope_utf8(
 pub(super) fn prefetch_reported_subjects(
     prep: &ReportPrep<'_, '_>,
     query_warning_lines: &mut [Vec<u8>],
-    prefetch_posts: &mut Vec<(usize, crate::report::diag_log::Posts)>,
     psiblast_pssms: &mut Option<PssmFiles>,
-) -> Result<SubjectReads> {
+) -> Result<ReportedPrefetch> {
     let ReportPrep {
         args,
         outputs,
@@ -300,6 +318,21 @@ pub(super) fn prefetch_reported_subjects(
     let reported_lists = &hit_lists[..prefetch_stop
         .as_ref()
         .map_or(hit_lists.len(), |span| span.start)];
+    // What the XML2 and JSON reports of the batches before a stop (all of them where none stops)
+    // do at each subject's `Hit` (`ListedTitles::hit_loads`, the one answer: a `Hit` whose lookup
+    // throws where a batch's prefetch is off, and the subjects that no report loads), which the
+    // refusals, the stop's record of the loads before it, the names and the taxonomy reads take
+    // (review 1 of line DBID pfoff-1, H1 and M1; psiblast writes none of these formats,
+    // `psiblast::args::PsiblastArgs::check_outfmt`).
+    let after_throw = crate::report::db_subject::FormatThrow::of_outfmts(
+        outputs.formats.iter().map(|format| format.outfmt),
+        crate::blastinput::app::Program::Blastp,
+    );
+    let hit_loads = listed_titles
+        .as_ref()
+        .map_or_else(Default::default, |titles| {
+            titles.hit_loads(reported_lists, batch_prefetch, after_throw)
+        });
     if let Some(titles) = listed_titles.as_ref() {
         titles.check_reported_titles(reported_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
@@ -340,6 +373,7 @@ pub(super) fn prefetch_reported_subjects(
                 BlastpReport::CustomTabular(spec) => spec.needs().taxonomy,
                 _ => false,
             }),
+            &hit_loads,
             format_plans.iter().fold(
                 crate::report::tabular::PrintedIds::default(),
                 |words, outfmt| words.or(outfmt.printed_ids()),
@@ -380,6 +414,8 @@ pub(super) fn prefetch_reported_subjects(
     // read one by one, by query, where the first format places them
     // (`ReportFormat::places_subject_reads`).
     let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
+    // The posts of each batch's prefetch, by the batch's first query.
+    let mut prefetch_posts: Vec<(usize, crate::report::diag_log::Posts)> = Vec::new();
     let first_report = outputs
         .formats
         .first()
@@ -469,6 +505,7 @@ pub(super) fn prefetch_reported_subjects(
     // that psiblast's PSSM includes (`PssmReads::one_by_one`, where a PSSM is made). Made only
     // where the batch at `start` stops, and for the run's record of psiblast's rounds where a
     // prefetch of the run can stop (`ListedTitles::note_loaded`).
+    let hit_loads_ref = &hit_loads;
     let loaded = |start: usize| {
         crate::algorithm::common::database::LoadedBefore {
             hits: &hit_lists[..start],
@@ -484,8 +521,11 @@ pub(super) fn prefetch_reported_subjects(
                     prefetched_ranks(span)
                 }
                 crate::algorithm::common::database::BatchLoads::Read(rows) => {
-                    let mut ranks: Vec<usize> =
-                        database::ListedTitles::fetched_ranks(hits, rows).collect();
+                    // Not a subject whose load throws, nor one that no report reaches after
+                    // such a subject (`HitLoads::loaded`).
+                    let mut ranks: Vec<usize> = database::ListedTitles::fetched_ranks(hits, rows)
+                        .filter(|&rank| hit_loads_ref.loaded(rank))
+                        .collect();
                     if pssm_made {
                         for query in span {
                             ranks.extend_from_slice(pssm_reads.one_by_one(query));
@@ -524,6 +564,7 @@ pub(super) fn prefetch_reported_subjects(
                 database,
                 &hit_lists[..span.start],
                 loaded(span.start),
+                &hit_loads,
                 prefetched_ranks(span.clone()),
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
                     .after_unrecorded_calls(unrecorded_calls),
@@ -546,7 +587,8 @@ pub(super) fn prefetch_reported_subjects(
                 titles,
                 database,
                 query_batches,
-                (prefetch_posts, &mut subject_reads, hit_lists),
+                after_throw,
+                (&mut prefetch_posts, &mut subject_reads, hit_lists),
                 &|span| batch_seq_aligns(span),
                 &prefetched_ranks,
             )?;
@@ -559,12 +601,11 @@ pub(super) fn prefetch_reported_subjects(
                 format_plans.first(),
                 Some(BlastpReport::CustomTabular(spec)) if spec.looks_up_every_taxid()
             );
+            // A row whose subject's load throws looks nothing up (`HitLoads::loaded`).
             let open_for_rows = |lists: &[Option<BlastpHitList>]| -> Result<()> {
                 if plural_names
-                    && lists
-                        .iter()
-                        .flatten()
-                        .any(|hit_list| hit_list.hsplist_count > 0)
+                    && database::ListedTitles::reported_ranks(lists)
+                        .any(|rank| hit_loads.loaded(rank))
                 {
                     database.open_for_tabular_rows(args.app.name())?;
                 }
@@ -583,8 +624,12 @@ pub(super) fn prefetch_reported_subjects(
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
                             // read none of a query whose HSPs have none, which looks no taxid up.
-                            let mut fetched =
-                                database::ListedTitles::fetched_ranks(shown, rows).peekable();
+                            // Not a subject that no report reaches after one whose load throws
+                            // (`HitLoads::reached`: a load that throws has read the candidates'
+                            // headers, `common::database::load_read_texts`).
+                            let mut fetched = database::ListedTitles::fetched_ranks(shown, rows)
+                                .filter(|&rank| hit_loads.reached(rank))
+                                .peekable();
                             if rows == crate::report::tabular::SubjectFetch::Every
                                 || fetched.peek().is_some()
                             {
@@ -746,7 +791,11 @@ pub(super) fn prefetch_reported_subjects(
             titles.note_loaded(database, || loaded(hit_lists.len()));
         }
     }
-    Ok(subject_reads)
+    Ok(ReportedPrefetch {
+        subject_reads,
+        posts: prefetch_posts,
+        hit_loads,
+    })
 }
 
 /// Refuse, before any format of the call is written, what LOSAT does not report as NCBI does:

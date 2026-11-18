@@ -250,6 +250,12 @@ impl NcbiException {
             .is_some_and(|rest| rest.starts_with("::"))
     }
 
+    /// `GetType()::GetErrCodeString()` of the exception: `CSeqDBException::eInvalid`, which
+    /// tells the class that the programs' `CATCH_ALL` reports apart (`cli::NativeError::exception`).
+    pub fn kind(&self) -> &'static str {
+        self.site.kind
+    }
+
     /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
     /// [`ThrowSite::generated`] names none).
     pub fn places_known(&self) -> bool {
@@ -894,6 +900,10 @@ mod tests {
     /// 500,000 deep leaves, `NCBI_RETHROW_SAME` in each) is dropped, and one of 100,000 is
     /// cloned, compared, shown and reported, on a thread of 256 KiB (line RG D3-1 review 7 B1).
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn a_chain_of_any_length_is_handled_link_by_link() {
         let chain = |links: usize| {
             let mut chain = NcbiException::new(ThrowSite::generated("CSerialException"), "");
@@ -950,6 +960,10 @@ mod tests {
     // leaving a call gives the thread back the stream it had; a thread that runs no call reads
     // the command line's.
     #[test]
+    #[cfg_attr(
+        all(target_os = "wasi", not(target_feature = "atomics")),
+        ignore = "needs threads: wasm32-wasip1 has none"
+    )]
     fn each_run_has_a_diagnostic_stream_of_its_own() {
         let a = std::sync::Arc::new(MainDiag::new());
         let b = std::sync::Arc::new(MainDiag::new());

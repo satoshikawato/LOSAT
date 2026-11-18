@@ -329,9 +329,9 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
     let mut subject_sequence = genome[5_000..5_060].to_vec();
     subject_sequence.extend_from_slice(segment);
     let write = |name: &str, title: &[u8], sequence: &[u8]| {
-        let path = std::env::temp_dir().join(format!(
+        let path = crate::utils::test_dir::temp_dir().join(format!(
             "losat_run_local_subject_ids_{}_{name}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let mut text = b">".to_vec();
         text.extend_from_slice(title);

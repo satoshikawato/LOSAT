@@ -12,7 +12,10 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 // 1 MiB without the cut.
 #[test]
 fn the_fixture_database_is_cut_into_several_blocks() {
-    let dir = std::env::temp_dir().join(format!("losat-bpdbcut-fixture-{}", std::process::id()));
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-bpdbcut-fixture-{}",
+        crate::utils::test_dir::process_id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MejoMJNV.faa");

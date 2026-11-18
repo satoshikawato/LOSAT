@@ -79,14 +79,21 @@ impl TblastnArgs {
         subject: &[u8],
     ) -> Result<Vec<u8>> {
         let report = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        self.run_io(
+        let ran = self.run_io(
             settings,
             RunIo::Memory {
                 query,
                 subject,
                 report: report.clone(),
             },
-        )?;
+        );
+        // `CATCH_ALL`'s silent end returns 0 with what the run wrote (the error archive of the
+        // saved messages), as the library's call does (`api::run::run_local`).
+        if let Err(error) = ran {
+            if !crate::cli::is_silent_end(&error) {
+                return Err(error);
+            }
+        }
         let bytes = std::mem::take(&mut *report.lock().expect("report mutex poisoned"));
         Ok(bytes)
     }
@@ -299,7 +306,7 @@ impl TblastnArgs {
                     && args.strategy.is_none();
                 match subject_input {
                     Input::File(file) => read_subject_input(
-                        FastaInputSource::from_argument(&subject_path, file, config),
+                        FastaInputSource::from_file(file, config),
                         &args,
                         subject_range.as_ref(),
                         x_packed,
@@ -427,6 +434,16 @@ impl TblastnArgs {
                     let in_run = super::in_pssm::file_error_in_run(error);
                     if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
+                    } else if let Some(lines) =
+                        crate::report::archive::silent_end_lines(handle, error)
+                    {
+                        // An exception that `CATCH_ALL` ends without a post: the archive of the
+                        // messages saved before it, with no text before it.
+                        let _ = crate::report::archive::write_error_archive(
+                            handle,
+                            &lines,
+                            &mut stream,
+                        );
                     }
                 }
                 Ok(()) => {
@@ -481,13 +498,17 @@ enum RunIo<'a> {
 
 /// An input of `run`: the opened file of `-query` or `-subject`, or web ABI v1's bytes.
 enum Input<'a> {
-    File(std::fs::File),
+    File(crate::blastinput::input_files::InputFile),
     Bytes(&'a [u8]),
 }
 
 /// The reader of `search_cli`'s queries over an `Input`.
 enum QuerySource<'a> {
-    File(crate::blastinput::fasta_reader::FastaInputSource<std::fs::File>),
+    File(
+        crate::blastinput::fasta_reader::FastaInputSource<
+            crate::blastinput::input_files::InputFile,
+        >,
+    ),
     Bytes(crate::blastinput::fasta_reader::FastaInputSource<&'a [u8]>),
 }
 
@@ -856,7 +877,7 @@ fn search_cli(
                     .subject
                     .as_deref()
                     .is_some_and(|path| path.as_os_str() == "-");
-            let mut source = FastaInputSource::from_argument(&args.query, query_file, config);
+            let mut source = FastaInputSource::from_file(query_file, config);
             source.set_id_scope(args.id_scope.clone());
             let empty = !shared_standard_input && source.stream_is_empty();
             (QuerySource::File(source), empty)
@@ -961,7 +982,6 @@ fn search_pssm_query(
     database: Option<&TblastnDatabase>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    psi.refuse_request_members("TBLASTN")?;
     for &outfmt in outfmts {
         super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
     }
@@ -2414,7 +2434,7 @@ fn search(
                         outputs.hits.is_some(),
                         outputs.formats.iter().map(|format| format.outfmt),
                     ),
-                    parsed_shown(&outputs.formats),
+                    &outputs.formats,
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2484,7 +2504,14 @@ fn search(
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
             let xml2_reads = (reported, &mut subject_reads);
-            prefetch_posts.extend(reads.xml2(first_xml2, xml2_reads, &results, &batch_spans)?);
+            let after = super::database::after_throw(&outputs.formats);
+            prefetch_posts.extend(reads.xml2(
+                first_xml2,
+                xml2_reads,
+                &results,
+                &batch_spans,
+                after,
+            )?);
             if first_prefetches && (taxdb_found || database.parsed_seqids()) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
@@ -2513,12 +2540,7 @@ fn search(
                         .as_ref()
                         .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    if plural_names
-                        && hitlists
-                            .iter()
-                            .flat_map(super::stage_d_results::KappaResultHitList::lists)
-                            .any(|list| !list.hsps.hsps.is_empty())
-                    {
+                    if plural_names && reported.loads_a_row(hitlists) {
                         database.open_for_tabular_rows()?;
                     }
                     Ok::<(), anyhow::Error>(())
@@ -2875,84 +2897,6 @@ fn search(
         return Err(error);
     }
     Ok(())
-}
-
-/// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
-/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
-/// 20) whose fields read the subject (`report::tabular::reads_subject`), outfmt 0, the
-/// structured documents (5, 13 to 16), the formats that join the alignments of following hits
-/// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
-/// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
-/// subjects.
-fn parsed_shown(
-    formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> crate::algorithm::common::database::ParsedShown {
-    let numbers: Vec<i32> = formats
-        .iter()
-        .map(|format| super::stage_e_report::format_number(format.outfmt))
-        .collect();
-    let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
-    crate::algorithm::common::database::ParsedShown {
-        stops_at_failed_lookup: formats.iter().any(|format| {
-            matches!(
-                super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 20
-            ) && crate::report::tabular::may_stop_at_failed_lookup(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            )
-        }),
-        tabular: formats.iter().any(|format| {
-            matches!(
-                super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 18 | 20
-            ) && crate::report::tabular::writes_rows(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            ) && crate::report::tabular::reads_subject(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-                crate::blastinput::app::Program::Tblastn,
-            )
-        }),
-        pairwise,
-        structured: formats
-            .iter()
-            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt)),
-        joined: pairwise
-            || formats.iter().any(|format| {
-                super::stage_e_report::is_structured_xml(format.outfmt)
-                    || super::tabular::tabular_spec(format.outfmt)
-                        .is_some_and(|spec| spec.needs().joins_subjects())
-            }),
-        sam: false,
-        taxonomy: formats.iter().any(|format| {
-            super::stage_e_report::xml2_kind(format.outfmt).is_some()
-                || super::tabular::tabular_spec(format.outfmt)
-                    .is_some_and(|spec| spec.needs().taxonomy)
-        }),
-        words: formats
-            .iter()
-            .filter(|format| {
-                matches!(
-                    super::stage_e_report::format_number(format.outfmt),
-                    6 | 7 | 10 | 20
-                )
-            })
-            .fold(
-                crate::report::tabular::PrintedIds::default(),
-                |words, format| {
-                    words.or(crate::report::tabular::PrintedIds::of(
-                        super::tabular::tabular_spec(format.outfmt).as_ref(),
-                    ))
-                },
-            ),
-        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
-        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
-            |&number| match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            },
-        )) && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-    }
 }
 
 #[cfg(test)]

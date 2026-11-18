@@ -447,11 +447,7 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
     // reports of the batches before).
     if let Some(exception) = error.ncbi_exception() {
         if exception.is_class("CEofException") {
-            return NativeError {
-                exit: 0,
-                message: String::new(),
-            }
-            .into();
+            return NativeError::silent_end().into();
         }
         return NativeError::exception(exception).into();
     }
@@ -3749,11 +3745,15 @@ impl ParsedShown {
 /// does not write as NCBI (`check_shown_parsed_subject`), a tabular id that it does not
 /// write as NCBI (`ParsedSubject::tabular_ids`), and where only the prefetch reads the subject
 /// (`shown.prefetched`), what it cannot read as NCBI does (`check_prefetched_parsed`). `db` is
-/// the subject's database.
+/// the subject's database; `load`, what the reports do at the subject's `Hit`
+/// (`report::db_subject::HitLoads`, the one answer: its `Hit` throws, or no report loads it,
+/// `ParsedSubject::fetched`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_reported_parsed(
     db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
     shown: ParsedShown,
+    load: crate::report::db_subject::HitLoad,
     protein: bool,
     taxdb_found: bool,
     ordinal: u32,
@@ -3761,7 +3761,7 @@ pub(crate) fn check_reported_parsed(
 ) -> Result<()> {
     if shown.reads_bioseq() {
         subject
-            .fetched(shown.taxonomy, shown.one_by_one)
+            .fetched(shown.taxonomy, shown.one_by_one, load)
             .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {
         check_prefetched_parsed(db, subject, ordinal, program)?;
@@ -4035,10 +4035,12 @@ pub(crate) fn reports_may_refuse(
                 }
             }
             Ok(ReportedHeader::Parsed(subject)) => {
+                // Before the search no `Hit` is known: every subject is taken as loaded.
                 check_reported_parsed(
                     db,
                     &subject,
                     shown,
+                    crate::report::db_subject::HitLoad::Loaded,
                     protein,
                     shown.pairwise && taxdb_found,
                     ordinal,
@@ -6792,7 +6794,21 @@ fn load_read_texts<'s>(
     let offset_taxid = run.prefetch_texts(db).offset_error_taxid;
     let mut reads = Vec::new();
     let mut fetched: std::collections::HashSet<u32> = Default::default();
+    let mut thrown: std::collections::HashSet<u32> = Default::default();
     for (key, ordinal, load) in loads {
+        // A subject whose lookup throws (`ParsedSubject::lookup_throws`, a report that reads one by
+        // one reaches it: `HitLoads::reached`) has read the candidates' headers first, so its load
+        // posts NCBI's warning of a UTF8String among them and nothing else: no blob is read, no
+        // taxonomy text comes, and a row of it opens nothing (`rows_open` waits for the first
+        // subject that loads).
+        if let SubjectLoad::Read(Some(subject)) = load {
+            if subject.lookup_throws().is_some() {
+                if thrown.insert(ordinal) && scope_utf8 {
+                    reads.extend(scope_utf8_read(db, run, key, subject, &lower));
+                }
+                continue;
+            }
+        }
         if !fetched.insert(ordinal) {
             continue;
         }
@@ -6917,10 +6933,16 @@ fn scope_utf8_path(
 /// `Hit`s' loads in their order (`subjects`, each `(key, ordinal, parsed Seq-ids)`), of which the
 /// first whose Seq-align id's lookup reads a header with a UTF8String where a VisibleString is
 /// expected posts NCBI's warning there (`report::query_warnings::ReadCursor`, at the `Hit`); empty
-/// where none does (`SeqDb::scope_utf8_loads`).
+/// where none does (`SeqDb::scope_utf8_loads`). The `Hit`s that the report reaches
+/// (`HitLoads::of` of this report alone, `after`: what the run's formats do after a subject whose
+/// lookup throws, `FormatThrow::of_run`): those up to the first `Hit` whose lookup throws, that
+/// one included (its lookup read the candidates' headers first, `HitLoads::reached`), not those
+/// after it where the report or the run ends there (line DBID pfoff, DECISIONS 62); the one owner
+/// of that answer is `HitLoads`.
 pub(crate) fn scope_utf8_hit_reads<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
+    after: Option<crate::report::db_subject::RunThrow>,
     subjects: impl IntoIterator<
         Item = (
             u32,
@@ -6933,12 +6955,31 @@ pub(crate) fn scope_utf8_hit_reads<'s>(
     if !db.scope_utf8_loads() {
         return Vec::new();
     }
+    let subjects: Vec<_> = subjects.into_iter().collect();
+    let loads = crate::report::db_subject::HitLoads::of(
+        after,
+        [(
+            true,
+            subjects
+                .iter()
+                .map(|&(key, ..)| Some(key as usize))
+                .collect(),
+        )],
+        |key| {
+            subjects
+                .iter()
+                .find(|&&(subject, ..)| subject as usize == key)
+                .and_then(|&(.., parsed)| parsed)
+        },
+        |_, _| 0,
+    );
     scope_utf8_reads(
         db,
         run,
         subjects
-            .into_iter()
-            .map(|(key, ordinal, parsed)| (key, ordinal, SubjectLoad::Read(parsed))),
+            .iter()
+            .filter(|&&(key, ..)| loads.reached(key as usize))
+            .map(|&(key, ordinal, parsed)| (key, ordinal, SubjectLoad::Read(parsed))),
         &program.to_ascii_lowercase(),
     )
 }
@@ -6955,7 +6996,6 @@ fn scope_utf8_reads<'s>(
     loads: impl IntoIterator<Item = (u32, u32, SubjectLoad<'s>)>,
     lower: &str,
 ) -> crate::report::query_warnings::QueryReads {
-    use crate::report::query_warnings::{ReadLoad, SubjectRead};
     let mut fetched: std::collections::HashSet<u32> = Default::default();
     let mut reads = Vec::new();
     for (key, ordinal, load) in loads {
@@ -6965,18 +7005,33 @@ fn scope_utf8_reads<'s>(
         let SubjectLoad::Read(Some(parsed)) = load else {
             continue;
         };
-        if parsed.scope_utf8_read().is_none() {
-            continue;
-        }
-        let mut load = ReadLoad::of_scope_utf8(run.ledger());
-        let text = load.place_after(scope_utf8_lead(db, Some(parsed), lower), Vec::new());
-        reads.push(SubjectRead {
-            subject: key,
-            text,
-            load: Some(load),
-        });
+        reads.extend(scope_utf8_read(db, run, key, parsed, lower));
     }
     reads
+}
+
+/// The read of `parsed` (key `key`) that only NCBI's lookup of its Seq-align id makes: where that
+/// lookup reads a header with a UTF8String where a VisibleString is expected
+/// (`ParsedSubject::scope_utf8_read`), the warning (`scope_utf8_lead`) in a load of the run's
+/// ledger; none otherwise. The one producer of the read of a subject whose lookup then throws
+/// (`ParsedSubject::lookup_throws`: it read the candidates' headers first, and loads nothing of
+/// the subject, `load_read_texts`) and of every load without `taxdb.bti` (`scope_utf8_reads`).
+fn scope_utf8_read(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    key: u32,
+    parsed: &crate::report::db_subject::ParsedSubject,
+    lower: &str,
+) -> Option<crate::report::query_warnings::SubjectRead> {
+    use crate::report::query_warnings::{ReadLoad, SubjectRead};
+    parsed.scope_utf8_read()?;
+    let mut load = ReadLoad::of_scope_utf8(run.ledger());
+    let text = load.place_after(scope_utf8_lead(db, Some(parsed), lower), Vec::new());
+    Some(SubjectRead {
+        subject: key,
+        text,
+        load: Some(load),
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
@@ -9423,9 +9478,9 @@ mod taxdb_prepass_tests {
     /// (`None`: not set), from an empty current directory.
     fn database(name: &str, taxdb: Option<&Path>) -> Opened {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat_prepass_cwd_{}_{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -9441,7 +9496,10 @@ mod taxdb_prepass_tests {
 
     /// An empty current directory of the test `tag`, which the test removes at its end.
     fn empty_cwd(tag: &str) -> PathBuf {
-        let cwd = std::env::temp_dir().join(format!("losat_{tag}_cwd_{}", std::process::id()));
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_{tag}_cwd_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&cwd).unwrap();
         cwd
     }
@@ -9487,7 +9545,10 @@ mod taxdb_prepass_tests {
             else {
                 panic!("{name}: a sequence with parsed Seq-ids");
             };
-            match (subject.fetched(false, true), want) {
+            match (
+                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
                 (got, _) => panic!("{name}: {got:?}"),
@@ -9590,7 +9651,9 @@ mod taxdb_prepass_tests {
                 ),
                 got => panic!("{list} {ordinal}: {got:?}"),
             }
-            let refusal = subject.fetched(false, false).unwrap_err();
+            let refusal = subject
+                .fetched(false, false, crate::report::db_subject::HitLoad::Loaded)
+                .unwrap_err();
             assert!(refusal.contains(unknown), "{list} {ordinal}: {refusal}");
             assert_eq!(
                 refusal.contains("lookup gives database sequence 0 first"),
@@ -9721,7 +9784,10 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             for (taxonomy, want) in [(false, &without), (true, &with)] {
-                match (subject.fetched(taxonomy, true), want) {
+                match (
+                    subject.fetched(taxonomy, true, crate::report::db_subject::HitLoad::Loaded),
+                    want,
+                ) {
                     (Ok(()), None) => {}
                     (Err(error), Some(text)) => {
                         assert!(error.contains(text.as_str()), "{name} {ordinal}: {error}")
@@ -9802,7 +9868,10 @@ mod taxdb_prepass_tests {
                 panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
             };
             assert!(!subject.unfetchable(), "{name} {ordinal}");
-            match (subject.fetched(false, true), want) {
+            match (
+                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(text)) => {
                     assert!(error.contains(&text), "{name} {ordinal}: {error}")
@@ -9914,9 +9983,9 @@ mod taxdb_prepass_tests {
         // which a version 4 database does not look up (no Bioseq), 0 `gb|AF000070.1|`; every
         // sequence with taxid 99990, whose lookup in `offset_last_past_end` writes the offset
         // error.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-batch-prefetch-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -10074,9 +10143,9 @@ mod taxdb_prepass_tests {
         // Line DBID loadord (tests/db_search/make_multidb.py --loadord-only): `ldp` holds
         // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|`; the unparsed `qp1` is
         // `gnl|BL_ORD_ID|0` beside it in `lda ldp`, `|1` in `ldb ldp` and `|2` in `ldp ldu`.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-load-order-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -10493,9 +10562,9 @@ mod taxdb_prepass_tests {
         // `multidb` (make_multidb.py --loadord-only): `lda` (no accession table) beside `ldp`'s
         // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|` (packed 900), `ldq`'s
         // `lcl|Query_1` (not packed), `ldg`'s `gi|1|ref|NP_000002.1|` and the unparsed `ldu`.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-two-stops-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -10713,9 +10782,9 @@ mod taxdb_prepass_tests {
         // `ldp`'s stopping `ref|NP_000002.1|`), `lda`'s OID 0 (`|0`, after it), `ldu`'s OID 2
         // (`|2`, the same packed number), `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the
         // stopping accession) and `lds`'s stopping `ref|NP_000003.1|`.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-e2-placed-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -10969,9 +11038,9 @@ mod taxdb_prepass_tests {
         // `multidb` (make_multidb.py --loadord-only): `ldb`'s unparsed OID 1 (`gnl|BL_ORD_ID|1`),
         // `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the stopping accession), `ldp`'s
         // stopping `ref|NP_000002.1|` (no accession table); taxid 9606, BLASTDB=bad_magic.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-record-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -11137,9 +11206,9 @@ mod taxdb_prepass_tests {
         // table), whose parsed Seq-ids' lookups fail with NCBI's `DB contains no accession
         // info.`, and `taxfilter/tfu_n` (-input_type blastdb: the table of its ordinal ids; taxids
         // 7955 and 9606), whose loads look the taxonomy up.
-        let cwd = std::env::temp_dir().join(format!(
+        let cwd = crate::utils::test_dir::temp_dir().join(format!(
             "losat-prefetch-stop-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -11486,8 +11555,16 @@ mod taxdb_prepass_tests {
                     panic!("{name} {ordinal}: no parsed Seq-ids");
                 };
                 // A batch whose prefetch is on loads the subject by its own id.
-                assert!(subject.fetched(false, false).is_ok(), "{name} {ordinal}");
-                match (subject.fetched(false, true), want.filter(|_| prefetch_off)) {
+                assert!(
+                    subject
+                        .fetched(false, false, crate::report::db_subject::HitLoad::Loaded)
+                        .is_ok(),
+                    "{name} {ordinal}"
+                );
+                match (
+                    subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
+                    want.filter(|_| prefetch_off),
+                ) {
                     (Ok(()), None) => {}
                     (Err(error), Some(Some(other))) => assert!(
                         error.contains(&format!("match an id of database sequence {other} weakly")),
@@ -11533,10 +11610,17 @@ mod taxdb_prepass_tests {
             match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
                 (ReportedHeader::Stored(_), Ok(true)) => {}
                 (ReportedHeader::Parsed(subject), Ok(false)) => {
-                    assert!(subject.fetched(false, true).is_ok(), "{name} {ordinal}")
+                    assert!(
+                        subject
+                            .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                            .is_ok(),
+                        "{name} {ordinal}"
+                    )
                 }
                 (ReportedHeader::Parsed(subject), Err(id)) => {
-                    let error = subject.fetched(false, true).unwrap_err();
+                    let error = subject
+                        .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                        .unwrap_err();
                     assert!(
                         error.contains(&format!("the Seq-align id {id},")),
                         "{name} {ordinal}: {error}"
@@ -11700,7 +11784,10 @@ mod taxdb_prepass_tests {
         // tabs are inside the mapping (its scientific name too): nothing holds. From 4096 the
         // record lies wholly past the mapping: its names, which XML2 and JSON write, hold (the
         // check does not tell the formats apart: a run whose loads write no name holds too).
-        let dir = std::env::temp_dir().join(format!("losat_prepass_btd_{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat_prepass_btd_{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::copy(variant("good").join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
         let mut index = std::fs::read(variant("good").join("taxdb.bti")).unwrap();
@@ -11786,7 +11873,7 @@ mod taxdb_prepass_tests {
         let Some(dir) = std::env::var_os("LOSAT_TEST_NCBI_TAXDB") else {
             return;
         };
-        let cwd = std::env::temp_dir();
+        let cwd = crate::utils::test_dir::temp_dir();
         let search = SearchPath::new(&cwd, Some(&dir), None).unwrap();
         let taxdb = LazyTaxDb::new(search);
         let entries = taxdb.entry_count().unwrap();

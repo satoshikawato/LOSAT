@@ -182,7 +182,7 @@ fn a_read_error_keeps_the_map_read_so_far() {
     // A directory, as std::fs opens it on Linux.
     #[cfg(target_os = "linux")]
     {
-        let dir = std::env::temp_dir();
+        let dir = crate::utils::test_dir::temp_dir();
         let file = std::fs::File::open(&dir).unwrap();
         let mut set = TaxIdSet::default();
         set.set_mapping_from_file(&mut std::io::BufReader::new(file), &mut |_| {})

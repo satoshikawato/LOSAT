@@ -582,9 +582,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_batch_where_the_run_ends_carries_its_diagnostics() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-batches-end-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();

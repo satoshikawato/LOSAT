@@ -178,7 +178,11 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
 ///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
 /// }
 /// ```
-fn write_scientific_ncbi<W: Write>(writer: &mut W, value: f64, precision: usize) -> io::Result<()> {
+fn write_scientific_ncbi<W: Write + ?Sized>(
+    writer: &mut W,
+    value: f64,
+    precision: usize,
+) -> io::Result<()> {
     let formatted = format_scientific_ncbi(value, precision);
     writer.write_all(formatted.as_bytes())
 }
@@ -357,7 +361,7 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0lf", evalue);
 /// }
 /// ```
-fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
+fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -384,7 +388,7 @@ fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<
 ///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
 /// }
 /// ```
-fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
+fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -408,7 +412,7 @@ fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Resu
 ///         bit_score);
 /// }
 /// ```
-fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<()> {
+fn write_bitscore_ncbi<W: Write + ?Sized>(writer: &mut W, bit_score: f64) -> io::Result<()> {
     if bit_score > 99999.0 {
         write_scientific_ncbi(writer, bit_score, 3)
     } else if bit_score > 99.9 {
@@ -437,7 +441,7 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
 /// }
 /// ```
 #[allow(clippy::too_many_arguments)]
-pub fn write_hit_fields_bytes<W: Write>(
+pub fn write_hit_fields_bytes<W: Write + ?Sized>(
     writer: &mut W,
     query_id: &[u8],
     subject_id: &[u8],

@@ -38,10 +38,10 @@ pub(super) fn temp_path(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    std::env::temp_dir().join(format!(
+    crate::utils::test_dir::temp_dir().join(format!(
         "losat_run_local_{}_{}_{nanos}_{}_{name}",
         module_path!().replace("::", "-"),
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         CALLS.fetch_add(1, Ordering::Relaxed)
     ))
 }

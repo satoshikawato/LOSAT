@@ -664,6 +664,18 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.string_store(value);
         self.flush();
     }
+    fn null(&mut self) {
+        self.inner.null();
+        self.flush();
+    }
+    fn utf8_str(&mut self, value: &[u8]) {
+        self.inner.utf8_str(value);
+        self.flush();
+    }
+    fn delayed(&mut self, text: &[u8]) {
+        self.inner.delayed(text);
+        self.flush();
+    }
     fn error(&self) -> Option<SerialError> {
         self.inner.error()
     }

@@ -50,6 +50,7 @@ use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, Consensus,
     RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
+use crate::common::GapEditOp;
 use crate::core::blast_util::frame_to_context;
 use crate::stats::KarlinParams;
 
@@ -938,19 +939,23 @@ pub(crate) fn frame_queries<'a>(
 /// user query's frame, in protein letters; the subject side the profile's consensus), so the
 /// coordinates become BLASTX's 0-based half-open ones on the frame and the profile, the context
 /// is the query's frame context, and the scores, the e-value, the counts, the edit script and
-/// the composition-based method are the traceback's.
+/// the composition-based method are the traceback's. The ends are those of NCBI's Seq-align: the
+/// starts plus the letters of the edit script (`reported_ends`).
 fn blastx_hsp(hsp: &BlastpHsp, query_index: usize) -> Hsp {
     let to_i32 = |value: usize| i32::try_from(value).expect("a position below 2^31");
+    let q_start = to_i32(hsp.q_start) - 1;
+    let s_start = to_i32(hsp.s_start) - 1;
+    let (q_end, s_end) = reported_ends(hsp, q_start, s_start, to_i32(hsp.q_end), to_i32(hsp.s_end));
     Hsp {
         hsp: PreliminaryHsp {
             context: query_index * NUM_FRAMES + frame_to_context(hsp.query_frame),
             frame: hsp.query_frame as i8,
             score: hsp.raw_score,
-            q_start: to_i32(hsp.q_start) - 1,
-            q_end: to_i32(hsp.q_end),
+            q_start,
+            q_end,
             q_gapped_start: hsp.gapped_q_start,
-            s_start: to_i32(hsp.s_start) - 1,
-            s_end: to_i32(hsp.s_end),
+            s_start,
+            s_end,
             s_gapped_start: hsp.gapped_s_start,
         },
         // No sum statistics (`do_sum_stats` is FALSE for RPSTBLASTN): no linked set.
@@ -962,6 +967,51 @@ fn blastx_hsp(hsp: &BlastpHsp, query_index: usize) -> Hsp {
         edit_script: hsp.gap_info.clone().unwrap_or_default(),
         composition_method: i32::from(hsp.comp_adjustment_method),
     }
+}
+
+/// The ends of an RPS final HSP as NCBI's reports print them: the 0-based starts `q_start`,
+/// `s_start` plus the letters of its edit script on each side (`Sub` and `Ins` on the query,
+/// `Sub` and `Del` on the profile); without an edit script the HSP's ends `q_end`, `s_end`. They
+/// differ from the HSP's ends only where the redo's gapped alignment had no right extension
+/// (`found_end` FALSE: a window's frame copy shorter than the HSP's gapped start, `-strand plus`
+/// or `minus` with composition-based statistics). Those ends stay the HSP's for the sort, the
+/// reap, the containment and `-qcov_hsp_perc` before the reports (`rps_search`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653
+/// ```c
+///     if (found_end == FALSE) {
+///         gap_align->query_stop = q_start - 1;
+///         gap_align->subject_stop = s_start - 1;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:181-182 (the Seq-align
+/// runs the edit script from the starts)
+/// ```c++
+///     int start1 = hsp->query.offset;   // start of alignment on master sequence
+///     int start2 = hsp->subject.offset; // start of alignment on slave sequence
+/// ```
+fn reported_ends(
+    hsp: &BlastpHsp,
+    q_start: i32,
+    s_start: i32,
+    q_end: i32,
+    s_end: i32,
+) -> (i32, i32) {
+    let Some(script) = hsp.gap_info.as_deref() else {
+        return (q_end, s_end);
+    };
+    let (mut q, mut s) = (q_start, s_start);
+    for op in script {
+        match *op {
+            GapEditOp::Sub(n) => {
+                q += n as i32;
+                s += n as i32;
+            }
+            GapEditOp::Ins(n) => q += n as i32,
+            GapEditOp::Del(n) => s += n as i32,
+        }
+    }
+    (q, s)
 }
 
 /// A query's final hit list as BLASTX's results: one list per profile in the hit list's order,
@@ -996,7 +1046,6 @@ fn blastx_lists(hit_list: Option<BlastpHitList>, query_index: usize) -> Vec<HspL
 mod tests {
     use super::*;
     use crate::algorithm::blastp::hsp::BlastpHspList;
-    use crate::common::GapEditOp;
 
     fn options(extra: &[&str]) -> ResolvedOptions {
         let mut argv = vec!["losat", "rpstblastn", "-query", "q.fna", "-db", "cdd"];
@@ -1242,6 +1291,13 @@ mod tests {
         let mut method = hsp(1, 1, (1, 2), (1, 2));
         method.comp_adjustment_method = 1;
         assert_eq!(blastx_hsp(&method, 0).composition_method, 1);
+        // `found_end` FALSE (blast_gapalign.c:4650-4653, quoted at `reported_ends`): the HSP's ends
+        // stop before its starts while its edit script runs on; the reports read the script's ends.
+        let mut short = hsp(-2, 41, (11, 30), (3, 23));
+        short.q_end = 10;
+        short.s_end = 2;
+        let converted = blastx_hsp(&short, 0);
+        assert_eq!((converted.hsp.q_end, converted.hsp.s_end), (30, 23));
     }
 
     // A query's hit list: one BLASTX list per profile with HSPs, in the hit list's order, named

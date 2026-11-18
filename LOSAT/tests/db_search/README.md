@@ -469,6 +469,12 @@ title against a clean `-subject` or `-db`, a `-subject` title with a hit, a `-su
 `makeblastdb -in xb/xb_sp_clean.faa -dbtype prot -out xb_p -title "xb proteins" -blastdb_version 4` and
 `makeblastdb -in xb/xb_sn_clean.fna -dbtype nucl -out xb_n -title "xb nucleotides" -blastdb_version 4`. Every row is frozen from
 NCBI BLAST+ 2.17.0 (`freeze --only db.xb.`), the trace lines of its exceptions naming NCBI's own build path, which LOSAT prints.
+K4j (BLASTX titles that are not UTF-8, and every other byte class of K4h, in every report): `xj/` holds the inputs of the
+rows `db.xj.*` of `blastx.tsv` and `rpstblastn.tsv`, made by `make_xj_inputs.py` (its docstring names the files: one query
+title per byte class, `-subject` titles of every class, long titles, ASCII titles that `GenerateDefline` changes,
+`-parse_deflines` titles with the byte in the first word, empty subjects, rpstblastn queries); the `-db` rows search `xb_p`.
+Every row is frozen from NCBI BLAST+ 2.17.0 (`freeze --only db.xj.`). The titles that the rows `db.t7.*` (`t7/`) cover, a
+first word `Subject_N` with a byte NCBI cannot decode and single `x81` titles, are not repeated here.
 `xb/e2/` (K4h review 3, case E2: rows `db.xb.e2.*`) holds the BLASTP and BLASTN queries of `e2probe.py prep` (remaining-gaps
 K/k4h/review3/e2): q0 without hits, q1 titled `q1 a\xc3\xa9b z` that hits only `multidb/put` (`nut`), q2 that hits `multidb/pa` (`na`)
 and `put` (`nut`); `qmp` has the ASCII title `q1 ab z`, `qm1`'s q2 hits only `pa` (`na`), `qm2`'s only `put` (`nut`).

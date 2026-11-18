@@ -1959,7 +1959,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_order: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_labels: &[Arc<[u8]>],
+    subject_labels: &[DescriptionLabel],
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
@@ -1972,10 +1972,10 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         show_sum_n,
         columns,
         |s_idx| {
-            subject_labels
-                .get(s_idx as usize)
-                .map_or(&b"unknown"[..], |label| label)
-                .to_vec()
+            subject_labels.get(s_idx as usize).map_or_else(
+                || DescriptionLabel::title_only(b"unknown".to_vec()),
+                DescriptionLabel::clone,
+            )
         },
         read,
     )
@@ -2080,78 +2080,7 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:73-111
-// ```c
-// if (m_Program == "psiblast" || m_Program == "blastp") {
-//     CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
-// }
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/version.cpp:46-69
-// ```c
-// "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Schaffer, ..."
-// "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, ..."
-// ```
-fn write_blastp_pairwise_intro<W: Write>(
-    writer: &mut W,
-    version: &str,
-    program: &str,
-) -> io::Result<()> {
-    if program == "psiblast" {
-        return write_psiblast_pairwise_intro(writer, version);
-    }
-    if program == "rpsblast" {
-        return write_rpsblast_pairwise_intro(writer, version);
-    }
-    writeln!(writer, "BLASTP {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference for composition-based statistics: Alejandro A. Schaffer,"
-    )?;
-    writeln!(
-        writer,
-        "L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri"
-    )?;
-    writeln!(
-        writer,
-        "I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),"
-    )?;
-    writeln!(
-        writer,
-        "\"Improving the accuracy of PSI-BLAST protein database searches with"
-    )?;
-    writeln!(
-        writer,
-        "composition-based statistics and other refinements\", Nucleic Acids"
-    )?;
-    writeln!(writer, "Res. 29:2994-3005.")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:386-405
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-395
 // ```c++
 //       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
 //                                               m_Outfile);
@@ -2162,153 +2091,31 @@ fn write_blastp_pairwise_intro<W: Write>(
 //     }
 //
 //     m_Outfile << NcbiEndl << NcbiEndl;
-//     ...
-//     else
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                                           m_Outfile);
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426 (quoted below:
-// the references of compositional matrix adjustment and of composition-based statistics are
-// psiblast's, deltablast's and blastp's only)
-/// The prolog of rpsblast's pairwise report: the program line and the Gapped BLAST reference
-/// only.
-fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
-    writeln!(writer, "RPSBLAST {}", version)?;
+/// The prolog of blastp's, psiblast's and rpsblast's pairwise reports before the database: the
+/// version line (`reference::write_version_line`), two newlines and the references of
+/// `PrintProlog` (`reference::write_prolog_references`: the Gapped BLAST reference, psiblast's
+/// compositionally adjusted matrices and the composition-based statistics of psiblast and
+/// blastp). `program` is `psiblast`, `rpsblast`, or blastp's for any other.
+fn write_blastp_pairwise_intro<W: Write>(
+    writer: &mut W,
+    version: &str,
+    program: &str,
+) -> io::Result<()> {
+    let program = match program {
+        "psiblast" | "rpsblast" => program,
+        _ => "blastp",
+    };
+    super::reference::write_version_line(writer, false, program, version)?;
     writeln!(writer)?;
     writeln!(writer)?;
-    writeln!(
+    super::reference::write_prolog_references(
         writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426
-// ```c++
-//     if (m_Program == "psiblast" || m_Program == "deltablast") {
-//         m_Outfile << "\n";
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                               m_Outfile, CReference::eCompAdjustedMatrices);
-//     }
-//     if (m_Program == "psiblast" || m_Program == "blastp") {
-//         m_Outfile << "\n";
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                               m_Outfile, CReference::eCompBasedStats,
-//                               (bool)(m_Program == "psiblast"));
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:81-88
-// ```c++
-//     string reference("Reference");
-//     if (pub == blast::CReference::eCompAdjustedMatrices) {
-//         reference += " for compositional score matrix adjustment";
-//     } else if (pub == blast::CReference::eCompBasedStats) {
-//         reference += " for composition-based statistics";
-//         if (is_psiblast) {
-//             reference += " starting in round 2";
-//         }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/version.cpp:62-72
-// ```c
-//     // eCompBasedStats
-//     "Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, \
-// John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul \
-// (2001), \"Improving the accuracy of PSI-BLAST protein database searches \
-// with composition-based statistics and other refinements\", Nucleic Acids \
-// Res. 29:2994-3005.",
-//     // eCompAdjustedMatrices
-//     "Stephen F. Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala, \
-// Aleksandr Morgulis, Alejandro A. Sch&auml;ffer, and Yi-Kuo Yu (2005) \"Protein \
-// database searches using compositionally adjusted substitution matrices\", \
-// FEBS J. 272:5101-5109.",
-// ```
-/// psiblast's outfmt 0 intro: the program, the gapped BLAST reference, the reference of the
-/// compositionally adjusted matrices and the reference of composition-based statistics "starting
-/// in round 2", each wrapped at 68 columns (`x_WrapOutputLine`) as NCBI writes them.
-fn write_psiblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
-    writeln!(writer, "PSIBLAST {}", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference for compositional score matrix adjustment: Stephen F."
-    )?;
-    writeln!(
-        writer,
-        "Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,"
-    )?;
-    writeln!(
-        writer,
-        "Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)"
-    )?;
-    writeln!(
-        writer,
-        "\"Protein database searches using compositionally adjusted"
-    )?;
-    writeln!(writer, "substitution matrices\", FEBS J. 272:5101-5109.")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference for composition-based statistics starting in round 2:"
-    )?;
-    writeln!(
-        writer,
-        "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei"
-    )?;
-    writeln!(
-        writer,
-        "Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and"
-    )?;
-    writeln!(
-        writer,
-        "Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST"
-    )?;
-    writeln!(
-        writer,
-        "protein database searches with composition-based statistics and"
-    )?;
-    writeln!(
-        writer,
-        "other refinements\", Nucleic Acids Res. 29:2994-3005."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        program,
+        false,
+    )
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:125-138
@@ -2340,6 +2147,37 @@ fn write_flatfile_wrapped<W: Write + ?Sized>(
     text: &[u8],
     width: usize,
 ) -> io::Result<()> {
+    write_flatfile_wrapped_with(writer, text, width, TextFacts::of(text))
+}
+
+/// Whether a text holds a newline or a backspace, which `write_flatfile_wrapped_with` needs to know (a text
+/// without either has a column for each byte and no line of its own).
+#[derive(Clone, Copy)]
+pub(crate) struct TextFacts {
+    /// The text holds a `\n`.
+    pub(crate) newlines: bool,
+    /// The text holds a backspace (8).
+    pub(crate) backspaces: bool,
+}
+
+impl TextFacts {
+    /// The facts of `text`.
+    pub(crate) fn of(text: &[u8]) -> Self {
+        TextFacts {
+            newlines: text.contains(&b'\n'),
+            backspaces: text.contains(&8),
+        }
+    }
+}
+
+/// `write_flatfile_wrapped` of a text whose facts (`TextFacts`) are `facts`: the caller of a
+/// constant text knows them (`report::reference`).
+pub(crate) fn write_flatfile_wrapped_with<W: Write + ?Sized>(
+    writer: &mut W,
+    text: &[u8],
+    width: usize,
+    facts: TextFacts,
+) -> io::Result<()> {
     let bytes = text;
     let mut pos = 0;
     // NCBI reference: c++/src/corelib/ncbistr.cpp:5100,5153-5157,5137
@@ -2349,62 +2187,80 @@ fn write_flatfile_wrapped<W: Write + ?Sized>(
     while pos < bytes.len() {
         let mut has_backspace = false;
         if newline <= pos {
-            newline = bytes[pos..]
-                .iter()
-                .position(|&c| c == b'\n')
-                .map_or(bytes.len(), |n| pos + n);
+            newline = if facts.newlines {
+                bytes[pos..]
+                    .iter()
+                    .position(|&c| c == b'\n')
+                    .map_or(bytes.len(), |n| pos + n)
+            } else {
+                bytes.len()
+            };
         }
-        let pos0 = if newline - pos <= width { newline } else { pos };
-        let mut scan = pos0;
-        let mut column = 0;
-        let mut best = pos;
-        let mut best_score = 0;
-        while scan < bytes.len() && column <= width {
-            let c = bytes[scan];
-            let mut score = 0;
-            let mut score_pos = scan;
-            if c == b'\n' {
-                best = scan;
-                best_score = 4;
-                break;
-            }
-            if c.is_ascii_whitespace() || c == 11 {
-                score = 3;
-            } else if c == b',' && column < width && scan + 1 < bytes.len() {
-                score = 2;
-                score_pos += 1;
-            } else if c == b'-' && column < width && scan + 1 < bytes.len() {
-                score = 1;
-                score_pos += 1;
-            }
-            if score >= best_score && score_pos > pos0 {
-                best = score_pos;
-                best_score = score;
-            }
-            while scan + 1 < bytes.len() && bytes[scan + 1] == 8 {
+        let (best, best_score) = if !facts.backspaces && width > 0 && newline - pos > width {
+            // The scan below on a text without backspaces, from a line start whose next newline
+            // is past `width` columns: it reads the columns `pos..=pos + width`, which hold no
+            // newline, and ends past them (`column > width`); its break is the last of the
+            // highest score, which `last_break` finds from the end.
+            last_break(bytes, pos, pos + width)
+        } else {
+            let pos0 = if newline - pos <= width { newline } else { pos };
+            let mut scan = pos0;
+            let mut column = 0;
+            let mut best = pos;
+            let mut best_score = 0;
+            while scan < bytes.len() && column <= width {
+                let c = bytes[scan];
+                let mut score = 0;
+                let mut score_pos = scan;
+                if c == b'\n' {
+                    best = scan;
+                    best_score = 4;
+                    break;
+                }
+                if c.is_ascii_whitespace() || c == 11 {
+                    score = 3;
+                } else if c == b',' && column < width && scan + 1 < bytes.len() {
+                    score = 2;
+                    score_pos += 1;
+                } else if c == b'-' && column < width && scan + 1 < bytes.len() {
+                    score = 1;
+                    score_pos += 1;
+                }
+                if score >= best_score && score_pos > pos0 {
+                    best = score_pos;
+                    best_score = score;
+                }
+                while scan + 1 < bytes.len() && bytes[scan + 1] == 8 {
+                    scan += 1;
+                    column = column.saturating_sub(1);
+                    has_backspace = true;
+                }
                 scan += 1;
-                column = column.saturating_sub(1);
+                column += 1;
+            }
+            // NCBI reference: c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
+            // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
+            // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
+            if best_score != 4 && column <= width && best != bytes.len() {
+                best = bytes.len();
                 has_backspace = true;
             }
-            scan += 1;
-            column += 1;
-        }
-        // NCBI reference: c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
-        // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
-        // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
-        if best_score != 4 && column <= width && best != bytes.len() {
-            best = bytes.len();
-            has_backspace = true;
-        }
-        let mut line = Vec::with_capacity(best - pos);
-        for &c in &bytes[pos..best] {
-            if has_backspace && c == 8 {
-                line.pop();
-            } else {
-                line.push(c);
+            (best, best_score)
+        };
+        // Eating backspaces leaves a line without them as it is.
+        if has_backspace && facts.backspaces {
+            let mut line = Vec::with_capacity(best - pos);
+            for &c in &bytes[pos..best] {
+                if c == 8 {
+                    line.pop();
+                } else {
+                    line.push(c);
+                }
             }
+            crate::cli::insert(writer, &line)?;
+        } else {
+            crate::cli::insert(writer, &bytes[pos..best])?;
         }
-        crate::cli::insert(writer, &line)?;
         crate::cli::insert(writer, b"\n")?;
         pos = best;
         if best_score == 3 {
@@ -2423,6 +2279,26 @@ fn write_flatfile_wrapped<W: Write + ?Sized>(
         }
     }
     Ok(())
+}
+
+/// The break of the line from `pos` of `write_flatfile_wrapped_with`'s scan where its columns
+/// `pos..=end` hold no newline and no backspace and the scan ends past `end`: the last of the
+/// highest score, the running maximum of `score >= best_score && score_pos > pos0` (`pos0` is
+/// `pos`): a blank after `pos` (score 3, the line ends before it), else a `,` or else a `-` before
+/// `end` (scores 2 and 1, the line ends after it), else `end` itself (score 0: every column after
+/// `pos` scores 0, `end` last).
+fn last_break(bytes: &[u8], pos: usize, end: usize) -> (usize, i32) {
+    let blank = |c: &u8| c.is_ascii_whitespace() || *c == 11;
+    if let Some(at) = bytes[pos + 1..=end].iter().rposition(blank) {
+        return (pos + 1 + at, 3);
+    }
+    if let Some(at) = bytes[pos..end].iter().rposition(|&c| c == b',') {
+        return (pos + at + 1, 2);
+    }
+    if let Some(at) = bytes[pos..end].iter().rposition(|&c| c == b'-') {
+        return (pos + at + 1, 1);
+    }
+    (end, 0)
 }
 
 /// The outfmt 0 prolog of blastp (the version, the references and the database), which
@@ -3945,7 +3821,7 @@ fn write_description_table<W: Write>(
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     show_sum_n: bool,
     columns: Option<SortColumns>,
-    mut label_of: impl FnMut(u32) -> Vec<u8>,
+    mut label_of: impl FnMut(u32) -> DescriptionLabel,
     read: super::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
@@ -4086,24 +3962,7 @@ fn write_description_table<W: Write>(
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
         read(*s_idx, writer)?;
-        let label = label_of(*s_idx);
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
-        // ```c++
-        //         if(line_component.size()+line_length > m_LineLen){
-        //             actual_line_component = line_component.substr(0, m_LineLen -
-        //                                                           line_length - 3);
-        //             actual_line_component += kEllipsis;
-        //     ...
-        //         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
-        // ```
-        // String widths are byte counts, including non-ASCII FASTA titles.
-        if label.len() > 68 {
-            writer.write_all(&label[..65])?;
-            writer.write_all(b"...")?;
-        } else {
-            writer.write_all(&label)?;
-            write_spaces(writer, 68 - label.len())?;
-        }
+        label_of(*s_idx).write_cut(writer)?;
         write!(
             writer,
             "  {:<max_score$}",
@@ -4311,6 +4170,88 @@ fn record_skipped_id(
     }
 }
 
+/// A description line's label in NCBI's two parts (`x_DisplayDeflineTableBody`): the id text
+/// (`gi|N|` and the id, the `line_length` that NCBI counts before the title; under `-html` the
+/// text of the sequence's link) and the title (`line_component`: the defline, after two spaces
+/// where a gi was written; under `-html` HTML-encoded). The plain line writes them as one string
+/// (`write_cut`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:883-913
+/// ```c++
+///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
+///             out << sdl->id_url;
+///         }
+///         if(m_Option & eShowGi){
+///             if(sdl->gi > ZERO_GI){
+///                 line_component = "gi|" + NStr::NumericToString(sdl->gi) + "|";
+///                 out << line_component;
+///                 line_length += line_component.size();
+///             }
+///         }
+///         if(!sdl->id.Empty()){
+///             ...
+///                 out << idStr;
+///                 line_length += idStr.size();
+///             }
+///         }
+///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
+///             out << "</a>";
+///         }
+///         line_component = (line_component.empty() ? "" : "  ") + sdl->defline;
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DescriptionLabel {
+    /// The id text (`ParsedSubject::description`'s start; empty for a title alone).
+    pub id: Vec<u8>,
+    /// The title.
+    pub title: Vec<u8>,
+}
+
+impl DescriptionLabel {
+    /// A label of a title alone (a generated defline, `Unknown`).
+    pub fn title_only(title: Vec<u8>) -> Self {
+        DescriptionLabel {
+            id: Vec::new(),
+            title,
+        }
+    }
+
+    /// The plain label on the description line: the id text and the title as one string cut to
+    /// 68 columns (a longer one is its first 65 bytes and `...`), or padded to them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:915-918,930
+    /// ```c++
+    ///         if(line_component.size()+line_length > m_LineLen){
+    ///             actual_line_component = line_component.substr(0, m_LineLen -
+    ///                                                           line_length - 3);
+    ///             actual_line_component += kEllipsis;
+    ///     ...
+    ///         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
+    /// ```
+    /// String widths are byte counts, including non-ASCII FASTA titles. (NCBI cuts the title
+    /// alone, which is the same cut for an id text of up to 65 bytes; a longer id is refused
+    /// before any output (`common/database.rs`, `report/db_subject.rs`), so the cut of the
+    /// whole label below never cuts the id.)
+    fn write_cut<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        // A label of a title alone is written as the joined label was: one write of its letters.
+        let len = self.id.len() + self.title.len();
+        if len > 68 {
+            let id = self.id.len().min(65);
+            if id > 0 {
+                writer.write_all(&self.id[..id])?;
+            }
+            writer.write_all(&self.title[..65 - id])?;
+            writer.write_all(b"...")
+        } else {
+            if !self.id.is_empty() {
+                writer.write_all(&self.id)?;
+            }
+            writer.write_all(&self.title)?;
+            write_spaces(writer, 68 - len)
+        }
+    }
+}
+
 /// The description-table label of a database sequence (before the cut to the line): the title
 /// that `GenerateDefline` makes of the stored title `title` and the source `source` of the
 /// Bioseq, which an empty title is made from (`Unknown` where NCBI's `HtmlDecode` throws), or for
@@ -4320,17 +4261,21 @@ pub fn database_description_label(
     source: &super::defline::SourceTaxname,
     parsed: Option<&crate::report::db_subject::ParsedSubject>,
     protein: bool,
-) -> Vec<u8> {
+) -> DescriptionLabel {
     if let Some(subject) = parsed {
-        let (mut label, title) = subject.description(protein);
-        label.extend_from_slice(&title.text);
-        return label;
+        let (id, title) = subject.description(protein);
+        return DescriptionLabel {
+            id,
+            title: title.text,
+        };
     }
     let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
-    match super::defline::generate_bioseq_defline(title, protein, true, &facts) {
-        Ok(defline) => defline.text,
-        Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
-    }
+    DescriptionLabel::title_only(
+        match super::defline::generate_bioseq_defline(title, protein, true, &facts) {
+            Ok(defline) => defline.text,
+            Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
+        },
+    )
 }
 
 // The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
@@ -4391,31 +4336,20 @@ fn write_blastn_description_table<W: Write>(
 //         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
 //                                           m_Outfile, CReference::eMegaBlast);
 // ```
-// NCBI reference: c++/src/algo/blast/api/version.cpp:58-61
-// ```c++
-//     // eMegaBlast
-//     "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \
-// \"A greedy algorithm for aligning DNA sequences\", \
-// J Comput Biol 2000; 7(1-2):203-14.",
-// ```
-// The reference is printed after "Reference: " and wrapped at 68 columns
-// (blastfmtutil.cpp:116-121); the layout is that of `write_translated_pairwise_intro`.
+// The prolog of a megablast search: the reference is the megablast one
+// (`reference::write_prolog_references`); the layout is that of
+// `write_translated_pairwise_intro`.
 fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
-    writeln!(writer, "BLASTN {version}")?;
+    super::reference::write_version_line(writer, false, "blastn", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
-    writeln!(
+    super::reference::write_prolog_references(
         writer,
-        "Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb"
-    )?;
-    writeln!(
-        writer,
-        "Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J"
-    )?;
-    writeln!(writer, "Comput Biol 2000; 7(1-2):203-14.")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        "blastn",
+        true,
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
@@ -5616,6 +5550,70 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
+    /// end; it equals the scan of every column (the form it takes for a text that may hold a
+    /// backspace) on texts of every scored class, at every width.
+    #[test]
+    fn the_break_found_from_the_end_is_the_scans() {
+        let alphabet = b"ab ,-\n\t\x0bxyz  \x08";
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..20_000 {
+            let len = (next() % 160) as usize;
+            let backspace = next() % 4 == 0;
+            let text: Vec<u8> = (0..len)
+                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+                .map(|c| if c == 8 && !backspace { b'q' } else { c })
+                .collect();
+            let width = 1 + (next() % 70) as usize;
+            let mut found = Vec::new();
+            write_flatfile_wrapped(&mut found, &text, width).unwrap();
+            let mut scanned = Vec::new();
+            let every_column = TextFacts {
+                newlines: true,
+                backspaces: true,
+            };
+            write_flatfile_wrapped_with(&mut scanned, &text, width, every_column).unwrap();
+            assert_eq!(
+                found,
+                scanned,
+                "{:?} at width {width}",
+                String::from_utf8_lossy(&text)
+            );
+        }
+    }
+
+    /// The plain description label is the id text and the title as one string, cut to 68 columns
+    /// or padded to them, wherever the parts split it (line RG, item T4a0).
+    #[test]
+    fn a_description_label_in_parts_writes_the_joined_line() {
+        let cut = |id: &[u8], title: &[u8]| {
+            let mut out = Vec::new();
+            DescriptionLabel {
+                id: id.to_vec(),
+                title: title.to_vec(),
+            }
+            .write_cut(&mut out)
+            .unwrap();
+            String::from_utf8(out).unwrap()
+        };
+        let joined = |label: &[u8]| cut(b"", label);
+        assert_eq!(cut(b"P1 ", b"title"), format!("P1 title{}", " ".repeat(60)));
+        assert_eq!(joined(b"P1 title"), cut(b"P1 ", b"title"));
+        let long = [b'x'; 70];
+        for split in [0, 3, 64, 65, 66, 70] {
+            let line = cut(&long[..split], &long[split..]);
+            assert_eq!(line, format!("{}...", "x".repeat(65)), "split {split}");
+        }
+        let exact = [b'y'; 68];
+        assert_eq!(cut(&exact[..10], &exact[10..]), "y".repeat(68));
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268 (quoted at
     // `write_matrix_line`)
@@ -7158,7 +7156,7 @@ fn write_translated_pairwise_intro(
     //         out << BlastGetVersion(program) << "\n";
     // }
     // ```
-    writeln!(writer, "{} {}", program, version)?;
+    super::reference::write_version_line(writer, false, program, version)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
     // ```c++
     //     m_Outfile << NcbiEndl << NcbiEndl;
@@ -7171,26 +7169,13 @@ fn write_translated_pairwise_intro(
     //     m_Outfile << NcbiEndl << NcbiEndl;
     // ```
     writer.flush()?;
-    writeln!(
+    super::reference::write_prolog_references(
         writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    Ok(())
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        program,
+        false,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:275-282
@@ -7291,7 +7276,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
-    subject_labels: &[Arc<[u8]>],
+    subject_labels: &[DescriptionLabel],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<BlastxDatabaseSubjects<'_>>,
@@ -7369,7 +7354,7 @@ struct BlastxSections<'a> {
     options: &'a BlastxPairwiseOptions,
     queries: &'a [BlastpPairwiseQuery],
     /// The description line of each subject, by subject index (`database_description_label`).
-    subject_labels: &'a [Arc<[u8]>],
+    subject_labels: &'a [DescriptionLabel],
     report: &'a BlastpPairwiseReport,
     /// A `-db` report's subjects (`None` for `-subject`).
     database: Option<BlastxDatabaseSubjects<'a>>,
@@ -8644,7 +8629,9 @@ mod tblastx_tests {
         }
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&first, &best, &tie])].into_iter().collect();
-        let ids = [Arc::<[u8]>::from(&b"YOL075C pep YOL075C"[..])];
+        let ids = [DescriptionLabel::title_only(
+            b"YOL075C pep YOL075C".to_vec(),
+        )];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
             write_subject_summary_table_with_sum_n(
@@ -8770,7 +8757,7 @@ mod tblastx_tests {
                 Some(&mut warnings),
                 &config,
                 &queries,
-                &[Arc::from(&b"s0 title"[..])],
+                &[DescriptionLabel::title_only(b"s0 title".to_vec())],
                 &report,
                 &options,
                 None,

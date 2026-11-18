@@ -404,6 +404,7 @@ export LOSAT_X_BXCHUNKSLICE=1
 export LOSAT_X_BXCLUTCAP=3
 export LOSAT_X_BXCLUTPOOL=1
 export LOSAT_X_BXCROSS=1
+export LOSAT_X_BXCROSS128=1
 export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXCTXONCE=1
 export LOSAT_X_BXDIAG=1
@@ -421,6 +422,7 @@ export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_BXW4CAP=1
 export LOSAT_X_CHAINRUN=1
+export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -2391,6 +2393,58 @@ Rebuilding less:
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_CLUTPAIRS=1` (BLASTP `-task blastp-fast` or a `-word_size` above 4, BLASTX and TBLASTN with a compressed
+  table (`-word_size` 5 to 7; their `-fast` tasks' 5), speed; in the strict set from the pull request that added it,
+  2026-11-17, line v4-BPF s14-s15; `=0` turns it off; acts in the serial builders and the pool's; class always: it
+  records nothing in `LOSAT_X_REACH`, its sides are `LOSAT_X_BPCLUT`'s) takes the cells of the two innermost
+  positions of a query word's neighbouring words from a row per pair of query letters, instead of the two innermost
+  loops of NCBI's `s_CompressedAddWordHitsCore` (`tblastx/lookup/x_clut_direct.rs` `XPairTable`, `XPairRow`,
+  `XWords::neighbors_paired` for positions w - 2 and w - 1, `neighbors_below_last_paired` for w - 3 and w - 2 of the
+  pool's waves; the exactness argument is in that file's header). The structural cause: at each node of the last two
+  positions the reference loops over the sorted letters of position w - 2 with a bound test per letter, and for each
+  over those of w - 1, a short pair of loops (blastp-fast, human x yeast proteomes `-db`: 643.9 M nodes,
+  964.7 M appends, 2.6 appends per node) whose tests and missed branches took about 33 cycles per append (line v4-BPF
+  s13). A row holds the pairs (i, j) of ranks in the two letters' sorted rows, in the order of the sum descending and
+  then of k = i * A + j (the stable sort by sum), as i16 sums and one-byte codes `char_a[i] + A * char_b[j]` in
+  groups of 16; the pairs a node reaches are a prefix of the row (sum >= threshold - (score - row_max[b])), which
+  `XPairRow::emit` counts 16 at a time without a branch, and their cells are `partial + code * A^(w-2)`. It holds
+  for every input: a query offset gets the loops' cells, each once, in another order within the offset, and every
+  test of the passes (the count chunks, the refusal, the bucket and piece cuts) runs at the end of an offset, so the
+  table is the same. A row is made when first read, 16 pairs at a time, by a merge of the two sorted rows that keeps
+  the key of each candidate row's next pair (`XPairRow::make`). The table depends only on the matrix and the
+  alphabet: the builds that run at once share one (BLASTX's query batches on the pool's tasks,
+  `LOSAT_X_BXCHUNKCROSS`), freed when the last of them ends; memory about 1 KiB per row read, at most 0.52 MiB and
+  12.25 KiB of `OnceLock`s (a table of each build had kept 184 tables' rows at 16 threads in blastx-fast, 800
+  queries: max RSS +5.2 MiB; one kept for the process kept its rows during the search: UniRef50, one thread, +292 KiB).
+  Tests: the lib tests `pair_tables_hold_every_matrix` (every NCBI matrix and compressed alphabet: the rows' order is
+  the stable sort's, and `emit` gives a scan's cells at every key, the ends of i32 included) and
+  `paired_cells_are_the_loops_cells` (word sizes 5 to 7, every matrix, thresholds from all words to few, letters
+  outside the alphabet, the waves' letter ranges: the same cells, each once), and `tests/compressed_clut_pairs.rs`
+  (common suite: blastp-fast, blastx-fast, blastx `-word_size 6`, tblastn-fast and tblastn `-word_size 6` at 1 and 2
+  threads, the default's reports and messages equal `=0`'s). With `LOSAT_X_STATS`, `main` prints `[X_STATS] CLUTPAIRS
+  tables= rows= groups=` (tables made, rows made, groups of 16 pairs made). Instructions, ws node 0 (2026-11-17, one
+  thread, dev d49e8e388 / this build with `=0` / this build, one run each, `perf stat -e instructions:u`): blastp-fast
+  human x yeast `-db` x0.935, 2,388 human queries x yeast x0.936, 2,763 Arabidopsis queries x zebrafish x0.986, 20
+  queries x WSSV `-subject` x0.814, one 318-letter human protein x WSSV x0.996 (BLOSUM45 x0.941),
+  UniRef50 `-db` with 3 and 10 queries x1.000 and x0.9999; blastx-fast 800 and 50 cDNAs x yeast `-db` x0.902 and x0.906, one cDNA x WSSV x0.909; tblastn-fast 30
+  C. elegans proteins x its genome x0.998, one x1.000; exact blastp (no compressed table) x1.000; outputs identical
+  in every arm (NCBI BLAST+ 2.17.0's bytes where it ran). Time, ws node 1 (2026-11-17, 16 cores, siblings idle, 8
+  rounds, arm order rotating, max RSS in the same runs), `-outfmt 6 -num_threads 16`, dev / `=0` / this build:
+  blastp-fast human x yeast `-subject` 4.388 / 4.389 / 4.280 s (x0.975, 8/8 rounds faster), its first 3,000 queries
+  0.416 / 0.416 / 0.401 s (x0.963, 7/8), the same pair `-db` 4.784 / 4.784 / 4.659 s (x0.974, 8/8), blastx-fast 800
+  cDNAs x yeast `-db` 1.157 / 1.163 / 1.093 s (x0.945, 8/8); the median per-round max RSS difference to dev -2.0,
+  +1.2, -1.0 and +1.5 MiB (108, 77, 98, 83 MiB); runs of tens of milliseconds within the null arm's spread (one cDNA
+  x WSSV, 40 rounds, mean 45.8 / 44.9 / 45.2 ms; one protein x WSSV, 24 rounds, 35.3 / 35.7 / 36.0 ms, CPU time
+  51.3 / 51.9 / 50.7 ms). WebAssembly (the serial WASI module, one core, 4 rounds, `=0` / this build): 2,388 human
+  queries x yeast x0.978, 3 queries x UniRef50 `-db` x0.960, 20 queries x WSSV x0.932. At one thread (ws node 1, one
+  core, sibling idle, dev / `=0` / this build): human x yeast `-db` 56.999 / 57.248 / 55.028 s (x0.965, 3/3 rounds),
+  2,388 human queries x yeast 5.670 / 5.670 / 5.446 s (x0.961, 8/8), 2,763 Arabidopsis queries x zebrafish 20.309 /
+  20.367 / 20.123 s (x0.991, 4/4), 20 queries x WSSV 1.048 / 1.050 / 0.930 s (x0.887, 8/8), blastx-fast 800 cDNAs x
+  yeast 14.250 / 14.354 / 13.578 s (x0.953, 4/4), max RSS -0.1 to +1.0 MiB of dev (at most +1.1 %); the runs of a
+  few queries (UniRef50 `-db` 3 and 10 queries, tblastn-fast 30 C. elegans proteins and one, one protein or cDNA x
+  WSSV) x0.984 to x1.007 of dev with the null arm x0.977 to x1.004, and the max RSS of `=0` in runs whose
+  environments have one length (UniRef50 10 queries 16,056 / 16,058 KiB, tblastn-fast 30 proteins 36,724 / 36,740
+  KiB, medians of 4; an environment variable of another length had moved it by up to 56 KiB).
 - `LOSAT_X_BPFFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-25, line v4-BPF K2-2; `=0` turns it off; acts where the serial builder makes the flat compressed table of
   `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly, and any thread count in builds without threads, such as
@@ -7312,17 +7366,21 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.000 / x0.985 (16 / 8 pairs), the cDNAs x1.002 / x1.000 (8 pairs; x1.002 is one 10 ms step of 8.17 s).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
-  per cell: on by default where the cell test is `LOSAT_X_BXCROSS`'s (an x86-64 CPU with AVX2 and POPCNT;
-  `LOSAT_X_BXCROSS=0` or no POPCNT leaves the direct loop on every table), `=0` turns it
-  off; set to a value (or with `LOSAT_X_BXDIAGSHADOW`) it runs with any cell test (`LOSAT_X_BXCROSS`'s where that
-  runs, otherwise the masked AVX2 batch on a CPU with AVX2 and the per-hit loop elsewhere); acts
+  per cell: on by default where the cell test is `LOSAT_X_BXCROSS`'s (an x86-64 CPU with AVX2 and POPCNT) or
+  `LOSAT_X_BXCROSS128`'s (the WebAssembly build, x86-64 with SSSE3, SSE4.1 and POPCNT; since 2026-11-17;
+  `LOSAT_X_BXCROSS=0`, or neither, leaves the direct loop on every table), `=0` turns it
+  off; set to a value (or with `LOSAT_X_BXDIAGSHADOW`) it runs with any cell test (`LOSAT_X_BXCROSS`'s or
+  `LOSAT_X_BXCROSS128`'s where one runs, otherwise the masked AVX2 batch on a CPU with AVX2 and the per-hit loop
+  elsewhere); acts
   in the two-hit stage with the standard lookup table,
   `-word_size 3`, when no diagnostic stage traces the seeds)
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of BPSEED with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
   with AVX2, in the form of `LOSAT_X_BXCROSS` where the CPU also has POPCNT, otherwise (with a value of
-  `LOSAT_X_BXDIAG` or `LOSAT_X_BXDIAGSHADOW`) the masked batch of 2026-11-02's fold, below; the per-hit loop elsewhere), and the
+  `LOSAT_X_BXDIAG` or `LOSAT_X_BXDIAGSHADOW`) the masked batch of 2026-11-02's fold, below; `LOSAT_X_BXCROSS`'s
+  batches in 128 bits (`LOSAT_X_BXCROSS128`) in the WebAssembly build and on x86-64 with SSSE3, SSE4.1 and POPCNT
+  but no AVX2; the per-hit loop elsewhere), and the
   hits that
   pass the test go to the reference's context
   check, extension, save and entry update unchanged (the context from blastp's `XContextTable`, made once
@@ -7332,10 +7390,11 @@ Scheduling (each value computed by one thread with the original function; order 
   the diagonal table for every subject and stops at a difference of the hit lists or the tables (the
   tables are not compared for a subject shorter than a word less one letter, whose one scan position the
   reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
-  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-cross-defer|avx2-cross|avx2-defer-masked|scalar|per-hit> subjects=
+  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-cross-defer|avx2-cross|w128-cross|avx2-defer-masked|scalar|per-hit> subjects=
   cells= batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST`
   (until 2026-11-02 it also gave `defer_min_hits_per_cell=` and `tables_avx2=`, `LOSAT_X_BXDEFER`'s rule), and
-  with `mode=avx2-cross` `cross_splits=` (`LOSAT_X_BXCROSS`'s windows tested in parts). A query batch whose
+  with `mode=avx2-cross`, `avx2-cross-defer` or `w128-cross` `cross_splits=` (the windows with a repeated entry,
+  which `LOSAT_X_BXCROSS`'s AVX2 batches test in parts and `LOSAT_X_BXCROSS128`'s hit by hit). A query batch whose
   lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 670 for
   every cell test since 2026-11-02, the fold of line SF S3 family bx-seed-loop, which had 670 with
   `LOSAT_X_BXCROSS`'s cell test and 900 with the others; a number set is the cutoff, `0` fuses every batch) is scanned by the direct loop instead, which is faster there; the
@@ -7480,9 +7539,11 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_BXCROSS=1` (BLASTX, speed; in the strict set since 2026-10-23, from the pull request that made it the
   default (it was an opt-in prototype the same day; v4-A14 DECISIONS 14): `=0` turns it off; acts where
   `LOSAT_X_BXDIAG`'s fused loop runs an AVX2 cell test on an x86-64 CPU with AVX2 and POPCNT, on every table
-  that loop takes; off, or without POPCNT, `LOSAT_X_BXDIAG` not set leaves the direct loop on every table, and
-  with a value (or `LOSAT_X_BXDIAGSHADOW`) the fused loop takes the masked AVX2 batch (`mode=avx2-defer-masked`; until 2026-11-02 the default
-  took `LOSAT_X_BXDEFER`'s choice there).
+  that loop takes, and since 2026-11-17 in 128 bits where the CPU has no AVX2 (`LOSAT_X_BXCROSS128`: the
+  WebAssembly build, x86-64 with SSSE3, SSE4.1 and POPCNT); off, or on a CPU with neither (AVX2 without POPCNT,
+  x86-64 without SSSE3, SSE4.1 or POPCNT, aarch64), `LOSAT_X_BXDIAG` not set leaves the direct loop on every table,
+  and with a value (or `LOSAT_X_BXDIAGSHADOW`) the fused loop takes the masked AVX2 batch (`mode=avx2-defer-masked`,
+  the per-hit loop without AVX2; until 2026-11-02 the default took `LOSAT_X_BXDEFER`'s choice there).
   Which query batches the fused loop takes is `LOSAT_X_BXDIAGMIN`'s rule, a separate cutoff against the direct
   loop, whose built-in value is 670 (900 without this cell test until 2026-11-02)) the cell test of blastx's fused seed loop cuts its batches of eight
   across the cells' borders (`blastp/x_seed_fused.rs`, `x_scan_cells_avx2_cross`, exactness argument in its
@@ -7525,6 +7586,63 @@ Scheduling (each value computed by one thread with the original function; order 
   (and results/fab against 32a63700). Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3
   (DESIGN_s3.md: round 2) and results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays,
   the windows with a repeated entry out of line).
+- `LOSAT_X_BXCROSS128=1` (BLASTX, speed; in the strict set since 2026-11-17, class platform, on by default; `=0`
+  turns it off, `=2` runs it on any x86-64 CPU with SSSE3, SSE4.1 and POPCNT, AVX2 or not, as a diagnostic;
+  `blastp/x_seed_fused.rs`, exactness argument in its header) `LOSAT_X_BXCROSS`'s cell test of blastx's fused seed
+  loop in 128-bit vectors, for the targets without its AVX2 kernel: the WebAssembly build (simd128) and x86-64 with
+  SSSE3, SSE4.1 and POPCNT but no AVX2, which ran the direct loop on every table before. With it `LOSAT_X_BXDIAG`'s
+  fused loop runs by default there too, on the tables `LOSAT_X_BXDIAGMIN` gives it (670, as for the AVX2 kernel),
+  and those tables take 16-bit hits. Both kernels run one driver (`XCrossKernel`: the stage, the drain and the
+  batches are written once; a kernel gives a piece's stage, the conflict test, the test of eight lanes and its
+  window with a repeated entry, and the AVX2 kernel also the deferral of `LOSAT_X_BXCROSSDEFER`). The 128-bit
+  kernel holds a window's eight lanes in two vectors of four: the conflict test compares each half with itself one
+  and two lanes round and the low half with the high one zero to three lanes round (all 28 pairs), the batch
+  computes the AVX2 batch's lane formulas by half and reads and stores the entries by lane, a cell's piece is
+  staged as six vectors (`u16` hits by three 16-byte loads, the AVX2 stage's reads; `i32` hits without reading past
+  the list), and a window with a repeated entry takes its eight hits one after the other (the reference's order)
+  instead of the AVX2 kernel's parts (at 6.77 hits per used cell a fifth of the windows repeat an entry, and the
+  parts cost the 128-bit kernel more than the scalar tests). It calls each batch's candidates at once (its drain
+  refuses `DEFER` when it is compiled): `LOSAT_X_BXCROSSDEFER`'s deferral made the WebAssembly build slower (in the
+  prototype build bx1 of v4-W W2 s3, whose windows with a repeated entry were still tested in parts, on the 50-kb
+  piece of the fly genome of the timings below: x0.780 of `dev` with it against x0.749 without; on x86-64 with `=2`
+  it was 3 % faster, which a CPU without AVX2 forgoes so that the kernel has one form). Its operations come from the
+  128-bit layer of the X-drop kernel (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128;
+  new there: `sub32`, `eq32`, `shl32`, `sra32`, `set32`, `mask32`, `any_set`, `rot32_1/2/3`, `zext_lo16/hi16`); on
+  x86-64 it asks for SSSE3 as that layer does, though none of its operations needs it. The AVX2 kernel keeps its
+  instructions, not all of its machine code: in the release build of rustc 1.92.0 (v4-W W2 s3 build bx6 against
+  `dev` b59c21dc4; the review fixes left every seed-loop function as bx6's, build bx8) the functions of the seed
+  loops, the scans, the X-drop kernels and the rest of BLASTX (880) disassemble as `dev`'s but for the AVX2 drain with the
+  deferral (`x_cross_drain` with `DEFER`, the default: the same instructions, its blocks laid out otherwise and its
+  frame 16 bytes smaller; its cycles are in the timings below), the closures that choose the cell test
+  (`x_word_finder_fused*`) and the timing line's writer; rustc marks `#[inline(never)]` of a `#[target_feature]`
+  function only at call sites in functions with those features, so the kernels call their out-of-line functions
+  from methods compiled for their instructions (otherwise LLVM inlined the drain without the deferral into the
+  scan), and the scan's closure, the windows with a repeated entry and the AVX2 unit are written in the kernels'
+  functions. With `LOSAT_TIMING=1` the `blastx_diag` line names `mode=w128-cross` and ends with `cross_splits=` (the
+  windows with a repeated entry, tested hit by hit). Tests: the unit tests run the 128-bit kernel natively (its SSE
+  build) against the per-hit test with every cell test (random and edge tables, the chunks of 1,024 and 64, the
+  tables of 16-bit hits, the conflict test on all 4,140 patterns of equal lanes), pin the choice of the cell test
+  for every class of CPU (`the_cell_test_follows_the_cpu_and_the_switches`), and run in the WebAssembly build in CI
+  (`.github/workflows/web.yml`, step "SIMD kernel tests on wasm32-wasip1": the unit tests of `x_seed_fused` and
+  `x_seed_diag` under `web/tools/wasi-test-runner.mjs`); `tests/blastx_diag.rs`
+  (`the_128_bit_cross_cell_batches_give_the_reports_of_the_reference`) runs `=2` end to end against the reference
+  with every search, the shadow and `=0`.
+  Timed on the workstation (node 0, one core, Node 26.8.2, the serial WebAssembly command; `dev` b59c21dc4 against
+  the final build 1da1745f4 in one Node process, 7 rounds, rotating rounds after a warm-up; the same output in every arm): a
+  50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`; 25-31 hits per used cell) 14.420 -> 11.183 s, x0.748 [0.724-0.789] (7 of 7 rounds below 1),
+  five fly cDNAs (19.5) x0.769 [0.756-0.787] (7 of 7), and by hits per used cell (one to three fly cDNAs): 6.77 (the fewest the fused
+  loop takes) x0.992 [0.988-1.031] (5 of 7), 7.74 x0.943 [0.939-0.994] (7 of 7), 8.27 x0.901 [0.887-0.948] (7 of
+  7), 9.85 x0.858 [0.852-0.886] (7 of 7), 13.32 x0.799 [0.780-0.809] (7 of 7); a 1.5-kb cDNA (4.91, the direct loop
+  in both arms) x1.006 [0.996-1.054] (2 of 7), the spread of the rounds. Where the form pays least: at 6.77 hits per
+  used cell the gain is within the spread; testing the windows with a repeated entry hit by hit cut their cycles
+  there from 0.235 G (in parts) to 0.094 G (a build that tested them in parts was x1.023 [1.013-1.062]), and the
+  untimed `perf` counts of the seed functions are 0.70 against the direct loop's 0.67 G (v4-W results/w2/bx128). Native x86-64 with AVX2 (the final build against `dev`, the same rounds): cycles
+  x0.9967 [0.9872-0.9985] on the 50-kb piece and x0.9886-1.0003 on the cDNAs, instructions x1.0012-1.0035
+  (x0.9998 on the 1.5-kb cDNA); `=2` (the 128-bit kernel in place of the AVX2 one; build e9fec94f8, whose
+  kernels are the final build's machine code) x1.116 [1.113-1.119] of the default's cycles on the 50-kb piece and
+  x1.049 [1.042-1.055] on the 2.1-kb cDNA, with the same output. Not timed: x86-64
+  without AVX2, where the 128-bit kernel replaces the direct loop by default (no run compares the two there; `=2`
+  on a CPU with AVX2 compares the 128-bit kernel with the AVX2 one, not with that class's direct loop).
 - `LOSAT_X_BXCROSSDEFER=1` (BLASTX, speed; in the strict set since 2026-10-25, from the pull request that
   added it (perf/bx-cross-defer; v4-A14 DECISIONS 26-27): `=0` turns it off; acts where `LOSAT_X_BXCROSS`'s cell
   test runs, on every table blastx's fused loop takes on an x86-64 CPU with AVX2 and POPCNT) `LOSAT_X_BXCROSS`'s
@@ -7637,8 +7755,10 @@ Scheduling (each value computed by one thread with the original function; order 
   as u32 < 2 (window - wordsize)`, and the cell's next value is selected. A flag-1 cell or a candidate goes on
   to the reference's statements. Acts per subject where `1 <= wordsize < window`, `0 <= diag_offset` and
   `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: the one-hit search,
-  and offsets near 2^30 at a `-window_size` near 2^29). The direct loop scans every subject where the CPU
-  has no AVX2 and POPCNT (aarch64, WebAssembly: `LOSAT_X_BXDIAG` is off there) or with `LOSAT_X_BXCROSS=0`, and on x86-64 the query batches whose
+  and offsets near 2^30 at a `-window_size` near 2^29). The direct loop scans every subject where no cell test
+  of batches across the cells' borders runs (`LOSAT_X_BXDIAG` is off by default there: aarch64, x86-64 without
+  POPCNT, SSSE3 or SSE4.1, `LOSAT_X_BXCROSS=0`, and `LOSAT_X_BXCROSS128=0` on x86-64 without AVX2 and in
+  WebAssembly), and elsewhere (x86-64, WebAssembly) the query batches whose
   lookup table has fewer hits per used cell than `LOSAT_X_BXDIAGMIN` (short queries); the fused loop of
   `LOSAT_X_BXDIAG` keeps its own tests. With `LOSAT_X_BXDIAG=0` 79-81 % of the hits of the three cases
   below are too far, 14.5-17.4 % overlap, 1.2-1.4 % meet a flag-1 cell and 2.1-2.8 % are candidates

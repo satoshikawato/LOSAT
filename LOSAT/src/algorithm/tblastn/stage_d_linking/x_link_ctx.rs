@@ -208,6 +208,10 @@ mod tests {
     // HSPs are each in the first and the last context (a query given twice), where the final
     // sort meets ties in every field it reads and keeps the order of the list.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn contexts_linked_apart_give_the_list_of_one_pass() {
         let link = LocalLinkParameters {
             gap_decay_rate: 0.1,

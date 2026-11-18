@@ -103,6 +103,10 @@ fn subjects(path: &std::path::Path) -> Vec<FastaRecord> {
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
     for extra in [
@@ -331,6 +335,10 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
 // gets a search: through the reference scan (`-lcase_masking` and a lowercase subject), the
 // default one and at two threads. A debug build checks the unchecked reads' preconditions.
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn a_word_size_of_one_searches() {
     let a = fixture_sequence("LC738884.fasta");
     let query = TempFasta::new("tblastx_word1_query.fna", &[("q", &a[0..1_500])]);

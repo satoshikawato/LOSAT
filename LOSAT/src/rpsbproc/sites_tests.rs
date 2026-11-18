@@ -8,9 +8,9 @@ use crate::rpsbproc::data::{DataFiles, Site};
 /// A data directory with the model `cd10001` and sites `A`..`E` (the text of the motif and the
 /// positions in the table below).
 fn load(sites: &[(&str, &str, &str)]) -> CddData {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat_rpsbproc_sites_{}_{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

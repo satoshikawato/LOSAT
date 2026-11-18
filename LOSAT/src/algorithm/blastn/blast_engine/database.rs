@@ -44,7 +44,7 @@ pub(super) use crate::algorithm::common::database::{HeaderReadError, Preliminary
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::{PrintedIds, SubjectFetch};
 use crate::seqdb::{
@@ -586,13 +586,18 @@ impl BlastnDatabase {
     /// each rank, `ReportedSubjects::ordinals`; `parsed`: the sequences with parsed Seq-ids,
     /// `ReportedSubjects::parsed`) and what the taxonomy database says about it, for the XML2
     /// and JSON formats (`algorithm::common::database::read_reported_taxonomy`); the sequences
-    /// of `hit_lists` with HSPs are the reported ones.
+    /// of `hit_lists` with HSPs are the reported ones, of which those that the reports load
+    /// (`loads`, `ReportedSubjects::loads`: the reads of a subject whose `Hit` throws, and of one
+    /// shown only after it, are never made, so the texts of opening the taxonomy database and of a
+    /// volume's first lookup of a taxid go to the loads that make them; review 1 of line DBID
+    /// pfoff-1, H1).
     #[allow(clippy::type_complexity)]
     pub(super) fn read_taxids(
         &self,
         ordinals: &[u32],
         parsed: &[Option<Arc<ParsedSubject>>],
         hit_lists: &[Option<BlastnHitList>],
+        loads: &HitLoads,
     ) -> Result<(
         Vec<i32>,
         Vec<crate::report::blast_xml::HitTaxonomy>,
@@ -605,6 +610,7 @@ impl BlastnDatabase {
             .flat_map(|hit_list| &hit_list.hsplist_array)
             .filter_map(|hsp_list| hsp_list.hsps.first())
             .map(|hsp| hsp.s_idx as usize)
+            .filter(|&rank| loads.loaded(rank))
             .collect();
         shared::read_reported_taxonomy(&self.db, &self.taxdb, ordinals, &reported, parsed, PROGRAM)
     }
@@ -737,20 +743,31 @@ impl BlastnDatabase {
     /// `hit_lists`, for the XML2 and JSON formats, which write the taxonomy
     /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
     /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`;
-    /// the reports read every reported subject), which BLASTN writes after the stop (the XML
-    /// formats are not streamed, `x_rpt_stream`).
+    /// `spans`: the queries of each of those batches, numbered from 0, as BLASTN holds them all;
+    /// the reports read every reported subject that they load: `hit_loads` of `batches_prefetch`,
+    /// the reports' own answer, which leaves out a subject whose `Hit` throws and one shown only
+    /// after it, with `writes_thrown`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which
+    /// BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn batch_prefetch_stop(
         &self,
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
+        spans: &[std::ops::Range<usize>],
+        writes_thrown: bool,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
+        let prefetch = batches_prefetch(before, 0, spans, gapped);
+        let loads = hit_loads(before, &prefetch, writes_thrown, |ordinal| {
+            titled_parsed(titles, ordinal)
+        });
         shared::held_batch_prefetch_stop(
             &self.db,
             &self.taxdb,
-            Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every),
+            Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every)
+                .filter(|subject| loads.loaded(subject.ordinal as usize)),
             std::iter::empty(),
             Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
             PROGRAM,
@@ -1923,6 +1940,27 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
         .sum()
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (quoted at
+// `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
+// results against `PRE_FETCH_SEQS_LIMIT`)
+/// Whether the batch of each query of `hit_lists` (final hit lists by query) prefetches
+/// (`shared::BatchPrefetch::of`): `batches` are the queries of each batch, numbered from `first`
+/// (the query of `hit_lists[0]`), and `seq_aligns_of` counts a batch's Seq-aligns (`gapped`). The
+/// one producer of the prefetch that the reports' loads read (`hit_loads`), for both of its
+/// readers: the stop of a later batch, of the batches before it
+/// (`BlastnDatabase::batch_prefetch_stop`), and the reports (`reported_subjects`), so the two
+/// cannot disagree on what the batches before loaded (review 2 of line DBID pfoff-1, N-M2).
+fn batches_prefetch(
+    hit_lists: &[Option<BlastnHitList>],
+    first: usize,
+    batches: &[std::ops::Range<usize>],
+    gapped: bool,
+) -> shared::BatchPrefetch {
+    shared::BatchPrefetch::of(hit_lists.len(), first, batches, |span| {
+        seq_aligns_of(&hit_lists[span], gapped)
+    })
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
@@ -1940,6 +1978,55 @@ pub(super) struct ReportedSubjects {
     /// The names of the sources from which NCBI makes the empty stored titles of the others, by
     /// rank (`shared::StoredTitle::source`; empty when none has one).
     pub(super) sources: Vec<crate::report::defline::SourceTaxname>,
+    /// What the XML2 and JSON reports do at each subject's `Hit`, by rank (`hit_loads`, the one
+    /// answer: a `Hit` whose lookup throws, a subject that no report loads), which the refusals,
+    /// the names and the taxonomy reads take.
+    pub(super) loads: HitLoads,
+}
+
+/// Whether every format of `output_formats` writes a `Hit` whose subject's lookup throws as NCBI
+/// does (`Xml2Kind::every`, for `hit_loads`).
+pub(super) fn writes_thrown(output_formats: &[BlastnOutputFormat]) -> bool {
+    crate::report::blast_xml2::Xml2Kind::every(
+        output_formats.iter().map(|format| format.xml2_kind()),
+    )
+}
+
+/// What the XML2 and JSON reports of `hit_lists` (final hit lists by query, in the order of the
+/// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
+/// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by
+/// one (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a
+/// key; the `Hit`s are those that `blast_xml::write_blastn_xml` makes.
+pub(super) fn hit_loads<'p>(
+    hit_lists: &[Option<BlastnHitList>],
+    prefetch: &shared::BatchPrefetch,
+    writes_thrown: bool,
+    parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
+) -> HitLoads {
+    HitLoads::of(
+        writes_thrown,
+        hit_lists.iter().enumerate().map(|(query, hit_list)| {
+            (
+                prefetch.reads_one_by_one(query),
+                hit_list.as_ref().map_or_else(Vec::new, |hit_list| {
+                    hit_list
+                        .hsplist_array
+                        .iter()
+                        .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
+                        .collect()
+                }),
+            )
+        }),
+        parsed,
+    )
+}
+
+/// The subject with parsed Seq-ids of the ordinal id `ordinal` in `titles`.
+fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubject> {
+    match titles.get(&u32::try_from(ordinal).ok()?) {
+        Some(ReportedHeader::Parsed(subject)) => Some(subject),
+        _ => None,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1406-1414
@@ -1975,8 +2062,11 @@ pub(super) struct ReportedSubjects {
 /// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
 /// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`;
-/// `prefetch`: whether each query's batch prefetches, where only the prefetch reads a subject).
-/// The records are made on `pool` (`x_reported_records`).
+/// `batches`: the queries of each batch, numbered from `first_query`, whose prefetch, where only
+/// the prefetch reads a subject, is `batches_prefetch`'s, with the Seq-aligns of a `gapped`
+/// search or not; `writes_thrown`: every format writes a `Hit` whose lookup throws,
+/// `writes_thrown`, for the one answer of the reports' loads, `hit_loads`, which the refusals
+/// take). The records are made on `pool` (`x_reported_records`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
@@ -1984,8 +2074,10 @@ pub(super) fn reported_subjects(
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
-    prefetch: &shared::BatchPrefetch,
+    writes_thrown: bool,
+    batches: &[std::ops::Range<usize>],
     first_query: usize,
+    gapped: bool,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
@@ -2001,6 +2093,7 @@ pub(super) fn reported_subjects(
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read
     // them one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
     // NCBI's warning (`BlastnDatabase::batch_prefetch`).
+    let prefetch = batches_prefetch(hit_lists, first_query, batches, gapped);
     let reads = prefetch.reads(
         hit_lists
             .iter()
@@ -2014,6 +2107,10 @@ pub(super) fn reported_subjects(
                     .map(move |hsp_list| (query, hsp_list.oid))
             }),
     );
+    // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below).
+    let loads = hit_loads(hit_lists, &prefetch, writes_thrown, |ordinal| {
+        titled_parsed(titles, ordinal)
+    });
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)
@@ -2049,7 +2146,16 @@ pub(super) fn reported_subjects(
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
                 let shown = reads.shown(shown, ordinal);
-                shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                shared::check_reported_parsed(
+                    db,
+                    subject,
+                    shown,
+                    loads.load(ordinal as usize),
+                    false,
+                    taxdb,
+                    ordinal,
+                    PROGRAM,
+                )?;
                 (
                     subject.first_title().to_vec(),
                     Some(Arc::clone(subject)),
@@ -2111,12 +2217,17 @@ pub(super) fn reported_subjects(
             )?;
         }
     }
+    let loads = loads.renamed(|ordinal| {
+        let ordinal = u32::try_from(ordinal).ok()?;
+        ordinals.binary_search(&ordinal).ok()
+    });
     Ok(ReportedSubjects {
         ordinals,
         records,
         stores,
         parsed,
         sources,
+        loads,
     })
 }
 
@@ -2492,9 +2603,9 @@ mod tests {
 
     /// A temporary directory of this test (removed by the test).
     fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastn-db-{tag}-{}-{:?}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2664,6 +2775,10 @@ mod tests {
     // every sequence once with its stored data, and merges what it keeps in ordinal order,
     // whatever the block size and the thread count, across the six volumes of the fixture.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn blocks_give_every_sequence_once_and_merge_in_ordinal_order() {
         let database = open("nucl_mv");
         let single = open("nucl_v4");
@@ -2698,6 +2813,10 @@ mod tests {
     // again by ordinal id, in BLASTNA with its ambiguity codes; the results come in the
     // order of the listed ordinal ids at every thread count.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn listed_sequences_are_read_again_with_their_ambiguity_codes() {
         let database = open("nucl_mv");
         let entries = entries();
@@ -2740,6 +2859,10 @@ mod tests {
     // results come in the order of `listed`: at 1 to 8 threads, uneven work per sequence so that
     // the threads steal from each other.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn the_parallel_traceback_reuses_the_idle_scratches() {
         use std::sync::atomic::{AtomicU64, Ordering};
         let database = open("nucl_mv");
@@ -2974,8 +3097,10 @@ mod tests {
             &mut hit_lists,
             true,
             ParsedShown::default(),
-            &shared::BatchPrefetch::every(),
+            false,
+            &[],
             0,
+            true,
             None,
         )
         .unwrap();
@@ -3029,8 +3154,10 @@ mod tests {
             &mut hit_lists,
             false,
             ParsedShown::default(),
-            &shared::BatchPrefetch::every(),
+            false,
+            &[],
             0,
+            true,
             None,
         )
         .unwrap();
@@ -3066,8 +3193,10 @@ mod tests {
             &mut clean,
             false,
             ParsedShown::default(),
-            &shared::BatchPrefetch::every(),
+            false,
+            &[],
             0,
+            true,
             None,
         )
         .unwrap();
@@ -3080,8 +3209,10 @@ mod tests {
             &mut bad,
             false,
             ParsedShown::default(),
-            &shared::BatchPrefetch::every(),
+            false,
+            &[],
             0,
+            true,
             None,
         )
         .err()
@@ -3100,6 +3231,10 @@ mod tests {
     // The records made on a pool are those made one at a time, and the error is the first one
     // in the order of the ordinal ids.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn reported_records_on_a_pool_are_the_serial_ones() {
         let ordinals: Vec<u32> = (0..500).collect();
         let record = |&ordinal: &u32| -> Result<Reported> {

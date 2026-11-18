@@ -77,6 +77,12 @@ fn run_binary_in(binary: &Path, dir: &Path, words: &[&str], envs: &[(&str, &str)
     if let Some(log) = std::env::var_os("LOSAT_BLASTX_WORKER_LOG") {
         command.env("LOSAT_BLASTX_WORKER_LOG", log);
     }
+    // An instrumented build (cargo llvm-cov, the nightly coverage jobs) writes its profile where
+    // this names it, in the target directory; without it the profile is a `default_*.profraw` in
+    // `dir`, a file the run would seem to have made.
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
     command.output().unwrap()
 }
 

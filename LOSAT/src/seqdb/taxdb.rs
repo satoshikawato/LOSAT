@@ -989,9 +989,9 @@ mod tests {
 
     fn temp_dir(tag: &str) -> TempDir {
         static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-taxdb-{tag}-{}-{}",
-            std::process::id(),
+            crate::utils::test_dir::process_id(),
             COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1269,16 +1269,32 @@ mod tests {
         );
     }
 
+    /// `std::env::join_paths`, which WASI lacks (it returns an error there): the directories join
+    /// with ":" as `path_splitter` splits them off Windows.
+    fn joined_paths(dirs: [&std::path::Path; 2]) -> std::ffi::OsString {
+        #[cfg(not(target_os = "wasi"))]
+        {
+            std::env::join_paths(dirs).unwrap()
+        }
+        #[cfg(target_os = "wasi")]
+        {
+            let mut joined = dirs[0].as_os_str().to_os_string();
+            joined.push(":");
+            joined.push(dirs[1]);
+            joined
+        }
+    }
+
     #[test]
     fn the_index_path_decides_and_the_data_file_is_its_sibling() {
         // The first directory with a taxdb.bti wins, even when its taxdb.btd is missing.
         let good = fixture_dir().join("good");
         let nobtd = fixture_dir().join("no_btd");
-        let joined = std::env::join_paths([&nobtd, &good]).unwrap();
+        let joined = joined_paths([&nobtd, &good]);
         let cwd = temp_dir("cwd");
         let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None).unwrap();
         assert!(TaxDb::open(&search).unwrap().is_missing());
-        let joined = std::env::join_paths([&fixture_dir().join("no_bti"), &good]).unwrap();
+        let joined = joined_paths([&fixture_dir().join("no_bti"), &good]);
         let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None).unwrap();
         assert!(!TaxDb::open(&search).unwrap().is_missing());
         // The current directory comes before BLASTDB.

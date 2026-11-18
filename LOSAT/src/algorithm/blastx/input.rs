@@ -2550,7 +2550,7 @@ impl<R: Read> FastaStream<R> {
 // then remaining regular-file bytes without forcing the next 8191-byte window.
 // Independent instrumented pinned CPushback_Streambuf calibrates this hint;
 // sgetn may span windows when the preserved allocation is larger than 8191.
-fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
+fn file_available(file: &mut crate::blastinput::input_files::InputFile) -> std::io::Result<usize> {
     let metadata = file.metadata()?;
     // Windows reports a pipe or a console as a file whose position can be read
     // (`input_files::has_stream_position`); elsewhere `stream_position` below fails on one.
@@ -2569,7 +2569,7 @@ fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
         // FIONREAD before forcing a file-buffer refill (independent C++ oracle).
         #[cfg(unix)]
         {
-            rustix::io::ioctl_fionread(file)
+            rustix::io::ioctl_fionread(&**file)
                 .map(|n| n as usize)
                 .map_err(Into::into)
         }
@@ -2586,7 +2586,7 @@ fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
 // typedef IO_PREFIX::ifstream      CNcbiIfstream;
 // #endif
 // ```
-impl FastaStream<std::fs::File> {
+impl FastaStream<crate::blastinput::input_files::InputFile> {
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
     // ```c++
     // CT_INT_TYPE CPushback_Streambuf::underflow(void)
@@ -2603,7 +2603,8 @@ impl FastaStream<std::fs::File> {
     //     x_FillBuffer((size_t) m_Sb->in_avail());
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
-    pub(crate) fn from_file(input: std::fs::File) -> Self {
+    pub(crate) fn from_file(input: impl Into<crate::blastinput::input_files::InputFile>) -> Self {
+        let input = input.into();
         let no_position = !crate::blastinput::input_files::has_stream_position(&input);
         let mut stream = Self::new(input);
         stream.no_position = no_position;
@@ -2628,7 +2629,10 @@ pub(crate) struct QueryStreamSettings {
 
 impl QueryStreamSettings {
     /// The search's stream of the query file.
-    pub(crate) fn stream(&self, file: std::fs::File) -> FastaStream<std::fs::File> {
+    pub(crate) fn stream(
+        &self,
+        file: impl Into<crate::blastinput::input_files::InputFile>,
+    ) -> FastaStream<crate::blastinput::input_files::InputFile> {
         let mut stream = FastaStream::from_file(file);
         stream.parse_deflines = self.parse_deflines;
         stream.id_scope = self.id_scope.clone();
@@ -2641,7 +2645,10 @@ impl QueryStreamSettings {
     /// A stream of the query file for a read before the search: its ids go to a copy of the
     /// search's (`IdScope::copy`), so that it stops at the record the search refuses (a query
     /// with the id of a subject) and the search reads its records into its ids as before.
-    pub(crate) fn stream_before_search(&self, file: std::fs::File) -> FastaStream<std::fs::File> {
+    pub(crate) fn stream_before_search(
+        &self,
+        file: impl Into<crate::blastinput::input_files::InputFile>,
+    ) -> FastaStream<crate::blastinput::input_files::InputFile> {
         let mut stream = self.stream(file);
         stream.id_scope = self
             .id_scope
@@ -3004,7 +3011,7 @@ mod stream_tests {
     //         }
     //         m_Ios = fstrm;
     // ```
-    impl NativeRead for std::fs::File {
+    impl NativeRead for crate::blastinput::input_files::InputFile {
         // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
         // ```c++
         //     x_FillBuffer((size_t) m_Sb->in_avail());
@@ -3281,15 +3288,17 @@ mod stream_tests {
             } else {
                 &[false, true][..]
             } {
-                let temporary = std::env::temp_dir().join(format!(
+                let temporary = crate::utils::test_dir::temp_dir().join(format!(
                     "losatx-e-stream-unit-{}-{}",
-                    std::process::id(),
+                    crate::utils::test_dir::process_id(),
                     fields[0]
                 ));
                 let input: Box<dyn NativeRead> = if file_backend {
                     assert!(!temporary.exists());
                     std::fs::write(&temporary, &data).unwrap();
-                    Box::new(std::fs::File::open(&temporary).unwrap())
+                    Box::new(crate::blastinput::input_files::InputFile::from(
+                        std::fs::File::open(&temporary).unwrap(),
+                    ))
                 } else {
                     Box::new(Input {
                         data: Cursor::new(data.clone()),
@@ -3943,9 +3952,9 @@ mod query_settings_tests {
 
     /// The directory of this test's files (removed at its end).
     fn dir() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
+        crate::utils::test_dir::temp_dir().join(format!(
             "losat-blastx-query-settings-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ))
     }
 
@@ -3958,7 +3967,10 @@ mod query_settings_tests {
     }
 
     /// The records of `stream`, of the query (`protein` false) or the subject role.
-    fn read(stream: &mut FastaStream<std::fs::File>, protein: bool) -> Result<Vec<FastaRecord>> {
+    fn read(
+        stream: &mut FastaStream<crate::blastinput::input_files::InputFile>,
+        protein: bool,
+    ) -> Result<Vec<FastaRecord>> {
         parse_fasta_stream_keeping(
             stream,
             protein,

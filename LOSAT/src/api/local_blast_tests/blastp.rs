@@ -440,6 +440,10 @@ fn a_batch_of_queries_without_residues_stops() {
 // outfmt 0), and some subjects hold lower-case letters (`-lcase_masking`: the lowercase subject
 // rows).
 #[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
 fn rows_made_per_window_write_the_bytes_of_rows_made_up_front() {
     let inputs = WindowInputs::new();
     let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTP", true, true));
@@ -535,9 +539,13 @@ fn window_budget(threads: usize) -> usize {
     (1 << 20) * threads
 }
 
-/// `x_pairwise_par::query_estimate_of` of the rows of one query's HSPs of lengths `lengths`.
+/// The estimate of the report of one query's HSPs of lengths `lengths` at the default line
+/// length, which the windows' search uses (`x_pairwise_par::query_estimate_of`).
 fn query_estimate(lengths: impl Iterator<Item = usize>) -> usize {
-    lengths.fold(512, |bytes, length| bytes + 100 + 400 + 4 * length)
+    crate::report::x_pairwise_par::query_estimate_of(
+        lengths,
+        crate::report::pairwise::DEFAULT_LINE_LENGTH,
+    )
 }
 
 /// `sequence` with the letter at `position` replaced by `letter`.

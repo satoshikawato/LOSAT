@@ -369,9 +369,9 @@ fn bl_taxid_in_a_name_is_refused() {
     // NCBI writes `STaxInfo::blNameTaxid`, an uninitialised `int` (`-1784` in probe
     // `s2.blastp.bltaxid`), where the report shows that taxid's group.
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat-tax-report-{}-{}",
-        std::process::id(),
+        crate::utils::test_dir::process_id(),
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).unwrap();

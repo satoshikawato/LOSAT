@@ -5446,14 +5446,41 @@ pub fn run(
     // ```
     // The query is opened and the output file created before the options are checked;
     // `-` is standard input and standard output.
-    input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
-    // NCBI opens the query file inside `Run` too: its error is saved and an error archive
-    // follows.
-    let query_file = match input_files::open_input(&args.query, "query", args.app.name()) {
-        Ok(file) => file,
-        Err(error) => {
-            write_run_error_archive(&args, archive.as_ref(), &error);
-            return Err(error);
+    //
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
+    // ```c++
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios  = &cin;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:448-453
+    // ```c++
+    //         /*** Get the query sequence(s) or PSSM (these two options are mutually
+    //          * exclusive) ***/
+    //         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
+    //         CRef<CBlastInput> input;
+    //
+    //         if (pssm.Empty()) {  // FASTA input
+    // ```
+    // psiblast `-in_pssm` (`pssm_query`): the query is the PSSM, which the options' handler
+    // reads (`check_options`). `-in_pssm` excludes `-query` (blast_args.cpp:1242-1244, the
+    // parser's exclusion), so the query is the default `-` (`kDfltArgQuery`,
+    // blast_args.cpp:3425-3427), which NCBI takes as `&cin` (no platform refuses it) and never
+    // reads. LOSAT opens no query input then, as tblastn's `-in_pssm` (`tblastn_app`).
+    let query_file = if pssm_query(&args) {
+        None
+    } else {
+        input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
+        // NCBI opens the query file inside `Run` too: its error is saved and an error archive
+        // follows.
+        match input_files::open_input(&args.query, "query", args.app.name()) {
+            Ok(file) => Some(file),
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
         }
     };
     let out_file = open_out_file(&args)?;
@@ -5886,7 +5913,7 @@ fn subject_taxonomy(
 fn search_cli(
     args: BlastpArgs,
     list: Option<crate::seqdb::DbList>,
-    query_file: std::fs::File,
+    query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
     choice: crate::blastinput::app::FormatChoice,
@@ -5960,6 +5987,13 @@ fn search_cli(
     // opened file, before it is read (`stream_is_empty`). When the subjects were read from
     // standard input too, `cin` has reached its end (a failed stream), so NCBI gets no
     // position for the query either, and its reader is at its end: no query batch is read.
+    // The query input is opened for every query but the PSSM of `-in_pssm` (`pssm_query`), which
+    // the branch above searched (`psi_search` is that PSSM, read with the options).
+    let Some(query_file) = query_file else {
+        return Err(anyhow::anyhow!(
+            "LOSAT internal error: a FASTA query search without its query input"
+        ));
+    };
     let shared_standard_input = args.query.as_os_str() == "-"
         && args
             .subject
@@ -6182,7 +6216,6 @@ fn search_pssm_query(
     xinclude: Option<&crate::blastinput::app::FormatChoice>,
 ) -> Result<()> {
     let program = resolved.app.name();
-    psi.refuse_request_members(program)?;
     // The PSSM files of round 1 (written back from the input PSSM, or the engine's), which a run
     // that never searches does not write (NCBI BLAST+ 2.17.0 leaves `-out_pssm` and
     // `-out_ascii_pssm` alone when the object manager ends the run: line RG D3-1 fix 3 S1, fix 4).
@@ -11692,11 +11725,9 @@ fn run_call(
         pssm_reads: &pssm_reads,
     };
     let mut query_warning_lines = report_prep::query_warning_lines(&prep);
-    let mut prefetch_posts = Vec::new();
-    let subject_reads = report_prep::prefetch_reported_subjects(
+    let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
-        &mut prefetch_posts,
         &mut psiblast_pssms,
     )?;
     report_prep::refuse_unreportable(&prep, &rows_of)?;
@@ -11984,7 +12015,7 @@ fn run_call(
         reports
             .call_requests
             .map_or_else(Vec::new, CallRequests::take_posts),
-        prefetch_posts,
+        prefetched.posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
@@ -12033,6 +12064,7 @@ fn run_call(
         subject_accessions: &subject_accessions,
         subject_stitles: &subject_stitles,
         hit_lists: &hit_lists,
+        hit_loads: &prefetched.hit_loads,
         engine_counts: &engine_counts,
         pairwise_hits: &pairwise_hits,
         psiblast_hits_found: &psiblast_hits_found,
@@ -12101,7 +12133,7 @@ fn run_call(
         // its batches' queries; so do the Seq-annots' posts of the bytes that NCBI's stream
         // replaces (`seqalign::write_query_to`).
         // The first format's writer also writes the texts of the subjects that the reports
-        // read one by one (`subject_reads`).
+        // read one by one (`ReportedPrefetch::subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
@@ -12117,7 +12149,7 @@ fn run_call(
                 &mut *outputs.diagnostics,
             );
             match first_lines {
-                Some(_) => warnings.with_subject_reads(subject_reads.queries()),
+                Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,
             }
         });
@@ -14616,6 +14648,10 @@ mod tests {
     //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
     // ```
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn test_x_block_search_refusals_of_the_search_of_all_queries() {
         let lengths = [1500usize, 2000, 1000];
         let records = x_block_test_records(&lengths);
@@ -14708,6 +14744,10 @@ mod tests {
     // `-sum_stats`; and a call of the preliminary stage only never plans
     // (`BlastpReports::prelim_only`), so a block is not split again on its own batches' words.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn x_prelim_block_plan_is_the_search_of_all_queries_of_blastp() {
         let records = x_block_test_records(&[3000; 30]);
         let input = seq_range::QueryInput::whole(&records);
@@ -14756,6 +14796,10 @@ mod tests {
     // default thresholds, with SEG and `-lcase_masking` on, on one thread and on three; queries
     // without letters, of X only, of one letter repeated, of every letter, with lower-case letters.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn x_blocks_contexts_are_the_builders_contexts() {
         let mut records = x_block_test_records(&[300, 0, 1200, 45, 700]);
         for (index, letters) in [
@@ -14897,6 +14941,10 @@ mod tests {
     // plus the words of the batch with the most (or one batch), on one thread and on three. The
     // standard table keeps the blocks it is given.
     #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
     fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
         use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
         let lengths = [900usize, 1200, 700, 1100, 800, 1000];

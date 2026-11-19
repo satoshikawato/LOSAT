@@ -42,7 +42,7 @@ where
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
 // before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host
 // registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).
-pub use crate::api::start::CallerStart;
+pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };

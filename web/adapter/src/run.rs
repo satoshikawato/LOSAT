@@ -7,8 +7,9 @@ use std::sync::Arc;
 use losat::api::{FastaRecord, QueryEnd};
 use losat::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    ApplicationSettings, CallerStart, Cli, Commands, CountsSource, FormatObserver, FormatOutput,
-    FormatRefusal, HspIndex, OutputSink, PairwiseHit, ReportOutputs, RunFiles,
+    ApplicationSettings, CallerSink, CallerStart, Cli, Commands, CountsSource, ErrorSource,
+    FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink, PairwiseHit, ReportOutputs,
+    RunFiles,
 };
 
 use crate::emit::{
@@ -847,7 +848,8 @@ struct Failed {
     /// `NativeError`), or `Error: ` and the error, as `main` returns it.
     cli_stderr: Vec<u8>,
     /// NCBI's message (a `NativeError`), which the CLI also writes to the file of `-logfile` when
-    /// the run's messages go there (`CallerStart::post`); `None` for LOSAT's own errors.
+    /// the run's messages go there (`CallerStart::post`); `None` for LOSAT's own errors, which the
+    /// CLI writes to the standard error whatever `-logfile` is (`Failed::source`).
     native: Option<Vec<u8>>,
     /// Whether the search had written a byte of any of its formats. The host discards
     /// the streams of a failed run, but a search that wrote nothing leaves the other
@@ -875,6 +877,14 @@ impl Failed {
             cli_stderr,
             native,
             wrote,
+        }
+    }
+
+    /// Whose error this is, which decides where the CLI writes it (`CallerSink::error`).
+    fn source(&self) -> ErrorSource {
+        match self.native {
+            Some(_) => ErrorSource::Ncbi,
+            None => ErrorSource::Losat,
         }
     }
 }
@@ -1400,34 +1410,27 @@ struct RunInputs<'a> {
 /// to its standard error during the run go where the run's messages go, as they come
 /// (`CallerStart::sink`: the file of `-logfile` in TBLASTX, else stream 3), and the error that ends
 /// the run with an NCBI message is posted there too (`CallerStart::post`), as on the command line.
+/// The host is told first where the run's messages go (`emit::messages`, stream 10); the error of
+/// each output that the run could not write is where the sink wrote it (`CallerSink::error`,
+/// stream 9).
 fn run_started(
     words: &[&str],
     inputs: RunInputs,
     started: &mut CallerStart,
     diagnostics: &mut StreamWriter,
 ) -> Result<(), String> {
+    // Where the messages written to the sink end up, which the host is told first (stream 10; line
+    // WQA's sweep, D7, 2026-11-20).
+    crate::emit::messages(crate::emit::place(started.messages_place()));
     let Some(parsed) = started_command(words, started)? else {
         diagnostics.finish();
         return Ok(());
     };
     let settings = started.settings()?.clone();
     let mut posted = None;
-    // Where the messages written to the sink end up: the place of the errors of the outputs that
-    // fail (line WQA's sweep, D7, 2026-11-20).
-    let place = crate::emit::error_place(started.messages_place());
     let searched = {
         let mut sink = started.sink(diagnostics);
-        search_all(
-            parsed,
-            words,
-            inputs,
-            &settings,
-            RunMessages {
-                writer: &mut sink,
-                place,
-            },
-            &mut posted,
-        )
+        search_all(parsed, words, inputs, &settings, &mut sink, &mut posted)
     };
     let Done {
         mut writers,
@@ -1462,32 +1465,20 @@ struct Done {
     records: Option<HitRecords>,
 }
 
-/// Where the messages of a run go (`search_all`): the writer of the messages that the command line
-/// writes to its standard error, and the place where its bytes end up (`emit::error_place`: stream
-/// 3, the file of `-logfile`, or nowhere), which holds the error of each output that fails.
-struct RunMessages<'w> {
-    writer: &'w mut (dyn std::io::Write + Send),
-    place: u32,
-}
-
 /// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line
-/// writes to its standard error go to `messages`; for an error that ends the run, `posted` gets
+/// writes to its standard error go to `diagnostics`; for an error that ends the run, `posted` gets
 /// the NCBI message that the command line writes for it (`Failed::native`). Each output stream that
 /// fails while the run goes on (a format that failed alone, the formats of a search that failed)
-/// is signalled to the host with the place of the messages, where its error is written
-/// (`emit::discard`).
+/// is signalled to the host with the place where the sink wrote its error (`CallerSink::error`,
+/// `emit::discard`).
 fn search_all(
     parsed: (Program, Commands, Requested),
     words: &[&str],
     inputs: RunInputs,
     settings: &ApplicationSettings,
-    messages: RunMessages<'_>,
+    diagnostics: &mut CallerSink<'_>,
     posted: &mut Option<Vec<u8>>,
 ) -> Result<Done, String> {
-    let RunMessages {
-        writer: diagnostics,
-        place: errors,
-    } = messages;
     let (program, command, requested) = parsed;
     let groups = search_groups(&outputs(program, &requested), &command);
     let custom_accepted = custom_handler_check(program, requested.custom.as_deref()).is_ok();
@@ -1553,9 +1544,10 @@ fn search_all(
     // Stream 3: the CLI's standard error of each search in turn, its warnings and then its error
     // or the refusals of its formats that failed alone, each text once (`Diagnostics`). Each
     // stream that failed, alone or with its search (`fails_run`: without a byte of its formats),
-    // is signalled where its error is written, with the place of that error (stream 9, also where
-    // no chunk of it was sent: the host tells which outputs a run could not write, and where their
-    // errors are, from these signals alone; line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
+    // is signalled where its error is written, with the place where the sink wrote that error
+    // (stream 9, also where no chunk of it was sent: the host tells which outputs a run could not
+    // write, and where their errors are, from these signals alone; line WQA's sweep, D7,
+    // 2026-11-19 and 2026-11-20).
     let mut texts = Diagnostics::after(&first_diagnostics);
     for (position, (result, scratch)) in outcomes.iter().enumerate() {
         if position > 0 {
@@ -1563,15 +1555,15 @@ fn search_all(
         }
         match result {
             Err(failed) => {
-                texts.error(&failed.cli_stderr, &mut *diagnostics);
+                let place = texts.error(failed, diagnostics);
                 for output in &groups[position] {
-                    crate::emit::discard(output.stream, errors);
+                    crate::emit::discard(output.stream, place);
                 }
             }
             Ok(done) => {
                 for (stream, refused) in &done.refused {
-                    texts.error(&refused.cli_stderr, &mut *diagnostics);
-                    crate::emit::discard(*stream, errors);
+                    let place = texts.error(refused, diagnostics);
+                    crate::emit::discard(*stream, place);
                 }
             }
         }
@@ -1635,12 +1627,13 @@ impl std::io::Write for Kept<'_> {
 /// search, and so does a formatting handler's line that both searches write (`Examining 5 or
 /// more matches`); a search after one that failed before its warnings writes them. The errors of
 /// the searches that failed and the refusals of the formats that failed alone follow the
-/// warnings of their search, each once (streams 6 and 7 of a search stop at the same row).
+/// warnings of their search, each once (streams 6 and 7 of a search stop at the same row), where
+/// the CLI writes them (`CallerSink::error`).
 struct Diagnostics<'t> {
     /// The lines that stream 3 holds, with the number of times it holds each.
     lines: std::collections::HashMap<&'t [u8], usize>,
-    /// The errors that stream 3 holds.
-    errors: Vec<&'t [u8]>,
+    /// The errors that the run holds, each with the place where the sink wrote it (`emit::place`).
+    errors: Vec<(&'t [u8], u32)>,
 }
 
 impl<'t> Diagnostics<'t> {
@@ -1681,14 +1674,18 @@ impl<'t> Diagnostics<'t> {
         }
     }
 
-    /// An error of a search, or a refusal of a format that failed alone, `text`: written to
-    /// `sink` unless stream 3 holds it.
-    fn error(&mut self, text: &'t [u8], sink: &mut dyn std::io::Write) {
-        if !self.errors.contains(&text) {
-            let _ = sink.write_all(text);
-            self.errors.push(text);
-            self.hold(text);
+    /// An error of a search, or a refusal of a format that failed alone, `failed`: written by
+    /// `sink` where the CLI writes it (`CallerSink::error`) unless the run holds it, and the place
+    /// where it is, which the sink gave when it wrote it (`emit::place`).
+    fn error(&mut self, failed: &'t Failed, sink: &mut CallerSink<'_>) -> u32 {
+        let text = failed.cli_stderr.as_slice();
+        if let Some((_, place)) = self.errors.iter().find(|(held, _)| *held == text) {
+            return *place;
         }
+        let place = crate::emit::place(sink.error(text, failed.source()));
+        self.errors.push((text, place));
+        self.hold(text);
+        place
     }
 }
 

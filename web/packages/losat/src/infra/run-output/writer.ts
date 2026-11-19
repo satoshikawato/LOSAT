@@ -1,7 +1,8 @@
 // Engine side of the run output channel (ports/run-output.ts). The Engine worker (S09) and
 // the FakeEngine write through it.
 import type { RunOutput } from '../../domain/output-format.js';
-import type { OutputErrorPlace, OutputStream, RunOutputMessage } from '../../ports/run-output.js';
+import type { MessagePlace } from '../../domain/run-files.js';
+import type { OutputStream, RunOutputMessage } from '../../ports/run-output.js';
 
 export class RunOutputWriter {
   private chunks = 0;
@@ -33,7 +34,7 @@ export class RunOutputWriter {
    * searches, also where none of its chunks was sent. The chunks sent still count in the totals of
    * `end`.
    */
-  discard(stream: RunOutput, error: OutputErrorPlace): void {
+  discard(stream: RunOutput, error: MessagePlace): void {
     if (this.ended) throw new Error('the output of this run has already ended');
     const message: RunOutputMessage = { type: 'discard', stream, error };
     this.port.postMessage(message);

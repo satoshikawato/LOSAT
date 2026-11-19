@@ -163,7 +163,8 @@ export async function storedOutputs(page: Page, run: number): Promise<{ outputs:
     outputs[format] = readFileSync((await download.path())!);
   }
   await page.getByTestId('results-view-details').click();
-  const none = await page.getByTestId('run-diagnostics-none').count();
-  const warnings = none > 0 ? '' : ((await page.getByTestId('run-diagnostics').textContent()) ?? '');
+  await expect(page.getByTestId('run-details')).toBeVisible();
+  const shown = await page.getByTestId('run-diagnostics').count();
+  const warnings = shown === 0 ? '' : ((await page.getByTestId('run-diagnostics').textContent()) ?? '');
   return { outputs: outputs as Record<0 | 6 | 7, Buffer>, warnings };
 }

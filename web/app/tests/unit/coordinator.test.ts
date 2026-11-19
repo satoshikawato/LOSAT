@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
+import { CUSTOM_OUTPUT, type MessagePlace, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   UnavailableError,
@@ -94,6 +94,8 @@ class ManualEngine implements EngineGateway {
   lateFinish?: () => void;
   /** The IDs that the outputs of the next runs show (a run of -parse_deflines). */
   shownIds?: ShownIds;
+  /** Where the runs' messages go, as the engine says (`RuntimeInfo.messages`). */
+  messages: MessagePlace = 'diagnostics';
 
   async describe() {
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
@@ -120,6 +122,7 @@ class ManualEngine implements EngineGateway {
             path: 'fake',
             threads: 1,
             engineBuild: 'manual',
+            messages: this.messages,
             ...(runFiles === undefined ? {} : { runFiles }),
             ...(this.shownIds === undefined ? {} : { shownIds: this.shownIds }),
           });
@@ -611,6 +614,20 @@ describe('Coordinator', () => {
     engine.finish(parsed);
     await waitFor(coordinator, parsed, 'completed');
     expect(viewOf(coordinator, parsed)!.record.shownIds).toEqual({ query: ['AB000001.1'], subject: ['NP_000006.1'] });
+  });
+
+  // line WQA's sweep, D7, 2026-11-20: where the run's messages went is the engine's word, kept with the completed run.
+  it("keeps where the run's messages went, as the engine said", async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine);
+    for (const messages of ['diagnostics', 'logfile', 'nowhere'] as const) {
+      engine.messages = messages;
+      const runId = (await coordinator.enqueue(request)).runId!;
+      await waitFor(coordinator, runId, 'running');
+      engine.finish(runId);
+      await waitFor(coordinator, runId, 'completed');
+      expect(viewOf(coordinator, runId)!.record.messages).toBe(messages);
+    }
   });
 
   it('keeps the files that a run made besides its outputs, of a completed and of a failed run, and none of a cancelled one', async () => {

@@ -12,11 +12,12 @@
 // later BLASTN searches. A search with -conffile gives the engine the registry file for that
 // search only, and the files that a run makes besides its outputs (stream 8: the file of
 // -logfile) come back with its result, or with its error when it fails (line RG E1w-3b); they
-// never go to the Data worker.
+// never go to the Data worker. Where the run's messages go (stream 10: the diagnostics, the file of
+// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type RunFile } from '../../domain/run-files.js';
+import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';
-import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputErrorPlace, type OutputStream } from '../../ports/run-output.js';
+import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
 import {
@@ -26,6 +27,8 @@ import {
   FILE_REGISTRY,
   FILE_WINDOW_MASKER_COUNTS,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
@@ -37,6 +40,7 @@ import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from
 import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
+import type { MainLinks } from './link.js';
 import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
@@ -45,9 +49,8 @@ export interface RuntimeOptions {
   readonly serial: () => Promise<WebAssembly.Module>;
   readonly threads: () => Promise<{ readonly module: WebAssembly.Module; readonly artifact: ReactorArtifact }>;
   readonly builds: { readonly serial: string; readonly threads: string };
-  readonly faultChannel: string;
-  /** The channel of the keeper of the threaded instance's shared memory (memory-keeper.ts). */
-  readonly keeperChannel: string;
+  /** The links of the thread workers and the keeper of the threaded instance's shared memory to the main thread (link.ts). */
+  readonly main: MainLinks;
   /**
    * Whether the threaded instance is in use, shared with the Gateway (instance-use.ts): the
    * calls into it and the threads of its search pool count, and the Gateway ends this worker
@@ -231,12 +234,14 @@ export class EngineRuntime {
       // The engine's standard error of this search only, for a stop message.
       loaded.instance.wasi.clear();
       phase('running');
-      // The run's files (stream 8) stay here, apart from the outputs.
+      // The run's files (stream 8) stay here, apart from the outputs, and so does where its messages go (stream 10).
       const archive: Uint8Array[] = [];
+      let messages: MessagePlace | undefined;
       try {
         abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
+          else if (stream === MESSAGES_STREAM) messages = messagesPlace(bytes);
           else if (stream === DISCARD_STREAM) writer.discard(...discardedOutput(bytes));
           else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
         });
@@ -246,6 +251,7 @@ export class EngineRuntime {
         throw abi.stoppedBy === undefined ? failedWithFiles(error, archive) : error;
       }
       const runFiles = readRunFiles(archive);
+      if (messages === undefined) throw new Error(`the engine did not say where the messages of the run go (stream ${MESSAGES_STREAM})`);
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
       loaded.ran.add(request.argv.join('\0'));
@@ -262,6 +268,7 @@ export class EngineRuntime {
         ...(fallbackReason === undefined ? {} : { fallbackReason }),
         memory: { linearBytesBefore, linearBytesAfter, instanceRuns: loaded.runs },
         subjectRetained,
+        messages,
         ...(shownIds === undefined ? {} : { shownIds }),
         ...(windowMasker === undefined ? {} : { windowMasker }),
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
@@ -405,7 +412,7 @@ export class EngineRuntime {
   private async load(path: RuntimePath): Promise<Loaded> {
     const current = this.loaded;
     if (current?.path === path && current.instance.abi.stoppedBy === undefined) return current;
-    // A second keeper on the Gateway's channel could answer for the other memory.
+    // The Gateway asks the keeper whose link came last (gateway.ts): the keeper of the other memory ends first.
     if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
       const instance = await instantiateSerial(await this.options.serial());
@@ -420,8 +427,7 @@ export class EngineRuntime {
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
     const { memory, maximumPages } = createSharedMemory(artifact.memory);
-    const { faultChannel, keeperChannel } = this.options;
-    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel, use });
+    const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
       this.loaded = { path, instance, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
@@ -458,16 +464,27 @@ function messageOf(error: unknown): string {
  * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
  * file of -logfile) or nowhere. Another number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): [RunOutput, OutputErrorPlace] {
+function discardedOutput(bytes: Uint8Array): [RunOutput, MessagePlace] {
   const { stream, errorStream } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  const error = errorStream === undefined ? 'nowhere' : ERROR_PLACES.get(errorStream);
+  const error = errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
   if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
   return [stream, error];
 }
 
-/** The place of an error that a signal of stream 9 gives as a stream (ABI v2 §5). */
-const ERROR_PLACES: ReadonlyMap<number, OutputErrorPlace> = new Map([
+/**
+ * Where the run's messages go, as the engine's signal of stream 10 says (ABI v2 §5): stream 3 (the diagnostics), stream 8
+ * (the run's files: the file of -logfile) or nowhere. Another number breaks the ABI (line WQA's sweep, D7, 2026-11-20).
+ */
+function messagesPlace(bytes: Uint8Array): MessagePlace {
+  const stream = messagesSignal(bytes);
+  const place = stream === undefined ? 'nowhere' : PLACES.get(stream);
+  if (place === undefined) throw new Error(`the engine put the messages of the run on stream ${stream}, which holds no messages`);
+  return place;
+}
+
+/** The place of messages that a signal of stream 9 or 10 gives as a stream (ABI v2 §5). */
+const PLACES: ReadonlyMap<number, MessagePlace> = new Map([
   [DIAGNOSTICS_STREAM, 'diagnostics'],
   [RUN_FILES_STREAM, 'logfile'],
 ]);

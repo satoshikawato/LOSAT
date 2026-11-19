@@ -14,7 +14,8 @@ import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type Results
 import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
-import { outputErrorPlace } from './output-error-text';
+import { placeParts } from './message-place-text';
+import PlaceWords from './PlaceWords.vue';
 import LosatLoader from './LosatLoader.vue';
 import { vScrollFocus } from './scroll-focus';
 
@@ -36,10 +37,10 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
 const sorted = computed(() => props.state.loaded?.limits.sorted === true);
-/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; '' where it was written. */
+/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; undefined where it was written. */
 const outfmt0Error = computed(() => {
   const loaded = props.state.loaded;
-  return loaded?.outfmt0Error === undefined ? '' : outputErrorPlace(loaded.outfmt0Error, loaded.run);
+  return loaded?.outfmt0Error === undefined ? undefined : placeParts(loaded.outfmt0Error, loaded.run);
 });
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
 /** The subjects whose alignments outfmt 0 shows, "3 subjects" or "subjects" where -num_alignments cannot be read. */
@@ -319,8 +320,8 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
               >{{ detail.section }}</pre
             >
           </template>
-          <p v-else-if="outfmt0Error !== ''" class="notice" data-testid="detail-not-in-outfmt0">
-            No outfmt 0 alignment is linked to this HSP: outfmt 0 could not be written, and its error is {{ outfmt0Error }}. The outfmt 6 row
+          <p v-else-if="outfmt0Error !== undefined" class="notice" data-testid="detail-not-in-outfmt0">
+            No outfmt 0 alignment is linked to this HSP: outfmt 0 could not be written, and its error is <PlaceWords :parts="outfmt0Error" />. The outfmt 6 row
             below and outfmt 7 hold the HSP.
           </p>
           <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">

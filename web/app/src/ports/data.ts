@@ -3,8 +3,8 @@
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (losat/ports: run-output.ts), not through these methods.
-import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
-import type { HspRecord, InputCheck, OutputErrorPlace } from 'losat/ports';
+import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, MessagePlace, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { HspRecord, InputCheck } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
 import { withUnit } from '../domain/units';
@@ -81,7 +81,7 @@ export interface ResultSetRef {
 /** An output that a run could not write, and where its error is (`ResultSetRef.failed`). */
 export interface FailedOutput {
   readonly output: RunOutput;
-  readonly error: OutputErrorPlace;
+  readonly error: MessagePlace;
 }
 
 /** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */

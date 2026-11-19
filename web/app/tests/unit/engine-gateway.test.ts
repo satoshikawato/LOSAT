@@ -1,8 +1,8 @@
 // The Wasm EngineGateway's runtime generations (web/packages/losat/src/infra/engine-worker/gateway.ts) with a
 // fake Engine worker: runs, phases, cancel, renewal, faults, errors, the use count of the
-// threaded instance and the memory keeper's channel. The real Engine worker runs in the
-// browsers (tests/e2e/engine.spec.ts).
-import { afterEach, describe, expect, it, vi } from 'vitest';
+// threaded instance and the links of the thread workers and the memory keeper (link.ts). The real Engine worker runs
+// in the browsers (tests/e2e/engine.spec.ts).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ENGINE_ENDED, ENGINE_NOT_STARTED, WasmEngine, type EngineAssets, type LifeLocks, type WasmEngineOptions } from 'losat';
 import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from 'losat/ports';
 import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
@@ -12,6 +12,7 @@ import {
   type EngineCommand,
   type EngineEvent,
   type EngineInit,
+  type LinkRole,
   type WorkerPrepare,
   type WorkerRun,
   type WorkerRunResult,
@@ -119,16 +120,47 @@ function output(): MessagePort {
 }
 
 /**
- * The keeper of `worker`'s generation on its channel: `answer` gets each message and returns
- * what to post back, if anything.
+ * A link of `worker`'s generation (link.ts), as the Engine worker posts one for a thread worker or the keeper: returns
+ * the end that the thread worker or the keeper holds. `answer` gets each message on it and returns what to post back,
+ * if anything.
  */
-function fakeKeeper(worker: FakeWorker, answer: (message: unknown) => unknown): BroadcastChannel {
-  const channel = new BroadcastChannel(worker.init.keeperChannel);
-  channel.onmessage = (event: MessageEvent) => {
+function link(worker: FakeWorker, role: LinkRole, answer: (message: unknown) => unknown = () => undefined): MessagePort {
+  const channel = new MessageChannel();
+  ports.push(channel.port1, channel.port2);
+  channel.port1.onmessage = (event: MessageEvent) => {
     const reply = answer(event.data);
-    if (reply !== undefined) channel.postMessage(reply);
+    if (reply !== undefined) channel.port1.postMessage(reply);
   };
-  return channel;
+  worker.send({ type: 'link', generation: worker.init.generation, role, port: channel.port2 });
+  return channel.port1;
+}
+
+/** As `link`; the main thread's end records `name` in `closed` when the Gateway closes it. */
+function watchedLink(
+  worker: FakeWorker,
+  role: LinkRole,
+  name: string,
+  closed: string[],
+  answer: (message: unknown) => unknown = () => undefined,
+): MessagePort {
+  const channel = new MessageChannel();
+  ports.push(channel.port1, channel.port2);
+  channel.port1.onmessage = (event: MessageEvent) => {
+    const reply = answer(event.data);
+    if (reply !== undefined) channel.port1.postMessage(reply);
+  };
+  const close = channel.port2.close.bind(channel.port2);
+  channel.port2.close = () => {
+    closed.push(name);
+    close();
+  };
+  worker.send({ type: 'link', generation: worker.init.generation, role, port: channel.port2 });
+  return channel.port1;
+}
+
+/** The keeper of `worker`'s generation on its link: `answer` gets each message and returns what to post back, if anything. */
+function fakeKeeper(worker: FakeWorker, answer: (message: unknown) => unknown): MessagePort {
+  return link(worker, 'keeper', answer);
 }
 
 /** Waits until `condition` holds. */
@@ -143,6 +175,7 @@ const RESULT: WorkerRunResult = {
   engineBuild: 'losat-web-serial.wasm sha256:aaaaaaaaaaaaaaaa',
   memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 },
   subjectRetained: false,
+  messages: 'diagnostics',
 };
 
 /** Waits until `worker` has received `count` run commands. */
@@ -185,6 +218,7 @@ describe('WasmEngine', () => {
       runtimeGeneration: 1,
       memory: RESULT.memory,
       subjectRetained: true,
+      messages: 'diagnostics',
     });
     expect(phases).toEqual(['running']);
   });
@@ -347,10 +381,8 @@ describe('WasmEngine', () => {
       return { type: 'grown' };
     });
     expect(worker.use.enter()).toBe(true);
-    const faults = new BroadcastChannel(worker.init.faultChannel);
-    faults.postMessage({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 trapped' });
+    link(worker, 'thread').postMessage({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 trapped' });
     await expect(run).rejects.toThrow('The engine stopped: thread 2 trapped');
-    faults.close();
     await until(() => worker.terminated);
     expect(terminatedWhenAsked).toBe(false);
     keeper.close();
@@ -705,15 +737,79 @@ describe('WasmEngine', () => {
     expect((await next).runtimeGeneration).toBe(2);
   });
 
-  it('fails the search when a thread worker reports a fault', async () => {
+  it('fails the search when a thread worker reports a fault on its link', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1', 4), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
-    const channel = new BroadcastChannel(worker.init.faultChannel);
-    channel.postMessage({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 trapped' });
+    link(worker, 'thread').postMessage({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 trapped' });
     await expect(run).rejects.toThrow('The engine stopped: thread 2 trapped');
-    channel.close();
     expect(worker.terminated).toBe(true);
+  });
+
+  it('fails the search when the Engine worker reports a fault of its thread host', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'fault', generation: 1, tid: 3, message: 'The engine stopped: thread 3 did not start in time' });
+    await expect(run).rejects.toThrow('The engine stopped: thread 3 did not start in time');
+    expect(worker.terminated).toBe(true);
+  });
+
+  it("answers the hello on each link, which the thread worker or the keeper waits for before it is ready", async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    for (const role of ['thread', 'keeper'] as const) {
+      const answers: unknown[] = [];
+      link(worker, role, (message) => void answers.push(message)).postMessage({ type: 'hello' });
+      await until(() => answers.length === 1);
+      expect(answers).toEqual([{ type: 'hello' }]);
+    }
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    await run;
+  });
+
+  it('closes the links of a generation when it ends', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const closed: string[] = [];
+    watchedLink(worker, 'keeper', 'keeper', closed);
+    watchedLink(worker, 'thread', 'thread', closed);
+    expect(closed).toEqual([]);
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    expect(worker.terminated).toBe(true);
+    expect(closed).toEqual(['keeper', 'thread']);
+  });
+
+  // The review of line WQA's D8, L1 (2026-11-20): the runtime makes a new ThreadHost after a search on the other module or
+  // a failed preparation, and the links of the one before, whose workers had ended, stayed open until the generation
+  // ended: with Auto threads alternating small and large searches, up to 32 more for each switch.
+  it('closes the links of a thread host once the next host links its keeper, and asks only that keeper to grow', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const closed: string[] = [];
+    const asked: string[] = [];
+    const keeper = (name: string) =>
+      watchedLink(worker, 'keeper', name, closed, () => {
+        asked.push(name);
+        return { type: 'grown' };
+      });
+    keeper('keeper 1');
+    watchedLink(worker, 'thread', 'thread 1', closed);
+    watchedLink(worker, 'thread', 'thread 2', closed);
+    expect(closed).toEqual([]);
+    keeper('keeper 2');
+    expect(closed).toEqual(['keeper 1', 'thread 1', 'thread 2']);
+    watchedLink(worker, 'thread', 'thread 3', closed);
+    expect(worker.use.enter()).toBe(true);
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    await until(() => worker.terminated);
+    expect(asked).toEqual(['keeper 2']);
+    expect(closed).toEqual(['keeper 1', 'thread 1', 'thread 2', 'keeper 2', 'thread 3']);
   });
 
   it('prepares the runtime of a search before it comes, once per thread count, and runs the search there', async () => {
@@ -783,5 +879,67 @@ describe('WasmEngine', () => {
     const worker = await posted(() => workers[0], 1);
     worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
     await first;
+  });
+});
+
+// Line WQA's sweep, D8 (2026-11-20): where the site's data is blocked (cookies blocked), Firefox refuses
+// `new BroadcastChannel()` with SecurityError, on the page and in every worker. The Gateway opened one for the faults of
+// the thread workers and one for the keeper with each runtime, and every search failed with "The operation is
+// insecure." The thread workers and the keeper are linked to the Gateway by MessageChannels (link.ts).
+describe("WasmEngine where the site's data is blocked", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        constructor() {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        }
+      },
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('runs a search', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    // The browser refuses the worker's lock too: none is waited for.
+    worker.send({ type: 'started', generation: 1 });
+    worker.send({ type: 'life', generation: 1, held: false });
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    expect((await run).runtimeGeneration).toBe(1);
+  });
+
+  it('fails a threaded search whose thread stopped, which its thread worker reports on its link', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const keeper = fakeKeeper(worker, () => ({ type: 'grown' }));
+    expect(worker.use.enter()).toBe(true);
+    link(worker, 'thread').postMessage({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 trapped' });
+    await expect(run).rejects.toThrow('The engine stopped: thread 2 trapped');
+    await until(() => worker.terminated);
+    keeper.close();
+  });
+
+  it('ends a cancelled threaded search in use once the keeper grew the memory, asked on its link', async () => {
+    const ends: string[] = [];
+    const { engine, workers } = setup(undefined, { onRuntimeEnd: (end) => ends.push(end) });
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const asked: Array<{ message: unknown; terminated: boolean }> = [];
+    const keeper = fakeKeeper(worker, (message) => {
+      asked.push({ message, terminated: worker.terminated });
+      return { type: 'grown' };
+    });
+    expect(worker.use.enter()).toBe(true);
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    await until(() => worker.terminated);
+    expect(asked).toEqual([{ message: { type: 'grow' }, terminated: false }]);
+    expect(ends).toEqual(['grown']);
+    keeper.close();
   });
 });

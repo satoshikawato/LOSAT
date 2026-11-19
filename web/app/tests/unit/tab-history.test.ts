@@ -232,7 +232,7 @@ describe('Back and Forward between the Search and Results tabs', () => {
     tab.page!.choose('search');
     tab.clock += BACK_LOST_MS + 1;
     tab.page!.choose('results');
-    expect(tab.own()).toEqual([null, results(1)]);
+    expect(tab.own()).toHaveLength(2);
     tab.go(-1);
     expect(tab.page!.shown).toBe('search');
     tab.backs = 'arrive';

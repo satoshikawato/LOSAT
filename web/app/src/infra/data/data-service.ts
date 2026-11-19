@@ -24,6 +24,7 @@ import {
   type HspRecord,
   type InputCheck,
   type InputChecker,
+  type OutputErrorPlace,
   type OutputStream,
   type RecordScanner,
 } from 'losat/ports';
@@ -90,8 +91,8 @@ interface StagedRun {
   readonly writers: ReadonlyMap<OutputStream, BlockWriter>;
   readonly receiver: RunOutputReceiver;
   readonly lengths: Lengths;
-  /** The outputs that the engine said failed (its discards, `clear`): `ResultSetRef.failed`. */
-  readonly failed: Set<RunOutput>;
+  /** The outputs that the engine said failed, with where their errors are (its discards, `clear`): `ResultSetRef.failed`. */
+  readonly failed: Map<RunOutput, OutputErrorPlace>;
   /** HSP records so far: the lines of stream 1 that are not blank, as `readHits` reads them. */
   hitLines: number;
   /** The current line of stream 1 has a character other than white space. */
@@ -225,10 +226,10 @@ export class DataService implements DataGateway {
       receiver: new RunOutputReceiver(
         channel.port2,
         (stream, bytes) => this.append(run, stream, bytes),
-        (stream) => this.clear(run, stream),
+        (stream, error) => this.clear(run, stream, error),
       ),
       lengths,
-      failed: new Set(),
+      failed: new Map(),
       hitLines: 0,
       hitLineOpen: false,
       failure: undefined,
@@ -266,7 +267,7 @@ export class DataService implements DataGateway {
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
     const custom = run.lengths[CUSTOM_OUTPUT];
     const byteLengths = { 0: run.lengths[0]!, 6: run.lengths[6]!, 7: run.lengths[7]!, ...(custom === undefined ? {} : { [CUSTOM_OUTPUT]: custom }) };
-    const failed = [...run.failed].sort((a, b) => a - b);
+    const failed = [...run.failed].sort(([a], [b]) => a - b).map(([output, error]) => ({ output, error }));
     return { runId, byteLengths, hitCount, failed };
   }
 
@@ -379,11 +380,11 @@ export class DataService implements DataGateway {
   }
 
   /**
-   * Records that one output of a staged run failed, as the engine said (docs/web/abi_v2.md §5: it failed alone, or
-   * its search failed in a run of two searches), and drops what the run received of it: the output stays empty.
-   * After a failure, the run keeps nothing.
+   * Records that one output of a staged run failed, and where its error is, as the engine said (docs/web/abi_v2.md
+   * §5: it failed alone, or its search failed in a run of two searches), and drops what the run received of it: the
+   * output stays empty. After a failure, the run keeps nothing.
    */
-  private clear(run: StagedRun, stream: RunOutput): void {
+  private clear(run: StagedRun, stream: RunOutput, error: OutputErrorPlace): void {
     if (run.failure !== undefined) return;
     try {
       const writer = run.writers.get(stream);
@@ -395,7 +396,7 @@ export class DataService implements DataGateway {
       return;
     }
     run.lengths[stream] = 0;
-    run.failed.add(stream);
+    run.failed.set(stream, error);
   }
 
   private async readStream(runId: string, stream: OutputStream): Promise<Uint8Array> {

@@ -17,16 +17,31 @@ export type OutputStream = RunOutput | typeof HITS_STREAM | typeof DIAGNOSTICS_S
 export const OUTPUT_STREAMS: readonly OutputStream[] = Object.freeze([0, 6, 7, 4, HITS_STREAM, DIAGNOSTICS_STREAM]);
 
 /**
+ * Where the error of an output that a run could not write is, as the engine's signal of stream 9 says (docs/web/abi_v2.md
+ * §5): `diagnostics`, the run's diagnostics (stream 3, the CLI's standard error); `logfile`, the file of the run's
+ * -logfile (stream 8: TBLASTX writes the messages of its run there, as the CLI does); `nowhere`, where -logfile names no
+ * file (TBLASTX's `-logfile ""` or `-logfile /dev/null`, which write them nowhere, as the CLI does). Line WQA's sweep,
+ * D7, 2026-11-20.
+ */
+export type OutputErrorPlace = 'diagnostics' | 'logfile' | 'nowhere';
+export const OUTPUT_ERROR_PLACES: readonly OutputErrorPlace[] = Object.freeze(['diagnostics', 'logfile', 'nowhere']);
+
+/** Whether `value` is a place of the error of an output that a run could not write. */
+export function isOutputErrorPlace(value: unknown): value is OutputErrorPlace {
+  return OUTPUT_ERROR_PLACES.includes(value as OutputErrorPlace);
+}
+
+/**
  * The messages of one run, in order: any number of chunks and discards, then one `end` that
- * states how many chunks and bytes were sent. A `discard` says that an output failed (the engine's
- * signal of stream 9, docs/web/abi_v2.md §5: it failed alone, or its search failed in a run of two
- * searches; its error is in the diagnostics) and drops what arrived of it, which then stays empty;
- * the totals of `end` count every chunk sent, discarded or not. A run can be committed only after its `end` arrived and the totals agree; a run that
- * fails or is cancelled sends no `end` and is discarded.
+ * states how many chunks and bytes were sent. A `discard` says that an output failed and where its
+ * error is (the engine's signal of stream 9, docs/web/abi_v2.md §5: it failed alone, or its search
+ * failed in a run of two searches) and drops what arrived of it, which then stays empty; the totals
+ * of `end` count every chunk sent, discarded or not. A run can be committed only after its `end`
+ * arrived and the totals agree; a run that fails or is cancelled sends no `end` and is discarded.
  */
 export type RunOutputMessage =
   | { readonly type: 'chunk'; readonly stream: OutputStream; readonly bytes: Uint8Array }
-  | { readonly type: 'discard'; readonly stream: RunOutput }
+  | { readonly type: 'discard'; readonly stream: RunOutput; readonly error: OutputErrorPlace }
   | { readonly type: 'end'; readonly chunks: number; readonly bytes: number };
 
 /** Whether `stream` is an output of a run (not the HSP records or the diagnostics): what a `discard` may name. */

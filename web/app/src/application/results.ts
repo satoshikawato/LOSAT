@@ -4,8 +4,8 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import type { ProgramId, RecordKey, SequenceKind } from 'losat/domain';
-import type { ProgramDescription } from 'losat/ports';
+import type { ProgramId, RecordKey, RunOutput, SequenceKind } from 'losat/domain';
+import type { OutputErrorPlace, ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
@@ -116,17 +116,17 @@ export interface LoadedRun {
   readonly description: ProgramDescription;
   readonly limits: HitLimits;
   /**
-   * Whether the run could not write outfmt 0, as the engine said (`ResultSetRef.failed`): its report failed alone in
-   * the search of the other formats, or its search of its own (-num_descriptions / -num_alignments) failed
-   * (abi_v2.md §5, §7). Its error is in the diagnostics (line WQA's sweep, D7, 2026-11-19).
+   * Where the error of outfmt 0 is when the run could not write it, as the engine said (`failedOutput`): its report
+   * failed alone in the search of the other formats, or its search of its own (-num_descriptions / -num_alignments)
+   * failed (abi_v2.md §5, §7). Undefined where outfmt 0 was written (line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
    */
-  readonly outfmt0Failed: boolean;
+  readonly outfmt0Error: OutputErrorPlace | undefined;
   /**
-   * Whether the run could not write outfmt 6, as the engine said (`ResultSetRef.failed`), so that it has no HSP
-   * records (they point into outfmt 6, abi_v2.md §8); outfmt 7 stops at the same row. Its error is in the
-   * diagnostics.
+   * Where the error of outfmt 6 is when the run could not write it, as the engine said (`failedOutput`), so that it
+   * has no HSP records (they point into outfmt 6, abi_v2.md §8); outfmt 7 stops at the same row. Undefined where
+   * outfmt 6 was written.
    */
-  readonly tabularFailed: boolean;
+  readonly tabularError: OutputErrorPlace | undefined;
   readonly badge: Badge;
   readonly diagnostics: string;
   readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
@@ -275,8 +275,8 @@ export class ResultsBrowser {
         out6,
         description,
         limits,
-        outfmt0Failed: run.result?.failed.includes(0) === true,
-        tabularFailed: run.result?.failed.includes(6) === true,
+        outfmt0Error: failedOutput(run, 0),
+        tabularError: failedOutput(run, 6),
         badge: verificationBadge(
           {
             program: run.snapshot.program,
@@ -686,13 +686,21 @@ export class ResultsBrowser {
   }
 }
 
+/**
+ * Where the error of the output `output` of a run is when the run could not write it, as the engine said
+ * (`ResultSetRef.failed`); undefined where the run wrote it, or has no result.
+ */
+export function failedOutput(run: RunView, output: RunOutput): OutputErrorPlace | undefined {
+  return run.result?.failed.find((failed) => failed.output === output)?.error;
+}
+
 /** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
 export type NoHspReason = 'dry-run' | 'empty-query' | 'no-tabular-hits' | 'no-tabular-output' | 'no-queries' | 'no-hits' | 'filtered-out';
 
 /**
  * Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is
  * loaded. A dry run (-dryrun; line RG E1w-3b) searched nothing. A run that could not write outfmt 6
- * (`LoadedRun.tabularFailed`) has no HSP records, whatever its queries found.
+ * (`LoadedRun.tabularError`) has no HSP records, whatever its queries found.
  */
 export function noHspReason(state: ResultsState): NoHspReason | undefined {
   const loaded = state.loaded;
@@ -700,7 +708,7 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
   if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
-  if (loaded.tabularFailed) return 'no-tabular-output';
+  if (loaded.tabularError !== undefined) return 'no-tabular-output';
   if (state.queries.length === 0) return 'no-queries';
   if (state.queryTotals === undefined) return undefined;
   if (state.queryTotals.hsps === 0) return 'no-hits';

@@ -4,7 +4,7 @@
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (losat/ports: run-output.ts), not through these methods.
 import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
-import type { HspRecord, InputCheck } from 'losat/ports';
+import type { HspRecord, InputCheck, OutputErrorPlace } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
 import { withUnit } from '../domain/units';
@@ -72,9 +72,16 @@ export interface ResultSetRef {
   /**
    * The outputs that the run could not write, by stream number: those that the engine said failed (its signal of
    * stream 9, docs/web/abi_v2.md §5: a format that failed alone, or the formats of a search that failed in a run of
-   * two searches). Each is empty, and its error is in the run's diagnostics (line WQA's sweep, D7, 2026-11-19).
+   * two searches), each with where its error is, as the engine said. Each is empty (line WQA's sweep, D7, 2026-11-19
+   * and 2026-11-20).
    */
-  readonly failed: readonly RunOutput[];
+  readonly failed: readonly FailedOutput[];
+}
+
+/** An output that a run could not write, and where its error is (`ResultSetRef.failed`). */
+export interface FailedOutput {
+  readonly output: RunOutput;
+  readonly error: OutputErrorPlace;
 }
 
 /** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */

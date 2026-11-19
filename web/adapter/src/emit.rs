@@ -23,9 +23,12 @@ pub const STREAM_INFLATED: u32 = 5;
 /// the run, also when it failed (docs/web/abi_v2.md §5).
 pub const STREAM_RUN_FILES: u32 = 8;
 /// The signal that an output stream of a run failed (it failed alone, or its search failed in a
-/// run of two searches): the host discards what it received of it (`discard`; docs/web/abi_v2.md
-/// §5).
+/// run of two searches), with where its error is: the host discards what it received of it
+/// (`discard`; docs/web/abi_v2.md §5).
 pub const STREAM_DISCARD: u32 = 9;
+/// The place of the error of a failed output (`discard`) that the run wrote nowhere: TBLASTX's
+/// `-logfile ""` or `-logfile /dev/null`, where the run's messages go.
+pub const ERROR_NOWHERE: u32 = u32::MAX;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]
@@ -53,12 +56,27 @@ pub fn emit(stream: u32, bytes: &[u8]) {
     }
 }
 
-/// Tells the host that `stream` failed in this run and that it discards what it received of it:
-/// one `emit` on `STREAM_DISCARD` whose 4 bytes are the stream's number, little-endian, for each
-/// output stream that failed, also where no chunk of it was sent. The run sends nothing more of
-/// that stream (docs/web/abi_v2.md §5).
-pub fn discard(stream: u32) {
-    emit(STREAM_DISCARD, &stream.to_le_bytes());
+/// Tells the host that `stream` failed in this run, that it discards what it received of it, and
+/// where the error of the stream is (`error`, `error_place`): one `emit` on `STREAM_DISCARD` of 8
+/// bytes, the stream's number and then the place, each an unsigned 32-bit little-endian number,
+/// for each output stream that failed, also where no chunk of it was sent. The run sends nothing
+/// more of that stream (docs/web/abi_v2.md §5).
+pub fn discard(stream: u32, error: u32) {
+    let mut signal = [0; 8];
+    signal[..4].copy_from_slice(&stream.to_le_bytes());
+    signal[4..].copy_from_slice(&error.to_le_bytes());
+    emit(STREAM_DISCARD, &signal);
+}
+
+/// The place of an error that the run wrote where its messages go (`place`,
+/// `CallerStart::messages_place`), as a signal of stream 9 gives it (`discard`): the stream that
+/// holds it (stream 3, or stream 8 for the file of `-logfile`), or `ERROR_NOWHERE`.
+pub fn error_place(place: losat::web_adapter::TextPlace) -> u32 {
+    match place {
+        losat::web_adapter::TextPlace::StandardError => STREAM_DIAGNOSTICS,
+        losat::web_adapter::TextPlace::LogFile => STREAM_RUN_FILES,
+        losat::web_adapter::TextPlace::Nowhere => ERROR_NOWHERE,
+    }
 }
 
 /// A stream that the engine writes one output to. It sends whole chunks as they fill

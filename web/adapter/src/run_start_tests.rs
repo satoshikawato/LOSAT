@@ -85,6 +85,24 @@ fn run_files(streams: &BTreeMap<u32, Vec<u8>>) -> Option<Vec<(String, String)>> 
     })
 }
 
+/// The signals of stream 9: each failed stream and the place of its error (`emit::discard`).
+fn signals(streams: &BTreeMap<u32, Vec<u8>>) -> Vec<(u32, u32)> {
+    let bytes = streams
+        .get(&crate::emit::STREAM_DISCARD)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(bytes.len() % 8, 0);
+    bytes
+        .chunks(8)
+        .map(|signal| {
+            (
+                u32::from_le_bytes(signal[..4].try_into().unwrap()),
+                u32::from_le_bytes(signal[4..].try_into().unwrap()),
+            )
+        })
+        .collect()
+}
+
 /// Registers the registry file `name` (kind 2) with `bytes`, for one test: names are unique per
 /// test, since the registrations are the process's and the tests run at once.
 struct Registered(u32);
@@ -320,20 +338,58 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
             stderr.contains("No hits are being saved"),
             "{program}: {stderr}"
         );
+        // The host is told that streams 6 and 7 failed, and where their error is: stream 3
+        // (line WQA's sweep, D7, 2026-11-20).
+        let on_stream_3 = vec![(6, STREAM_DIAGNOSTICS), (7, STREAM_DIAGNOSTICS)];
+        assert_eq!(signals(&plain), on_stream_3, "{program}");
         let mut words = plain_words.clone();
         words.extend(["-logfile", "run.log"]);
         let (result, logged) = run_of(&words);
         result.unwrap();
         assert_eq!(logged.get(&0), plain.get(&0), "{program}");
         let expected = match program {
-            "tblastx" => (String::new(), stderr),
-            _ => (stderr, String::new()),
+            "tblastx" => (String::new(), stderr.clone()),
+            _ => (stderr.clone(), String::new()),
         };
         assert_eq!(
             (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
             (expected.0, Some(vec![("run.log".to_string(), expected.1)])),
             "{program}"
         );
+        // In TBLASTX the error is in the file of -logfile (stream 8), in the others on stream 3.
+        let place = match program {
+            "tblastx" => STREAM_RUN_FILES,
+            _ => STREAM_DIAGNOSTICS,
+        };
+        assert_eq!(signals(&logged), [(6, place), (7, place)], "{program}");
+        // `-logfile -` is the standard error, stream 3; `""` and `/dev/null` are nowhere in
+        // TBLASTX (the CLI writes the error nowhere), stream 3 in the others.
+        for (name, place) in [
+            ("-", STREAM_DIAGNOSTICS),
+            ("", crate::emit::ERROR_NOWHERE),
+            ("/dev/null", crate::emit::ERROR_NOWHERE),
+        ] {
+            let mut words = plain_words.clone();
+            words.extend(["-logfile", name]);
+            let (result, streams) = run_of(&words);
+            result.unwrap();
+            let place = match program {
+                "tblastx" => place,
+                _ => STREAM_DIAGNOSTICS,
+            };
+            assert_eq!(
+                signals(&streams),
+                [(6, place), (7, place)],
+                "{program} {name:?}"
+            );
+            let on_3 = stream_text(&streams, STREAM_DIAGNOSTICS);
+            assert_eq!(
+                on_3.contains("No hits are being saved"),
+                place == STREAM_DIAGNOSTICS,
+                "{program} {name:?}: {on_3}"
+            );
+            assert_eq!(run_files(&streams), None, "{program} {name:?}");
+        }
     }
 }
 

@@ -30,7 +30,7 @@
 // the run writes no stream for them, and stream 3 is the CLI's standard error of the argv's own
 // format followed by each such format's error (the last line of its CLI run's standard error), as
 // the adapter writes a refusal of a format that failed alone (abi_v2.md §7), and the run's signals of
-// stream 9 name them and no other stream (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
+// stream 9 name them and no other stream, each with the place of its error, which holds it (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
 // format then is that stream, and no stream 4 is written).
 //
 // A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
@@ -812,10 +812,18 @@ async function main() {
         assert.equal(sha256(diagnostics), sha256(expected.diagnostics), `${label}: diagnostics\n${diagnostics}`);
         row.diagnostics = sha256(expected.diagnostics);
         // The run's signals of stream 9 name the streams that it could not write: those whose CLI run of the argv
-        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19).
+        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19), each with where its error is (2026-11-20): stream 3,
+        // which then holds it, the file of -logfile (stream 8), or nowhere.
         const signals = run.streams.get(9) || Buffer.alloc(0);
-        const failedStreams = Array.from({ length: signals.length / 4 }, (_, i) => signals.readUInt32LE(4 * i)).sort((a, b) => a - b);
+        assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+        const failed = Array.from({ length: signals.length / 8 }, (_, i) => [signals.readUInt32LE(8 * i), signals.readUInt32LE(8 * i + 4)]);
+        const failedStreams = failed.map(([stream]) => stream).sort((a, b) => a - b);
         assert.deepEqual(failedStreams, [...(search.fails_alone || [])].sort((a, b) => a - b), `${label}: the streams that the run says failed (stream 9)`);
+        for (const [stream, place] of failed) {
+          if (place === 3) assert.ok(diagnostics.length > 0, `${label}: the error of stream ${stream} is on stream 3, which is empty`);
+          else if (place === 8) assert.ok(run.streams.has(8), `${label}: the error of stream ${stream} is in the file of -logfile, which the run did not give`);
+          else assert.equal(place, 0xffffffff, `${label}: the place of the error of stream ${stream}`);
+        }
         if (search.fails_alone) row.fails_alone = search.fails_alone;
         row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
         if (together) row.inputs = "register_inputs";

@@ -7,6 +7,7 @@ import { noHspReason, type ResultsState } from '../application/results';
 import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
 import { NO_HSP_TEXT } from './no-hsp-text';
+import { outputErrorPlace } from './output-error-text';
 import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ state: ResultsState }>();
@@ -21,8 +22,16 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
 const sorted = computed(() => props.state.loaded?.limits.sorted === true);
-/** The run could not write outfmt 0, as the engine said (its error is under Warnings in Run details). */
-const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; '' where it was written. */
+const outfmt0Error = computed(() => {
+  const loaded = props.state.loaded;
+  return loaded?.outfmt0Error === undefined ? '' : outputErrorPlace(loaded.outfmt0Error, loaded.run);
+});
+/** Where the error of outfmt 6 and 7 is, in words, when the run could not write them, as the engine said; '' where they were written. */
+const tabularError = computed(() => {
+  const loaded = props.state.loaded;
+  return loaded?.tabularError === undefined ? '' : outputErrorPlace(loaded.tabularError, loaded.run);
+});
 /** Why the selected query shows no HSP (the Dot Plot tab says the same in place of its plot). */
 const reason = computed(() => noHspReason(props.state));
 /** What the engine wrote to the warnings (BLAST+'s "Query is Empty!"), as it wrote it. */
@@ -38,11 +47,12 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
       <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
     </div>
     <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
-      <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error,
-      under Warnings in Run details), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.
+      <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved"
+      error<template v-if="tabularError !== ''">, {{ tabularError }}</template>), so this run has no HSP records; outfmt 0 is written as BLAST+
+      writes it.
     </p>
     <p v-else-if="reason === 'no-tabular-output'" class="notice" data-testid="results-notice" data-kind="no-tabular-output">
-      {{ NO_HSP_TEXT['no-tabular-output'] }}
+      {{ NO_HSP_TEXT['no-tabular-output'] }} Their error is {{ tabularError }}.
     </p>
     <p v-else-if="reason === 'no-queries'" class="notice" data-testid="results-notice" data-kind="no-queries">
       {{ NO_HSP_TEXT['no-queries'] }}
@@ -65,8 +75,8 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         ({{ limitGiven ? '' : 'the default of ' }}<span class="option-name">{{ limitFlag }}</span>: {{ formatCount(limit) }}). More
         subjects may match; a search with a larger <span class="option-name">{{ limitFlag }}</span> would show them.
       </p>
-      <p v-if="totals.subjects > 0 && outfmt0Failed" class="notice" data-testid="results-notice" data-kind="outfmt0-failed">
-        outfmt 0 could not be written (its error is under Warnings in Run details), so no alignment is linked to this query's
+      <p v-if="totals.subjects > 0 && outfmt0Error !== ''" class="notice" data-testid="results-notice" data-kind="outfmt0-failed">
+        outfmt 0 could not be written (its error is {{ outfmt0Error }}), so no alignment is linked to this query's
         {{ plural(totals.subjects, 'subject') }}. outfmt 6 and 7 hold the HSPs.
       </p>
       <p

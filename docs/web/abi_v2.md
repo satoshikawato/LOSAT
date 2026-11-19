@@ -163,7 +163,7 @@ after a trap (§4, "After a trap").
 | `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ, and without its `-line_length`, `-sorthits` and `-sorthsps` lines, which it writes for formats above 4 or other than 0 only). With stream 4 it is the CLI's standard error for the argv's `-outfmt` instead: for 6, 7, 10, 18 and 20 the same lines, and the warnings of the fields' writer (NCBI's `Taxonomy name lookup from taxid requires installation of taxdb database`); for the structured formats (5, 8, 9, 11 to 17) without the queries' warnings, which their writers do not write; as the CLI writes them. In a run of two searches (§7) it is that standard error followed by what the CLI's standard error for `-outfmt 0` adds to it, so that each text comes once: the lines of the format 0 search's warnings that stream 3 does not hold yet, then its error when it failed. Where the first search wrote its warnings, the reader's and the queries' warnings come with it, and so does a formatting handler's line that both searches write (`Examining 5 or more matches`); where it failed before them, they come with the format 0 search. A later search writes a line as many times as it writes it more often than stream 3 holds it. A stream that failed alone (§7) adds its refusal after the warnings of its search, and an error or a refusal that stream 3 holds (streams 6 and 7 stop at the same row) is not written again |
 | `8` | the files of a run besides its outputs (line RG item E1w-3a): the file of `-logfile NAME` (§4, `losat_web2_start`), named `NAME`, as a ZIP archive with stored entries as stream 4's. It is emitted after the run, only when the run has such a file, and also when the run fails (the host keeps it: TBLASTX's file then holds NCBI's error, and a start that ended holds what the CLI writes to the file) |
 | `5` | the inflated bytes of `inflate_chunk` and `inflate_end` (§4): each call sends what the decoder released during it, in chunks of at most 1 MiB, in order; the host copies them during the call |
-| `9` | a run's signal that one output stream (0, 6, 7 or 4) of this run failed, and that the host discards what it received of it: each `emit` on stream 9 is one signal, whose 4 bytes are that stream's number as an unsigned 32-bit little-endian integer. It comes for every stream that fails alone (§7), whether or not a chunk of it was sent, and for each stream of a search that fails in a run of two searches (§7); no chunk of that stream follows, the stream of the run is empty, its error is on stream 3, and the run goes on with the other streams. A host tells from these signals alone which outputs a run could not write (an empty stream is not such a sign: outfmt 6 of a search without hits is empty). Since ABI version 3 after a chunk was sent, since version 4 for every such stream (§10) |
+| `9` | a run's signal that one output stream (0, 6, 7 or 4) of this run failed, that the host discards what it received of it, and where its error is: each `emit` on stream 9 is one signal of 8 bytes, that stream's number and then the place of its error, each an unsigned 32-bit little-endian integer. The place is where the run writes its messages, which hold the error: `3`, stream 3; `8`, the file of `-logfile` (stream 8), where TBLASTX with `-logfile NAME` writes them, as the CLI does; `0xFFFFFFFF`, nowhere, where TBLASTX's `-logfile ""` or `-logfile /dev/null` sends them, as on the CLI (the adapter takes the place from LOSAT's start of the run, `CallerStart::messages_place`, where its messages go). It comes for every stream that fails alone (§7), whether or not a chunk of it was sent, and for each stream of a search that fails in a run of two searches (§7); no chunk of that stream follows, the stream of the run is empty, and the run goes on with the other streams. A host tells from these signals alone which outputs a run could not write and where their errors are (an empty stream is not such a sign: outfmt 6 of a search without hits is empty). Since ABI version 3 after a chunk was sent (4 bytes, the stream), since version 4 for every such stream, with the place of its error (§10) |
 
 The adapter sends each output stream in chunks of 1 MiB as they fill, and the rest when
 the run ends, so an output never has to fit in linear memory as a whole. Stream 2 is
@@ -172,7 +172,8 @@ arrives in several chunks, which the host joins before it parses the JSON (S09).
 the HSP records are sent after the search. If `run` fails, the host discards what it
 received, except stream 8. A stream that fails alone (§7), and each stream of a search that fails
 in a run of two searches, is followed by its signal on stream 9: the host discards what it
-received of that stream (a chunk of it may have been sent before it failed) and keeps the others.
+received of that stream (a chunk of it may have been sent before it failed) and keeps the others,
+and the signal says where the stream's error is (stream 3, the file of `-logfile`, or nowhere).
 
 ## 6. Memory ownership
 
@@ -238,12 +239,13 @@ the WASI imports.
   report fails, as the CLI's run of that format alone fails (the refusals and NCBI's errors of one
   format of the `run` row, §4), fails alone in the search that writes the others
   (`FormatRefusal::FailsAlone`), whether the failure comes at a check before its rows or in the
-  middle of its report: its stream is empty, stream 3 has its error after the search's warnings
-  (each text once: streams 6 and 7 stop at the same row), and the other formats are written;
+  middle of its report: its stream is empty, its error follows the search's warnings where the
+  run writes its messages (stream 3, or the file of TBLASTX's `-logfile`, §5; each text once:
+  streams 6 and 7 stop at the same row), and the other formats are written;
   without stream 6 there are no HSP records (stream 1 points into it, §8), and without stream 0
   the records have no `out0` and `out0_subject`. The bytes that it wrote stay in the adapter,
-  and the run's signal on stream 9 tells the host that the stream failed and to discard what it
-  received of it (§5), where a chunk of them was sent (a report that failed after 1 MiB of it, or,
+  and the run's signal on stream 9 tells the host that the stream failed, where its error is, and to
+  discard what it received of it (§5), where a chunk of them was sent (a report that failed after 1 MiB of it, or,
   in BLASTX, which writes its formats query batch by query batch, a batch of 10,002 query letters,
   NCBI's, a refusal at a later batch) and where none was. A subject whose title NCBI's `GenerateDefline` cannot decode
   stops the default tabular formats (streams 6 and 7 fail alone where the argv asks for outfmt 0
@@ -408,8 +410,9 @@ response and the *start* field `register_inputs`: a run of `-parse_deflines`, wh
 for its argv, and refuses the handles of `register`; in such a run LOSAT's refusal of outfmt 0 of a
 record that is both a query and a subject and has masks fails stream 0 alone (§7). The signal of
 stream 9 comes for every output stream that fails, alone or with its search in a run of two
-searches, where version 3 sent it only after a chunk of the stream, so that a host knows which
-outputs a run could not write (§5). A host of version 3 registers each input alone,
+searches, where version 3 sent it only after a chunk of the stream, and has 8 bytes, the stream and
+the place of its error (stream 3, the file of `-logfile`, or nowhere; 2026-11-20), so that a host
+knows which outputs a run could not write and where their errors are (§5). A host of version 3 registers each input alone,
 so its runs of the option would now fail rather than be refused at `validate`: the application
 refuses a module of version 3, and a host of version 3 refuses a module of version 4. Runs without
 the option give the streams of version 3.

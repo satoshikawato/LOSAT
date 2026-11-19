@@ -945,9 +945,9 @@ impl Searched {
 /// call writes the others, as the CLI's run of each format alone writes it; an error of the argv's
 /// own format fails the call, as it fails the CLI. The bytes that a format that failed alone had
 /// written stay with its writer, which is dropped, and its observer events with the recorder,
-/// which forgets them (`RangeRecorder::forget`); the host is told that the stream failed
-/// (`emit::discard`), and drops what it received of it where a chunk reached it already (a report
-/// that failed after 1 MiB, BLASTX's later query batch).
+/// which forgets them (`RangeRecorder::forget`); `search_all` tells the host that the stream
+/// failed (`emit::discard`), and the host drops what it received of it where a chunk reached it
+/// already (a report that failed after 1 MiB, BLASTX's later query batch).
 fn search(
     command: Commands,
     formats: &[Output],
@@ -1090,10 +1090,8 @@ fn search(
             .any(|writer| writer.position().load(Ordering::SeqCst) > 0);
         return Err(Failed::new(&error, wrote));
     }
-    // The formats that failed alone: their writers are dropped with what they hold, the host is
-    // told that each failed (stream 9, also where no chunk of it was sent: the host reports which
-    // outputs a run could not write from these signals alone; line WQA's sweep, D7, 2026-11-19)
-    // and discards what it received of it, and the recorder forgets their events.
+    // The formats that failed alone: their writers are dropped with what they hold, and the
+    // recorder forgets their events (`search_all` tells the host that each failed).
     let mut written = Vec::with_capacity(writers.len());
     let mut refused = Vec::new();
     for (index, ((format, writer), refusal)) in
@@ -1102,7 +1100,6 @@ fn search(
         match refusal {
             None => written.push(writer),
             Some(error) => {
-                crate::emit::discard(format.stream);
                 recorder.forget(index);
                 refused.push((format.stream, Failed::new(&error, false)));
             }
@@ -1386,6 +1383,9 @@ fn run_started(
     };
     let settings = started.settings()?.clone();
     let mut posted = None;
+    // Where the messages written to the sink end up: the place of the errors of the outputs that
+    // fail (line WQA's sweep, D7, 2026-11-20).
+    let place = crate::emit::error_place(started.messages_place());
     let searched = {
         let mut sink = started.sink(diagnostics);
         search_all(
@@ -1394,7 +1394,10 @@ fn run_started(
             query,
             subject,
             &settings,
-            &mut sink,
+            RunMessages {
+                writer: &mut sink,
+                place,
+            },
             &mut posted,
         )
     };
@@ -1431,18 +1434,33 @@ struct Done {
     records: Option<HitRecords>,
 }
 
+/// Where the messages of a run go (`search_all`): the writer of the messages that the command line
+/// writes to its standard error, and the place where its bytes end up (`emit::error_place`: stream
+/// 3, the file of `-logfile`, or nowhere), which holds the error of each output that fails.
+struct RunMessages<'w> {
+    writer: &'w mut (dyn std::io::Write + Send),
+    place: u32,
+}
+
 /// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line
-/// writes to its standard error go to `diagnostics`; for an error that ends the run, `posted` gets
-/// the NCBI message that the command line writes for it (`Failed::native`).
+/// writes to its standard error go to `messages`; for an error that ends the run, `posted` gets
+/// the NCBI message that the command line writes for it (`Failed::native`). Each output stream that
+/// fails while the run goes on (a format that failed alone, the formats of a search that failed)
+/// is signalled to the host with the place of the messages, where its error is written
+/// (`emit::discard`).
 fn search_all(
     parsed: (Program, Commands, Requested),
     words: &[&str],
     query: &[FastaRecord],
     subject: &[FastaRecord],
     settings: &ApplicationSettings,
-    diagnostics: &mut (dyn std::io::Write + Send),
+    messages: RunMessages<'_>,
     posted: &mut Option<Vec<u8>>,
 ) -> Result<Done, String> {
+    let RunMessages {
+        writer: diagnostics,
+        place: errors,
+    } = messages;
     let (program, command, requested) = parsed;
     let groups = search_groups(&outputs(program, &requested), &command);
     let custom_accepted = custom_handler_check(program, requested.custom.as_deref()).is_ok();
@@ -1507,17 +1525,27 @@ fn search_all(
         });
     }
     // Stream 3: the CLI's standard error of each search in turn, its warnings and then its error
-    // or the refusals of its formats that failed alone, each text once (`Diagnostics`).
+    // or the refusals of its formats that failed alone, each text once (`Diagnostics`). Each
+    // stream that failed, alone or with its search (`fails_run`: without a byte of its formats),
+    // is signalled where its error is written, with the place of that error (stream 9, also where
+    // no chunk of it was sent: the host tells which outputs a run could not write, and where their
+    // errors are, from these signals alone; line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
     let mut texts = Diagnostics::after(&first_diagnostics);
     for (position, (result, scratch)) in outcomes.iter().enumerate() {
         if position > 0 {
             texts.warnings(scratch, &mut *diagnostics);
         }
         match result {
-            Err(failed) => texts.error(&failed.cli_stderr, &mut *diagnostics),
+            Err(failed) => {
+                texts.error(&failed.cli_stderr, &mut *diagnostics);
+                for output in &groups[position] {
+                    crate::emit::discard(output.stream, errors);
+                }
+            }
             Ok(done) => {
-                for (_, refused) in &done.refused {
+                for (stream, refused) in &done.refused {
                     texts.error(&refused.cli_stderr, &mut *diagnostics);
+                    crate::emit::discard(*stream, errors);
                 }
             }
         }
@@ -1527,15 +1555,7 @@ fn search_all(
     for (position, (result, _)) in outcomes.into_iter().enumerate() {
         match result {
             Ok(done) => searched.push(done),
-            // A search that failed without a byte of its formats (`fails_run`): each of its
-            // streams failed, which the host is told as for a format that failed alone (stream 9;
-            // line WQA's sweep, D7, 2026-11-19).
-            Err(_) => {
-                for output in &groups[position] {
-                    crate::emit::discard(output.stream);
-                }
-                tabular_failed |= position == 0;
-            }
+            Err(_) => tabular_failed |= position == 0,
         }
     }
     let mut writers = Vec::new();
@@ -2408,7 +2428,7 @@ mod tests {
         crate::emit::EMITTED.with(|emitted| {
             for (stream, bytes) in emitted.borrow().iter() {
                 if *stream == crate::emit::STREAM_DISCARD {
-                    let discarded = u32::from_le_bytes(bytes[..].try_into().unwrap());
+                    let discarded = u32::from_le_bytes(bytes[..4].try_into().unwrap());
                     streams.insert(discarded, Vec::new());
                 }
                 streams
@@ -2420,13 +2440,21 @@ mod tests {
         Ok(streams)
     }
 
-    /// The streams that the signals of stream 9 of `streams` discard, in order.
+    /// The streams that the signals of stream 9 of `streams` discard, in order. Each signal says
+    /// that the error of its stream is on stream 3: these runs have no `-logfile`, so their
+    /// messages go to stream 3 (`run_start_tests` has the places of `-logfile`).
     fn discarded(streams: &std::collections::BTreeMap<u32, Vec<u8>>) -> Vec<u32> {
-        streams
+        let signals = streams
             .get(&crate::emit::STREAM_DISCARD)
-            .map_or(&[][..], Vec::as_slice)
-            .chunks(4)
-            .map(|signal| u32::from_le_bytes(signal.try_into().unwrap()))
+            .map_or(&[][..], Vec::as_slice);
+        assert_eq!(signals.len() % 8, 0, "signals of 8 bytes");
+        signals
+            .chunks(8)
+            .map(|signal| {
+                let place = u32::from_le_bytes(signal[4..].try_into().unwrap());
+                assert_eq!(place, STREAM_DIAGNOSTICS, "the place of the error");
+                u32::from_le_bytes(signal[..4].try_into().unwrap())
+            })
             .collect()
     }
 

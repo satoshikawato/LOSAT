@@ -22,17 +22,36 @@ export const INFLATED_STREAM = 5;
  */
 export const RUN_FILES_STREAM = 8;
 /**
- * Stream 9: a run's signal that an output stream failed, whose received chunks the host discards
- * (ABI v2 §5, §7; line RG T7-W): every output stream that failed alone, or whose search failed in a
- * run of two searches, since ABI version 4 (line WQA's sweep, D7, 2026-11-19). Each `emit` is one
- * signal; `discardedStream` reads the stream's number from its bytes.
+ * Stream 9: a run's signal that an output stream failed, whose received chunks the host discards,
+ * and where its error is (ABI v2 §5, §7; line RG T7-W): every output stream that failed alone, or
+ * whose search failed in a run of two searches, since ABI version 4 (line WQA's sweep, D7,
+ * 2026-11-19 and 2026-11-20). Each `emit` is one signal; `discardSignal` reads it.
  */
 export const DISCARD_STREAM = 9;
+/** The place of an error that the run wrote nowhere, in a signal of stream 9 (ABI v2 §5). */
+export const ERROR_NOWHERE = 0xffff_ffff;
 
-/** The output stream that a signal of stream 9 discards: its 4 bytes, an unsigned 32-bit little-endian number. */
+/**
+ * A signal of stream 9 (ABI v2 §5): the output stream that failed, and the stream that holds its
+ * error (3, the diagnostics; 8, the run's files: the file of -logfile), or `undefined` where the
+ * run wrote it nowhere (`ERROR_NOWHERE`).
+ */
+export interface DiscardSignal {
+  readonly stream: number;
+  readonly errorStream: number | undefined;
+}
+
+/** Reads a signal of stream 9: its 8 bytes, the stream and the place of its error, each an unsigned 32-bit little-endian number. */
+export function discardSignal(bytes: Uint8Array): DiscardSignal {
+  if (bytes.length !== 8) throw new Error(`a signal of stream ${DISCARD_STREAM} has ${bytes.length} bytes, not 8`);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+  const place = view.getUint32(4, true);
+  return { stream: view.getUint32(0, true), errorStream: place === ERROR_NOWHERE ? undefined : place };
+}
+
+/** The output stream that a signal of stream 9 discards (`discardSignal`). */
 export function discardedStream(bytes: Uint8Array): number {
-  if (bytes.length !== 4) throw new Error(`a signal of stream ${DISCARD_STREAM} has ${bytes.length} bytes, not 4`);
-  return new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
+  return discardSignal(bytes).stream;
 }
 export const ROLE_QUERY = 0;
 export const ROLE_SUBJECT = 1;

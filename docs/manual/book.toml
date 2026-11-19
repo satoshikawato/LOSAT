@@ -1,0 +1,9 @@
+[book]
+title = "LOSAT User Manual"
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/LOSAT/"
+git-repository-url = "https://github.com/satoshikawato/LOSAT"
+edit-url-template = "https://github.com/satoshikawato/LOSAT/edit/dev/docs/manual/{path}"

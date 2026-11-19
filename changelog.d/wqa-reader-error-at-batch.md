@@ -7,3 +7,11 @@
   NCBI's `Empty CBlastQueryVector`. In the library, `read_input_records` keeps the query records
   read before a reader's error and the error (`QueryEnd`), and `run` and `run_batches` of them end
   with it in its batch, after the reports of the batches before; `read_inputs` is unchanged.
+  Under `-parse_deflines` a query ID repeated in the batch that the reader's error ends no longer
+  takes the place of that error (BLASTX's `run` and every program's `run_batches`), and BLASTX's
+  `run` and BLASTN's and BLASTX's `run_batches` now refuse a repeated ID after the batches before
+  it in outfmt 6, as the command line does. LOSAT Web: such an input under `-parse_deflines` is no
+  longer refused when its reader stops before the end of the index scan; in a Combined query an
+  input whose first line is not a defline and that the reader stops at (a byte order mark) is
+  refused after another input, as before; the warning says what to correct and names the run's
+  line, and the inputs after it say that they are not searched.

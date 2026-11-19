@@ -143,7 +143,7 @@ export class DataService implements DataGateway {
       parser,
       records: Object.freeze(records.map((record, i) => Object.freeze({ ...record, sha256: hashes[i]! }))),
       excluded: Object.freeze([]),
-      ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, message: stop.message }) }),
+      ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, defline: stop.defline, message: stop.message }) }),
     });
   }
 

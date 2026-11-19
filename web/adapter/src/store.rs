@@ -473,9 +473,10 @@ pub fn register_inputs(
 
 /// Fails unless the index scan found the reader's records: for each record the same ID, length and
 /// residue counts (the stored residues upper-cased; plan TD-8), and the same number, or where the
-/// reader's error ended the records (`end`), at least as many (the scan's records past an error
-/// that it does not meet, an id under `-parse_deflines`), and as many where the scan met the
-/// reader's own error too (`Scanned::stop`).
+/// reader's error ended the records (`end`), at least as many: the scan's records past an error
+/// that it does not meet (an id under `-parse_deflines`), before its own stop (`Scanned::stop`) or
+/// without one, and as many where the scan met the reader's own error. A reader that stops where
+/// the scan reads on has no error (review M1, 2026-11-20).
 fn check_scan(
     role: &str,
     scanned: &scan::Scanned,
@@ -484,9 +485,9 @@ fn check_scan(
 ) -> Result<(), String> {
     let stopped = matches!(end, QueryEnd::Error(_));
     let count = match (stopped, &scanned.stop) {
-        (true, None) => scanned.records.len() >= records.len(),
+        (true, _) => scanned.records.len() >= records.len(),
         (false, Some(_)) => false,
-        _ => scanned.records.len() == records.len(),
+        (false, None) => scanned.records.len() == records.len(),
     };
     // A record whose ids the reader read from its defline (`-parse_deflines`) has the title after
     // them: the scan's ID, the defline's first word, is not the title's.
@@ -660,7 +661,10 @@ mod tests {
         let mut stopped_early = stopped.clone();
         stopped_early.records.truncate(1);
         assert!(check_scan("query", &stopped_early, &read[..1], &end).is_ok());
-        assert!(check_scan("query", &stopped, &read[..1], &end).is_err());
+        assert!(check_scan("query", &stopped_early, &read, &end).is_err());
+        // The reader's error before the scan's own stop (an id under `-parse_deflines`): the scan
+        // has more records (review M1, 2026-11-20).
+        assert!(check_scan("query", &stopped, &read[..1], &end).is_ok());
     }
 
     /// The `records` of a *register* response.
@@ -803,6 +807,53 @@ mod tests {
         .is_ok());
         for handle in [query, subject, plain_query, plain_subject] {
             release(handle).unwrap();
+        }
+    }
+
+    // Under `-parse_deflines` the reader's error can come before the scan's own stop (review M1,
+    // 2026-11-20): a Seq-id of the other molecule (`blastp -parse_deflines`: "Error: the Seq-id …
+    // names the other molecule" on the command line), or a first record without a defline, before
+    // a line that the scan stops at too. The inputs register with the reader's error, as the
+    // command line ends there.
+    #[test]
+    fn the_readers_error_can_come_before_the_scans_stop() {
+        let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let subject = b">s1\nMKVLAAGIVA\n";
+        let cases: [(&[u8], &str, usize); 2] = [
+            (
+                b">p1\nMKVLAAGIVA\n>ref|NM_000001.1|\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
+                "names the other molecule",
+                1,
+            ),
+            (
+                b"MKVLAAGIVA\n>p2\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
+                "doesn't start with a defline",
+                0,
+            ),
+        ];
+        for (query, message, read) in cases {
+            let scanned = scan::scan_ncbi(query, true).unwrap();
+            assert_eq!(scanned.records.len(), 2);
+            assert!(scanned.stop.is_some());
+            let (query_handle, subject_handle, response) =
+                register_inputs(&words, query, subject).unwrap();
+            assert!(response.contains(message), "{response}");
+            let read_records = |queries: &[FastaRecord], end: &QueryEnd, _: &[FastaRecord]| {
+                (queries.len(), matches!(end, QueryEnd::Error(_)))
+            };
+            assert_eq!(
+                with_inputs(
+                    Program::Blastp,
+                    query_handle,
+                    subject_handle,
+                    &words,
+                    read_records
+                ),
+                Ok((read, true))
+            );
+            for handle in [query_handle, subject_handle] {
+                release(handle).unwrap();
+            }
         }
     }
 

@@ -151,7 +151,8 @@ export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): ScanRespon
           dataLine(bytes, at, end, lineNumber, current!, parser);
         } catch (error) {
           if (!(error instanceof ReaderStopError)) throw error;
-          return { records, reader_error: { offset: current!.headerOffset, message: error.message } };
+          const offset = current!.headerOffset;
+          return { records, reader_error: { offset, defline: bytes[offset] === GT, message: error.message } };
         }
       }
     }

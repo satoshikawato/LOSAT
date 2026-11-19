@@ -186,7 +186,15 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
   await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '');
   await expect
     .poll(() => told(page, 'status'))
-    .toContainEqual(expect.stringContaining('A run ends with this error before it reads a record, as the command line does: '));
+    .toContainEqual(expect.stringContaining('A run stops at this error before it reads a record of this input, as the command line does: '));
+  // A subject that the engine refuses for that error: its card's hint of the byte order mark is told too
+  // (review L1, 2026-11-20).
+  await paste(page, 'subject', `\uFEFF>s1\n${dna(5, 60)}\n`);
+  await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'refused');
+  await expect(page.getByTestId('subject-source-0-mark')).toBeVisible();
+  await expect
+    .poll(() => told(page, 'status'))
+    .toContainEqual(expect.stringMatching(/refuses this input: .*The text starts with a byte order mark \(U\+FEFF\)\./));
 });
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');

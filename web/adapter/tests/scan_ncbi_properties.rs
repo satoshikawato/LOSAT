@@ -825,6 +825,9 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
                         scanned.stop,
                         Some(ReaderStop {
                             offset: *offset,
+                            // The record starts with a defline unless it is the input's first,
+                            // read without one (review M2, 2026-11-20).
+                            defline: input.get(*offset as usize) == Some(&b'>'),
                             message: message.clone()
                         }),
                         "{context}: reader error"

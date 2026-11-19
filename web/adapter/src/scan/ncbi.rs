@@ -943,6 +943,8 @@ impl Forward {
 struct Builder {
     id: Vec<u8>,
     header_offset: u64,
+    /// Whether the record starts with a defline (`>`), not the input's first record without one.
+    defline: bool,
     sequence_offset: u64,
     length: u64,
     residue_counts: Box<[u64; 256]>,
@@ -954,10 +956,11 @@ struct Builder {
 }
 
 impl Builder {
-    fn new(header_offset: u64, sequence_offset: u64) -> Self {
+    fn new(header_offset: u64, sequence_offset: u64, defline: bool) -> Self {
         Self {
             id: Vec::new(),
             header_offset,
+            defline,
             sequence_offset,
             length: 0,
             residue_counts: Box::new([0; 256]),
@@ -1107,12 +1110,12 @@ impl Records {
     /// input's records, and the error ends them (`ReaderStop`).
     fn stop(&mut self, message: String) {
         if self.error.is_none() {
-            let offset = self
-                .current
-                .as_ref()
-                .map_or(0, |current| current.header_offset);
+            let (offset, defline) = self.current.as_ref().map_or((0, false), |current| {
+                (current.header_offset, current.defline)
+            });
             self.stop = Some(ReaderStop {
                 offset,
+                defline,
                 message: message.clone(),
             });
             self.error = Some(message);
@@ -1241,7 +1244,7 @@ impl Records {
         if self.need_defline {
             // `ParseDefLine(">")`: the input's first record, without a title.
             self.need_defline = false;
-            self.current = Some(Builder::new(0, 0));
+            self.current = Some(Builder::new(0, 0, false));
         }
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:715-717
         // ```c++
@@ -1280,7 +1283,7 @@ impl Records {
                     self.close(current, self.line_start);
                 }
                 self.need_defline = false;
-                let mut current = Builder::new(self.line_start, self.line_start);
+                let mut current = Builder::new(self.line_start, self.line_start, true);
                 let mut title = Title::default();
                 for &(byte, _) in &prefix.bytes[skip..prefix.len] {
                     title.byte(byte, &mut current.id);
@@ -1562,6 +1565,10 @@ pub struct ReaderStop {
     /// The offset of the record that the reader fails on: its defline's `>` (0 for a first record
     /// without a defline). The bytes from there on are read by no record.
     pub offset: u64,
+    /// Whether that record starts with a defline. One without (the input's first line, read as
+    /// letters: a byte-order mark, a line of other text) cannot follow another input, whose last
+    /// record would read it (review M2, 2026-11-20).
+    pub defline: bool,
     /// The reader's message (`CFastaReader: Near line …`).
     pub message: String,
 }

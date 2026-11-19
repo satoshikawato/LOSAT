@@ -6,7 +6,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
-import { includedOf, noSequenceOf } from '../application/draft';
+import { includedOf, noSequenceOf, queryEndBefore } from '../application/draft';
 import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind } from '../domain/programs';
@@ -58,10 +58,33 @@ const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequence
  * 2026-11-19).
  */
 const readerError = computed(() => (props.source.check?.state === 'ok' ? props.source.check.readerError : undefined));
+/** The role's sources when one Combined query input reads them in turn (else none). */
+const combinedQuery = computed(() =>
+  props.role === 'query' && props.state[props.role].mode === 'combined' ? props.state[props.role].sources : undefined,
+);
+/**
+ * A source before this one whose reader's error ends the Combined query input: a run does not read this one, so its card
+ * does not say "Accepted" (review L2, 2026-11-20).
+ */
+const endedBy = computed(() => (combinedQuery.value === undefined ? undefined : queryEndBefore(combinedQuery.value, props.source)));
+const notSearchedText = (before: DraftSource) =>
+  `Not searched: the search stops at the error in ${before.origin === 'paste' ? 'the pasted sequences' : before.name}, before this input. Correct that error, or choose Separate to search each input alone.`;
+/** A Combined query input has sources after this one, which a run does not read past this one's error. */
+const sourcesAfter = computed(() => {
+  const sources = combinedQuery.value;
+  return sources !== undefined && sources.findIndex((source) => source.key === props.source.key) < sources.length - 1;
+});
+/**
+ * The warning of a reader's error, with what to do (review L2, 2026-11-20). The message is the run's: in a Combined input,
+ * the line it names counts the inputs before this one (`SearchDraft`'s check).
+ */
 const readerErrorText = (message: string) =>
-  records.value.length === 0
-    ? `A run ends with this error before it reads a record, as the command line does: ${message}`
-    : `A run reads the records before this error and then stops with it, as the command line does: ${message}`;
+  [
+    included.value.length === 0
+      ? `A run stops at this error before it reads a record of this input, as the command line does: ${message} Correct that line to search this input.`
+      : `A run searches the records before this error and then stops with it, as the command line does: ${message} Correct that line to search the records after it.`,
+    ...(sourcesAfter.value ? ['The run does not read the inputs after this one.'] : []),
+  ].join(' ');
 /**
  * The input cannot be read from its start: the scan failed, or the reader's error comes before its first record. The hints that
  * make its first line readable (a defline, '>', the byte order mark) are for such an input, with the reader's message.
@@ -172,27 +195,31 @@ const verdict = computed(() => {
     fetchHint.value,
     check?.state,
     check === undefined ? undefined : check.state === 'ok' ? [check.records, check.readerError] : 'message' in check ? check.message : undefined,
+    endedBy.value?.key,
+    sourcesAfter.value,
+    included.value.length === 0,
     noSequence.value,
     otherKind.value,
     otherKind.value > 0 ? kind.value : '',
     duplicateCount.value,
     formatName.value,
   ]);
+  // The hints that make the first line readable come with the card's first sentence whatever the check says, as on the
+  // screen (review L1, 2026-11-20).
+  const hints = stopsAtStart.value ? [...(fetchHint.value ? [FETCH_HINT] : []), ...(markHint.value ? [markHint.value] : [])] : [];
   if (unread.value) {
     parts.push(UNREAD);
   } else if (source.status === 'failed') {
-    parts.push(`This input cannot be read: ${source.error ?? ''}`);
-    if (fetchHint.value) parts.push(FETCH_HINT);
-    if (markHint.value) parts.push(markHint.value);
+    parts.push(`This input cannot be read: ${source.error ?? ''}`, ...hints);
   } else if (check !== undefined) {
-    if (check.state === 'ok' && check.readerError !== undefined) {
-      parts.push(readerErrorText(check.readerError));
-      if (markHint.value) parts.push(markHint.value);
-    } else if (check.state === 'ok') {
+    if (check.state === 'ok' && endedBy.value !== undefined) parts.push(notSearchedText(endedBy.value));
+    else if (check.state === 'ok' && check.readerError !== undefined) parts.push(readerErrorText(check.readerError));
+    else if (check.state === 'ok') {
       parts.push(noSequence.value ? NO_SEQUENCE_TEXT[noSequence.value] : `Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
     }
     else if (check.state === 'refused') parts.push(`The ${programLabel.value} engine refuses this input: ${check.message}`);
     else if (check.state === 'error') parts.push(check.unavailable === true ? UNCHECKED : `The input could not be checked here (${check.message}).`);
+    parts.push(...hints);
     if (otherKind.value > 0) {
       parts.push(
         `${formatCount(otherKind.value)} ${otherKind.value === 1 ? 'record looks' : 'records look'} like ${otherKindName.value} sequences, but ${programLabel.value} reads the ${props.role} as ${kind.value}.`,
@@ -253,6 +280,15 @@ watch(verdict, (now) => {
         data-check="pending"
       >
         <LosatLoader />Checking…
+      </p>
+      <p
+        v-else-if="source.check?.state === 'ok' && endedBy !== undefined"
+        class="warning"
+        :data-testid="`${testid}-check`"
+        data-check="ok"
+        data-not-searched
+      >
+        {{ notSearchedText(endedBy) }}
       </p>
       <p
         v-else-if="readerError !== undefined"

@@ -13,7 +13,7 @@ import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
+import { openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 
@@ -36,7 +36,9 @@ const DNA = letters('ACGT', 7, 300);
 const SUBJECT = `>s1 subject\n${DNA}\n`;
 const NOT_PLAUSIBLE = (line: number) =>
   `BLAST query error: CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`;
-const WARNING = 'A run reads the records before this error and then stops with it, as the command line does: ';
+const WARNING = 'A run searches the records before this error and then stops with it, as the command line does: ';
+/** What the warning says to do (review L2, 2026-11-20). */
+const REMEDY = ' Correct that line to search the records after it.';
 
 /** The native CLI's run of `words` (program first) on the inputs as query.fa and subject.fa, one thread. */
 function nativeRun(words: readonly string[], query: string, subject: string): { status: number | null; stderr: string } {
@@ -68,7 +70,7 @@ test("a query whose reader fails on a later record runs, and the run ends with t
   const check = page.getByTestId('query-source-0-check');
   await expect(check).toHaveAttribute('data-check', 'ok');
   await expect(check).toHaveAttribute('data-reader-error', '');
-  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(6)}`);
+  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(6)}${REMEDY}`);
   await expect(page.getByTestId('query-source-0-error')).toHaveCount(0);
   const status = await failedRun(page, 1);
   if (!BUILD_HAS_ENGINE) return;
@@ -109,6 +111,56 @@ test('under -parse_deflines an error of an earlier query batch comes before the 
   const cli = nativeRun(['blastp', '-parse_deflines', '-outfmt', '6'], query, subject);
   expect(cli.status).toBe(1);
   expect(cli.stderr).toBe(`Error: ${message}\n`);
+});
+
+// One Combined query input reads its sources in turn (review of D10, 2026-11-20): the warning names the
+// run's line, after the input before it (M2/L2); the input after it is not read, and its card says so in
+// place of "Accepted"; a source whose error is on a first line without a defline (a byte order mark)
+// cannot follow another input, whose last record would read that line (M2). Separate runs each alone.
+test("a Combined query input reads up to a source's reader's error, and the warning names the run's line", async ({ page }, testInfo) => {
+  const pasted = `>q1 first\n${DNA.slice(0, 120)}\n`;
+  const bad = `>a\n${DNA.slice(0, 90)}\n>b\nACGTAC%%%%\n`;
+  const after = `>c\n${DNA.slice(150, 240)}\n`;
+  await program(page, 'blastn');
+  await paste(page, 'subject', SUBJECT);
+  await paste(page, 'query', pasted);
+  await openFiles(page, 'query', [
+    { name: 'bad.fa', text: bad },
+    { name: 'after.fa', text: after },
+  ]);
+  const check = page.getByTestId('query-source-1-check');
+  await expect(check).toHaveAttribute('data-reader-error', '');
+  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(6)}${REMEDY} The run does not read the inputs after this one.`);
+  const later = page.getByTestId('query-source-2-check');
+  await expect(later).toHaveAttribute('data-not-searched', '');
+  await expect(later).toHaveText(
+    'Not searched: the search stops at the error in bad.fa, before this input. Correct that error, or choose Separate to search each input alone.',
+  );
+  await page.getByTestId('query-mode-separate').check();
+  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(4)}${REMEDY}`);
+  await expect(later).not.toHaveAttribute('data-not-searched', '');
+  await page.getByTestId('query-mode-combined').check();
+  await expect(check).toContainText(NOT_PLAUSIBLE(6));
+  const status = await failedRun(page, 1);
+  if (BUILD_HAS_ENGINE) await expect(status).toContainText(NOT_PLAUSIBLE(6));
+  // A source whose reader's error is on its first line, read without a defline.
+  await page.getByTestId('tab-search').click();
+  await page.getByTestId('query-source-2-remove').click();
+  await page.getByTestId('query-source-1-remove').click();
+  await openFiles(page, 'query', [{ name: 'mark.fa', text: Buffer.from(`\uFEFF>q2\n${DNA.slice(0, 60)}\n`) }]);
+  await expect(page.getByTestId('query-source-1-mark')).toBeVisible();
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toHaveText(
+    'Query (file mark.fa) starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.',
+  );
+  await expect(page.getByTestId('run-2-option')).toHaveCount(0);
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The CLI's error: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const cli = nativeRun(['blastn', '-outfmt', '6'], `${pasted}${bad}${after}`, SUBJECT);
+  expect(cli.status).toBe(1);
+  expect(cli.stderr).toBe(`${NOT_PLAUSIBLE(6)}\n`);
 });
 
 test('a query of comment lines only has no sequence, and the run ends as the command line ends it', async ({ page }, testInfo) => {

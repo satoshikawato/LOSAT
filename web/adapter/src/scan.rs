@@ -137,8 +137,8 @@ pub fn to_json(scanned: &Scanned) -> String {
     if let Some(stop) = &scanned.stop {
         let _ = write!(
             out,
-            ",\"reader_error\":{{\"offset\":{},\"message\":",
-            stop.offset
+            ",\"reader_error\":{{\"offset\":{},\"defline\":{},\"message\":",
+            stop.offset, stop.defline
         );
         crate::json::string(&mut out, &stop.message);
         out.push('}');

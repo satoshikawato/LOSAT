@@ -5,7 +5,7 @@ import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
-import { noSequenceOf, SearchDraft, type DraftSource } from '../../src/application/draft';
+import { noSequenceOf, queryEndBefore, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -1576,6 +1576,61 @@ describe('SearchDraft submit', () => {
     );
     draft.setMode('subject', 'separate');
     expect(draft.readiness()).toBeUndefined();
+  });
+
+  // A source whose reader's error comes before its first record, on a first line read without a
+  // defline (a byte order mark, a line of other text), cannot follow another input: the record
+  // before it would read that line (review M2, 2026-11-20). One whose first record has a defline can.
+  it("refuses to combine a source whose reader's error is on a first line without a defline after another source", async () => {
+    const { draft } = setup();
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('query', [new File(['\uFEFF>q2\nACGT\n'], 'mark.fa')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'query', 1).base?.readerError).toMatchObject({ offset: 0, defline: false });
+    expect(draft.readiness()).toBe(
+      'Query (file mark.fa) starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.',
+    );
+    draft.setMode('query', 'separate');
+    expect(draft.readiness()).toBeUndefined();
+    draft.setMode('query', 'combined');
+    draft.removeSource('query', sourceOf(draft, 'query', 1).key);
+    draft.addFiles('query', [new File(['=== list ===\n>q2\nACGT\n'], 'text.fa')]);
+    await draft.idle();
+    expect(draft.readiness()).toMatch(/^Query \(file text\.fa\) starts with a line that is not a defline/);
+    draft.removeSource('query', sourceOf(draft, 'query', 1).key);
+    draft.addFiles('query', [new File(['>q2\n$$$$\n'], 'data.fa')]);
+    await draft.idle();
+    expect(sourceOf(draft, 'query', 1).base?.readerError).toMatchObject({ offset: 0, defline: true });
+    expect(draft.readiness()).toBeUndefined();
+  });
+
+  // In a Combined query input the run's error names the run's line, after the inputs before the
+  // source, and the run reads no input after it (review L2, 2026-11-20).
+  it("checks a Combined query's reader's error after the inputs before it, and the inputs after it are not read", async () => {
+    const { draft } = setup();
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('query', [new File(['>a\nACGT\n>b\n$$$$\n'], 'bad.fa'), new File(['>c\nACGT\n'], 'after.fa')]);
+    await draft.idle();
+    const bad = () => draft.state.get().query.sources.find((source) => source.name === 'bad.fa')!;
+    expect(bad().check).toMatchObject({ state: 'ok', records: 1, readerError: expect.stringContaining('Near line 6,') });
+    const sources = draft.state.get().query.sources;
+    expect(queryEndBefore(sources, sources[2]!)?.key).toBe(bad().key);
+    expect(queryEndBefore(sources, sources[1]!)).toBeUndefined();
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    expect(bad().check).toMatchObject({ readerError: expect.stringContaining('Near line 4,') });
+    draft.setMode('query', 'combined');
+    await draft.idle();
+    expect(bad().check).toMatchObject({ readerError: expect.stringContaining('Near line 6,') });
+    // The run reads what is included: the line follows the records left out.
+    draft.setIncluded('query', 'paste', [0], false);
+    await draft.idle();
+    expect(bad().check).toMatchObject({ readerError: expect.stringContaining('Near line 4,') });
+    draft.removeSource('query', 'paste');
+    await draft.idle();
+    expect(bad().check).toMatchObject({ readerError: expect.stringContaining('Near line 4,') });
   });
 
   it("maps a subject record that the engine refuses, and reports it in short above the button", async () => {

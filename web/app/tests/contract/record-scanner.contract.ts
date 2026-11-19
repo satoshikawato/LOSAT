@@ -259,15 +259,25 @@ const STOPS: ReadonlyArray<{
   readonly error: RegExp;
   readonly records: number;
   readonly offset: number;
+  /** Whether the record that the reader fails on starts with a defline (review M2, 2026-11-20). */
+  readonly defline: boolean;
 }> = [
-  { name: 'a first data line that is not plausible data', input: encoder.encode('>a\n$$$$$$\nACGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0 },
-  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0 },
+  {
+    name: 'a first data line that is not plausible data',
+    input: encoder.encode('>a\n$$$$$$\nACGT\n'),
+    error: NOT_PLAUSIBLE(2),
+    records: 0,
+    offset: 0,
+    defline: true,
+  },
+  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0, defline: true },
   {
     name: 'a later record whose first data line is not plausible data',
     input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n>c\nACGT\n'),
     error: NOT_PLAUSIBLE(4),
     records: 1,
     offset: 8,
+    defline: true,
   },
   {
     name: 'a byte order mark',
@@ -275,6 +285,15 @@ const STOPS: ReadonlyArray<{
     error: NOT_PLAUSIBLE(1),
     records: 0,
     offset: 0,
+    defline: false,
+  },
+  {
+    name: 'a first line of other text',
+    input: encoder.encode('=== list ===\n>a\nAC\n'),
+    error: NOT_PLAUSIBLE(1),
+    records: 0,
+    offset: 0,
+    defline: false,
   },
   {
     name: 'a byte that is not UTF-8 in a first data line',
@@ -282,6 +301,7 @@ const STOPS: ReadonlyArray<{
     error: NOT_PLAUSIBLE(2),
     records: 0,
     offset: 0,
+    defline: true,
   },
 ];
 
@@ -410,6 +430,7 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
             const response = await scanner.scan(kind, chunked(stop.input, size));
             same(response.records.length, stop.records, `${label}: records before the error`);
             same(response.reader_error?.offset, stop.offset, `${label}: the offset of the record`);
+            same(response.reader_error?.defline, stop.defline, `${label}: whether the record starts with a defline`);
             const message = response.reader_error?.message ?? '';
             check(stop.error.test(message), `${label}: the reader's message, not ${JSON.stringify(message)}`);
           }

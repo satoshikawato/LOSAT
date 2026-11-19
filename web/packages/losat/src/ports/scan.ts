@@ -15,6 +15,12 @@ import type { FastaParserKind, IndexedRecord } from '../domain/dataset.js';
 export interface ReaderStop {
   /** The offset of the record that the reader fails on (its `>`; 0 for a first record without a defline). */
   readonly offset: number;
+  /**
+   * Whether that record starts with a defline: `false` for the input's first record read without one
+   * (a byte-order mark, a first line of other text), which cannot follow another input's records
+   * (review M2, 2026-11-20).
+   */
+  readonly defline: boolean;
   /** The reader's message (`CFastaReader: Near line …`). */
   readonly message: string;
 }

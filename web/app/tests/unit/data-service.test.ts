@@ -91,6 +91,7 @@ describe('DataService sources and record tables', () => {
     expect(revision.records.map((record) => record.id)).toEqual(['a', 'b']);
     expect(revision.readerError).toEqual({
       offset: 14,
+      defline: true,
       message: "CFastaReader: Near line 6, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
     });
     const whole = await data.buildRunInput([revision.revisionId]);
@@ -123,7 +124,7 @@ describe('DataService sources and record tables', () => {
         scanner: {
           async scan() {
             const { records } = await new FakeScanner().scan(1, (async function* () { yield new TextEncoder().encode('>a\nACGT\n'); })());
-            return { records, reader_error: { offset, message: 'x' } };
+            return { records, reader_error: { offset, defline: true, message: 'x' } };
           },
         },
       });

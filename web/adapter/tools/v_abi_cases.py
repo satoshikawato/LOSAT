@@ -364,6 +364,11 @@ def window_masker() -> list[dict]:
     return list(searches.values())
 
 
+# The copies of each program's subject sequence in `reader_error`: the outfmt 0 report of the first
+# batch is then over 1 MiB (the CLI's file before its error: 1.26 to 1.46 MB, measured 2026-11-20).
+COPIES = {"blastn": 72, "blastp": 30, "tblastn": 16, "blastx": 72, "tblastx": 10}
+
+
 def reader_error() -> list[dict]:
     """A query whose reader fails on a record of its second query batch (line WQA's sweep, D10,
     2026-11-19): the CLI searches the first batch, writes its report and ends with the reader's error
@@ -375,7 +380,11 @@ def reader_error() -> list[dict]:
     window_masker's. A BLASTP search with -parse_deflines: two records of one ID in the first batch
     end the CLI there, before the record of the second batch whose Seq-id names a nucleotide
     sequence (`register_inputs` reads it, and the run ends with the first batch's error, before the
-    CLI writes the outfmt 0 prolog)."""
+    CLI writes the outfmt 0 prolog). The subject holds copies of its sequence, so that the outfmt 0
+    report of the first batch is over the adapter's chunk of 1 MiB (`emit::CHUNK`): a run sends
+    whole chunks as they fill and nothing smaller before it fails, so the run's first chunk of
+    outfmt 0, which the CLI's file starts with, shows the batch before the error (`sends`; review L3,
+    2026-11-20)."""
     import random
 
     engine = REPO / "LOSAT"
@@ -401,21 +410,24 @@ def reader_error() -> list[dict]:
 
     bad = b">bad\nACGTAC%%%%\n"
     nucleotide, residues, long_residues = letters("ACGT", 5000), protein(1100), protein(2100)
+    # The query records, the query and subject sequences, and the copies of the subject sequence.
     inputs = {
-        "blastn": (40, nucleotide, nucleotide),
-        "blastp": (12, residues, residues),
-        "tblastn": (12, long_residues, coding(long_residues)),
-        "blastx": (5, coding(residues), residues),
-        "tblastx": (5, coding(residues), coding(residues)),
+        "blastn": (40, nucleotide, nucleotide, COPIES["blastn"]),
+        "blastp": (12, residues, residues, COPIES["blastp"]),
+        "tblastn": (12, long_residues, coding(long_residues), COPIES["tblastn"]),
+        "blastx": (5, coding(residues), residues, COPIES["blastx"]),
+        "tblastx": (5, coding(residues), coding(residues), COPIES["tblastx"]),
     }
     searches = []
-    for program, (count, query, subject) in inputs.items():
+    for program, (count, query, subject, copies) in inputs.items():
         names = [f"q{i}" for i in range(1, count + 1)]
         (engine / directory / f"{program}.q.fa").write_bytes(fasta(names, query) + bad)
-        (engine / directory / f"{program}.s.fa").write_bytes(fasta(["s1"], subject))
+        subjects = b"".join(fasta([f"s{i}"], subject) for i in range(1, copies + 1))
+        (engine / directory / f"{program}.s.fa").write_bytes(subjects)
         searches.append({"program": program, "argv": [program, "-query", str(directory / f"{program}.q.fa"),
                                                       "-subject", str(directory / f"{program}.s.fa")],
-                         "cwd": str(engine), "cases": [f"reader_error.{program}"], "frozen": {}, "expect": "failure"})
+                         "cwd": str(engine), "cases": [f"reader_error.{program}"], "frozen": {}, "expect": "failure",
+                         "sends": [0]})
     names = ["q1", "q1", *(f"q{i}" for i in range(3, 12)), "ref|NM_000001.1|"]
     (engine / directory / "blastp_pd.q.fa").write_bytes(fasta(names, residues))
     (engine / directory / "blastp_pd.s.fa").write_bytes(fasta(["s1"], residues[:300]))

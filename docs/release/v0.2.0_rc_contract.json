@@ -141,10 +141,10 @@
     "ws_evidence": {
       "J": {
         "memory_table": {
-          "record": null
+          "record": "docs/evidence/release_v020/J/README.md#memory-passed"
         },
         "speed_grid": {
-          "record": null
+          "record": "docs/evidence/release_v020/J/README.md#speed-passed"
         }
       }
     },

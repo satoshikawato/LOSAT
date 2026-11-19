@@ -456,7 +456,7 @@ jobs:
             --target "${{ matrix.target_triple }}"
 
   # CodeQL of the candidate itself (codeql.yml: the four languages, filed under this run's ref and
-  # commit), so that job `security` can require no open alert at R. Its upload of the results is the
+  # commit); its job `open alerts` fails when an alert is open at R. Its upload of the results is the
   # only write before job `handoff` (security-events).
   codeql-candidate:
     uses: ./.github/workflows/codeql.yml
@@ -468,13 +468,9 @@ jobs:
       security-events: write
 
   security:
-    name: Security (advisories and code scanning at the candidate)
-    needs: codeql-candidate
+    name: Dependency advisories at the candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions:
-      contents: read
-      security-events: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -508,30 +504,6 @@ jobs:
       - name: Dependency advisories (cargo, npm, pip)
         run: scripts/dependency_advisories.sh
 
-      # Every language has an analysis of R on this ref (job codeql-candidate), and no alert is open
-      # on it. A false positive is dismissed on GitHub with its reason; dismissals carry over by
-      # category, so a dismissed alert does not fail here.
-      - name: No open code scanning alert at the candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          analysed=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/analyses?ref=$GITHUB_REF&per_page=100" \
-            --jq "[.[] | select(.commit_sha == \"$GITHUB_SHA\") | .category] | unique | join(\" \")")
-          for language in actions javascript-typescript python rust; do
-            if [[ " $analysed " != *" /language:$language "* ]]; then
-              echo "::error::no CodeQL analysis of $GITHUB_SHA on $GITHUB_REF for /language:$language"
-              exit 1
-            fi
-          done
-          open=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$GITHUB_REF&state=open&per_page=100" --paginate \
-            --jq '.[] | "#\(.number) \(.rule.id) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"')
-          if [[ -n "$open" ]]; then
-            echo "::error::open code scanning alerts on $GITHUB_REF at $GITHUB_SHA (fix, or dismiss a false positive on GitHub with its reason):"
-            echo "$open"
-            exit 1
-          fi
-          echo "No open code scanning alert on $GITHUB_REF at $GITHUB_SHA ($analysed)."
-
   handoff:
     name: Aggregate exact-SHA RC handoff
     needs:
@@ -541,10 +513,12 @@ jobs:
       - threaded-wasm-artifact
       - extracted-smoke
       - threading-regression
+      - codeql-candidate
       - security
     if: >-
       ${{ always() &&
           needs.quality.result == 'success' &&
+          needs.codeql-candidate.result == 'success' &&
           needs.security.result == 'success' &&
           needs.threading-regression.result == 'success' &&
           needs.native-artifacts.result == 'success' &&

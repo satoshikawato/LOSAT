@@ -22,3 +22,9 @@
   not supported by LOSAT's BLASTX", exit status 2) instead of "unsupported BLASTX option '-html':
   outside the declared local FASTA scope", and an argument error ends with "For more information,
   try '-help'." (NCBI's form) instead of '--help'.
+- blastx refuses a protein subject of more than 5,000,000 residues in one form from a `-subject`
+  record and from a database sequence ("subject sequence 1 has 5000001 residues; a subject longer
+  than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by
+  LOSAT's BLASTX", exit status 1, as "database sequence 0 has ..."); the `-subject` record got
+  "BLAST engine error: BLASTX preliminary protein-subject splitting above 5000000 residues is not
+  implemented" with exit status 3 before. Subjects up to 5,000,000 residues are unchanged.

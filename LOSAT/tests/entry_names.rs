@@ -336,8 +336,10 @@ fn search_program_help_says_what_outfmt_writes() {
             let help = run(losat(), &[program, flag]);
             let text = String::from_utf8_lossy(&help.stdout).into_owned();
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            // blastx keeps the value name `<OUTFMT>` of its frozen Web ABI v1 error text.
             let after = text
                 .split_once("-outfmt <SPEC> ")
+                .or_else(|| text.split_once("-outfmt <OUTFMT> "))
                 .unwrap_or_else(|| panic!("{program} {flag}: no -outfmt line\n{text}"))
                 .1;
             assert!(
@@ -509,4 +511,75 @@ fn refusals_by_name_have_one_form_and_the_hint_says_help() {
         );
         assert!(!text.contains("--help"), "{program}: {text:?}");
     }
+}
+
+/// blastx refuses a protein subject of more than 5,000,000 residues (NCBI searches it in
+/// overlapping parts) in one form, from a `-subject` record and from a database sequence: the
+/// same wording but the name of the subject, exit status 1, no output.
+#[test]
+fn blastx_refuses_a_subject_over_5_000_000_residues_in_one_form() {
+    let dir = temp_dir("longsubject");
+    let query = dir.join("q.fna");
+    fs::write(&query, format!(">q\n{}\n", "ATGGCTGCTAAAGAAGGT".repeat(20))).unwrap();
+    let subject = dir.join("s.faa");
+    fs::write(&subject, format!(">long\n{}\n", "W".repeat(5_000_001))).unwrap();
+    let wording = |what: &str| {
+        format!(
+            "Error: {what} has 5000001 residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX\n"
+        )
+    };
+    let q = query.to_str().unwrap();
+    let s = subject.to_str().unwrap();
+    let out = dir.join("out.txt");
+    let o = out.to_str().unwrap();
+    let by_subject = run(
+        losat(),
+        &[
+            "blastx", "-query", q, "-subject", s, "-outfmt", "6", "-out", o,
+        ],
+    );
+    assert_eq!(by_subject.status.code(), Some(1), "{by_subject:?}");
+    assert!(by_subject.stdout.is_empty(), "{by_subject:?}");
+    assert_eq!(
+        String::from_utf8(by_subject.stderr).unwrap(),
+        wording("subject sequence 1")
+    );
+    assert!(fs::read(&out).map_or(true, |bytes| bytes.is_empty()));
+
+    let db = dir.join("db");
+    let made = run(
+        losat(),
+        &[
+            "makeblastdb",
+            "-in",
+            s,
+            "-dbtype",
+            "prot",
+            "-out",
+            db.to_str().unwrap(),
+        ],
+    );
+    assert!(made.status.success(), "{made:?}");
+    let by_db = run(
+        losat(),
+        &[
+            "blastx",
+            "-query",
+            q,
+            "-db",
+            db.to_str().unwrap(),
+            "-outfmt",
+            "6",
+            "-out",
+            o,
+        ],
+    );
+    assert_eq!(by_db.status.code(), Some(1), "{by_db:?}");
+    assert!(by_db.stdout.is_empty(), "{by_db:?}");
+    assert_eq!(
+        String::from_utf8(by_db.stderr).unwrap(),
+        wording("database sequence 0")
+    );
+    assert!(fs::read(&out).map_or(true, |bytes| bytes.is_empty()));
+    fs::remove_dir_all(&dir).unwrap();
 }

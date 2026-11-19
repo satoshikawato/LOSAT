@@ -671,6 +671,13 @@ fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
     if error.use_stderr() && !message.ends_with('\n') {
         message.push('\n');
     }
+    // The command line says NCBI's `-help`; `render_message` keeps clap's `--help` for the
+    // texts of LOSAT Web's ABI v1 (frozen: `tests/fixtures/web_v1_tblastn/word_size.err`) and
+    // the library API.
+    let message = message.replace(
+        "For more information, try '--help'.",
+        "For more information, try '-help'.",
+    );
     // rpsbproc's messages and help are written without a panic on a closed stream
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
     if argv_is_rpsbproc {

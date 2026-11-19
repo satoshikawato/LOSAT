@@ -791,10 +791,6 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("-V, --version", "--version")
         .replace("see a summary with '-help'", "see a summary with '-h'")
         .replace("see more with '--help'", "see more with '-help'")
-        .replace(
-            "For more information, try '--help'.",
-            "For more information, try '-help'.",
-        )
 }
 
 /// `render_message` for `losat rpsbproc`, whose arguments are NCBI's one-letter keys (`-i`)

@@ -386,7 +386,7 @@ pub struct BlastxArgs {
     // ```
     // NCBI reads the value when it sets the options (`native::run`; `blastinput/app.rs`
     // `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
+    #[arg(long, default_value = "0", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2726-2730
     // ```c++

@@ -7,6 +7,7 @@ import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId
 import type { HspRecord, InputCheck } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
+import { withUnit } from '../domain/units';
 
 export interface SourceRef {
   readonly sourceId: string;
@@ -128,9 +129,11 @@ export type StorageBackend = 'opfs' | 'memory';
 export const MEMORY_RESULTS_CAPACITY_BYTES = 512 * 1024 * 1024;
 /**
  * MEMORY_RESULTS_CAPACITY_BYTES as the page says it, "512 MB" (of 1024 × 1024 bytes): in the
- * message when it is reached, and in the note that says results are kept in memory.
+ * message when it is reached, and in the note that says results are kept in memory. The number and
+ * its unit are joined by a no-break space, so that the note never breaks "at most 512" / "MB" on a
+ * narrow screen (line WQA's sweep, D9, 2026-11-19).
  */
-export const MEMORY_RESULTS_CAPACITY = `${MEMORY_RESULTS_CAPACITY_BYTES / (1024 * 1024)} MB`;
+export const MEMORY_RESULTS_CAPACITY = withUnit(MEMORY_RESULTS_CAPACITY_BYTES / (1024 * 1024), 'MB');
 
 /** Removal of the temporary data that closed tabs left behind (plan §5.6). */
 export type CleanupState =

@@ -3,6 +3,7 @@
 // A run of many queries is drawn a screenful at a time, and is one Tab stop (VirtualRows).
 import { computed } from 'vue';
 import type { ResultsBrowser, ResultsState } from '../application/results';
+import { withUnit } from '../domain/units';
 import { formatCount, formatCounted } from './format';
 import VirtualRows from './VirtualRows.vue';
 
@@ -65,7 +66,7 @@ function setHitsOnly(event: Event): void {
           <span class="record-number">#{{ state.queries[position]!.qIdx + 1 }}</span>
           <span class="record-id">{{ state.queries[position]!.id }}</span>
           <span class="pick-meta">
-            {{ formatCount(state.queries[position]!.length) }} {{ unit }} ·
+            {{ withUnit(formatCount(state.queries[position]!.length), unit) }} ·
             <template v-if="state.queries[position]!.hsps === 0">no hits</template>
             <template v-else
               >{{ formatCounted(state.queries[position]!.subjects, 'subject') }}, {{ formatCounted(state.queries[position]!.hsps, 'HSP') }}</template

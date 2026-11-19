@@ -11,6 +11,7 @@ import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/acces
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
+import { withUnit } from '../domain/units';
 import { announce } from './announcer';
 import { formatBytes, formatCount } from './format';
 import LosatLoader from './LosatLoader.vue';
@@ -239,7 +240,7 @@ watch(verdict, (now) => {
       <p class="summary" :data-testid="`${testid}-summary`">
         {{ formatCount(records.length) }} {{ records.length === 1 ? 'record' : 'records' }}
         <template v-if="included.length !== records.length">({{ formatCount(included.length) }} included)</template>
-        · {{ formatCount(totalLength) }} {{ unit }}
+        · {{ withUnit(formatCount(totalLength), unit) }}
       </p>
 
       <p

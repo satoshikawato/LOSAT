@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, onBeforeUpdate, onUnmounted, onUpdated, ref, watch, watchEffect } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { isTerminal, type RunStatus } from '../domain/run';
+import { withUnit } from '../domain/units';
 import { announce } from './announcer';
 import { formatDuration } from './format';
 import LosatLoader from './LosatLoader.vue';
@@ -84,7 +85,7 @@ const phaseTimes = computed(() => {
   if (startedAt === undefined || times === undefined) return '';
   return (['preparing', 'running', 'finalizing'] as const)
     .filter((phase) => times[phase] !== undefined)
-    .map((phase) => `${PHASE_LABELS[phase]} at ${((times[phase]! - startedAt) / 1000).toFixed(1)} s`)
+    .map((phase) => `${PHASE_LABELS[phase]} at ${withUnit(((times[phase]! - startedAt) / 1000).toFixed(1), 's')}`)
     .join(', ');
 });
 </script>

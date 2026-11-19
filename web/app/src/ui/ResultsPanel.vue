@@ -16,6 +16,7 @@ import { recordName } from '../domain/dataset';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
+import { withUnit } from '../domain/units';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
 import CommandText from './CommandText.vue';
@@ -278,13 +279,13 @@ async function toAlignments(id: HspId): Promise<void> {
               <dt>Query ID</dt>
               <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>
               <dt>Query Length</dt>
-              <dd data-testid="results-query-length">{{ formatCount(selected.snapshot.query.records[0]!.length) }} {{ units.query }}</dd>
+              <dd data-testid="results-query-length">{{ withUnit(formatCount(selected.snapshot.query.records[0]!.length), units.query) }}</dd>
             </template>
             <template v-if="selected.snapshot.subject.records.length === 1">
               <dt>Subject ID</dt>
               <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0, selected.record.shownIds) }}</dd>
               <dt>Subject Length</dt>
-              <dd data-testid="results-subject-length">{{ formatCount(selected.snapshot.subject.records[0]!.length) }} {{ units.subject }}</dd>
+              <dd data-testid="results-subject-length">{{ withUnit(formatCount(selected.snapshot.subject.records[0]!.length), units.subject) }}</dd>
             </template>
             <template v-else>
               <dt>Subjects</dt>

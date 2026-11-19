@@ -45,7 +45,8 @@ const elapsed = computed(() => {
   return startedAt === undefined ? undefined : formatDuration((endedAt ?? now.value) - startedAt);
 });
 
-const cancellable = (run: RunView) => !isTerminal(run.status) && run.status !== 'finalizing';
+/** Until it ends: a run whose results the Data worker does not commit can be ended too (line WQA's sweep, D2). */
+const cancellable = (run: RunView) => !isTerminal(run.status);
 
 /** The run that searches while this one waits (runs search one at a time). */
 const ahead = computed(() => {

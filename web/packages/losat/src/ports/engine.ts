@@ -170,7 +170,7 @@ export function isFileReadError(error: unknown): error is Error {
 
 /**
  * A part of LOSAT could not be loaded, or stopped: an engine file that could not be downloaded, a worker that could not
- * start or that ended (line WQA's sweep, D1, 2026-11-19). It is no verdict on the inputs or the options, and a
+ * start or that ended (line WQA's sweep, D1 and D2, 2026-11-19). It is no verdict on the inputs or the options, and a
  * page says it as LOSAT's own failure. Its message names the part and why, as a clause. An error that crosses a worker
  * keeps its name only (`isUnavailable`).
  */

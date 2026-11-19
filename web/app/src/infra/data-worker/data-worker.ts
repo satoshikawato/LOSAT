@@ -145,6 +145,7 @@ const endpoint = Promise.all([service, examples, counts]).then(
     describe: (program) => control.describe(program),
     start: (argv) => control.start(argv),
     validate: (argv, registry) => control.validate(argv, registry),
+    lifeLock: async () => (await started).lock,
   }),
 );
 

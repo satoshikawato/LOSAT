@@ -150,19 +150,58 @@ describe('Coordinator', () => {
     expect(await data.readDiagnostics(first)).toBe(`Warning: ${first}\n`);
   });
 
-  // Line WQA's sweep, D1: a part of LOSAT that could not be loaded is said as the page says it.
-  it('a run that fails for a part of LOSAT that is unavailable fails with it and the remedy', async () => {
+  // Line WQA's sweep, D2 (2026-11-19): a Data worker that did not answer the commit kept the run "Organizing results"
+  // for good, with no Cancel, and the queue behind it waited.
+  it('a cancel ends a run whose results are not committed, the next run starts, and results that come later are deleted', async () => {
+    const engine = new ManualEngine();
+    let commit: (value: unknown) => void = () => undefined;
+    let made: Promise<unknown> = Promise.resolve();
+    const deleted: string[] = [];
+    const { coordinator } = setup(engine, (data) =>
+      Object.assign(Object.create(data) as DataService, {
+        // The first run's commit is made, and its answer comes only when the test lets it.
+        commitRun: (runId: string) => {
+          const commitment = data.commitRun(runId);
+          if (viewOf(coordinator, runId)!.snapshot.number !== 1) return commitment;
+          made = commitment;
+          return new Promise((resolve) => (commit = resolve)).then(() => commitment);
+        },
+        deleteRun: async (runId: string) => {
+          deleted.push(runId);
+          await data.deleteRun(runId);
+        },
+      }),
+    );
+    const first = (await coordinator.enqueue(request)).runId!;
+    const second = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'running');
+    engine.finish(first);
+    await waitFor(coordinator, first, 'finalizing');
+    // The Data worker committed the results; its answer does not come.
+    await made;
+    coordinator.cancel(first);
+    await waitFor(coordinator, first, 'cancelled');
+    await waitFor(coordinator, second, 'running');
+    expect(deleted).toEqual([]);
+    commit(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(deleted).toEqual([first]);
+    expect(statusOf(coordinator, first)).toBe('cancelled');
+  });
+
+  // Line WQA's sweep, D1 and D2: a part of LOSAT that could not be loaded or stopped is said as the page says it.
+  it('a run whose Data worker stopped fails with what stopped and the remedy', async () => {
     const engine = new ManualEngine();
     const { coordinator } = setup(engine, (data) =>
       Object.assign(Object.create(data) as DataService, {
-        commitRun: () => Promise.reject(new UnavailableError('LOSAT could not start the part that keeps the results')),
+        commitRun: () => Promise.reject(new UnavailableError('The part of LOSAT that keeps the results stopped')),
       }),
     );
     const runId = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, runId, 'running');
     engine.finish(runId);
     await waitFor(coordinator, runId, 'failed');
-    expect(viewOf(coordinator, runId)!.record.error).toBe('LOSAT could not start the part that keeps the results. Reload the page.');
+    expect(viewOf(coordinator, runId)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
   });
 
   it('refuses a request with the remedy, not as a fault of the options or the input, when a part of LOSAT is unavailable', async () => {

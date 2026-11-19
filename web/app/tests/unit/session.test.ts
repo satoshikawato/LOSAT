@@ -91,6 +91,8 @@ describe('working session ownership', () => {
     });
     expect(session.store).toBe(store);
     expect(session.fallbackReason).toBeUndefined();
+    // The page learns from its release that the worker ended (line WQA's sweep, D2).
+    expect(session.lock).toBe(SESSION_LOCK_PREFIX + 'own');
     expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 1 });
   });
 
@@ -125,6 +127,8 @@ describe('working session ownership', () => {
     });
     expect(session.store.backend).toBe('memory');
     expect(session.fallbackReason).toBe('the browser storage of this site is full');
+    // Held all the same: the worker keeps it until it ends.
+    expect(session.lock).toBe(SESSION_LOCK_PREFIX + 'own');
     // Results kept in memory have a budget (S09).
     expect((session.store as MemoryBlockStore).capacityBytes()).toBe(MEMORY_RESULTS_CAPACITY_BYTES);
   });
@@ -145,6 +149,7 @@ describe('working session ownership', () => {
     });
     expect(opened).toBe(false);
     expect(session.store.backend).toBe('memory');
+    expect(session.lock).toBeUndefined();
     expect(session.fallbackReason).toMatch(/^this browser has no Web Locks API/);
     expect(await session.cleanup).toEqual({ state: 'unavailable', reason: 'this browser has no Web Locks API' });
     expect(space.tokens).toEqual(['other']);
@@ -170,6 +175,7 @@ describe('working session ownership', () => {
     expect(opened).toBe(false);
     expect(session.store.backend).toBe('memory');
     expect(session.fallbackReason).toBe('the Web Lock of this tab could not be taken (SecurityError)');
+    expect(session.lock).toBeUndefined();
     expect(await session.cleanup).toEqual({ state: 'unavailable', reason: 'this tab holds no Web Lock' });
   });
 

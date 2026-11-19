@@ -33,7 +33,7 @@ export interface App {
   readonly results: ResultsBrowser;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
   readonly attention: Attention;
-  /** Whether LOSAT itself works: a part that could not be loaded (line WQA's sweep, D1). */
+  /** Whether LOSAT itself works: a part that could not be loaded, or that stopped (line WQA's sweep, D1 and D2). */
   readonly availability: Availability;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
   readonly usesFakeEngine: boolean;

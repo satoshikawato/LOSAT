@@ -1,4 +1,4 @@
-// What the page says when a part of LOSAT could not be loaded or stopped (line WQA's sweep, D1, 2026-11-19):
+// What the page says when a part of LOSAT could not be loaded or stopped (line WQA's sweep, D1 and D2, 2026-11-19):
 // an engine file that could not be downloaded made every input card say "This input cannot be read: Failed to fetch",
 // refused Run LOSAT for the pasted query, and said nothing for the page. The search form tells such a failure from an
 // unreadable input, and the page says it once with the remedy (application/availability.ts).

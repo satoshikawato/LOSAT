@@ -7,6 +7,7 @@ import type { OutputStream } from '../../ports/run-output.js';
 import { EngineStoppedError } from '../reactor/abi.js';
 import { loadReactor } from '../reactor/instance.js';
 import { RunOutputWriter } from '../run-output/writer.js';
+import { holdLife, webLocks } from '../worker-life.js';
 import { InstanceUse } from './instance-use.js';
 import {
   HOLD_USE_CHANNEL,
@@ -100,8 +101,8 @@ function holdIfArmed(use: InstanceUse | undefined): void {
 
 function init(command: EngineInit): void {
   generation = command.generation;
-  // Tells the Gateway that this worker started (line WQA's sweep, D1).
-  scope.postMessage({ type: 'alive', generation: command.generation });
+  // Tells the Gateway that this worker started, and holds its lock until the worker ends (worker-life.ts).
+  void holdLife(webLocks(), command.lifeLock).then((held) => scope.postMessage({ type: 'alive', generation: command.generation, held }));
   let serial: ReturnType<typeof moduleOf> | undefined;
   let threads: ReturnType<typeof moduleOf> | undefined;
   const use = command.use === undefined ? undefined : new InstanceUse(command.use);

@@ -84,6 +84,11 @@ export interface DataSessionEnv {
 
 export interface DataSession {
   readonly store: BlockStore;
+  /**
+   * The name of the session's lock, while the worker holds it (until it ends); undefined without one. The page learns
+   * from its release that the worker ended (data-worker/gateway.ts; line WQA's sweep, D2).
+   */
+  readonly lock?: string;
   /** Why the session uses memory instead of OPFS. */
   readonly fallbackReason?: string;
   /** Settles when the removal of abandoned sessions has finished. */
@@ -114,11 +119,12 @@ export async function startDataSession(env: DataSessionEnv): Promise<DataSession
       reason: 'this tab holds no Web Lock',
     });
   }
+  const lock = SESSION_LOCK_PREFIX + token;
   let space: SessionSpace;
   try {
     space = await env.opfs.space();
   } catch (error) {
-    return memorySession(messageOf(error), { state: 'done', removedSessions: 0 });
+    return memorySession(messageOf(error), { state: 'done', removedSessions: 0 }, lock);
   }
   const reclaim = () =>
     reclaimAbandonedSessions(space, locks, token).then(
@@ -126,20 +132,20 @@ export async function startDataSession(env: DataSessionEnv): Promise<DataSession
       (error: unknown): CleanupState => ({ state: 'unavailable', reason: messageOf(error) }),
     );
   try {
-    return { store: await env.opfs.open(token), cleanup: reclaim() };
+    return { store: await env.opfs.open(token), lock, cleanup: reclaim() };
   } catch {
     const cleanup = await reclaim();
     try {
-      return { store: await env.opfs.open(token), cleanup: Promise.resolve(cleanup) };
+      return { store: await env.opfs.open(token), lock, cleanup: Promise.resolve(cleanup) };
     } catch (error) {
-      return memorySession(openFailure(error), cleanup);
+      return memorySession(openFailure(error), cleanup, lock);
     }
   }
 }
 
-function memorySession(fallbackReason: string, cleanup: CleanupState): DataSession {
+function memorySession(fallbackReason: string, cleanup: CleanupState, lock?: string): DataSession {
   const store = new MemoryBlockStore({ capacityBytes: MEMORY_RESULTS_CAPACITY_BYTES, fullMessage: MEMORY_FULL_MESSAGE });
-  return { store, fallbackReason, cleanup: Promise.resolve(cleanup) };
+  return { store, fallbackReason, ...(lock === undefined ? {} : { lock }), cleanup: Promise.resolve(cleanup) };
 }
 
 function openFailure(error: unknown): string {

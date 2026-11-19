@@ -1,8 +1,10 @@
 // Application coordinator (plan §5.5): one active run, a FIFO queue, and the run state
 // machine  queued -> preparing -> running -> finalizing -> completed | cancelled | failed.
 //
-// Ordering rule for cancel versus commit: a run can be cancelled until it enters
-// `finalizing`; after that, cancel requests are ignored and the run completes.
+// Ordering rule for cancel versus commit: a run can be cancelled until it ends. A cancel while it
+// is `finalizing` ends the wait for its results, which are deleted if they come later: a Data
+// worker that stopped answering kept such a run "Organizing results" for good, with no Cancel
+// (line WQA's sweep, D2, 2026-11-19).
 //
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
@@ -119,6 +121,8 @@ export class Coordinator {
    */
   private readonly conffiles = new Map<string, Blob>();
   private active: string | undefined;
+  /** Ends the wait of the active run for the Data worker's commit of its results, when the run is cancelled meanwhile (cancel). */
+  private stopCommitWait: (() => void) | undefined;
   private nextNumber = 1;
 
   constructor(private readonly deps: CoordinatorDeps) {
@@ -261,9 +265,8 @@ export class Coordinator {
   }
 
   /**
-   * Cancels the runs of a group: the running one, if it can still be cancelled, and the
-   * queued ones (plan §5.2). Finished runs and a run that is finalizing are left alone;
-   * the operation is not atomic.
+   * Cancels the runs of a group: the active one and the queued ones (plan §5.2). Finished
+   * runs are left alone; the operation is not atomic.
    */
   cancelGroup(groupId: string): void {
     const members = this.state.get().runs.filter((run) => run.snapshot.group?.groupId === groupId);
@@ -272,10 +275,10 @@ export class Coordinator {
     for (const run of members) this.cancel(run.snapshot.runId);
   }
 
-  /** Cancels a queued or running run. Runs that are finalizing or finished are left alone. */
+  /** Cancels a queued or active run (one that is finalizing too). Finished runs are left alone. */
   cancel(runId: string): void {
     const view = this.find(runId);
-    if (view === undefined || isTerminal(view.status) || view.status === 'finalizing') return;
+    if (view === undefined || isTerminal(view.status)) return;
     const queuedIndex = this.queue.indexOf(runId);
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
@@ -285,6 +288,7 @@ export class Coordinator {
     }
     this.cancelRequested.add(runId);
     this.deps.engine.cancel(runId);
+    if (this.active === runId) this.stopCommitWait?.();
   }
 
   /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName, with its format's media type. */
@@ -451,7 +455,7 @@ export class Coordinator {
       runFiles = runtime.runFiles;
       if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
       this.update(runId, { status: 'finalizing' });
-      const result = await this.deps.data.commitRun(runId);
+      const result = await this.commitUnlessCancelled(runId);
       this.update(runId, {
         status: 'completed',
         result,
@@ -471,7 +475,8 @@ export class Coordinator {
         },
       });
     } catch (error) {
-      if (staged) await this.deps.data.discardRun(runId).catch(() => undefined);
+      // Not waited for: a Data worker that does not answer must not keep the run from ending (line WQA's sweep, D2).
+      if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
@@ -482,6 +487,7 @@ export class Coordinator {
         },
       });
     } finally {
+      this.stopCommitWait = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
       this.cancelRequested.delete(runId);
@@ -489,6 +495,33 @@ export class Coordinator {
       void this.refreshStorage();
       this.pump();
     }
+  }
+
+  /**
+   * The Data worker's commit of the active run's results, unless the run is cancelled before it answers (cancel): the
+   * wait then ends with RunCancelledError, and results that the commit makes later are deleted.
+   */
+  private commitUnlessCancelled(runId: string): Promise<ResultSetRef> {
+    const commit = this.deps.data.commitRun(runId);
+    return new Promise<ResultSetRef>((resolve, reject) => {
+      let waiting = true;
+      commit.then(
+        (result) => {
+          waiting = false;
+          resolve(result);
+        },
+        (error: unknown) => {
+          waiting = false;
+          reject(error);
+        },
+      );
+      this.stopCommitWait = () => {
+        if (!waiting) return;
+        waiting = false;
+        reject(new RunCancelledError(runId));
+        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
+      };
+    });
   }
 
   /** Phase events are accepted only for the active, non-cancelled run. */

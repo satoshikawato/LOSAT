@@ -62,18 +62,23 @@ export function serveRpc<T extends object>(
   endpoint.start?.();
 }
 
-/** How a client names a worker that could not start, and who is told (rpcClient; line WQA's sweep, D1, 2026-11-19). */
+/** How a client learns that its worker could not start or has ended (rpcClient). */
 export interface RpcLife {
   /** The error of every call once the endpoint reported an error before its first answer: a worker that could not start. */
   readonly notStarted?: (detail: string) => Error;
-  /** Told once, with the error of every call from then on: the worker could not start. */
+  /**
+   * Settles once the worker has ended without an error event (line WQA's sweep, D2, 2026-11-19): every pending and later
+   * call then rejects with its error, where they waited for good.
+   */
+  readonly ended?: Promise<Error>;
+  /** Told once, with the error of every call from then on: the worker could not start, or it ended. */
   readonly onEnd?: (error: Error) => void;
 }
 
 /**
  * Returns an object whose `methods` call the served object behind `endpoint`. If the
- * endpoint reports an error before its first answer (a worker that failed to start),
- * every pending and later call rejects with that error (`life.notStarted`'s, when given).
+ * endpoint reports an error before its first answer (a worker that failed to start), or
+ * `life.ended` settles, every pending and later call rejects with that error.
  */
 export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: readonly Methods<T>[], life: RpcLife = {}): T {
   let nextId = 0;
@@ -108,6 +113,7 @@ export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: read
     const detail = (event as ErrorEvent).message ?? '';
     end(life.notStarted?.(detail) ?? new Error(`the worker stopped${detail ? `: ${detail}` : ''}`));
   });
+  void life.ended?.then(end);
   endpoint.start?.();
   const client: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
   for (const method of methods) {

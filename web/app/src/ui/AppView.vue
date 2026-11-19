@@ -31,7 +31,7 @@ const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const availabilityState = useStore(props.availability.state);
 /**
- * What of LOSAT could not be loaded or stopped, and the remedy, once for the page (line WQA's sweep, D1): a
+ * What of LOSAT could not be loaded or stopped, and the remedy, once for the page (line WQA's sweep, D1 and D2): a
  * reload also loses the results of this session, which the page then says.
  */
 const unavailable = computed(() => {

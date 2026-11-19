@@ -3,7 +3,9 @@
 // generation) when there is none, posts the search with the Data worker's output port,
 // and relays the phases. A cancel ends the Engine worker with its thread workers; the next
 // search starts a new generation, whose instance registers the subject again from the run
-// snapshot's bytes (R1). Messages of an older generation are dropped. A runtime is also
+// snapshot's bytes (R1). Messages of an older generation are dropped. A worker that ends by
+// itself fails its search: with an error event, or by the release of the Web Lock that it holds
+// for as long as it lives, when it ends without one (worker-life.ts; line WQA's sweep, D2). A runtime is also
 // renewed before a search when its instance ran too many searches or its memory grew too
 // much (policy.ts). A preparation hint (prepare) starts the generation, its instance and its
 // thread workers, or that renewal, before the search that would start them. `describe`, `start`
@@ -29,6 +31,7 @@ import {
 import { engineBuildName, type EngineAssets } from '../reactor/assets.js';
 import type { EngineControl } from '../reactor/control.js';
 import { loadReactor } from '../reactor/instance.js';
+import { watchLife, webLocks, type LifeLocks } from '../worker-life.js';
 import { InstanceUse } from './instance-use.js';
 import { chooseThreads, DEFAULT_RENEWAL, limitsHolding, renewalReason, type RenewalLimits } from './policy.js';
 import type {
@@ -63,10 +66,14 @@ export interface WasmEngineOptions {
   readonly loadModules?: () => Promise<{ readonly serial: ModuleSource; readonly threads: ModuleSource }>;
   /** Told how each runtime ended (tests record it). */
   readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
+  /** The Web Locks with which the Gateway learns that a worker ended (worker-life.ts); the browser's by default (tests replace them). */
+  readonly locks?: LifeLocks;
 }
 
 /** Why a search fails whose Engine worker could not start: its script or its first message (line WQA's sweep, D1). */
 export const ENGINE_NOT_STARTED = 'LOSAT could not start the part that runs searches';
+/** Why a search fails whose Engine worker ended without an error event (line WQA's sweep, D2); the next search starts another. */
+export const ENGINE_ENDED = 'The part of LOSAT that runs searches stopped';
 
 interface Generation {
   readonly id: number;
@@ -87,6 +94,10 @@ interface Generation {
    * retire). Undefined where the page cannot share memory: no threaded instance starts then.
    */
   readonly use: InstanceUse | undefined;
+  /** The Web Lock that the worker holds for as long as it lives (EngineInit.lifeLock). */
+  readonly lifeLock: string;
+  /** Ends the wait for that lock when the Gateway ends the worker itself (retire). */
+  readonly life: AbortController;
   /** Whether the worker said that it started (`alive`): an error before it is a worker that could not start. */
   started: boolean;
 }
@@ -106,9 +117,11 @@ export class WasmEngine implements EngineGateway {
   private generations = 0;
   private modules: Promise<{ readonly serial: ModuleSource; readonly threads: ModuleSource }> | undefined;
   private readonly renewal: RenewalLimits;
+  private readonly locks: LifeLocks | undefined;
 
   constructor(private readonly options: WasmEngineOptions) {
     this.renewal = { ...DEFAULT_RENEWAL, ...options.renewal };
+    this.locks = options.locks ?? webLocks();
   }
 
   describe(program: ProgramDescription['program']): Promise<ProgramDescription> {
@@ -243,6 +256,8 @@ export class WasmEngine implements EngineGateway {
       renew: undefined,
       prepared: undefined,
       use,
+      lifeLock: `losat-web:engine-life:${crypto.randomUUID()}`,
+      life: new AbortController(),
       started: false,
     };
     worker.onmessage = (event: MessageEvent<EngineEvent>) => this.receive(generation, event.data);
@@ -267,6 +282,7 @@ export class WasmEngine implements EngineGateway {
       builds: { serial: engineBuildName('serial', assets.serial), threads: engineBuildName('threads', assets.threads) },
       faultChannel: faults.name,
       keeperChannel: keeper.name,
+      lifeLock: generation.lifeLock,
       ...(use === undefined ? {} : { use: use.buffer }),
     };
     try {
@@ -287,6 +303,10 @@ export class WasmEngine implements EngineGateway {
     if (generation !== this.current || !('generation' in event) || event.generation !== generation.id) return;
     if (event.type === 'alive') {
       generation.started = true;
+      // The worker holds its lock now: the page may wait for it.
+      if (event.held && this.locks !== undefined) {
+        watchLife(this.locks, generation.lifeLock, generation.life.signal, () => this.fail(generation, new Error(ENGINE_ENDED)));
+      }
       return;
     }
     const active = this.active;
@@ -346,6 +366,8 @@ export class WasmEngine implements EngineGateway {
     const generation = this.current;
     if (generation === undefined) return;
     this.current = undefined;
+    // The Gateway ends this worker itself: the release of its lock is no news.
+    generation.life.abort();
     generation.worker.onmessage = null;
     generation.worker.onerror = null;
     generation.worker.onmessageerror = null;

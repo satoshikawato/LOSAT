@@ -159,7 +159,7 @@ after a trap (§4, "After a trap").
 | `4` | the output of the argv's `-outfmt` when it is a format besides 0, 6 and 7 that the CLI writes (5, 8 to 16, 18, 20, BLASTN's 17; with or without words after the number), or 6 or 7 with words after the number (fields, `delim=`, §7): the CLI's output for the same argv, text, or binary ASN.1 for outfmt 9. For 13 and 14 it is a ZIP archive of the files that the CLI writes with `-out results`: the side files `results_<n>.json` (13) or `results_<n>.xml` (14), one per query, each added as its report is written, then the master file that lists them, as `results.json` or `results.xml`, then the central directory. The entries are stored (no compression) with their CRC-32 and the date 1980-01-01 00:00, so that the archive of a run is always the same bytes; ZIP64 records come only where the classic fields cannot hold a value (65,535 entries or more, or an offset of 4 GiB - 1 or more). Only such a run writes it. An output without bytes (outfmt 6 of a search without hits) comes as no chunk at all, so a host tells from the argv, as the adapter does, whether the run has this output |
 | `1` | HSP records as JSON Lines, one object per HSP (§8); every program |
 | `2` | JSON response of `describe`, `register`, `scan_end`, `inflate_begin`, `losat_web2_start` (*start*) or `file_end` (*file*) |
-| `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ, and without its `-line_length`, `-sorthits` and `-sorthsps` lines, which it writes for formats above 4 or other than 0 only). With stream 4 it is the CLI's standard error for the argv's `-outfmt` instead: for 6, 7, 10, 18 and 20 the same lines, and the warnings of the fields' writer (NCBI's `Taxonomy name lookup from taxid requires installation of taxdb database`); for the structured formats (5, 8, 9, 11 to 17) without the queries' warnings, which their writers do not write; as the CLI writes them. In a run of two searches (§7) it is that standard error followed by what the CLI's standard error for `-outfmt 0` adds to it, so that each text comes once: the lines of the format 0 search's warnings that stream 3 does not hold yet, then its error when it failed. Where the first search wrote its warnings, the reader's and the queries' warnings come with it, and so does a formatting handler's line that both searches write (`Examining 5 or more matches`); where it failed before them, they come with the format 0 search. A later search writes a line as many times as it writes it more often than stream 3 holds it. A stream that failed alone (§7) adds its refusal after the warnings of its search, and an error or a refusal that stream 3 holds (streams 6 and 7 stop at the same row) is not written again. A run that fails also sends it: what the CLI writes to its standard error before the error that ends the run (its warnings, as NCBI's `Subject sequence contains no data` before `The average subject length is too short`), without the error, which is the run's (`losat_web2_last_error`); in a run of two searches it is the stream 3 above up to that error: where the format 0 search ends the run, the lines of its warnings that stream 3 does not hold yet come after the tabular search's warnings (and its error, when it failed alone), and where both searches fail, the run's error is the tabular search's and the format 0 search's warnings and error follow its warnings (line WQA's sweep, D3 review, 2026-11-19); where the CLI writes its run's messages to the file of `-logfile` (TBLASTX), the file has them and the error, and stream 3 does not (line WQA's sweep, D3, 2026-11-19) |
+| `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ, and without its `-line_length`, `-sorthits` and `-sorthsps` lines, which it writes for formats above 4 or other than 0 only). With stream 4 it is the CLI's standard error for the argv's `-outfmt` instead: for 6, 7, 10, 18 and 20 the same lines, and the warnings of the fields' writer (NCBI's `Taxonomy name lookup from taxid requires installation of taxdb database`); for the structured formats (5, 8, 9, 11 to 17) without the queries' warnings, which their writers do not write; as the CLI writes them. In a run of two searches (§7) that completes it is that standard error followed by what the CLI's standard error for `-outfmt 0` adds to it, so that each text comes once: the lines of the format 0 search's warnings that stream 3 does not hold yet, then its error when it failed. Where the first search wrote its warnings, the reader's and the queries' warnings come with it, and so does a formatting handler's line that both searches write (`Examining 5 or more matches`); where it failed before them, they come with the format 0 search. A later search writes a line as many times as it writes it more often than stream 3 holds it. A stream that failed alone (§7) adds its refusal after the warnings of its search, and an error or a refusal that stream 3 holds (streams 6 and 7 stop at the same row) is not written again. A run that fails also sends it: what the CLI writes to its standard error for the run's argv before the error that ends the run (its warnings, as NCBI's `Subject sequence contains no data` before `The average subject length is too short`), without the error, which is the run's (`losat_web2_last_error`), so that stream 3 and then the error as the CLI writes it (NCBI's messages as they are, LOSAT's own errors after `Error: ` and with a line end) are the CLI's standard error for the argv; in a run of two searches, whose outcome is that of the search of the argv's own format (§7), these are the warnings of that search alone, not those of the other search, which the CLI writes for formats that the argv does not ask for (line WQA's sweep, D3 review, 2026-11-19); where the CLI writes its run's messages to the file of `-logfile` (TBLASTX), the file has them and the error, and stream 3 does not (line WQA's sweep, D3, 2026-11-19) |
 | `8` | the files of a run besides its outputs (line RG item E1w-3a): the file of `-logfile NAME` (§4, `losat_web2_start`), named `NAME`, as a ZIP archive with stored entries as stream 4's. It is emitted after the run, only when the run has such a file, and also when the run fails (the host keeps it: TBLASTX's file then holds NCBI's error, and a start that ended holds what the CLI writes to the file) |
 | `5` | the inflated bytes of `inflate_chunk` and `inflate_end` (§4): each call sends what the decoder released during it, in chunks of at most 1 MiB, in order; the host copies them during the call |
 | `9` | a run's signal that the host discards what it received of one output stream (0, 6 or 7) of this run: each `emit` on stream 9 is one signal, whose 4 bytes are that stream's number as an unsigned 32-bit little-endian integer. It comes when a stream fails alone (§7) after a chunk of it was sent; no chunk of that stream follows, the stream of the run is empty, and the run goes on with the other streams (since ABI version 3, §10) |
@@ -213,17 +213,18 @@ the WASI imports.
   (`0 qseqid`), which the CLI reads as 0. Every other format that the CLI writes, with or without
   words, and 6 and 7 with words after the number (after NCBI's white space around the value is
   removed, a space follows the number: fields, `-field`, `std`, `delim=`) add stream 4, written by
-  the tabular search (the first search, below) as its first format, so that it is the CLI's output
-  for the same argv and adds no search (the hit list size of every format above 4 is that of 6 and
-  7). What the CLI's run of that format has besides, the run has too (session W11): SAM's `@PG`
+  the search of its hit list size as its first format, so that it is the CLI's output for the same
+  argv and adds no search: the tabular search (the first search, below) for every format above 4,
+  whose hit list size is that of 6 and 7, and the format 0 search for 1 to 4, whose size is that of
+  0. What the CLI's run of that format has besides, the run has too (session W11): SAM's `@PG`
   line shows the command line (`CL:losat ` and the run's argv with the host's `-num_threads`, each
   word followed by a space, as NCBI's `GetCmdlineArgs`; the CLI writes its own argv there); the BLAST archive's Bioseqs hold
   the whole records (with `-query_loc` and `-subject_loc` too) and the deflines as read (`register`
   keeps a defline that `>` and the title do not give). A custom delimiter that a field uses to separate its entries
   (`6 delim=; qseqid staxids`) is NCBI's formatting handler's error, which the CLI makes after the
   ranges and the query options: `validate` reports the error of the CLI's own checks of the argv
-  with that `-outfmt` (a `-subject_loc` of bad syntax first), whatever the hit list sizes of the
-  searches, and `run` fails with it, never tolerating the failure of the tabular search (below).
+  with that `-outfmt` (a `-subject_loc` of bad syntax first), and `run` fails with it: the tabular
+  search writes the argv's own format, whose search decides the run (below).
   TBLASTN's and TBLASTX's engine reads every format of a run before the ranges and the option
   checks that come before the handler (`-seg`, `-query_loc`), so their `run` of an argv with both
   errors reports the delimiter's, where the CLI and `validate` report the other.
@@ -277,25 +278,28 @@ the WASI imports.
   memory peak is that of the larger search plus the HSP list of the tabular formats, which stays in memory (about the size of
   stream 1) while the second search runs (measured: +21.7 MiB on 142.6 MiB for BLASTN of Sakai against EDL933 with
   `-num_alignments 3`).
-- A search of a two-search run that fails before it has written a byte of its formats does not fail the run when the
-  other search succeeds, but only when the options' checks reject its hit list size, as the CLI rejects that format
-  alone: for BLASTN and BLASTX the checks of `validate` for that search's formats fail (the adapter's `blastn_group_check`:
-  `check_scoring_options` and `check_losat_limits`; `blastx::check_options`), for the other programs the search's hit list size is 0. This
-  is `-num_alignments 0` for the tabular formats (NCBI's error `BLAST query/options error: No hits are being saved`
-  for `-outfmt 6` and `-outfmt 7`, while `-outfmt 0` keeps its size, 500 or `-num_descriptions`), and for BLASTN's format
-  0 a `-num_descriptions` of 2,147,483,598 or more (N + 50 overflows the 32-bit preliminary hit list size; LOSAT's
-  error, where NCBI crashes; the CLI accepts up to 2,147,483,597), while the tabular formats ignore
-  `-num_descriptions`. Any other error of a search, for example a thread pool that cannot start, fails the run, as it
-  did when the search was alone. The streams of the failed search's formats stay
-  empty; if it is the tabular search there are no HSP records (stream 1), else the records have no `out0`. Stream 3 is
-  the CLI's standard error for the tabular formats (the tabular search's warnings, and NCBI's error when it failed)
-  followed by the lines of the CLI's standard error for `-outfmt 0` that it does not hold yet (the format 0 search's warnings,
-  and its error when it failed; §5): the lines that the CLI user sees running the two formats one after the other, each
-  text once. When both searches
-  fail, `run` fails with the tabular search's error, as the CLI fails every format (so does `-num_descriptions 0
-  -num_alignments 0`, whose hit lists are both empty and make one search); so does a search that fails after it has
-  written a byte. `validate` accepts the argv when at least one search passes the checks, and reports the tabular
-  search's error otherwise.
+- The outcome of a two-search run is that of the search of the argv's own format (the tabular search for `-outfmt 6`
+  and `7` and for the formats above 4 of stream 4; the format 0 search without `-outfmt`, for `-outfmt 0` and for 1
+  to 4), as the CLI runs that format alone (line WQA's sweep, D3 review, 2026-11-19): the run completes when that
+  search completes, and fails when it fails, with its error and, on stream 3, the warnings that it wrote before the
+  error (§5). The other search writes only formats that the argv does not ask for (the run writes formats 0, 6 and 7 whatever the
+  argv): when it fails, its formats fail alone, as the CLI's run of each of them alone fails. Their streams stay
+  empty (a chunk that the host received of them is discarded, stream 9); if it is the tabular search there are no
+  HSP records (stream 1), else the records have no `out0`. This is `-num_alignments 0` for the tabular formats
+  (NCBI's error `BLAST query/options error: No hits are being saved` for `-outfmt 6` and `-outfmt 7`, while
+  `-outfmt 0` keeps its size, 500 or `-num_descriptions`): an argv without `-outfmt` completes with format 0, and
+  one with `-outfmt 6` fails with that error after the formatting handler's warning, as the CLI. And for BLASTN's
+  format 0 a `-num_descriptions` of 2,147,483,598 or more (N + 50 overflows the 32-bit preliminary hit list size;
+  LOSAT's error, where NCBI crashes; the CLI accepts up to 2,147,483,597), while the tabular formats ignore
+  `-num_descriptions`: an argv with `-outfmt 6` completes, one without `-outfmt` fails. A fault of the adapter
+  itself (the output ranges of the records) fails the run in either search. Stream 3 of a run that completes is the
+  CLI's standard error for the tabular formats (the tabular search's warnings, and NCBI's error when it failed)
+  followed by the lines of the CLI's standard error for `-outfmt 0` that it does not hold yet (the format 0 search's
+  warnings, and its error when it failed; §5): the lines that the CLI user sees running the two formats one after
+  the other, each text once. When both hit lists are empty (`-num_descriptions 0 -num_alignments 0`, one search),
+  the run fails as the CLI fails every format. `validate` makes the checks of the argv's own search (BLASTN's and
+  BLASTX's, which check its hit list) and reports their error; the other programs' hit list is checked by the
+  engine in the run.
 
 ## 8. HSP record
 
@@ -388,7 +392,10 @@ message, now runs.
 
 Stream 3 of a run that fails (line WQA's sweep D3, 2026-11-19) kept version 3: the adapter sends what
 it held of the stream when the run fails, and a host that does not know it discards it with the
-other streams of the failed run, as before; the outputs and the error of every run are unchanged.
+other streams of the failed run, as before. So did the outcome of a run of two searches, which is
+that of the argv's own search (§7; D3 review, 2026-11-19): a run whose own format's search fails now
+fails with that search's error, as the CLI, where it completed or failed with the tabular search's
+error. This changes which runs complete, not a signature, a stream or a JSON field.
 
 Version 3 (line RG item T7-W, 2026-11-16) adds the signal of stream 9 (§5): a stream that fails
 alone after the host received a chunk of it, which made the run fail in version 2, is discarded

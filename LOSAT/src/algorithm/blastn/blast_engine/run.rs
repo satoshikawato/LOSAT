@@ -12112,14 +12112,21 @@ fn write_reports_untimed(
     mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
-    // Outfmt 0 only: the query-anchored sections (outfmt 1 to 4) draw these masks as NCBI does
-    // (`query_anchored::fill_loc_list`).
-    if args.parse_deflines
-        && output_formats.contains(&BlastnOutputFormat::Pairwise(
-            crate::report::pairwise::PairwiseView::Pairwise,
-        ))
-    {
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+    // Outfmt 0 only, each such output's refusal (`refuse_shared_masks_in`): the query-anchored
+    // sections (outfmt 1 to 4) draw these masks as NCBI does (`query_anchored::fill_loc_list`).
+    if args.parse_deflines {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(output_formats)
+                .filter(|(_, output_format)| {
+                    **output_format
+                        == BlastnOutputFormat::Pairwise(
+                            crate::report::pairwise::PairwiseView::Pairwise,
+                        )
+                })
+                .map(|(format, _)| &mut format.refusal),
             query_records,
             |query| {
                 results

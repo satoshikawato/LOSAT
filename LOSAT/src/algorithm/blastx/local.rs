@@ -327,8 +327,9 @@ struct RunReports<'a> {
 /// record (the archive's). Under `-parse_deflines` (`parse_deflines`) the read adds each batch
 /// that the reader delivers to the scopes of the queries (`QueryScan::query_scopes`, read ahead),
 /// as the command line's read does (`blast_xml::scan_query_stream`): LOSAT's refusal of two
-/// queries of one scope with one id comes before the first byte, and the batch that a reader error
-/// ends adds nothing (review M3, 2026-11-20).
+/// queries of one scope with one id stops the run at its batch (`QueryScopes::read_ahead`; line WQA
+/// D10 round 4, 2026-11-20), and the batch that a reader error ends adds nothing (review M3,
+/// 2026-11-20).
 #[allow(clippy::too_many_arguments)]
 fn scan_xml_titles(
     resolved: &[ResolvedOptions],
@@ -347,7 +348,7 @@ fn scan_xml_titles(
         .map(|options| options.outfmt)
         .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
         .collect();
-    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+    let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         parse_deflines,
         subject_set,
         structured.contains(&5),
@@ -362,12 +363,11 @@ fn scan_xml_titles(
     }
     let holds_back =
         crate::report::blast_xml2::reports_held(subject_set, false) && !structured.contains(&5);
-    let mut delivered = 0usize;
-    let mut refusal = None;
-    let mut scan = super::blast_xml::scan_queries(
+    super::blast_xml::scan_queries(
         &resolved[0],
         holds_back,
         xml_matrix.is_none(),
+        query_scopes,
         &mut |deliver| {
             reader_batches(
                 query_records,
@@ -378,32 +378,12 @@ fn scan_xml_titles(
                 keep_whole,
                 0,
                 false,
-                &mut |batch| {
-                    // A batch that NCBI fails (`deliver`'s error) reports nothing of its scope.
-                    deliver(batch)?;
-                    if let Some(scopes) = query_scopes.as_mut() {
-                        let added = scopes.add_batch_ids(
-                            batch.iter().filter_map(|record| record.believed()),
-                            delivered,
-                        );
-                        if let Err(error) = added {
-                            refusal = Some(error);
-                            anyhow::bail!("LOSAT refuses this batch");
-                        }
-                    }
-                    delivered += batch.len();
-                    Ok(())
-                },
+                deliver,
                 &mut |_| Ok(()),
             )
         },
     )
-    .map_err(report_error)?;
-    if let Some(refusal) = refusal {
-        return Err(refusal);
-    }
-    scan.query_scopes = query_scopes.map(crate::blastinput::query_batch::QueryScopes::read_ahead);
-    Ok(scan)
+    .map_err(report_error)
 }
 
 /// The subjects as the reports of a query batch show them: `shown`, or a database's sequences of
@@ -671,9 +651,11 @@ fn write_run(
     } = run;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5 and
     // 13 to 16 the read before the search made them (`scan_xml_titles`, `QueryScopes::read_ahead`),
-    // so that a refusal comes before any byte; else the batches add theirs as the reader delivers
-    // them (`render`), as the command line's (`native::run_inner`). Either way a batch that a
-    // reader error ends adds none (review M3, 2026-11-20).
+    // whose refusal comes where the search adds its batch; else the batches add theirs as the
+    // reader delivers them (`render`), as the command line's (`native::run_inner`). Either way a
+    // batch that a reader error ends adds none (review M3, 2026-11-20), and LOSAT's refusal of two
+    // queries with one id stops the run at the batch of the second, after the reports of the
+    // batches before (line WQA D10 round 4, 2026-11-20).
     let xml = choices.iter().any(|choice| choice.number == 5);
     let query_scopes = std::cell::RefCell::new(read_ahead_scopes.or_else(|| {
         crate::blastinput::query_batch::QueryScopes::of_search(

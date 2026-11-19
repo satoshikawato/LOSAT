@@ -4167,9 +4167,18 @@ fn run_batch_loop(
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
         // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
-        // the batch (its own errors come first), as its refusal of a title (below).
+        // the batch (its own errors come first), in the form of an error of NCBI's in the batch:
+        // after the reports of the batches before (for the first batch, the prologs) and the
+        // messages of the batch's records, as the Owner's decision Q-X2c of 2026-11-16 writes
+        // TBLASTX's refusals of the search (line WQA D10 round 4, 2026-11-20).
         if let Some(scopes) = query_scopes.as_mut() {
-            scopes.add_batch(&query_runs.input_records[input_start..input_end], start)?;
+            if let Err(refusal) =
+                scopes.add_batch(&query_runs.input_records[input_start..input_end], start)
+            {
+                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                return Err(refusal);
+            }
         }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.

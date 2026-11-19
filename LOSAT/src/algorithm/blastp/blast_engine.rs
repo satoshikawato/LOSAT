@@ -7104,6 +7104,10 @@ fn psiblast_stop_at_invalid_query(
     // LOSAT's writes none.
     batches.stop_batch = error.is::<crate::cli::NativeError>().then_some(span);
     batches.stop = Some((warnings, error));
+    // The stop of a batch before LOSAT's refusal of a later batch's two queries with one id
+    // replaces it (`QueryBatches::scope_refusal`): NCBI 2.17.0 stops at the query without
+    // Karlin-Altschul parameters (line WQA D10 round 4, 2026-11-20, `r3-psiblast-probe`).
+    batches.scope_refusal = false;
     batches
 }
 
@@ -7199,7 +7203,7 @@ fn psiblast_stop_at_pssm_query(
             batches.stop_batch = None;
             // The query's ids never join the scope (`PsiSearch::joins_scope`): no refusal of
             // another record with one of them (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 d01-d06).
-            batches.query_refusal = None;
+            batches.scope_refusal = false;
             return batches;
         }
     }
@@ -7224,6 +7228,7 @@ fn psiblast_stop_at_pssm_query(
     batches.searched_done = 0;
     batches.stop = Some((warnings, stop.error()));
     batches.stop_batch = request;
+    batches.scope_refusal = false;
     batches
 }
 
@@ -7437,11 +7442,10 @@ fn search(
     // the PSSM, or the search strategy's request without a database, stops the run at its query
     // (`psiblast_stop_at_pssm_query`); a query that never joins NCBI's scope meets no other record
     // there.
-    let mut batches = psiblast_stop_at_pssm_query(&args, database, batches);
-    // LOSAT's refusal of two queries of one scope with one id comes before any report.
-    if let Some(refusal) = batches.query_refusal.take() {
-        return Err(refusal);
-    }
+    // LOSAT's refusal of two queries of one scope with one id is the stop of their batch
+    // (`QueryBatches::scope_refusal`): the run writes the reports of the batches before, unless
+    // NCBI stops at one of them first (line WQA D10 round 4, 2026-11-20).
+    let batches = psiblast_stop_at_pssm_query(&args, database, batches);
     // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its
     // first batch (`batches.starts` empty: a reader's error, NCBI's check of a PSSM, the object
     // manager's stop as a PSSM's query joins the scope) never searches, and gives NCBI's error

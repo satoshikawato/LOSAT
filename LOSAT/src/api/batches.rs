@@ -207,9 +207,6 @@ pub struct Batches<'a> {
     skipped: Vec<bool>,
     /// Under `-parse_deflines` with `-subject`, NCBI's scope of the run's queries (`run_scopes`).
     run_scopes: RunScopes,
-    /// TBLASTX's batches searched before its refusal's batch (`RunScopes::Refused`), which
-    /// `next` hands over once that batch's search has ended, or drops for the refusal.
-    held: Option<std::collections::VecDeque<Result<Batch, Error>>>,
     next_query: usize,
     /// Whether the end of the query records (`Inputs::query_end`: blank lines or a reader error)
     /// is still to come: in the batch that reads past the last record, or in a batch of its own
@@ -266,7 +263,6 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             sizes: BatchSizes::Fixed(0),
             skipped: vec![false; lengths.len()],
             run_scopes: RunScopes::None,
-            held: None,
             lengths,
             next_query: 0,
             end_pending: false,
@@ -308,7 +304,6 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         lengths,
         skipped,
         run_scopes,
-        held: None,
         next_query: 0,
         end_pending: inputs.pssm.is_none() && !inputs.end().is_input(),
         hsps_before: 0,
@@ -331,11 +326,17 @@ enum RunScopes {
     /// BLASTN and BLASTX: the queries of the batches searched so far, which each batch adds to once
     /// it is searched (`Batches::search_batch`).
     Searched(crate::blastinput::query_batch::QueryScopes),
-    /// TBLASTX: LOSAT's refusal of two queries with one id, in the batch whose first record is
-    /// `batch`. Its command line refuses them once it has searched that batch, without the reports
-    /// of the batches before, and an error of a batch up to it comes first, after the reports of
-    /// the batches before that one (`Batches::next`).
-    Refused { batch: usize, refusal: Error },
+    /// BLASTP, TBLASTN, PSIBLAST and TBLASTX: LOSAT's refusal of two queries with one id, which
+    /// stops the run at the batch whose first record is `batch`, as it stops the command line's
+    /// (`query_batch::QueryBatches::scope_refusal`): the batches before it are searched and handed
+    /// over first, and an error of one of them ends the batches there (`Batches::next`). TBLASTX
+    /// refuses once it has searched that batch (`after_search`: its errors come first), the others
+    /// before its search.
+    Refused {
+        batch: usize,
+        after_search: bool,
+        refusal: Error,
+    },
 }
 
 /// NCBI's scope of the run's queries under `-parse_deflines` with `-subject`
@@ -345,13 +346,12 @@ enum RunScopes {
 /// (review M3 and M-b of line WQA's D10, 2026-11-20). BLASTN and BLASTX add each batch once it is
 /// searched (its own errors come first), as their command lines' loops do, so a batch with the id
 /// of an earlier batch's query is refused after the batches before it (`RunScopes::Searched`).
-/// BLASTP, TBLASTN and PSIBLAST refuse two queries of the run with one id before the first batch,
-/// as their command lines refuse them before any report: the refusal of the command line's own
+/// BLASTP, TBLASTN, PSIBLAST and TBLASTX take the batch of the refusal from the command line's own
 /// reading of the batches (`query_batch::read_query_batches`, `read_psiblast_query_batches`), after
-/// the checks of the environment that come before it. TBLASTX refuses them once it has searched
-/// the refusal's batch (`RunScopes::Refused`); its batches are the command line's, whose errors
-/// before the search are those of `read_query_batches` and more, which the search of each batch
-/// gives (`Batches::next`).
+/// the checks of the environment that come before it (BLASTP's, TBLASTN's and PSIBLAST's), and
+/// refuse there after the batches before it (`RunScopes::Refused`), so that an error of NCBI's in
+/// the search of one of them comes first, as in the command line (line WQA D10 round 4,
+/// 2026-11-20: psiblast's query without Karlin-Altschul parameters, NCBI BLAST+ 2.17.0).
 fn run_scopes(
     search: &Search,
     inputs: Inputs<'_>,
@@ -395,7 +395,7 @@ fn run_scopes(
         ),
     };
     let reading = inputs.end().reading();
-    let mut batches = match search.program() {
+    let batches = match search.program() {
         Program::Psiblast => {
             read_psiblast_query_batches(inputs.query, &searched, &input, reading, Some(scopes))
         }
@@ -409,13 +409,13 @@ fn run_scopes(
             Some(scopes),
         ),
     };
-    match batches.query_refusal.take() {
-        None => Ok(RunScopes::None),
-        Some(refusal) if matches!(search.program(), Program::Tblastx) => Ok(RunScopes::Refused {
+    match batches.stop {
+        Some((_, refusal)) if batches.scope_refusal => Ok(RunScopes::Refused {
             batch: batches.input_done,
+            after_search: matches!(search.program(), Program::Tblastx),
             refusal: Error::search(&refusal),
         }),
-        Some(refusal) => Err(Error::search(&refusal)),
+        _ => Ok(RunScopes::None),
     }
 }
 
@@ -574,43 +574,6 @@ impl Batches<'_> {
     }
 }
 
-impl Batches<'_> {
-    /// TBLASTX's refusal of two queries with one id (`RunScopes::Refused`): searches the batches
-    /// up to the refusal's, as its command line does, and holds what `next` hands over. A batch
-    /// that fails ends them with its error after the batches before it; when none fails, the
-    /// refusal comes alone, as the command line writes no report then. The refusal's batch gives
-    /// the same refusal itself when it holds both queries.
-    fn search_to_refusal(&mut self) {
-        let RunScopes::Refused { batch, refusal } =
-            std::mem::replace(&mut self.run_scopes, RunScopes::None)
-        else {
-            return;
-        };
-        let mut held = std::collections::VecDeque::new();
-        let failure = loop {
-            let (range, reached) = self.next_range();
-            self.next_query = range.end;
-            let last = range.end > batch || range.is_empty();
-            let searched = self.search_batch(range, !reached);
-            self.searched_one = true;
-            match searched {
-                Ok(searched) if !last => held.push_back(Ok(searched)),
-                Ok(_) => break None,
-                Err(error) if last && error.message() == refusal.message() => break None,
-                Err(error) => break Some(error),
-            }
-        };
-        match failure {
-            Some(error) => held.push_back(Err(error)),
-            None => {
-                held.clear();
-                held.push_back(Err(refusal));
-            }
-        }
-        self.held = Some(held);
-    }
-}
-
 impl Iterator for Batches<'_> {
     type Item = Result<Batch, Error>;
 
@@ -629,14 +592,6 @@ impl Iterator for Batches<'_> {
                 diagnostics: std::mem::take(&mut self.start_messages),
             }));
         }
-        if matches!(self.run_scopes, RunScopes::Refused { .. }) {
-            self.search_to_refusal();
-        }
-        if let Some(held) = self.held.as_mut() {
-            let batch = held.pop_front();
-            self.finished = held.is_empty();
-            return batch;
-        }
         // Queries without a record are one call: NCBI's `Query is Empty!`. An end of the records
         // that the last batch did not meet (it reached its size) is a batch of its own.
         let done = self.next_query >= self.lengths.len() && self.searched_one && !self.end_pending;
@@ -645,6 +600,27 @@ impl Iterator for Batches<'_> {
         }
         let (range, reached) = self.next_range();
         self.next_query = range.end;
+        // LOSAT's refusal of two queries with one id stops the run at its batch, after the batches
+        // before (`RunScopes::Refused`); TBLASTX's search of that batch comes first.
+        if matches!(&self.run_scopes, RunScopes::Refused { batch, .. } if range.end > *batch) {
+            let RunScopes::Refused {
+                after_search,
+                refusal,
+                ..
+            } = std::mem::replace(&mut self.run_scopes, RunScopes::None)
+            else {
+                unreachable!("matched above");
+            };
+            self.finished = true;
+            if after_search {
+                let searched = self.search_batch(range, !reached);
+                self.searched_one = true;
+                if let Err(error) = searched {
+                    return Some(Err(error));
+                }
+            }
+            return Some(Err(refusal));
+        }
         let batch = self.search_batch(range, !reached);
         self.searched_one = true;
         self.finished = batch.is_err();

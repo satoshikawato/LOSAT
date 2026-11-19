@@ -20,3 +20,11 @@
   repeated ID after the batches before it in outfmt 6, and TBLASTX's `run_batches` once it has
   searched the batch of the second ID, an error of a batch up to it coming first, as each command
   line does.
+- Under `-parse_deflines`, a query ID repeated in a later query batch is now refused at that batch,
+  after the reports of the batches before (in the first batch, after the prologs), in every program
+  and output format, as the command line writes them when NCBI BLAST+ stops at that batch. An error
+  that NCBI BLAST+ 2.17.0 gives in the search of an earlier batch now comes first, as NCBI's: for
+  example psiblast with a query of only `X` before the repeated ID, or subjects too short for
+  `-searchsp`, which LOSAT refused before with the repeated ID. Before, LOSAT wrote nothing before
+  the refusal in BLASTP, TBLASTN, PSIBLAST and TBLASTX (TBLASTX's outfmt 0: its prolog only), and in
+  BLASTN's and BLASTX's XML and JSON reports. The library's `run` and `run_batches` do the same.

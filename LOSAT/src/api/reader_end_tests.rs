@@ -310,9 +310,8 @@ fn fasta_named(names: &[String], sequence: &[u8]) -> Vec<u8> {
 // Under `-parse_deflines` with `-subject` LOSAT refuses two queries of the run with one id
 // (`query_batch::QueryScopes`), and a scope holds the batches that the reader delivers: a batch
 // that a reader error ends adds none, so its error is the run's (review M3, 2026-11-20). The
-// library's run and `run_batches` refuse where the command line does, in outfmt 6 and 5: BLASTN
-// and BLASTX after the batches before the one with the second id (in outfmt 6), the others before
-// any report.
+// library's run and `run_batches` refuse where the command line does, in outfmt 6 and 5: after the
+// reports of the batches before the one with the second id (line WQA D10 round 4, 2026-11-20).
 #[test]
 fn a_scope_holds_the_batches_that_the_reader_delivers() {
     let options = ["-parse_deflines"];
@@ -462,9 +461,10 @@ fn a_batch_that_ncbi_fails_adds_nothing_to_the_scope() {
     );
 }
 
-// TBLASTX refuses two queries with one id once it has searched the batch of the second, without
-// the reports of the batches before; an error of that batch's search comes first (review M-b,
-// 2026-11-20): `run_batches` searches the batches up to it as the command line does.
+// TBLASTX refuses two queries with one id once it has searched the batch of the second, after the
+// reports of the batches before (before line WQA D10 round 4, 2026-11-20: without them); an error of
+// that batch's search comes first (review M-b, 2026-11-20): `run_batches` searches the batches up
+// to it as the command line does.
 #[test]
 fn tblastx_refuses_two_queries_of_one_id_after_their_batch() {
     let protein = |length| letters(b"ACDEFGHIKLMNPQRSTVWY", length, 7);
@@ -475,15 +475,16 @@ fn tblastx_refuses_two_queries_of_one_id_after_their_batch() {
         .map(|name| name.to_string())
         .collect();
     let text = fasta_named(&names, &query);
-    // Subjects with letters: the refusal alone.
+    // Subjects with letters: the reports of the first batch (`q1` to `q4`), then the refusal.
     let subject = fasta_named(&["s1".to_string()], &coding(&protein(1100)));
-    let (cli_report, cli_error) =
-        command_line_with(Program::Tblastx, &text, &subject, &options, "6");
-    let cli_error = cli_error.expect("the refusal");
-    assert!(cli_error.contains("lcl|q1"), "{cli_error}");
-    assert!(cli_report.is_empty(), "no report before the refusal");
-    let (rows, error) = batches_with(Program::Tblastx, &text, &subject, &options);
-    assert_eq!((rows, error.as_deref()), (0, Some(cli_error.as_str())));
+    ends_as_the_command_line(
+        "tblastx: the refusal",
+        Program::Tblastx,
+        &text,
+        &subject,
+        &options,
+        "two query records have the Seq-id lcl|q1",
+    );
     // A subject without letters: NCBI's error of the first batch's search comes first.
     let empty = b">s1\n".to_vec();
     let (cli_report, cli_error) = command_line_with(Program::Tblastx, &text, &empty, &options, "6");
@@ -492,6 +493,82 @@ fn tblastx_refuses_two_queries_of_one_id_after_their_batch() {
     assert!(cli_report.is_empty());
     let (rows, error) = batches_with(Program::Tblastx, &text, &empty, &options);
     assert_eq!((rows, error.as_deref()), (0, Some(cli_error.as_str())));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2799 (a query whose letters
+// give no Karlin-Altschul parameters, quoted at `report::query_warnings::INVALID_QUERY_MESSAGE`)
+// An error of NCBI's in the search of a batch comes before LOSAT's refusal of two queries with one
+// id in a later batch, on the command line, in the library's run and in `run_batches` (line WQA D10
+// round 4, 2026-11-20; NCBI BLAST+ 2.17.0, probes `fix-reader-error/r3-psiblast-probe` and
+// `r4-probe`): psiblast's first query of only `X` stops the run there with no report (exit 3), as
+// without the second `q1`, and so do subjects too short for `-searchsp` in BLASTP and in BLASTX's
+// BLAST XML; before, LOSAT refused the second `q1`. Without such an error the run writes the
+// reports of the batches before the refusal.
+#[test]
+fn an_error_of_ncbi_before_the_refusal_comes_first() {
+    let options = ["-parse_deflines"];
+    let protein = b"WNQQGYFFYHSSPALDGYTNTQRWQFAGQPMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+    let named = |name: &str, sequence: &[u8]| fasta_named(&[name.to_string()], sequence);
+    let subject = named("s1", protein);
+    let mut text = named("q1", &[b'X'; 30]);
+    text.extend_from_slice(&named("q2", protein));
+    text.extend_from_slice(&named("q1", protein));
+    // NCBI's stdout (empty) and stderr of `psiblast -query dup.fa -subject s.fa -parse_deflines
+    // -outfmt 6` (exit 3).
+    let ncbi = "BLAST engine error: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
+    let (cli_report, cli_error) =
+        command_line_with(Program::Psiblast, &text, &subject, &options, "6");
+    assert_eq!(cli_error.as_deref(), Some(ncbi));
+    assert!(cli_report.is_empty(), "NCBI writes no report");
+    let (report, error) = library_with(Program::Psiblast, &text, &subject, &options, "6");
+    assert_eq!((report.is_empty(), error.as_deref()), (true, Some(ncbi)));
+    let (rows, error) = batches_with(Program::Psiblast, &text, &subject, &options);
+    assert_eq!((rows, error.as_deref()), (0, Some(ncbi)));
+    // `q1` with letters: the report of `q1` and `q2`, then the refusal of the second `q1`.
+    let mut text = named("q1", protein);
+    text.extend_from_slice(&named("q2", protein));
+    text.extend_from_slice(&named("q1", protein));
+    ends_as_the_command_line(
+        "psiblast: the refusal after the batches before",
+        Program::Psiblast,
+        &text,
+        &subject,
+        &options,
+        "two query records have the Seq-id lcl|q1",
+    );
+    // NCBI's error of the first batch's search (subjects of 2, 0 and 0 letters with `-searchsp
+    // 1000`: `The average subject length is too short`, exit 3, no report; NCBI BLAST+ 2.17.0, probe
+    // `fix-reader-error/r4-probe` `bp_avg`, `nuc_avg`): BLASTP before the second `q1` of the next
+    // batch, and BLASTX in BLAST XML, whose read before the search met the refusal first.
+    let ncbi = "BLAST engine error: The average subject length is too short";
+    let options = ["-parse_deflines", "-searchsp", "1000"];
+    let protein = |length| letters(b"ACDEFGHIKLMNPQRSTVWY", length, 7);
+    let subjects = b">s1\nMK\n>s2\n>s3\n";
+    for (program, first, other, outfmt) in [
+        (Program::Blastp, protein(10500), protein(300), "6"),
+        (
+            Program::Blastx,
+            coding(&protein(3500)),
+            coding(&protein(300)),
+            "5",
+        ),
+    ] {
+        let name = program.name();
+        let mut text = named("q1", &first);
+        text.extend_from_slice(&named("q2", &other));
+        text.extend_from_slice(&named("q1", &other));
+        let (cli_report, cli_error) = command_line_with(program, &text, subjects, &options, outfmt);
+        assert_eq!(cli_error.as_deref(), Some(ncbi), "{name}");
+        assert!(cli_report.is_empty(), "{name}: NCBI writes no report");
+        let (report, error) = library_with(program, &text, subjects, &options, outfmt);
+        assert_eq!(
+            (report.is_empty(), error.as_deref()),
+            (true, Some(ncbi)),
+            "{name}"
+        );
+        let (rows, error) = batches_with(program, &text, subjects, &options);
+        assert_eq!((rows, error.as_deref()), (0, Some(ncbi)), "{name}");
+    }
 }
 
 // The batches of `run_batches` end alike: the batches before, then the error in the batch that

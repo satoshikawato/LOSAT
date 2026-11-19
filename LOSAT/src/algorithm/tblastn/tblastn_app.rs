@@ -1682,7 +1682,10 @@ fn search(
         resolved.pssm.is_some(),
         input_records,
     );
-    let mut batches = crate::blastinput::query_batch::read_query_batches(
+    // LOSAT's refusal of two queries of one scope with one id is the stop of their batch
+    // (`QueryBatches::scope_refusal`): the run writes the reports of the batches before, unless
+    // NCBI stops at one of them first (line WQA D10 round 4, 2026-11-20).
+    let batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,
         &query_input,
@@ -1699,10 +1702,6 @@ fn search(
             "TBLASTN",
         ),
     );
-    // LOSAT's refusal of two queries of one scope with one id comes before any report.
-    if let Some(refusal) = batches.query_refusal.take() {
-        return Err(refusal);
-    }
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
     // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
     // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.

@@ -702,7 +702,9 @@ fn run_inner(
     let mut stops_after = None;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5
     // and 13 to 16 the read before the search makes them (`QueryScopes::read_ahead`), else the
-    // batches add theirs as the reader delivers them (`render_batch`).
+    // batches add theirs as the reader delivers them (`render_batch`). Either way LOSAT's refusal
+    // of two queries with one id comes where the search adds the batch of the second, after the
+    // reports of the batches before (line WQA D10 round 4, 2026-11-20).
     let query_scopes_of = || {
         crate::blastinput::query_batch::QueryScopes::of_search(
             args.parse_deflines,
@@ -717,8 +719,7 @@ fn run_inner(
     // Where the run's XML format fails for a matrix name that NCBI's BLAST XML report data does not
     // know (`blast_xml::xml_matrix_failure`, decided once for the run): before any report is
     // written, so NCBI writes no title. Such a run reads the queries before the search only for
-    // their scopes (`-parse_deflines`, whose refusal of two queries of one id comes before any
-    // byte), checks no title and holds nothing.
+    // their scopes (`-parse_deflines`), checks no title and holds nothing.
     let xml_matrix =
         super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), database.is_none());
     let reads_ahead = held

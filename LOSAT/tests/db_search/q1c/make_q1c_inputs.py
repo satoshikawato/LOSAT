@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Line RG, series Q, Q1c (rows db.pd.q1c.*, db.ps.q1c.*): -parse_deflines query inputs: two queries of one Seq-id, and a query whose id a reported database sequence
 holds, each in one query batch and in two (BATCH_SIZE=1). usage (from LOSAT/): python3 tests/db_search/q1c/make_q1c_inputs.py tests/db_search tests/db_search/q1c"""
-import os, random, sys
+import os
+import random
+import sys
 
 src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
@@ -30,7 +32,12 @@ def write(name, records):
 
 
 rnd = random.Random(20261113)
-rand_nt = lambda n: ''.join(rnd.choice('ACGT') for _ in range(n))
+
+
+def rand_nt(n):
+    return ''.join(rnd.choice('ACGT') for _ in range(n))
+
+
 # A protein of no database here (WSSV TK-TMK, the first record of Q1's dup.faa).
 KIN = ('MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTD'
        'LVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG')
@@ -58,4 +65,32 @@ write('dup2_bx.fna', two('bslice_q.fna', 450))
 write('dup2_tx.fna', [('lcl|dup2 first', recs('xslice.fna')[0][1][1000:1450]), ('lcl|dup2 second', recs('xslice.fna')[2][1][500:950])])
 # A name with and without an accession (blastp), two queries.
 write('p_name.faa', [('gb|AAA00017.1|NAMEQ first', KIN[:140]), ('gb||NAMEQ second', recs('pd_clash_q.faa')[0][1])])
+# Line WQA D10 round 4 (2026-11-20): the near inputs of the dup2 files, whose second record's letters are a line that
+# NCBI's reader refuses (NCBI stops at that query batch after the reports of the batches before, as LOSAT's refusal of
+# the second lcl|dup2 does: the stdout of rows db.pd.q1c.*.dup2stop.*)...
+BAD_LINE = 'ACGTAC%%%%'
+for name in ('dup2_bp.faa', 'dup2_tn.faa', 'dup2_bn.fna', 'dup2_bx.fna', 'dup2_tx.fna'):
+    first, (second, _) = recs(os.path.join(os.path.relpath(out, src), name))
+    stem, ext = name.rsplit('.', 1)
+    write(f'{stem}_stop.{ext}', [first, (second, BAD_LINE)])
+# ...and errors of NCBI's in the search of a batch before the second q1 (rows db.ps.q1c.kastop.*, db.pd.q1c.*.avgstop.*):
+# psiblast's first query of only X (no Karlin-Altschul parameters), and subjects of 2, 0 and 0 letters with -searchsp 1000
+# (the average subject length is too short), with a first query that fills the first batch of blastp and blastx.
+rnd2 = random.Random(20261120)
+
+
+def rand_aa(n):
+    return ''.join(rnd2.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(n))
+
+
+def rand_nt2(n):
+    return ''.join(rnd2.choice('ACGT') for _ in range(n))
+
+
+P = 'WNQQGYFFYHSSPALDGYTNTQRWQFAGQPMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ'
+write('ka_ps.faa', [('q1', 'X' * 30), ('q2', P), ('q1', P)])
+write('ka_ps_s.faa', [('s1', P)])
+write('avg_s.faa', [('s1', 'MK'), ('s2', ''), ('s3', '')])
+write('avg_bp.faa', [('q1', rand_aa(10500)), ('q2', rand_aa(300)), ('q1', rand_aa(300))])
+write('avg_bx.fna', [('q1', rand_nt2(10500)), ('q2', rand_nt2(900)), ('q1', rand_nt2(900))])
 print(sorted(os.listdir(out)))

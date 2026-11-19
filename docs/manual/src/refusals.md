@@ -97,7 +97,7 @@ Output formats:
 
 Two queries or two subjects with one id (`-parse_deflines`):
 
-- Two queries with one id in one query batch are refused. With `-subject` or `-outfmt 5` this applies to any two batches, because NCBI keeps every batch's queries there.
+- Two queries with one id in one query batch are refused. With `-subject` or `-outfmt 5` this applies to any two batches, because NCBI keeps every batch's queries there. LOSAT first writes the results of the query batches before the second query's batch, as NCBI writes them when it stops at a batch, then stops with the error. An error that NCBI gives for an earlier batch comes first.
 - A query and a subject with one id are refused unless they are one record: the same definition line and the same letters.
 - `blastx` and `tblastn` refuse even one record that is both query and subject.
 - With `-outfmt 0`, `blastn`, `blastp` and `tblastx` refuse such a record when it has masks.

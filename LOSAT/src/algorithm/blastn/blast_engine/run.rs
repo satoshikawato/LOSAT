@@ -11192,18 +11192,6 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
-        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
-        // the batch (its own errors come first): the warnings of the batches read so far, as for
-        // its refusal of a title (below).
-        if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
-                let written = if stream.acting() { start } else { 0 };
-                for query_warnings in &warnings[written..=start] {
-                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                }
-                return Err(error);
-            }
-        }
         // NCBI fails a batch where it reads a header file that it cannot read (`read_titles`)
         // or where its prefetch looks up a Seq-align id whose lookup fails on a file
         // (`database::batch_prefetch`), after the prologs, the reports of the batches before
@@ -11247,6 +11235,18 @@ fn run_in_pool(
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err($error);
             }};
+        }
+        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
+        // the batch (its own errors come first), in the form of an error of NCBI's in the batch
+        // (`fail_batch`): after the reports of the batches before (for the first batch, the
+        // prologs) and the messages of the batch's records, in every format, as the Owner's
+        // decision Q-X2c of 2026-11-16 writes TBLASTX's refusals of the search (line WQA D10
+        // round 4, 2026-11-20; before, outfmt 5 and the other formats that the stream does not
+        // write wrote no report).
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
+                fail_batch!(error);
+            }
         }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.

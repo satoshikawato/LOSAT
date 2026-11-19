@@ -17,7 +17,7 @@ export const test = base.extend({
 });
 
 /** A wake lock that the browser grants at once and that ends on release(), as WakeLockSentinel does. */
-function standInWakeLock(): void {
+export function standInWakeLock(): void {
   type Sentinel = EventTarget & { released: boolean; readonly type: 'screen'; release(): Promise<void> };
   Object.defineProperty(navigator, 'wakeLock', {
     configurable: true,

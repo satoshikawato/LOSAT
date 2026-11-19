@@ -59,8 +59,9 @@ test('Back on the results returns to the form as it was, Forward shows the resul
   const formScroll = await runOnce(page);
   expect(formScroll).toBeGreaterThan(0);
   expect(page.url()).toBe(url);
-  await page.evaluate(() => window.scrollTo(0, 120));
-  const resultsScroll = await scrollY(page);
+  // Far down the results: Forward shows them from their heading again (their views read their content
+  // after they mount, so a position far down could not be met).
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
 
   // The form as it was: its fields, where it was scrolled, and the focus in it or on its tab (never lost).
   await page.goBack();
@@ -81,7 +82,8 @@ test('Back on the results returns to the form as it was, Forward shows the resul
   await page.goForward();
   await expectTab(page, 'results');
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
-  await expect.poll(() => scrollY(page)).toBe(resultsScroll);
+  await expect(page.getByTestId('results-heading')).toBeFocused();
+  await expect(page.getByTestId('results-heading')).toBeInViewport();
   expect(asked).toEqual([]);
 
   // From the Search tab, Back leaves LOSAT, and the page asks first (the leave guard), as before.
@@ -145,4 +147,33 @@ test('the tab buttons and the arrow keys keep one Results entry, and a reload op
   await expectTab(page, 'results');
   await expect(page.getByTestId('results-run-a-search')).toBeVisible();
   expect(asked).toEqual(['beforeunload']);
+});
+
+// Review of 6fff89265: a reload kept the Results entry as a second Search entry, so the first Back
+// after it did nothing, and Forward after Back and a reload showed an empty Results tab.
+test('after a reload, Back leaves at once and Forward never opens the results that the reload took', async ({ page }) => {
+  const asked = dialogs(page);
+  await openAfterAnotherPage(page);
+  await runOnce(page);
+  await reload(page);
+  await described(page);
+  expect(asked).toEqual(['beforeunload']);
+  await expectTab(page, 'search');
+  await expect.poll(() => page.evaluate(() => history.state)).toBeNull();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/favicon\.svg$/);
+  expect(asked).toEqual(['beforeunload']);
+
+  await openSearch(page);
+  await runOnce(page);
+  await page.goBack();
+  await expectTab(page, 'search');
+  await reload(page);
+  await described(page);
+  await page.goForward();
+  await expect.poll(() => page.evaluate(() => history.state)).toBeNull();
+  await expectTab(page, 'search');
+  await expect(page.getByTestId('results-run-a-search')).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/favicon\.svg$/);
 });

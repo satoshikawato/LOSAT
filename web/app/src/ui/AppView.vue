@@ -31,12 +31,12 @@ const attentionState = useStore(props.attention.state);
 /** The tab shown. Choosing one goes through the page's history, so Back on the results returns to the form (tab-history.ts). */
 const shown = ref<MainTab>('search');
 const navigation = tabNavigation(window.history);
-/** How far each tab was scrolled, and what had the focus, when it was left: Back and Forward return there, as between pages. */
-const scrolled: Record<MainTab, number> = { search: 0, results: 0 };
-const focused: Record<MainTab, Element | null> = { search: null, results: null };
+/** How far the form was scrolled, and what had the focus, when the Search tab was left: Back returns there, as between pages. */
+const form = { scroll: 0, focus: null as Element | null };
 function leave(): void {
-  scrolled[shown.value] = window.scrollY;
-  focused[shown.value] = document.activeElement;
+  if (shown.value !== 'search') return;
+  form.scroll = window.scrollY;
+  form.focus = document.activeElement;
 }
 const tab = computed<MainTab>({
   get: () => shown.value,
@@ -89,10 +89,12 @@ async function showSearch(): Promise<void> {
 }
 
 /**
- * Back or Forward moved between the tabs' history entries (tab-history.ts): the tab shown comes back
- * where it was scrolled, with the focus where it was (the search form stays mounted, so "Run LOSAT"
- * has it again after Back). A focus that is not there to give back goes to the tab shown when the
- * focus was on the other tab or went with the panel now hidden; nothing scrolls for it.
+ * Back or Forward moved between the tabs' history entries (tab-history.ts). The form comes back where
+ * it was scrolled, with the focus where it was (it stays mounted, so "Run LOSAT" has it again after
+ * Back); a focus that is not there to give back goes to the Search tab, without scrolling, when it
+ * was on the other tab or went with the results. The results come back from their heading, as
+ * "Run LOSAT" shows them: their panel mounts again and its views read their content afterwards
+ * (outputs, alignments), so a position further down could not be met (review of 6fff89265).
  */
 async function arrived(): Promise<void> {
   const next = navigation.arrived();
@@ -100,15 +102,17 @@ async function arrived(): Promise<void> {
   leave();
   shown.value = next;
   await nextTick();
-  window.scrollTo(0, scrolled[next]);
-  const panel = document.getElementById(MAIN_TABS[next === 'search' ? 0 : 1].panel);
-  const hidden = document.getElementById(MAIN_TABS[next === 'search' ? 1 : 0].panel);
-  const before = focused[next];
+  if (next === 'results') {
+    resultsPanel.value?.showHeading();
+    return;
+  }
+  window.scrollTo(0, form.scroll);
+  const panel = document.getElementById(MAIN_TABS[0].panel);
   const active = document.activeElement;
   const onTab = MAIN_TABS.some((main) => main.id === active?.id);
-  if (before instanceof HTMLElement && before.isConnected && panel?.contains(before)) {
-    before.focus({ preventScroll: true });
-  } else if (active === null || active === document.body || !active.isConnected || onTab || hidden?.contains(active)) {
+  if (form.focus instanceof HTMLElement && form.focus.isConnected && panel?.contains(form.focus)) {
+    form.focus.focus({ preventScroll: true });
+  } else if (active === null || active === document.body || !active.isConnected || onTab) {
     mainTabs.value?.focus({ preventScroll: true });
   }
 }

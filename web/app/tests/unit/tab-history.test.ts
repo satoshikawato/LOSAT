@@ -1,174 +1,282 @@
 // Back and Forward between the Search and Results tabs (ui/tab-history.ts; line WQA's sweep, D6).
 import { describe, expect, it } from 'vitest';
-import { entryTab, tabNavigation, type MainTab, type TabHistory, type TabNavigation } from '../../src/ui/tab-history';
+import { BACK_LOST_MS, tabNavigation, type MainTab, type TabHistory, type TabNavigation } from '../../src/ui/tab-history';
 
 /**
- * A tab's session history: the entries of another site before the page's first entry, the page's
- * entries, and a cursor. `back()` arrives later, as a browser's does (`popstate` is a task); the
- * user's Back and Forward (`go`) arrive at once. A move off the page's entries leaves the page.
+ * The document state of history entries (HTML's session history): pushState gives the new entry
+ * the document state of the entry it was pushed from, and a reload puts a new document into the
+ * current entry's document state, so the entries that share it stay one document with the new
+ * load. Moving to an entry of another document state loads that page again; a restored or
+ * duplicated tab has a document state of its own for every entry.
  */
-class FakeHistory implements TabHistory {
-  readonly entries: unknown[];
-  index: number;
-  backs = 0;
-  left = false;
-  scrollRestoration: ScrollRestoration = 'auto';
-  private queued = 0;
+interface DocumentState {
+  page?: Page;
+}
+interface Entry {
+  state: unknown;
+  readonly document: DocumentState | 'another site';
+}
 
-  constructor(
-    states: unknown[] = [null],
-    private readonly page = { first: 1 },
-  ) {
-    this.entries = ['another site', ...states];
-    this.index = this.entries.length - 1;
+/** One load of LOSAT in the tab: the tab shown, set by a choice at once and by `popstate`. */
+class Page {
+  shown: MainTab = 'search';
+  readonly navigation: TabNavigation;
+  constructor(tab: FakeTab, load: string) {
+    this.navigation = tabNavigation(tab.history(this), { load, now: () => tab.clock });
+  }
+  choose(tab: MainTab): void {
+    this.shown = tab;
+    this.navigation.choose(tab);
+  }
+  popstate(): void {
+    this.shown = this.navigation.arrived();
+  }
+}
+
+/** A browser tab: another site's page, then LOSAT. `back()` of the page arrives later, as a browser's does. */
+class FakeTab {
+  readonly entries: Entry[] = [{ state: null, document: 'another site' }];
+  index = 0;
+  clock = 0;
+  loads = 0;
+  /** The page's back() calls are dropped (a browser's rate limit) or throw. */
+  backs: 'arrive' | 'dropped' | 'throw' = 'arrive';
+  private queued: Page[] = [];
+
+  constructor() {
+    this.entries.push({ state: null, document: {} });
+    this.index = 1;
+    this.load();
   }
 
-  /** Set by the test: what the page does on `popstate`. */
-  onPopState: () => void = () => undefined;
+  get page(): Page | undefined {
+    const document = this.entries[this.index]!.document;
+    return document === 'another site' ? undefined : document.page;
+  }
+  get left(): boolean {
+    return this.entries[this.index]!.document === 'another site';
+  }
+  /** The page's own entries: their states. */
+  own(): unknown[] {
+    return this.entries.filter((entry) => entry.document !== 'another site').map((entry) => entry.state);
+  }
 
-  get state(): unknown {
-    return this.entries[this.index];
+  /** `window.history` as a page sees it. */
+  history(page: Page): TabHistory & { replaceState(data: unknown, unused: string): void } {
+    const current = (): Entry => this.entries[this.index]!;
+    const push = (state: unknown): void => {
+      const document = current().document;
+      this.entries.splice(this.index + 1);
+      this.entries.push({ state, document });
+      this.index += 1;
+    };
+    const back = (): void => {
+      if (this.backs === 'throw') throw new DOMException('Too many calls to Location or History APIs', 'SecurityError');
+      if (this.backs === 'arrive') this.queued.push(page);
+    };
+    return {
+      scrollRestoration: 'auto',
+      get state() {
+        return current().state;
+      },
+      pushState: (data: unknown) => push(structuredClone(data)),
+      // Not used by the page now; the page before the review replaced the state of a Results entry on load.
+      replaceState: (data: unknown) => {
+        current().state = structuredClone(data);
+      },
+      back,
+    };
   }
-  pushState(data: unknown): void {
-    this.entries.splice(this.index + 1);
-    this.entries.push(structuredClone(data));
-    this.index += 1;
+
+  private load(): void {
+    const document = this.entries[this.index]!.document as DocumentState;
+    document.page = new Page(this, `load-${++this.loads}`);
   }
-  replaceState(data: unknown): void {
-    this.entries[this.index] = structuredClone(data);
+  reload(): void {
+    this.load();
   }
-  back(): void {
-    this.backs += 1;
-    this.queued += 1;
-  }
-  /** Delivers the `back()` calls on their way. */
-  settle(): void {
-    for (; this.queued > 0; this.queued -= 1) this.go(-1);
+  /** A tab restored or duplicated: the same entries, no document left. */
+  restore(): void {
+    for (let i = 0; i < this.entries.length; i++) {
+      if (this.entries[i]!.document !== 'another site') this.entries[i] = { state: this.entries[i]!.state, document: {} };
+    }
+    this.load();
   }
   /** The browser's Back (-1) and Forward (+1). */
   go(delta: number): void {
+    const from = this.entries[this.index]!.document;
     const next = this.index + delta;
     if (next < 0 || next >= this.entries.length) return;
     this.index = next;
-    if (next < this.page.first) {
-      this.left = true;
-      return;
+    const to = this.entries[next]!.document;
+    if (to === 'another site') return;
+    if (to === from && to.page !== undefined) to.page.popstate();
+    else this.load();
+  }
+  /** Delivers the page's back() calls on their way (a page that is gone has none). */
+  settle(): void {
+    while (this.queued.length > 0) {
+      const page = this.queued.shift()!;
+      if (page === this.page) this.go(-1);
     }
-    this.onPopState();
   }
-  /** The page's entries above the other site's: [state, …]. */
-  ownEntries(): unknown[] {
-    return this.entries.slice(this.page.first);
+  /** "Run LOSAT": the results of a run. */
+  run(): void {
+    this.page!.choose('results');
   }
 }
 
-/** The page: the tab shown, set by a choice at once and by `popstate` from `arrived()`. */
-function page(history: FakeHistory): { navigation: TabNavigation; shown: () => MainTab; choose: (tab: MainTab) => void } {
-  const navigation = tabNavigation(history);
-  let shown: MainTab = 'search';
-  history.onPopState = () => {
-    shown = navigation.arrived();
-  };
-  return {
-    navigation,
-    shown: () => shown,
-    choose: (tab) => {
-      shown = tab;
-      navigation.choose(tab);
-    },
-  };
-}
-
-const RESULTS = { losatTab: 'results' };
+const results = (load: number) => ({ losatTab: 'results', load: `load-${load}` });
 
 describe('Back and Forward between the Search and Results tabs', () => {
   it('Back on the results shows the form, Forward the results again, and Back from the form leaves', () => {
-    const history = new FakeHistory();
-    const app = page(history);
-    app.choose('results'); // Run LOSAT
-    expect(history.ownEntries()).toEqual([null, RESULTS]);
-    history.go(-1);
-    expect(app.shown()).toBe('search');
-    expect(history.left).toBe(false);
-    history.go(+1);
-    expect(app.shown()).toBe('results');
-    history.go(-1);
-    history.go(-1);
-    expect(history.left).toBe(true);
+    const tab = new FakeTab();
+    tab.run();
+    expect(tab.own()).toEqual([null, results(1)]);
+    tab.go(-1);
+    expect(tab.page!.shown).toBe('search');
+    tab.go(+1);
+    expect(tab.page!.shown).toBe('results');
+    tab.go(-1);
+    tab.go(-1);
+    expect(tab.left).toBe(true);
+    expect(tab.loads).toBe(1);
   });
 
   it('the Search tab goes back to the form entry: tabs never pile up entries', () => {
-    const history = new FakeHistory();
-    const app = page(history);
+    const tab = new FakeTab();
     for (let i = 0; i < 5; i++) {
-      app.choose('results');
-      app.choose('search');
-      expect(app.shown()).toBe('search');
-      history.settle();
-      expect(app.shown()).toBe('search');
+      tab.page!.choose('results');
+      tab.page!.choose('search');
+      tab.settle();
+      expect(tab.page!.shown).toBe('search');
     }
-    expect(history.ownEntries()).toEqual([null, RESULTS]);
-    expect(history.index).toBe(1);
-    // Forward shows the results, and the form's next run replaces them.
-    history.go(+1);
-    expect(app.shown()).toBe('results');
-    history.go(-1);
-    app.choose('results');
-    expect(history.ownEntries()).toEqual([null, RESULTS]);
-    expect(history.index).toBe(2);
+    expect(tab.own()).toEqual([null, results(1)]);
+    expect(tab.index).toBe(1);
+    tab.go(+1);
+    expect(tab.page!.shown).toBe('results');
+    tab.go(-1);
+    tab.run();
+    expect(tab.own()).toEqual([null, results(1)]);
   });
 
-  it('a tab chosen again, or chosen while a Back is on its way, takes the browser to that tab', () => {
-    const history = new FakeHistory();
-    const app = page(history);
-    app.choose('search');
-    expect(history.backs).toBe(0); // the Search tab on the form's entry never leaves the page
-    app.choose('results');
-    app.choose('results');
-    expect(history.ownEntries()).toEqual([null, RESULTS]);
-    // Search, then Results (Run LOSAT, or the arrow keys) before the Back has arrived.
-    app.choose('search');
-    app.choose('results');
-    expect(app.shown()).toBe('results');
-    history.settle();
-    expect(app.shown()).toBe('results');
-    expect(history.backs).toBe(1);
-    expect(history.ownEntries()).toEqual([null, RESULTS]);
-    expect(history.index).toBe(2);
-    history.go(-1);
-    expect(app.shown()).toBe('search');
+  it('a tab chosen while a Back is on its way is the tab when it arrives', () => {
+    const tab = new FakeTab();
+    tab.page!.choose('search');
+    expect(tab.index).toBe(1); // the Search tab on the form's entry never leaves the page
+    tab.run();
+    tab.page!.choose('search');
+    tab.page!.choose('results'); // Run LOSAT, or an arrow key, before the Back has arrived
+    expect(tab.page!.shown).toBe('results');
+    tab.settle();
+    expect(tab.page!.shown).toBe('results');
+    expect(tab.own()).toEqual([null, results(1)]);
+    tab.go(-1);
+    expect(tab.page!.shown).toBe('search');
   });
 
-  it('a page reloaded on the results opens on the Search tab, its entry a form entry', () => {
-    const history = new FakeHistory([null, RESULTS]);
-    const app = page(history);
-    expect(app.shown()).toBe('search');
-    expect(history.ownEntries()).toEqual([null, null]);
-    // The page puts each tab back where it was scrolled (AppView.vue), not the browser.
-    expect(history.scrollRestoration).toBe('manual');
-    app.choose('search');
-    expect(history.backs).toBe(0);
-    app.choose('results');
-    expect(history.ownEntries()).toEqual([null, null, RESULTS]);
+  // Review of 6fff89265: the first Back after a reload did nothing, and Forward showed empty results.
+  it('after a reload on the results, the page shows the form and the first Back leaves', () => {
+    const tab = new FakeTab();
+    tab.run();
+    tab.reload();
+    tab.settle();
+    expect(tab.page!.shown).toBe('search');
+    expect(tab.index).toBe(1);
+    expect(tab.loads).toBe(2);
+    tab.go(-1);
+    expect(tab.left).toBe(true);
+  });
+
+  it('after Back to the form and a reload, Forward does not open empty results, and Back leaves', () => {
+    const tab = new FakeTab();
+    tab.run();
+    tab.go(-1);
+    tab.reload();
+    tab.go(+1);
+    expect(tab.page!.shown).toBe('search');
+    tab.settle();
+    expect(tab.index).toBe(1);
+    expect(tab.page!.shown).toBe('search');
+    tab.go(-1);
+    expect(tab.left).toBe(true);
+  });
+
+  it('runs and reloads leave no entry that Back stops at', () => {
+    const tab = new FakeTab();
+    for (let i = 0; i < 3; i++) {
+      tab.run();
+      tab.reload();
+      tab.settle();
+    }
+    expect(tab.page!.shown).toBe('search');
+    tab.go(-1);
+    expect(tab.left).toBe(true);
+  });
+
+  it('a restored or duplicated tab on the results opens on the form, and Back leaves', () => {
+    const tab = new FakeTab();
+    tab.run();
+    tab.restore();
+    tab.settle();
+    expect(tab.index).toBe(1);
+    expect(tab.page!.shown).toBe('search');
+    tab.go(-1);
+    expect(tab.left).toBe(true);
+  });
+
+  it('a back() that the browser drops is not waited for, and the next Back is the user\'s', () => {
+    const tab = new FakeTab();
+    tab.run();
+    tab.backs = 'dropped';
+    tab.page!.choose('search');
+    tab.clock += BACK_LOST_MS + 1;
+    tab.page!.choose('results');
+    expect(tab.own()).toEqual([null, results(1)]);
+    tab.go(-1);
+    expect(tab.page!.shown).toBe('search');
+    tab.backs = 'arrive';
+    tab.go(+1);
+    expect(tab.page!.shown).toBe('results');
+  });
+
+  it('a back() that the browser refuses leaves the choices working', () => {
+    const tab = new FakeTab();
+    tab.run();
+    tab.backs = 'throw';
+    expect(() => tab.page!.choose('search')).not.toThrow();
+    tab.backs = 'arrive';
+    tab.page!.choose('results');
+    tab.page!.choose('search');
+    tab.settle();
+    expect(tab.index).toBe(1);
+    expect(tab.page!.shown).toBe('search');
   });
 
   it('a pushState that the browser refuses leaves the tab shown and the history as it was', () => {
-    const history = new FakeHistory();
-    const app = page(history);
-    history.pushState = () => {
-      throw new DOMException('Attempt to use history.pushState() more than 100 times per 30 seconds', 'SecurityError');
-    };
-    app.choose('results');
-    expect(app.shown()).toBe('results');
-    expect(history.ownEntries()).toEqual([null]);
-    app.choose('search');
-    expect(history.backs).toBe(0);
+    class RefusingTab extends FakeTab {
+      override history(page: Page) {
+        const history = super.history(page);
+        history.pushState = () => {
+          throw new DOMException('Attempt to use history.pushState() more than 100 times per 30 seconds', 'SecurityError');
+        };
+        return history;
+      }
+    }
+    const tab = new RefusingTab();
+    tab.page!.choose('results');
+    expect(tab.page!.shown).toBe('results');
+    expect(tab.own()).toEqual([null]);
+    tab.page!.choose('search');
+    tab.settle();
+    expect(tab.index).toBe(1);
   });
 
-  it('reads only its own state', () => {
-    expect(entryTab(RESULTS)).toBe('results');
-    for (const state of [null, undefined, 'results', { losatTab: 'search' }, { tab: 'results' }, 0]) {
-      expect(entryTab(state)).toBe('search');
-    }
+  it('the page restores the scroll itself', () => {
+    const tab = new FakeTab();
+    const seen: TabHistory = { state: null, scrollRestoration: 'auto', pushState: () => undefined, back: () => undefined };
+    tabNavigation(seen, { load: 'x' });
+    expect(seen.scrollRestoration).toBe('manual');
+    expect(tab.page!.shown).toBe('search');
   });
 });

@@ -72,7 +72,7 @@ The link points at the `losat` file itself. If you move or replace `losat`, run 
 LOSAT keeps to NCBI's results. A small set of differences is on purpose, and each has a written decision. [Differences from NCBI BLAST+](differences.md) lists them. In short:
 
 - A local `-subject` search of `tblastx` and `tblastn` translates the subject with the genetic code that `-db_gencode` selects. NCBI's local search uses code 1. `tblastn` also accepts genetic code 32.
-- On macOS, the last (15th) digit of a full-precision E value can differ by 1. On WASI, the last digit of a value in psiblast's ASN.1 PSSM can differ by 1.
+- On macOS, the last (15th) digit of a full-precision E value can differ by 1.
 - Where NCBI's result depends on undefined behaviour in its code, such as a signed overflow, LOSAT computes the value without it, or refuses the input.
 - In SAM output (`-outfmt 17`), the `CL:` tag of the `@PG` line holds LOSAT's own command line.
 

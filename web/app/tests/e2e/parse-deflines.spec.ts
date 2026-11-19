@@ -115,3 +115,46 @@ test('an input that the CLI refuses under -parse_deflines fails the run with the
   expect(cli.status).toBe(1);
   expect(cli.stderr.toString('utf8')).toBe(`Error: ${message}\n`);
 });
+
+// One record as the query and the subject, with lower-case letters and -lcase_masking: LOSAT refuses
+// outfmt 0 of a record that is both a query and a subject under -parse_deflines and has masks, that
+// format's alone (round 2 of line WQA's sweep, D7, 2026-11-19). With -outfmt 6 the run writes the
+// CLI's outfmt 6 and 7, outfmt 0 stays empty and the warnings end with the CLI's error of outfmt 0;
+// without -outfmt (outfmt 0) the run fails with that error, as the CLI fails.
+test('a record that is both a query and a subject and has masks: outfmt 0 alone is refused, as the CLI refuses it', async ({ page }, testInfo) => {
+  const record = `>gb|AB000001.1| shared record\n${DNA.slice(0, 40).toLowerCase()}${DNA.slice(40)}\n`;
+  const words = ['blastn', '-parse_deflines', '-lcase_masking'] as const;
+  const message = "the record gb|AB000001.1| is both a query and a subject under -parse_deflines and has masks (NCBI BLAST+ draws them at the other record's places in outfmt 0); this is not supported by LOSAT's BLASTN";
+  for (const [run, extra] of [[1, ' -outfmt 6'], [2, '']] as const) {
+    if (run > 1) await page.getByTestId('tab-search').click();
+    await program(page, 'blastn');
+    await paste(page, 'query', record);
+    await paste(page, 'subject', record);
+    await openParameters(page);
+    // -lcase_masking is a control of the form ("Mask lower case letters"), not an additional option.
+    const mask = page.getByTestId('param-lcase_masking');
+    if (!(await mask.isChecked())) await mask.check();
+    await page.getByTestId('param-extra').fill(`-parse_deflines${extra}`);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, run === 1 ? 'completed' : 'failed');
+  }
+  await pickRun(page, 2);
+  await expect(page.getByTestId('results-status')).toContainText(message);
+  const { outputs, warnings } = await storedOutputs(page, 1);
+  expect(outputs[0].length, 'outfmt 0 is refused').toBe(0);
+  expect(outputs[6].toString('utf8').split('\t').slice(0, 2)).toEqual(['AB000001.1', 'AB000001.1']);
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const zero = nativeRun(words, record, record, 0);
+  expect(zero.status).toBe(1);
+  expect(zero.stderr.toString('utf8')).toBe(`Error: ${message}\n`);
+  for (const format of [6, 7] as const) {
+    const cli = nativeRun(words, record, record, format);
+    expect(cli.status, `-outfmt ${format}: ${cli.stderr}`).toBe(0);
+    expect(outputs[format].equals(cli.stdout), `-outfmt ${format}`).toBe(true);
+    if (format === 6) expect(warnings, 'the warnings: outfmt 6\'s, then the error of outfmt 0').toBe(`${cli.stderr.toString('utf8')}Error: ${message}\n`);
+  }
+});

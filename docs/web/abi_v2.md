@@ -251,9 +251,13 @@ the WASI imports.
   titled `, ,` fails stream 0 alone where the argv asks for `-outfmt 6` (whose row NCBI writes).
   So does a description table of `-sorthits` whose last total is above 99999 bits where the argv
   asks for `-outfmt 6`, 5 or another format (stream 0 fails alone; the CLI writes NCBI's outfmt 6
-  and 5), and an NCBI error of outfmt 0 alone, such as BLASTX's `Row is empty`. An error of the
+  and 5), an NCBI error of outfmt 0 alone, such as BLASTX's `Row is empty`, and LOSAT's refusal of
+  outfmt 0 of a record that is both a query and a subject under `-parse_deflines` and has masks
+  (BLASTN, BLASTP and TBLASTX: stream 0 fails alone where the argv asks for `-outfmt 6` or another
+  format, whose output the CLI writes; line WQA's sweep, D7, 2026-11-19). An error of the
   argv's own format fails the run, as the CLI fails (`-outfmt 6` or `7` with such a subject: the
-  CLI's exit status 1; outfmt 0 with `Row is empty`: NCBI's exception).
+  CLI's exit status 1; outfmt 0 with `Row is empty`: NCBI's exception; outfmt 0, or no `-outfmt`,
+  with such a record: the CLI's exit status 1).
 - `-num_descriptions` and `-num_alignments` are accepted (every program; `-max_target_seqs` excludes both, as on
   the command line) and described (§9). NCBI derives the hit list size of a format from them
   (`blast_args.cpp:2894-2973`): format 0 keeps the larger of `-num_descriptions` (500) and `-num_alignments` (250) where
@@ -401,7 +405,9 @@ again after a failure.
 Version 4 (line WQA's sweep, D7, 2026-11-19) adds `losat_web2_register_inputs`, the *inputs*
 response and the *start* field `register_inputs`: a run of `-parse_deflines`, which version 3 refused
 (`-parse_deflines is not supported in the browser yet`), runs with the inputs that the new export reads
-for its argv, and refuses the handles of `register`. A host of version 3 registers each input alone,
+for its argv, and refuses the handles of `register`; in such a run LOSAT's refusal of outfmt 0 of a
+record that is both a query and a subject and has masks fails stream 0 alone (§7). A host of version 3
+registers each input alone,
 so its runs of the option would now fail rather than be refused at `validate`: the application
 refuses a module of version 3, and a host of version 3 refuses a module of version 4. Runs without
 the option give the streams of version 3.

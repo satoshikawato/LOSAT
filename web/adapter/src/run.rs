@@ -2085,42 +2085,31 @@ mod tests {
             rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
         assert_eq!(programs.len(), 5, "{programs:?}");
         assert!(rows.len() >= 130, "{}", rows.len());
-        let (mut shown, mut refused) = (0, 0);
+        let (mut shown, mut refused, mut alone) = (0, 0, 0);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
             let (query, subject) = (read(at("-query")), read(at("-subject")));
             // Rows that LOSAT Web does not run, each with its refusal, so that this test shows
-            // when one runs: a `>?` gap line, which the store refuses (maintainer decision 3), and
-            // the pd.self rows other than outfmt 0, a record that is both a query and a subject
-            // and has masks: the engine refuses it for outfmt 0 by failing the whole call
-            // (`believed::refuse_shared_masks`), and LOSAT Web writes outfmt 0 in every call, so
-            // the argv's other formats fail with it where the command line writes them (open
-            // after line WQA's sweep, D7, 2026-11-19: the refusal is to be outfmt 0's alone,
-            // `FormatRefusal`, in BLASTN, BLASTP and TBLASTX).
+            // when one runs: a `>?` gap line, which the store refuses (maintainer decision 3).
             let gap_line = [&query, &subject].iter().any(|bytes| {
                 bytes
                     .split(|b| *b == b'\n')
                     .any(|line| line.starts_with(b">?"))
             });
+            // The pd.self rows other than outfmt 0: a record that is both a query and a subject and
+            // has masks, whose outfmt 0 LOSAT refuses, that format's alone
+            // (`believed::refuse_shared_masks_in`; line WQA's sweep, D7, 2026-11-19): the run
+            // writes the argv's format and outfmt 0 fails alone, its refusal on stream 3 after the
+            // CLI's warnings.
             let shared_masks = id.starts_with("pd.self.") && !id.ends_with(".0");
             let streams = match try_registered_streams(&words, &query, &subject) {
                 Ok(streams) => {
-                    assert!(!gap_line && !shared_masks, "{id}: LOSAT Web runs it now");
+                    assert!(!gap_line, "{id}: LOSAT Web runs it now");
                     streams
                 }
                 Err(error) if gap_line => {
                     assert!(error.contains("is a gap line ('>?')"), "{id}: {error}");
-                    refused += 1;
-                    continue;
-                }
-                Err(error) if shared_masks => {
-                    assert!(
-                        error.contains(
-                            "is both a query and a subject under -parse_deflines and has masks"
-                        ),
-                        "{id}: {error}"
-                    );
                     refused += 1;
                     continue;
                 }
@@ -2142,7 +2131,33 @@ mod tests {
                 .get(&STREAM_DIAGNOSTICS)
                 .cloned()
                 .unwrap_or_default();
-            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            if shared_masks {
+                let program = match words[0] {
+                    "blastn" => "BLASTN",
+                    "blastp" => "BLASTP",
+                    _ => "TBLASTX",
+                };
+                let refusal = format!(
+                    "is both a query and a subject under -parse_deflines and has masks (NCBI \
+                     BLAST+ draws them at the other record's places in outfmt 0); this is not \
+                     supported by LOSAT's {program}\n"
+                );
+                let rest = text(&diagnostics)
+                    .strip_prefix(text(&stderr).as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| panic!("{id}: stream 3 {}", text(&diagnostics)));
+                assert!(
+                    rest.starts_with("Error: the record ") && rest.ends_with(&refusal),
+                    "{id}: stream 3 after the CLI's: {rest}"
+                );
+                assert!(
+                    streams.get(&0).is_none_or(Vec::is_empty),
+                    "{id}: outfmt 0 failed alone"
+                );
+                alone += 1;
+            } else {
+                assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            }
             if outfmt != "6" {
                 continue;
             }
@@ -2179,8 +2194,9 @@ mod tests {
             }
         }
         assert!(shown > 0);
+        assert_eq!(alone, 33, "the pd.self rows other than outfmt 0");
         eprintln!(
-            "{} rows, {refused} refused, {shown} outfmt 6 rows' ids",
+            "{} rows, {refused} refused, {alone} with outfmt 0 failed alone, {shown} outfmt 6 rows' ids",
             rows.len()
         );
     }

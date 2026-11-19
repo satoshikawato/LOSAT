@@ -24,6 +24,14 @@
 // with `-out results`: the side files `results_<n>.json|xml`, and the master file as
 // `results.json|xml`.
 //
+// A search with `"fails_alone"` lists the formats of 0, 6 and 7 whose CLI run of the argv fails
+// while the argv's own format runs (a record that is both a query and a subject under
+// -parse_deflines and has masks: LOSAT refuses outfmt 0 alone; line WQA's sweep, D7, 2026-11-19):
+// the run writes no stream for them, and stream 3 is the CLI's standard error of the argv's own
+// format followed by each such format's error (the last line of its CLI run's standard error), as
+// the adapter writes a refusal of a format that failed alone (abi_v2.md §7). Its `"outfmt"` may be
+// 6 or 7 (the argv's own format then is that stream, and no stream 4 is written).
+//
 // A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
 // the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
 // it for the next searches that name it, as the application keeps one (abi_v2.md §6); a value that
@@ -345,13 +353,23 @@ function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   let stderr = null, status = null;
   const stderrs = new Map();
+  const alone = new Set(search.fails_alone || []);
+  const refusals = [];
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
     const failed = result.status !== 0;
-    if (failed !== (search.expect === "failure")) {
+    if (failed !== (search.expect === "failure" || alone.has(format))) {
       throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+    }
+    if (alone.has(format)) {
+      // The format that fails alone: no stream, and its error after the warnings on stream 3.
+      fs.rmSync(out, { force: true });
+      outputs.set(format, Buffer.alloc(0));
+      const messages = result.stderr.toString().split("\n").filter(Boolean);
+      refusals.push(Buffer.from(`${messages[messages.length - 1]}\n`));
+      continue;
     }
     outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
     fs.rmSync(out, { force: true });
@@ -368,12 +386,12 @@ function nativeOutputs(native, search, scratch) {
   if (stderrs.has(6)) {
     stderr = stderrs.get(6);
     if (stderrs.has(7)) assert.equal(sha256(stderrs.get(7)), sha256(stderr), "outfmt 7 writes the warnings of outfmt 6");
-    for (const format of FORMATS[search.program].filter((f) => f !== 6)) {
+    for (const format of FORMATS[search.program].filter((f) => f !== 6 && !alone.has(f))) {
       assert.deepEqual(withoutHandler(format), withoutHandler(6), `outfmt ${format}: the same warnings but the handler's`);
       for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
     }
   }
-  if (search.outfmt !== undefined) {
+  if (customStream(search)) {
     const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
     const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
@@ -387,7 +405,13 @@ function nativeOutputs(native, search, scratch) {
     }
     stderr = result.stderr;
   }
-  return { outputs, stderr, status };
+  return { outputs, stderr, status, diagnostics: Buffer.concat([stderr, ...refusals]) };
+}
+
+// Whether the search's `"outfmt"` writes stream 4: a format besides 0, 6 and 7, or 6 or 7 with
+// fields (an argv's own plain 6 or 7, of a search with `"fails_alone"`, is that stream).
+function customStream(search) {
+  return search.outfmt !== undefined && !/^\s*[67]\s*$/.test(search.outfmt);
 }
 
 // A run that fails as the CLI fails: the CLI's error is the last message of its standard
@@ -773,7 +797,7 @@ async function main() {
           const sides = entries.slice(0, -1).map(([, bytes]) => sha256(toFrozen(bytes, search.frozen_prefix))).join(",");
           if (search.frozen.custom) row.frozen.custom = master === search.frozen.custom;
           if (search.frozen.sides !== undefined) row.frozen.sides = sides === search.frozen.sides;
-        } else if (search.outfmt !== undefined) {
+        } else if (customStream(search)) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
           const actual = search.sam ? withoutCl(sent) : sent;
           const cli = expected.outputs.get(CUSTOM_STREAM);
@@ -783,8 +807,10 @@ async function main() {
         } else {
           assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without -outfmt`);
         }
-        assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(expected.stderr), `${label}: diagnostics`);
-        row.diagnostics = sha256(expected.stderr);
+        const diagnostics = run.streams.get(3) || Buffer.alloc(0);
+        assert.equal(sha256(diagnostics), sha256(expected.diagnostics), `${label}: diagnostics\n${diagnostics}`);
+        row.diagnostics = sha256(expected.diagnostics);
+        if (search.fails_alone) row.fails_alone = search.fails_alone;
         row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
         if (together) row.inputs = "register_inputs";
         results.push(row);

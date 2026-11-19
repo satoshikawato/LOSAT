@@ -1509,17 +1509,28 @@ struct XGroup {
     scan_bf: bool,
     /// The presence-vector rank of a compacted table, empty for a table of the full backbone.
     rank: Vec<u32>,
-    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table of the full backbone that
-    /// NCBI's loop scanned (`x_scan_bf::x_tbx_presence`), `None` for the others.
-    presence: Option<crate::algorithm::tblastx::x_scan_byte::XPresence>,
+    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): for a table of the full backbone that NCBI's loop scanned
+    /// and the scan on presence bytes takes (`x_scan_bf::x_tbx_scans_byte`), its presence bytes,
+    /// made by the first scan of the table (`scan`, `x_scan_bf::x_tbx_presence`) and freed with
+    /// it; `None` for the others.
+    ///
+    /// The bytes are not made where the table is built. The group tables of a batch are built one
+    /// after the other on one thread, and the bytes made there (32 KiB a table, #1228) sat between
+    /// them in that thread's heap: on Sakai x MG1655 `-subject` at 16 threads (84 slice tables of
+    /// LOSAT_X_TBXQSLICE, 2.6 MiB of bytes) glibc then kept the 560 MiB of the freed tables in the
+    /// main heap after the seed release (`[heap]` 624 MiB to the end of the run, against 58 MiB
+    /// with LOSAT_X_TBXSCANBYTE=0), and the linking that follows took its memory elsewhere: max RSS
+    /// +241 MiB (x1.12). Made by the scan, the bytes leave the build's allocations as they are with
+    /// the switch off, and they live as long as the table, so they never outlive it in any heap.
+    presence: Option<OnceLock<crate::algorithm::tblastx::x_scan_byte::XPresence>>,
 }
 
 impl XGroup {
     // No NCBI counterpart: the layout of a group table (`x_scan_bf::x_compact`); its cells,
     // entries and presence bits are those of `lookup`.
     /// The group of `lookup`. A table the branch-free scan takes (`x_scan_bf_for`: fewer than
-    /// half of its cells have entries) keeps only the cells with entries; the others get their
-    /// presence bytes when LOSAT_X_TBXSCANBYTE scans them (`x_tbx_presence`).
+    /// half of its cells have entries) keeps only the cells with entries; the others get a place
+    /// for their presence bytes when LOSAT_X_TBXSCANBYTE scans them (`x_tbx_scans_byte`).
     fn new(mut lookup: BlastAaLookupTable, q_min: u32, q_max: u32) -> Self {
         let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
         let rank = if scan_bf {
@@ -1531,7 +1542,7 @@ impl XGroup {
             crate::algorithm::tblastx::x_scan_bf::x_reach_scan_byte_not_taken();
             None
         } else {
-            crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&lookup)
+            crate::algorithm::tblastx::x_scan_bf::x_tbx_scans_byte(&lookup).then(OnceLock::new)
         };
         Self {
             lookup,
@@ -1557,7 +1568,7 @@ impl XGroup {
             crate::algorithm::tblastx::x_scan_bf::x_reach_scan_byte_not_taken();
             None
         } else {
-            crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&g.table)
+            crate::algorithm::tblastx::x_scan_bf::x_tbx_scans_byte(&g.table).then(OnceLock::new)
         };
         Self {
             lookup: g.table,
@@ -1574,7 +1585,8 @@ impl XGroup {
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // ```
     /// One scan call of this group's table: `x_scan_subject_byte` on a table with presence bytes
-    /// (LOSAT_X_TBXSCANBYTE), `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
+    /// (LOSAT_X_TBXSCANBYTE; the first call makes them), `x_scan_subject` (LOSAT_X_TBXSCANBF's
+    /// choice), or
     /// `x_scan_subject_compact` on a compacted table. The offset array holds
     /// `x_offset_pairs_len(array_size)` entries.
     #[inline(always)]
@@ -1587,6 +1599,8 @@ impl XGroup {
         scan_range: &mut [i32; 3],
     ) -> i32 {
         if let Some(presence) = &self.presence {
+            let presence = presence
+                .get_or_init(|| crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&self.lookup));
             crate::algorithm::tblastx::x_scan_bf::x_scan_subject_byte(
                 &self.lookup,
                 presence,

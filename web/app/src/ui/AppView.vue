@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
 import type { Attention } from '../application/attention';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
@@ -14,6 +14,7 @@ import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import { useRunAnnouncements } from './run-announcements';
 import StorageStatus from './StorageStatus.vue';
+import { tabNavigation, type MainTab } from './tab-history';
 import TabList from './TabList.vue';
 
 const props = defineProps<{
@@ -27,9 +28,26 @@ const props = defineProps<{
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
-const tab = ref<'search' | 'results'>('search');
+/** The tab shown. Choosing one goes through the page's history, so Back on the results returns to the form (tab-history.ts). */
+const shown = ref<MainTab>('search');
+const navigation = tabNavigation(window.history);
+/** How far each tab was scrolled, and what had the focus, when it was left: Back and Forward return there, as between pages. */
+const scrolled: Record<MainTab, number> = { search: 0, results: 0 };
+const focused: Record<MainTab, Element | null> = { search: null, results: null };
+function leave(): void {
+  scrolled[shown.value] = window.scrollY;
+  focused[shown.value] = document.activeElement;
+}
+const tab = computed<MainTab>({
+  get: () => shown.value,
+  set: (value) => {
+    if (value !== shown.value) leave();
+    shown.value = value;
+    navigation.choose(value);
+  },
+});
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
-const mainTabs = ref<{ focus: () => void }>();
+const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
 /** Search and Results: tabs, each with its panel (WA2-AX-12). */
 const ids = useId();
 const MAIN_TABS = [
@@ -70,6 +88,32 @@ async function showSearch(): Promise<void> {
   mainTabs.value?.focus();
 }
 
+/**
+ * Back or Forward moved between the tabs' history entries (tab-history.ts): the tab shown comes back
+ * where it was scrolled, with the focus where it was (the search form stays mounted, so "Run LOSAT"
+ * has it again after Back). A focus that is not there to give back goes to the tab shown when the
+ * focus was on the other tab or went with the panel now hidden; nothing scrolls for it.
+ */
+async function arrived(): Promise<void> {
+  const next = navigation.arrived();
+  if (next === shown.value) return;
+  leave();
+  shown.value = next;
+  await nextTick();
+  window.scrollTo(0, scrolled[next]);
+  const panel = document.getElementById(MAIN_TABS[next === 'search' ? 0 : 1].panel);
+  const hidden = document.getElementById(MAIN_TABS[next === 'search' ? 1 : 0].panel);
+  const before = focused[next];
+  const active = document.activeElement;
+  const onTab = MAIN_TABS.some((main) => main.id === active?.id);
+  if (before instanceof HTMLElement && before.isConnected && panel?.contains(before)) {
+    before.focus({ preventScroll: true });
+  } else if (active === null || active === document.body || !active.isConnected || onTab || hidden?.contains(active)) {
+    mainTabs.value?.focus({ preventScroll: true });
+  }
+}
+const onPopState = () => void arrived();
+
 // A file dropped outside an input's drop zone would make the browser open it in place of
 // the application (and end the searches of this tab).
 const keep = (event: DragEvent) => {
@@ -78,10 +122,12 @@ const keep = (event: DragEvent) => {
 onMounted(() => {
   window.addEventListener('dragover', keep);
   window.addEventListener('drop', keep);
+  window.addEventListener('popstate', onPopState);
 });
 onUnmounted(() => {
   window.removeEventListener('dragover', keep);
   window.removeEventListener('drop', keep);
+  window.removeEventListener('popstate', onPopState);
 });
 </script>
 

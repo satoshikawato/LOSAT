@@ -91,7 +91,8 @@ A host that keeps every chunk would keep output that the command line does not w
 file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
 second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
-run fails, `runFilesOf(error)` returns it.
+run fails, `runFilesOf(error)` returns it, and `runDiagnosticsOf(error)` the warnings that the
+command line writes to its standard error before the error (stream 3).
 
 In a worker or in Node, the serial module can also be called directly:
 

@@ -721,8 +721,9 @@ export function unreadableResults(run: RunView, error: unknown): string {
 
 /**
  * Why a run that has not completed has no results: the results page's sentence, also told to a
- * screen reader as the run ends. A failed run that made the file of its `-logfile` keeps it (line RG
- * E1w-3b), and the page shows it under the sentence (RunFiles).
+ * screen reader as the run ends. A failed run keeps the warnings that it wrote before its error (line
+ * WQA's sweep, D3, 2026-11-19) and the file of its `-logfile` (line RG E1w-3b), and the page shows
+ * them under the sentence (ResultsPanel, RunFiles).
  */
 export function unavailableMessage(run: RunView): string {
   const n = run.snapshot.number;
@@ -731,8 +732,9 @@ export function unavailableMessage(run: RunView): string {
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
     case 'failed': {
       const files = run.record.runFiles ?? [];
+      const warned = run.record.diagnostics?.trim() ? ' It keeps the warnings written before the error.' : '';
       const kept = files.length === 0 ? '' : ` It keeps the file of its -logfile, ${files.map((file) => file.name).join(', ')}.`;
-      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.${kept}`;
+      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.${warned}${kept}`;
     }
     case 'completed':
       return '';

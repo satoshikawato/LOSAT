@@ -4,6 +4,8 @@ import { RunOutputWriter, sha256Hex } from 'losat';
 import { CUSTOM_OUTPUT, type RegistryFile, type RunFile } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
+  runDiagnosticsOf,
+  withRunDiagnostics,
   withRunFiles,
   type EngineGateway,
   type EnginePhase,
@@ -121,10 +123,11 @@ class ManualEngine implements EngineGateway {
   finish(runId: string, runFiles?: readonly RunFile[]) {
     this.pending.get(runId)?.resolve(runFiles);
   }
-  /** Fails a run, with the files that it made besides its outputs. */
-  fail(runId: string, message: string, runFiles?: readonly RunFile[]) {
+  /** Fails a run, with the files that it made besides its outputs and the warnings that it wrote before its error. */
+  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string) {
     const error = new Error(message);
-    this.pending.get(runId)?.reject(runFiles === undefined ? error : withRunFiles(error, runFiles));
+    const warned = diagnostics === undefined ? error : withRunDiagnostics(error, diagnostics);
+    this.pending.get(runId)?.reject(runFiles === undefined ? warned : withRunFiles(warned, runFiles));
   }
 }
 
@@ -499,6 +502,44 @@ describe('Coordinator', () => {
       { fileName: 'losat-run2-blastn-19700101T000001Z.logfile.run.log', text: 'BLAST engine error: The average subject length is too short\n', type: 'text/plain' },
     ]);
     await expect(coordinator.exportRunFile(plain, 0)).rejects.toThrow('the run has no such file');
+  });
+
+  // Line WQA's sweep, D3 (2026-11-19): the warnings that the command line writes before its error
+  // (stream 3) come with the engine's rejection, and the failed run keeps them; a cancelled run keeps
+  // none, and a failed run without warnings has none.
+  it('keeps the warnings that a failed run wrote before its error, and none of a cancelled run', async () => {
+    const engine = new ManualEngine();
+    const { coordinator, data } = setup(engine);
+    const warning = 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n';
+    const failed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, failed, 'running');
+    engine.fail(failed, 'BLAST engine error: The average subject length is too short', undefined, warning);
+    await waitFor(coordinator, failed, 'failed');
+    expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'BLAST engine error: The average subject length is too short', diagnostics: warning });
+    expect('runFiles' in viewOf(coordinator, failed)!.record).toBe(false);
+    // The staged run is discarded, as before: the record keeps the text.
+    await expect(data.readDiagnostics(failed)).rejects.toThrow();
+
+    const plain = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, plain, 'running');
+    engine.fail(plain, 'BLAST engine error: Empty CBlastQueryVector');
+    await waitFor(coordinator, plain, 'failed');
+    expect('diagnostics' in viewOf(coordinator, plain)!.record).toBe(false);
+
+    const cancelled = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, cancelled, 'running');
+    coordinator.cancel(cancelled);
+    engine.fail(cancelled, 'cancelled', undefined, warning);
+    await waitFor(coordinator, cancelled, 'cancelled');
+    expect('diagnostics' in viewOf(coordinator, cancelled)!.record).toBe(false);
+  });
+
+  it('gives the FakeEngine\'s failed run its marked warning', async () => {
+    const { coordinator } = setup();
+    const runId = (await coordinator.enqueue({ ...request, subject: { text: '' } })).runId!;
+    await waitFor(coordinator, runId, 'failed');
+    expect(viewOf(coordinator, runId)!.record).toMatchObject({ error: expect.stringContaining('No sequence input was provided'), diagnostics: `Warning: ${FAKE_MARKER}\n` });
+    expect(runDiagnosticsOf(new Error('x'))).toBeUndefined();
   });
 
   it('exports a completed output byte for byte under a name with the task and the time of the run (WA-RS-05)', async () => {

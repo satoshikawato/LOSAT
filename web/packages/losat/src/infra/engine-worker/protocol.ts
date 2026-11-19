@@ -152,6 +152,8 @@ export interface WorkerError {
   readonly stopped?: boolean;
   /** The files that the failed run made besides its outputs (stream 8; `runFilesOf`). */
   readonly runFiles?: readonly RunFile[];
+  /** What the failed run wrote to stream 3 before its error (`runDiagnosticsOf`). */
+  readonly diagnostics?: string;
 }
 
 export type EngineEvent =

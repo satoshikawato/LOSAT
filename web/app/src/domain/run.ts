@@ -126,6 +126,13 @@ export interface RunRecord {
   readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
   readonly endedAt?: number;
   readonly error?: string;
+  /**
+   * What a failed run wrote to the command line's standard error before its error (engine stream 3:
+   * its warnings, as NCBI's `Subject sequence contains no data` before `The average subject length is
+   * too short`), as the engine wrote it; a completed run's are in its results (line WQA's sweep, D3,
+   * 2026-11-19).
+   */
+  readonly diagnostics?: string;
 }
 
 export function isTerminal(status: RunStatus): boolean {

@@ -192,6 +192,23 @@ export function withRunFiles<E extends Error>(error: E, runFiles: readonly RunFi
   return Object.assign(error, { runFiles });
 }
 
+/**
+ * What a failed run wrote to the CLI's standard error before its error (ABI v2 §5: stream 3, which
+ * the host keeps with a failed run as it keeps stream 8): its warnings, as NCBI's `Subject sequence
+ * contains no data` before `The average subject length is too short` (line WQA's sweep, D3,
+ * 2026-11-19), UTF-8 text as the engine wrote it. The rejection of `EngineGateway.run` carries it
+ * (`withRunDiagnostics`); undefined for an error without warnings, as a trap's or a cancel's.
+ */
+export function runDiagnosticsOf(error: unknown): string | undefined {
+  const diagnostics = typeof error === 'object' && error !== null ? (error as { readonly diagnostics?: unknown }).diagnostics : undefined;
+  return typeof diagnostics === 'string' ? diagnostics : undefined;
+}
+
+/** Gives the error of a failed run what the run wrote before its error (`runDiagnosticsOf`); its name and message stay. */
+export function withRunDiagnostics<E extends Error>(error: E, diagnostics: string): E {
+  return Object.assign(error, { diagnostics });
+}
+
 export interface EngineGateway {
   describe(program: ProgramId): Promise<ProgramDescription>;
   /**
@@ -210,7 +227,8 @@ export interface EngineGateway {
    * every stream, then `end`, all posted before the promise resolves. `output` comes from
    * `DataGateway.openRun` and may be transferred to a worker. Rejects on failure or cancel
    * without sending `end`; the data layer then discards what arrived. The files that a failed run
-   * made besides its outputs come with the rejection (`runFilesOf`).
+   * made besides its outputs come with the rejection (`runFilesOf`), and so do the warnings that it
+   * wrote before its error (`runDiagnosticsOf`).
    */
   run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo>;
   /** Stops the run as soon as possible. Unknown or finished runs are ignored. */

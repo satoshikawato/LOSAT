@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { instantiateSerial, reactorControl, reopening, WasmEngine } from 'losat';
 import { readStoredZip, type RegistryFile, type RunFile } from 'losat/domain';
-import { FileReadError, isFileReadError, runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
+import { FileReadError, isFileReadError, runDiagnosticsOf, runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { outputFileName, runFileName } from '../../src/domain/output-format';
 import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
@@ -430,7 +430,9 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
  * refuses it, as the adapter does. `discard`: after outfmt 6, the signal of stream 9 that discards
  * it (its bytes), then outfmt 7 (ABI v2 §5).
  */
-function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array } = {}) {
+function fakeAbi(
+  options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array; warnings?: readonly Uint8Array[] } = {},
+) {
   const calls: string[] = [];
   let handle = 100;
   let stopped: EngineStoppedError | undefined;
@@ -461,6 +463,7 @@ function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean
     run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
       calls.push('run');
       sink(6, encode('q\ts\n'));
+      for (const chunk of options.warnings ?? []) sink(3, chunk);
       if (options.discard !== undefined) {
         sink(DISCARD_STREAM, options.discard);
         sink(7, encode('# 0 hits found\n'));
@@ -607,6 +610,39 @@ describe("the Engine worker's runtime and the files of a run", () => {
     // The chunk written before the failure, and no end.
     expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
     close();
+  });
+
+  // Line WQA's sweep, D3 (2026-11-19): the warnings that the command line writes before its error
+  // (stream 3) come with the error, as one text; they reach the Data worker too, which drops them with
+  // the run. A failed run without warnings, and a stop, give none.
+  it("gives a failed run's warnings (stream 3) with its error, as one UTF-8 text", async () => {
+    const text = encode('Warning: [blastn] Subject_1 \u00e9 empty: Subject sequence contains no data\n');
+    // Two chunks that split the two bytes of é.
+    const cut = text.indexOf(0xc3) + 1;
+    const warnings = [text.subarray(0, cut), text.subarray(cut)];
+    const { abi } = fakeAbi({ warnings, fail: 'BLAST engine error: The average subject length is too short' });
+    const { run, delivered, close } = workerRun([]);
+    const error = await runtimeWith(abi)
+      .run(run, () => undefined)
+      .catch((e: unknown) => e);
+    expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
+    expect(runDiagnosticsOf(error)).toBe('Warning: [blastn] Subject_1 \u00e9 empty: Subject sequence contains no data\n');
+    expect(runFilesOf(error)).toBeUndefined();
+    expect(await delivered()).toEqual([
+      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+      { type: 'chunk', stream: 3, bytes: warnings[0] },
+      { type: 'chunk', stream: 3, bytes: warnings[1] },
+    ]);
+    close();
+    for (const options of [{ fail: 'BLAST engine error: Empty CBlastQueryVector' }, { warnings, stop: true }]) {
+      const next = workerRun([]);
+      const plain = await runtimeWith(fakeAbi(options).abi)
+        .run(next.run, () => undefined)
+        .catch((e: unknown) => e);
+      expect(plain).toBeInstanceOf(Error);
+      expect(runDiagnosticsOf(plain)).toBeUndefined();
+      next.close();
+    }
   });
 
   it('fails a run whose file of -conffile the engine refuses, with nothing registered and nothing searched', async () => {
@@ -794,7 +830,15 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     expect(failed.error).toBeInstanceOf(EngineCallError);
     const [file] = readStoredZip(failed.joined(RUN_FILES_STREAM));
     expect(file!.name).toBe('run.log');
-    expect(new TextDecoder().decode(file!.bytes)).toContain('The average subject length is too short');
+    expect(new TextDecoder().decode(file!.bytes)).toBe(
+      'Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\nBLAST engine error: The average subject length is too short\n',
+    );
+    expect(failed.streams.has(3)).toBe(false);
+    // Without -logfile the warning before the error is on stream 3, where the command line writes it
+    // (NCBI BLAST+ 2.17.0; line WQA's sweep, D3, 2026-11-19), and the error is the run's.
+    const plain = run(abi, [], encode('>s1 alpha\n'));
+    expect((plain.error as Error).message).toBe('BLAST engine error: The average subject length is too short\n');
+    expect(new TextDecoder().decode(plain.joined(3))).toBe('Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\n');
   }, 120_000);
 
   // DECISIONS E1w3b-4: the file goes to an instance of the validation's own; the shared instance neither

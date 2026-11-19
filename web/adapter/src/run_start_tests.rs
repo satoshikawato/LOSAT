@@ -212,12 +212,15 @@ fn the_conffile_is_a_registered_registry_file() {
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
         assert_eq!(run_files(&streams), None, "{program}");
+        // The report is the error: nothing came before it on the standard error (stream 3).
+        assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
         // With `-logfile`: the programs whose application holds its diagnostic handler as a member
         // replay the collected messages to the standard error, the others into the file
         // (`ncbi_environment::replays_to_stderr`).
         words.extend(["-logfile", "run.log"]);
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
+        assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
         let file = match program {
             "tblastx" => SECTION_REPORT.repeat(2),
             _ => SECTION_REPORT.to_string(),
@@ -308,6 +311,8 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
     let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);
     let (result, streams) = run_of(&failed);
     assert!(result.is_err());
+    // The file has the error, and the standard error (stream 3) nothing.
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "");
     assert_eq!(
         run_files(&streams),
         Some(vec![(

@@ -1299,6 +1299,12 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
         ),
         Err((message, started)) => (Err(message), started.map(|started| *started)),
     };
+    // Stream 3 of a run that failed: what the command line wrote to its standard error before the
+    // error that ends it (its warnings: NCBI's `Subject sequence contains no data` before `The
+    // average subject length is too short`), which the host keeps with the failed run as it keeps
+    // stream 8 (docs/web/abi_v2.md §5; line WQA's sweep, D3, 2026-11-19). The error itself is the
+    // run's error. A run that succeeded sent it already.
+    diagnostics.finish();
     // The run's files (the file of `-logfile`), after the run, whether it failed or not.
     let handed = started.map_or(Ok(()), CallerStart::finish);
     let emitted = handed.and_then(|()| files.emit());
@@ -4464,6 +4470,86 @@ mod tests {
             &subject,
             "Warning: [blastx] Error pre-fetching sequence data\n",
             "CSeq_align::GetSeqRange(): Row is empty",
+        );
+    }
+
+    /// The streams of a run that failed, as a host keeps them (docs/web/abi_v2.md §5: stream 3
+    /// and stream 8), and its error.
+    fn failed_streams(
+        words: &[&str],
+        query: &[FastaRecord],
+        subject: &[FastaRecord],
+    ) -> (String, std::collections::BTreeMap<u32, Vec<u8>>) {
+        crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+        let error = run(words, query, subject).unwrap_err();
+        let mut streams = std::collections::BTreeMap::new();
+        crate::emit::EMITTED.with(|emitted| {
+            for (stream, bytes) in emitted.borrow().iter() {
+                streams
+                    .entry(*stream)
+                    .or_insert_with(Vec::new)
+                    .extend_from_slice(bytes);
+            }
+        });
+        (error, streams)
+    }
+
+    // A run that fails gives on stream 3 what the command line writes to its standard error before
+    // its error: NCBI BLAST+ 2.17.0 ($NCBI_BIN, 2026-11-19, line WQA's sweep D3) writes the subject's
+    // warning and then the error, exit status 3, for a subject whose one record has no residues
+    // (BLASTN and TBLASTX; the other programs search it with the warning), and the error alone for
+    // a query whose one record has none. TBLASTX's `-logfile` file holds both, and stream 3 nothing.
+    #[test]
+    fn a_failed_run_gives_the_warnings_before_its_error() {
+        let letters = random_nucleotides(300, 11);
+        let query = [FastaRecord::new("Query_1", b"q1", &letters)];
+        let empty = [FastaRecord::new("Subject_1", b"empty record", b"")];
+        for program in ["blastn", "tblastx"] {
+            let words = [program, "-query", "q", "-subject", "s", "-outfmt", "6"];
+            let (error, streams) = failed_streams(&words, &query, &empty);
+            assert_eq!(
+                error.trim_end(),
+                "BLAST engine error: The average subject length is too short",
+                "{program}"
+            );
+            assert_eq!(
+                text(streams.get(&STREAM_DIAGNOSTICS).map_or(&[][..], Vec::as_slice)),
+                format!("Warning: [{program}] Subject_1 empty record: Subject sequence contains no data\n"),
+                "{program}"
+            );
+            for stream in [0, 6, 7, STREAM_HITS] {
+                assert!(
+                    streams.get(&stream).is_none_or(Vec::is_empty),
+                    "{program} {stream}"
+                );
+            }
+            let (error, streams) = failed_streams(&words, &empty, &query);
+            assert_eq!(
+                error.trim_end(),
+                "BLAST engine error: Warning: Sequence contains no data",
+                "{program}"
+            );
+            assert!(
+                streams.get(&STREAM_DIAGNOSTICS).is_none_or(Vec::is_empty),
+                "{program}: {:?}",
+                streams.get(&STREAM_DIAGNOSTICS).map(|bytes| text(bytes))
+            );
+        }
+        let words = [
+            "tblastx", "-query", "q", "-subject", "s", "-outfmt", "6", "-logfile", "run.log",
+        ];
+        let (_, streams) = failed_streams(&words, &query, &empty);
+        assert!(streams.get(&STREAM_DIAGNOSTICS).is_none_or(Vec::is_empty));
+        let archive = crate::zip::read(&streams[&crate::emit::STREAM_RUN_FILES]);
+        assert_eq!(
+            archive
+                .iter()
+                .map(|(name, bytes)| (text(name), text(bytes)))
+                .collect::<Vec<_>>(),
+            [(
+                "run.log".to_string(),
+                "Warning: [tblastx] Subject_1 empty record: Subject sequence contains no data\nBLAST engine error: The average subject length is too short\n".to_string()
+            )]
         );
     }
 }

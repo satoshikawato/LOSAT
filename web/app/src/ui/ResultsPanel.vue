@@ -32,6 +32,7 @@ import ResultNotices from './ResultNotices.vue';
 import RunDetails from './RunDetails.vue';
 import RunFiles from './RunFiles.vue';
 import RunStatus from './RunStatus.vue';
+import { vScrollFocus } from './scroll-focus';
 import SubjectTable from './SubjectTable.vue';
 import TabList from './TabList.vue';
 import VerificationBadge from './VerificationBadge.vue';
@@ -315,6 +316,17 @@ async function toAlignments(id: HspId): Promise<void> {
       >
         {{ state.message }}
       </p>
+      <!-- A failed run keeps the warnings that it wrote to the command line's standard error before its
+           error (NCBI's "Subject sequence contains no data" before "The average subject length is too
+           short"), as the engine wrote them (line WQA's sweep, D3, 2026-11-19). -->
+      <section
+        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && selected.record.diagnostics?.trim()"
+        class="results-group failed-warnings"
+        data-testid="results-failed-warnings"
+      >
+        <h3>Warnings</h3>
+        <pre v-scroll-focus="'Warnings'" class="output" data-testid="results-failed-diagnostics">{{ selected.record.diagnostics }}</pre>
+      </section>
       <!-- A failed run keeps the file of its -logfile (TBLASTX's holds NCBI's error; line RG E1w-3b). -->
       <RunFiles
         v-if="state.phase === 'unavailable' && selected?.status === 'failed' && (selected.record.runFiles?.length ?? 0) > 0"

@@ -10,6 +10,7 @@
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
   RunCancelledError,
+  runDiagnosticsOf,
   runFilesOf,
   type EngineGateway,
   type EngineInput,
@@ -417,8 +418,10 @@ export class Coordinator {
     const conffile = this.conffiles.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
-    // The files that the run made besides its outputs, which a completed and a failed run keep.
+    // The files that the run made besides its outputs, which a completed and a failed run keep, and
+    // the warnings that a failed run wrote before its error (a completed run's are in its results).
     let runFiles: readonly RunFile[] | undefined;
+    let diagnostics: string | undefined;
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
@@ -442,6 +445,7 @@ export class Coordinator {
         (phase) => this.onPhase(runId, phase),
       ).catch((error: unknown) => {
         runFiles = runFilesOf(error);
+        diagnostics = runDiagnosticsOf(error);
         throw error;
       });
       runFiles = runtime.runFiles;
@@ -475,6 +479,7 @@ export class Coordinator {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: errorMessage(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
+          ...(cancelled || diagnostics === undefined ? {} : { diagnostics }),
         },
       });
     } finally {

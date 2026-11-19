@@ -9,3 +9,5 @@
 - docs: README's output-format table says "all five programs" for outfmt 11 (it said every program) and
   points to the program table for the formats of `psiblast`, `rpsblast` and `rpstblastn`; the
   `convert2blastmask` paragraph no longer says that `losat makeblastdb` lacks `-mask_data`.
+- docs: README says that the Web GUI follows the page layout of NCBI BLAST (it said "the layout and terms";
+  its words are LOSAT's own).

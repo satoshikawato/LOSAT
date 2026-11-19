@@ -6,6 +6,7 @@ import type { Compression, FileInflater, RecordScanner } from 'losat/ports';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
+import { REFUSED_REASON } from '../../src/infra/data/session';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { NodeInflater } from './support/node-inflater';
 
@@ -196,7 +197,7 @@ describe('DataService runs and storage status', () => {
   it('reports the storage it uses, the session bytes and the cleanup state', async () => {
     let settle!: (value: { state: 'done'; removedSessions: number }) => void;
     const { data } = service({
-      fallbackReason: 'the browser does not let this site store files here, as in a private window',
+      fallbackReason: REFUSED_REASON,
       fallbackError: 'SecurityError: Security error when calling GetDirectory',
       cleanup: new Promise((resolve) => {
         settle = resolve;
@@ -205,7 +206,7 @@ describe('DataService runs and storage status', () => {
     });
     expect(await data.storageInfo()).toEqual({
       backend: 'memory',
-      fallbackReason: 'the browser does not let this site store files here, as in a private window',
+      fallbackReason: REFUSED_REASON,
       fallbackError: 'SecurityError: Security error when calling GetDirectory',
       sessionBytes: 0,
       estimate: { usage: 10, quota: 1000 },

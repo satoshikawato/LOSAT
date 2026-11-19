@@ -90,8 +90,9 @@ export interface OpfsAccess {
  * The browser refused the site's storage from the start: the tab's lock was refused with
  * SecurityError (a site whose data is blocked, in Chromium and Firefox), or the first
  * `getDirectory()` of a session (`space()`) rejected with SecurityError (Firefox's private
- * windows), or with UnknownError twice (WebKit's ephemeral sessions, as Safari's private
- * windows). A failure after the storage worked is never one. The browser's error is the cause.
+ * windows, a site whose data is blocked). Only a SecurityError is one: WebKit's UnknownError comes
+ * from its ephemeral sessions and from a failing storage alike (opfs-block-store.ts). A failure
+ * after the storage worked is never one. The browser's error is the cause.
  */
 export class StorageRefusedError extends Error {
   constructor(cause: unknown) {
@@ -125,16 +126,26 @@ export class SessionsUnreadableError extends Error {
  * 2026-11-19). Each reason says what happened at the step that failed; the browser's error, its
  * name and message, stays in the note's data-error attribute, for developers.
  */
-/** The storage was refused from the start (StorageRefusedError: the tab's lock, or the first getDirectory()). */
-export const REFUSED_REASON = 'the browser does not let this site store files here, as in a private window';
+/**
+ * The storage was refused from the start (StorageRefusedError: the tab's lock, or the first
+ * getDirectory()). It names both causes and so what helps: Chromium's private windows store files,
+ * so there it is always blocked site data (review storage-r2 of line WQA's sweep, D5, L1, 2026-11-19).
+ */
+export const REFUSED_REASON = "the browser does not let this site store files (a private window, or site data blocked in the browser's settings)";
 /** QuotaExceededError (or StorageFullError), at any step. */
 export const FULL_REASON = 'the browser storage of this site is full';
 /** No OPFS, no writing from a worker, or no Web Locks (without which no other tab could tell the data is in use). */
 export const UNSUPPORTED_REASON = 'LOSAT cannot store files in this browser';
 /** The tab's lock was not given (other than SecurityError): the storage was never tried, and no other tab was asked. */
 export const UNRESERVED_REASON = 'the browser could not reserve storage for this tab';
-/** `space()` failed otherwise: the root or tmp/ could not be opened. */
-export const UNOPENED_REASON = 'the browser storage of this site could not be opened';
+/**
+ * `space()` failed otherwise: the root or tmp/ could not be opened. The root's lasting UnknownError
+ * comes here: WebKit gives it for its ephemeral sessions (Safari's private windows) and for a
+ * storage that fails in a normal window, and Firefox for the latter, so the sentence is true of both
+ * and says only that a private window may have none (review storage-r2 of line WQA's sweep, D5, M1,
+ * 2026-11-19: a normal window had been told it was a private one).
+ */
+export const UNOPENED_REASON = 'the browser storage of this site could not be opened (a private window may have none)';
 /** `open()` failed after `space()` had worked: making the session's directory, or its check. */
 export const BROKEN_REASON = 'the browser storage of this site failed when LOSAT used it';
 

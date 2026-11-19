@@ -250,7 +250,7 @@ describe('why a session keeps its data in memory', () => {
   const at = (error: DOMException) => `${error.name}: ${error.message}`;
 
   it.each([
-    ['refused from the start (WebKit, ephemeral)', { space: new StorageRefusedError(WEBKIT) }, REFUSED_REASON, at(WEBKIT)],
+    ['the root could not be opened (WebKit: ephemeral, or a failing storage)', { space: WEBKIT }, UNOPENED_REASON, at(WEBKIT)],
     ['refused from the start (Firefox, private window)', { space: new StorageRefusedError(FIREFOX) }, REFUSED_REASON, at(FIREFOX)],
     ['tmp/ could not be made', { space: new DOMException('Disk I/O failed.', 'UnknownError') }, UNOPENED_REASON, 'UnknownError: Disk I/O failed.'],
     ['full at the start', { space: QUOTA }, FULL_REASON, at(QUOTA)],
@@ -359,18 +359,44 @@ describe('why a session keeps its data in memory', () => {
     return { calls: () => calls };
   }
 
-  it('the first getDirectory() refused (SecurityError, or UnknownError twice) is a private window', async () => {
-    for (const answers of [[FIREFOX], [WEBKIT, WEBKIT]]) {
-      storage(...answers);
-      const error = await opfsAccess.space().then(
-        () => undefined,
-        (rejected: unknown) => rejected,
-      );
-      expect(error).toBeInstanceOf(StorageRefusedError);
-      expect((error as StorageRefusedError).cause).toBe(answers[0]);
+  it('only a SecurityError of the first getDirectory() is a refusal, and it is not asked again', async () => {
+    const refused = storage(FIREFOX);
+    const error = await opfsAccess.space().then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    expect(error).toBeInstanceOf(StorageRefusedError);
+    expect((error as StorageRefusedError).cause).toBe(FIREFOX);
+    expect(refused.calls()).toBe(1);
+    const session = await startDataSession({ token: 'own', locks: new FakeLocks(), opfs: opfsAccess });
+    expect(session.fallbackReason).toBe(REFUSED_REASON);
+    expect(session.fallbackError).toBe(at(FIREFOX));
+  });
+
+  // Review storage-r2 of line WQA's sweep, D5, M1 (2026-11-19): in a normal Firefox or WebKit
+  // window whose storage folder could not be written, getDirectory() rejected with the same
+  // UnknownError every time, and the page said "as in a private window". WebKit answers its
+  // ephemeral sessions with the same error and message, so neither can be told from the other.
+  it('a lasting UnknownError of the first getDirectory() is storage that could not be opened, not a refusal', async () => {
+    const FIREFOX_FAILING = new DOMException('Could not create actor', 'UnknownError');
+    // Chromium's answer when its storage folder cannot be made (a probe, 2026-11-19): asked once.
+    const CHROMIUM_FAILING = new DOMException(
+      'An operation that depends on state cached in an interface object was made but the state had changed since it was read from disk.',
+      'InvalidStateError',
+    );
+    for (const [failure, calls] of [
+      [WEBKIT, 2],
+      [FIREFOX_FAILING, 2],
+      [CHROMIUM_FAILING, 1],
+    ] as const) {
+      const failing = storage(failure);
+      await expect(opfsAccess.space()).rejects.toBe(failure);
+      expect(failing.calls()).toBe(calls);
       const session = await startDataSession({ token: 'own', locks: new FakeLocks(), opfs: opfsAccess });
-      expect(session.fallbackReason).toBe(REFUSED_REASON);
-      expect(session.fallbackError).toBe(at(answers[0]!));
+      expect(session.store.backend).toBe('memory');
+      expect(session.fallbackReason).toBe(UNOPENED_REASON);
+      expect(session.fallbackError).toBe(at(failure));
+      expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 0 });
     }
   });
 
@@ -408,7 +434,8 @@ describe('why a session keeps its data in memory', () => {
     const reasons = [REFUSED_REASON, FULL_REASON, UNSUPPORTED_REASON, UNRESERVED_REASON, UNOPENED_REASON, BROKEN_REASON];
     const cleanups = [NO_LOCKS_CLEANUP, LOCK_FAILED_CLEANUP, UNREADABLE_CLEANUP];
     for (const reason of [...reasons, ...cleanups]) {
-      expect(reason).not.toMatch(/error|exception|transient|GetDirectory|OPFS|Web Lock|lock|API/i);
+      // A lock as a word: "site data blocked" names no lock.
+      expect(reason).not.toMatch(/error|exception|transient|GetDirectory|OPFS|\blocks?\b|API/i);
     }
   });
 });

@@ -260,10 +260,12 @@ function opfsStorage(): StorageManager {
 
 /**
  * The root of the site's storage when a session starts (`space()`), the first thing that asks for
- * it. A refusal from the start is StorageRefusedError (session.ts): SecurityError (Firefox's private
- * windows, a site whose data is blocked), or UnknownError again on a second try (WebKit's ephemeral
- * sessions, as Safari's private windows, answer it every time; a passing fault would not).
- * Anything else, a full storage among them, stays the browser's error.
+ * it. Only SecurityError is the browser's refusal, StorageRefusedError (session.ts): Firefox's
+ * private windows, a site whose data is blocked. An UnknownError is tried once more, as a passing
+ * fault would not come again; when it does, it stays the browser's error, as does anything else (a
+ * full storage among them). WebKit answers the same UnknownError for its ephemeral sessions (as
+ * Safari's private windows) and for a storage that fails in a normal window, and Firefox for the
+ * latter, so it is no refusal (review storage-r2 of line WQA's sweep, D5, M1, 2026-11-19).
  */
 async function firstRoot(storage: StorageManager): Promise<FileSystemDirectoryHandle> {
   for (let attempt = 1; ; attempt++) {
@@ -272,7 +274,7 @@ async function firstRoot(storage: StorageManager): Promise<FileSystemDirectoryHa
     } catch (error) {
       const name = (error as { name?: unknown }).name;
       if (name === 'UnknownError' && attempt < 2) continue;
-      throw name === 'SecurityError' || name === 'UnknownError' ? new StorageRefusedError(error) : error;
+      throw name === 'SecurityError' ? new StorageRefusedError(error) : error;
     }
   }
 }

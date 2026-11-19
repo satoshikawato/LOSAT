@@ -5,7 +5,7 @@ import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
-import { SearchDraft, type DraftSource } from '../../src/application/draft';
+import { noSequenceOf, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -124,6 +124,51 @@ describe('SearchDraft inputs', () => {
     expect(source.base?.records.map((r) => r.id)).toEqual(['q1', 'q2']);
     expect(source.check).toEqual({ state: 'ok', records: 2 });
     expect(source.head).toBe('>q1\nACGT\n>q2\nGGCC\n');
+  });
+
+  // Line WQA's sweep, D4 (2026-11-19): an input without residues is read and run as the command line
+  // runs it, and is told apart from one with a sequence, and (D4 review) from one whose records with
+  // residues are left out. A source whose records are all left out is not one (runs leave it out), nor
+  // is one with an empty record among others.
+  it('tells an input that holds no sequence, which the engine reads and runs take as they are', async () => {
+    const { draft } = setup();
+    const cases: ReadonlyArray<readonly [string, string, 'none' | undefined]> = [
+      ['empty.fa', '', 'none'],
+      ['blank.fa', '  \n\t\n', 'none'],
+      ['defline.fa', '>empty record\n', 'none'],
+      ['deflines.fa', '>a\n>b\n\n', 'none'],
+      ['mixed.fa', '>a\nACGT\n>empty record\n>b\nGGCC\n', undefined],
+      ['plain.fa', '>a\nACGT\n', undefined],
+    ];
+    draft.addFiles('subject', cases.map(([name, text]) => file(name, text)));
+    await draft.idle();
+    cases.forEach(([name, , none], index) => {
+      const source = sourceOf(draft, 'subject', index);
+      expect(source.name).toBe(name);
+      expect(source.check).toMatchObject({ state: 'ok' });
+      expect(noSequenceOf(source), name).toBe(none);
+    });
+    // What runs take decides: the records with residues left out, the rest holds none, though the input
+    // has a sequence; every record left out, runs leave the source out. Deflines alone, one of them left
+    // out, still have no sequence at all.
+    const mixed = sourceOf(draft, 'subject', 4);
+    draft.setIncluded('subject', mixed.key, [0, 2], false);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 4))).toBe('excluded');
+    draft.setIncluded('subject', mixed.key, [1], false);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 4))).toBeUndefined();
+    draft.setIncluded('subject', mixed.key, [0], true);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 4))).toBeUndefined();
+    const deflines = sourceOf(draft, 'subject', 3);
+    draft.setIncluded('subject', deflines.key, [0], false);
+    await draft.idle();
+    expect(noSequenceOf(sourceOf(draft, 'subject', 3))).toBe('none');
+    // The run is not refused: the command line runs these inputs.
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    expect(draft.readiness()).toBeUndefined();
   });
 
   it('replaces the paste source when the text changes, and removes it when the text is emptied', async () => {
@@ -632,7 +677,7 @@ describe('SearchDraft accessions (line WF-1)', () => {
     draft.setPaste('query', 'NC_000001.11');
     draft.fetchAccessions('query');
     await draft.idle();
-    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10\u00a0MB') });
   });
 });
 
@@ -920,7 +965,7 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
     await draft.idle();
     draft.fetchGroup('subject', 0, 'cncb');
     await draft.idle();
-    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10\u00a0MB') });
     expect(draft.state.get().subject.fetched).toEqual({ 1: { fasta: P, source: 'ncbi' } });
   });
 

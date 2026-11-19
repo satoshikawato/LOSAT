@@ -51,6 +51,7 @@ import { inputLead, type InputLead } from '../domain/input-format';
 import { describedSections, formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
+import { withUnit } from '../domain/units';
 import type { DataGateway } from '../ports/data';
 import { failureText, withRemedy } from './availability';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
@@ -1592,7 +1593,7 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
     case 'not-found':
       return `${label} has no ${kind} record ${accession}.`;
     case 'too-large':
-      return `${accession} makes the fetched text larger than ${FETCH_BYTE_LIMIT / 1_000_000} MB: download it from ${label} and open it with "Open FASTA files…".`;
+      return `${accession} makes the fetched text larger than ${withUnit(FETCH_BYTE_LIMIT / 1_000_000, 'MB')}: download it from ${label} and open it with "Open FASTA files…".`;
     case 'unreachable':
       return `${label} could not be reached (${result.detail}).`;
     case 'refused':
@@ -1615,6 +1616,28 @@ export function holdsInputs(state: DraftState): boolean {
 /** The included records of a ready source. */
 export function includedOf(source: DraftSource): readonly DatasetRecord[] {
   return source.base === undefined ? [] : includedRecords({ ...source.base, excluded: source.excluded });
+}
+
+/**
+ * Why what runs take of a source that is read holds no residue, if it holds none: `none`, the input has
+ * no residue at all (an empty file, white space only, deflines alone); `excluded`, it has records with
+ * residues, but they are left out and the records included have none. The engine reads such an input,
+ * as NCBI's reader does, and runs search it as the command line does: it adds nothing to the search,
+ * and NCBI BLAST+ 2.17.0 warns of it or ends the run with an error, by role, program and the other
+ * inputs (an empty subject alone: `Empty CBlastQueryVector`; a lone subject record without residues:
+ * `The average subject length is too short` in BLASTN and TBLASTX, a warning in the others; an empty
+ * query alone: `Query is Empty!`, a warning; a lone query record without residues: `Sequence contains
+ * no data`, an error). So its card shows no "Accepted" mark (line WQA's sweep, D4, 2026-11-19; D4
+ * review). Undefined for a source with an included record that has residues, and for one whose
+ * records are all left out: runs leave it out.
+ */
+export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefined {
+  if (source.status !== 'ready' || source.base === undefined) return undefined;
+  const { records } = source.base;
+  if (records.length === 0) return 'none';
+  const included = includedOf(source);
+  if (included.length === 0 || included.some((record) => record.length > 0)) return undefined;
+  return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
 function nameOf(source: DraftSource, role: InputRole): string {

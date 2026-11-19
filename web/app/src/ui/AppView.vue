@@ -15,6 +15,7 @@ import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import { useRunAnnouncements } from './run-announcements';
 import StorageStatus from './StorageStatus.vue';
+import { tabNavigation, type MainTab } from './tab-history';
 import TabList from './TabList.vue';
 
 const props = defineProps<{
@@ -38,9 +39,26 @@ const unavailable = computed(() => {
   const problem = availabilityState.value.problem;
   return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some((run) => run.status === 'completed'));
 });
-const tab = ref<'search' | 'results'>('search');
+/** The tab shown. Choosing one goes through the page's history, so Back on the results returns to the form (tab-history.ts). */
+const shown = ref<MainTab>('search');
+const navigation = tabNavigation(window.history);
+/** How far the form was scrolled, and what had the focus, when the Search tab was left: Back returns there, as between pages. */
+const form = { scroll: 0, focus: null as Element | null };
+function leave(): void {
+  if (shown.value !== 'search') return;
+  form.scroll = window.scrollY;
+  form.focus = document.activeElement;
+}
+const tab = computed<MainTab>({
+  get: () => shown.value,
+  set: (value) => {
+    if (value !== shown.value) leave();
+    shown.value = value;
+    navigation.choose(value);
+  },
+});
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
-const mainTabs = ref<{ focus: () => void }>();
+const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
 /** Search and Results: tabs, each with its panel (WA2-AX-12). */
 const ids = useId();
 const MAIN_TABS = [
@@ -81,6 +99,36 @@ async function showSearch(): Promise<void> {
   mainTabs.value?.focus();
 }
 
+/**
+ * Back or Forward moved between the tabs' history entries (tab-history.ts). The form comes back where
+ * it was scrolled, with the focus where it was (it stays mounted, so "Run LOSAT" has it again after
+ * Back); a focus that is not there to give back goes to the Search tab, without scrolling, when it
+ * was on the other tab or went with the results. The results come back from their heading, as
+ * "Run LOSAT" shows them: their panel mounts again and its views read their content afterwards
+ * (outputs, alignments), so a position further down could not be met (review of 6fff89265).
+ */
+async function arrived(): Promise<void> {
+  const next = navigation.arrived();
+  if (next === shown.value) return;
+  leave();
+  shown.value = next;
+  await nextTick();
+  if (next === 'results') {
+    resultsPanel.value?.showHeading();
+    return;
+  }
+  window.scrollTo(0, form.scroll);
+  const panel = document.getElementById(MAIN_TABS[0].panel);
+  const active = document.activeElement;
+  const onTab = MAIN_TABS.some((main) => main.id === active?.id);
+  if (form.focus instanceof HTMLElement && form.focus.isConnected && panel?.contains(form.focus)) {
+    form.focus.focus({ preventScroll: true });
+  } else if (active === null || active === document.body || !active.isConnected || onTab) {
+    mainTabs.value?.focus({ preventScroll: true });
+  }
+}
+const onPopState = () => void arrived();
+
 // A file dropped outside an input's drop zone would make the browser open it in place of
 // the application (and end the searches of this tab).
 const keep = (event: DragEvent) => {
@@ -89,10 +137,12 @@ const keep = (event: DragEvent) => {
 onMounted(() => {
   window.addEventListener('dragover', keep);
   window.addEventListener('drop', keep);
+  window.addEventListener('popstate', onPopState);
 });
 onUnmounted(() => {
   window.removeEventListener('dragover', keep);
   window.removeEventListener('drop', keep);
+  window.removeEventListener('popstate', onPopState);
 });
 </script>
 

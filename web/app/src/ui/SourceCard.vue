@@ -6,11 +6,12 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
-import { includedOf } from '../application/draft';
+import { includedOf, noSequenceOf } from '../application/draft';
 import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
+import { withUnit } from '../domain/units';
 import { announce } from './announcer';
 import { formatBytes, formatCount } from './format';
 import LosatLoader from './LosatLoader.vue';
@@ -38,6 +39,18 @@ const otherKind = computed(
 );
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
+/**
+ * What runs take of the input holds no residue (an empty file, white space, deflines alone, or only
+ * records without residues included): the engine reads it, and a run searches it as the command line
+ * does, so the card says what that gives in place of the check mark of "Accepted", in words that fit a
+ * query and a subject (line WQA's sweep, D4, 2026-11-19, and its review; `noSequenceOf`).
+ */
+const noSequence = computed(() => noSequenceOf(props.source));
+const NO_SEQUENCE_TEXT = {
+  none: 'This input has no sequence, so it adds nothing to the search, and the run may end with an error. Add a sequence or remove it.',
+  excluded:
+    'Only records without a sequence are included, so this input adds nothing to the search, and the run may end with an error. Include a record that has a sequence, or remove this input.',
+} as const;
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
 /**
  * A pasted text of accessions only that are not one per line (WA2-OP-04): Fetch takes them one per line, so the card offers
@@ -142,6 +155,7 @@ const verdict = computed(() => {
     fetchHint.value,
     check?.state,
     check === undefined ? undefined : check.state === 'ok' ? check.records : 'message' in check ? check.message : undefined,
+    noSequence.value,
     otherKind.value,
     otherKind.value > 0 ? kind.value : '',
     duplicateCount.value,
@@ -154,7 +168,9 @@ const verdict = computed(() => {
     if (fetchHint.value) parts.push(FETCH_HINT);
     if (markHint.value) parts.push(markHint.value);
   } else if (check !== undefined) {
-    if (check.state === 'ok') parts.push(`Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
+    if (check.state === 'ok') {
+      parts.push(noSequence.value ? NO_SEQUENCE_TEXT[noSequence.value] : `Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
+    }
     else if (check.state === 'refused') parts.push(`The ${programLabel.value} engine refuses this input: ${check.message}`);
     else if (check.state === 'error') parts.push(check.unavailable === true ? UNCHECKED : `The input could not be checked here (${check.message}).`);
     if (otherKind.value > 0) {
@@ -238,7 +254,7 @@ watch(verdict, (now) => {
       <p class="summary" :data-testid="`${testid}-summary`">
         {{ formatCount(records.length) }} {{ records.length === 1 ? 'record' : 'records' }}
         <template v-if="included.length !== records.length">({{ formatCount(included.length) }} included)</template>
-        · {{ formatCount(totalLength) }} {{ unit }}
+        · {{ withUnit(formatCount(totalLength), unit) }}
       </p>
 
       <p
@@ -248,6 +264,15 @@ watch(verdict, (now) => {
         data-check="pending"
       >
         <LosatLoader />Checking…
+      </p>
+      <p
+        v-else-if="source.check?.state === 'ok' && noSequence"
+        class="warning"
+        :data-testid="`${testid}-check`"
+        data-check="ok"
+        :data-sequence="noSequence"
+      >
+        {{ NO_SEQUENCE_TEXT[noSequence] }}
       </p>
       <p v-else-if="source.check?.state === 'ok'" class="ok" :data-testid="`${testid}-check`" data-check="ok">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7" /></svg>

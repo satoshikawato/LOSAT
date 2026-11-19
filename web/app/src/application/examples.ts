@@ -21,6 +21,7 @@ import {
   type ExampleSet,
 } from '../domain/examples';
 import { refusedSentence, unreachableSentence } from '../domain/download-sentences';
+import { withUnit } from '../domain/units';
 import type {
   DownloadResult,
   ExampleCopy,
@@ -336,7 +337,7 @@ function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: Exa
     case 'unavailable':
       return withRemedy(result.detail);
     case 'too-large':
-      return `The file from ${host} is larger than ${EXAMPLE_BYTE_LIMIT / (1024 * 1024)} MiB decompressed.`;
+      return `The file from ${host} is larger than ${withUnit(EXAMPLE_BYTE_LIMIT / (1024 * 1024), 'MiB')} decompressed.`;
   }
 }
 

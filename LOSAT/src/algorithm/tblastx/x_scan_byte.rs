@@ -311,7 +311,56 @@ fn shared_presence(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
 /// Whether at most `X_SPARSE_TENTHS` tenths of the backbone cells of `lookup` have hits.
 fn sparse(presence: &[u8; X_MASK + 1], lookup: &BlastAaLookupTable) -> bool {
     let ones = presence.iter().filter(|&&b| b == 1).count();
+    sparse_ones(ones, lookup)
+}
+
+// No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
+/// `sparse` for a table whose presence bytes hold `ones` ones.
+fn sparse_ones(ones: usize, lookup: &BlastAaLookupTable) -> bool {
     ones * 10 <= lookup.backbone.len() * X_SPARSE_TENTHS
+}
+
+// No NCBI counterpart: counts the presence bits of `lookup`; it does not change any value NCBI
+// computes.
+/// The ones `build_presence` would write for `lookup`: the bits of `pv` at the indexes of the
+/// 15-bit space inside the backbone.
+fn presence_ones(lookup: &BlastAaLookupTable) -> usize {
+    let end = lookup.backbone.len().min(X_MASK + 1);
+    lookup
+        .pv
+        .iter()
+        .enumerate()
+        .map(|(w, &word)| {
+            let first = w << PV_ARRAY_BTS;
+            let bits = end.saturating_sub(first).min(PV_ARRAY_MASK + 1);
+            let mask = if bits > PV_ARRAY_MASK {
+                u32::MAX
+            } else {
+                (1u32 << bits) - 1
+            };
+            (word & mask).count_ones() as usize
+        })
+        .sum()
+}
+
+// No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): whether `mode` scans `lookup` on presence bytes (it is on, the
+/// table `fits`, and it is sparse if `mode` asks), decided from `pv` without the bytes: the
+/// same answer as `x_kept_presence(mode, &x_table_presence(lookup)).is_some()`, for a caller that
+/// builds the bytes when a scan first needs them (`x_build_presence`; tblastx's unit-group tables).
+pub(crate) fn x_table_takes(mode: XScanByte, lookup: &BlastAaLookupTable) -> bool {
+    mode.on()
+        && fits(lookup)
+        && (mode != XScanByte::Sparse || sparse_ones(presence_ones(lookup), lookup))
+}
+
+// No NCBI counterpart: the presence vector in another layout; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table that `fits` (`build_presence`),
+/// for a caller that decided with `x_table_takes`.
+pub(crate) fn x_build_presence(lookup: &BlastAaLookupTable) -> XPresence {
+    debug_assert!(fits(lookup), "presence bytes of a table that does not fit");
+    build_presence(lookup)
 }
 
 // No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
@@ -1565,6 +1614,46 @@ mod tests {
         assert!(
             near_end > 0,
             "no chain too near the overflow array's end for a run"
+        );
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXSCANBYTE decides from `pv` (`x_table_takes`) what the kept
+    // bytes decide (`x_kept_presence` of `x_table_presence`), on sparse and dense tables, in every
+    // mode, and the ones counted from `pv` are the ones of the bytes.
+    #[test]
+    fn table_takes_equals_kept_presence() {
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let modes = [
+            XScanByte::Off,
+            XScanByte::On { avx2: false },
+            XScanByte::On { avx2: true },
+            XScanByte::Sparse,
+        ];
+        let mut sides = [0usize; 2];
+        for case in 0..24 {
+            let queries: Vec<Vec<u8>> = (0..1 + case % 4)
+                .map(|_| {
+                    let len = 8 + rng.below([40, 400, 4_000][case % 3]);
+                    (0..len).map(|_| AMINO[rng.below(AMINO.len())]).collect()
+                })
+                .collect();
+            let lookup = lookup_for(&queries, [11, 13, 15][case % 3]);
+            let kept = x_table_presence(&lookup);
+            let (bytes, _) = kept.as_ref().expect("a tblastn-shaped table fits");
+            let ones = bytes.iter().filter(|&&b| b == 1).count();
+            assert_eq!(presence_ones(&lookup), ones, "case {case}");
+            for mode in modes {
+                let want = x_kept_presence(mode, &kept).is_some();
+                assert_eq!(x_table_takes(mode, &lookup), want, "case {case} {mode:?}");
+                if mode == XScanByte::Sparse {
+                    sides[usize::from(want)] += 1;
+                }
+            }
+            assert_eq!(*x_build_presence(&lookup), **bytes, "case {case}");
+        }
+        assert!(
+            sides[0] > 0 && sides[1] > 0,
+            "both sides of the sparse rule: {sides:?}"
         );
     }
 

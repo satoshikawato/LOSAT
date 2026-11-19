@@ -11,6 +11,7 @@ use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::core::psi::KarlinBlk;
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
 fn encode(text: &str) -> Vec<u8> {
@@ -56,7 +57,7 @@ fn run_of(consensus: &[u8]) -> RedoRun<'_> {
             alpha: 1.9,
             beta: -30.0,
         },
-        k.ln(),
+        k.glibc_ln(),
         (11, 1),
         (25.0, 0),
         QueryPssm {
@@ -244,7 +245,7 @@ fn the_window_copy_is_the_x_drop_redo() {
                             cutoff,
                             crate::core::link_hsps::LinkContext {
                                 lambda: 0.267,
-                                log_k: 0.041f64.ln(),
+                                log_k: 0.041f64.glibc_ln(),
                                 query_length: n,
                                 length_adjustment: 0,
                                 eff_searchsp: search_space,
@@ -414,10 +415,10 @@ fn a_significant_score_zero_is_decided_by_the_first_cell() {
 #[test]
 fn the_evalue_of_a_score_is_karlin_altschuls() {
     let lambda = 0.267 / SCALING_FACTOR;
-    let log_k = (1.2f64 * 0.041).ln();
+    let log_k = (1.2f64 * 0.041).glibc_ln();
     assert_eq!(
         evalue_from_score(3200, lambda, log_k, 1e6),
-        1e6 * (-(lambda * 3200.0) + log_k).exp()
+        1e6 * (-(lambda * 3200.0) + log_k).glibc_exp()
     );
-    assert_eq!(evalue_from_score(0, lambda, log_k, 1.0), log_k.exp());
+    assert_eq!(evalue_from_score(0, lambda, log_k, 1.0), log_k.glibc_exp());
 }

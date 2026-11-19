@@ -1,7 +1,7 @@
 # v0.2.0 release test set E: the `-db` rows re-run against NCBI BLAST+ 2.17.0
 
 Set E of [the release test plan](../../../release/v0.2.0_certification_plan.md) (section 2) on the
-candidate commit `C` = `703caed171944b0763c2efa4b3ef58805099fc47`, 2026-11-19.
+candidate commit `C` = `93ca2f652617acac09d416c28c293cc8a1a501d1`, 2026-11-19.
 
 - Where: the Linux x86_64 workstation (Intel Xeon Gold 6338, Linux 6.8), CPUs booked untimed on NUMA
   node 0. NCBI BLAST+ 2.17.0 is the official Linux x64 archive; every binary has the SHA-256 of the

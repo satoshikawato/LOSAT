@@ -1,0 +1,1 @@
+- Tests: the WASI runner's slow-reader pipe tests run their shell pipeline from a script file instead of `sh -c`, which CodeQL reported as a shell command built from absolute paths (code scanning alert #45).

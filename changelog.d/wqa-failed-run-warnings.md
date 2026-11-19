@@ -6,5 +6,4 @@
   `-outfmt`, so `blastp -num_alignments 0 -outfmt 6` is refused with "No hits are being saved", as on
   the command line. A run with a structured `-outfmt` (5, 8, 9, 11 to 17) now also shows the queries'
   warnings, such as "Sequence contains no data", that outfmt 0, 6 and 7 write. TBLASTX's file of
-  `-logfile` holds what the command line's file holds, and with `-logfile /dev/null` or
-  `-logfile ""` the run shows no warning, as the command line writes none.
+  `-logfile` holds what the command line's file holds.

@@ -402,10 +402,9 @@ starting with the CLI's standard error for the argv (§5; D3 review r2, 2026-11-
 asks for format 0 to 4 gives the formatting handler's lines of the tabular formats after its own
 lines, where they came first, and a failed one does not give them; TBLASTX's file of `-logfile`
 holds only the argv's lines, the rest coming on stream 3. A run that completes gives the same lines,
-in another order where the argv asks for format 0 to 4. So did TBLASTX's run with `-logfile ""` or
-`-logfile /dev/null` (§5; D3 review r3, 2026-11-19): it adds nothing to stream 3, where it gave the
-other formats' lines. So did a run whose argv asks for a structured format (§5; D3 review r3,
-2026-11-19): stream 3 adds the queries' warnings that the other formats write, where it had none.
+in another order where the argv asks for format 0 to 4. So did a run whose argv asks for a
+structured format (§5; D3 review r3, 2026-11-19): stream 3 adds the queries' warnings that the other
+formats write, where it had none.
 
 Version 3 (line RG item T7-W, 2026-11-16) adds the signal of stream 9 (§5): a stream that fails
 alone after the host received a chunk of it, which made the run fail in version 2, is discarded

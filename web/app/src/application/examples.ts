@@ -35,6 +35,11 @@ import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
 export type ExampleLoad =
+  /**
+   * Asking LOSAT again whether it can be used (ExamplesDeps.unavailable), before any request: the row shows the load
+   * busy, with Cancel, and its sentence as before the press.
+   */
+  | { readonly state: 'asking' }
   /** Looking for the saved copy. */
   | { readonly state: 'reading' }
   | { readonly state: 'downloading'; readonly bytes: number; readonly total?: number }
@@ -207,11 +212,19 @@ export class ExampleLoader {
     this.update({ note: undefined });
     // While a part of LOSAT could not be loaded or stopped, the load fails with what the page says, before any
     // download: the set was downloaded whole (8 to 37 MB), and then the file was blamed, as the engine's decoders that
-    // inflate it, or the Data worker that keeps it, were what could not be used.
+    // inflate it, or the Data worker that keeps it, were what could not be used. The load is busy from the press: while
+    // LOSAT was asked again, it had no state, so the row showed no Cancel, and a mode change or a Delete did not end it:
+    // the set then downloaded and was saved for a mode the user had left (the fourth review of D1 and D2, M1).
+    progress({ state: 'asking' });
     const problem = await this.deps.unavailable?.();
     if (signal.aborted) return;
     if (problem !== undefined) {
       fail(withRemedy(problem));
+      return;
+    }
+    // A mode that has no button for the set gets none of it.
+    if (!set.programs.includes(this.deps.draft.state.get().program)) {
+      this.cancel();
       return;
     }
     progress({ state: 'reading' });

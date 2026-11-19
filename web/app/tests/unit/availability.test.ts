@@ -17,11 +17,25 @@ import { NodeInflater } from './support/node-inflater';
 
 const SERIAL = 'LOSAT could not download its engine file /engine/losat-web-serial-0123.wasm (network error)';
 
+/** Holds the answers of the calls made while it is on, until `release` (a request in flight). */
+function newGate() {
+  const gate = {
+    on: false,
+    held: [] as Array<() => void>,
+    release(): void {
+      gate.on = false;
+      for (const go of gate.held.splice(0)) go();
+    },
+  };
+  return gate;
+}
+
 /**
  * A search form whose Data worker cannot load the engine's serial module: every call that needs it fails so, while its
- * flag in `fail` is set (a test clears it when the module downloads).
+ * flag in `fail` is set when it is made (a test clears it when the module downloads). With `gate`, an index made while
+ * the gate is on answers only at its release.
  */
-function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; validate?: boolean } = {}) {
+function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; validate?: boolean } = {}, gate = newGate()) {
   let token = 0;
   const data = new DataService({
     store: new MemoryBlockStore(),
@@ -37,7 +51,9 @@ function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; val
   const indexSource = data.indexSource.bind(data);
   data.indexSource = (...args) => {
     calls.index++;
-    return fail.index === true ? unavailable() : indexSource(...args);
+    const failing = fail.index === true;
+    const answer = () => (failing ? unavailable() : indexSource(...args));
+    return gate.on ? new Promise<void>((resolve) => gate.held.push(resolve)).then(answer) : answer();
   };
   const checkInput = data.checkInput.bind(data);
   data.checkInput = (...args) => (fail.check === true ? unavailable() : checkInput(...args));
@@ -63,6 +79,14 @@ function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; val
 }
 
 const sourceOf = (draft: SearchDraft, role: 'query' | 'subject'): DraftSource => draft.state.get()[role].sources[0]!;
+
+const later = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Waits until `condition` holds. */
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !condition(); i++) await later(1);
+  expect(condition()).toBe(true);
+}
 
 describe('a part of LOSAT that is unavailable, in the search form', () => {
   it('an input that could not be read for it is not the input\'s fault, and Run LOSAT says what the page says', async () => {
@@ -278,6 +302,62 @@ describe('Run LOSAT and the Examples ask the engine again before they refuse', (
     expect(await availability.recheck()).toBeUndefined();
     expect(sourceOf(draft, 'query').status).toBe('ready');
     expect(draft.state.get().description?.program).toBe('blastn');
+  });
+
+  // The fourth review, M1 (2026-11-19): an Example waited for all of the form's work (draft.idle), a large index too.
+  it('the problem that an Example decides on waits for what the form asked again, not for the rest of its work', async () => {
+    const fail = { describe: true, validate: true };
+    const gate = newGate();
+    const { draft } = setup(fail, gate);
+    const availability = new Availability({ draft, dataWorkerEnded: never });
+    await draft.idle();
+    expect(availability.state.get()).toEqual({ problem: SERIAL });
+    // An input is being read meanwhile (its answer is held), and its validation failed too.
+    gate.on = true;
+    draft.setPaste('query', '>q\nACGT\n');
+    await until(() => gate.held.length === 1 && draft.state.get().validation.state === 'unavailable');
+    fail.describe = false;
+    fail.validate = false;
+    expect(availability.state.get()).toEqual({ problem: SERIAL });
+    const answer = await Promise.race([availability.recheck(), later(100).then(() => 'waited for the read')]);
+    expect(answer).toBeUndefined();
+    gate.release();
+    await draft.idle();
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+  });
+
+  // The fourth review, L1 (2026-11-19): a question in flight at the press, which failed after it, was not asked again:
+  // Run LOSAT said "Reload the page", and the next press succeeded.
+  it('Run LOSAT asks once more a question that was in flight at the press and failed after it', async () => {
+    const fail = { index: true };
+    const gate = newGate();
+    const { draft, calls } = setup(fail, gate);
+    gate.on = true;
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await until(() => gate.held.length === 2);
+    // The connection is back; the two reads made before still fail.
+    fail.index = false;
+    const pressed = draft.submit();
+    await later(5);
+    gate.release();
+    expect(await pressed).toEqual({ ok: true, runIds: ['r0'] });
+    expect(calls.index).toBe(4);
+  });
+
+  it('and once only, when the engine still cannot answer', async () => {
+    const fail = { index: true };
+    const gate = newGate();
+    const { draft, calls } = setup(fail, gate);
+    gate.on = true;
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await until(() => gate.held.length === 2);
+    const pressed = draft.submit();
+    await later(5);
+    gate.release();
+    expect(await pressed).toEqual({ ok: false, message: `${SERIAL}. Reload the page.` });
+    expect(calls.index).toBe(4);
   });
 
   it('a Data worker that ended is not asked again', async () => {

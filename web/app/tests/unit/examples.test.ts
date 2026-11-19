@@ -214,7 +214,8 @@ describe('ExampleLoader', () => {
     draft.setPaste('query', '>old\nACGT\n');
     examples.load('refseq-16s-bacteria');
     await draft.idle();
-    expect(examples.state.get().load).toBeUndefined();
+    // Busy from the press, with Cancel (the fourth review of D1 and D2, M1).
+    expect(examples.state.get().load).toEqual({ id: 'refseq-16s-bacteria', progress: { state: 'asking' } });
     answer();
     await settle();
     expect(examples.state.get().load).toEqual({
@@ -229,6 +230,56 @@ describe('ExampleLoader', () => {
     await settle();
     expect(downloader.requests.map((request) => request.url)).toEqual([SIXTEEN_S.url]);
     expect(examples.state.get().loaded).toEqual({ id: 'refseq-16s-bacteria', count: 1 });
+  });
+
+  // The fourth review of D1 and D2, M1 (2026-11-19): while LOSAT was asked again, the load had no state, so a mode change,
+  // a Delete or Cancel did not end it: 16S (8 MB) then downloaded and was saved for a mode the user had left.
+  describe('a load that waits while LOSAT is asked again', () => {
+    function waiting() {
+      let answer: () => void = () => undefined;
+      const loader = setup({ unavailable: () => new Promise((resolve) => (answer = () => resolve(undefined))) });
+      loader.examples.load('refseq-16s-bacteria');
+      expect(loader.examples.state.get().load).toEqual({ id: 'refseq-16s-bacteria', progress: { state: 'asking' } });
+      return { ...loader, answer: () => answer() };
+    }
+
+    it('ends at a mode that has no button for the set, before any request', async () => {
+      const { draft, examples, downloader, store, settle, answer } = waiting();
+      draft.setProgram('blastp');
+      // The row of the mode follows (ExampleLine's watch).
+      examples.refresh();
+      expect(examples.state.get().load).toBeUndefined();
+      answer();
+      await settle();
+      expect(downloader.requests).toEqual([]);
+      expect(await store.readExample(SIXTEEN_S.id, SIXTEEN_S.url)).toBeUndefined();
+      expect(examples.state.get().loaded).toBeUndefined();
+    });
+
+    it('gets no set for a mode that changed meanwhile, also unseen by the row', async () => {
+      const { draft, examples, downloader, settle, answer } = waiting();
+      draft.setProgram('blastp');
+      answer();
+      await settle();
+      expect(downloader.requests).toEqual([]);
+      expect(examples.state.get().load).toBeUndefined();
+    });
+
+    it('ends at Cancel and at a Delete, before any request', async () => {
+      const cancelled = waiting();
+      cancelled.examples.cancel();
+      expect(cancelled.examples.state.get().load).toBeUndefined();
+      cancelled.answer();
+      await cancelled.settle();
+      expect(cancelled.downloader.requests).toEqual([]);
+
+      const deleted = waiting();
+      await deleted.examples.delete('refseq-16s-bacteria');
+      expect(deleted.examples.state.get().load).toBeUndefined();
+      deleted.answer();
+      await deleted.settle();
+      expect(deleted.downloader.requests).toEqual([]);
+    });
   });
 
   it('says what the page says when the decoders or the store of the sets stop during a load, not that the file is damaged', async () => {

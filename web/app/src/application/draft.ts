@@ -303,7 +303,7 @@ export class SearchDraft {
       validation: { state: 'idle' },
       submitting: false,
     });
-    this.loadDescription('blastn');
+    void this.loadDescription('blastn');
     this.scheduleValidation();
   }
 
@@ -320,7 +320,7 @@ export class SearchDraft {
     const description = this.described.get(program);
     // The engine's start of the other program's argv is not this program's (its -conffile row goes until the validation).
     this.set({ program, description, descriptionError: undefined, descriptionUnavailable: undefined, message: undefined, start: undefined });
-    this.loadDescription(program);
+    void this.loadDescription(program);
     for (const role of ROLES) {
       const parser = fastaParser(next, role);
       for (const source of this.role(role).sources) {
@@ -927,9 +927,15 @@ export class SearchDraft {
     }
     // What the engine could not answer while a part of LOSAT could not be loaded is asked again first: Run LOSAT was
     // refused with "Reload the page" and asked nothing, also once the engine file downloaded again (the third review of
-    // line WQA's D1 and D2, M1, 2026-11-19).
-    this.askAgain();
+    // line WQA's D1 and D2, M1, 2026-11-19). A question still in flight at the press, which fails only after it, was not
+    // among those, and the next press then succeeded (its fourth review, L1): such a question is asked once more.
+    const failed = this.unavailableQuestions();
+    void this.askAgain();
     await this.idle();
+    if ([...this.unavailableQuestions()].some((question) => !failed.has(question))) {
+      void this.askAgain();
+      await this.idle();
+    }
     const { program, threads, title } = this.state.get();
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
@@ -1121,28 +1127,29 @@ export class SearchDraft {
 
   // --- asynchronous work ------------------------------------------------------------------
 
-  private loadDescription(program: ProgramId): void {
+  /** Asks the engine for the program's options (once, while it answers); settles once the form has the answer. */
+  private loadDescription(program: ProgramId): Promise<void> {
     let description = this.descriptions.get(program);
     if (description === undefined) {
       description = this.deps.engine.describe(program);
       this.descriptions.set(program, description);
       description.catch(() => this.descriptions.delete(program));
     }
-    this.track(
-      description.then(
-        (value) => {
-          this.described.set(program, value);
-          if (this.state.get().program === program) this.set({ description: value, descriptionError: undefined, descriptionUnavailable: undefined });
-          this.scheduleValidation();
-          this.askAgain();
-        },
-        (error: unknown) => {
-          if (this.state.get().program === program) {
-            this.set({ descriptionError: messageOf(error), descriptionUnavailable: isUnavailable(error) ? true : undefined });
-          }
-        },
-      ),
+    const answered = description.then(
+      (value) => {
+        this.described.set(program, value);
+        if (this.state.get().program === program) this.set({ description: value, descriptionError: undefined, descriptionUnavailable: undefined });
+        this.scheduleValidation();
+        void this.askAgain();
+      },
+      (error: unknown) => {
+        if (this.state.get().program === program) {
+          this.set({ descriptionError: messageOf(error), descriptionUnavailable: isUnavailable(error) ? true : undefined });
+        }
+      },
     );
+    this.track(answered);
+    return answered;
   }
 
   /**
@@ -1152,20 +1159,41 @@ export class SearchDraft {
    * page" for the whole session, also after searches completed (the second review of line WQA's D1 and D2, M1,
    * 2026-11-19). It is asked when the engine answers the options, an index or a check, when Run LOSAT is pressed, and
    * before an Example is loaded (Availability.recheck). A question is pending until it answers; one that fails asks
-   * nothing again.
+   * nothing again. Settles once what it asked has answered (and a validation that it asked has run), not the rest of
+   * the form's work: an Example waited for all of it, a large index or a fetch too (the fourth review, M1).
    */
-  askAgain(): void {
+  askAgain(): Promise<void> {
     const state = this.state.get();
-    this.askOptionsAgain();
+    const asked: Array<Promise<unknown>> = [];
+    const options = this.askOptionsAgain();
+    if (options !== undefined) asked.push(options);
     for (const role of ROLES) {
       for (const source of state[role].sources) {
-        if (source.status === 'failed' && source.unavailable === true) this.reindex(role, source.key, this.parserOf(role));
+        if (source.status === 'failed' && source.unavailable === true) asked.push(this.reindex(role, source.key, this.parserOf(role)));
         else if (source.status === 'ready' && source.check?.state === 'error' && source.check.unavailable === true) {
-          this.scheduleCheck(role, source.key, 0);
+          asked.push(this.checkNow(role, source.key));
         }
       }
     }
-    if (state.validation.state === 'unavailable') this.scheduleValidation();
+    const validation = state.validation.state === 'unavailable';
+    if (validation) this.scheduleValidation();
+    // The answers schedule a validation of their own; one that was unavailable has answered once none is left.
+    return Promise.allSettled(asked).then(() => (validation ? this.validationSettled() : undefined));
+  }
+
+  /** What the engine could not answer because a part of LOSAT could not be loaded, by question (unavailableOf). */
+  private unavailableQuestions(): Set<string> {
+    const state = this.state.get();
+    const questions = new Set<string>();
+    if (state.descriptionUnavailable === true) questions.add('options');
+    if (state.validation.state === 'unavailable') questions.add('validation');
+    for (const role of ROLES) {
+      for (const source of state[role].sources) {
+        if (source.status === 'failed' && source.unavailable === true) questions.add(`index:${role}:${source.key}`);
+        if (source.check?.state === 'error' && source.check.unavailable === true) questions.add(`check:${role}:${source.key}`);
+      }
+    }
+    return questions;
   }
 
   /**
@@ -1173,18 +1201,19 @@ export class SearchDraft {
    * asks only this: a validation follows every index, also one that failed, which would otherwise be read again after
    * each validation; the options that answer ask the rest again (askAgain).
    */
-  private askOptionsAgain(): void {
+  private askOptionsAgain(): Promise<void> | undefined {
     const { descriptionUnavailable, program } = this.state.get();
-    if (descriptionUnavailable === true && !this.descriptions.has(program)) this.loadDescription(program);
+    return descriptionUnavailable === true && !this.descriptions.has(program) ? this.loadDescription(program) : undefined;
   }
 
   private parserOf(role: InputRole): FastaParserKind {
     return fastaParser(programById(this.state.get().program), role);
   }
 
-  private reindex(role: InputRole, key: string, parser: FastaParserKind): void {
+  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). */
+  private reindex(role: InputRole, key: string, parser: FastaParserKind): Promise<void> {
     const source = this.role(role).sources.find((s) => s.key === key);
-    if (source === undefined) return;
+    if (source === undefined) return Promise.resolve();
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     // The table of the kind that the source leaves is kept, with its exclusions, for a program that reads it again.
@@ -1208,9 +1237,11 @@ export class SearchDraft {
       // An index of the kind that was left, still running, must not replace this table.
       this.nextGeneration(`${role}:${key}`);
       this.scheduleCheck(role, key, 0);
-      return;
+      return Promise.resolve();
     }
-    this.track(this.index(role, key, source.file, parser, source.sourceId));
+    const read = this.index(role, key, source.file, parser, source.sourceId);
+    this.track(read);
+    return read;
   }
 
   private async index(role: InputRole, key: string, file: File, parser: FastaParserKind, known?: string): Promise<void> {
@@ -1248,7 +1279,7 @@ export class SearchDraft {
       }));
       this.noteRevision(sourceId, base.revisionId);
       this.scheduleCheck(role, key, 0);
-      this.askAgain();
+      void this.askAgain();
     } catch (error) {
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
@@ -1267,6 +1298,18 @@ export class SearchDraft {
   private scheduleCheck(role: InputRole, key: string, delay?: number): void {
     this.updateSource(role, key, (source) => (source.status === 'ready' ? { ...source, check: { state: 'pending' } } : source));
     this.debounce(`check:${role}:${key}`, () => this.track(this.check(role, key)), delay);
+  }
+
+  /** Checks a source now, instead of a check of it that waits (askAgain); settles once it is checked. */
+  private checkNow(role: InputRole, key: string): Promise<void> {
+    this.updateSource(role, key, (source) => (source.status === 'ready' ? { ...source, check: { state: 'pending' } } : source));
+    const name = `check:${role}:${key}`;
+    clearTimeout(this.timers.get(name));
+    this.timers.delete(name);
+    this.workers.delete(name);
+    const checked = this.check(role, key);
+    this.track(checked);
+    return checked;
   }
 
   private async check(role: InputRole, key: string): Promise<void> {
@@ -1302,7 +1345,7 @@ export class SearchDraft {
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
     );
-    if (check.state !== 'error') this.askAgain();
+    if (check.state !== 'error') void this.askAgain();
   }
 
   /** The revision of a source's selection: its record table, or a revision without the excluded records. */
@@ -1335,6 +1378,20 @@ export class SearchDraft {
    * which the Data worker reads on an instance of its own, never runs beside another one that reads the
    * file again, and none starts for an argv that is already out of date.
    */
+  /** Settles once no validation waits or runs; one that waits runs now, as idle runs it (askAgain). */
+  private async validationSettled(): Promise<void> {
+    for (;;) {
+      if (this.timers.has('validate')) {
+        clearTimeout(this.timers.get('validate'));
+        this.timers.delete('validate');
+        this.runTimer('validate');
+      }
+      const turn = this.validationTurn;
+      await turn;
+      if (!this.timers.has('validate') && turn === this.validationTurn) return;
+    }
+  }
+
   private validateInTurn(): Promise<void> {
     const generation = this.generations.get('validate');
     const turn = this.validationTurn.then(() => (this.generations.get('validate') === generation ? this.validate() : undefined));
@@ -1392,7 +1449,7 @@ export class SearchDraft {
     this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation, start });
     this.prepareEngine();
-    if (answered) this.askOptionsAgain();
+    if (answered) void this.askOptionsAgain();
   }
 
   /** The registry file of the argv's `-conffile`: the chosen file under the argv's name (`registryName`); undefined without either. */

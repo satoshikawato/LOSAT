@@ -16,9 +16,10 @@
 // was said for the whole session (M1); a threaded runtime whose worker ended was never finished in Firefox (L1); "The part
 // of LOSAT that runs searches stopped." did not say what to do (L2). Its third review: Run LOSAT and the Examples asked
 // the engine nothing again, and were refused once its file downloaded (M1); a runtime already waiting for its keeper
-// was never finished when its worker ended (L2).
+// was never finished when its worker ended (L2). Its fourth review: an Example that waited while LOSAT was asked again
+// showed nothing and could not be ended (M1); Run LOSAT did not ask again what was in flight at the press (L1).
 import { gzipSync } from 'node:zlib';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Route } from '@playwright/test';
 import { test } from './support/test';
 import { exampleById } from '../../src/domain/examples';
 import { BUILD_HAS_ENGINE } from './support/browser';
@@ -259,43 +260,55 @@ test('once the engine file downloads after a failed download, the page no longer
 // The third review of D1 and D2, M1 (2026-11-19): with the inputs pasted while the engine file could not be downloaded,
 // Run LOSAT and the Examples were refused at once with "Reload the page", and asked nothing, also once the file could
 // be downloaded: a reload would have lost the pasted inputs, though one more request read them.
+/** The serial engine file: its requests fail, wait (`held`, until the test answers them) or download, by `mode`. */
+async function engineFile(page: Page) {
+  const file = { mode: 'fail' as 'fail' | 'hold' | 'pass', refused: 0, passed: 0, held: [] as Route[] };
+  await page.context().route(
+    (url) => /^\/engine\/losat-web-serial-[^/]*\.wasm$/.test(url.pathname),
+    async (route) => {
+      if (file.mode === 'hold') file.held.push(route);
+      else if (file.mode === 'pass') {
+        file.passed++;
+        await route.continue();
+      } else {
+        file.refused++;
+        await route.abort('failed');
+      }
+    },
+  );
+  return file;
+}
+
+/**
+ * Both inputs pasted while the engine file cannot be downloaded, until everything that the form asked has failed and
+ * nothing more is asked: a question still pending when the connection came back would read the inputs again by itself.
+ */
+async function pastedWhileUnavailable(page: Page, file: Awaited<ReturnType<typeof engineFile>>): Promise<void> {
+  await openSearch(page);
+  await pasteBoth(page);
+  await notRead(page);
+  await expect(page.getByTestId('losat-unavailable')).toBeVisible();
+  await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', 'failed');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'unavailable');
+  let last = -1;
+  await expect
+    .poll(() => {
+      const settled = file.refused === last;
+      last = file.refused;
+      return settled;
+    }, { intervals: [1000], timeout: 15_000 })
+    .toBe(true);
+}
+
 for (const press of ['Run LOSAT', 'an Example'] as const) {
   test(`${press} asks the engine again once its file can be downloaded, and is not refused`, async ({ page }) => {
     test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
     test.setTimeout(120_000);
-    let blocked = true;
-    let refused = 0;
-    let requests = 0;
-    await page.context().route(
-      (url) => /^\/engine\/losat-web-serial-[^/]*\.wasm$/.test(url.pathname),
-      (route) => {
-        if (!blocked) {
-          requests++;
-          return route.continue();
-        }
-        refused++;
-        return route.abort('failed');
-      },
-    );
+    const file = await engineFile(page);
     const away = await stubExampleHost(page);
-    await openSearch(page);
-    await pasteBoth(page);
-    await notRead(page);
-    await expect(page.getByTestId('losat-unavailable')).toBeVisible();
-    // Everything that the form asked has failed, and nothing more is asked: a question still pending when the connection
-    // came back would read the inputs again by itself.
-    await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', 'failed');
-    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'unavailable');
-    let last = -1;
-    await expect
-      .poll(() => {
-        const settled = refused === last;
-        last = refused;
-        return settled;
-      }, { intervals: [1000], timeout: 15_000 })
-      .toBe(true);
+    await pastedWhileUnavailable(page, file);
     // The connection is back; nothing is edited.
-    blocked = false;
+    file.mode = 'pass';
     if (press === 'Run LOSAT') {
       await page.getByTestId('run-losat').click();
       await waitStatus(page, 1, 'completed', 60_000);
@@ -306,10 +319,64 @@ for (const press of ['Run LOSAT', 'an Example'] as const) {
       await expect(page.getByTestId('example-error')).toHaveCount(0);
       expect(away).toEqual([SIXTEEN_S.url]);
     }
-    expect(requests).toBeGreaterThan(0);
+    expect(file.passed).toBeGreaterThan(0);
     await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
   });
 }
+
+// The fourth review of D1 and D2, M1 (2026-11-19): while LOSAT was asked again, the Example's load had no state: the row
+// showed no Cancel, and a mode change did not end it, so 16S (8 MB) downloaded and was saved for a mode the user left.
+for (const end of ['a mode change', 'Cancel'] as const) {
+  test(`an Example that waits while LOSAT is asked again has Cancel, and ${end} ends it before any request`, async ({ page }) => {
+    test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+    test.setTimeout(120_000);
+    const file = await engineFile(page);
+    const away = await stubExampleHost(page);
+    await pastedWhileUnavailable(page, file);
+    // The connection is back, and the engine file is on its way.
+    file.mode = 'hold';
+    const row = 'example-refseq-16s-bacteria';
+    const offer = 'Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov';
+    await page.getByTestId(row).click();
+    // Busy from the press, with the row's words as before it.
+    await expect(page.getByTestId(`${row}-cancel`)).toBeVisible();
+    await expect(page.getByTestId(`${row}-note`)).toHaveText(offer);
+    await expect.poll(() => file.held.length).toBeGreaterThan(0);
+    if (end === 'Cancel') await page.getByTestId(`${row}-cancel`).click();
+    else await page.getByTestId('program-blastp').check();
+    file.mode = 'pass';
+    for (const route of file.held.splice(0)) await route.continue();
+    if (end === 'a mode change') await program(page, 'blastn');
+    await expect(page.getByTestId('losat-unavailable')).toHaveCount(0, { timeout: 30_000 });
+    await page.waitForTimeout(1000);
+    // Nothing was downloaded nor kept: the row offers the download as before.
+    await expect(page.getByTestId(`${row}-note`)).toHaveText(offer);
+    await expect(page.getByTestId(`${row}-cancel`)).toHaveCount(0);
+    expect(away).toEqual([]);
+  });
+}
+
+// The fourth review of D1 and D2, L1 (2026-11-19): a question in flight at the press that failed after it was not asked
+// again, so Run LOSAT could say "Reload the page" though the next press succeeded. In the browser a later question
+// downloads the engine file again and its answer reads the inputs again, so this run started before the fix too: the
+// repeat itself is tested where nothing else asks (availability.test.ts). This guards the press as the user makes it.
+test('Run LOSAT starts the search when a read in flight at the press fails after it', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+  test.setTimeout(120_000);
+  const file = await engineFile(page);
+  await pastedWhileUnavailable(page, file);
+  // An edit of the query is read while the engine file is on its way.
+  file.mode = 'hold';
+  await page.getByTestId('query-input').fill(`${QUERY}ACGT\n`);
+  await expect.poll(() => file.held.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  await page.getByTestId('run-losat').click();
+  await page.waitForTimeout(1000);
+  // The connection is back, but the requests made before fail.
+  file.mode = 'pass';
+  for (const route of file.held.splice(0)) await route.abort('failed');
+  await waitStatus(page, 1, 'completed', 60_000);
+  expect(file.passed).toBeGreaterThan(0);
+});
 
 test('the options say that they were not read when the engine file cannot be downloaded', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);

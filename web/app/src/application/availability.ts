@@ -19,7 +19,7 @@ export interface AvailabilityDeps {
    * The search form, whose describe, inputs, checks and validation say when a part of LOSAT could not be loaded, and
    * which asks the engine again (recheck).
    */
-  readonly draft: { readonly state: Store<DraftState> } & Pick<SearchDraft, 'askAgain' | 'idle'>;
+  readonly draft: { readonly state: Store<DraftState> } & Pick<SearchDraft, 'askAgain'>;
   /** Settles when the Data worker could not start or ended: for good, as no call of it can succeed again. */
   readonly dataWorkerEnded: Promise<Error>;
 }
@@ -41,13 +41,11 @@ export class Availability {
    * What of LOSAT is unavailable once the search form asked the engine again what it could not ask it: an engine file
    * that could not be downloaded may download now. The Data worker does not come back. An Example decides on it; it
    * was refused with "Reload the page", and asked nothing, also once the engine file downloaded again (the third
-   * review of line WQA's D1 and D2, M1, 2026-11-19).
+   * review of line WQA's D1 and D2, M1, 2026-11-19). It waits for the answers to what the form asked again, not for
+   * the rest of the form's work (its fourth review, M1).
    */
   async recheck(): Promise<string | undefined> {
-    if (this.ended === undefined && this.state.get().problem !== undefined) {
-      this.deps.draft.askAgain();
-      await this.deps.draft.idle();
-    }
+    if (this.ended === undefined && this.state.get().problem !== undefined) await this.deps.draft.askAgain();
     return this.state.get().problem;
   }
 

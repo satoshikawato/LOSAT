@@ -335,7 +335,6 @@ fn check_options_fails_as_a_run_does() {
         (&["11"][..], &[][..]),
         // NCBI's formatting handler: a custom delimiter that a field uses (W10).
         (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
         // NCBI's error of a matrix BLASTX does not take (IDENTITY, `std_matrix_only`).
         (&FORMATS[..], &["-matrix", "IDENTITY"][..]),
         (&FORMATS[..], &["-evalue", "0"][..]),
@@ -370,7 +369,12 @@ fn check_options_fails_as_a_run_does() {
         failed += usize::from(run.is_err());
     }
     // Every case but the three searches and the valid ranges fails.
-    assert_eq!(failed, 12);
+    assert_eq!(failed, 11);
+    // `-parse_deflines` passes the check: the records come later, read with the ids of their
+    // deflines (LOSAT Web's `register_inputs`; line WQA's sweep, D7, 2026-11-19); a run of records
+    // that kept none is refused (`refusals_come_before_any_output`).
+    let args = blastx_args(&inputs.query, &inputs.subject, &["-parse_deflines"]);
+    crate::algorithm::blastx::check_options(&args, &["6"]).unwrap();
 }
 
 /// Values that the command line's parser refuses and a caller of `run_local` can set itself get

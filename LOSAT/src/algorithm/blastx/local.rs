@@ -1212,7 +1212,10 @@ fn search_database(
 /// (`OutputSink::Files`, which LOSAT Web gives them).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
     let requested: Vec<(&str, bool)> = outfmts.iter().map(|&outfmt| (outfmt, true)).collect();
-    let (choices, resolutions) = read_options(args, &requested, false)?;
+    // The records come later: LOSAT Web reads those of `-parse_deflines` with the ids of their
+    // deflines (`register_inputs`, `api::input::read_search_inputs`; line WQA's sweep, D7,
+    // 2026-11-19), and `run_local` refuses records that kept none.
+    let (choices, resolutions) = read_options(args, &requested, true)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1280,8 +1283,8 @@ fn read_options(
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The records keep no ids read from their deflines (the host registers them before it knows
-    // the options).
+    // The records keep no ids read from their deflines (a caller that read them without the
+    // option: LOSAT Web reads them with it, `register_inputs`).
     if args.parse_deflines && !ids_read {
         bail!("-parse_deflines is not supported in the browser yet");
     }

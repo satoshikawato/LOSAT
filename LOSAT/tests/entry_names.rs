@@ -395,7 +395,7 @@ fn help_has_no_source_references_and_a_true_footer() {
             let output = run(losat(), &words(flag));
             assert!(output.status.success(), "{program} {flag}: {output:?}");
             let text = String::from_utf8_lossy(&output.stdout).into_owned();
-            for leak in ["ncbi-blast/", "```", "Reference:"] {
+            for leak in ["ncbi-blast/", "```", "Reference:", "NCBI reference"] {
                 assert!(!text.contains(leak), "{program} {flag}: {leak:?}\n{text}");
             }
             // No hint names `--help`, which the programs do not show.

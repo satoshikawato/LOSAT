@@ -43,10 +43,12 @@ export function formatDateTime(ms: number): string {
   return `${date} ${two(time.getHours())}:${two(time.getMinutes())}:${two(time.getSeconds())}`;
 }
 
-/** The first paragraph of an option's help (`describe`), without the references to NCBI's sources. */
+/**
+ * The first paragraph of an option's help (`describe`). The engine's help names no NCBI sources
+ * (`LOSAT/tests/entry_names.rs`, `help_has_no_source_references_and_a_true_footer`).
+ */
 export function optionHelp(raw: string | undefined): string {
-  const paragraph = (raw ?? '').split(/\n\s*\n/)[0] ?? '';
-  return paragraph.replace(/\s*(?:NCBI reference|Reference):.*$/s, '').trim();
+  return ((raw ?? '').split(/\n\s*\n/)[0] ?? '').trim();
 }
 
 /** A count and its noun, singular for one: "1 subject", "3 subjects", "1 HSP", "5 HSPs" (W4b screen review L12). */

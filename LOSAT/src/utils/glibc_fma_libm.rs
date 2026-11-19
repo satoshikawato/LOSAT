@@ -787,120 +787,117 @@ fn pow_impl<F: Fma>(x: f64, y: f64) -> f64 {
     exp_core::<F, true>(ehi, elo, sign_bias, false)
 }
 
-/// The library's [`Fma`] where the CPU is not asked: [`Emulated`] on WebAssembly and on x86-64
-/// builds without the `fma` feature (whose CPUs with FMA take `x86_fma`), [`Fused`] elsewhere.
-#[cfg(any(
-    target_arch = "wasm32",
-    all(target_arch = "x86_64", not(target_feature = "fma"))
-))]
+/// The library's [`Fma`] where the CPU is not asked: [`Emulated`] on WebAssembly, [`Fused`] on
+/// aarch64 and on x86-64 builds with the `fma` feature. x86-64 builds without it ask the CPU
+/// (`x86_fma`).
+#[cfg(not(all(target_arch = "x86_64", not(target_feature = "fma"))))]
+#[cfg(target_arch = "wasm32")]
 type Portable = Emulated;
-#[cfg(not(any(
-    target_arch = "wasm32",
-    all(target_arch = "x86_64", not(target_feature = "fma"))
-)))]
+#[cfg(not(all(target_arch = "x86_64", not(target_feature = "fma"))))]
+#[cfg(not(target_arch = "wasm32"))]
 type Portable = Fused;
 
-/// x86-64 builds without the `fma` feature: copies compiled with it, called when the CPU has FMA
-/// (the same bits as [`Emulated`]; the instruction is the fast way to get them). They are never
-/// inlined: a caller compiled with a feature that implies `fma` (the `avx512f` helper of
-/// `x_newton_exact.rs`) would otherwise take their FMA instructions out of this module, where
-/// `LOSAT/tests/check_fp_contract.py binary` allows them.
-#[cfg(all(target_arch = "x86_64", not(target_feature = "fma")))]
-mod x86_fma {
-    use super::{exp_impl, ln_impl, log10_impl, pow_impl, Fused};
-
-    #[inline]
-    pub(super) fn available() -> bool {
-        std::arch::is_x86_feature_detected!("fma")
-    }
-
-    #[target_feature(enable = "fma")]
-    #[inline(never)]
-    pub(super) fn exp(x: f64) -> f64 {
-        exp_impl::<Fused>(x)
-    }
-
-    #[target_feature(enable = "fma")]
-    #[inline(never)]
-    pub(super) fn ln(x: f64) -> f64 {
-        ln_impl::<Fused>(x)
-    }
-
-    #[target_feature(enable = "fma")]
-    #[inline(never)]
-    pub(super) fn log10(x: f64) -> f64 {
-        log10_impl::<Fused>(x)
-    }
-
-    #[target_feature(enable = "fma")]
-    #[inline(never)]
-    pub(super) fn pow(x: f64, y: f64) -> f64 {
-        pow_impl::<Fused>(x, y)
-    }
-}
-
-/// Calls the `x86_fma` copy (`$fast`) when the CPU has FMA, else `$portable`.
-macro_rules! dispatch {
-    ($fast:expr, $portable:expr) => {{
-        #[cfg(all(target_arch = "x86_64", not(target_feature = "fma")))]
-        {
-            if x86_fma::available() {
-                // SAFETY: the CPU has the `fma` feature that the copy is compiled with.
-                return unsafe { $fast };
-            }
-        }
-        $portable
-    }};
-}
-
-/// Defines the `*_portable` entry points, each `$imp::<Portable>`. Where [`Portable`] is [`Fused`]
-/// (aarch64, x86-64 builds with `fma`) they are never inlined, so their FMA instructions stay in
-/// this module, the only one besides `stats::spouge` where `LOSAT/tests/check_fp_contract.py
-/// binary` allows them; elsewhere they hold none and the compiler decides.
-macro_rules! portable {
+/// Defines the entry points `$name`, each `$imp::<Portable>`. Where [`Portable`] is [`Fused`] they
+/// are never inlined, so their FMA instructions stay in this module, the only one besides
+/// `stats::spouge` where `LOSAT/tests/check_fp_contract.py binary` allows them; on WebAssembly
+/// they hold none and the compiler decides.
+#[cfg(not(all(target_arch = "x86_64", not(target_feature = "fma"))))]
+macro_rules! entry_points {
     ($(fn $name:ident($($arg:ident),+) = $imp:ident;)+) => {$(
-        #[cfg_attr(
-            not(any(
-                target_arch = "wasm32",
-                all(target_arch = "x86_64", not(target_feature = "fma"))
-            )),
-            inline(never)
-        )]
+        #[cfg_attr(not(target_arch = "wasm32"), inline(never))]
         fn $name($($arg: f64),+) -> f64 {
             $imp::<Portable>($($arg),+)
         }
     )+};
 }
 
-portable! {
+#[cfg(not(all(target_arch = "x86_64", not(target_feature = "fma"))))]
+entry_points! {
     fn exp_portable(x) = exp_impl;
     fn ln_portable(x) = ln_impl;
     fn log10_portable(x) = log10_impl;
     fn pow_portable(x, y) = pow_impl;
 }
 
+/// x86-64 builds without the `fma` feature: each entry point is chosen on its first call, a copy
+/// compiled with `fma` ([`Fused`]) when the CPU has FMA, else [`Emulated`] (the same bits), and
+/// then called through a pointer, as glibc's ifunc does. A direct call would let a caller compiled
+/// with a feature that implies `fma` (the `avx512f` helper of `x_newton_exact.rs`) inline the
+/// copy and take its FMA instructions out of this module, where
+/// `LOSAT/tests/check_fp_contract.py binary` allows them: rustc 1.92 drops `#[inline(never)]` on a
+/// `#[target_feature]` function.
+#[cfg(all(target_arch = "x86_64", not(target_feature = "fma")))]
+mod x86_fma {
+    use super::{exp_impl, ln_impl, log10_impl, pow_impl, Emulated, Fused};
+    use std::sync::atomic::{AtomicPtr, Ordering};
+
+    macro_rules! ifunc {
+        (@f64 $arg:ident) => { f64 };
+        ($(fn $name:ident($($arg:ident),+) = $imp:ident;)+) => {$(
+            pub(super) fn $name($($arg: f64),+) -> f64 {
+                type Entry = unsafe fn($(ifunc!(@f64 $arg)),+) -> f64;
+                #[target_feature(enable = "fma")]
+                unsafe fn fused($($arg: f64),+) -> f64 {
+                    $imp::<Fused>($($arg),+)
+                }
+                fn emulated($($arg: f64),+) -> f64 {
+                    $imp::<Emulated>($($arg),+)
+                }
+                fn resolve($($arg: f64),+) -> f64 {
+                    let entry: Entry = if std::arch::is_x86_feature_detected!("fma") {
+                        fused
+                    } else {
+                        emulated
+                    };
+                    SLOT.store(entry as *mut (), Ordering::Relaxed);
+                    // SAFETY: `fused` is chosen only when the CPU has FMA.
+                    unsafe { entry($($arg),+) }
+                }
+                static SLOT: AtomicPtr<()> = AtomicPtr::new(resolve as Entry as *mut ());
+                // SAFETY: `SLOT` holds `resolve`, `emulated` or `fused` (stored only when the CPU
+                // has FMA), each an `Entry`.
+                unsafe {
+                    let entry = std::mem::transmute::<*mut (), Entry>(SLOT.load(Ordering::Relaxed));
+                    entry($($arg),+)
+                }
+            }
+        )+};
+    }
+
+    ifunc! {
+        fn exp(x) = exp_impl;
+        fn ln(x) = ln_impl;
+        fn log10(x) = log10_impl;
+        fn pow(x, y) = pow_impl;
+    }
+}
+#[cfg(all(target_arch = "x86_64", not(target_feature = "fma")))]
+use x86_fma::{
+    exp as exp_portable, ln as ln_portable, log10 as log10_portable, pow as pow_portable,
+};
+
 /// glibc's `exp` on x86-64 with FMA, bit for bit.
 #[inline]
 pub fn exp(x: f64) -> f64 {
-    dispatch!(x86_fma::exp(x), exp_portable(x))
+    exp_portable(x)
 }
 
 /// glibc's `log` on x86-64 with FMA, bit for bit.
 #[inline]
 pub fn ln(x: f64) -> f64 {
-    dispatch!(x86_fma::ln(x), ln_portable(x))
+    ln_portable(x)
 }
 
 /// glibc's `log10` on x86-64 with FMA, bit for bit.
 #[inline]
 pub fn log10(x: f64) -> f64 {
-    dispatch!(x86_fma::log10(x), log10_portable(x))
+    log10_portable(x)
 }
 
 /// glibc's `pow` on x86-64 with FMA, bit for bit.
 #[inline]
 pub fn pow(x: f64, y: f64) -> f64 {
-    dispatch!(x86_fma::pow(x, y), pow_portable(x, y))
+    pow_portable(x, y)
 }
 
 /// The functions above as methods: `x.glibc_exp()` in place of `x.exp()`.

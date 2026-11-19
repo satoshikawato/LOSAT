@@ -144,7 +144,7 @@ describe('working session ownership', () => {
     // Results kept in memory have a budget (S09). The note under the page names it as the
     // storage-full message does (review of WQA D5, M1).
     expect((session.store as MemoryBlockStore).capacityBytes()).toBe(MEMORY_RESULTS_CAPACITY_BYTES);
-    expect(MEMORY_RESULTS_CAPACITY).toBe('512 MB');
+    expect(MEMORY_RESULTS_CAPACITY).toBe('512\u00a0MB');
     expect(MEMORY_FULL_MESSAGE).toContain(`at most ${MEMORY_RESULTS_CAPACITY} in a tab`);
   });
 

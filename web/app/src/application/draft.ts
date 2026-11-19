@@ -51,6 +51,7 @@ import { inputLead, type InputLead } from '../domain/input-format';
 import { describedSections, formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
+import { withUnit } from '../domain/units';
 import type { DataGateway } from '../ports/data';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import { registryName, unreadableConffile } from './conffile';
@@ -1468,7 +1469,7 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
     case 'not-found':
       return `${label} has no ${kind} record ${accession}.`;
     case 'too-large':
-      return `${accession} makes the fetched text larger than ${FETCH_BYTE_LIMIT / 1_000_000} MB: download it from ${label} and open it with "Open FASTA files…".`;
+      return `${accession} makes the fetched text larger than ${withUnit(FETCH_BYTE_LIMIT / 1_000_000, 'MB')}: download it from ${label} and open it with "Open FASTA files…".`;
     case 'unreachable':
       return `${label} could not be reached (${result.detail}).`;
     case 'refused':

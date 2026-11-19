@@ -564,6 +564,7 @@ CLI は query を batch ごとに読む（`CBlastInput::GetNextSeqBatch`、`blas
 |---|---|
 | 読む | `read_input_records(search, query, subject)` が `InputRecords { query, query_end, subject }` を返す。`query_end: QueryEnd` は `Input`（入力の終わり）、`BlankLines`（空行と comment 行だけ。NCBI の eEOF で batch が終わり、何も無ければ最初の batch に query が無く `Empty CBlastQueryVector`）、`Error(QueryError)`（reader の誤り。CLI の文言と、その record について reader がそれまでに書いた警告）。subject の誤りはここで失敗する（CLI は最初の query の前に subject を全部読む）。`read_inputs` は形を変えず、`Error` のときは従来どおり `Error::Input` |
 | 検索 | `Inputs::query_end(&end)`（`InputRecords::inputs`、`database`）。`run` と `run_batches` は records の後にその終わりを置き、CLI の batch と同じ所で誤りを返す。各 program の `run_local` は query の次に `query_end` を取り（`run_local(args, query, query_end, subject, outputs)`、blastp は subject の後にラベル 2 つ）、`QueryReading` に渡す。BLASTX の batch の繰り返しは、その batch で誤りを上げる |
-| CLI | CLI の読み方（`fasta_reader::read_queries`、`QueryReading`）は変えない |
+| CLI | CLI の読み方（`fasta_reader::read_queries`、`QueryReading`）は変えない。確認（2026-11-20）：`check_losat.py --only pd.` の 131 行と、`fasta_input_fixtures.py check` の読み手の誤りの行（`_bad`、`title_`、`after_error`、`hyphen_first_only`、`semicolon_short`）395 行が NCBI の凍結出力と同じ |
+| 例 | `examples/library_command_line` は `read_input_records` で読み、query の読み手の誤りで CLI と同じ所で終わる |
 | LOSAT Web | adapter の `register` と `register_inputs` が `read_query_records` で読み、終わりを handle に持たせて run に渡す。scan は reader の誤りで止まり、`reader_error`（offset と文言）を返す（docs/web/abi_v2.md §4、§9） |
 | 試験 | `api/reader_end_tests.rs`：5 program で、2 番目の batch にある誤りの報告と誤りが CLI と一致すること、`run_batches` の終わり、comment 行だけの query |

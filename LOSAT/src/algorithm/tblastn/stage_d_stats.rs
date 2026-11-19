@@ -479,6 +479,7 @@ mod tests {
     use crate::config::{ProteinScoringSpec, ScoringMatrix};
     use crate::stats::spouge::lookup_protein_gumbel_params;
     use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     // Pinned NCBI blast_setup.c:729-735,770-847 and the actual
     // BLAST_LinkHsps/Blast_HSPListGetEvalues query contexts in
@@ -698,8 +699,8 @@ mod tests {
     #[test]
     fn positive_uneven_gap_pair_matches_ncbi_double_bits() {
         let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let first = params.lambda * 331.0 - params.k.ln();
-        let second = params.lambda * 329.0 - params.k.ln();
+        let first = params.lambda * 331.0 - params.k.glibc_ln();
+        let second = params.lambda * 329.0 - params.k.glibc_ln();
         let divisor = crate::stats::sum_statistics::gap_decay_divisor(0.1, 2);
         let actual = crate::stats::sum_statistics::uneven_gap_sum_e(
             50,

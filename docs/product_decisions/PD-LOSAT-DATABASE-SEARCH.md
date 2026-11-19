@@ -884,8 +884,10 @@ opener, the reader's error texts and the title rules are those of BLASTP's `-db`
   `-db` until stage DB-7.
 
 Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same rules apply to the
-database's sequences and titles): a database sequence longer than 5,000,000 residues (NCBI searches it
-in overlapping parts; refused at the first query batch with a valid context, as the reader's errors),
+database's sequences and titles): a database sequence longer than 5,000,000 residues, as with
+`-subject` a record (NCBI searches it in overlapping parts; refused at the first query batch with a
+valid context, as the reader's errors, in one form, `database sequence N has M residues; ...` or
+`subject sequence N has M residues; ...`, exit status 1),
 `-searchsp`, `-db_soft_mask`, `-db_hard_mask`, the id and taxonomy lists, and the options BLASTX
 rejects with `-subject`.
 

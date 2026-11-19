@@ -1,4 +1,5 @@
-![LOSAT](images/losat-logo.svg)
+<img class="logo-for-light" src="images/losat-logo.svg" alt="LOSAT" width="420">
+<img class="logo-for-dark" src="images/losat-logo-white.svg" alt="LOSAT" width="420">
 
 # Introduction
 

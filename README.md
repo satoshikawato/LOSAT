@@ -158,7 +158,7 @@ On WASI, the host program opens the files: Node.js (`node:wasi`) reads `..` in a
 
 ## Quick Start
 
-Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and `rpsbproc` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. It stops without changing anything if a file of one of these names is already there, such as NCBI's own program.
+Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and `rpsbproc` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. A link or copy that an earlier LOSAT made is replaced; it stops without changing anything if another file of one of these names is already there, such as NCBI's own program.
 
 LOSAT adopts the standard NCBI single-dash command-line syntax:
 

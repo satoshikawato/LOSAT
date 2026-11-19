@@ -189,6 +189,30 @@ test('the file of -logfile of TBLASTX holds what the CLI writes for the run\'s o
   );
 });
 
+// Where TBLASTX's run messages go nowhere (-logfile /dev/null; ABI §4), the run shows no warning: the
+// CLI writes none for any format, and the lines that the run's other formats add go nowhere too
+// (line WQA's sweep, D3 review r3, 2026-11-19: the tabular formats' warning and error showed).
+test('TBLASTX with -logfile /dev/null shows no warning, as the CLI writes none', async ({ page }) => {
+  await program(page, 'tblastx');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await page.getByTestId('param-extra').fill('-logfile /dev/null');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-diagnostics-none')).toHaveText('The engine wrote no warnings.');
+  await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+  if (NATIVE === undefined) return;
+  for (const outfmt of ['0', '6']) {
+    const cli = spawnSync(NATIVE, ['tblastx', '-query', 'query.fa', '-subject', 'subject.fa', '-num_alignments', '0', '-outfmt', outfmt, '-logfile', '/dev/null', '-num_threads', '1'], { cwd: nativeDirectory(QUERY, SUBJECT) });
+    expect(String(cli.stderr), `-outfmt ${outfmt}`).toBe('');
+  }
+});
+
 // -conffile: the engine's start names the file, the form asks for it, and without it the engine's error
 // (the CLI's) keeps the search from starting. A file of any name is read under the argv's name; a file
 // that NCBI cannot read is refused with NCBI's report.

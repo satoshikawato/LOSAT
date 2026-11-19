@@ -795,3 +795,47 @@ fn a_callers_start_reads_its_files_and_hands_over_the_log() {
         ]
     );
 }
+
+// What a caller's run adds to the command line's messages for its arguments (`CallerStart::add`,
+// LOSAT Web's other formats) goes to its diagnostics, but where the run's messages go nowhere
+// (TBLASTX's `-logfile ""` and `-logfile /dev/null`), and never to the file of `-logfile` (line
+// WQA's sweep, D3 review r3, 2026-11-19).
+#[test]
+fn what_a_callers_run_adds_goes_where_the_run_s_messages_can_go() {
+    use crate::blastinput::ncbi_environment::ApplicationStart;
+    use crate::report::run_files::RunFiles;
+    let kept = std::sync::Arc::new(Kept::default());
+    let files = Files(Vec::new());
+    for (program, logfile, shown) in [
+        ("tblastx", None, true),
+        ("tblastx", Some("run.log"), true),
+        ("tblastx", Some("-"), true),
+        ("tblastx", Some(""), false),
+        ("tblastx", Some("/dev/null"), false),
+        ("blastn", Some(""), true),
+        ("blastn", Some("/dev/null"), true),
+        ("blastp", Some("run.log"), true),
+    ] {
+        let words: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
+        let mut stderr = Vec::new();
+        let started = begin_with(
+            ApplicationStart::with_files(program, &words, &[], &files),
+            &words,
+            &RunFiles::Receiver(kept.clone()),
+            &mut stderr,
+        )
+        .unwrap();
+        let mut diagnostics = Vec::new();
+        started.add(b"Warning: w\n", &mut diagnostics).unwrap();
+        let expected: &[u8] = if shown { b"Warning: w\n" } else { b"" };
+        assert_eq!(diagnostics, expected, "{program} {logfile:?}");
+        started.finish().unwrap();
+    }
+    // The files of `-logfile` hold nothing of it.
+    assert!(kept
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|(_, bytes)| bytes.is_empty()));
+}

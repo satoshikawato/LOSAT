@@ -394,7 +394,10 @@ def own_search() -> list[dict]:
     warning where the argv asks for outfmt 0 or 1, before it for outfmt 6).
 
     The application start's error without a line end (review r2 L2): `-conffile` of a file that is
-    not registered (NCBI's `Critical: (106.23) Registry file "x.ini" not found, aborting.`)."""
+    not registered (NCBI's `Critical: (106.23) Registry file "x.ini" not found, aborting.`).
+
+    TBLASTX runs whose messages go nowhere (`-logfile /dev/null`, `-logfile ""`; review r3 M1):
+    stream 3 is empty, as the CLI's standard error for every format."""
     inputs = {
         "blastp": ["-query", "tests/fasta/outfmt0/e2e_many_query.faa",
                    "-subject", "tests/fasta/outfmt0/e2e_many_subject.faa"],
@@ -461,6 +464,10 @@ def own_search() -> list[dict]:
             add(f"handler.{program}.line_length.sorthsps.warned{'.outfmt' + outfmt if outfmt else ''}", program,
                 [*handler["line_length"], *handler["sorthsps"]], outfmt, failure=False, given=warned)
     add("start.blastp.conffile_missing", "blastp", ["-conffile", "x.ini"], prolog=False)
+    for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
+        add(f"logfile.tblastx.na0.{name}", "tblastx", ["-num_alignments", "0", "-logfile", logfile], failure=False)
+        add(f"logfile.tblastx.line_length.warned.{name}", "tblastx", [*handler["line_length"], "-logfile", logfile],
+            failure=False, given=warned)
     return searches
 
 

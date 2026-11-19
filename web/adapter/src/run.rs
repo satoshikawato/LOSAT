@@ -1377,7 +1377,8 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
 /// (`search_all`), and the error that ends the run with an NCBI message is posted there after them
 /// (`CallerStart::post`), as on the command line. A run that completes then adds to stream 3 what
 /// the other formats' standard error adds (`Done::added`), which no file of the argv's CLI run
-/// holds (line WQA's sweep, D3 review r2, 2026-11-19: TBLASTX's file of `-logfile` had them).
+/// holds (line WQA's sweep, D3 review r2, 2026-11-19: TBLASTX's file of `-logfile` had them), and
+/// which goes nowhere where the run's messages go nowhere (`CallerStart::add`).
 fn run_started(
     words: &[&str],
     query: &[FastaRecord],
@@ -1419,7 +1420,9 @@ fn run_started(
     for writer in &mut writers {
         writer.finish();
     }
-    let _ = std::io::Write::write_all(diagnostics, &added);
+    // Stream 3, unless the run's messages go nowhere (TBLASTX's `-logfile ""` and `/dev/null`;
+    // line WQA's sweep, D3 review r3, 2026-11-19: they showed there).
+    let _ = started.add(&added, diagnostics);
     diagnostics.finish();
     if let Some((hits, recorder, ordinals)) = records {
         emit_hit_records(&hits, &recorder, ordinals.as_deref());
@@ -5076,6 +5079,22 @@ mod tests {
         );
         assert!(!completed[&0].is_empty());
         assert!(completed.get(&6).is_none_or(Vec::is_empty));
+        // Where the run's messages go nowhere (`-logfile ""`, `-logfile /dev/null`), so do the
+        // other formats' lines: the CLI writes none of them (line WQA's sweep, D3 review r3,
+        // 2026-11-19: stream 3 had them).
+        for nowhere in ["", "/dev/null"] {
+            for options in [&["-line_length", "80"][..], &["-num_alignments", "0"]] {
+                let words = [
+                    &["tblastx", "-query", "q", "-subject", "s"][..],
+                    options,
+                    &["-logfile", nowhere],
+                ]
+                .concat();
+                let completed = streams(&words, &query, &subject).unwrap();
+                assert_eq!(diagnostics_of(&completed), "", "{words:?}");
+                assert!(!completed[&0].is_empty(), "{words:?}");
+            }
+        }
     }
 
     // `validate` checks the options of BLASTP, TBLASTN and TBLASTX with the argv's own format,

@@ -412,6 +412,20 @@ impl CallerStart {
         self.log.post_text(text);
     }
 
+    /// Writes `text`, the messages that the caller's run adds to the command line's for its
+    /// arguments (LOSAT Web writes outfmt 0, 6 and 7 besides the argv's `-outfmt`, and gives what
+    /// the command line writes for those formats), to `diagnostics`, unless the run's messages go
+    /// nowhere (`-logfile ""` and `-logfile /dev/null` in TBLASTX, `DiagTarget::Discard`): the
+    /// command line's run of any format writes them nowhere there. The file of `-logfile` keeps
+    /// what the command line's file holds for the arguments (line WQA's sweep, D3 review r3,
+    /// 2026-11-19: they showed where the command line writes none).
+    pub fn add(&self, text: &[u8], diagnostics: &mut dyn Write) -> std::io::Result<()> {
+        match &self.log.0 {
+            Some(DiagTarget::Discard) => Ok(()),
+            _ => diagnostics.write_all(text),
+        }
+    }
+
     /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the
     /// run.
     pub fn finish(self) -> std::io::Result<()> {

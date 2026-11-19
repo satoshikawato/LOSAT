@@ -26,7 +26,7 @@ pub const STREAM_RUN_FILES: u32 = 8;
 /// run of two searches), with where its error is: the host discards what it received of it
 /// (`discard`; docs/web/abi_v2.md §5).
 pub const STREAM_DISCARD: u32 = 9;
-/// The signal of where the messages of a run go (`messages`; docs/web/abi_v2.md §5): the messages
+/// The signal of where the messages of a run go (`messages`; docs/web/abi_v2.md §5): the warnings
 /// that the command line writes to its standard error without `-logfile`. Line WQA's sweep, D7,
 /// 2026-11-20.
 pub const STREAM_MESSAGES: u32 = 10;

@@ -14,7 +14,7 @@ import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration, formatMillis } from './format';
-import { warningsPlaceParts } from './message-place-text';
+import { NO_WARNINGS, warningsPlaceParts } from './message-place-text';
 import PlaceWords from './PlaceWords.vue';
 import { vScrollFocus } from './scroll-focus';
 import VerificationBadge from './VerificationBadge.vue';
@@ -39,6 +39,8 @@ const countsDate = computed(() => dateOf(record.value.windowMasker?.origin?.last
  * nowhere, or that the engine wrote none (line WQA's sweep, D7, 2026-11-20).
  */
 const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, props.loaded.diagnostics, props.run));
+/** Whether those words say that the engine wrote no warnings (its place holds none). */
+const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
 const inputs = computed(() => [
   { role: 'Query', input: snapshot.value.query },
   { role: 'Subject', input: snapshot.value.subject },
@@ -144,7 +146,7 @@ const inputs = computed(() => [
 
     <h3>Warnings</h3>
     <pre v-if="loaded.diagnostics !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>
-    <p v-if="warningsPlace !== undefined" class="muted" :data-testid="loaded.messages === 'diagnostics' ? 'run-diagnostics-none' : 'run-diagnostics-place'">
+    <p v-if="warningsPlace !== undefined" class="muted" :data-testid="noWarnings ? 'run-diagnostics-none' : 'run-diagnostics-place'">
       <PlaceWords :parts="warningsPlace" />
     </p>
   </div>

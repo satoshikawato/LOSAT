@@ -748,16 +748,17 @@ describe('ResultsBrowser', () => {
   });
 
   // Where the run's messages went is the engine's word (RunRecord.messages, its signal of stream 10), not a guess from
-  // the program or the argv: empty diagnostics mean no warnings only where the messages go to them; for TBLASTX with
-  // -logfile they are in that file (under Outputs) or nowhere, also when the diagnostics hold lines (line WQA's sweep,
-  // D7, 2026-11-20).
+  // the program or the argv: empty diagnostics mean no warnings where the messages go to them; for TBLASTX with
+  // -logfile they are in that file (under Outputs) or nowhere, also when the diagnostics hold lines, and an empty file
+  // holds none (line WQA's sweep, D7, 2026-11-20).
   it("takes where the run's messages went from the engine, and says where its warnings are", async () => {
     for (const messages of ['diagnostics', 'logfile', 'nowhere'] as const) {
       const { results } = setup({ record: { messages } });
       await results.open('r1');
       expect(results.state.get().loaded!.messages).toBe(messages);
     }
-    const { results } = setup({ record: { messages: 'logfile', runFiles: [{ name: 'run.log', bytes: new Uint8Array(0) }] } });
+    const warning = new TextEncoder().encode('Warning: [tblastx] Examining 5 or more matches is recommended\n');
+    const { results } = setup({ record: { messages: 'logfile', runFiles: [{ name: 'run.log', bytes: warning }] } });
     await results.open('r1');
     const run = results.state.get().loaded!.run;
     expect(NO_WARNINGS).toBe('The engine wrote no warnings.');
@@ -767,6 +768,17 @@ describe('ResultsBrowser', () => {
     expect(warningsPlaceText('logfile', 'Warning: x\n', run)).toBe("The run's other warnings are in the file of the run's -logfile, run.log, under Outputs.");
     expect(warningsPlaceText('nowhere', '', run)).toBe("The run's warnings are not kept, as the run's -logfile writes its messages nowhere.");
     expect(warningsPlaceText('nowhere', 'Warning: x\n', run)).toBe("The run's other warnings are not kept, as the run's -logfile writes its messages nowhere.");
+    // TBLASTX with -logfile run.log on a search without warnings: the file is empty, as the CLI's, and Run details says
+    // that the engine wrote none (review 3 L1), or nothing besides the diagnostics where they hold lines.
+    const empty = setup({ record: { messages: 'logfile', runFiles: [{ name: 'run.log', bytes: new Uint8Array(0) }] } });
+    await empty.results.open('r1');
+    const emptyRun = empty.results.state.get().loaded!.run;
+    expect(warningsPlaceText('logfile', '', emptyRun)).toBe(NO_WARNINGS);
+    expect(warningsPlaceText('logfile', 'Error: x\n', emptyRun)).toBeUndefined();
+    // Files that are not kept say nothing of what they held.
+    const unkept = setup({ record: { messages: 'logfile' } });
+    await unkept.results.open('r1');
+    expect(warningsPlaceText('logfile', '', unkept.results.state.get().loaded!.run)).toBe("The run's warnings are in the file of the run's -logfile under Outputs.");
     // The page shows the option name unbroken (`option-name`): a narrow screen broke "-logfile" after its hyphen.
     for (const place of ['logfile', 'nowhere'] as const) {
       expect(placeParts(place, run).filter((part) => part.option === true).map((part) => part.text)).toEqual(['-logfile']);

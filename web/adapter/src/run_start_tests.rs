@@ -34,9 +34,18 @@ fn run_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
         .iter()
         .find(|(program, _, _)| *program == words[0])
         .unwrap();
+    run_on(words, &input(query), &input(subject))
+}
+
+/// `run_of` on the FASTA records `query` and `subject`.
+fn run_on(
+    words: &[&str],
+    query: &[u8],
+    subject: &[u8],
+) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, &input(query)).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, &input(subject)).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
         run(words, queries, subjects)
@@ -94,6 +103,20 @@ fn messages_place(streams: &BTreeMap<u32, Vec<u8>>) -> Option<u32> {
         assert_eq!(bytes.len(), 4, "one signal of stream 10");
         u32::from_le_bytes(bytes[..].try_into().unwrap())
     })
+}
+
+/// Where `text` is in the run's `streams`: on stream 3, in the file of `-logfile` (stream 8), or
+/// nowhere (`PLACE_NOWHERE`); never in both.
+fn place_of(streams: &BTreeMap<u32, Vec<u8>>, text: &str) -> u32 {
+    let on_3 = stream_text(streams, STREAM_DIAGNOSTICS).contains(text);
+    let in_file =
+        run_files(streams).is_some_and(|files| files.iter().any(|(_, bytes)| bytes.contains(text)));
+    match (on_3, in_file) {
+        (true, false) => STREAM_DIAGNOSTICS,
+        (false, true) => STREAM_RUN_FILES,
+        (false, false) => PLACE_NOWHERE,
+        (true, true) => panic!("{text:?} is on stream 3 and in the file of -logfile"),
+    }
 }
 
 /// The signals of stream 9: each failed stream and the place of its error (`emit::discard`).
@@ -354,10 +377,8 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
 
 // NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_engine_err` of line RG `E/SURVEY_E1.md`): TBLASTX
 // writes the messages of its run, and the error that ends it, to the `-logfile` file. In LOSAT Web
-// the file of a run that failed comes on stream 8 too, and a run of two searches (here the tabular
-// formats' hit list size of 0, which fails them alone) writes into it what stream 3 has without
-// `-logfile`. The command line's file of the failed run (ws, the gate's build of this branch, NCBI's
-// text): `BLAST query/options error: expect value ...`.
+// the file of a run that failed comes on stream 8 too. The command line's file of the failed run
+// (ws, the gate's build of this branch, NCBI's text): `BLAST query/options error: expect value ...`.
 #[test]
 fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
     let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);
@@ -370,74 +391,97 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
             "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string()
         )])
     );
+}
+
+// Line WQA's sweep, D7 (2026-11-20): each output that a run could not write is signalled with the
+// place where its error is (stream 9), which is where the sink wrote it (`CallerSink::error`), for
+// each `-logfile`. The tabular formats' hit list size of 0 fails them alone with NCBI's message,
+// which goes where the run's messages go: the CLI's `tblastx -outfmt 6 -num_alignments 0` writes
+// it to the file of `-logfile run.log`, nowhere for `""` and `/dev/null`, and to the standard error
+// for `-` (LOSAT's command line and NCBI BLAST+ 2.17.0); BLASTN's go to the standard error. A
+// subject title that NCBI cannot decode fails them alone with LOSAT's own refusal, which the CLI's
+// `tblastx -outfmt 6` writes to the standard error whatever `-logfile` is (`cli::main_entry`, its
+// file empty). LOSAT Web writes the run of outfmt 0 and the run of the tabular formats as one run
+// (the argv's `-outfmt 0` here): its run's messages hold both searches' messages, where the CLI's
+// run of the argv alone writes none of the tabular search's.
+#[test]
+fn the_error_of_an_output_that_fails_alone_is_where_its_signal_says() {
+    const CODING: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
+    let query = format!(">q\n{CODING}\n").into_bytes();
+    let bad = [
+        &b">Subject_9 bad x\x81y title\n"[..],
+        CODING.as_bytes(),
+        b"\n",
+    ]
+    .concat();
+    let saved = "No hits are being saved";
+    let refusal = "subject record 1 (Subject_9) has a title";
     for program in ["tblastx", "blastn"] {
-        let plain_words = argv(program, &["-num_alignments", "0"]);
-        let (result, plain) = run_of(&plain_words);
+        let (result, plain) = run_of(&argv(program, &["-num_alignments", "0"]));
         result.unwrap();
-        let stderr = stream_text(&plain, STREAM_DIAGNOSTICS);
-        assert!(
-            stderr.contains("No hits are being saved"),
-            "{program}: {stderr}"
-        );
-        // The host is told that streams 6 and 7 failed, and where their error is: stream 3
-        // (line WQA's sweep, D7, 2026-11-20).
-        let on_stream_3 = vec![(6, STREAM_DIAGNOSTICS), (7, STREAM_DIAGNOSTICS)];
-        assert_eq!(signals(&plain), on_stream_3, "{program}");
-        assert_eq!(
-            messages_place(&plain),
-            Some(STREAM_DIAGNOSTICS),
-            "{program}"
-        );
-        let mut words = plain_words.clone();
-        words.extend(["-logfile", "run.log"]);
-        let (result, logged) = run_of(&words);
-        result.unwrap();
-        assert_eq!(logged.get(&0), plain.get(&0), "{program}");
-        let expected = match program {
-            "tblastx" => (String::new(), stderr.clone()),
-            _ => (stderr.clone(), String::new()),
-        };
-        assert_eq!(
-            (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
-            (expected.0, Some(vec![("run.log".to_string(), expected.1)])),
-            "{program}"
-        );
-        // In TBLASTX the error is in the file of -logfile (stream 8), in the others on stream 3.
-        let place = match program {
-            "tblastx" => STREAM_RUN_FILES,
-            _ => STREAM_DIAGNOSTICS,
-        };
-        assert_eq!(signals(&logged), [(6, place), (7, place)], "{program}");
-        // The run's messages go where the errors of its outputs are (stream 10).
-        assert_eq!(messages_place(&logged), Some(place), "{program}");
-        // `-logfile -` is the standard error, stream 3; `""` and `/dev/null` are nowhere in
-        // TBLASTX (the CLI writes the error nowhere), stream 3 in the others.
-        for (name, place) in [
-            ("-", STREAM_DIAGNOSTICS),
-            ("", PLACE_NOWHERE),
-            ("/dev/null", PLACE_NOWHERE),
+        for logfile in [
+            None,
+            Some("-"),
+            Some("run.log"),
+            Some(""),
+            Some("/dev/null"),
         ] {
-            let mut words = plain_words.clone();
-            words.extend(["-logfile", name]);
+            let extra: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
+            let label = format!("{program} {logfile:?}");
+            // NCBI's message.
+            let words = argv(program, &[&["-num_alignments", "0"][..], &extra].concat());
             let (result, streams) = run_of(&words);
             result.unwrap();
-            let place = match program {
-                "tblastx" => place,
-                _ => STREAM_DIAGNOSTICS,
-            };
+            assert_eq!(streams.get(&0), plain.get(&0), "{label}");
+            assert_eq!(
+                run_files(&streams).is_some(),
+                logfile == Some("run.log"),
+                "{label}"
+            );
+            let place = place_of(&streams, saved);
+            assert_eq!(signals(&streams), [(6, place), (7, place)], "{label}");
+            assert_eq!(
+                place,
+                match (program, logfile) {
+                    ("tblastx", Some("run.log")) => STREAM_RUN_FILES,
+                    ("tblastx", Some("" | "/dev/null")) => PLACE_NOWHERE,
+                    _ => STREAM_DIAGNOSTICS,
+                },
+                "{label}"
+            );
+            // The run's messages go there too (stream 10), and stream 3 holds none of them elsewhere.
+            assert_eq!(messages_place(&streams), Some(place), "{label}");
+            if place != STREAM_DIAGNOSTICS {
+                assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{label}");
+            }
+            // LOSAT's own refusal.
+            let words = [program, "-query", "q", "-subject", "s"];
+            let words = [&words[..], &extra].concat();
+            let (result, streams) = run_on(&words, &query, &bad);
+            result.unwrap();
+            assert_eq!(place_of(&streams, refusal), STREAM_DIAGNOSTICS, "{label}");
             assert_eq!(
                 signals(&streams),
-                [(6, place), (7, place)],
-                "{program} {name:?}"
+                [(6, STREAM_DIAGNOSTICS), (7, STREAM_DIAGNOSTICS)],
+                "{label}"
             );
-            assert_eq!(messages_place(&streams), Some(place), "{program} {name:?}");
             let on_3 = stream_text(&streams, STREAM_DIAGNOSTICS);
-            assert_eq!(
-                on_3.contains("No hits are being saved"),
-                place == STREAM_DIAGNOSTICS,
-                "{program} {name:?}: {on_3}"
-            );
-            assert_eq!(run_files(&streams), None, "{program} {name:?}");
+            assert_eq!(on_3.matches(refusal).count(), 1, "{label}");
+            // Where the run's messages go elsewhere, stream 3 holds the refusal alone.
+            if messages_place(&streams) != Some(STREAM_DIAGNOSTICS) {
+                assert!(
+                    on_3.starts_with("Error: subject record 1 (Subject_9)")
+                        && on_3.matches('\n').count() == 1,
+                    "{label}: {on_3}"
+                );
+            }
+            if logfile == Some("run.log") {
+                assert_eq!(
+                    run_files(&streams),
+                    Some(vec![("run.log".to_string(), String::new())]),
+                    "{label}"
+                );
+            }
         }
     }
 }

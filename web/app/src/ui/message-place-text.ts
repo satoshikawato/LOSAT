@@ -1,8 +1,8 @@
 // Where messages of a run are, in the words of the results (line WQA's sweep, D7, 2026-11-20): the error of an output
 // that the run could not write (`ResultSetRef.failed`), and the run's warnings (`LoadedRun.messages`), each at the place
 // that the engine gave, never one guessed from the program or the argv. The run's diagnostics are its Warnings in Run
-// details; the file of its -logfile is a tab of the Outputs (TBLASTX writes the messages of its run there, as the CLI
-// does); a -logfile that names no file writes them nowhere.
+// details; the file of its -logfile is a tab of the Outputs (TBLASTX writes the messages of its run there); a -logfile
+// that names no file writes them nowhere.
 import type { MessagePlace } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 
@@ -42,12 +42,24 @@ export const NO_WARNINGS = 'The engine wrote no warnings.';
 /**
  * What Run details says under Warnings besides the run's diagnostics (`diagnostics`, stream 3), from where the run's
  * messages went (`messages`, the engine's word): where its warnings are when they did not go to the diagnostics (the
- * file of its -logfile, or nowhere), said also when the diagnostics hold lines; that the engine wrote none only where
- * they go to the diagnostics and those are empty; else nothing.
+ * file of its -logfile, or nowhere), said also when the diagnostics hold lines; that the engine wrote none where the
+ * place holds nothing (the diagnostics, or the file of the -logfile, empty) and the diagnostics are empty; else nothing.
+ * A place of nowhere may have taken warnings or none: its words say only that none is kept.
  */
 export function warningsPlaceParts(messages: MessagePlace, diagnostics: string, run: RunView): readonly PlacePart[] | undefined {
-  if (messages === 'diagnostics') return diagnostics === '' ? [{ text: NO_WARNINGS }] : undefined;
+  if (messages === 'diagnostics' || (messages === 'logfile' && emptyFile(run))) {
+    return diagnostics === '' ? [{ text: NO_WARNINGS }] : undefined;
+  }
   return [{ text: `${diagnostics === '' ? "The run's warnings are" : "The run's other warnings are"} ` }, ...placeParts(messages, run), { text: '.' }];
+}
+
+/**
+ * Whether the files of the run (the file of its -logfile) are kept and hold nothing: a TBLASTX search without warnings
+ * leaves the file empty, as the CLI's (line WQA's sweep, D7, 2026-11-20). Files that are not kept say nothing.
+ */
+function emptyFile(run: RunView): boolean {
+  const files = run.record.runFiles;
+  return files !== undefined && files.length > 0 && files.every((file) => file.bytes.length === 0);
 }
 
 /** The words of `warningsPlaceParts` as one text, or undefined where Warnings says nothing besides the diagnostics. */

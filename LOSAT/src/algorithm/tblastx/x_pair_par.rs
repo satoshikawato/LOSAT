@@ -1515,13 +1515,13 @@ struct XGroup {
     /// it; `None` for the others.
     ///
     /// The bytes are not made where the table is built. The group tables of a batch are built one
-    /// after the other on one thread, and the bytes made there (32 KiB a table, #1228) sat between
-    /// them in that thread's heap: on Sakai x MG1655 `-subject` at 16 threads (84 slice tables of
-    /// LOSAT_X_TBXQSLICE, 2.6 MiB of bytes) glibc then kept the 560 MiB of the freed tables in the
-    /// main heap after the seed release (`[heap]` 624 MiB to the end of the run, against 58 MiB
-    /// with LOSAT_X_TBXSCANBYTE=0), and the linking that follows took its memory elsewhere: max RSS
-    /// +241 MiB (x1.12). Made by the scan, the bytes leave the build's allocations as they are with
-    /// the switch off, and they live as long as the table, so they never outlive it in any heap.
+    /// after the other on one thread, and bytes made there (#1228: 32 KiB a table) sat between
+    /// them in that thread's heap. On Sakai x MG1655 `-subject` at 16 threads (84 slice tables of
+    /// LOSAT_X_TBXQSLICE, 2.6 MiB of bytes) glibc then kept the freed tables in the main heap after
+    /// the seed release (`[heap]` 624 MiB to the end of the run, 58 MiB with the switch off), and
+    /// the linking took its memory elsewhere: max RssAnon 2,225 MiB against 1,984 MiB with the
+    /// switch off. Made by the first scan, the bytes leave the build's allocations as they are with
+    /// the switch off (1,983 MiB), and they live as long as their table, never longer.
     presence: Option<OnceLock<crate::algorithm::tblastx::x_scan_byte::XPresence>>,
 }
 
@@ -1598,9 +1598,14 @@ impl XGroup {
         array_size: i32,
         scan_range: &mut [i32; 3],
     ) -> i32 {
-        if let Some(presence) = &self.presence {
-            let presence = presence
-                .get_or_init(|| crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&self.lookup));
+        if let Some(cell) = &self.presence {
+            // The first scan of the table makes the bytes, out of line: `get_or_init` inlined
+            // here changed the code of the units' scan loops (`scan_unit_bf`: 5.6 % more
+            // instructions on ViPTreeGen's Begomovirus.40).
+            let presence = match cell.get() {
+                Some(presence) => presence,
+                None => self.x_first_presence(cell),
+            };
             crate::algorithm::tblastx::x_scan_bf::x_scan_subject_byte(
                 &self.lookup,
                 presence,
@@ -1631,6 +1636,19 @@ impl XGroup {
                 scan_range,
             )
         }
+    }
+
+    // No NCBI counterpart: the presence vector in another layout, made once per table.
+    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of this table in `cell` (its
+    /// `presence`), made now by the first scan that needs them; a scan of another thread that asks
+    /// at the same time waits for them.
+    #[cold]
+    #[inline(never)]
+    fn x_first_presence<'a>(
+        &'a self,
+        cell: &'a OnceLock<crate::algorithm::tblastx::x_scan_byte::XPresence>,
+    ) -> &'a crate::algorithm::tblastx::x_scan_byte::XPresence {
+        cell.get_or_init(|| crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&self.lookup))
     }
 
     /// The entries of cell `index` (none for a cell without its presence bit).

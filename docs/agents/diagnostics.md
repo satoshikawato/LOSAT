@@ -6187,8 +6187,8 @@ Scheduling (each value computed by one thread with the original function; order 
   (presence bits in half or more of the backbone cells, `x_scan_bf_for`), are scanned with tblastn's
   scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, `tblastx/x_scan_byte.rs` `x_scan_one_range_byte`,
   exactness argument in its header): the table indexes of a block of 256 words made 16 at a time from
-  the letters, candidates listed from a presence vector of one byte per index (32 KB, built once per
-  group table), and each candidate copied once, NCBI's room test kept where the block could fill the
+  the letters, candidates listed from a presence vector of one byte per index (32 KB per group table,
+  made by the table's first scan and freed with it), and each candidate copied once, NCBI's room test kept where the block could fill the
   offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
   it, so every call returns NCBI's pairs and scan range (test
   `x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects`, byte arm, against
@@ -6201,7 +6201,12 @@ Scheduling (each value computed by one thread with the original function; order 
   3 rounds alternating, two runs, against dev ec6bd8123): x0.958-0.967, x0.965-0.967, ssDNA.prok.8
   x0.966-0.972, Easyfig's tblastx example x0.984-0.986, Galaxy's small tblastx test x0.999-1.010 (its
   tables are sparse; the same instructions). Branch misses x0.88-0.95. Heap peak (massif) the same
-  within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
+  within 10 bytes: the presence bytes live with their group table, not at the peak. Until
+  fix/tbx-presence-scratch (2026-11-19) the bytes were made where each table was built; on Sakai x
+  MG1655 `-subject` at 16 threads (84 slice tables) they sat between the tables in the building
+  thread's heap, and glibc kept the 560 MiB of freed tables there after the seed release: max
+  RssAnon 2,225 MiB against 1,984 MiB with `=0` (line MEM, v4-MEM REPORT §28). Made by the first scan
+  (`x_pair_par.rs` `XGroup::presence`), they leave the build's allocations as with `=0`: 1,983 MiB. Probe: line DT
   (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
   gave nothing more (x0.991-1.023).
 - `LOSAT_X_TBXCTXTABLE=1` TBLASTX (speed; in the strict set from the pull request that added it, 2026-11-17, on by

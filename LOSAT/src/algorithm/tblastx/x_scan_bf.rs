@@ -89,8 +89,8 @@ pub(crate) fn x_tbx_scans_byte(lookup: &BlastAaLookupTable) -> bool {
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table `x_tbx_scans_byte` took. The
 /// unit path makes them when a scan first needs them (`x_pair_par.rs` `XGroup::scan`), on the
 /// thread of that scan, and frees them with the table: the thread that builds the group tables
-/// one after the other makes no allocation between them for this switch (module text of
-/// `x_pair_par.rs` at `XGroup`).
+/// one after the other makes no allocation between them for this switch (`x_pair_par.rs`
+/// `XGroup::presence`).
 pub(crate) fn x_tbx_presence(
     lookup: &BlastAaLookupTable,
 ) -> crate::algorithm::tblastx::x_scan_byte::XPresence {

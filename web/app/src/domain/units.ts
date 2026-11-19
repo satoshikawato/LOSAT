@@ -1,7 +1,7 @@
 // A number and its unit, joined for display (line WQA's sweep, D9, 2026-11-19).
 
 /** No-break space (U+00A0): the space between a number and its unit, which a line never breaks at. */
-export const NBSP = ' ';
+export const NBSP = '\u00A0';
 
 /**
  * A number and the unit that follows it, "512 MB", "1,200 aa", "420 ms", joined by a no-break space so

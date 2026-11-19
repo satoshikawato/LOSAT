@@ -14,7 +14,7 @@ import {
   type BlockStore,
   type BlockWriter,
 } from './block-store';
-import { TMP_DIRECTORY, type OpfsAccess, type SessionSpace } from './session';
+import { StorageRefusedError, StorageUnsupportedError, TMP_DIRECTORY, type OpfsAccess, type SessionSpace } from './session';
 
 /** The part of FileSystemSyncAccessHandle that the store uses (worker-only API). */
 interface SyncAccessHandle {
@@ -252,9 +252,16 @@ export const opfsAccess: OpfsAccess = {
 async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
   const storage = (globalThis.navigator as Navigator | undefined)?.storage;
   if (typeof storage?.getDirectory !== 'function') {
-    throw new Error('this browser has no Origin Private File System');
+    throw new StorageUnsupportedError('this browser has no Origin Private File System');
   }
-  return (await storage.getDirectory()).getDirectoryHandle(TMP_DIRECTORY, { create: true });
+  let root: FileSystemDirectoryHandle;
+  try {
+    root = await storage.getDirectory();
+  } catch (error) {
+    // The root of the site's storage itself: the browser gives this page none (session.ts).
+    throw new StorageRefusedError(error);
+  }
+  return root.getDirectoryHandle(TMP_DIRECTORY, { create: true });
 }
 
 /** Whether tmp/<token>/ is not there (a lookup that does not make it). */
@@ -299,7 +306,7 @@ async function probe(store: OpfsBlockStore): Promise<void> {
 async function openSyncAccessHandle(file: FileSystemFileHandle): Promise<SyncAccessHandle> {
   const open = (file as SyncFileHandle).createSyncAccessHandle;
   if (typeof open !== 'function') {
-    throw new Error('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
+    throw new StorageUnsupportedError('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
   }
   return open.call(file);
 }

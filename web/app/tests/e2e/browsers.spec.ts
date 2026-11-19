@@ -70,9 +70,7 @@ test('the application keeps results in OPFS, or in memory with the reason shown'
   const backend = await status.getAttribute('data-backend');
   expect(['opfs', 'memory']).toContain(backend);
   if (backend === 'memory') {
-    await expect(status.getByTestId('storage-memory-note')).toContainText(
-      'Results are kept in memory only and are lost when this tab is closed or reloaded (',
-    );
+    await expect(status.getByTestId('storage-memory-note')).toContainText("Results are kept in this tab's memory only, because ");
   }
   const text = await status.innerText();
   if (EVIDENCE !== undefined) writeFileSync(join(EVIDENCE, `storage-${browserName}.json`), `${JSON.stringify({ backend, text }, null, 2)}\n`);

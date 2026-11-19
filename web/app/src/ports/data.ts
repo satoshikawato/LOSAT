@@ -123,12 +123,20 @@ export type StorageBackend = 'opfs' | 'memory';
 export type CleanupState =
   | { readonly state: 'pending' }
   | { readonly state: 'done'; readonly removedSessions: number }
-  | { readonly state: 'unavailable'; readonly reason: string };
+  | {
+      readonly state: 'unavailable';
+      /** In LOSAT's words, never the browser's message. */
+      readonly reason: string;
+      /** The name of the browser's error behind it (SecurityError…), for developers. */
+      readonly errorName?: string;
+    };
 
 export interface StorageInfo {
   readonly backend: StorageBackend;
-  /** Why OPFS is not used, when the backend is memory. */
+  /** Why OPFS is not used, when the backend is memory: LOSAT's words, never the browser's message. */
   readonly fallbackReason?: string;
+  /** The name of the browser's error behind fallbackReason (SecurityError…), for developers. */
+  readonly fallbackErrorName?: string;
   /** Bytes that this working session holds in temporary storage. */
   readonly sessionBytes: number;
   /** The browser's estimate for the whole site (`navigator.storage.estimate`); not a guarantee. */

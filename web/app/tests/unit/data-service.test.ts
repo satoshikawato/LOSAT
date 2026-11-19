@@ -196,7 +196,8 @@ describe('DataService runs and storage status', () => {
   it('reports the storage it uses, the session bytes and the cleanup state', async () => {
     let settle!: (value: { state: 'done'; removedSessions: number }) => void;
     const { data } = service({
-      fallbackReason: 'this browser has no Origin Private File System',
+      fallbackReason: 'the browser does not let this site store files here, as in a private window',
+      fallbackErrorName: 'SecurityError',
       cleanup: new Promise((resolve) => {
         settle = resolve;
       }),
@@ -204,7 +205,8 @@ describe('DataService runs and storage status', () => {
     });
     expect(await data.storageInfo()).toEqual({
       backend: 'memory',
-      fallbackReason: 'this browser has no Origin Private File System',
+      fallbackReason: 'the browser does not let this site store files here, as in a private window',
+      fallbackErrorName: 'SecurityError',
       sessionBytes: 0,
       estimate: { usage: 10, quota: 1000 },
       cleanup: { state: 'pending' },

@@ -69,11 +69,56 @@ export async function reclaimAbandonedSessions(
 
 /** OPFS as a session uses it; implemented by opfs-block-store.ts. */
 export interface OpfsAccess {
-  /** The session directories under tmp/. Rejects when this browser has no usable OPFS. */
+  /**
+   * The session directories under tmp/. Rejects when this browser has no usable OPFS: with
+   * StorageUnsupportedError when it lacks the API, with StorageRefusedError when the browser
+   * refuses the site's storage.
+   */
   space(): Promise<SessionSpace>;
-  /** Opens tmp/<token>/ as a block store after checking it; rejects when it cannot be used. */
+  /**
+   * Opens tmp/<token>/ as a block store after checking it; rejects when it cannot be used
+   * (StorageUnsupportedError when this browser cannot write the files from a worker).
+   */
   open(token: string): Promise<BlockStore>;
 }
+
+/**
+ * The browser does not give this page the site's storage: `navigator.storage.getDirectory()`
+ * itself rejected. Firefox's private windows answer SecurityError, WebKit's ephemeral sessions
+ * (as Safari's private windows) UnknownError, and a browser that blocks the site's data
+ * SecurityError. The browser's error is the cause.
+ */
+export class StorageRefusedError extends Error {
+  constructor(cause: unknown) {
+    super('the browser refused the storage of this site', { cause });
+    this.name = 'StorageRefusedError';
+  }
+}
+
+/** This browser lacks a part of OPFS that LOSAT stores files with. */
+export class StorageUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StorageUnsupportedError';
+  }
+}
+
+/*
+ * Why a session keeps its data in memory, in LOSAT's words: the note under the page says
+ * "Results are kept in this tab's memory only, because <reason>." The browser's own message is
+ * never shown: Firefox's private window said "Security error when calling GetDirectory", and
+ * WebKit's "The operation failed for an unknown transient reason (e.g. out of memory)", which
+ * reads as if memory ran out (line WQA's sweep, D5, 2026-11-19). The name of the browser's
+ * error stays in the note's data-error attribute, for developers.
+ */
+/** A private window, or a browser that blocks the site's data. */
+export const REFUSED_REASON = 'the browser does not let this site store files here, as in a private window';
+export const FULL_REASON = 'the browser storage of this site is full';
+/** No OPFS, no writing from a worker, or no Web Locks (without which no other tab could tell the data is in use). */
+export const UNSUPPORTED_REASON = 'LOSAT cannot store files in this browser';
+export const FAILED_REASON = 'the browser storage of this site could not be opened';
+/** The cleanup's reason when the session directories could not be listed or locked. */
+export const UNREADABLE_REASON = 'the browser storage of this site could not be read';
 
 export interface DataSessionEnv {
   readonly token: string;
@@ -84,8 +129,10 @@ export interface DataSessionEnv {
 
 export interface DataSession {
   readonly store: BlockStore;
-  /** Why the session uses memory instead of OPFS. */
+  /** Why the session uses memory instead of OPFS, in LOSAT's words (REFUSED_REASON…). */
   readonly fallbackReason?: string;
+  /** The name of the browser's error behind fallbackReason (SecurityError…), for developers. */
+  readonly fallbackErrorName?: string;
   /** Settles when the removal of abandoned sessions has finished. */
   readonly cleanup: Promise<CleanupState>;
 }
@@ -101,29 +148,23 @@ export interface DataSession {
 export async function startDataSession(env: DataSessionEnv): Promise<DataSession> {
   const { locks, token } = env;
   if (locks === undefined) {
-    return memorySession(
-      'this browser has no Web Locks API, which keeps the temporary files of a tab safe from other tabs',
-      { state: 'unavailable', reason: 'this browser has no Web Locks API' },
-    );
+    return memorySession({ reason: UNSUPPORTED_REASON }, { state: 'unavailable', reason: 'this browser has no Web Locks API' });
   }
   try {
     await holdSessionLock(locks, token);
   } catch (error) {
-    return memorySession(`the Web Lock of this tab could not be taken (${messageOf(error)})`, {
-      state: 'unavailable',
-      reason: 'this tab holds no Web Lock',
-    });
+    return memorySession(fallbackOf(error), { state: 'unavailable', reason: 'this tab holds no Web Lock' });
   }
   let space: SessionSpace;
   try {
     space = await env.opfs.space();
   } catch (error) {
-    return memorySession(messageOf(error), { state: 'done', removedSessions: 0 });
+    return memorySession(fallbackOf(error), { state: 'done', removedSessions: 0 });
   }
   const reclaim = () =>
     reclaimAbandonedSessions(space, locks, token).then(
       (removedSessions): CleanupState => ({ state: 'done', removedSessions }),
-      (error: unknown): CleanupState => ({ state: 'unavailable', reason: messageOf(error) }),
+      (error: unknown): CleanupState => ({ state: 'unavailable', reason: UNREADABLE_REASON, ...named(error) }),
     );
   try {
     return { store: await env.opfs.open(token), cleanup: reclaim() };
@@ -132,20 +173,43 @@ export async function startDataSession(env: DataSessionEnv): Promise<DataSession
     try {
       return { store: await env.opfs.open(token), cleanup: Promise.resolve(cleanup) };
     } catch (error) {
-      return memorySession(openFailure(error), cleanup);
+      return memorySession(fallbackOf(error), cleanup);
     }
   }
 }
 
-function memorySession(fallbackReason: string, cleanup: CleanupState): DataSession {
+interface Fallback {
+  readonly reason: string;
+  readonly errorName?: string;
+}
+
+function memorySession(fallback: Fallback, cleanup: CleanupState): DataSession {
   const store = new MemoryBlockStore({ capacityBytes: MEMORY_RESULTS_CAPACITY_BYTES, fullMessage: MEMORY_FULL_MESSAGE });
-  return { store, fallbackReason, cleanup: Promise.resolve(cleanup) };
+  return {
+    store,
+    fallbackReason: fallback.reason,
+    ...(fallback.errorName === undefined ? {} : { fallbackErrorName: fallback.errorName }),
+    cleanup: Promise.resolve(cleanup),
+  };
 }
 
-function openFailure(error: unknown): string {
-  return isStorageFull(error) ? 'the browser storage of this site is full' : messageOf(error);
+/**
+ * The reason for a failure of the lock, of OPFS or of its check. A SecurityError is the browser's
+ * refusal wherever it comes from (a Web Lock of a page whose site may not store data rejects so).
+ */
+function fallbackOf(error: unknown): Fallback {
+  if (error instanceof StorageRefusedError) return { reason: REFUSED_REASON, ...named(error.cause) };
+  if (error instanceof StorageUnsupportedError) return { reason: UNSUPPORTED_REASON };
+  if (errorName(error) === 'SecurityError') return { reason: REFUSED_REASON, ...named(error) };
+  if (isStorageFull(error)) return { reason: FULL_REASON, ...named(error) };
+  return { reason: FAILED_REASON, ...named(error) };
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function named(error: unknown): { errorName?: string } {
+  const name = errorName(error);
+  return typeof name === 'string' && name !== '' ? { errorName: name } : {};
+}
+
+function errorName(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
 }

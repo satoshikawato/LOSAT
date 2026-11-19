@@ -54,6 +54,8 @@ export interface DataServiceDeps {
   /** A new random token; tokens name blocks, so they never contain input names. */
   readonly newToken: () => string;
   readonly fallbackReason?: string;
+  /** The name of the browser's error behind fallbackReason, for developers (session.ts). */
+  readonly fallbackErrorName?: string;
   /** Settles when the removal of abandoned sessions has finished (session.ts). */
   readonly cleanup: Promise<CleanupState>;
   readonly estimate?: () => Promise<{ readonly usage: number; readonly quota: number } | undefined>;
@@ -336,6 +338,7 @@ export class DataService implements DataGateway {
     return {
       backend: this.deps.store.backend,
       ...(this.deps.fallbackReason === undefined ? {} : { fallbackReason: this.deps.fallbackReason }),
+      ...(this.deps.fallbackErrorName === undefined ? {} : { fallbackErrorName: this.deps.fallbackErrorName }),
       sessionBytes: this.deps.store.usage(),
       ...(estimate === undefined ? {} : { estimate }),
       cleanup: this.cleanup,

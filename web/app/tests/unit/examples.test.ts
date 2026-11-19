@@ -30,7 +30,7 @@ function setup(
     deletions?: ExampleDeletions;
     wrapStore?: (store: MemoryExampleStore) => ExampleStore;
     saver?: FakeFileSaver;
-    unavailable?: () => string | undefined;
+    unavailable?: () => Promise<string | undefined>;
   } = {},
 ) {
   let token = 0;
@@ -206,9 +206,16 @@ describe('ExampleLoader', () => {
   it('loads no set while a part of LOSAT is unavailable, and says what the page says', async () => {
     const UNAVAILABLE = 'LOSAT could not download its engine file /engine/serial.wasm (network error)';
     let problem: string | undefined = UNAVAILABLE;
-    const { draft, examples, downloader, settle } = setup({ unavailable: () => problem });
+    // The answer comes once the form asked the engine again (Availability.recheck); nothing starts before it.
+    let answer: () => void = () => undefined;
+    const { draft, examples, downloader, settle } = setup({
+      unavailable: () => new Promise((resolve) => (answer = () => resolve(problem))),
+    });
     draft.setPaste('query', '>old\nACGT\n');
     examples.load('refseq-16s-bacteria');
+    await draft.idle();
+    expect(examples.state.get().load).toBeUndefined();
+    answer();
     await settle();
     expect(examples.state.get().load).toEqual({
       id: 'refseq-16s-bacteria',
@@ -218,6 +225,7 @@ describe('ExampleLoader', () => {
     expect(draft.state.get().query.paste).toBe('>old\nACGT\n');
     problem = undefined;
     examples.load('refseq-16s-bacteria');
+    answer();
     await settle();
     expect(downloader.requests.map((request) => request.url)).toEqual([SIXTEEN_S.url]);
     expect(examples.state.get().loaded).toEqual({ id: 'refseq-16s-bacteria', count: 1 });

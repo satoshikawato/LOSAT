@@ -110,7 +110,7 @@ describe('a part of LOSAT that is unavailable, in the search form', () => {
   it('the page says the form\'s failure, then the Data worker\'s for good', async () => {
     const { draft } = setup({ index: true });
     let end: (error: Error) => void = () => undefined;
-    const availability = new Availability({ draft: draft.state, dataWorkerEnded: new Promise((resolve) => (end = resolve)) });
+    const availability = new Availability({ draft, dataWorkerEnded: new Promise((resolve) => (end = resolve)) });
     expect(availability.state.get()).toEqual({});
     draft.setPaste('query', '>q\nACGT\n');
     await draft.idle();
@@ -136,7 +136,7 @@ describe('a part of LOSAT that could not be loaded and then can', () => {
   it('the options are read again once the engine answers, and the page no longer says that LOSAT is unavailable', async () => {
     const fail = { describe: true, validate: true };
     const { draft } = setup(fail);
-    const availability = new Availability({ draft: draft.state, dataWorkerEnded: never });
+    const availability = new Availability({ draft, dataWorkerEnded: never });
     await draft.idle();
     expect(availability.state.get()).toEqual({ problem: SERIAL });
     fail.describe = false;
@@ -181,6 +181,43 @@ describe('a part of LOSAT that could not be loaded and then can', () => {
     expect(unavailableOf(draft.state.get())).toBeUndefined();
   });
 
+  // The third review of D1 and D2, L1 (2026-11-19): no test failed when the answers to the options and to a check no
+  // longer asked again; the form then left the inputs "Not read." and Run LOSAT refused.
+  it('an answer to the options reads again the inputs that could not be read for it', async () => {
+    const fail = { describe: true, validate: true, index: true };
+    const { draft } = setup(fail);
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    fail.describe = false;
+    fail.validate = false;
+    fail.index = false;
+    // A validation asks the options again (askOptionsAgain); their answer asks the rest.
+    draft.setExtra('-qcov_hsp_perc 50');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(unavailableOf(draft.state.get())).toBeUndefined();
+  });
+
+  it('an answer to a check reads again the inputs that could not be read for it', async () => {
+    const fail = { check: true, index: false };
+    const { draft } = setup(fail);
+    draft.setPaste('query', '>q1\nACGT\n>q2\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'error', message: SERIAL, unavailable: true });
+    fail.index = true;
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed', unavailable: true });
+    fail.check = false;
+    fail.index = false;
+    // Only a check asks the engine: a record of the query is left out.
+    draft.setIncluded('query', 'paste', [1], false);
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check?.state).toBe('ok');
+    expect(sourceOf(draft, 'subject').status).toBe('ready');
+    expect(unavailableOf(draft.state.get())).toBeUndefined();
+  });
+
   it('an input that still cannot be read for it is not read again after each validation', async () => {
     const { draft, calls } = setup({ index: true });
     draft.setPaste('query', '>q\nACGT\n');
@@ -192,6 +229,69 @@ describe('a part of LOSAT that could not be loaded and then can', () => {
     await draft.idle();
     expect(calls.index).toBe(reads);
     expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', unavailable: true });
+  });
+});
+
+// The third review of D1 and D2, M1 (2026-11-19): Run LOSAT and the Examples decided on what the form had found, and
+// asked nothing: with the inputs pasted while the engine file could not be downloaded, they were refused with "Reload
+// the page" also once it could, though one more request would have read them.
+describe('Run LOSAT and the Examples ask the engine again before they refuse', () => {
+  const never = new Promise<Error>(() => undefined);
+
+  /** Both inputs pasted while the engine file could not be downloaded. */
+  async function pastedWhileUnavailable() {
+    const fail = { describe: true, validate: true, index: true };
+    const { draft, calls } = setup(fail);
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    expect(unavailableOf(draft.state.get())).toBe(SERIAL);
+    return { fail, draft, calls, reads: calls.index };
+  }
+
+  const back = (fail: { describe: boolean; validate: boolean; index: boolean }) => {
+    fail.describe = false;
+    fail.validate = false;
+    fail.index = false;
+  };
+
+  it('Run LOSAT reads the inputs again and starts the search once the engine file downloads', async () => {
+    const { fail, draft, calls, reads } = await pastedWhileUnavailable();
+    back(fail);
+    expect(await draft.submit()).toEqual({ ok: true, runIds: ['r0'] });
+    expect(calls.index).toBe(reads + 2);
+    expect(unavailableOf(draft.state.get())).toBeUndefined();
+  });
+
+  it('Run LOSAT says what the page says when the engine still cannot answer, having asked once', async () => {
+    const { draft, calls, reads } = await pastedWhileUnavailable();
+    expect(await draft.submit()).toEqual({ ok: false, message: `${SERIAL}. Reload the page.` });
+    expect(calls.index).toBe(reads + 2);
+  });
+
+  it('the problem that an Example decides on is the one after the form asked again', async () => {
+    const { fail, draft, calls, reads } = await pastedWhileUnavailable();
+    const availability = new Availability({ draft, dataWorkerEnded: never });
+    expect(await availability.recheck()).toBe(SERIAL);
+    expect(calls.index).toBe(reads + 2);
+    back(fail);
+    expect(await availability.recheck()).toBeUndefined();
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(draft.state.get().description?.program).toBe('blastn');
+  });
+
+  it('a Data worker that ended is not asked again', async () => {
+    const STOPPED = 'The part of LOSAT that keeps the results stopped';
+    const { draft, calls } = setup({ index: true });
+    let end: (error: Error) => void = () => undefined;
+    const availability = new Availability({ draft, dataWorkerEnded: new Promise((resolve) => (end = resolve)) });
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    end(new UnavailableError(STOPPED));
+    await Promise.resolve();
+    const reads = calls.index;
+    expect(await availability.recheck()).toBe(STOPPED);
+    expect(calls.index).toBe(reads);
   });
 });
 

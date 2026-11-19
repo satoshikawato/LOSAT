@@ -81,12 +81,12 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
-  const availability = new Availability({ draft: draft.state, dataWorkerEnded });
+  const availability = new Availability({ draft, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
     draft,
-    unavailable: () => availability.state.get().problem,
+    unavailable: () => availability.recheck(),
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
   });

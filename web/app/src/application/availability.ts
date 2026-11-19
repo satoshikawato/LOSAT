@@ -6,7 +6,7 @@
 // Algorithm parameters. What the page says comes from what the search form found (`unavailableOf`), so it goes
 // once the form reads its inputs and options again, and from the Data worker, which comes back only with a reload.
 import { isUnavailable } from 'losat/ports';
-import type { DraftState } from './draft';
+import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
 export interface AvailabilityState {
@@ -15,8 +15,11 @@ export interface AvailabilityState {
 }
 
 export interface AvailabilityDeps {
-  /** The search form, whose describe, inputs, checks and validation say when a part of LOSAT could not be loaded. */
-  readonly draft: Store<DraftState>;
+  /**
+   * The search form, whose describe, inputs, checks and validation say when a part of LOSAT could not be loaded, and
+   * which asks the engine again (recheck).
+   */
+  readonly draft: { readonly state: Store<DraftState> } & Pick<SearchDraft, 'askAgain' | 'idle'>;
   /** Settles when the Data worker could not start or ended: for good, as no call of it can succeed again. */
   readonly dataWorkerEnded: Promise<Error>;
 }
@@ -26,7 +29,7 @@ export class Availability {
   private ended: string | undefined;
 
   constructor(private readonly deps: AvailabilityDeps) {
-    deps.draft.subscribe(() => this.update());
+    deps.draft.state.subscribe(() => this.update());
     void deps.dataWorkerEnded.then((error) => {
       this.ended = error.message;
       this.update();
@@ -34,8 +37,22 @@ export class Availability {
     this.update();
   }
 
+  /**
+   * What of LOSAT is unavailable once the search form asked the engine again what it could not ask it: an engine file
+   * that could not be downloaded may download now. The Data worker does not come back. An Example decides on it; it
+   * was refused with "Reload the page", and asked nothing, also once the engine file downloaded again (the third
+   * review of line WQA's D1 and D2, M1, 2026-11-19).
+   */
+  async recheck(): Promise<string | undefined> {
+    if (this.ended === undefined && this.state.get().problem !== undefined) {
+      this.deps.draft.askAgain();
+      await this.deps.draft.idle();
+    }
+    return this.state.get().problem;
+  }
+
   private update(): void {
-    const problem = this.ended ?? unavailableOf(this.deps.draft.get());
+    const problem = this.ended ?? unavailableOf(this.deps.draft.state.get());
     if (problem === this.state.get().problem) return;
     this.state.set(problem === undefined ? {} : { problem });
   }

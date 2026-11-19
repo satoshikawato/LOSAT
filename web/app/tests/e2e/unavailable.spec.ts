@@ -14,7 +14,9 @@
 // then blamed the file (M2); "Task Selection" and "Algorithm parameters" showed controls with no choices or values
 // (L1); a search went on after the Data worker ended (L2). Its second review: one failed download of the engine file
 // was said for the whole session (M1); a threaded runtime whose worker ended was never finished in Firefox (L1); "The part
-// of LOSAT that runs searches stopped." did not say what to do (L2).
+// of LOSAT that runs searches stopped." did not say what to do (L2). Its third review: Run LOSAT and the Examples asked
+// the engine nothing again, and were refused once its file downloaded (M1); a runtime already waiting for its keeper
+// was never finished when its worker ended (L2).
 import { gzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
@@ -57,23 +59,51 @@ async function keepWorkers(page: Page): Promise<void> {
   });
 }
 
-/** Counts the page's open BroadcastChannels by name (`openChannels`). */
-async function countChannels(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+/**
+ * Counts the page's open BroadcastChannels by name (`openChannels`), and keeps the names of the channels to the keepers
+ * in their order (`keeperChannels`). With `holdKeeper`, the page does not hear a keeper answer that it grew the memory,
+ * as while its grow takes long (up to 2 s on a busy machine, gateway.ts).
+ */
+async function countChannels(page: Page, { holdKeeper = false } = {}): Promise<void> {
+  await page.addInitScript((hold) => {
     const Native = window.BroadcastChannel;
     const open: Record<string, number> = {};
-    Object.assign(window, { openChannels: open });
+    const keepers: string[] = [];
+    Object.assign(window, { openChannels: open, keeperChannels: keepers });
+    const handler = Object.getOwnPropertyDescriptor(Native.prototype, 'onmessage')!;
     window.BroadcastChannel = class extends Native {
       constructor(name: string) {
         super(name);
         open[name] = (open[name] ?? 0) + 1;
+        if (!name.startsWith('losat-web:engine-keeper:')) return;
+        keepers.push(name);
+        if (!hold) return;
+        Object.defineProperty(this, 'onmessage', {
+          get: () => handler.get!.call(this),
+          set: (listener: ((event: MessageEvent) => void) | null) =>
+            handler.set!.call(this, listener === null ? null : (event: MessageEvent) => event.data?.type !== 'grown' && listener.call(this, event)),
+        });
       }
       override close(): void {
         open[this.name] = (open[this.name] ?? 0) - 1;
         super.close();
       }
     };
-  });
+  }, holdKeeper);
+}
+
+/** Whether the page's channel to the keeper of the `index`th Engine worker it started is open. */
+async function keeperOpen(page: Page, index: number): Promise<boolean> {
+  return page.evaluate((at) => {
+    const { openChannels, keeperChannels } = window as unknown as { openChannels: Record<string, number>; keeperChannels: string[] };
+    const name = keeperChannels[at];
+    return name !== undefined && (openChannels[name] ?? 0) > 0;
+  }, index);
+}
+
+/** How many workers of `name` the page started. */
+async function startedWorkers(page: Page, name: 'losat-data' | 'losat-engine'): Promise<number> {
+  return page.evaluate((which) => (window as unknown as { keptWorkers: Record<string, Worker[]> }).keptWorkers[which]?.length ?? 0, name);
 }
 
 /** How many of the page's channels to the keepers of the engine's shared memory are open. */
@@ -91,20 +121,20 @@ async function endedByPage(page: Page, name: 'losat-data' | 'losat-engine'): Pro
 }
 
 /**
- * Ends the latest worker of `name` from outside, without an error event, as a browser that ends it does; or, with
- * `error`, gives the page the error event of a worker that died of an uncaught error with that message.
+ * Ends the latest worker of `name` (or the `at`th) from outside, without an error event, as a browser that ends it does;
+ * or, with `error`, gives the page the error event of a worker that died of an uncaught error with that message.
  */
-async function endWorker(page: Page, name: 'losat-data' | 'losat-engine', error?: string): Promise<void> {
+async function endWorker(page: Page, name: 'losat-data' | 'losat-engine', error?: string, at = -1): Promise<void> {
   const ended = await page.evaluate(
-    ([which, message]) => {
-      const worker = (window as unknown as { keptWorkers: Record<string, Worker[]> }).keptWorkers[which]?.at(-1);
+    ([which, message, index]) => {
+      const worker = (window as unknown as { keptWorkers: Record<string, Worker[]> }).keptWorkers[which]?.at(index);
       if (worker === undefined) return false;
       // Not counted as ended by the page: Native's terminate, as the browser ends it.
       if (message === undefined) Object.getPrototypeOf(Object.getPrototypeOf(worker)).terminate.call(worker);
       else worker.dispatchEvent(new ErrorEvent('error', { message, cancelable: true }));
       return true;
     },
-    [name, error] as const,
+    [name, error, at] as const,
   );
   expect(ended, `a worker named ${name}`).toBe(true);
 }
@@ -226,6 +256,61 @@ test('once the engine file downloads after a failed download, the page no longer
   await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
 });
 
+// The third review of D1 and D2, M1 (2026-11-19): with the inputs pasted while the engine file could not be downloaded,
+// Run LOSAT and the Examples were refused at once with "Reload the page", and asked nothing, also once the file could
+// be downloaded: a reload would have lost the pasted inputs, though one more request read them.
+for (const press of ['Run LOSAT', 'an Example'] as const) {
+  test(`${press} asks the engine again once its file can be downloaded, and is not refused`, async ({ page }) => {
+    test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+    test.setTimeout(120_000);
+    let blocked = true;
+    let refused = 0;
+    let requests = 0;
+    await page.context().route(
+      (url) => /^\/engine\/losat-web-serial-[^/]*\.wasm$/.test(url.pathname),
+      (route) => {
+        if (!blocked) {
+          requests++;
+          return route.continue();
+        }
+        refused++;
+        return route.abort('failed');
+      },
+    );
+    const away = await stubExampleHost(page);
+    await openSearch(page);
+    await pasteBoth(page);
+    await notRead(page);
+    await expect(page.getByTestId('losat-unavailable')).toBeVisible();
+    // Everything that the form asked has failed, and nothing more is asked: a question still pending when the connection
+    // came back would read the inputs again by itself.
+    await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', 'failed');
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'unavailable');
+    let last = -1;
+    await expect
+      .poll(() => {
+        const settled = refused === last;
+        last = refused;
+        return settled;
+      }, { intervals: [1000], timeout: 15_000 })
+      .toBe(true);
+    // The connection is back; nothing is edited.
+    blocked = false;
+    if (press === 'Run LOSAT') {
+      await page.getByTestId('run-losat').click();
+      await waitStatus(page, 1, 'completed', 60_000);
+      await page.getByTestId('tab-search').click();
+    } else {
+      await page.getByTestId('example-refseq-16s-bacteria').click();
+      await expect(page.getByTestId('subject-source-0')).toContainText('bacteria.16SrRNA.fna', { timeout: 30_000 });
+      await expect(page.getByTestId('example-error')).toHaveCount(0);
+      expect(away).toEqual([SIXTEEN_S.url]);
+    }
+    expect(requests).toBeGreaterThan(0);
+    await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
+  });
+}
+
 test('the options say that they were not read when the engine file cannot be downloaded', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
   await failRequests(page, /^\/engine\/losat-web-serial-[^/]*\.wasm$/, 'network error');
@@ -330,6 +415,27 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
   await page.getByTestId('tab-search').click();
   await submit(page);
   await waitStatus(page, 2, 'completed', 120_000);
+});
+
+// The third review of D1 and D2, L2 (2026-11-19): a runtime that waits for its keeper after a Cancel (or a renewal, a
+// thread fault, an error) no longer watched its worker: a worker that ended before the keeper answered left the wait
+// for good, with the keeper's channel open. The page watches the worker until the runtime has ended.
+test('a cancelled threaded search whose Engine worker ends before its keeper answers ends at once', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+  test.setTimeout(180_000);
+  await keepWorkers(page);
+  await countChannels(page, { holdKeeper: true });
+  await startLongSearch(page);
+  const engine = (await startedWorkers(page, 'losat-engine')) - 1;
+  expect(await keeperOpen(page, engine)).toBe(true);
+  await pickRun(page, 1);
+  await page.getByTestId('run-status-cancel').click();
+  await waitStatus(page, 1, 'cancelled', 15_000);
+  // The threads were in use: the page waits for the keeper, which has not answered.
+  await page.waitForTimeout(1000);
+  expect(await keeperOpen(page, engine)).toBe(true);
+  await endWorker(page, 'losat-engine', undefined, engine);
+  await expect.poll(() => keeperOpen(page, engine), { timeout: 15_000 }).toBe(false);
 });
 
 // The first search of a new Engine worker is posted together with its `init`: after a cancel (here), before the warm-up,

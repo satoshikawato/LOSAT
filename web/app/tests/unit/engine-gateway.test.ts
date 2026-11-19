@@ -614,6 +614,76 @@ describe('WasmEngine', () => {
     keeper.close();
   });
 
+  // The third review of line WQA's D1 and D2, L2 (2026-11-19): the Gateway stopped waiting for the worker's lock once the
+  // generation began to end, so a generation already waiting for its keeper was never told that its worker ended: the
+  // wait never ended, with two channels open. It waits for the lock until the generation has ended.
+  describe('ends at once a generation that waits for its keeper when its worker ends', () => {
+    /** A threaded search whose worker holds its lock (unless `life` is false) and calls into the threaded instance. */
+    async function threadedSearch({ life = true } = {}) {
+      const locks = new FakeLocks();
+      const ends: string[] = [];
+      const { engine, workers } = setup(undefined, { locks, onRuntimeEnd: (end) => ends.push(end) });
+      const run = engine.run(request('r1', 4), output(), () => undefined);
+      const worker = await posted(() => workers[0], 1);
+      const asked: unknown[] = [];
+      // The keeper has not answered yet; it ends with the worker.
+      const keeper = fakeKeeper(worker, (message) => {
+        asked.push(message);
+        return undefined;
+      });
+      worker.send({ type: 'started', generation: 1 });
+      if (life) worker.send({ type: 'life', generation: 1, held: true });
+      expect(worker.use.enter()).toBe(true);
+      return { engine, run, worker, locks, ends, asked, keeper };
+    }
+
+    /** The generation waits for the keeper; the worker's end ends it at once. */
+    async function endsAtOnceWhenTheWorkerEnds({ worker, locks, ends, asked, keeper }: Awaited<ReturnType<typeof threadedSearch>>) {
+      await until(() => asked.length === 1);
+      expect(worker.terminated).toBe(false);
+      expect(ends).toEqual([]);
+      expect(locks.waiting.has(worker.init.lifeLock)).toBe(true);
+      locks.release(worker.init.lifeLock);
+      expect(worker.terminated).toBe(true);
+      expect(ends).toEqual(['at-once']);
+      keeper.close();
+    }
+
+    it('after a cancel', async () => {
+      const search = await threadedSearch();
+      search.engine.cancel('r1');
+      await expect(search.run).rejects.toBeInstanceOf(RunCancelledError);
+      await endsAtOnceWhenTheWorkerEnds(search);
+    });
+
+    it('after an error of the worker', async () => {
+      const search = await threadedSearch();
+      search.worker.onerror?.({ message: 'out of memory', preventDefault: () => undefined } as ErrorEvent);
+      await expect(search.run).rejects.toThrow('The engine worker stopped: out of memory');
+      await endsAtOnceWhenTheWorkerEnds(search);
+    });
+
+    it('after a cancel that came before the worker said that it holds its lock', async () => {
+      const search = await threadedSearch({ life: false });
+      search.engine.cancel('r1');
+      await expect(search.run).rejects.toBeInstanceOf(RunCancelledError);
+      search.worker.send({ type: 'life', generation: 1, held: true });
+      await endsAtOnceWhenTheWorkerEnds(search);
+    });
+
+    it('and stops waiting for the lock once the keeper answered', async () => {
+      const search = await threadedSearch();
+      const keeper = fakeKeeper(search.worker, () => ({ type: 'grown' }));
+      search.engine.cancel('r1');
+      await expect(search.run).rejects.toBeInstanceOf(RunCancelledError);
+      await until(() => search.worker.terminated);
+      expect(search.ends).toEqual(['grown']);
+      expect(search.locks.waiting.size).toBe(0);
+      keeper.close();
+      search.keeper.close();
+    });
+  });
+
   it('does not wait for the lock of a worker that it ends itself, nor of one that holds none', async () => {
     const locks = new FakeLocks();
     const { engine, workers } = setup(undefined, { locks });

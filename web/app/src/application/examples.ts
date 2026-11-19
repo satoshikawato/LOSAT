@@ -65,8 +65,11 @@ export interface ExamplesDeps {
   readonly deletions?: ExampleDeletions;
   /** Where a saved copy can be written; without it, "Save to folder…" and "Download" are not offered. */
   readonly saver?: FileSaver;
-  /** What of LOSAT could not be loaded or stopped (Availability's problem); undefined while LOSAT works. */
-  readonly unavailable?: () => string | undefined;
+  /**
+   * What of LOSAT could not be loaded or stopped, once the search form asked the engine again (Availability.recheck);
+   * undefined while LOSAT works.
+   */
+  readonly unavailable?: () => Promise<string | undefined>;
 }
 
 export class ExampleLoader {
@@ -105,18 +108,9 @@ export class ExampleLoader {
     }
   }
 
-  /**
-   * Loads a set into the draft for the current mode. While a part of LOSAT could not be loaded or stopped, the load
-   * fails at once with what the page says: the set was downloaded whole (8 to 37 MB), and then the file was blamed, as
-   * the engine's decoders that inflate it, or the Data worker that keeps it, were what could not be used.
-   */
+  /** Loads a set into the draft for the current mode. */
   load(id: ExampleId): void {
     this.cancel();
-    const problem = this.deps.unavailable?.();
-    if (problem !== undefined) {
-      this.update({ note: undefined, load: { id, progress: { state: 'failed', message: withRemedy(problem) } } });
-      return;
-    }
     const controller = new AbortController();
     this.running = controller;
     this.track(this.loadSet(exampleById(id), controller.signal));
@@ -211,6 +205,15 @@ export class ExampleLoader {
     };
     const fail = (message: string) => progress({ state: 'failed', message });
     this.update({ note: undefined });
+    // While a part of LOSAT could not be loaded or stopped, the load fails with what the page says, before any
+    // download: the set was downloaded whole (8 to 37 MB), and then the file was blamed, as the engine's decoders that
+    // inflate it, or the Data worker that keeps it, were what could not be used.
+    const problem = await this.deps.unavailable?.();
+    if (signal.aborted) return;
+    if (problem !== undefined) {
+      fail(withRemedy(problem));
+      return;
+    }
     progress({ state: 'reading' });
     // A copy being deleted is gone first, so that the draft never gets a file that is about to go.
     await this.deleting.get(set.id);

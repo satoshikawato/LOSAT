@@ -925,6 +925,10 @@ export class SearchDraft {
       const problem = this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
+    // What the engine could not answer while a part of LOSAT could not be loaded is asked again first: Run LOSAT was
+    // refused with "Reload the page" and asked nothing, also once the engine file downloaded again (the third review of
+    // line WQA's D1 and D2, M1, 2026-11-19).
+    this.askAgain();
     await this.idle();
     const { program, threads, title } = this.state.get();
     for (const role of ROLES) {
@@ -1130,7 +1134,7 @@ export class SearchDraft {
           this.described.set(program, value);
           if (this.state.get().program === program) this.set({ description: value, descriptionError: undefined, descriptionUnavailable: undefined });
           this.scheduleValidation();
-          this.engineAnswered();
+          this.askAgain();
         },
         (error: unknown) => {
           if (this.state.get().program === program) {
@@ -1142,13 +1146,15 @@ export class SearchDraft {
   }
 
   /**
-   * The engine answered a describe, an index or a check: what the form could not ask it while a part of LOSAT could not
-   * be loaded is asked again. An engine file that failed to download is downloaded again by the next call, so one
-   * network error at load left "Not read." on the options and the page's "Reload the page" for the whole session, also
-   * after searches completed (the second review of line WQA's D1 and D2, M1, 2026-11-19). A question is pending until
-   * it answers, and is asked again only by a later answer.
+   * Asks the engine again what the form could not ask it while a part of LOSAT could not be loaded: the options, the
+   * inputs that could not be read or checked, the validation. An engine file that failed to download is downloaded
+   * again by the next call, so one network error at load left "Not read." on the options and the page's "Reload the
+   * page" for the whole session, also after searches completed (the second review of line WQA's D1 and D2, M1,
+   * 2026-11-19). It is asked when the engine answers the options, an index or a check, when Run LOSAT is pressed, and
+   * before an Example is loaded (Availability.recheck). A question is pending until it answers; one that fails asks
+   * nothing again.
    */
-  private engineAnswered(): void {
+  askAgain(): void {
     const state = this.state.get();
     this.askOptionsAgain();
     for (const role of ROLES) {
@@ -1165,7 +1171,7 @@ export class SearchDraft {
   /**
    * Asks the engine for the options again if it could not answer them before. A validation that the engine answered
    * asks only this: a validation follows every index, also one that failed, which would otherwise be read again after
-   * each validation; the options that answer ask the rest again (engineAnswered).
+   * each validation; the options that answer ask the rest again (askAgain).
    */
   private askOptionsAgain(): void {
     const { descriptionUnavailable, program } = this.state.get();
@@ -1242,7 +1248,7 @@ export class SearchDraft {
       }));
       this.noteRevision(sourceId, base.revisionId);
       this.scheduleCheck(role, key, 0);
-      this.engineAnswered();
+      this.askAgain();
     } catch (error) {
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
@@ -1296,7 +1302,7 @@ export class SearchDraft {
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
     );
-    if (check.state !== 'error') this.engineAnswered();
+    if (check.state !== 'error') this.askAgain();
   }
 
   /** The revision of a source's selection: its record table, or a revision without the excluded records. */

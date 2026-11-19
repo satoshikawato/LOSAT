@@ -2366,7 +2366,7 @@ fn search(
         // it is structured, to the caller's receiver of a later format's (`later`,
         // `ReportOutputs::later_query_warnings`), in the order of the queries.
         let result_warnings = outputs.first_writes_query_warnings();
-        let later = outputs.later_query_warnings().is_some();
+        let later = outputs.takes_later_query_warnings();
         let mut later_text = Vec::new();
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
@@ -2435,9 +2435,7 @@ fn search(
                 lines
             })
             .collect();
-        if let Some(later) = outputs.later_query_warnings() {
-            later.write_all(&later_text)?;
-        }
+        outputs.write_later_query_warnings(&later_text)?;
         // The query batches that were read and searched, by their searched queries (the batches
         // before a database failure or a reader stop): each is reported.
         let batch_spans: Vec<std::ops::Range<usize>> = query_input

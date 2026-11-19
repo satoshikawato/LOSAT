@@ -7,6 +7,7 @@ use super::*;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
 
 fn hsp(frame: i32, s: (i32, i32), score: i32) -> BlastpPreliminaryHsp {
@@ -49,7 +50,7 @@ fn run_of(consensus: &[u8]) -> RedoRun<'_> {
             alpha: 1.9,
             beta: -30.0,
         },
-        0.041f64.ln(),
+        0.041f64.glibc_ln(),
         (11, 1),
         (25.0, 0),
         QueryPssm {

@@ -7,6 +7,8 @@
 //! (`adaptive_cbs_environment`), also for the preliminary hit list size
 //! (`blastn::hsp::get_prelim_hitlist_size`).
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
+
 /// Whether the environment variable `ADAPTIVE_CBS` is set (to any value, the empty one too):
 /// with composition-based statistics NCBI then keeps a larger preliminary hit list
 /// (`blastn::hsp::get_prelim_hitlist_size`) and closes the stream with
@@ -134,7 +136,7 @@ pub(crate) fn cbs_trim_count(
     let ref_evalue = best_evalue(ref_hit_num);
     let mut mag: i32 = -180;
     if ref_evalue != 0.0 {
-        mag = ref_evalue.log10() as i32;
+        mag = ref_evalue.glibc_log10() as i32;
     }
     if mag < -20 {
         mag = (mag * 90 / 100).max(mag + 10);
@@ -144,7 +146,7 @@ pub(crate) fn cbs_trim_count(
     let evalue_limit = if mag >= 0 {
         ref_evalue * 3.0
     } else {
-        9.9 * 10f64.powf(f64::from(mag))
+        9.9 * 10f64.glibc_pow(f64::from(mag))
     };
     let mut i = min_buf_sz;
     while i < max_index && i < sorted {

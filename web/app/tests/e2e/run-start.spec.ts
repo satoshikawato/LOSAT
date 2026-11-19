@@ -66,14 +66,19 @@ function nativeDirectory(query: string, subject: string | Uint8Array): string {
 }
 
 /**
- * The file of `-logfile run.log` that the native CLI writes for the search `words` (program first) on
- * the inputs, with the run's one thread: undefined without LOSAT_WEB_NATIVE.
+ * The file of `-logfile run.log` and the standard error that the native CLI writes for the search `words` (program
+ * first) on the inputs, with the run's one thread: undefined without LOSAT_WEB_NATIVE.
  */
-function nativeLogFile(words: readonly string[], query: string, subject: string | Uint8Array): Buffer | undefined {
+function nativeLogRun(words: readonly string[], query: string, subject: string | Uint8Array): { file: Buffer; stderr: Buffer } | undefined {
   if (NATIVE === undefined) return undefined;
   const directory = nativeDirectory(query, subject);
-  spawnSync(NATIVE, [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-logfile', 'run.log', '-num_threads', '1'], { cwd: directory });
-  return readFileSync(join(directory, 'run.log'));
+  const run = spawnSync(NATIVE, [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-logfile', 'run.log', '-num_threads', '1'], { cwd: directory });
+  return { file: readFileSync(join(directory, 'run.log')), stderr: run.stderr };
+}
+
+/** The file of `-logfile run.log` of `nativeLogRun`. */
+function nativeLogFile(words: readonly string[], query: string, subject: string | Uint8Array): Buffer | undefined {
+  return nativeLogRun(words, query, subject)?.file;
 }
 
 // The file of -logfile of a completed run: TBLASTX writes the warning of -max_target_seqs 1 into it,
@@ -245,9 +250,15 @@ test("TBLASTX with -logfile: the outputs that could not be written point to wher
       const shown = page.getByTestId('run-file-0');
       if (file === '') {
         await expect(shown.getByTestId('run-file-empty')).toHaveText('The file is empty.');
-        // The CLI's file of the same argv is empty too.
+        // The CLI's file of the same argv (outfmt 0, which writes the alignments) is empty too, and the CLI's run of
+        // outfmt 6 writes LOSAT's refusal to its standard error, none to the file.
         const native = nativeLogFile(['tblastx'], QUERY, subject);
         if (native !== undefined) expect(native.length, 'tblastx -logfile run.log, an undecodable subject title').toBe(0);
+        const six = nativeLogRun(['tblastx', '-outfmt', '6'], QUERY, subject);
+        if (six !== undefined) {
+          expect(six.stderr.toString('utf8'), 'tblastx -outfmt 6 -logfile run.log: standard error').toContain(refusal);
+          expect(six.file.length, 'tblastx -outfmt 6 -logfile run.log: the file').toBe(0);
+        }
       } else {
         await expect(shown.getByTestId('run-file-text')).toContainText(file);
       }

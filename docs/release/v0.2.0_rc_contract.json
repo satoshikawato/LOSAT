@@ -220,7 +220,7 @@
     {
       "id": "G",
       "title": "WASI threads and serial compatibility",
-      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; psiblast's -subject rows (outfmt0_manifest.tsv) and -db rows (db_search_manifest, PSSM files under PD-LOSAT-PLATFORM-LIBM) on both WASI commands; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
+      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; psiblast's -subject rows (outfmt0_manifest.tsv) and -db rows (db_search_manifest, PSSM files included, byte for byte since #1344) on both WASI commands; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
       "comparator": "mixed",
       "comparator_note": "NCBI executed (the workflow downloads and sha-verifies 2.17.0) + raw-byte equality",
       "tool": "wasm-threading.yml (candidate_sha=C, include_serial_compatibility=true) dispatched on cert/<9 hex of C>",

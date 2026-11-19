@@ -938,6 +938,15 @@ a release moves them under `[Unreleased]` below.
 
 ### Fixes
 
+- `exp`, `log`, `log10` and `pow` now give the bits of glibc's x86-64 FMA versions, which NCBI BLAST+
+  2.17.0 used for the reference output, on every platform LOSAT builds for (`LOSAT/src/utils/glibc_fma_libm.rs`).
+  On WebAssembly (WASI and the web page) and on x86-64 CPUs without FMA, a value printed with all 15
+  digits no longer differs from Linux by 1 in its last digit: the E values of `-outfmt 11` and
+  `-outfmt 8` (for example `tblastx`) and the values of
+  psiblast's ASN.1 PSSM. Tests: the WASI checks (`LOSAT/tests/check_wasm_threading.py`) run every
+  psiblast `-db` row through each WASI command and compare the output files, the ASN.1 PSSM included,
+  byte for byte with the frozen bytes of NCBI BLAST+ 2.17.0; `clippy` refuses the transcendental
+  methods of `f64` outside that module.
 - `losat -help` names every program that `losat` runs: blastdbcmd, dustmasker, segmasker and
   convert2blastmask are listed under "Other programs" (derived from the entry names that
   `--install-shims` links). Stale notes are gone: makeblastdb says it writes format version 5 by
@@ -2148,6 +2157,23 @@ a release moves them under `[Unreleased]` below.
 
 ### WebAssembly and LOSAT Web
 
+- LOSAT Web: the five mode tabs fit a 320 px window, so the search page no longer scrolls sideways and every mode name
+  stays inside its tab (#1329).
+- LOSAT Web: error messages are easier to read on the grey page and in a selected row; the error colour is a little
+  darker and now meets 4.5:1 on every ground it is drawn on (#1330).
+- LOSAT Web: an input that holds no sequence (an empty file, whitespace only, or a defline only) no longer gets the
+  check mark and "Accepted"; its card says that the input adds nothing to the search (#1337).
+- LOSAT Web: Back on the results returns to the Search tab with the form as it was, and Forward shows the results
+  again, instead of leaving LOSAT and losing every run and input (#1339).
+- LOSAT Web: when the browser does not let the page store result files, the note under the form says in LOSAT's words
+  that results are kept in this tab's memory (at most 512 MB) and why, instead of printing the browser's error text;
+  in Firefox with the site's data blocked, the page now starts (#1340).
+- LOSAT Web: a number and its unit, such as "512 MB", "420 ms" or "40 nt", stay on one line (#1341).
+- LOSAT Web: when a part of LOSAT cannot be loaded or stops, the page says so once, with what to do. It asks again by
+  itself once the part can be loaded, keeping the pasted inputs, and no run or button hangs; Cancel also works while a
+  run's results are being organized (#1343).
+- LOSAT Web: a search runs to its results in Firefox with the site's data blocked, instead of failing with "The
+  operation is insecure" (#1346).
 - LOSAT Web: the header reads "LOSAT" with "A miniaturized reimplementation of NCBI BLAST algorithm"; the "?" help of
   an option shows while the "?" is pointed at or reached with the keyboard, and a click keeps it open, as NCBI's
   helpbox; the screen wake lock is on by default, offered as "Keep searching while you're away" on phones and
@@ -2180,14 +2206,6 @@ a release moves them under `[Unreleased]` below.
   bytes as before. The WASI command checks (`LOSAT/tests/check_wasm_threading.py`) run every blastx row of
   these formats of the frozen `-subject` and `-db` fixtures through each WASI command (`--outfmts` of
   `check_losat.py` and `db_search_fixtures.py check`).
-- WASI (`wasm32-wasip1`, `wasm32-wasip1-threads`): a value in psiblast's ASN.1 PSSM file (`-out_pssm`
-  with `-out_ascii_pssm`) can differ from the other platforms' by 1 in its last (15th) digit, because
-  WebAssembly's `log()` has no FMA; NCBI BLAST+ 2.17.0 writes the same digit on an x86-64 CPU without
-  FMA. PD-LOSAT-PLATFORM-LIBM 1.1 records this for WASI (Owner, 2026-11-18), as 1.0 did for macOS. The
-  WASI checks (`LOSAT/tests/check_wasm_threading.py`) now run every psiblast `-db` row through each WASI
-  command, with that record's rule on the PSSM files only (`db_search_fixtures.py check
-  --libm-last-digit`); the rule, in `xinclude_fixtures.py` and in the macOS `-outfmt 11` test, accepts
-  only a 15-digit mantissa 1 away.
 - LOSAT Web and the WebAssembly (wasm32) builds now do what the command line does where they differed:
   a BLASTX batch whose lookup table would need over 268 million entries is built by the reference
   builder (same output) instead of stopping with "capacity overflow"; rpsbproc prints NCBI's text

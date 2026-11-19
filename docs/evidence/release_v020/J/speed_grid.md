@@ -38,7 +38,7 @@
 | bns | 86.9 | 87.8 | - | 91.3 | 0.989 (0.986-0.993) | - | 0.951 | 0.975 | met | met |
 | tbn | 37.8 | 38.5 | - | 135.7 | 0.981 (0.972-0.991) | - | 0.278 | 0.985 | met | met |
 | bx | 23.7 | 23.9 | - | 55.9 | 0.992 (0.991-0.995) | - | 0.424 | 0.989 | met | met |
-| tbx | 197.4 | 195.2 | 1508.8 | - | 1.011 (1.010-1.015) | 0.131 | - | 1.007 | met | - |
+| tbx | 197.4 | 195.2 | 1508.8 | 20679.7 | 1.011 (1.010-1.015) | 0.131 | 0.010 | 1.007 | met | met |
 
 ## n1 instructions:u (G; same medians)
 
@@ -52,7 +52,7 @@
 | bns | 193.5 | 198.3 | - | 190.2 | 0.976 (0.9760-0.9760) | - | 1.017 |
 | tbn | 140.4 | 146.7 | - | 282.9 | 0.957 (0.9571-0.9571) | - | 0.496 |
 | bx | 62.6 | 62.3 | - | 124.2 | 1.004 (1.0039-1.0040) | - | 0.504 |
-| tbx | 499.9 | 516.6 | 3015.0 | - | 0.968 (0.9677-0.9677) | 0.166 | - |
+| tbx | 499.9 | 516.6 | 3015.0 | 3873.5 | 0.968 (0.9677-0.9677) | 0.166 | 0.129 |
 
 ## n1 per-arm rc / sha16 (all runs of an arm must agree) and wall (s, median) / max RSS (MiB)
 
@@ -90,5 +90,8 @@
 | tbx | cp | 5 | 0 | ea54151b99edecb9 | 62.4 | 161 |
 | tbx | d48 | 5 | 0 | ea54151b99edecb9 | 61.7 | 159 |
 | tbx | v010 | 1 | 0 | d02ffd362e02c802 | 475.4 | 840 |
+| tbx | ncbi | 1 | 0 | ea54151b99edecb9 | 6493.9 | 305 |
 
-n1 rows with rc != 0 (left out of the tables): tbx ncbi rc None wall -
+n1 rows with rc != 0 (left out of the tables): none
+
+n1 runs that stopped and were run again (the rerun is in the tables): tbx ncbi (first run stopped by its time limit, row kept in its perfstat file)

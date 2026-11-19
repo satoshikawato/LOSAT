@@ -40,7 +40,7 @@ cells are empty); `ncbi` = NCBI BLAST+ 2.17.0 with `-db` against a database it b
 | Rule | Result |
 | --- | --- |
 | `cp` at most 1.05 x `d48` | met in all 9 modes at 16 threads (0.903-1.014) and at 1 thread (cycles 0.951-1.011) |
-| `cp` faster than NCBI | met in all 9 modes at 16 threads (0.0016-0.420 of NCBI's wall time) and in all 8 measured modes at 1 thread (0.21-0.95 of NCBI's cycles) |
+| `cp` faster than NCBI | met in all 9 modes at 16 threads (0.0016-0.420 of NCBI's wall time) and at 1 thread (0.010-0.95 of NCBI's cycles) |
 | `cp` against v0.1.0 | 0.022-0.182 of v0.1.0's wall time at 16 threads in the 4 modes v0.1.0 can run |
 
 Every arm wrote the same output in every run (`speed_grid.md`, the sha16 columns). `cp` and `d48` give the

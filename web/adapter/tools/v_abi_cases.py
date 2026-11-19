@@ -379,12 +379,13 @@ def reader_error() -> list[dict]:
     LOSAT/src/api/reader_end_tests.rs; the inputs are written under LOSAT/target, as
     window_masker's. A BLASTP search with -parse_deflines: two records of one ID in the first batch
     end the CLI there, before the record of the second batch whose Seq-id names a nucleotide
-    sequence (`register_inputs` reads it, and the run ends with the first batch's error, before the
-    CLI writes the outfmt 0 prolog). The subject holds copies of its sequence, so that the outfmt 0
-    report of the first batch is over the adapter's chunk of 1 MiB (`emit::CHUNK`): a run sends
-    whole chunks as they fill and nothing smaller before it fails, so the run's first chunk of
-    outfmt 0, which the CLI's file starts with, shows the batch before the error (`sends`; review L3,
-    2026-11-20)."""
+    sequence (`register_inputs` reads it, and the run ends with the first batch's error, after the
+    CLI writes the outfmt 0 prolog, as NCBI writes it when it stops in its first batch: line WQA D10
+    round 4, 2026-11-20; before, LOSAT refused before the prolog). The subject holds copies of its
+    sequence, so that the outfmt 0 report of the first batch is over the adapter's chunk of 1 MiB
+    (`emit::CHUNK`): a run sends whole chunks as they fill and nothing smaller before it fails, so
+    the run's first chunk of outfmt 0, which the CLI's file starts with, shows the batch before the
+    error (`sends`; review L3, 2026-11-20)."""
     import random
 
     engine = REPO / "LOSAT"
@@ -433,8 +434,7 @@ def reader_error() -> list[dict]:
     (engine / directory / "blastp_pd.s.fa").write_bytes(fasta(["s1"], residues[:300]))
     searches.append({"program": "blastp", "argv": ["blastp", "-query", str(directory / "blastp_pd.q.fa"),
                                                    "-subject", str(directory / "blastp_pd.s.fa"), "-parse_deflines"],
-                     "cwd": str(engine), "cases": ["reader_error.blastp_pd_order"], "frozen": {}, "expect": "failure",
-                     "prolog": False})
+                     "cwd": str(engine), "cases": ["reader_error.blastp_pd_order"], "frozen": {}, "expect": "failure"})
     return searches
 
 

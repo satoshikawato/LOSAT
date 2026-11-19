@@ -137,10 +137,21 @@ fn cases() -> Vec<Case> {
 /// The command line's run of `query` against `subject` in outfmt 6, in this process: its report
 /// (`-out`) and its error.
 fn command_line(program: Program, query: &[u8], subject: &[u8]) -> (Vec<u8>, Option<String>) {
+    command_line_with(program, query, subject, &[], "6")
+}
+
+/// `command_line` with the options `options` and the format `outfmt`.
+fn command_line_with(
+    program: Program,
+    query: &[u8],
+    subject: &[u8],
+    options: &[&str],
+    outfmt: &str,
+) -> (Vec<u8>, Option<String>) {
     let (query_path, subject_path, out) = (temp_path("q.fa"), temp_path("s.fa"), temp_path("out"));
     std::fs::write(&query_path, query).expect("write the query");
     std::fs::write(&subject_path, subject).expect("write the subject");
-    let argv = [
+    let mut argv = vec![
         "losat",
         program.name(),
         "-query",
@@ -148,10 +159,11 @@ fn command_line(program: Program, query: &[u8], subject: &[u8]) -> (Vec<u8>, Opt
         "-subject",
         subject_path.to_str().unwrap(),
         "-outfmt",
-        "6",
+        outfmt,
         "-out",
         out.to_str().unwrap(),
     ];
+    argv.extend_from_slice(options);
     let cli: Cli = try_parse_from(argv).expect("the argv parses");
     let settings = ApplicationSettings::default();
     let result = match cli.command {
@@ -175,20 +187,55 @@ fn command_line(program: Program, query: &[u8], subject: &[u8]) -> (Vec<u8>, Opt
 /// The library's search of the records of `query` and `subject` that `read_input_records` reads,
 /// in outfmt 6: its report and its error.
 fn library(program: Program, query: &[u8], subject: &[u8]) -> (Vec<u8>, Option<String>) {
-    let search = validate(program, &[]).expect("no options");
+    library_with(program, query, subject, &[], "6")
+}
+
+/// `library` with the options `options` and the format `outfmt`.
+fn library_with(
+    program: Program,
+    query: &[u8],
+    subject: &[u8],
+    options: &[&str],
+    outfmt: &str,
+) -> (Vec<u8>, Option<String>) {
+    let search = validate(program, options).expect("the options");
     let records = read_input_records(&search, query, subject).expect("the subject reads");
     let mut report = Vec::new();
     let mut diagnostics = Vec::new();
     let result = run(
         &search,
         records.inputs(),
-        &mut [("6", &mut report)],
+        &mut [(outfmt, &mut report)],
         &mut diagnostics,
     );
     let error = result
         .err()
         .map(|error| error.message().trim_end().to_string());
     (report, error)
+}
+
+/// The rows of `run_batches`'s search of `query` and `subject` with `options` (outfmt 6's, one an
+/// HSP) before its error, and the error: of the call, or of the batch that ends the batches.
+fn batches_with(
+    program: Program,
+    query: &[u8],
+    subject: &[u8],
+    options: &[&str],
+) -> (usize, Option<String>) {
+    let search = validate(program, options).expect("the options");
+    let records = read_input_records(&search, query, subject).expect("the subject reads");
+    let batches = match run_batches(&search, records.inputs()) {
+        Ok(batches) => batches,
+        Err(error) => return (0, Some(error.message().trim_end().to_string())),
+    };
+    let mut rows = 0;
+    for batch in batches {
+        match batch {
+            Ok(batch) => rows += batch.hsps.len(),
+            Err(error) => return (rows, Some(error.message().trim_end().to_string())),
+        }
+    }
+    (rows, None)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216-222
@@ -199,34 +246,129 @@ fn library(program: Program, query: &[u8], subject: &[u8]) -> (Vec<u8>, Option<S
 //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
 //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
 // ```
+// With `-parse_deflines` (the batches' Seq-id scopes, `query_batch::QueryScopes`) and with
+// `-query_loc` (a cut of each record, the batch counting the whole record) the run ends alike
+// (review L3, 2026-11-20).
 #[test]
 fn a_reader_error_ends_the_search_in_its_batch_as_on_the_command_line() {
+    for options in [&[][..], &["-parse_deflines"], &["-query_loc", "10-200"]] {
+        for case in cases() {
+            let name = format!("{} {options:?}", case.program.name());
+            // A subject with a defline, which `-parse_deflines` reads.
+            let subject = fasta_named(&["s1".to_string()], &case.subject);
+            let records = fasta(case.records, &case.query);
+            let query = with_bad_record(records.clone());
+            let (cli_report, cli_error) =
+                command_line_with(case.program, &query, &subject, options, "6");
+            let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: the command line fails"));
+            assert!(cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
+            assert!(!cli_report.is_empty(), "{name}: a batch before the error");
+            let (report, error) = library_with(case.program, &query, &subject, options, "6");
+            assert_eq!(error.as_deref(), Some(cli_error.as_str()), "{name}");
+            assert!(
+                report == cli_report,
+                "{name}: the reports of the batches before"
+            );
+            // The batch of the record is not searched: the whole input has more rows.
+            let (whole, whole_error) = library_with(case.program, &records, &subject, options, "6");
+            assert_eq!(whole_error, None, "{name}");
+            assert!(
+                whole.len() > report.len(),
+                "{name}: the last batch was searched"
+            );
+            assert!(whole.starts_with(&report), "{name}");
+            // `run_batches`: the rows of the batches before, then the error.
+            let (rows, batches_error) = batches_with(case.program, &query, &subject, options);
+            assert_eq!(
+                rows,
+                cli_report.split(|&byte| byte == b'\n').count() - 1,
+                "{name}"
+            );
+            assert_eq!(batches_error.as_deref(), Some(cli_error.as_str()), "{name}");
+            // `read_inputs` fails before any report.
+            let search = validate(case.program, options).unwrap();
+            let early = read_inputs(&search, &query, &subject).unwrap_err();
+            assert_eq!(early, Error::Input(cli_error), "{name}");
+        }
+    }
+}
+
+/// FASTA of records named `names`, each of `sequence`, 60 letters a line.
+fn fasta_named(names: &[String], sequence: &[u8]) -> Vec<u8> {
+    let mut text = Vec::new();
+    for name in names {
+        text.extend_from_slice(format!(">{name}\n").as_bytes());
+        for line in sequence.chunks(60) {
+            text.extend_from_slice(line);
+            text.push(b'\n');
+        }
+    }
+    text
+}
+
+// Under `-parse_deflines` with `-subject` LOSAT refuses two queries of the run with one id
+// (`query_batch::QueryScopes`), and a scope holds the batches that the reader delivers: a batch
+// that a reader error ends adds none, so its error is the run's (review M3, 2026-11-20). The
+// library's run and `run_batches` refuse where the command line does, in outfmt 6 and 5: BLASTN
+// and BLASTX after the batches before the one with the second id (in outfmt 6), the others before
+// any report.
+#[test]
+fn a_scope_holds_the_batches_that_the_reader_delivers() {
+    let options = ["-parse_deflines"];
     for case in cases() {
-        let name = case.program.name();
-        let records = fasta(case.records, &case.query);
-        let query = with_bad_record(records.clone());
-        let (cli_report, cli_error) = command_line(case.program, &query, &case.subject);
-        let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: the command line fails"));
-        assert!(cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
-        assert!(!cli_report.is_empty(), "{name}: a batch before the error");
-        let (report, error) = library(case.program, &query, &case.subject);
-        assert_eq!(error.as_deref(), Some(cli_error.as_str()), "{name}");
-        assert!(
-            report == cli_report,
-            "{name}: the reports of the batches before"
-        );
-        // The batch of the record is not searched: the whole input has more rows.
-        let (whole, whole_error) = library(case.program, &records, &case.subject);
-        assert_eq!(whole_error, None, "{name}");
-        assert!(
-            whole.len() > report.len(),
-            "{name}: the last batch was searched"
-        );
-        assert!(whole.starts_with(&report), "{name}");
-        // `read_inputs` fails before any report.
-        let search = validate(case.program, &[]).unwrap();
-        let early = read_inputs(&search, &query, &case.subject).unwrap_err();
-        assert_eq!(early, Error::Input(cli_error), "{name}");
+        let subject = fasta_named(&["s1".to_string()], &case.subject);
+        // One record more than `cases`, so that the last batch holds two.
+        let count = case.records + 1;
+        let mut names: Vec<String> = (1..=count).map(|index| format!("q{index}")).collect();
+        for (variant, other) in [("in its batch", count - 2), ("in the first batch", 0)] {
+            names[count - 1] = names[other].clone();
+            let duplicate = fasta_named(&names, &case.query);
+            let name = format!("{} {variant}", case.program.name());
+            for outfmt in ["6", "5"] {
+                // The second id alone: LOSAT's refusal.
+                let (cli_report, cli_error) =
+                    command_line_with(case.program, &duplicate, &subject, &options, outfmt);
+                let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: a refusal"));
+                assert!(!cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
+                let (report, error) =
+                    library_with(case.program, &duplicate, &subject, &options, outfmt);
+                assert_eq!(
+                    error.as_deref(),
+                    Some(cli_error.as_str()),
+                    "{name} {outfmt}"
+                );
+                assert!(report == cli_report, "{name} {outfmt}: the reports");
+                // Then a record that the reader fails on, in the batch of the second id.
+                let failing = with_bad_record(duplicate.clone());
+                let (cli_report, cli_error) =
+                    command_line_with(case.program, &failing, &subject, &options, outfmt);
+                let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: the reader's error"));
+                assert!(
+                    cli_error.starts_with(BAD_LINE),
+                    "{name} {outfmt}: {cli_error}"
+                );
+                assert!(!cli_report.is_empty(), "{name} {outfmt}: the first batch");
+                let (report, error) =
+                    library_with(case.program, &failing, &subject, &options, outfmt);
+                assert_eq!(
+                    error.as_deref(),
+                    Some(cli_error.as_str()),
+                    "{name} {outfmt}"
+                );
+                assert!(report == cli_report, "{name} {outfmt}: the reports");
+            }
+            for query in [duplicate.clone(), with_bad_record(duplicate)] {
+                let (cli_report, cli_error) =
+                    command_line_with(case.program, &query, &subject, &options, "6");
+                let (rows, error) = batches_with(case.program, &query, &subject, &options);
+                assert_eq!(error, cli_error, "{name}: run_batches");
+                assert_eq!(
+                    rows,
+                    cli_report.split(|&byte| byte == b'\n').count() - 1,
+                    "{name}: run_batches"
+                );
+            }
+        }
     }
 }
 

@@ -490,11 +490,6 @@ impl QueryScopes {
         self
     }
 
-    /// The span of the scopes.
-    pub(crate) fn span(&self) -> QueryScopeSpan {
-        self.span
-    }
-
     /// `new` for a search whose reports show the ids of its queries (`believed`, `believed_queries`;
     /// `None` otherwise), with `QueryScopeSpan::of` of `subject` and `xml`.
     pub(crate) fn of_search(

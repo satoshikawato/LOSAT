@@ -189,6 +189,7 @@ fn search_records(
         archive.is_some(),
         true,
         xml_matrix,
+        args.parse_deflines,
     )?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
@@ -226,7 +227,7 @@ fn search_records(
         }
     };
     report_batches(
-        &RunReports {
+        RunReports {
             lowercase: args.lcase_masking,
             query_records,
             query_end,
@@ -323,7 +324,11 @@ struct RunReports<'a> {
 /// in memory, read into the search's reader batches as the command line's `prescan_queries` reads
 /// the file, and at the same place: before the subjects' warnings). With outfmt 5 among the
 /// formats every report is written. `keep_whole`: the search keeps the whole letters of a cut
-/// record (the archive's).
+/// record (the archive's). Under `-parse_deflines` (`parse_deflines`) the read adds each batch
+/// that the reader delivers to the scopes of the queries (`QueryScan::query_scopes`, read ahead),
+/// as the command line's read does (`blast_xml::scan_query_stream`): LOSAT's refusal of two
+/// queries of one scope with one id comes before the first byte, and the batch that a reader error
+/// ends adds nothing (review M3, 2026-11-20).
 #[allow(clippy::too_many_arguments)]
 fn scan_xml_titles(
     resolved: &[ResolvedOptions],
@@ -335,35 +340,70 @@ fn scan_xml_titles(
     keep_whole: bool,
     subject_set: bool,
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    parse_deflines: bool,
 ) -> Result<super::blast_xml::QueryScan> {
     let structured: Vec<u8> = resolved
         .iter()
         .map(|options| options.outfmt)
         .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
         .collect();
+    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+        parse_deflines,
+        subject_set,
+        structured.contains(&5),
+        "BLASTX",
+    );
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
     // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
-    // checked. (The scopes of `-parse_deflines` are read ahead apart, `report_batches`.)
-    if structured.is_empty() || batch_size == 0 || xml_matrix.is_some() {
+    // checked, and the queries are read for their scopes alone.
+    if structured.is_empty() || batch_size == 0 || (xml_matrix.is_some() && query_scopes.is_none())
+    {
         return Ok(super::blast_xml::QueryScan::default());
     }
     let holds_back =
         crate::report::blast_xml2::reports_held(subject_set, false) && !structured.contains(&5);
-    super::blast_xml::scan_queries(&resolved[0], holds_back, true, &mut |deliver| {
-        reader_batches(
-            query_records,
-            query_end,
-            lowercase,
-            query_range,
-            batch_size,
-            keep_whole,
-            0,
-            false,
-            deliver,
-            &mut |_| Ok(()),
-        )
-    })
-    .map_err(report_error)
+    let mut delivered = 0usize;
+    let mut refusal = None;
+    let mut scan = super::blast_xml::scan_queries(
+        &resolved[0],
+        holds_back,
+        xml_matrix.is_none(),
+        &mut |deliver| {
+            reader_batches(
+                query_records,
+                query_end,
+                lowercase,
+                query_range,
+                batch_size,
+                keep_whole,
+                0,
+                false,
+                &mut |batch| {
+                    // A batch that NCBI fails (`deliver`'s error) reports nothing of its scope.
+                    deliver(batch)?;
+                    if let Some(scopes) = query_scopes.as_mut() {
+                        let added = scopes.add_batch_ids(
+                            batch.iter().filter_map(|record| record.believed()),
+                            delivered,
+                        );
+                        if let Err(error) = added {
+                            refusal = Some(error);
+                            anyhow::bail!("LOSAT refuses this batch");
+                        }
+                    }
+                    delivered += batch.len();
+                    Ok(())
+                },
+                &mut |_| Ok(()),
+            )
+        },
+    )
+    .map_err(report_error)?;
+    if let Some(refusal) = refusal {
+        return Err(refusal);
+    }
+    scan.query_scopes = query_scopes.map(crate::blastinput::query_batch::QueryScopes::read_ahead);
+    Ok(scan)
 }
 
 /// The subjects as the reports of a query batch show them: `shown`, or a database's sequences of
@@ -470,7 +510,11 @@ fn reader_batches(
 // ```
 /// The prologs, the query batches (`run_query_batches`) with the reports of each in every format,
 /// the epilogs and the hit list of a search of records.
-fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+    // The scopes that the read before the search made (`scan_xml_titles`), which the search's
+    // batches then keep.
+    let read_ahead_scopes = run.xml_scan.query_scopes.take();
+    let run = &run;
     let &RunReports {
         resolved,
         subjects,
@@ -549,6 +593,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     let wants_hits = hits_sink.is_some();
     let written = write_run(
         run,
+        read_ahead_scopes,
         &mut writers,
         &mut refusals,
         &mut documents,
@@ -592,6 +637,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 #[allow(clippy::too_many_arguments)]
 fn write_run(
     run: &RunReports<'_>,
+    read_ahead_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
     writers: &mut [crate::cli::NcbiOstream<'_>],
     refusals: &mut [&mut crate::api::local_blast::FormatRefusal],
     documents: &mut [Option<super::blast_xml::RunXml2>],
@@ -623,32 +669,20 @@ fn write_run(
         xml_matrix,
         ..
     } = run;
-    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with `-subject`
-    // or outfmt 5 one scope of every record in memory, made before the search so that its refusal
-    // comes before any byte (`QueryScopes::read_ahead`); else the batches add theirs as they come.
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5 and
+    // 13 to 16 the read before the search made them (`scan_xml_titles`, `QueryScopes::read_ahead`),
+    // so that a refusal comes before any byte; else the batches add theirs as the reader delivers
+    // them (`render`), as the command line's (`native::run_inner`). Either way a batch that a
+    // reader error ends adds none (review M3, 2026-11-20).
     let xml = choices.iter().any(|choice| choice.number == 5);
-    let query_scopes = std::cell::RefCell::new(
-        match crate::blastinput::query_batch::QueryScopes::of_search(
+    let query_scopes = std::cell::RefCell::new(read_ahead_scopes.or_else(|| {
+        crate::blastinput::query_batch::QueryScopes::of_search(
             parse_deflines,
             database.is_none(),
             xml,
             "BLASTX",
-        ) {
-            Some(scopes)
-                if scopes.span() == crate::blastinput::query_batch::QueryScopeSpan::Run =>
-            {
-                Some(
-                    crate::blastinput::query_batch::QueryScopes::of_records(
-                        crate::blastinput::query_batch::QueryScopeSpan::Run,
-                        "BLASTX",
-                        query_records,
-                    )?
-                    .read_ahead(),
-                )
-            }
-            scopes => scopes,
-        },
-    );
+        )
+    }));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
@@ -1203,9 +1237,10 @@ fn search_database(
         archive.is_some(),
         false,
         xml_matrix,
+        args.parse_deflines,
     )?;
     report_batches(
-        &RunReports {
+        RunReports {
             lowercase: args.lcase_masking,
             query_records,
             query_end,

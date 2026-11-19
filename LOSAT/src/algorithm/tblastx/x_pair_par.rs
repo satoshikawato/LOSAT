@@ -1521,7 +1521,7 @@ struct XGroup {
     /// to the end of the run, 58 MiB with the switch off), and max RssAnon was 2,225 MiB against
     /// 1,984 MiB with the switch off. The scan reads this field as before: a lazy cell read in
     /// `scan` (made by its first call) gave the same memory as the switch off but changed the code
-    /// of the units' scan loops (`scan_unit_bf`: two stack reloads per hit, 5.6 % more
+    /// of the units' scan loops (`scan_unit_bf`: two stack reloads per hit, 1.6 % more
     /// instructions on ViPTreeGen's Begomovirus.40).
     presence: Option<crate::algorithm::tblastx::x_scan_byte::XPresence>,
 }

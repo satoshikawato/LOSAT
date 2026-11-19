@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MEMORY_RESULTS_CAPACITY_BYTES, StorageFullError } from '../../src/infra/data/block-store';
+import { MEMORY_FULL_MESSAGE, StorageFullError } from '../../src/infra/data/block-store';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { opfsAccess } from '../../src/infra/data/opfs-block-store';
 import {
@@ -23,6 +23,7 @@ import {
   type SessionLocks,
   type SessionSpace,
 } from '../../src/infra/data/session';
+import { MEMORY_RESULTS_CAPACITY, MEMORY_RESULTS_CAPACITY_BYTES } from '../../src/ports/data';
 
 /** Web Locks for one origin: exclusive locks, no queueing (the tests never wait). */
 class FakeLocks implements SessionLocks {
@@ -140,8 +141,11 @@ describe('working session ownership', () => {
     expect(session.store.backend).toBe('memory');
     expect(session.fallbackReason).toBe(FULL_REASON);
     expect(session.fallbackError).toBe('StorageFullError: ' + new StorageFullError().message);
-    // Results kept in memory have a budget (S09).
+    // Results kept in memory have a budget (S09). The note under the page names it as the
+    // storage-full message does (review of WQA D5, M1).
     expect((session.store as MemoryBlockStore).capacityBytes()).toBe(MEMORY_RESULTS_CAPACITY_BYTES);
+    expect(MEMORY_RESULTS_CAPACITY).toBe('512 MB');
+    expect(MEMORY_FULL_MESSAGE).toContain(`at most ${MEMORY_RESULTS_CAPACITY} in a tab`);
   });
 
   it('keeps its data in memory and removes nothing without Web Locks', async () => {
@@ -189,10 +193,11 @@ describe('working session ownership', () => {
     });
     expect(opened).toBe(false);
     expect(session.store.backend).toBe('memory');
-    // A SecurityError for the tab's lock, the first storage call, is the browser's refusal.
+    // A SecurityError for the tab's lock, the first storage call, is the browser's refusal. No
+    // other tab was asked, so there is no note about them (review of WQA D5, M2).
     expect(session.fallbackReason).toBe(REFUSED_REASON);
     expect(session.fallbackError).toBe('SecurityError: The request was denied.');
-    expect(await session.cleanup).toEqual({ state: 'unavailable', reason: LOCK_FAILED_CLEANUP, error: 'SecurityError: The request was denied.' });
+    expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 0 });
   });
 
   it('falls back to memory with the reason when OPFS cannot be used', async () => {
@@ -261,7 +266,7 @@ describe('why a session keeps its data in memory', () => {
     expect(session.fallbackError).toBe(error);
   });
 
-  it('a lock that the browser fails to give leaves the storage untried', async () => {
+  it('a lock that the browser fails to give leaves the storage untried, and asks no other tab', async () => {
     const session = await startDataSession({
       token: 'own',
       locks: {
@@ -273,7 +278,48 @@ describe('why a session keeps its data in memory', () => {
     });
     expect(session.fallbackReason).toBe(UNRESERVED_REASON);
     expect(session.fallbackError).toBe('AbortError: The lock manager failed.');
-    expect(await session.cleanup).toEqual({ state: 'unavailable', reason: LOCK_FAILED_CLEANUP, error: 'AbortError: The lock manager failed.' });
+    // The note under the page says why this tab keeps its data in memory; nothing is said of other tabs.
+    expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 0 });
+  });
+
+  // Review of WQA D5, M2 (2026-11-19): where a site's data is blocked, Chromium and Firefox refuse
+  // the tab's lock with SecurityError before the storage is reached ("The request was denied.",
+  // "LockManager.request: request() is not allowed in this context"). The page also said
+  // "Temporary data of closed tabs is not removed: the browser could not tell whether other tabs
+  // still use it.", but no other tab was asked: the browser refused this site's storage.
+  it('a lock refused with SecurityError is the refused storage, as a refused getDirectory() is', async () => {
+    const CHROMIUM = new DOMException('The request was denied.', 'SecurityError');
+    const FIREFOX_LOCK = new DOMException('LockManager.request: request() is not allowed in this context', 'SecurityError');
+    const refusedRoot = await startDataSession({ token: 'own', locks: new FakeLocks(), opfs: opfs({ space: new StorageRefusedError(FIREFOX) }) });
+    for (const refusal of [CHROMIUM, FIREFOX_LOCK]) {
+      const locks: SessionLocks = {
+        request: async () => {
+          throw refusal;
+        },
+      };
+      const error = await holdSessionLock(locks, 'own').then(
+        () => undefined,
+        (rejected: unknown) => rejected,
+      );
+      expect(error).toBeInstanceOf(StorageRefusedError);
+      expect((error as StorageRefusedError).cause).toBe(refusal);
+      const refusedLock = await startDataSession({ token: 'own', locks, opfs: opfs({}) });
+      expect(refusedLock.fallbackReason).toBe(refusedRoot.fallbackReason);
+      expect(refusedLock.fallbackError).toBe(at(refusal));
+      expect(await refusedLock.cleanup).toEqual(await refusedRoot.cleanup);
+    }
+    // Any other failure of the lock is the browser's error as it is.
+    const failure = new DOMException('The lock manager failed.', 'AbortError');
+    await expect(
+      holdSessionLock(
+        {
+          request: async () => {
+            throw failure;
+          },
+        },
+        'own',
+      ),
+    ).rejects.toBe(failure);
   });
 
   it('a cleanup tells a listing that failed from a lock that failed', async () => {

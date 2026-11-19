@@ -71,7 +71,7 @@ test('the application keeps results in OPFS, or in memory with the reason shown'
   expect(['opfs', 'memory']).toContain(backend);
   if (backend === 'memory') {
     await expect(status.getByTestId('storage-memory-note')).toContainText(
-      "Results are kept in this tab's memory only and are lost when it is closed or reloaded, because ",
+      "Results are kept in this tab's memory (at most 512 MB), because ",
     );
   }
   const text = await status.innerText();

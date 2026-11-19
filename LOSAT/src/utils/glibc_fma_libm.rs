@@ -801,7 +801,10 @@ type Portable = Emulated;
 type Portable = Fused;
 
 /// x86-64 builds without the `fma` feature: copies compiled with it, called when the CPU has FMA
-/// (the same bits as [`Emulated`]; the instruction is the fast way to get them).
+/// (the same bits as [`Emulated`]; the instruction is the fast way to get them). They are never
+/// inlined: a caller compiled with a feature that implies `fma` (the `avx512f` helper of
+/// `x_newton_exact.rs`) would otherwise take their FMA instructions out of this module, where
+/// `LOSAT/tests/check_fp_contract.py binary` allows them.
 #[cfg(all(target_arch = "x86_64", not(target_feature = "fma")))]
 mod x86_fma {
     use super::{exp_impl, ln_impl, log10_impl, pow_impl, Fused};
@@ -812,21 +815,25 @@ mod x86_fma {
     }
 
     #[target_feature(enable = "fma")]
+    #[inline(never)]
     pub(super) fn exp(x: f64) -> f64 {
         exp_impl::<Fused>(x)
     }
 
     #[target_feature(enable = "fma")]
+    #[inline(never)]
     pub(super) fn ln(x: f64) -> f64 {
         ln_impl::<Fused>(x)
     }
 
     #[target_feature(enable = "fma")]
+    #[inline(never)]
     pub(super) fn log10(x: f64) -> f64 {
         log10_impl::<Fused>(x)
     }
 
     #[target_feature(enable = "fma")]
+    #[inline(never)]
     pub(super) fn pow(x: f64, y: f64) -> f64 {
         pow_impl::<Fused>(x, y)
     }
@@ -846,20 +853,30 @@ macro_rules! dispatch {
     }};
 }
 
-fn exp_portable(x: f64) -> f64 {
-    exp_impl::<Portable>(x)
+/// Defines the `*_portable` entry points, each `$imp::<Portable>`. Where [`Portable`] is [`Fused`]
+/// (aarch64, x86-64 builds with `fma`) they are never inlined, so their FMA instructions stay in
+/// this module, the only one besides `stats::spouge` where `LOSAT/tests/check_fp_contract.py
+/// binary` allows them; elsewhere they hold none and the compiler decides.
+macro_rules! portable {
+    ($(fn $name:ident($($arg:ident),+) = $imp:ident;)+) => {$(
+        #[cfg_attr(
+            not(any(
+                target_arch = "wasm32",
+                all(target_arch = "x86_64", not(target_feature = "fma"))
+            )),
+            inline(never)
+        )]
+        fn $name($($arg: f64),+) -> f64 {
+            $imp::<Portable>($($arg),+)
+        }
+    )+};
 }
 
-fn ln_portable(x: f64) -> f64 {
-    ln_impl::<Portable>(x)
-}
-
-fn log10_portable(x: f64) -> f64 {
-    log10_impl::<Portable>(x)
-}
-
-fn pow_portable(x: f64, y: f64) -> f64 {
-    pow_impl::<Portable>(x, y)
+portable! {
+    fn exp_portable(x) = exp_impl;
+    fn ln_portable(x) = ln_impl;
+    fn log10_portable(x) = log10_impl;
+    fn pow_portable(x, y) = pow_impl;
 }
 
 /// glibc's `exp` on x86-64 with FMA, bit for bit.

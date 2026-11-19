@@ -284,8 +284,8 @@ pub extern "C" fn losat_web2_scan_end(scanner: u32) -> i32 {
             .1
             .remove(&scanner)
             .ok_or_else(|| format!("unknown scanner {scanner}"))?;
-        let records = state.finish()?;
-        emit(STREAM_RESPONSE, scan::to_json(&records).as_bytes());
+        let scanned = state.finish()?;
+        emit(STREAM_RESPONSE, scan::to_json(&scanned).as_bytes());
         Ok(0)
     })
 }
@@ -386,7 +386,7 @@ pub unsafe extern "C" fn losat_web2_run(
             query_handle,
             subject_handle,
             &argv,
-            |queries, subjects| run::run(&argv, queries, subjects),
+            |queries, end, subjects| run::run(&argv, queries, end, subjects),
         )??;
         Ok(0)
     })

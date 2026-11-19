@@ -65,7 +65,12 @@ export type InputMode = 'combined' | 'separate';
 /** The engine's verdict on a source (losat/ports: input-check.ts). */
 export type SourceCheck =
   | { readonly state: 'pending' }
-  | { readonly state: 'ok'; readonly records: number }
+  /**
+   * `readerError`: the reader's error that ends the query's records, the command line's text; a run
+   * reads the records before it and ends with it, as the command line does, so it is a warning, not
+   * a refusal (line WQA's D10, 2026-11-19).
+   */
+  | { readonly state: 'ok'; readonly records: number; readonly readerError?: string }
   /** `record` is the index, in the record table, of the record that the message names. */
   | { readonly state: 'refused'; readonly message: string; readonly record?: number }
   /** The check could not run (not a verdict on the input). */
@@ -1214,7 +1219,9 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source?.status !== 'ready' || source.base === undefined) return;
-    if (includedOf(source).length === 0) {
+    // An input whose reading ends with the reader's error is checked whatever it includes: its run
+    // input keeps the error (line WQA's D10, 2026-11-19).
+    if (includedOf(source).length === 0 && source.base.readerError === undefined) {
       this.updateSource(role, key, (s) => ({ ...s, check: { state: 'ok', records: 0 } }));
       return;
     }
@@ -1526,7 +1533,10 @@ function describeSource(source: DraftSource): string {
 
 /** The engine's verdict, with the record its message names mapped to the record table. */
 function toSourceCheck(check: InputCheck, source: DraftSource): SourceCheck {
-  if (check.ok) return { state: 'ok', records: check.records.length };
+  if (check.ok) {
+    const { readerError } = check;
+    return { state: 'ok', records: check.records.length, ...(readerError === undefined ? {} : { readerError }) };
+  }
   const match = RECORD_IN_MESSAGE.exec(check.message);
   const record = match === null ? undefined : includedOf(source)[Number(match[1]) - 1];
   return { state: 'refused', message: check.message, ...(record === undefined ? {} : { record: record.index }) };

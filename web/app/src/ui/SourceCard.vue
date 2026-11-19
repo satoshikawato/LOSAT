@@ -53,6 +53,23 @@ const NO_SEQUENCE_TEXT = {
 } as const;
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
 /**
+ * The reader's error that ends the query's records (`SourceCheck`'s `readerError`, the command line's text): a run reads the
+ * records before it and ends with it, as the command line does, so the card warns and the run is not refused (line WQA's D10,
+ * 2026-11-19).
+ */
+const readerError = computed(() => (props.source.check?.state === 'ok' ? props.source.check.readerError : undefined));
+const readerErrorText = (message: string) => `A run reads the records before this error and then stops with it, as the command line does: ${message}`;
+/**
+ * The input cannot be read from its start: the scan failed, or the reader's error comes before its first record. The hints that
+ * make its first line readable (a defline, '>', the byte order mark) are for such an input, with the reader's message.
+ */
+const stopsAtStart = computed(
+  () =>
+    props.source.status === 'failed' ||
+    (props.source.status === 'ready' && props.source.base?.readerError !== undefined && records.value.length === 0),
+);
+const readMessage = computed(() => props.source.error ?? props.source.base?.readerError?.message);
+/**
  * A pasted text of accessions only that are not one per line (WA2-OP-04): Fetch takes them one per line, so the card offers
  * to put each on its own line. It does not depend on the reader: a list with no versions (AB000001 MH011443) reads as a
  * sequence (ABMH) and a ✓, though it is a list of accessions.
@@ -68,9 +85,9 @@ const hasMark = computed(() => props.source.lead !== undefined && 'mark' in prop
 const fetchHint = computed(
   () =>
     props.source.origin === 'paste' &&
-    props.source.status === 'failed' &&
+    stopsAtStart.value &&
     !splitsAccessions.value &&
-    pointsToFetch(props.source.error, props.state[props.role].paste),
+    pointsToFetch(readMessage.value, props.state[props.role].paste),
 );
 /**
  * A pasted text whose first line the engine reads as a Seq-id (which NCBI BLAST+ would fetch) and cannot read (WA2-OP-04): the
@@ -79,17 +96,17 @@ const fetchHint = computed(
 const seqIdFirstLine = computed(
   () =>
     props.source.origin === 'paste' &&
-    props.source.status === 'failed' &&
+    stopsAtStart.value &&
     !hasMark.value &&
     !splitsAccessions.value &&
-    isSeqIdReason(props.source.error),
+    isSeqIdReason(readMessage.value),
 );
 /** A pasted text that does not start with a defline and cannot be read; a byte order mark, a Seq-id and accessions on a line have their own hints. */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
   return (
     props.source.origin === 'paste' &&
-    props.source.status === 'failed' &&
+    stopsAtStart.value &&
     !hasMark.value &&
     !seqIdFirstLine.value &&
     !splitsAccessions.value &&
@@ -103,7 +120,7 @@ const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? 
 /** Why a source that starts with a byte order mark cannot be read (WA-IN-05); the engine's message is NCBI's. */
 const markHint = computed(() => {
   const lead = props.source.lead;
-  if (props.source.status !== 'failed' || lead === undefined || !('mark' in lead)) return undefined;
+  if (!stopsAtStart.value || lead === undefined || !('mark' in lead)) return undefined;
   if (props.source.origin === 'paste') return 'The text starts with a byte order mark (U+FEFF).';
   return lead.mark === 'UTF-16'
     ? 'The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.'
@@ -143,7 +160,7 @@ const verdict = computed(() => {
     markHint.value,
     fetchHint.value,
     check?.state,
-    check === undefined ? undefined : check.state === 'ok' ? check.records : 'message' in check ? check.message : undefined,
+    check === undefined ? undefined : check.state === 'ok' ? [check.records, check.readerError] : 'message' in check ? check.message : undefined,
     noSequence.value,
     otherKind.value,
     otherKind.value > 0 ? kind.value : '',
@@ -155,7 +172,10 @@ const verdict = computed(() => {
     if (fetchHint.value) parts.push(FETCH_HINT);
     if (markHint.value) parts.push(markHint.value);
   } else if (check !== undefined) {
-    if (check.state === 'ok') {
+    if (check.state === 'ok' && check.readerError !== undefined) {
+      parts.push(readerErrorText(check.readerError));
+      if (markHint.value) parts.push(markHint.value);
+    } else if (check.state === 'ok') {
       parts.push(noSequence.value ? NO_SEQUENCE_TEXT[noSequence.value] : `Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
     }
     else if (check.state === 'refused') parts.push(`The ${programLabel.value} engine refuses this input: ${check.message}`);
@@ -204,6 +224,60 @@ watch(verdict, (now) => {
     <p v-if="source.status === 'indexing'" class="muted"><LosatLoader />Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
+    </template>
+    <template v-else>
+      <p class="summary" :data-testid="`${testid}-summary`">
+        {{ formatCount(records.length) }} {{ records.length === 1 ? 'record' : 'records' }}
+        <template v-if="included.length !== records.length">({{ formatCount(included.length) }} included)</template>
+        · {{ withUnit(formatCount(totalLength), unit) }}
+      </p>
+
+      <p
+        v-if="source.check?.state === 'pending'"
+        class="muted"
+        :data-testid="`${testid}-check`"
+        data-check="pending"
+      >
+        <LosatLoader />Checking…
+      </p>
+      <p
+        v-else-if="readerError !== undefined"
+        class="warning"
+        :data-testid="`${testid}-check`"
+        data-check="ok"
+        data-reader-error
+      >
+        {{ readerErrorText(readerError) }}
+      </p>
+      <p
+        v-else-if="source.check?.state === 'ok' && noSequence"
+        class="warning"
+        :data-testid="`${testid}-check`"
+        data-check="ok"
+        :data-sequence="noSequence"
+      >
+        {{ NO_SEQUENCE_TEXT[noSequence] }}
+      </p>
+      <p v-else-if="source.check?.state === 'ok'" class="ok" :data-testid="`${testid}-check`" data-check="ok">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7" /></svg>
+        <span class="visually-hidden">Accepted by the {{ programLabel }} engine: {{ formatCount(source.check.records) }} {{ source.check.records === 1 ? 'record' : 'records' }}</span>
+      </p>
+      <div v-else-if="source.check?.state === 'refused'" class="refused" :data-testid="`${testid}-check`" data-check="refused">
+        <p class="error">The {{ programLabel }} engine refuses this input: {{ source.check.message }}</p>
+        <button
+          v-if="refusedRecord !== undefined"
+          type="button"
+          :data-testid="`${testid}-exclude-refused`"
+          @click="draft.setIncluded(role, source.key, [refusedRecord], false)"
+        >
+          Exclude record #{{ refusedRecord + 1 }} ({{ records[refusedRecord]?.id }})
+        </button>
+      </div>
+      <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
+        The input could not be checked here ({{ source.check.message }}).
+      </p>
+    </template>
+    <template v-if="source.status !== 'indexing'">
       <p v-if="fetchHint" class="hint" :data-testid="`${testid}-fetch-hint`">{{ FETCH_HINT }}</p>
       <p v-if="splitsAccessions" class="hint">
         <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
@@ -236,58 +310,7 @@ watch(verdict, (now) => {
         This looks like {{ formatName }}. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.
       </p>
     </template>
-    <template v-else>
-      <p class="summary" :data-testid="`${testid}-summary`">
-        {{ formatCount(records.length) }} {{ records.length === 1 ? 'record' : 'records' }}
-        <template v-if="included.length !== records.length">({{ formatCount(included.length) }} included)</template>
-        · {{ withUnit(formatCount(totalLength), unit) }}
-      </p>
-
-      <p
-        v-if="source.check?.state === 'pending'"
-        class="muted"
-        :data-testid="`${testid}-check`"
-        data-check="pending"
-      >
-        <LosatLoader />Checking…
-      </p>
-      <p
-        v-else-if="source.check?.state === 'ok' && noSequence"
-        class="warning"
-        :data-testid="`${testid}-check`"
-        data-check="ok"
-        :data-sequence="noSequence"
-      >
-        {{ NO_SEQUENCE_TEXT[noSequence] }}
-      </p>
-      <p v-else-if="source.check?.state === 'ok'" class="ok" :data-testid="`${testid}-check`" data-check="ok">
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7" /></svg>
-        <span class="visually-hidden">Accepted by the {{ programLabel }} engine: {{ formatCount(source.check.records) }} {{ source.check.records === 1 ? 'record' : 'records' }}</span>
-      </p>
-      <div v-else-if="source.check?.state === 'refused'" class="refused" :data-testid="`${testid}-check`" data-check="refused">
-        <p class="error">The {{ programLabel }} engine refuses this input: {{ source.check.message }}</p>
-        <button
-          v-if="refusedRecord !== undefined"
-          type="button"
-          :data-testid="`${testid}-exclude-refused`"
-          @click="draft.setIncluded(role, source.key, [refusedRecord], false)"
-        >
-          Exclude record #{{ refusedRecord + 1 }} ({{ records[refusedRecord]?.id }})
-        </button>
-      </div>
-      <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
-        The input could not be checked here ({{ source.check.message }}).
-      </p>
-
-      <p v-if="splitsAccessions" class="hint">
-        <button type="button" class="link" :data-testid="`${testid}-split-accessions`" @click="$emit('splitAccessions')">
-          Put each accession on its own line
-        </button>
-      </p>
-
-      <p v-if="formatName" class="warning" :data-testid="`${testid}-format-warning`">
-        This looks like {{ formatName }}. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.
-      </p>
+    <template v-if="source.status === 'ready'">
       <p v-if="otherKind > 0" class="warning" :data-testid="`${testid}-kind-warning`">
         {{ formatCount(otherKind) }} {{ otherKind === 1 ? 'record looks' : 'records look' }} like {{ otherKindName }}
         sequences, but {{ programLabel }} reads the {{ role }} as {{ kind }}.

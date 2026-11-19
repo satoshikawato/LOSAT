@@ -17,7 +17,9 @@
 
 use losat::api::FastaRecord;
 use losat::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
-use losat_web_adapter::scan::{scan_ncbi, LineLayout, NcbiScanner, ScanRecord, CHECKPOINT_EVERY};
+use losat_web_adapter::scan::{
+    scan_ncbi, LineLayout, NcbiScanner, ReaderStop, ScanRecord, Scanned, CHECKPOINT_EVERY,
+};
 
 /// A small deterministic generator (xorshift64*).
 struct Random(u64);
@@ -681,7 +683,9 @@ enum Expected {
     Records(Vec<(RefRecord, LineLayout)>),
     SeqId,
     Gap(u64),
-    Parse(String),
+    /// The reader's error: the records before it, and the offset of the record that it fails on
+    /// (`Scanned::stop`, line WQA's D10, 2026-11-19).
+    Parse(String, Vec<(RefRecord, LineLayout)>, u64),
     NotReadable(usize),
 }
 
@@ -788,7 +792,13 @@ fn expected(input: &[u8], protein: bool, context: &str, coverage: &mut Coverage)
     }
     if let EngineEnd::Parse { message, .. } = end {
         coverage.parse += 1;
-        return Expected::Parse(message);
+        assert_eq!(
+            layouts.len(),
+            records.len(),
+            "{context}: records before the error"
+        );
+        let offset = reference.records[records.len()].header_offset as u64;
+        return Expected::Parse(message, layouts, offset);
     }
     Expected::Records(layouts)
 }
@@ -798,10 +808,32 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
         let context = format!("{context} kind {}", 1 + protein as u8);
         let want = expected(input, protein, &context, coverage);
         let scanned = scan_ncbi(input, protein);
+        let records_of = |scanned: &Scanned, records: &[(RefRecord, LineLayout)]| {
+            assert_eq!(
+                scanned.records.len(),
+                records.len(),
+                "{context}: record count"
+            );
+            records.len()
+        };
         match (&want, &scanned) {
-            (Expected::Records(records), Ok(scanned)) => {
-                assert_eq!(scanned.len(), records.len(), "{context}: record count");
-                for (index, ((record, layout), got)) in records.iter().zip(scanned).enumerate() {
+            (Expected::Records(records), Ok(scanned))
+            | (Expected::Parse(_, records, _), Ok(scanned)) => {
+                records_of(scanned, records);
+                match &want {
+                    Expected::Parse(message, _, offset) => assert_eq!(
+                        scanned.stop,
+                        Some(ReaderStop {
+                            offset: *offset,
+                            message: message.clone()
+                        }),
+                        "{context}: reader error"
+                    ),
+                    _ => assert_eq!(scanned.stop, None, "{context}: no reader error"),
+                }
+                for (index, ((record, layout), got)) in
+                    records.iter().zip(&scanned.records).enumerate()
+                {
                     check_record(input, protein, record, layout, got, random, &context, index);
                     coverage.records += 1;
                     match layout {
@@ -830,9 +862,6 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
                     && error.contains("not supported in the browser"),
                 "{context}: {error}"
             ),
-            (Expected::Parse(message), Err(error)) => {
-                assert_eq!(error, message, "{context}: reader error")
-            }
             (Expected::NotReadable(index), Err(error)) => assert!(
                 error.starts_with(&format!("record {} ", index + 1))
                     && error.contains("reads two of its lines as one")

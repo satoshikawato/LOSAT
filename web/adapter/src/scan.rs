@@ -10,7 +10,7 @@
 
 mod ncbi;
 
-pub use ncbi::NcbiScanner;
+pub use ncbi::{NcbiScanner, ReaderStop, Scanned};
 
 /// Residues between two checkpoints of a record whose lines are not regular.
 pub const CHECKPOINT_EVERY: u64 = 65_536;
@@ -61,24 +61,26 @@ impl Scanner {
         self.0.feed(chunk);
     }
 
-    /// Ends the input and returns the records, or the scan's error.
-    pub fn finish(self) -> Result<Vec<ScanRecord>, String> {
+    /// Ends the input and returns the records and the reader's error that ended them, or the
+    /// scan's refusal.
+    pub fn finish(self) -> Result<Scanned, String> {
         self.0.finish()
     }
 }
 
 /// Scans a whole input at once with parser kind 1 (`protein` false) or 2.
-pub fn scan_ncbi(input: &[u8], protein: bool) -> Result<Vec<ScanRecord>, String> {
+pub fn scan_ncbi(input: &[u8], protein: bool) -> Result<Scanned, String> {
     let mut scanner = NcbiScanner::new(protein);
     scanner.feed(input);
     scanner.finish()
 }
 
-/// The *scan* response (docs/web/abi_v2.md §9).
-pub fn to_json(records: &[ScanRecord]) -> String {
+/// The *scan* response (docs/web/abi_v2.md §9): the records, and the reader's error that ended
+/// them (`reader_error`, line WQA's D10, 2026-11-19).
+pub fn to_json(scanned: &Scanned) -> String {
     use std::fmt::Write as _;
     let mut out = String::from("{\"records\":[");
-    for (index, record) in records.iter().enumerate() {
+    for (index, record) in scanned.records.iter().enumerate() {
         if index > 0 {
             out.push(',');
         }
@@ -131,6 +133,16 @@ pub fn to_json(records: &[ScanRecord]) -> String {
         }
         out.push_str("}}");
     }
-    out.push_str("]}");
+    out.push(']');
+    if let Some(stop) = &scanned.stop {
+        let _ = write!(
+            out,
+            ",\"reader_error\":{{\"offset\":{},\"message\":",
+            stop.offset
+        );
+        crate::json::string(&mut out, &stop.message);
+        out.push('}');
+    }
+    out.push('}');
     out
 }

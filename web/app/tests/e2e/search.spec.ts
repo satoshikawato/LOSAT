@@ -1000,7 +1000,9 @@ test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-0
 test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  // The reader's error before the first record: a run ends with it, as the command line does, so the
+  // check warns (line WQA's D10, 2026-11-19).
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
   await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
   await page.getByTestId('query-source-0-remove-mark').click();
   // The button goes with the old reading: the focus stays on the card (WA2-AX-04).

@@ -200,8 +200,13 @@ describe('SearchDraft inputs', () => {
     const { draft } = setup();
     draft.setPaste('query', '\uFEFF>q1\nACGT\n');
     await draft.idle();
-    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', lead: { mark: 'UTF-8' } });
-    expect(sourceOf(draft, 'query').error).toContain("doesn't look like plausible data");
+    // The reader's error ends the records before the first: a run ends with it, as the command line
+    // does, so the check warns (line WQA's D10, 2026-11-19).
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', lead: { mark: 'UTF-8' } });
+    expect(sourceOf(draft, 'query').base?.records).toEqual([]);
+    expect(sourceOf(draft, 'query').base?.readerError?.message).toContain("doesn't look like plausible data");
+    expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'ok', records: 0, readerError: expect.stringContaining('BLAST query error: CFastaReader: Near line 1') });
+    expect(draft.readiness()).toMatch(/^Add the subject/);
     draft.removeByteOrderMark('query');
     await draft.idle();
     expect(draft.state.get().query.paste).toBe('>q1\nACGT\n');
@@ -255,7 +260,8 @@ describe('SearchDraft inputs', () => {
   it('checks the inputs again for another program, and reads them again when it reads the role with another kind', async () => {
     const { draft, checks } = setup();
     draft.setPaste('query', '>a\nMKLV\n');
-    draft.setPaste('subject', '>s\n$$$$\n');
+    // A gap line, which LOSAT Web cannot index: the subject cannot be read.
+    draft.setPaste('subject', '>s\nAC\n>?5\nAC\n');
     await draft.idle();
     const revision = sourceOf(draft, 'query').base!.revisionId;
     expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(3);
@@ -487,7 +493,7 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     await draft.idle();
     for (const text of ['>q\nAC\n', '>q\nACG\n', '>q\nACGT\n']) draft.setPaste('query', text);
     await draft.idle();
-    draft.addFiles('subject', [file('bad.fa', '\uFEFF>s\nACGT\n')]);
+    draft.addFiles('subject', [file('bad.fa', '>s\nACGT\n>?5\nAC\n')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'failed' });
     expect(held()).toEqual({ sources: shown(draft), revisionSources: shown(draft) });

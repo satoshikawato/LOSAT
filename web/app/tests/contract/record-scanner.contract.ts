@@ -242,22 +242,46 @@ const NOT_PLAUSIBLE = (line: number) =>
   new RegExp(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment\\.$`);
 const GAP = (line: number) => new RegExp(`line ${line} is a gap line \\('>\\?'\\), .* gap lines are not supported in the browser$`);
 
+/** LOSAT Web's rejections, which reject the scan. */
 const ERRORS: ReadonlyArray<{ readonly name: string; readonly input: Uint8Array; readonly error: RegExp }> = [
   { name: 'a gap line', input: encoder.encode('>a\nACGT\n>?10\nAC\n'), error: GAP(3) },
   { name: 'a gap line after white space', input: encoder.encode('>a\nACGT\n >?10\n'), error: GAP(3) },
   { name: 'a gap line at the end of the input', input: encoder.encode('>a\r\nAC\r\n>?'), error: GAP(3) },
-  { name: 'a first data line that is not plausible data', input: encoder.encode('>a\n$$$$$$\nACGT\n'), error: NOT_PLAUSIBLE(2) },
-  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2) },
-  { name: 'a later record whose first data line is not plausible data', input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n'), error: NOT_PLAUSIBLE(4) },
+];
+
+/**
+ * The reader's own error, which ends the records (`reader_error`): the number of records before
+ * it, and the offset of the record that it fails on (line WQA's D10, 2026-11-19).
+ */
+const STOPS: ReadonlyArray<{
+  readonly name: string;
+  readonly input: Uint8Array;
+  readonly error: RegExp;
+  readonly records: number;
+  readonly offset: number;
+}> = [
+  { name: 'a first data line that is not plausible data', input: encoder.encode('>a\n$$$$$$\nACGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0 },
+  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0 },
+  {
+    name: 'a later record whose first data line is not plausible data',
+    input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n>c\nACGT\n'),
+    error: NOT_PLAUSIBLE(4),
+    records: 1,
+    offset: 8,
+  },
   {
     name: 'a byte order mark',
     input: new Uint8Array([0xef, 0xbb, 0xbf, ...encoder.encode('>a\nAC\n')]),
     error: NOT_PLAUSIBLE(1),
+    records: 0,
+    offset: 0,
   },
   {
     name: 'a byte that is not UTF-8 in a first data line',
     input: new Uint8Array([...encoder.encode('>a\nAC'), 0xff, ...encoder.encode('GT\n')]),
     error: NOT_PLAUSIBLE(2),
+    records: 0,
+    offset: 0,
   },
 ];
 
@@ -376,9 +400,26 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
       },
     }),
   ),
+  ...STOPS.map(
+    (stop): ContractCase<RecordScannerEnv> => ({
+      name: `scan: the reader's error ends the records for ${stop.name}`,
+      async run({ scanner }) {
+        for (const kind of KINDS) {
+          for (const size of CHUNKINGS) {
+            const label = `kind ${kind}, chunks of ${size} bytes`;
+            const response = await scanner.scan(kind, chunked(stop.input, size));
+            same(response.records.length, stop.records, `${label}: records before the error`);
+            same(response.reader_error?.offset, stop.offset, `${label}: the offset of the record`);
+            const message = response.reader_error?.message ?? '';
+            check(stop.error.test(message), `${label}: the reader's message, not ${JSON.stringify(message)}`);
+          }
+        }
+      },
+    }),
+  ),
   ...ERRORS.map(
     (error): ContractCase<RecordScannerEnv> => ({
-      name: `scan: the reader's error for ${error.name}`,
+      name: `scan: LOSAT Web's rejection of ${error.name}`,
       async run({ scanner }) {
         for (const kind of KINDS) {
           for (const size of CHUNKINGS) {

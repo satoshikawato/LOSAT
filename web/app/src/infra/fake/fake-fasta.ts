@@ -30,14 +30,23 @@ export class FakeScanner implements RecordScanner {
     if (parser !== 1 && parser !== 2) throw new Error(`unknown or unavailable FASTA parser kind ${String(parser)}`);
     const parts: Uint8Array[] = [];
     for await (const chunk of chunks) parts.push(chunk.slice());
-    return { records: fakeScan(concatBytes(parts), parser) };
+    return fakeScan(concatBytes(parts), parser);
   }
 }
 
 /** The records that the fake reads for a program's input, as the FakeEngine's `register` reports them. */
 export function fakeRecordKeys(bytes: Uint8Array, program: ProgramId, role: InputRole): RecordKey[] {
-  return fakeScan(bytes, fastaParser(programById(program), role)).map(recordKey);
+  return fakeScan(bytes, fastaParser(programById(program), role)).records.map(recordKey);
 }
+
+/** The reader's error that ends the records of an input, as the engine's message of a run says it, if one does. */
+export function fakeReaderError(bytes: Uint8Array, program: ProgramId, role: InputRole): string | undefined {
+  const stop = fakeScan(bytes, fastaParser(programById(program), role)).reader_error;
+  return stop === undefined ? undefined : `BLAST query error: ${stop.message}`;
+}
+
+/** The reader's own error (`CheckDataLine`), which ends the records (`ScanResponse.reader_error`). */
+class ReaderStopError extends Error {}
 
 interface Builder {
   readonly id: string;
@@ -108,7 +117,7 @@ function plausible(line: readonly number[]): boolean {
   return !(bad >= Math.floor(good / 3) && (length > 3 || good === 0 || bad > good));
 }
 
-export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): IndexedRecord[] {
+export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): ScanResponse {
   const records: IndexedRecord[] = [];
   let current: Builder | undefined;
   let needDefline = true;
@@ -138,13 +147,18 @@ export function fakeScan(bytes: Uint8Array, parser: FastaParserKind): IndexedRec
           needDefline = false;
           current = newBuilder('', 0, 0);
         }
-        dataLine(bytes, at, end, lineNumber, current!, parser);
+        try {
+          dataLine(bytes, at, end, lineNumber, current!, parser);
+        } catch (error) {
+          if (!(error instanceof ReaderStopError)) throw error;
+          return { records, reader_error: { offset: current!.headerOffset, message: error.message } };
+        }
       }
     }
     start = next;
   }
   close(bytes.length);
-  return records;
+  return { records };
 }
 
 function newBuilder(id: string, headerOffset: number, sequenceOffset: number): Builder {
@@ -161,7 +175,7 @@ function dataLine(bytes: Uint8Array, at: number, end: number, line: number, buil
   }
   // NCBI checks the data lines of a record until it has a residue.
   if (builder.length === 0 && !plausible(checked)) {
-    throw new Error(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`);
+    throw new ReaderStopError(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`);
   }
   for (let i = at; i < end && bytes[i] !== SEMICOLON; i++) {
     const residue = stored(bytes[i]!, parser);
@@ -198,12 +212,17 @@ function finish(builder: Builder, index: number, end: number): IndexedRecord {
  */
 export class FakeInputChecker implements InputChecker {
   async check(program: ProgramId, role: InputRole, bytes: Uint8Array): Promise<InputCheck> {
-    let records: IndexedRecord[];
+    let scanned: ScanResponse;
     try {
-      records = fakeScan(bytes, fastaParser(programById(program), role));
+      scanned = fakeScan(bytes, fastaParser(programById(program), role));
     } catch (error) {
       return { ok: false, message: `failed to read ${role} FASTA: ${error instanceof Error ? error.message : String(error)}` };
     }
+    const { records } = scanned;
+    // The engine's reader error ends a query's records, and a run ends with it (line WQA's D10,
+    // 2026-11-19); a subject's fails the input, as the engine's `register` does.
+    const stop = scanned.reader_error;
+    if (stop !== undefined && role === 'subject') return { ok: false, message: `BLAST query error: ${stop.message}` };
     const refused = records.find((record) => bytes.subarray(record.sequence_offset, record.end_offset).includes(0x21));
     if (refused !== undefined) {
       return {
@@ -211,6 +230,7 @@ export class FakeInputChecker implements InputChecker {
         message: `${role} record ${refused.index + 1} (${refused.id}) has '!' in its sequence (FAKE ENGINE check, not LOSAT's)`,
       };
     }
-    return { ok: true, records: records.map(recordKey) };
+    const keys = records.map(recordKey);
+    return stop === undefined ? { ok: true, records: keys } : { ok: true, records: keys, readerError: `BLAST query error: ${stop.message}` };
   }
 }

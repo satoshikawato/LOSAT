@@ -1068,6 +1068,9 @@ struct Records {
     forward: Forward,
     records: Vec<ScanRecord>,
     error: Option<String>,
+    /// The reader's own error that ended the records (`error` holds its message too, which ends
+    /// the scan).
+    stop: Option<ReaderStop>,
 }
 
 impl Records {
@@ -1090,11 +1093,28 @@ impl Records {
             forward: Forward::default(),
             records: Vec::new(),
             error: None,
+            stop: None,
         }
     }
 
     fn fail(&mut self, message: String) {
         if self.error.is_none() {
+            self.error = Some(message);
+        }
+    }
+
+    /// The reader's error `message` on the current record: the records read before it are the
+    /// input's records, and the error ends them (`ReaderStop`).
+    fn stop(&mut self, message: String) {
+        if self.error.is_none() {
+            let offset = self
+                .current
+                .as_ref()
+                .map_or(0, |current| current.header_offset);
+            self.stop = Some(ReaderStop {
+                offset,
+                message: message.clone(),
+            });
             self.error = Some(message);
         }
     }
@@ -1443,7 +1463,7 @@ impl Records {
                 check: Some(check), ..
             } if !check.plausible() => {
                 let line = self.line_number;
-                self.fail(format!(
+                self.stop(format!(
                     "CFastaReader: Near line {line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
                 ));
             }
@@ -1476,8 +1496,9 @@ impl Records {
     //                 break;
     // ```
     /// The end of the input (`total` bytes): the current record ends there; an input with
-    /// only white space and comment lines has no record.
-    fn finish(mut self, total: u64) -> Result<Vec<ScanRecord>, String> {
+    /// only white space and comment lines has no record. The reader's own error ends the records
+    /// before it (`ReaderStop`); LOSAT Web's refusals fail the scan.
+    fn finish(mut self, total: u64) -> Result<Scanned, String> {
         if self.error.is_none() {
             if let Some(mut current) = self.current.take() {
                 if self.awaiting_sequence {
@@ -1486,9 +1507,16 @@ impl Records {
                 self.close(current, total);
             }
         }
-        match self.error {
-            Some(error) => Err(error),
-            None => Ok(self.records),
+        match (self.stop, self.error) {
+            (stop @ Some(_), _) => Ok(Scanned {
+                records: self.records,
+                stop,
+            }),
+            (None, Some(error)) => Err(error),
+            (None, None) => Ok(Scanned {
+                records: self.records,
+                stop: None,
+            }),
         }
     }
 }
@@ -1507,6 +1535,35 @@ fn seq_id_line(line: &[u8], protein: bool) -> bool {
         source.next_sequence(&mut |_| Ok(())),
         Err(ReadError::Unsupported(_))
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
+// ```c++
+//         try { q.Reset(m_Source->GetNextSequence(scope)); }
+//         catch (const CObjReaderParseException& e) {
+//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+//                 break;
+//             }
+//             throw;
+//         }
+// ```
+/// The records of a scan, and the reader's own error that ended them (`CheckDataLine`): the
+/// command line's query batches search the records before it and end with the error in the batch
+/// that reads the record (line WQA's D10, 2026-11-19).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scanned {
+    pub records: Vec<ScanRecord>,
+    pub stop: Option<ReaderStop>,
+}
+
+/// The reader's error on the record after the records of a scan (`Scanned::stop`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReaderStop {
+    /// The offset of the record that the reader fails on: its defline's `>` (0 for a first record
+    /// without a defline). The bytes from there on are read by no record.
+    pub offset: u64,
+    /// The reader's message (`CFastaReader: Near line …`).
+    pub message: String,
 }
 
 /// A streaming scan with parser kind 1 (`protein` false) or 2 (`protein` true).
@@ -1533,8 +1590,9 @@ impl NcbiScanner {
         }
     }
 
-    /// Ends the input and returns the records, or the scan's error.
-    pub fn finish(mut self) -> Result<Vec<ScanRecord>, String> {
+    /// Ends the input and returns the records and the reader's error that ended them, or the
+    /// scan's refusal.
+    pub fn finish(mut self) -> Result<Scanned, String> {
         if self.records.error.is_none() {
             self.lines.finish(&mut self.records);
         }

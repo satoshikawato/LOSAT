@@ -81,10 +81,55 @@ describe('DataService sources and record tables', () => {
     expect(await data.checkInput('blastn', 'query', [excluded.revisionId])).toMatchObject({ ok: true });
   }, 60_000);
 
-  it('rejects a source that the reader cannot read', async () => {
+  // Line WQA's D10, 2026-11-19: the reader's error ends the records, as the command line's query
+  // batches end; a run input keeps the bytes from the error on, and lists no record after it.
+  it("keeps the records before the reader's error, and the error, which every run input of the source keeps", async () => {
     const { data } = service();
-    const source = await data.addSource(new File(['>a\n$$$$\nACGT\n'], 'plain.txt'));
-    await expect(data.indexSource(source.sourceId, 1)).rejects.toThrow("Near line 2, there's a line that doesn't look like plausible data");
+    const text = '>a\nACGT\n>b\nAC\n>c\n$$$$\n>d\nACGT\n';
+    const source = await data.addSource(new File([text], 'stop.fa'));
+    const revision = await data.indexSource(source.sourceId, 1);
+    expect(revision.records.map((record) => record.id)).toEqual(['a', 'b']);
+    expect(revision.readerError).toEqual({
+      offset: 14,
+      message: "CFastaReader: Near line 6, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+    });
+    const whole = await data.buildRunInput([revision.revisionId]);
+    expect(decoder.decode(whole.bytes)).toBe(text);
+    expect(whole.records).toEqual([
+      { id: 'a', length: 4 },
+      { id: 'b', length: 2 },
+    ]);
+    const excluded = await data.reviseDataset(revision.revisionId, [0]);
+    expect(excluded.readerError).toEqual(revision.readerError);
+    const input = await data.buildRunInput([excluded.revisionId]);
+    expect(decoder.decode(input.bytes)).toBe('>b\nAC\n>c\n$$$$\n>d\nACGT\n');
+    expect(input.records).toEqual([{ id: 'b', length: 2 }]);
+    const later = await data.addSource(new File(['>e\nACGT\n'], 'later.fa'));
+    const laterRevision = await data.indexSource(later.sourceId, 1);
+    const joined = await data.buildRunInput([revision.revisionId, laterRevision.revisionId]);
+    expect(decoder.decode(joined.bytes)).toBe(text);
+    expect(joined.records).toHaveLength(2);
+    expect(await data.checkInput('blastn', 'query', [excluded.revisionId])).toEqual({
+      ok: true,
+      records: [{ id: 'b', length: 2 }],
+      readerError: "BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+    });
+    expect(await data.checkInput('blastn', 'subject', [revision.revisionId])).toMatchObject({ ok: false });
+  });
+
+  it("rejects a reader's error that is not after the records inside the source", async () => {
+    for (const offset of [2, 40]) {
+      const { data } = service({
+        scanner: {
+          async scan() {
+            const { records } = await new FakeScanner().scan(1, (async function* () { yield new TextEncoder().encode('>a\nACGT\n'); })());
+            return { records, reader_error: { offset, message: 'x' } };
+          },
+        },
+      });
+      const source = await data.addSource(new File(['>a\nACGT\n>b\n'], 'x.fa'));
+      await expect(data.indexSource(source.sourceId, 1)).rejects.toThrow("invalid offset of the reader's error");
+    }
   });
 
   it('rejects a record table whose offsets are not ordered inside the source', async () => {

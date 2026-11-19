@@ -37,9 +37,10 @@ fn run_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let (query, _) = crate::store::register(words[0], 0, &input(query)).unwrap();
     let (subject, _) = crate::store::register(words[0], 1, &input(subject)).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-    let result = crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
-        run(words, queries, subjects)
-    });
+    let result =
+        crate::store::with_inputs(program, query, subject, words, |queries, end, subjects| {
+            run(words, queries, end, subjects)
+        });
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();
     let mut streams = BTreeMap::new();

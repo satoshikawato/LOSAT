@@ -8,7 +8,11 @@ import type { RecordKey } from '../domain/dataset.js';
 import type { InputRole, ProgramId } from '../domain/programs.js';
 
 export type InputCheck =
-  | { readonly ok: true; readonly records: readonly RecordKey[] }
+  /**
+   * `readerError`: the reader's error that ends a query's records, the CLI's text; a run reads the
+   * records before it and ends with it, as the CLI's query batches do (line WQA's D10, 2026-11-19).
+   */
+  | { readonly ok: true; readonly records: readonly RecordKey[]; readonly readerError?: string }
   | { readonly ok: false; readonly message: string };
 
 export interface InputChecker {

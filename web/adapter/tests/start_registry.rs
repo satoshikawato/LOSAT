@@ -26,8 +26,8 @@ fn run_blastp(words: &[&str]) -> Result<(), String> {
     let program = run::Program::parse("blastp").unwrap();
     let (query, _) = store::register("blastp", 0, &input("arch_bp_q.faa")).unwrap();
     let (subject, _) = store::register("blastp", 1, &input("arch_bp_s.faa")).unwrap();
-    let result = store::with_inputs(program, query, subject, words, |queries, subjects| {
-        run::run(words, queries, subjects)
+    let result = store::with_inputs(program, query, subject, words, |queries, end, subjects| {
+        run::run(words, queries, end, subjects)
     });
     store::release(query).unwrap();
     store::release(subject).unwrap();

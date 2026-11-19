@@ -122,7 +122,7 @@ pub struct RpsblastArgs {
         help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics, 2 and 3 as 1 with a larger preliminary e-value"
     )]
     pub comp_based_stats: String,
-    #[arg(long, default_value = "0", value_name = "SPEC")]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7 and 10", "6, 7 and 10", ""))]
     pub outfmt: String,
     #[arg(
         long = "show_gis",

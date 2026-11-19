@@ -742,13 +742,6 @@ pub struct BlastnArgs {
     #[arg(skip = 0usize)]
     pub scan_step: usize,
 
-    /// Output format (NCBI BLAST compatible).
-    ///
-    /// Supported formats:
-    ///   0 = Pairwise (the NCBI report; the default)
-    ///   6 = Tabular (tab-separated values)
-    ///   7 = Tabular with comment lines (headers)
-    ///
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
     // ```c
     // case 6: case 7:
@@ -761,12 +754,9 @@ pub struct BlastnArgs {
     //     x_PrintField(*iter);
     // }
     // ```
-    /// Custom field specifications are not yet ported and fail explicitly.
-    ///
-    /// Default fields: qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore
     // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed when the options
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
-    #[arg(long, default_value = "0", value_name = "SPEC")]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
 
     /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search

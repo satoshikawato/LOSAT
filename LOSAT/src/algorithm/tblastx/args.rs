@@ -276,9 +276,8 @@ pub struct TblastxArgs {
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 
-    /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
     // Read when NCBI reads it (`blastinput/app.rs` `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC")]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340

@@ -290,3 +290,98 @@ fn top_level_help_names_every_program() {
         }
     }
 }
+
+/// Every search program's `-help` says which `-outfmt` numbers it writes and which take a field
+/// list (README's "Output formats" tables; `cli::outfmt_help`), and none of the old notes.
+#[test]
+fn search_program_help_says_what_outfmt_writes() {
+    for (program, written, fields) in [
+        (
+            "blastn",
+            "Written: 0 to 18 and 20.",
+            "Formats 6, 7, 10 and 20 take",
+        ),
+        (
+            "blastp",
+            "Written: 0 to 16, 18 and 20.",
+            "Formats 6, 7, 10 and 20 take",
+        ),
+        (
+            "blastx",
+            "Written: 0 to 16, 18 and 20.",
+            "Formats 6, 7, 10 and 20 take",
+        ),
+        (
+            "tblastn",
+            "Written: 0 to 16, 18 and 20; with -in_pssm: 0 to 4, 6, 7 and 10.",
+            "Formats 6, 7, 10 and 20 take",
+        ),
+        (
+            "tblastx",
+            "Written: 0 to 16, 18 and 20.",
+            "Formats 6, 7, 10 and 20 take",
+        ),
+        (
+            "psiblast",
+            "Written: 0, 6, 7, 10 and 20; with -in_pssm: 0, 6 and 7.",
+            "Formats 6, 7, 10 and 20 take",
+        ),
+        (
+            "rpsblast",
+            "Written: 0, 6, 7 and 10.",
+            "Formats 6, 7 and 10 take",
+        ),
+    ] {
+        for flag in ["-help", "-h"] {
+            let help = run(losat(), &[program, flag]);
+            let text = String::from_utf8_lossy(&help.stdout).into_owned();
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let after = text
+                .split_once("-outfmt <SPEC> ")
+                .unwrap_or_else(|| panic!("{program} {flag}: no -outfmt line\n{text}"))
+                .1;
+            assert!(
+                after.starts_with("Output format. "),
+                "{program} {flag}: {after}"
+            );
+            assert!(after.contains(written), "{program} {flag}: {after}");
+            assert!(after.contains(fields), "{program} {flag}: {after}");
+            assert!(
+                after.contains("a field list, for example -outfmt \"6 qseqid sseqid evalue\"")
+                    && after.contains("qaccver saccver pident length mismatch"),
+                "{program} {flag}: {after}"
+            );
+            for stale in [
+                "not yet ported",
+                "without custom fields",
+                "Supported formats",
+            ] {
+                assert!(!text.contains(stale), "{program} {flag}: {stale:?}");
+            }
+        }
+    }
+}
+
+/// LOSAT's own refusals and syntax errors (not NCBI's text) end with a line end, as clap's own
+/// errors do, so that the shell prompt starts a line of its own.
+#[test]
+fn argument_refusals_end_with_a_line_end() {
+    for words in [
+        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-html"][..],
+        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-remote"],
+        &["blastn", "-no_such_option"],
+        &["blastn", "-query"],
+        &["makeblastdb", "-no_such_option"],
+        &["rpsbproc", "-no_such_option"],
+        &["no_such_program"],
+    ] {
+        let output = run(losat(), words);
+        assert_eq!(output.status.code(), Some(2), "{words:?} {output:?}");
+        let text = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(text.starts_with("error: "), "{words:?}: {text:?}");
+        assert!(
+            text.ends_with('\n') && !text.ends_with("\n\n"),
+            "{words:?}: {text:?}"
+        );
+    }
+}

@@ -1093,15 +1093,9 @@ export class SearchDraft {
       // neither a source whose reader's error is on its first line, read without a defline (a
       // byte order mark, a line of other text): the record before it would read that line
       // (review M2, 2026-11-20).
-      const late = combinedSources(draft.sources)
-        .slice(1)
-        .find((source) => startsWithoutDefline(source));
+      const late = draft.sources.find((source) => cannotFollow(draft.sources, source));
       if (late !== undefined) {
-        const where = `${label} (${describeSource(late)})`;
-        const message =
-          includedOf(late).length > 0
-            ? `${where} starts with a sequence without a defline (">"), which cannot follow another input.`
-            : `${where} starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.`;
+        const message = `${label} (${describeSource(late)}) ${cannotFollowText(late)}`;
         return { message, short: message };
       }
     }
@@ -1392,13 +1386,19 @@ export class SearchDraft {
     if (check.state !== 'error') void this.askAgain();
   }
 
-  /** The sources that a Combined run of the query reads before `source`, which it reads too (none otherwise). */
+  /**
+   * The sources that a Combined run of the query reads before `source`: every source of the run's
+   * input before it, whose bytes the run passes as they are, those without records too
+   * (`DataService.runInputBytes`; review L-a, 2026-11-20). None otherwise, and none when a source
+   * before ends the input with its reader's error, or `source` cannot follow them: a run then does
+   * not read `source` after them, and its own check stands.
+   */
   private sourcesBefore(role: InputRole, source: DraftSource): readonly DraftSource[] {
     const draft = this.role(role);
-    if (role !== 'query' || draft.mode !== 'combined') return [];
-    const read = combinedSources(draft.sources);
-    const at = read.findIndex((s) => s.key === source.key);
-    return at < 0 ? [] : read.slice(0, at);
+    if (role !== 'query' || draft.mode !== 'combined' || cannotFollow(draft.sources, source)) return [];
+    const at = draft.sources.findIndex((s) => s.key === source.key);
+    const before = draft.sources.slice(0, Math.max(0, at)).filter((s) => s.status === 'ready');
+    return before.some((s) => s.base?.readerError !== undefined) ? [] : before;
   }
 
   /**
@@ -1684,11 +1684,11 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
 }
 
 /**
- * The sources that a Combined run reads, in order: those with included records or the reader's
- * error, up to the first with the error, which ends the run's input (`DataService.runInputBytes`,
- * line WQA's D10, 2026-11-19).
+ * The sources whose records a Combined run reads, in order: those with included records or the
+ * reader's error, up to the first with the error, which ends the run's input
+ * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
  */
-export function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
+function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
   const read: DraftSource[] = [];
   for (const source of sources) {
     if (source.status !== 'ready') continue;
@@ -1707,13 +1707,30 @@ function startsWithoutDefline(source: DraftSource): boolean {
 }
 
 /**
+ * Whether `source` starts without a defline after a source whose records a Combined input of
+ * `sources` reads: the record before it would read its first line, so no run takes it
+ * (`SearchDraft`'s readiness; review M2, 2026-11-20), and its card says only that (review L-c).
+ */
+export function cannotFollow(sources: readonly DraftSource[], source: DraftSource): boolean {
+  return combinedSources(sources).findIndex((s) => s.key === source.key) > 0 && startsWithoutDefline(source);
+}
+
+/** What a source that cannot follow another input starts with (`cannotFollow`), after its name. */
+export function cannotFollowText(source: DraftSource): string {
+  return includedOf(source).length > 0
+    ? 'starts with a sequence without a defline (">"), which cannot follow another input.'
+    : 'starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.';
+}
+
+/**
  * The source before `source` whose reader's error ends a Combined query input, after which the run
- * reads nothing (`DataService.runInputBytes`): `source` is not searched (review L2, 2026-11-20).
+ * reads nothing (`DataService.runInputBytes`): `source` is not searched (review L2, 2026-11-20). A
+ * source that cannot follow another input ends no run: no run starts (review L-c, 2026-11-20).
  */
 export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {
   for (const before of sources) {
     if (before.key === source.key) return undefined;
-    if (before.status === 'ready' && before.base?.readerError !== undefined) return before;
+    if (before.status === 'ready' && before.base?.readerError !== undefined && !cannotFollow(sources, before)) return before;
   }
   return undefined;
 }

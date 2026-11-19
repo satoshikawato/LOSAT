@@ -5,7 +5,7 @@ import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
-import { noSequenceOf, queryEndBefore, SearchDraft, type DraftSource } from '../../src/application/draft';
+import { cannotFollow, noSequenceOf, queryEndBefore, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -1631,6 +1631,51 @@ describe('SearchDraft submit', () => {
     draft.removeSource('query', 'paste');
     await draft.idle();
     expect(bad().check).toMatchObject({ readerError: expect.stringContaining('Near line 4,') });
+  });
+
+  // The run passes the inputs of a Combined query as they are, one of comment and blank lines only
+  // too: the line of the run's error counts its lines (review L-a, 2026-11-20).
+  it("checks a Combined query's reader's error after every input before it, one without records too", async () => {
+    const { draft } = setup();
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('query', [new File(['; notes\n\n# more\n'], 'notes.fa'), new File(['>a\nACGT\n>b\n$$$$\n'], 'bad.fa')]);
+    await draft.idle();
+    const named = (name: string) => draft.state.get().query.sources.find((source) => source.name === name)!;
+    expect(named('bad.fa').check).toMatchObject({ state: 'ok', records: 1, readerError: expect.stringContaining('Near line 9,') });
+    draft.removeSource('query', named('notes.fa').key);
+    await draft.idle();
+    expect(named('bad.fa').check).toMatchObject({ readerError: expect.stringContaining('Near line 6,') });
+  });
+
+  // A source that cannot follow another input (a first line without a defline after another source)
+  // starts no run, so it ends none: the sources after it are not "not searched" (review L-c, 2026-11-20).
+  it('takes a source that cannot follow another input for no end of a run', async () => {
+    const { draft } = setup();
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('query', [new File(['\uFEFF>q2\nACGT\n'], 'mark.fa'), new File(['>c\nACGT\n'], 'after.fa')]);
+    await draft.idle();
+    const named = (name: string) => draft.state.get().query.sources.find((source) => source.name === name)!;
+    const sources = () => draft.state.get().query.sources;
+    expect(cannotFollow(sources(), named('mark.fa'))).toBe(true);
+    expect(cannotFollow(sources(), named('after.fa'))).toBe(false);
+    expect(queryEndBefore(sources(), named('after.fa'))).toBeUndefined();
+    expect(draft.readiness()).toMatch(/^Query \(file mark\.fa\) starts with a line that is not a defline/);
+    // A sequence without a defline whose reader fails later is the same.
+    draft.removeSource('query', named('mark.fa').key);
+    draft.removeSource('query', named('after.fa').key);
+    draft.addFiles('query', [new File(['GGCC\n>b\n$$$$\n'], 'bare.fa'), new File(['>c\nACGT\n'], 'after.fa')]);
+    await draft.idle();
+    expect(named('bare.fa').base?.readerError).toBeDefined();
+    expect(cannotFollow(sources(), named('bare.fa'))).toBe(true);
+    expect(queryEndBefore(sources(), named('after.fa'))).toBeUndefined();
+    expect(draft.readiness()).toMatch(/^Query \(file bare\.fa\) starts with a sequence without a defline/);
+    // First in the input, it can start so, and its error ends the run.
+    draft.removeSource('query', 'paste');
+    await draft.idle();
+    expect(cannotFollow(sources(), named('bare.fa'))).toBe(false);
+    expect(queryEndBefore(sources(), named('after.fa'))?.key).toBe(named('bare.fa').key);
   });
 
   it("maps a subject record that the engine refuses, and reports it in short above the button", async () => {

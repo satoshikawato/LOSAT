@@ -21,7 +21,9 @@
 //!   (no FMA instruction; wasi-libc's software `fma` costs ~16 ns per `exp` call) and x86-64 CPUs
 //!   without FMA. Most of glibc's FMAs add a small product to a larger sum, where a cheap test
 //!   proves the unfused result right; the others say what makes them cheaper (an exact product, an
-//!   exact sum, an integer factor).
+//!   exact sum, an integer factor). The polynomials of `exp` and `log` run unfused, and one test of
+//!   their last rounding, with a proved bound on the unfused minus the fused value, keeps the bits;
+//!   the arguments that fail a test (about 1 in 50) take every FMA exactly.
 //!
 //! `utils::glibc_fma_libm` is the only place where LOSAT calls a libm function on `f64`:
 //! `clippy.toml` refuses `f64::exp`, `f64::ln`, `f64::log10`, `f64::powf` and the other
@@ -45,7 +47,7 @@ fn d(u: u64) -> f64 {
 /// One fused multiply-add of glibc's code: `a * b + c` rounded once to nearest. Each variant
 /// names what the operands of that FMA make true; [`Fused`] computes them all with one
 /// instruction, [`Emulated`] uses what they say to do less work.
-pub(crate) trait Fma {
+pub(crate) trait Fma: Sized {
     /// Finite operands.
     fn fma(a: f64, b: f64, c: f64) -> f64;
     /// `a * b` is a double: `b` is a power of 2, or `a` is an integer and `b` has the trailing zero
@@ -69,6 +71,27 @@ pub(crate) trait Fma {
     fn fma_product_led(a: f64, b: f64, c: f64) -> f64 {
         Self::fma(a, b, c)
     }
+    /// `b` is `+-(2^m + 2^n)` with `n < m` (two bits); the product's rounding error reaches the
+    /// result.
+    #[inline(always)]
+    fn fma_two_bit(a: f64, b: f64, c: f64) -> f64 {
+        Self::fma(a, b, c)
+    }
+    /// `exp`'s last FMA, `scale * tmp + scale` with [`exp_tmp`], when the result is normal.
+    #[inline(always)]
+    fn exp_tail(r: f64, rt: f64, scale: f64) -> f64 {
+        Self::fma(scale, exp_tmp::<Self>(r, rt), scale)
+    }
+    /// `log`'s result `y + hi` with `y` of [`ln_poly`] (outside the interval near 1).
+    #[inline(always)]
+    fn ln_tail(r: f64, kd: f64, w: f64, hi: f64) -> f64 {
+        ln_poly::<Self>(r, kd, w, hi) + hi
+    }
+    /// `log`'s result near 1, `hi + y` with `y` of [`ln1_poly`].
+    #[inline(always)]
+    fn ln1_tail(r: f64, r2: f64, r3: f64, parts: [f64; 3], hi: f64) -> f64 {
+        hi + ln1_poly::<Self>(r, r2, r3, parts)
+    }
 }
 
 /// `f64::mul_add`.
@@ -82,6 +105,17 @@ impl Fma for Fused {
     #[inline(always)]
     fn fma(a: f64, b: f64, c: f64) -> f64 {
         a.mul_add(b, c)
+    }
+}
+
+/// Each FMA as a rounded product and a rounded sum: not glibc's bits. Only [`Emulated`]'s
+/// `exp_tail` and `ln_tail` use it, as an estimate whose distance from the fused value they bound.
+struct Unfused;
+
+impl Fma for Unfused {
+    #[inline(always)]
+    fn fma(a: f64, b: f64, c: f64) -> f64 {
+        a * b + c
     }
 }
 
@@ -106,6 +140,14 @@ const SIGN_BIT: u64 = 0x8000_0000_0000_0000;
 const EXP_BITS: u64 = 0x7ff0_0000_0000_0000;
 /// 2^-53 + 2^-105: `|p| * E_BOUND` rounded to nearest is at least `|p| * 2^-53` when normal.
 const E_BOUND: u64 = 0x3ca0_0000_0000_0001;
+/// `exp_tail`: `|r|` at most 0.00271 (ln 2 / 256 = 0.0027076 plus `pow`'s tail, < 2^-41), and
+/// twice the bound on `|tmp|` unfused minus fused there, 2^-59 (see `exp_tail`).
+const EXP_R_MAX: f64 = 0.00271;
+const EXP_TMP_SLACK: u64 = 0x3c40_0000_0000_0000; // 2^-59
+/// `ln_tail`: `|r|` at most 0.0041 (glibc: `|r| < 1/256` and a little) and three times the bound
+/// on `|y|` unfused minus fused there, 2^-66 (see `ln_tail`).
+const LN_R_MAX: f64 = 0.0041;
+const LN_Y_SLACK: u64 = 0x3bd0_0000_0000_0000; // 2^-66
 
 impl Emulated {
     /// Veltkamp's split: `a = hi + lo` with 26 and 27 significant bits.
@@ -166,6 +208,33 @@ impl Emulated {
         Self::full(a, b, c)
     }
 
+    /// Whether every real within `bound` of `u + z` rounds to `u`: `|z| + bound` below half the
+    /// gap from `u` to its nearer neighbour (2^(E-53) for `u` in [2^E, 2^(E+1)), 2^(E-54) when `u`
+    /// is 2^E). `RN(|z| + bound)` below that half gap (a power of 2) means `|z| + bound` is below
+    /// it. False for `u` below 2^-968, infinite or NaN.
+    #[inline(always)]
+    fn rounds_to(u: f64, z: f64, bound: f64) -> bool {
+        let ub = u.to_bits() & !SIGN_BIT;
+        let eb = ub & EXP_BITS;
+        let half_gap = d(eb.wrapping_sub(if ub == eb { 54 << 52 } else { 53 << 52 }));
+        eb.wrapping_sub(55 << 52) < EXP_BITS - (55 << 52) && z.abs() + bound < half_gap
+    }
+
+    /// `u = c + RN(a * b)` when it is provably `c + a * b'` rounded once for every `a * b'` within
+    /// `slack / 1.01` of `a * b` (`slack` 0: `b' = b`). With `u + z = c + p` exactly (TwoSum) and
+    /// `a * b = p + e`, the exact sum is `u + z + e`; `|e|` is at most `|p| * 2^-53` for a normal
+    /// `p` and 2^-1075 below, so at most `RN(|p| * E_BOUND) + 2^-1022`; the 1 % covers the
+    /// rounding of the bound. Fails for `|p|` near `|u|` (about `2 |p| / |u|` of the arguments).
+    #[inline(always)]
+    fn unfused_if_exact(a: f64, b: f64, c: f64, slack: f64) -> Option<f64> {
+        let p = a * b;
+        let u = c + p;
+        let pb = u - c;
+        let z = (c - (u - pb)) + (p - pb);
+        let bound = p.abs() * d(E_BOUND) + (slack + f64::MIN_POSITIVE);
+        Self::rounds_to(u, z, bound).then_some(u)
+    }
+
     /// `r`, which a variant computed for `a * b + c`; debug builds compare it with the general way.
     #[inline(always)]
     fn checked(r: f64, a: f64, b: f64, c: f64) -> f64 {
@@ -179,28 +248,12 @@ impl Emulated {
 }
 
 impl Fma for Emulated {
-    /// `u = c + RN(a * b)` when a test proves it equal to the once-rounded `c + a * b`, else
-    /// [`Emulated::full`]. With `u + z = c + p` exactly (TwoSum) and `a * b = p + e`, the exact
-    /// sum is `u + (z + e)`, which rounds to `u` when `|z| + |e|` is below half the gap from `u`
-    /// to its nearer neighbour (2^(E-53) for `u` in [2^E, 2^(E+1)), 2^(E-54) when `u` is 2^E).
-    /// `|e|` is at most `|p| * 2^-53` for a normal `p` and 2^-1075 below, so at most
-    /// `bound = RN(RN(|p| * E_BOUND) + 2^-1022)`; and `RN(|z| + bound)` below that half gap (a
-    /// power of 2) means `|z| + bound` is below it. The test fails for `|p|` near `|u|` (about
-    /// `2 |p| / |u|` of the arguments) and for `u` below 2^-968, infinite or NaN.
+    /// `c + RN(a * b)` when [`Emulated::unfused_if_exact`] proves it, else [`Emulated::full`].
     #[inline(always)]
     fn fma(a: f64, b: f64, c: f64) -> f64 {
-        let p = a * b;
-        let u = c + p;
-        let pb = u - c;
-        let z = (c - (u - pb)) + (p - pb);
-        let bound = p.abs() * d(E_BOUND) + f64::MIN_POSITIVE;
-        let ub = u.to_bits() & !SIGN_BIT;
-        let eb = ub & EXP_BITS;
-        let half_gap = d(eb.wrapping_sub(if ub == eb { 54 << 52 } else { 53 << 52 }));
-        if eb.wrapping_sub(55 << 52) < EXP_BITS - (55 << 52) && z.abs() + bound < half_gap {
-            u
-        } else {
-            Self::full_cold(a, b, c)
+        match Self::unfused_if_exact(a, b, c, 0.0) {
+            Some(u) => u,
+            None => Self::full_cold(a, b, c),
         }
     }
 
@@ -231,6 +284,92 @@ impl Fma for Emulated {
     #[inline(always)]
     fn fma_product_led(a: f64, b: f64, c: f64) -> f64 {
         Self::full(a, b, c)
+    }
+
+    /// `a * 2^m` and `a * 2^n` are exact and `a * 2^m - p` too (Sterbenz), so the product's
+    /// rounding error needs no split.
+    #[inline(always)]
+    fn fma_two_bit(a: f64, b: f64, c: f64) -> f64 {
+        let p = a * b;
+        let bh = d(b.to_bits() & 0xfff0_0000_0000_0000);
+        let r = Self::round_sum(c, p, (a * bh - p) + a * (b - bh));
+        Self::checked(r, a, b, c)
+    }
+
+    /// The polynomial unfused and one test of the last FMA. For `|r| <= 0.00271`, unfused minus
+    /// fused (`u - f`, each step `|RN(x) - RN(y)| <= |x - y| + ulp`): `C2 + r C3` in
+    /// [0.4995, 0.5005] differs by at most 2^-53 + |r C3| 2^-53 = 1.00046 * 2^-53, `C4 + r C5`
+    /// in [2^-5, 2^-4) by 1.0004 * 2^-57; `rt + p23 r2` (`|r2| <= 7.35e-6`, result below 2^-8)
+    /// by 2^-61 + (1.00046 + 0.5005) * 7.35e-6 * 2^-53 = 1.0029 * 2^-61; `tmp` (below 2^-8) by
+    /// that, `r2^2 (2^-57 + p45 2^-53)` (< 1e-9 * 2^-61) and 2^-61: below 2.003 * 2^-61. So
+    /// `scale * tmp + scale` is within `|scale| * 2.003 * 2^-61` of glibc's exact last sum (`pow`'s
+    /// `scale` is negative for an odd power of a negative `x`), and
+    /// `EXP_TMP_SLACK` (2^-59) is twice that. Fails for about 2^-6 of the arguments, which take
+    /// every FMA exactly.
+    #[inline(always)]
+    fn exp_tail(r: f64, rt: f64, scale: f64) -> f64 {
+        if r.abs() <= EXP_R_MAX {
+            let tmp = exp_tmp::<Unfused>(r, rt);
+            if let Some(v) =
+                Self::unfused_if_exact(scale, tmp, scale, scale.abs() * d(EXP_TMP_SLACK))
+            {
+                debug_assert_eq!(
+                    v.to_bits(),
+                    Self::fma(scale, exp_tmp::<Self>(r, rt), scale).to_bits()
+                );
+                return v;
+            }
+        }
+        Self::fma(scale, exp_tmp::<Self>(r, rt), scale)
+    }
+
+    /// `y` unfused and one test of `y + hi`. For `|r| <= 0.0041`, `|kd| <= 1075`, `|hi| < 1024`,
+    /// unfused minus fused, steps as in `exp_tail`: `lo` (below 2^-33; `|kd Ln2lo| <= 5.91e-11`)
+    /// by 2^-86 + 5.91e-11 2^-53 = 1.51 2^-86; `r2 A0 + lo` (below 2^-16; `|r2 A0| <= 8.41e-6`)
+    /// by 2^-69 + 8.41e-6 2^-53 + that = 1.551 2^-69; `A1 + r A2` in [0.332, 0.335) by 1.0021
+    /// 2^-54 and `A3 + r A4` in [0.199, 0.201) by 1.003 2^-55, so `p` in [0.332, 0.335) by
+    /// 2.0021 2^-54; `y` (below 2^-16; `|r3| <= 6.9e-8`) by 2^-69 + 1.551 2^-69 + 6.9e-8 (2.0021
+    /// 2^-54 + 0.335 2^-53) = 2.557 2^-69. `LN_Y_SLACK` (2^-66) is three times that. Fails for
+    /// about 2^-7 of the arguments, which take every FMA exactly.
+    #[inline(always)]
+    fn ln_tail(r: f64, kd: f64, w: f64, hi: f64) -> f64 {
+        if r.abs() <= LN_R_MAX {
+            let y = ln_poly::<Unfused>(r, kd, w, hi);
+            let u = y + hi;
+            let yb = u - hi;
+            let z = (hi - (u - yb)) + (y - yb);
+            if Self::rounds_to(u, z, d(LN_Y_SLACK)) {
+                debug_assert_eq!(u.to_bits(), (ln_poly::<Self>(r, kd, w, hi) + hi).to_bits());
+                return u;
+            }
+        }
+        ln_poly::<Self>(r, kd, w, hi) + hi
+    }
+
+    /// `y` unfused and one test of `hi + y`, with a bound that scales with `r = x - 1` (exact;
+    /// `|r| <= 0.0648`). Unfused minus fused, steps as in `exp_tail`: `B1 + r B2` in [0.317, 0.35)
+    /// by 1.0324 * 2^-54, `q1` by 2.0341 * 2^-54; `q2` (in [0.157, 0.177]) by 2.0391 * 2^-55;
+    /// `q3` (in [0.104, 0.118]) by 3.0551 * 2^-56; `q3 r3 + q2` by 3.0397 * 2^-55; `p` (in
+    /// [0.317, 0.351)) by 3.035 * 2^-54. `lo` (below 1.04 |r| 2^-53) plus `B0 rlo (r + rhi)`
+    /// (below `r^2 2^-26`) by `r^2 2^-79` and the ulp of the sum; `y` by that, `|r3| (3.035 *
+    /// 2^-54 + 0.3506 * 2^-53)` and its ulp: below 2.569 |r3| 2^-53 + 1.25 r^2 2^-77 + 2.08 |r|
+    /// 2^-105. The slack is about twice each term.
+    #[inline(always)]
+    fn ln1_tail(r: f64, r2: f64, r3: f64, parts: [f64; 3], hi: f64) -> f64 {
+        let y = ln1_poly::<Unfused>(r, r2, r3, parts);
+        let u = hi + y;
+        let yb = u - hi;
+        let z = (hi - (u - yb)) + (y - yb);
+        let slack = r3.abs() * d(0x3cc0_0000_0000_0000) // 2^-51
+            + (r2 * d(0x3b30_0000_0000_0000) + r.abs() * d(0x3990_0000_0000_0000)); // 2^-76, 2^-102
+        if Self::rounds_to(u, z, slack) {
+            debug_assert_eq!(
+                u.to_bits(),
+                (hi + ln1_poly::<Self>(r, r2, r3, parts)).to_bits()
+            );
+            return u;
+        }
+        hi + ln1_poly::<Self>(r, r2, r3, parts)
     }
 }
 
@@ -308,15 +447,21 @@ fn exp_core<F: Fma, const TAIL: bool>(x: f64, xtail: f64, sign_bias: u64, specia
     let top = ki.wrapping_add(sign_bias) << (52 - EXP_TABLE_BITS);
     let tail = d(EXP_TAB[idx]);
     let sbits = EXP_TAB[idx + 1].wrapping_add(top);
+    let rt = r + tail;
+    if special {
+        return exp_specialcase::<F>(exp_tmp::<F>(r, rt), sbits, ki);
+    }
+    F::exp_tail(r, rt, d(sbits))
+}
+
+/// `tmp` of e_exp.c and e_pow.c: `tail + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5)`, with
+/// glibc's three FMAs and `rt = r + tail`.
+#[inline(always)]
+fn exp_tmp<F: Fma>(r: f64, rt: f64) -> f64 {
     let r2 = r * r;
     let p23 = F::fma(r, d(EXP_HEAD[5]), d(EXP_HEAD[4])); // C2 + r * C3
     let p45 = F::fma(r, d(EXP_HEAD[7]), d(EXP_HEAD[6])); // C4 + r * C5
-    let tmp = F::fma(r2 * r2, p45, F::fma(p23, r2, r + tail));
-    if special {
-        return exp_specialcase::<F>(tmp, sbits, ki);
-    }
-    let scale = d(sbits);
-    F::fma(scale, tmp, scale)
+    F::fma(r2 * r2, p45, F::fma(p23, r2, rt))
 }
 
 /// glibc's `exp` (e_exp.c `__exp`).
@@ -357,24 +502,18 @@ fn ln_impl<F: Fma>(x: f64) -> f64 {
         if ix == 0x3ff0_0000_0000_0000 {
             return 0.0;
         }
-        let b = |i: usize| d(LOG_HEAD[7 + i]);
+        let b0 = d(LOG_HEAD[7]); // B[0] = -0.5
         let r = x - 1.0;
         let r2 = r * r;
         let r3 = r * r2;
-        let q1 = F::fma(r2, b(3), F::fma(r, b(2), b(1)));
-        let q2 = F::fma(r2, b(6), F::fma(r, b(5), b(4)));
-        let q3 = F::fma(r3, b(10), F::fma(r2, b(9), F::fma(r, b(8), b(7))));
-        let p = F::fma(F::fma(q3, r3, q2), r3, q1);
         let c27 = d(0x41a0_0000_0000_0000); // 0x1p27
         let t = F::fma_exact_product(r, c27, r);
         let rhi = F::fma_exact_product(-c27, r, t);
         let rlo = r - rhi;
         let rr = rhi * rhi;
-        let hi = F::fma_exact_product(rr, b(0), r); // B[0] = -0.5
-        let lo = F::fma_exact_product(rr, b(0), r - hi);
-        let lo = F::fma_product_led(b(0) * rlo, r + rhi, lo);
-        let y = F::fma_product_led(p, r3, lo);
-        return hi + y;
+        let hi = F::fma_exact_product(rr, b0, r);
+        let lo = F::fma_exact_product(rr, b0, r - hi);
+        return F::ln1_tail(r, r2, r3, [rhi, rlo, lo], hi);
     }
     if top.wrapping_sub(0x0010) >= 0x7ff0 - 0x0010 {
         if ix << 1 == 0 {
@@ -404,12 +543,32 @@ fn ln_impl<F: Fma>(x: f64) -> f64 {
     let kd = k as f64;
     let w = F::fma_exact_product(kd, d(LOG_HEAD[0]), logc);
     let hi = r + w;
+    F::ln_tail(r, kd, w, hi)
+}
+
+/// `y` of e_log.c near 1, whose result is `hi + y`: `lo + B[0] * rlo * (r + rhi) + r3 * p` with
+/// `p` glibc's polynomial in `r` (`B[1]` to `B[10]`), with its FMAs; `parts` is `[rhi, rlo, lo]`.
+#[inline(always)]
+fn ln1_poly<F: Fma>(r: f64, r2: f64, r3: f64, parts: [f64; 3]) -> f64 {
+    let [rhi, rlo, lo] = parts;
+    let b = |i: usize| d(LOG_HEAD[7 + i]);
+    let q1 = F::fma(r2, b(3), F::fma(r, b(2), b(1)));
+    let q2 = F::fma(r2, b(6), F::fma(r, b(5), b(4)));
+    let q3 = F::fma(r3, b(10), F::fma(r2, b(9), F::fma(r, b(8), b(7))));
+    let p = F::fma(F::fma(q3, r3, q2), r3, q1);
+    let lo = F::fma_product_led(b(0) * rlo, r + rhi, lo);
+    F::fma_product_led(p, r3, lo)
+}
+
+/// `y` of e_log.c, whose result is `y + hi`: `lo + r2 * A[0] + r * r2 * (A[1] + r * A[2] + r2 *
+/// (A[3] + r * A[4]))` with `lo = w - hi + r + kd * Ln2lo`, with glibc's FMAs.
+#[inline(always)]
+fn ln_poly<F: Fma>(r: f64, kd: f64, w: f64, hi: f64) -> f64 {
     let lo = F::fma_small_int(kd, d(LOG_HEAD[1]), (w - hi) + r);
     let r2 = r * r;
     let a = |j: usize| d(LOG_HEAD[2 + j]);
     let p = F::fma(F::fma(r, a(4), a(3)), r2, F::fma(r, a(2), a(1)));
-    let y = F::fma(r * r2, p, F::fma_product_led(r2, a(0), lo));
-    y + hi
+    F::fma(r * r2, p, F::fma_two_bit(r2, a(0), lo)) // A[0] = -0x1.0000000000001p-1
 }
 
 /// glibc's `log10` (e_log10.c `__ieee754_log10`, built without FMA; its `__ieee754_log` is the
@@ -927,6 +1086,11 @@ mod tests {
     }
 
     /// Arguments of every range the functions treat apart: (function, x, y).
+    /// 2^-4 to 2^-53: the distance from 1 of an argument of `log`'s interval near 1.
+    fn near_one(r: &mut Rng) -> f64 {
+        2f64.powi(-4 - (r.next() % 50) as i32)
+    }
+
     fn arguments(n: usize) -> Vec<(u8, f64, f64)> {
         let mut r = Rng(12345);
         let mut out = Vec::new();
@@ -941,6 +1105,7 @@ mod tests {
                 (0, r.unif(-1.0, 1.0) * 1e-17, 0.0),
                 (1, r.unif(0.5, 2.0), 0.0),
                 (1, r.unif(0.937, 1.0647), 0.0),
+                (1, 1.0 + r.unif(-1.0, 1.0) * near_one(&mut r), 0.0),
                 (1, r.unif(1.0, 1e7), 0.0),
                 (1, f64::from_bits(r.next() >> 1), 0.0),
                 (1, f64::from_bits(r.next() >> 12), 0.0),

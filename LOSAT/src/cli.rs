@@ -188,10 +188,9 @@ fn entry_program_description(name: &str) -> &'static str {
 fn top_level_after_help() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TEXT.get_or_init(|| {
-        let commands = <Commands as clap::Subcommand>::augment_subcommands(clap::Command::new("losat"));
         let others: Vec<&str> = ENTRY_NAMES
             .into_iter()
-            .filter(|name| commands.find_subcommand(name).is_none())
+            .filter(|name| !<Commands as clap::Subcommand>::has_subcommand(name))
             .collect();
         let width = others.iter().map(|name| name.len()).max().unwrap_or(0);
         let mut text = String::new();

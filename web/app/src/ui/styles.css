@@ -108,7 +108,11 @@
   --accent-line: #9ccbe6;
   --ok: #007a5a;
   --ok-bg: #e3f4ee;
-  --error: #b84f00;
+  /* Okabe–Ito's vermillion (#d55e00) darkened until it is 4.5:1 or more on every ground that shows
+     an error or a reverse orientation: 5.0:1 on --page, 5.2:1 on --error-bg, 5.1:1 on a selected
+     row (--accent-bg). #b84f00 was 4.3, 4.5 and 4.4:1 there (axe in line WQA's random walk,
+     2026-11-19; tests/unit/colour-contrast.test.ts). */
+  --error: #a84800;
   --error-bg: #fdeee3;
   --error-line: #f2b58b;
   --warn-bg: #faf6d2;
@@ -2053,9 +2057,9 @@ label.inline {
   white-space: nowrap;
 }
 
-/* 5.1:1 on the selected row's background (the error colour #b84f00 is 4.4:1 there; axe, W6). */
+/* The error colour, 5.1:1 on the selected row's background too (axe, W6). */
 .orientation[data-orientation='reverse'] {
-  color: #a84800;
+  color: var(--error);
 }
 
 .orientation[data-orientation='unknown'] {

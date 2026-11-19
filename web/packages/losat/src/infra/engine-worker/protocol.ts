@@ -31,6 +31,12 @@ export interface EngineInit {
   /** BroadcastChannel on which the Gateway asks the keeper of the shared memory to grow it (memory-keeper.ts). */
   readonly keeperChannel: string;
   /**
+   * The Web Lock that the worker holds for as long as it lives (worker-life.ts): the Gateway learns from its release
+   * that the worker ended without an error event (line WQA's sweep, D2). The worker answers `started` at once, and
+   * `life` once it holds the lock, before any preparation or search of the worker starts.
+   */
+  readonly lifeLock: string;
+  /**
    * Whether the threaded instance is in use (instance-use.ts), shared with the Gateway. Absent
    * where the page cannot share memory with a worker: no threaded instance starts then.
    */
@@ -155,6 +161,16 @@ export interface WorkerError {
 }
 
 export type EngineEvent =
+  /**
+   * The worker started: its script loaded and took `init`. An error before this is a worker that could not start (line
+   * WQA's sweep, D1); an error after it, a worker that stopped.
+   */
+  | { readonly type: 'started'; readonly generation: number }
+  /**
+   * Whether the worker holds the lock `lifeLock` (EngineInit), posted before any preparation or search of the worker
+   * starts: the Gateway waits for that lock from then on, also during the worker's first search (line WQA's sweep, D2).
+   */
+  | { readonly type: 'life'; readonly generation: number; readonly held: boolean }
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }

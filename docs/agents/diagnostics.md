@@ -43,12 +43,15 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   Second, `Fused::fma` in `utils/glibc_fma_libm.rs` (since 2026-11-20, #1344): every fused
   operation of glibc 2.35's x86-64 FMA `exp`, `log` and `pow`, the functions NCBI BLAST+ called
   for the reference output. Its test `the_emulated_fma_rounds_once` holds the other two calls.
-  The port's x86-64 copies compiled with `fma` (chosen at run time) and, where `Fused` is the
-  portable choice (aarch64), the four `*_portable` entry points are never inlined, so the FMA
-  instructions stay in `losat::utils::glibc_fma_libm::` functions; on baseline x86-64 the cold
-  `exp_specialcase` calls the `fma` of compiler-builtins. In the baseline x86-64 release
-  binary of #1344 (2026-11-20): 88 FMA instructions in `x86_fma::{exp,ln,log10,pow}` and one `fma`
-  reference in `exp_specialcase`.
+  On baseline x86-64 each entry point is chosen on its first call (the copy compiled with
+  `fma` when the CPU has FMA, else the emulation) and then called through a pointer, as glibc's
+  ifunc does: rustc drops `#[inline(never)]` on a `#[target_feature]` function, and a caller whose
+  features imply `fma` (`optimize_avx512`) inlined the copy. On aarch64 the entry points are never
+  inlined. So the FMA instructions stay in `losat::utils::glibc_fma_libm::` functions; on
+  baseline x86-64 the cold `exp_specialcase` calls the `fma` of compiler-builtins. In the
+  baseline x86-64 release binary of #1344 (2026-11-20): 88 FMA instructions in the `fused`
+  copies of `x86_fma::{exp,ln,log10,pow}` (15, 23, 23, 27) and one `fma` reference in
+  `exp_specialcase`.
 
   A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
   entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).

@@ -5,7 +5,7 @@ import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
-import { SearchDraft, type DraftSource } from '../../src/application/draft';
+import { holdsNoSequence, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -124,6 +124,42 @@ describe('SearchDraft inputs', () => {
     expect(source.base?.records.map((r) => r.id)).toEqual(['q1', 'q2']);
     expect(source.check).toEqual({ state: 'ok', records: 2 });
     expect(source.head).toBe('>q1\nACGT\n>q2\nGGCC\n');
+  });
+
+  // Line WQA's sweep, D4 (2026-11-19): an input without residues is read and run as the command line
+  // runs it, and is told apart from one with a sequence. A source whose records are all left out is not
+  // one (runs leave it out), nor is one with an empty record among others.
+  it('tells an input that holds no sequence, which the engine reads and runs take as they are', async () => {
+    const { draft } = setup();
+    const cases: ReadonlyArray<readonly [string, string, boolean]> = [
+      ['empty.fa', '', true],
+      ['blank.fa', '  \n\t\n', true],
+      ['defline.fa', '>empty record\n', true],
+      ['deflines.fa', '>a\n>b\n\n', true],
+      ['mixed.fa', '>a\nACGT\n>empty record\n>b\nGGCC\n', false],
+      ['plain.fa', '>a\nACGT\n', false],
+    ];
+    draft.addFiles('subject', cases.map(([name, text]) => file(name, text)));
+    await draft.idle();
+    cases.forEach(([name, , none], index) => {
+      const source = sourceOf(draft, 'subject', index);
+      expect(source.name).toBe(name);
+      expect(source.check).toMatchObject({ state: 'ok' });
+      expect(holdsNoSequence(source), name).toBe(none);
+    });
+    // What runs take decides: the records with residues left out, the rest holds none; every record
+    // left out, runs leave the source out.
+    const mixed = sourceOf(draft, 'subject', 4);
+    draft.setIncluded('subject', mixed.key, [0, 2], false);
+    await draft.idle();
+    expect(holdsNoSequence(sourceOf(draft, 'subject', 4))).toBe(true);
+    draft.setIncluded('subject', mixed.key, [1], false);
+    await draft.idle();
+    expect(holdsNoSequence(sourceOf(draft, 'subject', 4))).toBe(false);
+    // The run is not refused: the command line runs these inputs.
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    expect(draft.readiness()).toBeUndefined();
   });
 
   it('replaces the paste source when the text changes, and removes it when the text is emptied', async () => {

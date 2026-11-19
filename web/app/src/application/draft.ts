@@ -1493,6 +1493,23 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
   return source.base === undefined ? [] : includedRecords({ ...source.base, excluded: source.excluded });
 }
 
+/**
+ * Whether what runs take of a source that is read holds no residue: it has no record (an empty file,
+ * white space only), or every record that runs take has none (a defline alone). The engine reads such
+ * an input, as NCBI's reader does, and runs search it as the command line does: a search finds
+ * nothing in it, and NCBI BLAST+ 2.17.0 warns of it or ends the run with an error, by role, program
+ * and the other inputs (an empty subject alone: `Empty CBlastQueryVector`; a lone subject record
+ * without residues: `The average subject length is too short` in BLASTN and TBLASTX, a warning in the
+ * others; an empty query alone: `Query is Empty!`, a warning; a lone query record without residues:
+ * `Sequence contains no data`, an error). So its card shows no "Accepted" mark (line WQA's sweep, D4,
+ * 2026-11-19). A source whose records are all left out is not one: runs leave it out.
+ */
+export function holdsNoSequence(source: DraftSource): boolean {
+  if (source.status !== 'ready' || source.base === undefined) return false;
+  const included = includedOf(source);
+  return source.base.records.length === 0 || (included.length > 0 && included.every((record) => record.length === 0));
+}
+
 function nameOf(source: DraftSource, role: InputRole): string {
   return source.origin === 'paste' ? PASTED_NAMES[role] : source.name;
 }

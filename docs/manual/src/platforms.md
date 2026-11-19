@@ -48,7 +48,7 @@ The two WASI files are command modules for runtimes that implement WASI preview 
 | `wasm32-wasip1` (serial) | one | WASI preview 1 |
 | `wasm32-wasip1-threads` | several (`-num_threads`) | WASI preview 1, shared memory and the `wasi` thread-spawn call |
 
-The serial module gives the same bytes as the native Linux x86_64 binary, with one exception: on WASI, the last (15th) digit of a value in psiblast's ASN.1 PSSM (`-out_pssm` with `-out_ascii_pssm`) can differ by 1, because WebAssembly's `log()` has no fused multiply-add. NCBI BLAST+ on an x86-64 CPU without that instruction writes the same digit. See [the decision record on the last digit of full-precision values](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
+The serial module gives the same bytes as the native Linux x86_64 binary.
 
 ### What a WASI host must pass
 

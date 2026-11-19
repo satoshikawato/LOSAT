@@ -81,7 +81,7 @@ WASI (1.1; describes the builds before the port of #1344):
   an ASN.1 PSSM whose `informationContent` differs in the last of its 15 digits, for example
   `{ 347923230575625, 10, -15 }` where the frozen file and the native commands have
   `{ 347923230575626, 10, -15 }`. Every other byte of these files is the same. (Found by the
-  psiblast WASI work of 2026-11-17, #1281.) Correction (1.2, release line RL4, 2026-11-20): in these
+  psiblast WASI work of 2026-11-17, #1281.) Correction (1.2, the v0.2.0 release line, 2026-11-20): in these
   14 rows the differing value comes from `pow` in the pseudocounts (relative entropy to the power
   K, `LOSAT/src/core/psi/stages.rs`), not from `log` as this record said in 1.1.
 - NCBI's own output depends on the CPU: on x86-64, glibc picks an FMA variant of `log()` on a CPU
@@ -172,5 +172,5 @@ pending): its psiblast ASN.1 PSSM files give the Linux x64 bytes.
   all 15 digits). On that
   branch the WASI guard compares the psiblast PSSM files byte for byte and the Python copy of the
   rule is removed; the macOS Rust copy stays. Correction to 1.1: in the 14 psiblast rows the
-  differing value came from `pow` in the pseudocounts, not from `log` (release line RL4, 2026-11-20).
+  differing value came from `pow` in the pseudocounts, not from `log` (the v0.2.0 release line, 2026-11-20).
   Until the Owner decides, 1.1 stands as accepted.

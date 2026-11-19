@@ -452,3 +452,61 @@ fn help_has_no_source_references_and_a_true_footer() {
         "{full}"
     );
 }
+
+/// One form for LOSAT's refusal of an NCBI option by name, whatever the program and the other
+/// arguments are (blastn, blastp and blastx, with and without `-subject`: the same bytes but the
+/// program's name, exit status 2), and the hint of an argument error names `-help`, NCBI's form.
+#[test]
+fn refusals_by_name_have_one_form_and_the_hint_says_help() {
+    for option in ["-html", "-remote"] {
+        let mut forms = Vec::new();
+        for program in ["blastn", "blastp", "blastx"] {
+            for with_subject in [false, true] {
+                let mut words = vec![program, "-query", "q.fa"];
+                if with_subject {
+                    words.extend(["-subject", "s.fa"]);
+                } else {
+                    words.extend(["-db", "d"]);
+                }
+                words.push(option);
+                let output = run(losat(), &words);
+                assert_eq!(output.status.code(), Some(2), "{words:?} {output:?}");
+                assert!(output.stdout.is_empty(), "{words:?}");
+                let text = String::from_utf8(output.stderr).unwrap();
+                forms.push(text.replace(&program.to_uppercase(), "PROGRAM"));
+            }
+        }
+        let expected =
+            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
+        assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
+    }
+    // blastx's other refusals by name (`-gilist`, `-use_sw_tback`) have the same form.
+    for option in ["-gilist", "-use_sw_tback"] {
+        let output = run(losat(), &["blastx", "-query", "q.fa", option]);
+        assert_eq!(output.status.code(), Some(2), "{option} {output:?}");
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's BLASTX\n")
+        );
+    }
+    // An argument error ends with NCBI's form of the hint (makeblastdb has no `-num_threads`).
+    let output = run(losat(), &["makeblastdb", "-dbtype", "zzz"]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let text = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        text.ends_with("\n\nFor more information, try '-help'.\n"),
+        "{text:?}"
+    );
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
+        let output = run(losat(), &[program, "-num_threads", "x"]);
+        assert_eq!(output.status.code(), Some(2), "{program} {output:?}");
+        let text = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            text.ends_with("\n\nFor more information, try '-help'.\n"),
+            "{program}: {text:?}"
+        );
+        assert!(!text.contains("--help"), "{program}: {text:?}");
+    }
+}

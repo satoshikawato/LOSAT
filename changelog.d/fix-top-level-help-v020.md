@@ -17,3 +17,8 @@
   comments next to the fields in every program's argument structs. The hint at the foot of blastn's
   help is true: `-h` ("see more with '-help'") prints the summary and `-help` ("see a summary with
   '-h'") the full text.
+- blastx refuses an NCBI option that LOSAT does not run (`-html`, `-remote`, `-gilist`,
+  `-use_sw_tback`, ...) in the form of the other programs ("error: the NCBI BLAST+ option -html is
+  not supported by LOSAT's BLASTX", exit status 2) instead of "unsupported BLASTX option '-html':
+  outside the declared local FASTA scope", and an argument error ends with "For more information,
+  try '-help'." (NCBI's form) instead of '--help'.

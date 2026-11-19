@@ -791,6 +791,10 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("-V, --version", "--version")
         .replace("see a summary with '-help'", "see a summary with '-h'")
         .replace("see more with '--help'", "see more with '-help'")
+        .replace(
+            "For more information, try '--help'.",
+            "For more information, try '-help'.",
+        )
 }
 
 /// `render_message` for `losat rpsbproc`, whose arguments are NCBI's one-letter keys (`-i`)
@@ -1041,10 +1045,7 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
     // ```
     // Product scope explicitly refuses unported NCBI capabilities.
     if program == "blastx" && is_unported_blastx_arg(name) {
-        return Some(clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"),
-        ));
+        return refusal("BLASTX");
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
     // ```c++

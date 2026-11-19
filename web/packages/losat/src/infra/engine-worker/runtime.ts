@@ -453,8 +453,8 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * The output that the engine's signal of stream 9 discards (ABI v2 §5): an output stream of the run
- * that failed alone after some of its chunks were sent. Another number breaks the ABI.
+ * The output that the engine's signal of stream 9 names (ABI v2 §5): an output stream of the run
+ * that failed. Another number breaks the ABI.
  */
 function discardedOutput(bytes: Uint8Array): RunOutput {
   const stream = discardedStream(bytes);

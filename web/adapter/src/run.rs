@@ -945,9 +945,9 @@ impl Searched {
 /// call writes the others, as the CLI's run of each format alone writes it; an error of the argv's
 /// own format fails the call, as it fails the CLI. The bytes that a format that failed alone had
 /// written stay with its writer, which is dropped, and its observer events with the recorder,
-/// which forgets them (`RangeRecorder::forget`); where a chunk of them reached the host already
-/// (a report that failed after 1 MiB, BLASTX's later query batch), the host is told to discard
-/// that stream (`emit::discard`).
+/// which forgets them (`RangeRecorder::forget`); the host is told that the stream failed
+/// (`emit::discard`), and drops what it received of it where a chunk reached it already (a report
+/// that failed after 1 MiB, BLASTX's later query batch).
 fn search(
     command: Commands,
     formats: &[Output],
@@ -1090,8 +1090,10 @@ fn search(
             .any(|writer| writer.position().load(Ordering::SeqCst) > 0);
         return Err(Failed::new(&error, wrote));
     }
-    // The formats that failed alone: their writers are dropped with what they hold, the host
-    // discards what it received of them, and the recorder forgets their events.
+    // The formats that failed alone: their writers are dropped with what they hold, the host is
+    // told that each failed (stream 9, also where no chunk of it was sent: the host reports which
+    // outputs a run could not write from these signals alone; line WQA's sweep, D7, 2026-11-19)
+    // and discards what it received of it, and the recorder forgets their events.
     let mut written = Vec::with_capacity(writers.len());
     let mut refused = Vec::new();
     for (index, ((format, writer), refusal)) in
@@ -1100,9 +1102,7 @@ fn search(
         match refusal {
             None => written.push(writer),
             Some(error) => {
-                if writer.sent() {
-                    crate::emit::discard(format.stream);
-                }
+                crate::emit::discard(format.stream);
                 recorder.forget(index);
                 refused.push((format.stream, Failed::new(&error, false)));
             }
@@ -1527,7 +1527,15 @@ fn search_all(
     for (position, (result, _)) in outcomes.into_iter().enumerate() {
         match result {
             Ok(done) => searched.push(done),
-            Err(_) => tabular_failed |= position == 0,
+            // A search that failed without a byte of its formats (`fails_run`): each of its
+            // streams failed, which the host is told as for a format that failed alone (stream 9;
+            // line WQA's sweep, D7, 2026-11-19).
+            Err(_) => {
+                for output in &groups[position] {
+                    crate::emit::discard(output.stream);
+                }
+                tabular_failed |= position == 0;
+            }
         }
     }
     let mut writers = Vec::new();
@@ -3964,6 +3972,8 @@ mod tests {
                 "stream {stream}"
             );
         }
+        // The host is told that streams 6 and 7 failed (stream 9; line WQA's sweep, D7, 2026-11-19).
+        assert_eq!(discarded(&streams), [6, 7]);
         assert!(ERR6_ND3_NA0.contains(&text(SPLIT_ND3_NA0_ERR0)));
         assert_eq!(text(&streams[&3]), ERR6_ND3_NA0);
         // Both formats' hit lists of 0 fail every format, as the CLI does.
@@ -4092,6 +4102,7 @@ mod tests {
                     "{program}: stream {stream}"
                 );
             }
+            assert_eq!(discarded(&plain), [6, 7], "{program}");
             let error = text(&plain[&3]);
             assert_eq!(error.matches(refusal).count(), 1, "{program}: {error}");
             assert!(
@@ -4530,7 +4541,9 @@ mod tests {
                 streams(&[&words[..], &["-outfmt", argv]].concat(), &query, &subject).unwrap();
             assert_eq!(text(&written[&stream]), ncbi, "{argv}");
             assert!(written.get(&0).is_none_or(Vec::is_empty), "{argv}");
-            assert!(discarded(&written).is_empty(), "{argv}");
+            // The host is told that stream 0 failed, also where no chunk of it was sent (line WQA's
+            // sweep, D7, 2026-11-19).
+            assert_eq!(discarded(&written), [0], "{argv}");
             let error = text(&written[&3]);
             assert!(error.starts_with(warning), "{argv}: {error}");
             assert_eq!(error.matches(warning).count(), 1, "{argv}: {error}");
@@ -4655,7 +4668,7 @@ mod tests {
         assert_eq!(two[&6], one[&6], "{program}");
         for streams in [&one, &two] {
             assert!(streams.get(&0).is_none_or(Vec::is_empty), "{program}");
-            assert!(discarded(streams).is_empty(), "{program}");
+            assert_eq!(discarded(streams), [0], "{program}");
         }
     }
 

@@ -22,8 +22,9 @@ export const INFLATED_STREAM = 5;
  */
 export const RUN_FILES_STREAM = 8;
 /**
- * Stream 9: a run's signal that the host discards what it received of an output stream, which
- * failed alone after a chunk of it was sent (ABI v2 §5, §7; line RG T7-W). Each `emit` is one
+ * Stream 9: a run's signal that an output stream failed, whose received chunks the host discards
+ * (ABI v2 §5, §7; line RG T7-W): every output stream that failed alone, or whose search failed in a
+ * run of two searches, since ABI version 4 (line WQA's sweep, D7, 2026-11-19). Each `emit` is one
  * signal; `discardedStream` reads the stream's number from its bytes.
  */
 export const DISCARD_STREAM = 9;

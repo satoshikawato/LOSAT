@@ -18,10 +18,10 @@ export const OUTPUT_STREAMS: readonly OutputStream[] = Object.freeze([0, 6, 7, 4
 
 /**
  * The messages of one run, in order: any number of chunks and discards, then one `end` that
- * states how many chunks and bytes were sent. A `discard` drops what arrived of an output (the
- * engine's signal of stream 9, docs/web/abi_v2.md §5: the output failed alone after some of its
- * chunks were sent), which then stays empty; the totals of `end` count every chunk sent, discarded
- * or not. A run can be committed only after its `end` arrived and the totals agree; a run that
+ * states how many chunks and bytes were sent. A `discard` says that an output failed (the engine's
+ * signal of stream 9, docs/web/abi_v2.md §5: it failed alone, or its search failed in a run of two
+ * searches; its error is in the diagnostics) and drops what arrived of it, which then stays empty;
+ * the totals of `end` count every chunk sent, discarded or not. A run can be committed only after its `end` arrived and the totals agree; a run that
  * fails or is cancelled sends no `end` and is discarded.
  */
 export type RunOutputMessage =

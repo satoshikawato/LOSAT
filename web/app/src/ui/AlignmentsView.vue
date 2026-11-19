@@ -35,7 +35,7 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
 const sorted = computed(() => props.state.loaded?.limits.sorted === true);
-/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
+/** The run could not write outfmt 0, as the engine said (its error is under Warnings in Run details). */
 const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
 /** The subjects whose alignments outfmt 0 shows, "3 subjects" or "subjects" where -num_alignments cannot be read. */
@@ -316,8 +316,8 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             >
           </template>
           <p v-else-if="outfmt0Failed" class="notice" data-testid="detail-not-in-outfmt0">
-            No outfmt 0 alignment is linked to this HSP: the search of outfmt 0 failed, and its error is in the diagnostics. The outfmt 6 row
-            below and outfmt 7 hold the HSP.
+            No outfmt 0 alignment is linked to this HSP: outfmt 0 could not be written, and its error is under Warnings in Run details. The
+            outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">
             No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">

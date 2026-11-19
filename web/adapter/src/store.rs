@@ -374,8 +374,13 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
 /// handles and the *inputs* JSON (docs/web/abi_v2.md §9): the *register* response of each, with
 /// each record's `shown_id` (`tabular_id`).
 ///
-/// The errors are the CLI's, in its order. The scans come first: LOSAT Web's refusals and the
-/// reader's own errors, as in `register`. A scan that fails gives the error of the reading when the
+/// The errors are the CLI's texts. Their order is the CLI's for the subjects, which the CLI reads
+/// whole before any query, and for a query that the CLI reads in one batch: every query record is
+/// read here before the run, so a reader's error in a later query batch of the CLI (two records of
+/// one Seq-id under `-parse_deflines`, for example) ends the run before the searches of the batches
+/// before it, where the CLI ends with the first error of those (a refusal of outfmt 0 in batch 1;
+/// review of line WQA's D7, L1, 2026-11-19, open). The scans come first: LOSAT Web's refusals and
+/// the reader's own errors, as in `register`. A scan that fails gives the error of the reading when the
 /// reading fails (the CLI fails with that error, whatever the scan refused), and its own error
 /// otherwise. A subject without records ends the run with NCBI's `Empty CBlastQueryVector` before
 /// the query is read, as it ends the CLI (`register` registers it, and the run gives the error).

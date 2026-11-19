@@ -13,7 +13,7 @@ import { expect } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openParameters, openSearch, paste, pickRun, program, storedOutputs, submit, waitStatus } from './support/search';
+import { chooseRun, openParameters, openSearch, paste, pickRun, program, showOutput, storedOutputs, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine reads no ids of the deflines: the engine build runs these tests');
@@ -141,6 +141,22 @@ test('a record that is both a query and a subject and has masks: outfmt 0 alone 
   }
   await pickRun(page, 2);
   await expect(page.getByTestId('results-status')).toContainText(message);
+  // The results of run 1 say that outfmt 0 could not be written, from the engine's report of the outputs that
+  // failed (ABI v2 §5, stream 9; round 3 of D7), not that it shows the alignments of a first 0 subjects.
+  await chooseRun(page, 1);
+  const notices = page.getByTestId('results-notice');
+  await expect(notices.and(page.locator('[data-kind="outfmt0-failed"]'))).toHaveText(
+    "outfmt 0 could not be written (its error is under Warnings in Run details), so no alignment is linked to this query's 1 subject. outfmt 6 and 7 hold the HSPs.",
+  );
+  await expect(notices.and(page.locator('[data-kind="outfmt0-partial"]'))).toHaveCount(0);
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('detail-not-in-outfmt0')).toHaveText(
+    'No outfmt 0 alignment is linked to this HSP: outfmt 0 could not be written, and its error is under Warnings in Run details. The outfmt 6 row below and outfmt 7 hold the HSP.',
+  );
+  await showOutput(page, 1, 0, false);
+  await expect(page.getByTestId('outputs-not-written')).toHaveText('outfmt 0 could not be written: its error is under Warnings in Run details.');
+  await showOutput(page, 1, 6, false);
+  await expect(page.getByTestId('outputs-not-written')).toHaveCount(0);
   const { outputs, warnings } = await storedOutputs(page, 1);
   expect(outputs[0].length, 'outfmt 0 is refused').toBe(0);
   expect(outputs[6].toString('utf8').split('\t').slice(0, 2)).toEqual(['AB000001.1', 'AB000001.1']);

@@ -69,6 +69,12 @@ export interface ResultSetRef {
   /** The bytes of each output of the run: the formats that every run writes, and the output of its -outfmt where it has one. */
   readonly byteLengths: Readonly<Record<OutputFormat, number> & Partial<Record<typeof CUSTOM_OUTPUT, number>>>;
   readonly hitCount: number;
+  /**
+   * The outputs that the run could not write, by stream number: those that the engine said failed (its signal of
+   * stream 9, docs/web/abi_v2.md §5: a format that failed alone, or the formats of a search that failed in a run of
+   * two searches). Each is empty, and its error is in the run's diagnostics (line WQA's sweep, D7, 2026-11-19).
+   */
+  readonly failed: readonly RunOutput[];
 }
 
 /** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */

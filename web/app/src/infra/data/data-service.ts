@@ -90,6 +90,8 @@ interface StagedRun {
   readonly writers: ReadonlyMap<OutputStream, BlockWriter>;
   readonly receiver: RunOutputReceiver;
   readonly lengths: Lengths;
+  /** The outputs that the engine said failed (its discards, `clear`): `ResultSetRef.failed`. */
+  readonly failed: Set<RunOutput>;
   /** HSP records so far: the lines of stream 1 that are not blank, as `readHits` reads them. */
   hitLines: number;
   /** The current line of stream 1 has a character other than white space. */
@@ -226,6 +228,7 @@ export class DataService implements DataGateway {
         (stream) => this.clear(run, stream),
       ),
       lengths,
+      failed: new Set(),
       hitLines: 0,
       hitLineOpen: false,
       failure: undefined,
@@ -263,7 +266,8 @@ export class DataService implements DataGateway {
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
     const custom = run.lengths[CUSTOM_OUTPUT];
     const byteLengths = { 0: run.lengths[0]!, 6: run.lengths[6]!, 7: run.lengths[7]!, ...(custom === undefined ? {} : { [CUSTOM_OUTPUT]: custom }) };
-    return { runId, byteLengths, hitCount };
+    const failed = [...run.failed].sort((a, b) => a - b);
+    return { runId, byteLengths, hitCount, failed };
   }
 
   async discardRun(runId: string): Promise<void> {
@@ -375,9 +379,9 @@ export class DataService implements DataGateway {
   }
 
   /**
-   * Drops what a staged run received of one of its outputs, which the engine discarded (it failed
-   * alone after some of its chunks were sent, docs/web/abi_v2.md §5): the output stays empty. After a
-   * failure, the run keeps nothing.
+   * Records that one output of a staged run failed, as the engine said (docs/web/abi_v2.md §5: it failed alone, or
+   * its search failed in a run of two searches), and drops what the run received of it: the output stays empty.
+   * After a failure, the run keeps nothing.
    */
   private clear(run: StagedRun, stream: RunOutput): void {
     if (run.failure !== undefined) return;
@@ -391,6 +395,7 @@ export class DataService implements DataGateway {
       return;
     }
     run.lengths[stream] = 0;
+    run.failed.add(stream);
   }
 
   private async readStream(runId: string, stream: OutputStream): Promise<Uint8Array> {

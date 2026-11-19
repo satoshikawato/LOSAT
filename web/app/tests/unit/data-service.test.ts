@@ -258,6 +258,34 @@ describe('DataService runs and storage status', () => {
     await expect(data.commitRun('run-4')).rejects.toThrow('The engine wrote output stream 4, which this run does not write');
   });
 
+  // The engine's signal of stream 9 (ABI v2 §5): an output that failed, alone in the search of the others or with its
+  // search in a run of two searches, is empty and named in the result, also where no chunk of it came (line WQA's
+  // sweep, D7, 2026-11-19); an empty output that the engine did not name is not.
+  it('names the outputs that the engine said failed in the result, and keeps them empty', async () => {
+    const { data } = service();
+    const writer = new RunOutputWriter(await data.openRun('run-1'));
+    writer.write(0, encoder.encode('BLASTN 2.17.0+\n'));
+    writer.write(6, encoder.encode('row\n'));
+    writer.discard(0);
+    writer.write(7, encoder.encode('# BLASTN\n'));
+    writer.end();
+    const result = await data.commitRun('run-1');
+    expect(result.failed).toEqual([0]);
+    expect(result.byteLengths).toEqual({ 0: 0, 6: 4, 7: 9 });
+    expect(await data.readOutput('run-1', 0)).toEqual(new Uint8Array(0));
+    const tabular = new RunOutputWriter(await data.openRun('run-2'));
+    tabular.discard(7);
+    tabular.discard(6);
+    tabular.write(0, encoder.encode('BLASTN 2.17.0+\n'));
+    tabular.end();
+    expect((await data.commitRun('run-2')).failed).toEqual([6, 7]);
+    const empty = new RunOutputWriter(await data.openRun('run-3'));
+    empty.end();
+    const none = await data.commitRun('run-3');
+    expect(none.byteLengths[0]).toBe(0);
+    expect(none.failed).toEqual([]);
+  });
+
   it('refuses a second run with the same id and a commit of an unknown run', async () => {
     const { data } = service();
     await data.openRun('run-1');

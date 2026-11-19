@@ -29,8 +29,9 @@
 // -parse_deflines and has masks: LOSAT refuses outfmt 0 alone; line WQA's sweep, D7, 2026-11-19):
 // the run writes no stream for them, and stream 3 is the CLI's standard error of the argv's own
 // format followed by each such format's error (the last line of its CLI run's standard error), as
-// the adapter writes a refusal of a format that failed alone (abi_v2.md §7). Its `"outfmt"` may be
-// 6 or 7 (the argv's own format then is that stream, and no stream 4 is written).
+// the adapter writes a refusal of a format that failed alone (abi_v2.md §7), and the run's signals of
+// stream 9 name them and no other stream (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
+// format then is that stream, and no stream 4 is written).
 //
 // A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
 // the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
@@ -810,6 +811,11 @@ async function main() {
         const diagnostics = run.streams.get(3) || Buffer.alloc(0);
         assert.equal(sha256(diagnostics), sha256(expected.diagnostics), `${label}: diagnostics\n${diagnostics}`);
         row.diagnostics = sha256(expected.diagnostics);
+        // The run's signals of stream 9 name the streams that it could not write: those whose CLI run of the argv
+        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19).
+        const signals = run.streams.get(9) || Buffer.alloc(0);
+        const failedStreams = Array.from({ length: signals.length / 4 }, (_, i) => signals.readUInt32LE(4 * i)).sort((a, b) => a - b);
+        assert.deepEqual(failedStreams, [...(search.fails_alone || [])].sort((a, b) => a - b), `${label}: the streams that the run says failed (stream 9)`);
         if (search.fails_alone) row.fails_alone = search.fails_alone;
         row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
         if (together) row.inputs = "register_inputs";

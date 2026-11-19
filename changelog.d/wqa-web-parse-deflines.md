@@ -7,3 +7,7 @@
   as the CLI refuses it. In the library, BLASTX's `run_local` no longer refuses `-parse_deflines`,
   and two empty inputs end with NCBI's `Empty CBlastQueryVector` as on the command line. ABI v2 is
   version 4 (`losat_web2_register_inputs`).
+- LOSAT Web: a run that wrote its other outputs but could not write outfmt 0, or outfmt 6 and 7,
+  now says so in its results and in the Outputs view, and points to the error under Warnings in
+  Run details. Before, the results said that outfmt 0 showed the alignments of "the first 0
+  subjects", or that the query had no hits.

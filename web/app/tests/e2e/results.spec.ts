@@ -1063,6 +1063,33 @@ test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', a
   }
 });
 
+// outfmt 6 and 7 that fail alone in the run's one search (line WQA's sweep, D7, round 3, 2026-11-19): a subject titled
+// `Subject_9 bad x\x81y title`, whose title NCBI's GenerateDefline cannot decode, stops the tabular formats (the CLI's
+// -outfmt 6 and 7 exit 1), while outfmt 0, the argv's own, shows the hit with NCBI's "alignment skipped" line
+// (web/adapter/src/run.rs, a_subject_title_ncbi_cannot_decode_fails_the_tabular_streams_the_argv_does_not_ask_for).
+// The engine reports the outputs that failed (ABI v2 §5, stream 9): the notice says that outfmt 6 and 7 could not be
+// written, not that the query has no hits.
+test('outfmt 6 and 7 that could not be written: the notice says so, not that the query has no hits', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine writes every output');
+  const coding = 'ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG';
+  const subject = Buffer.concat([Buffer.from('>Subject_9 bad x'), Buffer.from([0x81]), Buffer.from(`y title\n${coding}\n`)]);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${coding}\n`);
+  await openFiles(page, 'subject', [{ name: 'subject.fa', text: subject }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-output"]');
+  await expect(notice).toHaveText('outfmt 6 and 7 could not be written (their error is under Warnings in Run details), so this run has no HSP records.');
+  expect(await noticeKinds(page)).toEqual(['no-tabular-output']);
+  await showOutput(page, 1, 0, false);
+  expect(await text(page.getByTestId('result-output'))).toContain('Sequence with id Subject_1 no longer exists in database...alignment skipped');
+  await expect(page.getByTestId('outputs-not-written')).toHaveCount(0);
+  await showOutput(page, 1, 6, false);
+  await expect(page.getByTestId('outputs-not-written')).toHaveText('outfmt 6 could not be written: its error is under Warnings in Run details.');
+  await show(page, 'details');
+  await expect(page.getByTestId('run-diagnostics')).toContainText('subject record 1 (Subject_9) has a title whose non-UTF-8 bytes');
+});
+
 test("BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line", async ({ page }) => {
   // The example of docs/evidence/losat_web_e2c/AUTHORITY.md §P: a one-letter HSP on the minus
   // strand. The FakeEngine writes a one-letter BLASTN HSP for its third query.

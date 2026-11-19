@@ -438,6 +438,7 @@ function setup(
     error?: string;
     snapshot?: Partial<RunSnapshot>;
     record?: Partial<RunRecord>;
+    result?: RunView['result'];
   } = {},
 ) {
   const run = makeRun(options.specs);
@@ -445,6 +446,7 @@ function setup(
     snapshot: { ...snapshot('r1', options.argv), ...options.snapshot },
     status: options.status ?? 'completed',
     record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: options.error ?? 'boom' } : {}), ...options.record },
+    ...(options.result === undefined ? {} : { result: options.result }),
   };
   const runs = new Store<AppState>({ runs: [view] });
   const pending: Array<() => void> = [];
@@ -692,6 +694,41 @@ describe('ResultsBrowser', () => {
     await settle();
     await settle();
     expect(running.results.state.get().phase).toBe('ready');
+  });
+
+  // The outputs that the run could not write are the engine's word (its signal of stream 9, `ResultSetRef.failed`),
+  // not a guess from their lengths: outfmt 0 that failed alone in the search of the other formats, or whose search
+  // of its own (-num_alignments) failed; outfmt 6 and 7 that failed, which leave the run without HSP records (line
+  // WQA's sweep, D7, 2026-11-19).
+  it('takes the outputs that could not be written from the engine, in one search or in a search of their own', async () => {
+    const result = (failed: readonly (0 | 6 | 7)[], out0 = 0) => ({ runId: 'r1', byteLengths: { 0: out0, 6: 10, 7: 10 }, hitCount: 4, failed });
+    const one = ['blastn', '-query', 'q.fa', '-subject', 's.fa'];
+    const separate = [...one, '-num_alignments', '3'];
+    const cases: ReadonlyArray<readonly [readonly string[], readonly (0 | 6 | 7)[], number, boolean]> = [
+      [one, [0], 0, true],
+      [separate, [0], 0, true],
+      // An empty outfmt 0 that the engine did not name: written, as the engine said.
+      [one, [], 0, false],
+      [separate, [], 0, false],
+      [one, [6, 7], 100, false],
+    ];
+    for (const [argv, failed, out0, expected] of cases) {
+      const { results } = setup({ argv, result: result(failed, out0) });
+      await results.open('r1');
+      const loaded = results.state.get().loaded!;
+      expect(loaded.outfmt0Failed, JSON.stringify([argv, failed])).toBe(expected);
+      expect(loaded.tabularFailed, JSON.stringify([argv, failed])).toBe(failed.includes(6));
+    }
+    const tabular = setup({ specs: [], result: result([6, 7], 100) });
+    await tabular.results.open('r1');
+    expect(noHspReason(tabular.results.state.get())).toBe('no-tabular-output');
+    expect(NO_HSP_TEXT['no-tabular-output']).toBe(
+      'outfmt 6 and 7 could not be written (their error is under Warnings in Run details), so this run has no HSP records.',
+    );
+    // -num_alignments 0 keeps its own notice: the tabular search fails because of that hit list.
+    const zero = setup({ specs: [], argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-num_alignments', '0'], result: result([6, 7], 100) });
+    await zero.results.open('r1');
+    expect(noHspReason(zero.results.state.get())).toBe('no-tabular-hits');
   });
 
   // A dry run (-dryrun; line RG E1w-3b) completes without a search: its notice says so in place of "no hits".

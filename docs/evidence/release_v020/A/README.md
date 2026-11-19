@@ -1,7 +1,7 @@
 # v0.2.0 release test set A: Gate A v0.1.1, Linux x64 native and serial Wasm
 
 Set A of [the release test plan](../../../release/v0.2.0_certification_plan.md) (section 2) on the
-candidate commit `C` = `703caed171944b0763c2efa4b3ef58805099fc47`, 2026-11-19, 04:45-06:03 JST (4,656 s).
+candidate commit `C` = `93ca2f652617acac09d416c28c293cc8a1a501d1`, 2026-11-19, 19:56-21:14 JST (4,664 s).
 
 - Where: the Linux x86_64 workstation (Intel Xeon Gold 6338, Linux 6.8), two CPUs booked untimed on NUMA
   node 0. NCBI BLAST+ 2.17.0 is the official Linux x64 archive; every binary has the SHA-256 of the
@@ -27,7 +27,7 @@ Result `INTEGRATED_RUNTIME_CERTIFIED` (`summary.json`):
 | Runtime boundary (`zero_delegation.stdout`) | | no temporary production finding, the 2 reviewed dependency signals |
 
 Files: the script's summary files above, `certify.log.gz` (its log), `output_manifest.tsv` (path, bytes and
-SHA-256 of each of the 618 files the run wrote, 83 MB in all). The whole output is kept as
-`A_output.tar.gz` (40,527,413 bytes, SHA-256 `7411441a24b203f4f71aa214bb065a30ac735667ca018339f77950cda94c1b99`).
+SHA-256 of each of the 618 files the run wrote, 177 MB in all). The whole output is kept as
+`A_output.tar.gz` (41,239,148 bytes, SHA-256 `f2250e1ce48fb82b61314bf0349bfc66648b7e4f1f9909db9a5aaa8b84d4babf`).
 `MANIFEST.tsv` lists the files of this directory; its SHA-256 is `local_evidence.A.evidence_sha256` in
 `docs/release/v0.2.0_rc_contract.json`.

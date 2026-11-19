@@ -6,12 +6,13 @@
 // -num_threads and validate that argv (ABI v2 §7), register the query and, unless the
 // instance holds it, the subject, compare the records that the engine read with the
 // record tables (plan §5.4; a difference stops the run before any output), run, and send
-// the output streams to the Data worker's port, with the engine's discards of an output that
-// failed alone (stream 9). A BLASTN search with -window_masker_db also
-// gives the engine the counts file, which the instance holds for later BLASTN searches. A search
-// with -conffile gives the engine the registry file for that search only, and the files that a
-// run makes besides its outputs (stream 8: the file of -logfile) come back with its result, or with
-// its error when it fails (line RG E1w-3b); they never go to the Data worker.
+// the output streams to the Data worker's port, with the engine's signal of each output that
+// failed (stream 9: the Data worker drops what it received of that output). A BLASTN search
+// with -window_masker_db also gives the engine the counts file, which the instance holds for
+// later BLASTN searches. A search with -conffile gives the engine the registry file for that
+// search only, and the files that a run makes besides its outputs (stream 8: the file of
+// -logfile) come back with its result, or with its error when it fails (line RG E1w-3b); they
+// never go to the Data worker.
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';

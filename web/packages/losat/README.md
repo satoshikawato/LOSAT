@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 3, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 4, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -22,7 +22,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 3 |
+| 0.2.0 | 0.2.0 | 4 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -77,12 +77,16 @@ stream; `RunOutputReceiver` reads them on the other end of a `MessageChannel`. `
 holds the ID and length of every record of the input. `ReactorScanner` produces them, and the
 engine checks them before it searches.
 
-The engine can tell the host to discard an output: it sends stream 9 (`DISCARD_STREAM`), whose 4
-bytes are a stream number as a little-endian unsigned integer, and the host drops everything that
-arrived of that stream. It happens when one added output fails on its own after some of its chunks
-were sent, while the run goes on with the others. `RunOutputReceiver` reports it through `onDiscard`,
-its required third argument (`new RunOutputReceiver(port, onChunk, onDiscard)`; `onDiscard(stream)` drops what
-arrived of that output), and `RunOutputMessage` has a `discard` variant for it.
+The engine tells the host which outputs a run could not write: for each, it sends stream 9
+(`DISCARD_STREAM`), whose 4 bytes are that output's stream number as a little-endian unsigned
+integer, and the host drops everything that arrived of that stream, which then stays empty. It comes
+for each output that fails on its own, whether or not some of its chunks were sent, and for each
+output of a search that fails in a run of two searches; the error is on stream 3, and the run goes
+on with the other outputs. These signals are the only sign of an output that could not be written:
+an empty stream is not one (outfmt 6 of a search without hits is empty). `RunOutputReceiver`
+reports each signal through `onDiscard`, its required third argument (`new RunOutputReceiver(port,
+onChunk, onDiscard)`; `onDiscard(stream)` drops what arrived of that output), and
+`RunOutputMessage` has a `discard` variant for it.
 
 A host that keeps every chunk would keep output that the command line does not write.
 
@@ -106,7 +110,7 @@ let outfmt6: Uint8Array[] = [];
 // -query and -subject name the inputs in the outputs; the sequences come from the handles.
 abi.run(['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'], query.handle, subject.handle, (stream, bytes) => {
   if (stream === 6) outfmt6.push(bytes.slice());
-  // Stream 9: the engine discards what it sent of one output (here, outfmt 6 if it is named).
+  // Stream 9: the engine could not write the output that it names; if it is outfmt 6, drop what arrived.
   else if (stream === DISCARD_STREAM && discardedStream(bytes) === 6) outfmt6 = [];
 });
 abi.release(query.handle);

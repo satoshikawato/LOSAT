@@ -27,9 +27,10 @@ export class RunOutputWriter {
   }
 
   /**
-   * Tells the receiver to drop what it received of the output `stream`, which then stays empty: the
-   * engine's signal of stream 9 (docs/web/abi_v2.md §5), for an output that failed alone after
-   * some of its chunks were sent. The chunks sent still count in the totals of `end`.
+   * Tells the receiver that the output `stream` failed and to drop what it received of it, which
+   * then stays empty: the engine's signal of stream 9 (docs/web/abi_v2.md §5), for each output that
+   * failed alone or with its search in a run of two searches, also where none of its chunks was
+   * sent. The chunks sent still count in the totals of `end`.
    */
   discard(stream: RunOutput): void {
     if (this.ended) throw new Error('the output of this run has already ended');

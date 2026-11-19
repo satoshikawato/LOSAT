@@ -3853,6 +3853,8 @@ mod tests {
         let streams = streams(&words, &query, &subject).unwrap();
         assert_eq!(streams[&0], SPLIT_OUT0);
         assert_eq!(streams[&6], SPLIT_OUT6);
+        // Neither search failed: no signal of stream 9 (line WQA's sweep, D7, 2026-11-19).
+        assert_eq!(discarded(&streams), [] as [u32; 0]);
         // The warning of the tabular formats, once (outfmt 0 has none).
         assert_eq!(streams[&3], SPLIT_ERR6);
         let out0 = String::from_utf8(streams[&0].clone()).unwrap();
@@ -4002,6 +4004,7 @@ mod tests {
         let subject = fasta(SPLIT_SUBJECT);
         let plain_words = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
         let plain = streams(&plain_words, &query, &subject).unwrap();
+        assert_eq!(discarded(&plain), [] as [u32; 0]);
         let words = [&plain_words[..], &["-num_descriptions", "2147483647"]].concat();
         validate(&words).unwrap();
         let streams = streams(&words, &query, &subject).unwrap();
@@ -4010,6 +4013,8 @@ mod tests {
             assert_eq!(streams[&stream], plain[&stream], "stream {stream}");
         }
         assert!(streams.get(&0).is_none_or(|bytes| bytes.is_empty()));
+        // The host is told that stream 0 failed, once (stream 9; line WQA's sweep, D7, 2026-11-19).
+        assert_eq!(discarded(&streams), [0]);
         // The records follow the tabular list, with no section of format 0.
         let records = String::from_utf8(streams[&1].clone()).unwrap();
         assert!(records.lines().count() > 0);

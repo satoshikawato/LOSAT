@@ -455,6 +455,83 @@ jobs:
             --archive ".tmp/release-readiness/download/${{ matrix.archive }}" \
             --target "${{ matrix.target_triple }}"
 
+  # CodeQL of the candidate itself (codeql.yml: the four languages, filed under this run's ref and
+  # commit), so that job `security` can require no open alert at R. Its upload of the results is the
+  # only write before job `handoff` (security-events).
+  codeql-candidate:
+    uses: ./.github/workflows/codeql.yml
+    with:
+      own_commit: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+  security:
+    name: Security (advisories and code scanning at the candidate)
+    needs: codeql-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact candidate
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install pip-audit
+        run: python -m pip install --disable-pip-version-check pip-audit==2.10.1
+
+      # The same script as nightly.yml's job `audit`: no known advisory in any lock file at R.
+      - name: Dependency advisories (cargo, npm, pip)
+        run: scripts/dependency_advisories.sh
+
+      # Every language has an analysis of R on this ref (job codeql-candidate), and no alert is open
+      # on it. A false positive is dismissed on GitHub with its reason; dismissals carry over by
+      # category, so a dismissed alert does not fail here.
+      - name: No open code scanning alert at the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          analysed=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/analyses?ref=$GITHUB_REF&per_page=100" \
+            --jq "[.[] | select(.commit_sha == \"$GITHUB_SHA\") | .category] | unique | join(\" \")")
+          for language in actions javascript-typescript python rust; do
+            if [[ " $analysed " != *" /language:$language "* ]]; then
+              echo "::error::no CodeQL analysis of $GITHUB_SHA on $GITHUB_REF for /language:$language"
+              exit 1
+            fi
+          done
+          open=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$GITHUB_REF&state=open&per_page=100" --paginate \
+            --jq '.[] | "#\(.number) \(.rule.id) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"')
+          if [[ -n "$open" ]]; then
+            echo "::error::open code scanning alerts on $GITHUB_REF at $GITHUB_SHA (fix, or dismiss a false positive on GitHub with its reason):"
+            echo "$open"
+            exit 1
+          fi
+          echo "No open code scanning alert on $GITHUB_REF at $GITHUB_SHA ($analysed)."
+
   handoff:
     name: Aggregate exact-SHA RC handoff
     needs:
@@ -464,16 +541,19 @@ jobs:
       - threaded-wasm-artifact
       - extracted-smoke
       - threading-regression
+      - security
     if: >-
       ${{ always() &&
           needs.quality.result == 'success' &&
+          needs.security.result == 'success' &&
           needs.threading-regression.result == 'success' &&
           needs.native-artifacts.result == 'success' &&
           needs.serial-wasm-artifact.result == 'success' &&
           needs.threaded-wasm-artifact.result == 'success' &&
           needs.extracted-smoke.result == 'success' }}
     runs-on: ubuntu-24.04
-    # id-token and attestations: the two attestations below (every other job stays read-only).
+    # id-token and attestations: the two attestations below (every other job stays read-only, but for
+    # codeql-candidate's upload of code scanning results).
     permissions:
       contents: read
       id-token: write

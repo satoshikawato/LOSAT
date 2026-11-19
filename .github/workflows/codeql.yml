@@ -12,6 +12,9 @@ name: CodeQL
 #   a schedule only from the file on the default branch, main, so main carries the same file as dev;
 #   each scan checks out its branch and files its results under that branch and its commit.
 # - workflow_dispatch does what the schedule does (main and dev), for a scan between Mondays.
+# - workflow_call with own_commit: true scans the caller's commit and files it under the caller's
+#   ref: release-readiness-v020.yml (job `codeql-candidate`) scans the release candidate, and its
+#   job `security` then requires no open alert on that ref.
 #
 # The categories are /language:<language>, the ones default setup used, so the alerts that exist
 # and their dismissals carry over to this workflow's results. Code scanning rejects an upload from
@@ -22,6 +25,12 @@ on:
   schedule:
     - cron: '0 18 * * 0'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      own_commit:
+        description: Scan the caller's commit instead of the heads of main and dev
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,8 +52,9 @@ jobs:
       fail-fast: false
       matrix:
         language: [actions, javascript-typescript, python, rust]
-        # A push scans its own commit (''); the schedule and workflow_dispatch scan main and dev.
-        branch: ${{ github.event_name == 'push' && fromJSON('[""]') || fromJSON('["main", "dev"]') }}
+        # A push and a call with own_commit scan their own commit (''); the schedule and
+        # workflow_dispatch scan main and dev.
+        branch: ${{ (github.event_name == 'push' || inputs.own_commit) && fromJSON('[""]') || fromJSON('["main", "dev"]') }}
     steps:
       - name: Check out the scanned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -2150,9 +2150,9 @@ mod tests {
         OwnerFirstScan,
     }
 
-    /// (`Slow::OwnerFirstScan`) Sleeps in 1 ms steps until `done`, or until 60 s have passed
-    /// since `from` (then the test's assertions fail: a stall exit that never fires fails the
-    /// test instead of hanging it).
+    /// (`Slow::OwnerFirstScan`, `Forced`) Sleeps in 1 ms steps until `done`, or until 60 s have
+    /// passed since `from` (then the test's assertions fail: a stall exit that never fires, or a
+    /// participant that never comes, fails the test instead of hanging it).
     fn wait_until(from: std::time::Instant, done: impl Fn() -> bool) {
         while !done() && from.elapsed() < std::time::Duration::from_secs(60) {
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -2798,9 +2798,113 @@ mod tests {
         }
     }
 
+    /// (`a_panicking_participant_ends_the_stage*`) `random_cuts` with strips 0 and 2 of `parts`
+    /// seeds or more, whose first `parts` ops are moved to diagonals of partitions 0, 1, ...,
+    /// `parts - 1` (`bucket % parts`; the next such diagonal from the op's own): the first unit
+    /// of strips 0 and 2 (the strip, or its first piece with pieces of `parts` seeds or more)
+    /// holds a seed of every partition, so that no partition passes it without a fold call.
+    fn cuts_with_every_partition(rng: &mut Lcg, ops: &mut [Op], parts: usize) -> Vec<usize> {
+        let mut cuts = random_cuts(rng, ops.len());
+        for i in [0, 2] {
+            cuts[i + 1] = cuts[i + 1].max(cuts[i] + parts);
+            for k in i + 2..cuts.len() {
+                cuts[k] = cuts[k].max(cuts[k - 1]);
+            }
+            for (p, op) in ops[cuts[i]..cuts[i] + parts].iter_mut().enumerate() {
+                while bucket_of_diag(op.diag) % parts != p {
+                    op.diag += 1;
+                }
+            }
+        }
+        cuts
+    }
+
+    /// (`a_panicking_participant_ends_the_stage*`) Makes a case's panicking fold happen on the
+    /// participant the case names, whatever the OS runs when. (A 1 ms sleep in every fold made it
+    /// only likely: on a loaded machine a helper that came while the owner slept in a fold of the
+    /// helper's home partition, which the owner folded as an orphan, `Run::Orphan`, found nothing
+    /// to do in the closed window, left the stalled stage after `HELPER_STALL` for good, and the
+    /// owner folded the whole stage: "helper fold, home true: no panic".) The stage's data is
+    /// `cuts_with_every_partition`'s, with a partition per thread.
+    /// - "owner fold": a helper's fold of strip 2 or later waits until the owner has entered one
+    ///   (which panics). Until then no partition passes strip 2's first unit: a helper that folds
+    ///   it waits there holding that partition, and the folds before it run freely. Every
+    ///   partition reaches that unit (the owner alone can fold every unit before it), which is
+    ///   then the slowest one, which the window and the pool of pieces always let the stage scan;
+    ///   the helpers are fewer than the partitions, so the owner, which never leaves the stage,
+    ///   folds a partition there that no helper holds: its home, else by `Run::Slowest` (without
+    ///   `home`, any partition).
+    /// - "helper fold": the owner's folds wait until a helper has entered one (which panics), and
+    ///   a helper's scans other than of strip 0's first unit wait until the owner has entered a
+    ///   fold (or a helper has). The owner's first fold is in strip 0's first unit, where every
+    ///   other partition then waits with a ready unit, so a helper in the stage folds one (its
+    ///   home, else the slowest partition by `Run::Slowest`; without `home`, any). Before that
+    ///   fold a helper finds nothing to do (and may leave a stalled stage) only while strip 0's
+    ///   first unit is being scanned: by a helper, which then folds its home there, or by the
+    ///   owner, and then the next strip (or piece) went to a helper, whose scan waits. Either way
+    ///   a helper stays in the stage, and a helper that starts later finds the folds.
+    ///
+    /// Each wait gives up 60 s after the case started (`wait_until`), so that a broken guarantee
+    /// fails the test (no panic) instead of hanging it.
+    struct Forced {
+        place: &'static str,
+        owner: Option<usize>,
+        from: std::time::Instant,
+        owner_folded: AtomicBool,
+        helper_folded: AtomicBool,
+    }
+
+    impl Forced {
+        /// In the owner's `pool.install`.
+        fn new(place: &'static str) -> Self {
+            Forced {
+                place,
+                owner: rayon::current_thread_index(),
+                from: std::time::Instant::now(),
+                owner_folded: AtomicBool::new(false),
+                helper_folded: AtomicBool::new(false),
+            }
+        }
+
+        /// Before a scan; `first`: of strip 0's first unit.
+        fn scan(&self, first: bool) {
+            if self.place == "helper fold" && !first && rayon::current_thread_index() != self.owner
+            {
+                wait_until(self.from, || {
+                    self.owner_folded.load(Ordering::Acquire)
+                        || self.helper_folded.load(Ordering::Acquire)
+                });
+            }
+        }
+
+        /// Before a fold of strip `strip`: panics or waits as the place says.
+        fn fold(&self, strip: u64) {
+            let on_owner = rayon::current_thread_index() == self.owner;
+            match self.place {
+                "owner fold" if strip >= 2 => {
+                    if on_owner {
+                        self.owner_folded.store(true, Ordering::Release);
+                        panic!("a test fold panics on the owner");
+                    }
+                    wait_until(self.from, || self.owner_folded.load(Ordering::Acquire));
+                }
+                "helper fold" => {
+                    if !on_owner {
+                        self.helper_folded.store(true, Ordering::Release);
+                        panic!("a test fold panics on a helper");
+                    }
+                    self.owner_folded.store(true, Ordering::Release);
+                    wait_until(self.from, || self.helper_folded.load(Ordering::Acquire));
+                }
+                _ => {}
+            }
+        }
+    }
+
     // A participant that panics (in a fold on the owner, in a fold on a helper, in a scan) makes
     // the stage panic instead of hang and leaves the table untouched, and the next stage on the
-    // same scratch gives the reference's result.
+    // same scratch gives the reference's result. Every case panics whatever the OS runs when
+    // (`Forced`).
     #[test]
     fn a_panicking_participant_ends_the_stage() {
         let mut rng = Lcg(0x9A41_C000);
@@ -2819,36 +2923,24 @@ mod tests {
                 let mut scratch = PartScratch::default();
                 let mut s = 50i32;
                 let n = 3000;
-                let ops = random_ops(&mut rng, n, &mut s, 300);
+                let mut ops = random_ops(&mut rng, n, &mut s, 300);
+                let cuts = cuts_with_every_partition(&mut rng, &mut ops, threads);
                 let expected = reference::<true>(&mut reference_hash, &ops, 0, 40);
-                let cuts = random_cuts(&mut rng, n);
                 let strips = cuts.len() - 1;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     pool.install(|| {
-                        let owner = rayon::current_thread_index();
+                        let forced = Forced::new(place);
                         let scan = |i: usize, out: &mut Vec<Seed>| {
                             if place == "scan" && i == strips / 2 {
                                 panic!("a test scan panics");
                             }
+                            forced.scan(i == 0);
                             for k in cuts[i]..cuts[i + 1] {
                                 out.push(seed_of(k, &ops[k]));
                             }
                         };
                         let fold = |st: &mut PartState, seeds: &[Seed], _pos: &[u32]| {
-                            let on_owner = rayon::current_thread_index() == owner;
-                            match place {
-                                "owner fold" if on_owner && st.out.strip >= 2 => {
-                                    panic!("a test fold panics on the owner")
-                                }
-                                "helper fold" if !on_owner => {
-                                    panic!("a test fold panics on a helper")
-                                }
-                                // the owner leaves the folds to the helpers, or they to it
-                                "helper fold" | "owner fold" => {
-                                    std::thread::sleep(std::time::Duration::from_millis(1))
-                                }
-                                _ => {}
-                            }
+                            forced.fold(st.out.strip);
                             st.counts.seeds += seeds.len() as u64;
                         };
                         let mut hits = Vec::new();
@@ -2906,9 +2998,12 @@ mod tests {
     // EXPERIMENT (LOSAT_X_SEEDPIECE): a participant that panics in the stage in pieces (in a
     // piece's scan, in a fold on the owner, in a fold on a helper) makes the stage panic instead
     // of hang and leaves the table untouched, and the next stage on the same scratch gives the
-    // reference's result.
+    // reference's result. Every case panics whatever the OS runs when (`Forced`; pieces of 8
+    // seeds, so that a piece can hold a seed of each of 8 partitions).
     #[test]
     fn a_panicking_participant_ends_the_stage_in_pieces() {
+        // (the seeds of a piece)
+        const PIECE: usize = 8;
         let mut rng = Lcg(0x9A41_C0DE);
         for threads in [2usize, 4, 8] {
             let pool = rayon::ThreadPoolBuilder::new()
@@ -2921,17 +3016,22 @@ mod tests {
                 let mut scratch = PartScratch::default();
                 let mut s = 50i32;
                 let n = 3000;
-                let ops = random_ops(&mut rng, n, &mut s, 300);
+                let mut ops = random_ops(&mut rng, n, &mut s, 300);
+                let cuts = cuts_with_every_partition(&mut rng, &mut ops, threads);
                 let expected = reference::<true>(&mut reference_hash, &ops, 0, 40);
-                let cuts = random_cuts(&mut rng, n);
                 let strips = cuts.len() - 1;
+                // ("scan": the first strip from the middle on with a second piece)
+                let panics = (strips / 2..strips)
+                    .find(|&i| cuts[i + 1] - cuts[i] > PIECE)
+                    .unwrap();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     pool.install(|| {
-                        let owner = rayon::current_thread_index();
+                        let forced = Forced::new(place);
                         let scan = |i: usize, from: Option<Resume>, out: &mut PieceSink<'_>| {
-                            if place == "scan" && i == strips / 2 && from.is_some() {
+                            if place == "scan" && i == panics && from.is_some() {
                                 panic!("a test piece scan panics");
                             }
+                            forced.scan(i == 0 && from.is_none());
                             let start = cuts[i] + from.map_or(0, |r| r.s);
                             for k in start..cuts[i + 1] {
                                 if out.room() == 0 {
@@ -2942,19 +3042,7 @@ mod tests {
                             None
                         };
                         let fold = |st: &mut PartState, seeds: &[Seed], _pos: &[u32]| {
-                            let on_owner = rayon::current_thread_index() == owner;
-                            match place {
-                                "owner fold" if on_owner && st.out.strip >= 2 => {
-                                    panic!("a test fold panics on the owner")
-                                }
-                                "helper fold" if !on_owner => {
-                                    panic!("a test fold panics on a helper")
-                                }
-                                "helper fold" | "owner fold" => {
-                                    std::thread::sleep(std::time::Duration::from_millis(1))
-                                }
-                                _ => {}
-                            }
+                            forced.fold(st.out.strip);
                             st.counts.seeds += seeds.len() as u64;
                         };
                         let mut hits = Vec::new();
@@ -2969,7 +3057,7 @@ mod tests {
                             &mut scratch,
                             threads,
                             occ0,
-                            7,
+                            PIECE,
                             &scan,
                             &fold,
                             false,

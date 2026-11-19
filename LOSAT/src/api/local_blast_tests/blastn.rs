@@ -141,6 +141,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -183,6 +184,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -389,6 +391,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
                 sink: OutputSink::Writer(&mut output),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -442,6 +445,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -504,6 +508,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -582,6 +587,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -604,6 +610,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -892,6 +899,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut extensions),
             };
@@ -970,6 +978,7 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -993,4 +1002,75 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
             assert!(format!("{error:#}").contains(refusal), "{error:#}");
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452 (quoted at
+// `ReportFormat::writes_query_warnings`): a structured report returns before the query's result
+// warnings.
+// A structured first format (outfmt 5) writes no result warning of a query, as the command line's
+// run of it; a later format that writes them (outfmt 6) gives them to the caller's receiver
+// (`ReportOutputs::later_warnings`), and to nothing without one. A first format that writes them
+// writes them to the diagnostics alone (line WQA's sweep, D3 review r3, 2026-11-19).
+#[test]
+fn the_query_warnings_of_a_later_format_go_to_the_later_receiver() {
+    let a = fixture_sequence("LC738884.fasta");
+    let query = TempFasta::new(
+        "blastn_later_query.fna",
+        &[("qempty", &[][..]), ("q_a0", &a[0..2_000])],
+    );
+    let subject = TempFasta::new("blastn_later_subject.fna", &[("s_a0", &a[0..4_000])]);
+    let queries = reader_records(
+        &query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
+    let subjects = reader_records(
+        &subject.0,
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
+    );
+    let args = || {
+        let (query, subject) = (
+            query.0.display().to_string(),
+            subject.0.display().to_string(),
+        );
+        let cli: Cli = try_parse_from(["losat", "blastn", "-query", &query, "-subject", &subject])
+            .expect("blastn argv");
+        match cli.command {
+            Commands::Blastn(args) => args,
+            _ => unreachable!("blastn subcommand"),
+        }
+    };
+    // The diagnostics and the later receiver's text of a run of `formats`.
+    let run = |formats: &[&str], receives: bool| -> (Vec<u8>, Option<Vec<u8>>) {
+        let mut sinks = vec![Vec::new(); formats.len()];
+        let (mut diagnostics, mut later) = (Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            later_warnings: receives.then_some(&mut later as &mut (dyn std::io::Write + Send)),
+            hits: None,
+            observer: None,
+        };
+        run_local_blastn(args(), &queries, &subjects, &mut outputs).expect("run_local");
+        (diagnostics, receives.then_some(later))
+    };
+    let warning = b"Warning: [blastn] Query_1 qempty: Sequence contains no data \n".to_vec();
+    let (alone, _) = run(&["5"], false);
+    assert!(!alone.ends_with(&warning));
+    assert_eq!(run(&["5", "6"], false), (alone.clone(), None));
+    assert_eq!(
+        run(&["5", "6"], true),
+        (alone.clone(), Some(warning.clone()))
+    );
+    assert_eq!(run(&["5", "11"], true), (alone, Some(Vec::new())));
+    let (tabular, _) = run(&["6"], false);
+    assert!(tabular.ends_with(&warning));
+    assert_eq!(run(&["6", "5"], true), (tabular, Some(Vec::new())));
 }

@@ -178,6 +178,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -222,6 +223,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -247,6 +249,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 sink: OutputSink::Writer(&mut report),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -280,6 +283,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -362,6 +366,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -741,6 +746,7 @@ fn several_file_outputs_are_written_one_after_the_other() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -812,6 +818,7 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: None,
         };

@@ -10,8 +10,8 @@
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
   RunCancelledError,
-  runDiagnosticsOf,
   runFilesOf,
+  runOutputFailedOf,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -419,9 +419,10 @@ export class Coordinator {
     let staged = false;
     const startedAt = this.deps.now();
     // The files that the run made besides its outputs, which a completed and a failed run keep, and
-    // the warnings that a failed run wrote before its error (a completed run's are in its results).
+    // whether the engine ended the output of a failed run with `fail`, after which the data layer has
+    // the warnings that it wrote before its error (a completed run's are in its results).
     let runFiles: readonly RunFile[] | undefined;
-    let diagnostics: string | undefined;
+    let outputFailed = false;
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
@@ -445,7 +446,7 @@ export class Coordinator {
         (phase) => this.onPhase(runId, phase),
       ).catch((error: unknown) => {
         runFiles = runFilesOf(error);
-        diagnostics = runDiagnosticsOf(error);
+        outputFailed = runOutputFailedOf(error);
         throw error;
       });
       runFiles = runtime.runFiles;
@@ -471,15 +472,19 @@ export class Coordinator {
         },
       });
     } catch (error) {
-      if (staged) await this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
+      // A failed run keeps the warnings that it wrote before its error (stream 3, docs/web/abi_v2.md §5;
+      // line WQA's sweep, D3, 2026-11-19), which the data layer reads as it discards the run.
+      let diagnostics: string | undefined;
+      if (staged && outputFailed && !cancelled) diagnostics = await this.deps.data.discardFailedRun(runId).catch(() => undefined);
+      else if (staged) await this.deps.data.discardRun(runId).catch(() => undefined);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: errorMessage(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
-          ...(cancelled || diagnostics === undefined ? {} : { diagnostics }),
+          ...(cancelled || !diagnostics ? {} : { diagnostics }),
         },
       });
     } finally {

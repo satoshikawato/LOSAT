@@ -4,9 +4,9 @@ import { RunOutputWriter, sha256Hex } from 'losat';
 import { CUSTOM_OUTPUT, type RegistryFile, type RunFile } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
-  runDiagnosticsOf,
-  withRunDiagnostics,
+  runOutputFailedOf,
   withRunFiles,
+  withRunOutputFailed,
   type EngineGateway,
   type EnginePhase,
   type EngineRunRequest,
@@ -86,7 +86,10 @@ class ManualEngine implements EngineGateway {
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
   startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
-  private readonly pending = new Map<string, { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<
+    string,
+    { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
+  >();
   lateFinish?: () => void;
 
   async describe() {
@@ -113,6 +116,7 @@ class ManualEngine implements EngineGateway {
           resolve({ path: 'fake', threads: 1, engineBuild: 'manual', ...(runFiles === undefined ? {} : { runFiles }) });
         },
         reject,
+        output,
       });
       // Simulates a phase event that arrives after the run was cancelled.
       this.lateFinish = () => onPhase('finalizing');
@@ -123,11 +127,24 @@ class ManualEngine implements EngineGateway {
   finish(runId: string, runFiles?: readonly RunFile[]) {
     this.pending.get(runId)?.resolve(runFiles);
   }
-  /** Fails a run, with the files that it made besides its outputs and the warnings that it wrote before its error. */
-  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string) {
+  /**
+   * Fails a run, with the files that it made besides its outputs. With `diagnostics` the run fails as the
+   * engine fails a run that began to write: it writes them to stream 3 and ends its output with `fail`,
+   * then rejects (with `late`, it rejects first, as a slow port might deliver them after the rejection).
+   */
+  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string, late = false) {
+    const pending = this.pending.get(runId);
+    if (pending === undefined) return;
     const error = new Error(message);
-    const warned = diagnostics === undefined ? error : withRunDiagnostics(error, diagnostics);
-    this.pending.get(runId)?.reject(runFiles === undefined ? warned : withRunFiles(warned, runFiles));
+    const failed = diagnostics === undefined ? error : withRunOutputFailed(error);
+    const write = () => {
+      const writer = new RunOutputWriter(pending.output);
+      if (diagnostics !== '') writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(diagnostics));
+      writer.fail();
+    };
+    if (diagnostics !== undefined && !late) write();
+    pending.reject(runFiles === undefined ? failed : withRunFiles(failed, runFiles));
+    if (diagnostics !== undefined && late) setTimeout(write, 50);
   }
 }
 
@@ -505,8 +522,9 @@ describe('Coordinator', () => {
   });
 
   // Line WQA's sweep, D3 (2026-11-19): the warnings that the command line writes before its error
-  // (stream 3) come with the engine's rejection, and the failed run keeps them; a cancelled run keeps
-  // none, and a failed run without warnings has none.
+  // (stream 3) arrive at the data layer before the engine's `fail`, and the failed run keeps them, also
+  // where the rejection comes first; a cancelled run keeps none, and a failed run without warnings has
+  // none.
   it('keeps the warnings that a failed run wrote before its error, and none of a cancelled run', async () => {
     const engine = new ManualEngine();
     const { coordinator, data } = setup(engine);
@@ -519,6 +537,21 @@ describe('Coordinator', () => {
     expect('runFiles' in viewOf(coordinator, failed)!.record).toBe(false);
     // The staged run is discarded, as before: the record keeps the text.
     await expect(data.readDiagnostics(failed)).rejects.toThrow();
+    await expect(data.discardFailedRun(failed)).resolves.toBe('');
+
+    // The rejection before the chunks and the `fail`: the data layer waits for them.
+    const late = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, late, 'running');
+    engine.fail(late, 'BLAST engine error: The average subject length is too short', undefined, warning, true);
+    await waitFor(coordinator, late, 'failed');
+    expect(viewOf(coordinator, late)!.record).toMatchObject({ diagnostics: warning });
+
+    // A failed run whose output ended with `fail` but holds no warning keeps none.
+    const silent = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, silent, 'running');
+    engine.fail(silent, 'BLAST engine error: Empty CBlastQueryVector', undefined, '');
+    await waitFor(coordinator, silent, 'failed');
+    expect('diagnostics' in viewOf(coordinator, silent)!.record).toBe(false);
 
     const plain = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, plain, 'running');
@@ -539,7 +572,7 @@ describe('Coordinator', () => {
     const runId = (await coordinator.enqueue({ ...request, subject: { text: '' } })).runId!;
     await waitFor(coordinator, runId, 'failed');
     expect(viewOf(coordinator, runId)!.record).toMatchObject({ error: expect.stringContaining('No sequence input was provided'), diagnostics: `Warning: ${FAKE_MARKER}\n` });
-    expect(runDiagnosticsOf(new Error('x'))).toBeUndefined();
+    expect(runOutputFailedOf(new Error('x'))).toBe(false);
   });
 
   it('exports a completed output byte for byte under a name with the task and the time of the run (WA-RS-05)', async () => {

@@ -5,13 +5,15 @@ import { isRunOutput, OUTPUT_STREAMS, type OutputStream, type RunOutputMessage }
 export type RunOutputResult =
   /** `end` arrived and its totals agree with what arrived. */
   | { readonly state: 'ended' }
-  /** `end` arrived but the totals disagree, or a message was not part of the protocol. */
+  /** `fail` arrived and its totals agree with what arrived: the engine failed the run. */
+  | { readonly state: 'failed' }
+  /** `end` or `fail` arrived but the totals disagree, or a message was not part of the protocol. */
   | { readonly state: 'broken'; readonly detail: string }
   /** The receiver was closed before `end`. */
   | { readonly state: 'closed' };
 
 export class RunOutputReceiver {
-  /** Settles once: on `end`, on a broken message, or on `close`. */
+  /** Settles once: on `end`, on `fail`, on a broken message, or on `close`. */
   readonly finished: Promise<RunOutputResult>;
   private settle!: (result: RunOutputResult) => void;
   private done = false;
@@ -55,11 +57,11 @@ export class RunOutputReceiver {
       onDiscard(data.stream);
       return;
     }
-    if (data?.type === 'end' && typeof data.chunks === 'number' && typeof data.bytes === 'number') {
+    if ((data?.type === 'end' || data?.type === 'fail') && typeof data.chunks === 'number' && typeof data.bytes === 'number') {
       const complete = data.chunks === this.chunks && data.bytes === this.bytes;
       this.finish(
         complete
-          ? { state: 'ended' }
+          ? { state: data.type === 'end' ? 'ended' : 'failed' }
           : {
               state: 'broken',
               detail:

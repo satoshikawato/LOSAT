@@ -12,12 +12,12 @@
 // with -conffile gives the engine the registry file for that search only, and the files that a
 // run makes besides its outputs (stream 8: the file of -logfile) come back with its result, or with
 // its error when it fails (line RG E1w-3b); they never go to the Data worker. The warnings of a run
-// (stream 3) go to the Data worker, and those of a failed run come with its error too (line WQA's
-// sweep, D3, 2026-11-19).
+// (stream 3) go to the Data worker; a run that the engine failed ends its output with `fail`, so that
+// the Data worker keeps those of a failed run (line WQA's sweep, D3, 2026-11-19).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type RunFile } from '../../domain/run-files.js';
-import { InputMismatchError, withRunDiagnostics, withRunFiles, type EnginePhase } from '../../ports/engine.js';
-import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
+import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
+import { isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
 import {
@@ -211,25 +211,23 @@ export class EngineRuntime {
       // The engine's standard error of this search only, for a stop message.
       loaded.instance.wasi.clear();
       phase('running');
-      // The run's files (stream 8) stay here, apart from the outputs, and so does a copy of its
-      // warnings (stream 3), which a failed run keeps.
+      // The run's files (stream 8) stay here, apart from the outputs.
       const archive: Uint8Array[] = [];
-      const warnings: Uint8Array[] = [];
       try {
         abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
           else if (stream === DISCARD_STREAM) writer.discard(discardedOutput(bytes));
-          else if (OUTPUT_STREAMS.includes(stream as OutputStream)) {
-            if (stream === DIAGNOSTICS_STREAM) warnings.push(bytes.slice());
-            writer.write(stream as OutputStream, bytes);
-          }
+          else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
         });
       } catch (error) {
         // A run that the engine failed gives the files that it made (TBLASTX's file of -logfile holds
-        // its error) and what it wrote to the CLI's standard error before its error (line WQA's
-        // sweep, D3, 2026-11-19); a stop does not (the chunks before a trap are discarded, ABI v2 §4).
-        throw abi.stoppedBy === undefined ? failedWithFiles(error, archive, warnings) : error;
+        // its error), and ends its output with `fail`, so that the Data worker keeps what it wrote to
+        // the CLI's standard error before its error (stream 3; line WQA's sweep, D3, 2026-11-19); a
+        // stop does neither (the chunks before a trap are discarded, ABI v2 §4).
+        if (abi.stoppedBy !== undefined) throw error;
+        writer.fail();
+        throw failedWithFiles(error, archive);
       }
       const runFiles = readRunFiles(archive);
       const linearBytesAfter = abi.memoryBytes();
@@ -445,30 +443,24 @@ function discardedOutput(bytes: Uint8Array): RunOutput {
 
 /** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
 function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
-  return chunks.length === 0 ? [] : readStoredZip(joined(chunks));
-}
-
-/** The chunks of a stream as one array. */
-function joined(chunks: readonly Uint8Array[]): Uint8Array {
-  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  if (chunks.length === 0) return [];
+  const archive = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
   let offset = 0;
   for (const chunk of chunks) {
-    bytes.set(chunk, offset);
+    archive.set(chunk, offset);
     offset += chunk.length;
   }
-  return bytes;
+  return readStoredZip(archive);
 }
 
 /**
- * The error of a run that the engine failed, with the files that the run made (`withRunFiles`) and
- * what it wrote to stream 3 before its error (`withRunDiagnostics`: UTF-8, read as the data layer
- * reads the diagnostics of a completed run). An archive that cannot be read is told after the run's
- * error, which stays the run's.
+ * The error of a run that the engine failed after it ended the run's output with `fail`
+ * (`withRunOutputFailed`), with the files that the run made (`withRunFiles`). An archive that cannot
+ * be read is told after the run's error, which stays the run's.
  */
-function failedWithFiles(error: unknown, chunks: readonly Uint8Array[], warnings: readonly Uint8Array[]): unknown {
+function failedWithFiles(error: unknown, chunks: readonly Uint8Array[]): unknown {
   if (!(error instanceof Error)) return error;
-  const diagnostics = new TextDecoder().decode(joined(warnings));
-  const failed = diagnostics === '' ? error : withRunDiagnostics(error, diagnostics);
+  const failed = withRunOutputFailed(error);
   let runFiles: RunFile[];
   try {
     runFiles = readRunFiles(chunks);

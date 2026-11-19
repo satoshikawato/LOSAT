@@ -23,11 +23,19 @@ export const OUTPUT_STREAMS: readonly OutputStream[] = Object.freeze([0, 6, 7, 4
  * chunks were sent), which then stays empty; the totals of `end` count every chunk sent, discarded
  * or not. A run can be committed only after its `end` arrived and the totals agree; a run that
  * fails or is cancelled sends no `end` and is discarded.
+ *
+ * A run that the engine failed after it began to write ends with `fail` in place of `end`, with the
+ * same totals, before the engine rejects the run (`runOutputFailedOf`, ports/engine.ts): what it
+ * wrote to stream 3 before its error (its warnings, which the host keeps with a failed run,
+ * docs/web/abi_v2.md §5) is read from what arrived, once all of it arrived, and the run is then
+ * discarded (line WQA's sweep, D3 review, 2026-11-19). A run that is cancelled or stopped sends
+ * neither.
  */
 export type RunOutputMessage =
   | { readonly type: 'chunk'; readonly stream: OutputStream; readonly bytes: Uint8Array }
   | { readonly type: 'discard'; readonly stream: RunOutput }
-  | { readonly type: 'end'; readonly chunks: number; readonly bytes: number };
+  | { readonly type: 'end'; readonly chunks: number; readonly bytes: number }
+  | { readonly type: 'fail'; readonly chunks: number; readonly bytes: number };
 
 /** Whether `stream` is an output of a run (not the HSP records or the diagnostics): what a `discard` may name. */
 export function isRunOutput(stream: unknown): stream is RunOutput {

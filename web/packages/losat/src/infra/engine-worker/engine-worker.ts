@@ -2,7 +2,7 @@
 // thread ends it to cancel a search or to renew the instance; it keeps no working state
 // that cannot be rebuilt from the Data worker (design D01). This module is the worker's
 // composition root.
-import { InputMismatchError, runDiagnosticsOf, runFilesOf } from '../../ports/engine.js';
+import { InputMismatchError, runFilesOf, runOutputFailedOf } from '../../ports/engine.js';
 import type { OutputStream } from '../../ports/run-output.js';
 import { EngineStoppedError } from '../reactor/abi.js';
 import { loadReactor } from '../reactor/instance.js';
@@ -121,13 +121,12 @@ function toWorkerError(error: unknown): WorkerError {
   }
   if (error instanceof Error) {
     const runFiles = runFilesOf(error);
-    const diagnostics = runDiagnosticsOf(error);
     return {
       name: error.name,
       message: error.message,
       ...(error instanceof EngineStoppedError ? { stopped: true } : {}),
       ...(runFiles === undefined ? {} : { runFiles }),
-      ...(diagnostics === undefined ? {} : { diagnostics }),
+      ...(runOutputFailedOf(error) ? { outputFailed: true } : {}),
     };
   }
   return { name: 'Error', message: String(error) };

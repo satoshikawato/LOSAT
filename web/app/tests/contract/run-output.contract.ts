@@ -227,6 +227,39 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
     },
   },
   {
+    // Line WQA's sweep, D3 review (2026-11-19): a run that the engine failed after it began to write
+    // ends with `fail`; the data layer reads its stream 3 once `fail` arrived, then holds nothing.
+    name: "a failed run's warnings are read from its staged stream 3 after its fail, and the run is dropped",
+    async run(env) {
+      const baseline = await env.usage();
+      const writer = await openWriter(env, 'run-q');
+      const warnings = [bytes('Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n'), bytes('Warning: caf\u00e9\n')];
+      await writer.write(6, pattern(MiB, 4));
+      await writer.write(DIAGNOSTICS_STREAM, warnings[0]!);
+      // Its UTF-8 split across two chunks.
+      await writer.write(DIAGNOSTICS_STREAM, warnings[1]!.subarray(0, 13));
+      await writer.write(DIAGNOSTICS_STREAM, warnings[1]!.subarray(13));
+      const read = env.data.discardFailedRun('run-q');
+      check(!(await settlesWithin(read, 300)), 'the read must wait for fail');
+      await writer.post({ type: 'fail', chunks: 4, bytes: MiB + warnings[0]!.length + warnings[1]!.length });
+      same(await read, 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\nWarning: caf\u00e9\n', 'warnings');
+      same(await env.usage(), baseline, 'bytes held after the read');
+      await rejects(env.data.commitRun('run-q'), /not staged/, 'commit after the read');
+      same(await env.data.discardFailedRun('run-q'), '', 'a second read');
+
+      // A fail whose totals disagree gives no warnings; a commit of a failed run fails.
+      const broken = await openWriter(env, 'run-r');
+      await broken.write(DIAGNOSTICS_STREAM, bytes('Warning: one\n'));
+      await broken.post({ type: 'fail', chunks: 2, bytes: 99 });
+      same(await env.data.discardFailedRun('run-r'), '', 'incomplete');
+      const failed = await openWriter(env, 'run-s');
+      await failed.write(6, bytes('row\n'));
+      await failed.post({ type: 'fail', chunks: 1, bytes: 4 });
+      await rejects(env.data.commitRun('run-s'), /failed/, 'commit of a failed run');
+      same(await env.usage(), baseline, 'bytes held at the end');
+    },
+  },
+  {
     name: 'the writer refuses to write after end',
     async run(env) {
       const writer = await openWriter(env, 'run-k');

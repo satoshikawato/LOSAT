@@ -14,8 +14,8 @@ import type { RegistryFile } from '../../domain/run-files.js';
 import {
   InputMismatchError,
   RunCancelledError,
-  withRunDiagnostics,
   withRunFiles,
+  withRunOutputFailed,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -378,7 +378,8 @@ function workerInput(program: string, input: EngineInput): WorkerInput {
 
 /**
  * Rebuilds an error of the worker with its name and message (as web/app/src/infra/data-worker/rpc.ts),
- * and the files of a failed run (`runFilesOf`) and its warnings (`runDiagnosticsOf`).
+ * the files of a failed run (`runFilesOf`), and whether it ended the run's output with `fail`
+ * (`runOutputFailedOf`).
  */
 function toError(error: WorkerError): Error {
   if (error.name === 'InputMismatchError' && error.role !== undefined && error.detail !== undefined) {
@@ -386,6 +387,6 @@ function toError(error: WorkerError): Error {
   }
   const rebuilt = new Error(error.message);
   rebuilt.name = error.name;
-  const warned = error.diagnostics === undefined ? rebuilt : withRunDiagnostics(rebuilt, error.diagnostics);
-  return error.runFiles === undefined ? warned : withRunFiles(warned, error.runFiles);
+  const failed = error.outputFailed === true ? withRunOutputFailed(rebuilt) : rebuilt;
+  return error.runFiles === undefined ? failed : withRunFiles(failed, error.runFiles);
 }

@@ -39,9 +39,21 @@ export class RunOutputWriter {
 
   /** Sends `end`. Call it once, after the last chunk and before the run reports success. */
   end(): void {
+    this.finish('end');
+  }
+
+  /**
+   * Sends `fail` in place of `end`: the engine failed the run after it began to write. Call it once,
+   * before the run's rejection, which then says so (`withRunOutputFailed`, ports/engine.ts).
+   */
+  fail(): void {
+    this.finish('fail');
+  }
+
+  private finish(type: 'end' | 'fail'): void {
     if (this.ended) throw new Error('the output of this run has already ended');
     this.ended = true;
-    const message: RunOutputMessage = { type: 'end', chunks: this.chunks, bytes: this.bytes };
+    const message: RunOutputMessage = { type, chunks: this.chunks, bytes: this.bytes };
     this.port.postMessage(message);
   }
 }

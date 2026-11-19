@@ -8,7 +8,7 @@ import {
   HITS_STREAM,
   InputMismatchError,
   RunCancelledError,
-  withRunDiagnostics,
+  withRunOutputFailed,
   type EngineGateway,
   type EnginePhase,
   type EngineRunRequest,
@@ -91,9 +91,12 @@ export class FakeEngine implements EngineGateway {
       if (phase === 'preparing') this.register(request);
     }
     if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
-      // A failed run gives the warnings written before its error with the error, as the engine does
-      // (stream 3; line WQA's sweep, D3, 2026-11-19): here a marked line.
-      throw withRunDiagnostics(new Error('No sequence input was provided'), `Warning: ${FAKE_MARKER}\n`);
+      // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
+      // then `fail`; line WQA's sweep, D3, 2026-11-19): here a marked line.
+      const writer = new RunOutputWriter(output);
+      writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(`Warning: ${FAKE_MARKER}\n`));
+      writer.fail();
+      throw withRunOutputFailed(new Error('No sequence input was provided'));
     }
     // The counts file is accepted and recorded, not used: the fake searches nothing.
     const counts = request.windowMasker;

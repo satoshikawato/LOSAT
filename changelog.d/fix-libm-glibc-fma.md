@@ -3,5 +3,7 @@
   On WebAssembly (WASI and the web page) and on x86-64 CPUs without FMA, a value printed with all 15
   digits no longer differs from Linux by 1 in its last digit: the E values of `-outfmt 11` and
   `-outfmt 8` (for example `tblastx`, `blastp` with composition-based statistics) and the values of
-  psiblast's ASN.1 PSSM. Tests: the WASI checks compare psiblast's PSSM files byte for byte; `clippy`
-  refuses the transcendental methods of `f64` outside that module.
+  psiblast's ASN.1 PSSM. Tests: the WASI checks (`LOSAT/tests/check_wasm_threading.py`) run every
+  psiblast `-db` row through each WASI command and compare the output files, the ASN.1 PSSM included,
+  byte for byte with the frozen bytes of NCBI BLAST+ 2.17.0; `clippy` refuses the transcendental
+  methods of `f64` outside that module.

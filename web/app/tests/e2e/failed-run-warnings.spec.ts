@@ -3,13 +3,14 @@
 // sweep, D3, 2026-11-19; docs/web/abi_v2.md §5, stream 3). In the engine build, a BLASTN subject
 // whose one record has no residues gives NCBI's `Subject sequence contains no data` warning and then
 // its error `The average subject length is too short` (exit status 3); with LOSAT_WEB_NATIVE the
-// warnings shown and the error are the native CLI's standard error, line for line. The FakeEngine
-// fails a run of an empty input with a marked warning. A run of two searches (ABI §7) that its
-// format 0 search fails shows that search's warnings too (D3 review, 2026-11-19).
+// warnings shown and the error are the native CLI's standard error for the run's own command line,
+// line for line. The FakeEngine fails a run of an empty input with a marked warning. A run of two
+// searches (ABI §7) has the outcome of the search of its own -outfmt: it fails as the command line
+// fails, with that search's warnings only (D3 review, 2026-11-19).
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect } from '@playwright/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
@@ -35,6 +36,30 @@ function dna(seed: number, length: number): string {
 const QUERY = `>q1 first query\n${dna(7, 300)}\n`;
 const EMPTY_RECORD = '>empty record\n';
 const ERROR = 'BLAST engine error: The average subject length is too short';
+const PROTEIN_QUERY = '>p\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMAWRSTY\n';
+
+/** The options of the run shown (`results-run-options`): its command line after the program and the inputs. */
+async function runOptions(page: Page): Promise<string[]> {
+  const text = (await page.getByTestId('results-run-options').innerText()).trim();
+  return text === 'defaults' ? [] : text.split(/\s+/);
+}
+
+/**
+ * The native CLI's run of the run shown: the same program, inputs and options (`runOptions`), one
+ * thread; undefined, with a note, without LOSAT_WEB_NATIVE.
+ */
+async function nativeRun(page: Page, testInfo: TestInfo, mode: string, query: string, subject: string) {
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The native standard error: ${NO_NATIVE_REASON}` });
+    return undefined;
+  }
+  const options = await runOptions(page);
+  const directory = mkdtempSync(join(testInfo.outputPath(), 'native-'));
+  writeFileSync(join(directory, 'query.fa'), query);
+  writeFileSync(join(directory, 'subject.fa'), subject);
+  const cli = spawnSync(NATIVE, [mode, '-query', 'query.fa', '-subject', 'subject.fa', ...options, '-num_threads', '1'], { cwd: directory });
+  return { status: cli.status, stderr: String(cli.stderr) };
+}
 
 test('a failed run shows the warnings written before its error, as the command line writes them', async ({ page }, testInfo) => {
   await program(page, 'blastn');
@@ -58,16 +83,11 @@ test('a failed run shows the warnings written before its error, as the command l
   const shown = await warnings.evaluate((element) => element.textContent ?? '');
   expect(shown).toBe('Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n');
 
-  // The command line's standard error: the warnings shown, then the error.
-  if (NATIVE === undefined) {
-    testInfo.annotations.push({ type: 'skip', description: `The native standard error: ${NO_NATIVE_REASON}` });
-  } else {
-    const directory = mkdtempSync(join(testInfo.outputPath(), 'native-'));
-    writeFileSync(join(directory, 'query.fa'), QUERY);
-    writeFileSync(join(directory, 'subject.fa'), EMPTY_RECORD);
-    const cli = spawnSync(NATIVE, ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', '6', '-num_threads', '1'], { cwd: directory });
+  // The standard error of the command line that ran: the warnings shown, then the error.
+  const cli = await nativeRun(page, testInfo, 'blastn', QUERY, EMPTY_RECORD);
+  if (cli !== undefined) {
     expect(cli.status).toBe(3);
-    expect(String(cli.stderr)).toBe(`${shown}${ERROR}\n`);
+    expect(cli.stderr).toBe(`${shown}${ERROR}\n`);
   }
 
   // The run keeps them: they come back with the run after another run was shown.
@@ -81,48 +101,85 @@ test('a failed run shows the warnings written before its error, as the command l
   await expect(warnings).toHaveText('Warning: [blastn] Subject_1 empty record: Subject sequence contains no data');
 });
 
+// BLASTN with -num_descriptions 5 makes two searches (docs/web/abi_v2.md §7), and both fail on the
+// subject whose one record has no residues. The command line writes the formatting handler's
+// `-num_descriptions ... ignored` warning for -outfmt 6 and 7 only: the run, whose own format is
+// outfmt 0, shows the subject's warning alone, as the command line writes it (D3 review, 2026-11-19).
+test('a failed run of two searches shows the warnings of its own command line only', async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, 'two searches of the engine (engine build)');
+  await program(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-num_descriptions').fill('5');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', EMPTY_RECORD);
+  await submit(page);
+  await waitStatus(page, 1, 'failed');
+  await pickRun(page, 1);
+  await expect(page.getByTestId('results-status')).toContainText(`Run 1 failed: ${ERROR}.`);
+  const shown = await page.getByTestId('results-failed-diagnostics').evaluate((element) => element.textContent ?? '');
+  expect(shown).toBe('Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n');
+  expect(await runOptions(page)).toEqual(['-num_descriptions', '5']);
+  const cli = await nativeRun(page, testInfo, 'blastn', QUERY, EMPTY_RECORD);
+  if (cli === undefined) return;
+  expect(cli.status).toBe(3);
+  expect(cli.stderr).toBe(`${shown}${ERROR}\n`);
+});
+
 // BLASTP with -num_alignments 0 makes two searches (docs/web/abi_v2.md §7): the tabular one fails
-// alone before it reads the subject (the CLI's standard error for -outfmt 6: the handler's warning and
-// NCBI's error), and the format 0 search, the argv's own -outfmt 0, warns of the subject's empty first
-// record and fails the run on the title of its second (`, ,`, where NCBI BLAST+ 2.17.0 crashes and
-// LOSAT refuses). The warnings shown are the standard error for -outfmt 6 followed by what that for
-// -outfmt 0 writes before its error.
-test('a run that its format 0 search fails shows that search\'s warnings after those of the tabular formats', async ({ page }, testInfo) => {
+// alone before it reads the subject (NCBI's `No hits are being saved`, which the command line writes
+// for -outfmt 6 and 7 only), and the format 0 search, that of the run's own outfmt 0, warns of the
+// subject's empty first record and fails the run on the title of its second (`, ,`, where NCBI
+// BLAST+ 2.17.0 crashes and LOSAT refuses). The run shows the warnings of the format 0 search alone,
+// as the command line writes them for its command line (D3 review, 2026-11-19).
+test('a run of two searches that its format 0 search fails shows the warnings of its own command line', async ({ page }, testInfo) => {
   test.skip(!BUILD_HAS_ENGINE, 'the engine fails the run on the title (engine build)');
-  const query = '>p\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMAWRSTY\n';
   const subject = '>empty record\n>, ,\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMA\n';
   await program(page, 'blastp');
   await openParameters(page);
   await page.getByTestId('param-num_alignments').fill('0');
-  await paste(page, 'query', query);
+  await paste(page, 'query', PROTEIN_QUERY);
   await paste(page, 'subject', subject);
   await submit(page);
   await waitStatus(page, 1, 'failed');
   await pickRun(page, 1);
   const status = page.getByTestId('results-status');
-  await expect(status).toContainText('subject record 2 has a title of punctuation');
+  await expect(status).toContainText('Run 1 failed: subject record 2 has a title of punctuation');
   await expect(status).toContainText('It keeps the warnings written before the error.');
   const shown = await page.getByTestId('results-failed-diagnostics').evaluate((element) => element.textContent ?? '');
-  expect(shown).toBe(
-    'Warning: [blastp] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\nWarning: [blastp] Subject_1 empty record: Subject sequence contains no data\n',
-  );
-  if (NATIVE === undefined) {
-    testInfo.annotations.push({ type: 'skip', description: `The native standard error: ${NO_NATIVE_REASON}` });
-    return;
-  }
-  const directory = mkdtempSync(join(testInfo.outputPath(), 'native-'));
-  writeFileSync(join(directory, 'query.fa'), query);
-  writeFileSync(join(directory, 'subject.fa'), subject);
-  const cli = (outfmt: string) =>
-    spawnSync(NATIVE!, ['blastp', '-query', 'query.fa', '-subject', 'subject.fa', '-num_alignments', '0', '-outfmt', outfmt, '-num_threads', '1'], {
-      cwd: directory,
-    });
-  const tabular = cli('6');
-  const own = cli('0');
-  expect(tabular.status).toBe(1);
-  expect(own.status).toBe(1);
-  // The argv's own -outfmt 0: its warning, then the error that ends the run.
-  const ownLines = String(own.stderr).split(/(?<=\n)/);
-  expect(ownLines.at(-1)).toMatch(/^Error: subject record 2 has a title of punctuation/);
-  expect(shown).toBe(`${String(tabular.stderr)}${ownLines.slice(0, -1).join('')}`);
+  expect(shown).toBe('Warning: [blastp] Subject_1 empty record: Subject sequence contains no data\n');
+  expect(await runOptions(page)).toEqual(['-num_alignments', '0']);
+  const cli = await nativeRun(page, testInfo, 'blastp', PROTEIN_QUERY, subject);
+  if (cli === undefined) return;
+  // The warning shown, then the error that ends the run.
+  expect(cli.status).toBe(1);
+  const lines = cli.stderr.split(/(?<=\n)/);
+  expect(lines.at(-1)).toMatch(/^Error: subject record 2 has a title of punctuation/);
+  expect(cli.stderr).toBe(`${shown}${lines.at(-1)}`);
+});
+
+// The run's own -outfmt 6 with -num_alignments 0 (a hit list of 0 for the tabular formats): the
+// command line fails with NCBI's error after the formatting handler's warning (exit status 1), and so
+// does the run, with that warning shown, though outfmt 0, which the run also writes, has a hit list
+// of its own (D3 review, 2026-11-19; it completed before).
+test('a run whose own -outfmt has no hit list fails as the command line does', async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the engine checks the hit list (engine build)');
+  const subject = '>s1 ok\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMA\n';
+  await program(page, 'blastp');
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await page.getByTestId('param-extra').fill('-outfmt 6');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await paste(page, 'query', PROTEIN_QUERY);
+  await paste(page, 'subject', subject);
+  await submit(page);
+  await waitStatus(page, 1, 'failed');
+  await pickRun(page, 1);
+  const status = page.getByTestId('results-status');
+  await expect(status).toContainText('Run 1 failed: BLAST query/options error: No hits are being saved');
+  const shown = await page.getByTestId('results-failed-diagnostics').evaluate((element) => element.textContent ?? '');
+  expect(shown).toBe('Warning: [blastp] Examining 5 or more matches is recommended\n');
+  const cli = await nativeRun(page, testInfo, 'blastp', PROTEIN_QUERY, subject);
+  if (cli === undefined) return;
+  expect(cli.status).toBe(1);
+  expect(cli.stderr).toBe(`${shown}BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n`);
 });

@@ -280,13 +280,13 @@ pub struct BlastnArgs {
     //                                kArgNumThreads);
     //     }
     // ```
-    /// `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
-    /// and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
-    /// CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
-    /// runs the queries in batches and writes the end of an outfmt 0 report or each XML
-    /// document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
-    /// that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
-    /// given with it, as in NCBI (clap's `requires` ignores a default value).
+    // `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
+    // and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
+    // CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
+    // runs the queries in batches and writes the end of an outfmt 0 report or each XML
+    // document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
+    // that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
+    // given with it, as in NCBI (clap's `requires` ignores a default value).
     #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3363
@@ -318,16 +318,14 @@ pub struct BlastnArgs {
     // An omitted value keeps the default of the task (`coordination.rs` `determine_evalue`).
     #[arg(long, value_parser = blastn_evalue, help = "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)")]
     pub evalue: Option<f64>,
-    /// Percent identity threshold for filtering HSPs (Blast_HSPTest).
-    ///
-    /// Default: 0.0 (disabled, matches NCBI BLAST default from calloc initialization).
-    ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
-    /// ```c
-    /// return ((hsp->num_ident * 100.0 <
-    ///         align_length * hit_options->percent_identity) ||
-    ///         align_length < hit_options->min_hit_length) ;
-    /// ```
+    /// Percent identity threshold for filtering HSPs (default: 0, no filtering)
+    // Blast_HSPTest. The default 0.0 disables it, as NCBI's calloc'ed option does.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
+    // ```c
+    // return ((hsp->num_ident * 100.0 <
+    //         align_length * hit_options->percent_identity) ||
+    //         align_length < hit_options->min_hit_length) ;
+    // ```
     #[arg(long = "perc_identity", value_parser = blastn_percentage)]
     pub percent_identity: Option<f64>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
@@ -356,34 +354,34 @@ pub struct BlastnArgs {
     /// `blastinput::report_counts::FormattingArgs`).
     #[command(flatten)]
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
-    /// The hit list size (NCBI BLAST hitlist_size) and the numbers of descriptions and
-    /// alignments of the pairwise report, which `process_options` sets from
-    /// `-max_target_seqs`, `-num_descriptions`, `-num_alignments` and the output format
-    /// (`blastinput::report_counts`). Not a public option.
-    /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+    // The hit list size (NCBI BLAST hitlist_size) and the numbers of descriptions and
+    // alignments of the pairwise report, which `process_options` sets from
+    // `-max_target_seqs`, `-num_descriptions`, `-num_alignments` and the output format
+    // (`blastinput::report_counts`). Not a public option.
+    // Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
-    /// Remove word seeds with high frequency in the searched database (off).
-    /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:257 (limit_lookup)
+    // Remove word seeds with high frequency in the searched database (off).
+    // Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:257 (limit_lookup)
     // NCBI blastn has no such option: it is magicblast's (blast_args.cpp:1492-1501), so
     // the LOSAT option was removed (AGENTS.md rule 5).
     #[arg(skip = false)]
     pub limit_lookup: bool,
-    /// Maximum database word count for lookup filtering.
-    /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:172-174
-    /// #define MAX_DB_WORD_COUNT_MAPPER 30
+    // Maximum database word count for lookup filtering.
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:172-174
+    // #define MAX_DB_WORD_COUNT_MAPPER 30
     #[arg(skip = 30u8)]
     pub max_db_word_count: u8,
     /// Maximum number of HSPs per subject (unlimited when omitted)
-    /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
     #[arg(long = "qcov_hsp_perc", value_parser = blastn_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
-    /// Minimum diagonal separation between HSPs on the same subject (0 = auto, task-specific)
-    /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
-    /// Default: 50 for blastn, 6 for megablast
+    // Minimum diagonal separation between HSPs on the same subject (0 = auto, task-specific)
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
+    // Default: 50 for blastn, 6 for megablast
     // NCBI api/blast_nucl_options.cpp:239,259:
     // SetMinDiagSeparation(50); SetMinDiagSeparation(6);
     // Task resolution owns this internal value; no CLI override.
@@ -391,15 +389,15 @@ pub struct BlastnArgs {
     pub min_diag_separation: usize,
     #[arg(long, value_name = "PATH", value_parser = blastn_output_path())]
     pub out: Option<PathBuf>,
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
-    /// ```c++
-    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
-    ///                             "filename",
-    ///                             "File name to record the search strategy used",
-    ///                             CArgDescriptions::eOutputFile);
-    /// ```
-    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
-    /// options are read.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    //                             "filename",
+    //                             "File name to record the search strategy used",
+    //                             CArgDescriptions::eOutputFile);
+    // ```
+    // The search strategy file (`report::archive::strategy`), created by `run` before the other
+    // options are read.
     #[arg(long, value_name = "filename", value_parser = blastn_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
@@ -592,8 +590,8 @@ pub struct BlastnArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
-    /// Apply subject best hit filtering (disabled by default).
-    /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135
+    /// Apply subject best hit filtering (disabled by default)
+    // Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135
     #[arg(long = "subject_besthit", default_value_t = false)]
     pub subject_besthit: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
@@ -768,22 +766,22 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
 
-    /// The command line of the run as the SAM `@PG` line shows it: every argument followed by
-    /// one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the
-    /// library, ABI v1). Set by `run` from the process's arguments.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
-    /// ```c++
-    /// string
-    /// GetCmdlineArgs(const CNcbiArguments & a)
-    /// {
-    /// 	string cmd = kEmptyStr;
-    /// 	for(unsigned int i=0; i < a.Size(); i++) {
-    /// 		cmd += a[i] + " ";
-    /// 	}
-    /// 	return cmd;
-    /// }
-    /// ```
+    // The command line of the run as the SAM `@PG` line shows it: every argument followed by
+    // one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the
+    // library, ABI v1). Set by `run` from the process's arguments.
+    //
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
+    // ```c++
+    // string
+    // GetCmdlineArgs(const CNcbiArguments & a)
+    // {
+    // 	string cmd = kEmptyStr;
+    // 	for(unsigned int i=0; i < a.Size(); i++) {
+    // 		cmd += a[i] + " ";
+    // 	}
+    // 	return cmd;
+    // }
+    // ```
     #[arg(skip)]
     pub command_line: Option<Vec<u8>>,
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279

@@ -12,3 +12,8 @@
 - LOSAT's own argument refusals and syntax errors (`-html`, `-remote`, an unknown option, a missing
   value) end with a line end, as clap's own errors do, so the shell prompt no longer lands on the
   message's line. NCBI's texts are not among them.
+- No program's `-help` shows source references any more (blastn's `-perc_identity`, `-max_hsps` and
+  `-subject_besthit` showed "NCBI reference: ncbi-blast/c++/... ```c ..."): the references are `//`
+  comments next to the fields in every program's argument structs. The hint at the foot of blastn's
+  help is true: `-h` ("see more with '-help'") prints the summary and `-help` ("see a summary with
+  '-h'") the full text.

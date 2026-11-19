@@ -385,3 +385,70 @@ fn argument_refusals_end_with_a_line_end() {
         );
     }
 }
+
+/// No program's `-help` or `-h` text shows a source reference (they belong in `//` comments),
+/// and the hint at the foot of the help is true: `-h` prints the summary and `-help` the full
+/// text, so a hint names the other one in NCBI's single-dash form.
+#[test]
+fn help_has_no_source_references_and_a_true_footer() {
+    let mut programs = vec![""];
+    programs.extend([
+        "blastn",
+        "blastp",
+        "blastx",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "rpsblast",
+        "rpstblastn",
+        "makeblastdb",
+        "rpsbproc",
+    ]);
+    for program in programs {
+        let words = |flag: &'static str| -> Vec<&'static str> {
+            if program.is_empty() {
+                vec![flag]
+            } else {
+                vec![program, flag]
+            }
+        };
+        let mut texts = Vec::new();
+        for flag in ["-h", "-help", "--help"] {
+            let output = run(losat(), &words(flag));
+            assert!(output.status.success(), "{program} {flag}: {output:?}");
+            let text = String::from_utf8_lossy(&output.stdout).into_owned();
+            for leak in ["ncbi-blast/", "```", "Reference:"] {
+                assert!(!text.contains(leak), "{program} {flag}: {leak:?}\n{text}");
+            }
+            // No hint names `--help`, which the programs do not show.
+            assert!(!text.contains("'--help'"), "{program} {flag}\n{text}");
+            texts.push(text);
+        }
+        let (short, full) = (&texts[0], &texts[1]);
+        assert_eq!(full, &texts[2], "{program}: --help is -help");
+        // A hint at the foot of the short text promises a longer `-help`; one at the foot of
+        // the full text promises a shorter `-h`; no hint, no difference.
+        let short_hint = short.contains("(see more with '-help')");
+        let full_hint = full.contains("(see a summary with '-h')");
+        assert_eq!(short_hint, full_hint, "{program}");
+        if short_hint {
+            assert!(full.len() > short.len(), "{program}");
+        } else if program != "rpstblastn" {
+            assert_eq!(short, full, "{program}: -h and -help differ without a hint");
+        }
+    }
+    // The one search program whose long help differs from its summary.
+    let short = String::from_utf8_lossy(&run(losat(), &["blastn", "-h"]).stdout).into_owned();
+    let full = String::from_utf8_lossy(&run(losat(), &["blastn", "-help"]).stdout).into_owned();
+    assert!(
+        short
+            .trim_end()
+            .ends_with("Print help (see more with '-help')"),
+        "{short}"
+    );
+    assert!(
+        full.trim_end()
+            .ends_with("Print help (see a summary with '-h')"),
+        "{full}"
+    );
+}

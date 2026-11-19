@@ -782,10 +782,15 @@ pub fn render_message(error: &clap::Error) -> String {
             }
         }
     }
+    // clap's hints at the foot of the help name the other form: `-h` prints the summary and
+    // `-help` the full text, as in NCBI, so the hint of the full text points back to `-h` and
+    // that of the summary to `-help`.
     message
         .replace("'-h'", "'-help'")
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version")
+        .replace("see a summary with '-help'", "see a summary with '-h'")
+        .replace("see more with '--help'", "see more with '-help'")
 }
 
 /// `render_message` for `losat rpsbproc`, whose arguments are NCBI's one-letter keys (`-i`)

@@ -164,15 +164,15 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
-    /// ```c++
-    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
-    ///                             "filename",
-    ///                             "File name to record the search strategy used",
-    ///                             CArgDescriptions::eOutputFile);
-    /// ```
-    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
-    /// options are read.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    //                             "filename",
+    //                             "File name to record the search strategy used",
+    //                             CArgDescriptions::eOutputFile);
+    // ```
+    // The search strategy file (`report::archive::strategy`), created by `run` before the other
+    // options are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
@@ -438,13 +438,13 @@ pub struct BlastxArgs {
     //                                kArgNumThreads);
     //     }
     // ```
-    /// `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
-    /// and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
-    /// CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
-    /// runs the queries in batches and writes the end of an outfmt 0 report or each XML
-    /// document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
-    /// that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
-    /// given with it, as in NCBI (clap's `requires` ignores a default value).
+    // `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
+    // and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
+    // CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
+    // runs the queries in batches and writes the end of an outfmt 0 report or each XML
+    // document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
+    // that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
+    // given with it, as in NCBI (clap's `requires` ignores a default value).
     #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797

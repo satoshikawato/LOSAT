@@ -134,11 +134,11 @@ pub struct RpsblastArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
-    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
-    /// blast_args.cpp:2683-2721, quoted at `FormattingArgs`): the width of the outfmt 0
-    /// alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
-    /// rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
-    /// `SetLineLength` only).
+    // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    // blast_args.cpp:2683-2721, quoted at `FormattingArgs`): the width of the outfmt 0
+    // alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
+    // rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
+    // `SetLineLength` only).
     #[command(flatten)]
     pub formatting: FormattingArgs,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]

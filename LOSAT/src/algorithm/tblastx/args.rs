@@ -4,27 +4,27 @@ use crate::blastinput::value_parsers::*;
 use clap::Args;
 use std::path::PathBuf;
 
-/// Command-line arguments for TBLASTX (translated DNA vs translated DNA search)
-///
-/// NCBI reference (CTblastxAppArgs argument set):
-/// ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118
-/// ```c
-/// arg.Reset(new CGenericSearchArgs( !kQueryIsProtein, false, false, true));
-/// ...
-/// m_HspFilteringArgs.Reset(new CHspFilteringArgs);
-/// ...
-/// arg.Reset(new CWindowSizeArg);
-/// ...
-/// m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-/// ...
-/// arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
-/// arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eDatabase));
-/// ...
-/// arg.Reset(new CFormattingArgs);
-/// arg.Reset(new CMTArgs);
-/// arg.Reset(new CRemoteArgs);
-/// arg.Reset(new CDebugArgs);
-/// ```
+// Command-line arguments for TBLASTX (translated DNA vs translated DNA search)
+//
+// NCBI reference (CTblastxAppArgs argument set):
+// ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118
+// ```c
+// arg.Reset(new CGenericSearchArgs( !kQueryIsProtein, false, false, true));
+// ...
+// m_HspFilteringArgs.Reset(new CHspFilteringArgs);
+// ...
+// arg.Reset(new CWindowSizeArg);
+// ...
+// m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
+// ...
+// arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
+// arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eDatabase));
+// ...
+// arg.Reset(new CFormattingArgs);
+// arg.Reset(new CMTArgs);
+// arg.Reset(new CRemoteArgs);
+// arg.Reset(new CDebugArgs);
+// ```
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
 // arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ..., eInteger);
@@ -144,9 +144,9 @@ pub struct TblastxArgs {
 
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
-    /// (quoted at `BlastpArgs::export_search_strategy`). The search strategy file
-    /// (`report::archive::strategy`), created by `run` before the other options are read.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    // (quoted at `BlastpArgs::export_search_strategy`). The search strategy file
+    // (`report::archive::strategy`), created by `run` before the other options are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
@@ -182,11 +182,11 @@ pub struct TblastxArgs {
     /// `blastinput::report_counts::FormattingArgs`).
     #[command(flatten)]
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
-    /// The hit list size and the numbers of descriptions and alignments of the pairwise
-    /// report, which `check_ncbi_options` sets from `-max_target_seqs`, `-num_descriptions`,
-    /// `-num_alignments` and the output format (`blastinput::report_counts`). Not a public
-    /// option.
-    /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+    // The hit list size and the numbers of descriptions and alignments of the pairwise
+    // report, which `check_ncbi_options` sets from `-max_target_seqs`, `-num_descriptions`,
+    // `-num_alignments` and the output format (`blastinput::report_counts`). Not a public
+    // option.
+    // Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-206

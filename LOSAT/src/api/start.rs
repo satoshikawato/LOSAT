@@ -17,7 +17,7 @@ use super::error::Error;
 use super::input::Inputs;
 use super::search::Search;
 use crate::blastinput::ncbi_environment::{
-    log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget,
+    log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget, TextPlace,
 };
 use crate::report::run_files::RunFiles;
 
@@ -253,6 +253,14 @@ impl RunLog {
         }
     }
 
+    /// Where the messages of a sink with `to_log` end up (`RunSink::write`): the target's place
+    /// (`DiagTarget::place`), or the caller's diagnostics without a target.
+    pub(super) fn place(&self) -> TextPlace {
+        self.0
+            .as_ref()
+            .map_or(TextPlace::StandardError, DiagTarget::place)
+    }
+
     /// Writes `messages`, gathered from a search, where the run's messages go, and gives back what
     /// goes to the call's diagnostics: all of it without a target or for `cerr`, nothing for the
     /// file of `-logfile` or no output.
@@ -404,6 +412,14 @@ impl CallerStart {
         diagnostics: &'a mut (dyn Write + Send),
     ) -> impl Write + Send + 'a {
         self.log.sink(diagnostics, true)
+    }
+
+    /// Where the messages written to `sink` end up (`RunLog::place`): the file of `-logfile`, or
+    /// nowhere, where the run's messages go to its target (TBLASTX's, `run_messages_follow_log`),
+    /// else the caller's diagnostics. LOSAT Web tells its host where the error of an output that the
+    /// run could not write is (line WQA's sweep, D7, 2026-11-20).
+    pub fn messages_place(&self) -> TextPlace {
+        self.log.place()
     }
 
     /// Writes `text`, the message of a `NativeError` that ended the run, to the `-logfile` file

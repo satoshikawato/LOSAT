@@ -795,3 +795,61 @@ fn a_callers_start_reads_its_files_and_hands_over_the_log() {
         ]
     );
 }
+
+// Line WQA's sweep, D7 (2026-11-20): the place that a caller's start gives for its run's messages
+// (`CallerStart::messages_place`) is where the messages written to its sink end up, for each kind
+// of `-logfile` target (none, `-`, a file, `""` and `/dev/null`) in a program whose run's messages
+// follow `-logfile` (TBLASTX) and in one whose do not (BLASTN).
+#[test]
+fn a_callers_start_says_where_its_run_s_messages_go() {
+    use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
+    use crate::report::run_files::RunFiles;
+    use std::io::Write as _;
+    let files = Files(Vec::new());
+    for program in ["tblastx", "blastn"] {
+        for logfile in [
+            None,
+            Some("-"),
+            Some("run.log"),
+            Some(""),
+            Some("/dev/null"),
+        ] {
+            let words: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
+            let kept = std::sync::Arc::new(Kept::default());
+            let mut stderr = Vec::new();
+            let mut started = begin_with(
+                ApplicationStart::with_files(program, &words, &[], &files),
+                &words,
+                &RunFiles::Receiver(kept.clone()),
+                &mut stderr,
+            )
+            .unwrap();
+            let place = started.messages_place();
+            let mut cerr = Vec::new();
+            started.sink(&mut cerr).write_all(b"Warning: w\n").unwrap();
+            started.finish().unwrap();
+            let in_file = kept
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, bytes)| bytes.as_slice() == b"Warning: w\n");
+            let label = format!("{program} {logfile:?}");
+            assert_eq!(
+                (cerr == b"Warning: w\n", in_file),
+                match place {
+                    TextPlace::StandardError => (true, false),
+                    TextPlace::LogFile => (false, true),
+                    TextPlace::Nowhere => (false, false),
+                },
+                "{label}: {place:?}"
+            );
+            let expected = match (program, logfile) {
+                ("tblastx", Some("run.log")) => TextPlace::LogFile,
+                ("tblastx", Some("" | "/dev/null")) => TextPlace::Nowhere,
+                _ => TextPlace::StandardError,
+            };
+            assert_eq!(place, expected, "{label}");
+        }
+    }
+}

@@ -6,3 +6,6 @@
 - docs: `docs/release/v0.1.0.md` says v0.1.0 was published (GitHub Release, 2026-09-17); the "Configuration
   boundary" of `docs/cli_v2_migration.md` says that stdin and `-db` were missing at v0.1.0 and work since
   v0.2.0; README says that `--install-shims` replaces a link or copy an earlier LOSAT made.
+- docs: README's output-format table says "all five programs" for outfmt 11 (it said every program) and
+  points to the program table for the formats of `psiblast`, `rpsblast` and `rpstblastn`; the
+  `convert2blastmask` paragraph no longer says that `losat makeblastdb` lacks `-mask_data`.

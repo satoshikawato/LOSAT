@@ -63,6 +63,8 @@ On the pairwise profiles and fixtures of its [release test set](docs/release/v0.
 
 The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) write; `19` and `21` belong to igblastn and magicblast. Every LOSAT program reads `-outfmt` as NCBI does and gives NCBI's error for a value that NCBI rejects. A format that NCBI writes and LOSAT does not write is rejected with "output format N is not supported by LOSAT's PROGRAM" before the inputs are read. The default is `0`.
 
+`psiblast`, `rpsblast` and `rpstblastn` write the formats that [Supported Programs & Tasks](#supported-programs--tasks) lists for them.
+
 | `-outfmt` | NCBI name | NCBI programs that write it | LOSAT |
 |:---|:---|:---|:---|
 | `0` | Pairwise | all five | all five programs |
@@ -76,7 +78,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `8` | Seqalign (Text ASN.1) | all five | all five programs (a `-db` title or an id with a byte NCBI's stream replaces is written with `#` and NCBI's error message for each byte of each query's document) |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs (as outfmt 8) |
 | `10` | Comma-separated values | all five | all five programs |
-| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all five | every program (with `-subject` and `-db`; `ARCHIVE_FORMAT` unset: ASN.1 text, `bin...`: ASN.1 binary, `xml`: XML (`Blast4-archive`), any case, as NCBI reads it; a title, id, `-db` name or `-window_masker_db` path with a byte NCBI's stream replaces is written with `#` and NCBI's error message for each byte, as in the search strategy file) |
+| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all five | all five programs (with `-subject` and `-db`; `ARCHIVE_FORMAT` unset: ASN.1 text, `bin...`: ASN.1 binary, `xml`: XML (`Blast4-archive`), any case, as NCBI reads it; a title, id, `-db` name or `-window_masker_db` path with a byte NCBI's stream replaces is written with `#` and NCBI's error message for each byte, as in the search strategy file) |
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
 | `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
@@ -323,7 +325,7 @@ losat convert2blastmask -in masked.fna -masking_algorithm other -masking_options
 
 `losat segmasker` writes what NCBI BLAST+ 2.17.0 `segmasker` writes, byte for byte: the low-complexity intervals of each protein sequence of a FASTA file (`-in`, the standard input by default) or of a protein BLAST database (`-infmt blastdb -in NAME`, every sequence of its volumes as for dustmasker), found by the SEG of blastp's and blastx's query masking without its merging of overlapping segments (segmasker keeps NCBI's `overlaps` off), in each of its eight `-outfmt` forms, with `-parse_seqids`, `-window`, `-locut` and `-hicut` (values outside NCBI's ranges, and NCBI's spellings of a number such as `0x10` or `2e`, taken as NCBI takes them), `-out`, `-logfile`, `-conffile`, `-dryrun`, `-h`, `-help` and `-version`, and NCBI's error messages and exit codes (the NCBI exceptions of its run with their report, exit status 1). The library API runs it as `run_segmasker` (pylosat: `segmasker`).
 
-`losat convert2blastmask` writes what NCBI BLAST+ 2.17.0 `convert2blastmask` writes, byte for byte: the masking information of FASTA input that another tool has masked (`-in`, the standard input by default). The lower case letters of each sequence, and the lines `from - to` in the place of sequence data (the form that `-outfmt interval` writes), are the masked intervals, written in `-outfmt maskinfo_asn1_text` (the default), `maskinfo_asn1_bin`, `maskinfo_xml` or `interval`, with `-parse_seqids`, `-masking_algorithm` and `-masking_options` (both required: the name of the masking program and a free text that describes how the masking was made), `-out`, `-h`, `-help` and `-version`, and NCBI's error messages and exit codes. The `maskinfo_*` files are the `-mask_data` input of NCBI's `makeblastdb` (`losat makeblastdb` does not take `-mask_data` yet). The library API runs it as `run_convert2blastmask` (pylosat: `convert2blastmask`).
+`losat convert2blastmask` writes what NCBI BLAST+ 2.17.0 `convert2blastmask` writes, byte for byte: the masking information of FASTA input that another tool has masked (`-in`, the standard input by default). The lower case letters of each sequence, and the lines `from - to` in the place of sequence data (the form that `-outfmt interval` writes), are the masked intervals, written in `-outfmt maskinfo_asn1_text` (the default), `maskinfo_asn1_bin`, `maskinfo_xml` or `interval`, with `-parse_seqids`, `-masking_algorithm` and `-masking_options` (both required: the name of the masking program and a free text that describes how the masking was made), `-out`, `-h`, `-help` and `-version`, and NCBI's error messages and exit codes. The `maskinfo_*` files are the `-mask_data` input of `makeblastdb` (NCBI's and `losat makeblastdb`). The library API runs it as `run_convert2blastmask` (pylosat: `convert2blastmask`).
 
 ## Common Command-Line Options
 

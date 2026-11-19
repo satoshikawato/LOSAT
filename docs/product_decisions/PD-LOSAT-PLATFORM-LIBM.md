@@ -1,19 +1,19 @@
 # Product Decision: a platform's libm and the last digit of a full-precision value
 
 - Decision ID: `PD-LOSAT-PLATFORM-LIBM`
-- Version: 1.2 (pending: the Owner's decision; proposed 2026-11-20 by line LIBM)
+- Version: 1.2 (2026-11-20, Owner: the WASI clause of 1.1 is retired)
 - Date: 2026-10-25 (1.0, macOS: Owner, release board question 2, option (a); for v0.2.0);
-  2026-11-18 (1.1, WASI: Owner, see Amendments); 1.2 pending, see Amendments
+  2026-11-18 (1.1, WASI: Owner, see Amendments); 2026-11-20 (1.2, WASI retired: Owner, see
+  Amendments)
 - Status: macOS clause (1.0): Accepted for v0.2.0; it stays, and is unverified on macOS (no Apple
-  device). WASI clause (1.1): retired by 1.2 (pending) because of the port of glibc's FMA `exp`,
-  `log`, `log10` and `pow` to one Rust path on every target (#1344); until the Owner decides, 1.1
-  stands as accepted.
+  device). WASI clause (1.1): retired by 1.2 (Owner, 2026-11-20) because of the port of glibc's
+  FMA `exp`, `log`, `log10` and `pow` to one Rust path on every target (#1344).
 
 ## Scope
 
 Two platforms where the libm that LOSAT calls for `exp` and `log` can differ by 1 ULP from glibc's
 on an x86-64 CPU with FMA, where NCBI BLAST+ 2.17.0 wrote the frozen bytes of the tests (Linux x64).
-Since 1.2 (pending) only macOS is in force; the WASI paragraph is kept as it stood in 1.1:
+Since 1.2 only macOS is in force; the WASI paragraph is kept as it stood in 1.1:
 
 - **macOS** (arm64 and x86_64), since 1.0: Apple's libm, when LOSAT computes an E value. The
   condition is an output format that prints the E value with all its digits. Of the formats LOSAT
@@ -23,7 +23,7 @@ Since 1.2 (pending) only macOS is in force; the WASI paragraph is kept as it sto
   `LOSAT/src/report/blast_xml/hsp.rs:18`), and the tabular formats (6, 7, outfmt 0 tables) print 2
   or 3 significant digits; neither is affected in practice. This record names outfmt 11 and 8 only.
 - **WASI** (`wasm32-wasip1` serial and `wasm32-wasip1-threads`), since 1.1, no longer in force
-  under 1.2 (pending; see Amendments): Rust's `f64::ln` there is
+  under 1.2 (see Amendments): Rust's `f64::ln` there is
   wasi-libc's `log` (musl's, the same algorithm as glibc's without FMA; WebAssembly has no FMA
   instruction). The condition is psiblast's ASN.1 PSSM (`-out_pssm`) written with its diagnostics,
   which psiblast adds when `-out_ascii_pssm` is given too (`PSIDiagnosticsRequestNewEx`,
@@ -46,7 +46,7 @@ platform-specific code path, no normalization of the output. The tests accept th
 macOS and nowhere else: the macOS platform checks.
 
 Under 1.1, the same held on WASI for the 15-digit mantissa of a value of psiblast's ASN.1 PSSM.
-Under 1.2 (pending) WASI is no longer in force: the port gives the Linux x64 bytes there (Amendments,
+Under 1.2 WASI is no longer in force: the port gives the Linux x64 bytes there (Amendments,
 Verification), and the WASI guard compares the PSSM files byte for byte.
 
 ## Observation
@@ -120,7 +120,7 @@ not a last-digit change), or any other byte fails. The copy reads the values of 
 
 - macOS: the `-outfmt 11` blastx tests apply the rule with `cfg!(target_os = "macos")`; on every
   other OS the comparison is exact. This copy stays under 1.2.
-- WASI, since 1.2 (pending): `LOSAT/tests/check_wasm_threading.py` (set G of the release test plan,
+- WASI, since 1.2: `LOSAT/tests/check_wasm_threading.py` (set G of the release test plan,
   `wasm-threading.yml`) runs every psiblast `-db` row through each WASI command it is given and
   compares the PSSM files byte for byte, as the report, standard error and exit status (1,030 rows
   equal on the serial WASI command of the port's branch, 2026-11-20). The Python copy of the rule
@@ -143,8 +143,8 @@ Mac. The macOS clause (1.0) stays until the Owner retires it.
 On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can differ from the
 other platforms' output by 1 in its last (15th) digit because Apple's libm differs from the
 other platforms' by 1 ULP; NCBI BLAST+ built on macOS has the same property, and the formats
-that print 2 to 6 digits are not affected in the cases tested. WASI is no longer named (1.2,
-pending): its psiblast ASN.1 PSSM files give the Linux x64 bytes.
+that print 2 to 6 digits are not affected in the cases tested. WASI is no longer named (1.2): its
+psiblast ASN.1 PSSM files give the Linux x64 bytes.
 
 ## Amendments
 
@@ -158,7 +158,7 @@ pending): its psiblast ASN.1 PSSM files give the Linux x64 bytes.
   guard (`check_wasm_threading.py`) runs the psiblast `-db` rows under the rule; the rule's two
   copies now also require 15-digit mantissas, as the Decision says (1.0's test compared digit
   counts only, which let a shorter mantissa 1 away pass).
-- 1.2 (pending: the Owner's decision; proposed 2026-11-20 by line LIBM): the WASI clause of 1.1 is
+- 1.2 (2026-11-20, Owner; proposed the same day by line LIBM): the WASI clause of 1.1 is
   retired; the macOS clause (1.0) stays and is unverified on macOS (no Apple device). Why: the branch
   `fix/libm-glibc-fma` (#1344) ports glibc 2.35's x86-64 FMA versions of `exp`, `log`, `log10`
   and `pow` to one Rust path on every target (`LOSAT/src/utils/glibc_fma_libm.rs`): `f64::mul_add`
@@ -173,4 +173,8 @@ pending): its psiblast ASN.1 PSSM files give the Linux x64 bytes.
   branch the WASI guard compares the psiblast PSSM files byte for byte and the Python copy of the
   rule is removed; the macOS Rust copy stays. Correction to 1.1: in the 14 psiblast rows the
   differing value came from `pow` in the pseudocounts, not from `log` (the v0.2.0 release line, 2026-11-20).
-  Until the Owner decides, 1.1 stands as accepted.
+  The Owner answered with no words: on 2026-11-20 at 05:39 JST the Owner pressed "Ready for review"
+  on pull request #1345, which its description named as the way to accept option A of this question
+  (Q-LIBM-PD, as shown to the Owner): retire the WASI clause of PD-LOSAT-PLATFORM-LIBM (1.1, Owner
+  2026-11-18)? (A) retire it (recommended) / (B) keep 1.1; the macOS clause stays in both. Not
+  taken: (B). #1345 merged into dev the same minute.

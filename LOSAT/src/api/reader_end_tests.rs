@@ -172,6 +172,7 @@ fn command_line_with(
         Commands::Tblastn(args) => crate::algorithm::tblastn::TblastnArgs::run(args, settings),
         Commands::Blastx(args) => crate::algorithm::blastx::BlastxArgs::run(args, settings),
         Commands::Tblastx(args) => crate::algorithm::tblastx::run(args, settings),
+        Commands::Psiblast(args) => crate::algorithm::psiblast::run(args, settings),
         _ => unreachable!("a search program"),
     };
     let report = std::fs::read(&out).unwrap_or_default();
@@ -370,6 +371,127 @@ fn a_scope_holds_the_batches_that_the_reader_delivers() {
             }
         }
     }
+}
+
+/// The command line's run of `query` against `subject` with `options` in outfmt 6 rows HSPs and
+/// then fails with an error that holds `error`; the library's run and `run_batches` give the same
+/// rows and error (`name` tells the case).
+fn ends_as_the_command_line(
+    name: &str,
+    program: Program,
+    query: &[u8],
+    subject: &[u8],
+    options: &[&str],
+    error: &str,
+) {
+    let (cli_report, cli_error) = command_line_with(program, query, subject, options, "6");
+    let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: the command line fails"));
+    assert!(cli_error.contains(error), "{name}: {cli_error}");
+    let cli_rows = cli_report.split(|&byte| byte == b'\n').count() - 1;
+    assert!(cli_rows > 0, "{name}: the batches before");
+    let (report, library_error) = library_with(program, query, subject, options, "6");
+    assert_eq!(library_error.as_deref(), Some(cli_error.as_str()), "{name}");
+    assert!(report == cli_report, "{name}: the reports");
+    let (rows, batches_error) = batches_with(program, query, subject, options);
+    assert_eq!(
+        (rows, batches_error.as_deref()),
+        (cli_rows, Some(cli_error.as_str())),
+        "{name}: run_batches"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652 (a batch whose
+// queries all have no data stops the run, quoted at `query_batch::no_data_batch_error`)
+// A batch that NCBI fails is never searched and adds nothing to the scope of the run's queries,
+// so a query with the id of an earlier one in that batch is not LOSAT's refusal: the batches
+// before are reported and the run ends with NCBI's error, in the library's run and in
+// `run_batches` as on the command line (review M-b of line WQA's D10, 2026-11-20).
+#[test]
+fn a_batch_that_ncbi_fails_adds_nothing_to_the_scope() {
+    let protein = |length| letters(b"ACDEFGHIKLMNPQRSTVWY", length, 7);
+    let options = ["-parse_deflines"];
+    let named = |name: &str, sequence: &[u8]| fasta_named(&[name.to_string()], sequence);
+    // A query `q1` longer than the first batch, then a second `q1` without residues, alone in the
+    // next batch: `Sequence contains no data` after the first batch's report.
+    for (program, query, subject) in [
+        (Program::Blastp, protein(10500), protein(2000)),
+        (Program::Tblastn, protein(20500), coding(&protein(2000))),
+        (
+            Program::Tblastx,
+            coding(&protein(3500)),
+            coding(&protein(700)),
+        ),
+    ] {
+        let mut text = named("q1", &query);
+        text.extend_from_slice(b">q1\n");
+        ends_as_the_command_line(
+            program.name(),
+            program,
+            &text,
+            &named("s1", &subject),
+            &options,
+            "Sequence contains no data",
+        );
+    }
+    // TBLASTX stops a batch whose queries all have fewer than three letters when one has none,
+    // which BLASTP's rule (every query without letters) does not: the last batch, with the second
+    // `q1`, fails on its search, after the first batch's report.
+    let mut text = named("q1", &coding(&protein(3500)));
+    text.extend_from_slice(b">e\n>t\nAC\n>q1\nA\n");
+    ends_as_the_command_line(
+        "tblastx: a batch of short queries",
+        Program::Tblastx,
+        &text,
+        &named("s1", &coding(&protein(700))),
+        &options,
+        "Sequence contains no data",
+    );
+    // psiblast's batches hold one query with letters and the queries without letters before it:
+    // `q1`, then `q2` (no residues) with `q3`, which `CPsiBlast` refuses, before the second `q1`.
+    let mut text = named("q1", &protein(300));
+    text.extend_from_slice(b">q2\n");
+    text.extend_from_slice(&named("q3", &protein(300)));
+    text.extend_from_slice(&named("q1", &protein(300)));
+    ends_as_the_command_line(
+        "psiblast",
+        Program::Psiblast,
+        &text,
+        &named("s1", &protein(300)),
+        &options,
+        "PSI-BLAST only accepts one protein sequence as query",
+    );
+}
+
+// TBLASTX refuses two queries with one id once it has searched the batch of the second, without
+// the reports of the batches before; an error of that batch's search comes first (review M-b,
+// 2026-11-20): `run_batches` searches the batches up to it as the command line does.
+#[test]
+fn tblastx_refuses_two_queries_of_one_id_after_their_batch() {
+    let protein = |length| letters(b"ACDEFGHIKLMNPQRSTVWY", length, 7);
+    let options = ["-parse_deflines"];
+    let query = coding(&protein(1100));
+    let names: Vec<String> = ["q1", "q2", "q3", "q4", "q5", "q1"]
+        .iter()
+        .map(|name| name.to_string())
+        .collect();
+    let text = fasta_named(&names, &query);
+    // Subjects with letters: the refusal alone.
+    let subject = fasta_named(&["s1".to_string()], &coding(&protein(1100)));
+    let (cli_report, cli_error) =
+        command_line_with(Program::Tblastx, &text, &subject, &options, "6");
+    let cli_error = cli_error.expect("the refusal");
+    assert!(cli_error.contains("lcl|q1"), "{cli_error}");
+    assert!(cli_report.is_empty(), "no report before the refusal");
+    let (rows, error) = batches_with(Program::Tblastx, &text, &subject, &options);
+    assert_eq!((rows, error.as_deref()), (0, Some(cli_error.as_str())));
+    // A subject without letters: NCBI's error of the first batch's search comes first.
+    let empty = b">s1\n".to_vec();
+    let (cli_report, cli_error) = command_line_with(Program::Tblastx, &text, &empty, &options, "6");
+    let cli_error = cli_error.expect("the search's error");
+    assert!(cli_error.contains("average subject length"), "{cli_error}");
+    assert!(cli_report.is_empty());
+    let (rows, error) = batches_with(Program::Tblastx, &text, &empty, &options);
+    assert_eq!((rows, error.as_deref()), (0, Some(cli_error.as_str())));
 }
 
 // The batches of `run_batches` end alike: the batches before, then the error in the batch that

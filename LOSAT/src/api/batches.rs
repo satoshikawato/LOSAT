@@ -205,9 +205,11 @@ pub struct Batches<'a> {
     lengths: Vec<usize>,
     /// The query records that NCBI's reader skips (`-query_loc`).
     skipped: Vec<bool>,
-    /// Under `-parse_deflines` with `-subject`, the scope of the queries of the batches searched
-    /// so far, which BLASTN and BLASTX add each batch to once it is searched (`run_scopes`).
-    run_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+    /// Under `-parse_deflines` with `-subject`, NCBI's scope of the run's queries (`run_scopes`).
+    run_scopes: RunScopes,
+    /// TBLASTX's batches searched before its refusal's batch (`RunScopes::Refused`), which
+    /// `next` hands over once that batch's search has ended, or drops for the refusal.
+    held: Option<std::collections::VecDeque<Result<Batch, Error>>>,
     next_query: usize,
     /// Whether the end of the query records (`Inputs::query_end`: blank lines or a reader error)
     /// is still to come: in the batch that reads past the last record, or in a batch of its own
@@ -263,7 +265,8 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             inputs,
             sizes: BatchSizes::Fixed(0),
             skipped: vec![false; lengths.len()],
-            run_scopes: None,
+            run_scopes: RunScopes::None,
+            held: None,
             lengths,
             next_query: 0,
             end_pending: false,
@@ -295,8 +298,8 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         })
         .collect::<Vec<bool>>();
     let run_scopes = match inputs.pssm {
-        None => run_scopes(search, inputs, &sizes, &lengths, &skipped)?,
-        Some(_) => None,
+        None => run_scopes(search, inputs, &sizes, query_range.as_ref())?,
+        Some(_) => RunScopes::None,
     };
     Ok(Batches {
         search,
@@ -305,6 +308,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         lengths,
         skipped,
         run_scopes,
+        held: None,
         next_query: 0,
         end_pending: inputs.pssm.is_none() && !inputs.end().is_input(),
         hsps_before: 0,
@@ -318,58 +322,101 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     })
 }
 
-/// Under `-parse_deflines` with `-subject`, NCBI's scope keeps every batch's queries
-/// (`query_batch::QueryScopes`), while each batch's call holds its own records alone: the run's
-/// scope is kept here, of the batches that the reader delivers. A batch that a reader error ends
-/// is never delivered and adds nothing, nor do the batches after it (review M3, 2026-11-20).
-/// BLASTN and BLASTX add each batch once it is searched (its own errors come first), as their
-/// command lines' loops do, so a batch with the id of an earlier batch's query is refused after
-/// the batches before it (the scope returned, `Batches::search_batch`). BLASTP, TBLASTN, TBLASTX
-/// and PSIBLAST refuse two queries of the run with one id before the first batch, as their command
-/// lines refuse them before any report (`query_batch::read_query_batches`, tblastx's loop):
-/// nothing is returned.
+/// How a call keeps NCBI's scope of the run's queries under `-parse_deflines` with `-subject`
+/// (`query_batch::QueryScopes`), while each batch's call holds its own records alone
+/// (`run_scopes`).
+enum RunScopes {
+    /// No scope across the batches.
+    None,
+    /// BLASTN and BLASTX: the queries of the batches searched so far, which each batch adds to once
+    /// it is searched (`Batches::search_batch`).
+    Searched(crate::blastinput::query_batch::QueryScopes),
+    /// TBLASTX: LOSAT's refusal of two queries with one id, in the batch whose first record is
+    /// `batch`. Its command line refuses them once it has searched that batch, without the reports
+    /// of the batches before, and an error of a batch up to it comes first, after the reports of
+    /// the batches before that one (`Batches::next`).
+    Refused { batch: usize, refusal: Error },
+}
+
+/// NCBI's scope of the run's queries under `-parse_deflines` with `-subject`
+/// (`query_batch::QueryScopes`): the scope of the batches that the reader delivers. A batch that
+/// NCBI fails (a reader error, a batch without a query, a batch of queries without letters, the
+/// query splitter's environment) is never searched and adds nothing, nor do the batches after it
+/// (review M3 and M-b of line WQA's D10, 2026-11-20). BLASTN and BLASTX add each batch once it is
+/// searched (its own errors come first), as their command lines' loops do, so a batch with the id
+/// of an earlier batch's query is refused after the batches before it (`RunScopes::Searched`).
+/// BLASTP, TBLASTN and PSIBLAST refuse two queries of the run with one id before the first batch,
+/// as their command lines refuse them before any report: the refusal of the command line's own
+/// reading of the batches (`query_batch::read_query_batches`, `read_psiblast_query_batches`), after
+/// the checks of the environment that come before it. TBLASTX refuses them once it has searched
+/// the refusal's batch (`RunScopes::Refused`); its batches are the command line's, whose errors
+/// before the search are those of `read_query_batches` and more, which the search of each batch
+/// gives (`Batches::next`).
 fn run_scopes(
     search: &Search,
     inputs: Inputs<'_>,
     sizes: &BatchSizes,
-    lengths: &[usize],
-    skipped: &[bool],
-) -> Result<Option<crate::blastinput::query_batch::QueryScopes>, Error> {
-    use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
+    query_range: Option<&crate::blastinput::seq_range::SequenceRange>,
+) -> Result<RunScopes, Error> {
+    use crate::api::Program;
+    use crate::blastinput::query_batch::{
+        read_psiblast_query_batches, read_query_batches, QueryScopeSpan, QueryScopes,
+    };
+    use crate::blastinput::seq_range::{cut_queries, QueryInput};
     if !search.parse_deflines() || inputs.database {
-        return Ok(None);
+        return Ok(RunScopes::None);
     }
     let program = match search.program() {
-        crate::api::Program::Blastn => "BLASTN",
-        crate::api::Program::Blastp => "BLASTP",
-        crate::api::Program::Blastx => "BLASTX",
-        crate::api::Program::Tblastn => "TBLASTN",
-        crate::api::Program::Tblastx => "TBLASTX",
-        crate::api::Program::Psiblast => "PSIBLAST",
+        Program::Blastn => "BLASTN",
+        Program::Blastp => "BLASTP",
+        Program::Blastx => "BLASTX",
+        Program::Tblastn => "TBLASTN",
+        Program::Tblastx => "TBLASTX",
+        Program::Psiblast => "PSIBLAST",
     };
-    let mut scopes = QueryScopes::new(QueryScopeSpan::Run, program);
-    if matches!(
-        search.program(),
-        crate::api::Program::Blastn | crate::api::Program::Blastx
-    ) {
-        return Ok(Some(scopes));
+    let scopes = QueryScopes::new(QueryScopeSpan::Run, program);
+    if matches!(search.program(), Program::Blastn | Program::Blastx) {
+        return Ok(RunScopes::Searched(scopes));
     }
-    // The batches that the reader delivers: each up to its size, but for a last batch that the
-    // records end before its size when a reader error comes after them (`Batches::search_batch`'s
-    // `reads_on`). A batch size of 0 reads no record.
-    let fails_reading = matches!(inputs.end(), super::input::QueryEnd::Error(_));
-    let mut start = 0;
-    while start < lengths.len() {
-        let (end, reached) = next_ranged_batch(lengths, skipped, start, sizes.current());
-        if end <= start || (fails_reading && end == lengths.len() && !reached) {
-            break;
-        }
-        scopes
-            .add_batch(&inputs.query[start..end], start)
+    // The command lines of BLASTP, PSIBLAST and TBLASTN check the environment of the search before
+    // they read the queries (`blastinput::app::check_search_environment`).
+    if !matches!(search.program(), Program::Tblastx) {
+        crate::blastinput::app::check_search_environment(program, true)
             .map_err(|error| Error::search(&error))?;
-        start = end;
     }
-    Ok(None)
+    let (searched, input) = match query_range {
+        Some(range) => {
+            let ranged = cut_queries(inputs.query, range);
+            (std::borrow::Cow::Owned(ranged.records), ranged.input)
+        }
+        None => (
+            std::borrow::Cow::Borrowed(inputs.query),
+            QueryInput::whole(inputs.query),
+        ),
+    };
+    let reading = inputs.end().reading();
+    let mut batches = match search.program() {
+        Program::Psiblast => {
+            read_psiblast_query_batches(inputs.query, &searched, &input, reading, Some(scopes))
+        }
+        _ => read_query_batches(
+            inputs.query,
+            &searched,
+            &input,
+            reading,
+            sizes.current(),
+            true,
+            Some(scopes),
+        ),
+    };
+    match batches.query_refusal.take() {
+        None => Ok(RunScopes::None),
+        Some(refusal) if matches!(search.program(), Program::Tblastx) => Ok(RunScopes::Refused {
+            batch: batches.input_done,
+            refusal: Error::search(&refusal),
+        }),
+        Some(refusal) => Err(Error::search(&refusal)),
+    }
 }
 
 impl Batches<'_> {
@@ -483,7 +530,7 @@ impl Batches<'_> {
         // BLASTN's and BLASTX's refusal of a query with the id of an earlier batch's, once the
         // batch is searched (`run_scopes`): BLASTX's scope holds the queries it searches, BLASTN's
         // every record it read (those that `-query_loc` skips too).
-        if let Some(scopes) = self.run_scopes.as_mut() {
+        if let RunScopes::Searched(scopes) = &mut self.run_scopes {
             let searched_only = matches!(self.search.program(), crate::api::Program::Blastx);
             let ids = self.inputs.query[range.clone()]
                 .iter()
@@ -527,6 +574,43 @@ impl Batches<'_> {
     }
 }
 
+impl Batches<'_> {
+    /// TBLASTX's refusal of two queries with one id (`RunScopes::Refused`): searches the batches
+    /// up to the refusal's, as its command line does, and holds what `next` hands over. A batch
+    /// that fails ends them with its error after the batches before it; when none fails, the
+    /// refusal comes alone, as the command line writes no report then. The refusal's batch gives
+    /// the same refusal itself when it holds both queries.
+    fn search_to_refusal(&mut self) {
+        let RunScopes::Refused { batch, refusal } =
+            std::mem::replace(&mut self.run_scopes, RunScopes::None)
+        else {
+            return;
+        };
+        let mut held = std::collections::VecDeque::new();
+        let failure = loop {
+            let (range, reached) = self.next_range();
+            self.next_query = range.end;
+            let last = range.end > batch || range.is_empty();
+            let searched = self.search_batch(range, !reached);
+            self.searched_one = true;
+            match searched {
+                Ok(searched) if !last => held.push_back(Ok(searched)),
+                Ok(_) => break None,
+                Err(error) if last && error.message() == refusal.message() => break None,
+                Err(error) => break Some(error),
+            }
+        };
+        match failure {
+            Some(error) => held.push_back(Err(error)),
+            None => {
+                held.clear();
+                held.push_back(Err(refusal));
+            }
+        }
+        self.held = Some(held);
+    }
+}
+
 impl Iterator for Batches<'_> {
     type Item = Result<Batch, Error>;
 
@@ -544,6 +628,14 @@ impl Iterator for Batches<'_> {
                 rounds: Vec::new(),
                 diagnostics: std::mem::take(&mut self.start_messages),
             }));
+        }
+        if matches!(self.run_scopes, RunScopes::Refused { .. }) {
+            self.search_to_refusal();
+        }
+        if let Some(held) = self.held.as_mut() {
+            let batch = held.pop_front();
+            self.finished = held.is_empty();
+            return batch;
         }
         // Queries without a record are one call: NCBI's `Query is Empty!`. An end of the records
         // that the last batch did not meet (it reached its size) is a batch of its own.

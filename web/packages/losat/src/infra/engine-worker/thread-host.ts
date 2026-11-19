@@ -104,6 +104,7 @@ export class ThreadHost {
     this.keeper.onerror = (event) => {
       this.keeperError = `the memory keeper failed: ${workerError(event)}`;
     };
+    // The keeper's link is the host's first: on it the Gateway closes the links of the host before (gateway.ts, link).
     const keep: KeeperCommand = {
       type: 'keep',
       memory: options.memory,

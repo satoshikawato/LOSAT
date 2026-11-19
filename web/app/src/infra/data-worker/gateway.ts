@@ -3,7 +3,9 @@
 // with an UnavailableError, and the page is told (line WQA's sweep, D1 and D2, 2026-11-19): it
 // ends without an error event when the browser ends it, which the release of the Web Lock of its
 // session shows (worker-life.ts in the package). Before, its calls waited for good: a run stayed
-// "Organizing results", a pasted text "Reading the records…" and Run LOSAT "Starting…".
+// "Organizing results", a pasted text "Reading the records…" and Run LOSAT "Starting…". Where the
+// browser refuses that lock (a site whose data is blocked, in Chromium and Firefox), nothing shows
+// such an end, and its calls wait for good as before (worker-life.ts, holdLife).
 import { UnavailableError, watchLife, webLocks } from 'losat';
 import { DATA_WORKER_METHODS, type DataWorkerApi } from './methods';
 import { rpcClient } from './rpc';

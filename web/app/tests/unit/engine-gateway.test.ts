@@ -135,6 +135,29 @@ function link(worker: FakeWorker, role: LinkRole, answer: (message: unknown) => 
   return channel.port1;
 }
 
+/** As `link`; the main thread's end records `name` in `closed` when the Gateway closes it. */
+function watchedLink(
+  worker: FakeWorker,
+  role: LinkRole,
+  name: string,
+  closed: string[],
+  answer: (message: unknown) => unknown = () => undefined,
+): MessagePort {
+  const channel = new MessageChannel();
+  ports.push(channel.port1, channel.port2);
+  channel.port1.onmessage = (event: MessageEvent) => {
+    const reply = answer(event.data);
+    if (reply !== undefined) channel.port1.postMessage(reply);
+  };
+  const close = channel.port2.close.bind(channel.port2);
+  channel.port2.close = () => {
+    closed.push(name);
+    close();
+  };
+  worker.send({ type: 'link', generation: worker.init.generation, role, port: channel.port2 });
+  return channel.port1;
+}
+
 /** The keeper of `worker`'s generation on its link: `answer` gets each message and returns what to post back, if anything. */
 function fakeKeeper(worker: FakeWorker, answer: (message: unknown) => unknown): MessagePort {
   return link(worker, 'keeper', answer);
@@ -749,24 +772,42 @@ describe('WasmEngine', () => {
     const run = engine.run(request('r1', 4), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
     const closed: string[] = [];
-    /** Posts a link whose main-thread end records its close. */
-    const watchedLink = (role: LinkRole) => {
-      const channel = new MessageChannel();
-      ports.push(channel.port1, channel.port2);
-      const close = channel.port2.close.bind(channel.port2);
-      channel.port2.close = () => {
-        closed.push(role);
-        close();
-      };
-      worker.send({ type: 'link', generation: 1, role, port: channel.port2 });
-    };
-    watchedLink('thread');
-    watchedLink('keeper');
+    watchedLink(worker, 'keeper', 'keeper', closed);
+    watchedLink(worker, 'thread', 'thread', closed);
     expect(closed).toEqual([]);
     engine.cancel('r1');
     await expect(run).rejects.toBeInstanceOf(RunCancelledError);
     expect(worker.terminated).toBe(true);
-    expect(closed).toEqual(['thread', 'keeper']);
+    expect(closed).toEqual(['keeper', 'thread']);
+  });
+
+  // The review of line WQA's D8, L1 (2026-11-20): the runtime makes a new ThreadHost after a search on the other module or
+  // a failed preparation, and the links of the one before, whose workers had ended, stayed open until the generation
+  // ended: with Auto threads alternating small and large searches, up to 32 more for each switch.
+  it('closes the links of a thread host once the next host links its keeper, and asks only that keeper to grow', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const closed: string[] = [];
+    const asked: string[] = [];
+    const keeper = (name: string) =>
+      watchedLink(worker, 'keeper', name, closed, () => {
+        asked.push(name);
+        return { type: 'grown' };
+      });
+    keeper('keeper 1');
+    watchedLink(worker, 'thread', 'thread 1', closed);
+    watchedLink(worker, 'thread', 'thread 2', closed);
+    expect(closed).toEqual([]);
+    keeper('keeper 2');
+    expect(closed).toEqual(['keeper 1', 'thread 1', 'thread 2']);
+    watchedLink(worker, 'thread', 'thread 3', closed);
+    expect(worker.use.enter()).toBe(true);
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    await until(() => worker.terminated);
+    expect(asked).toEqual(['keeper 2']);
+    expect(closed).toEqual(['keeper 1', 'thread 1', 'thread 2', 'keeper 2', 'thread 3']);
   });
 
   it('prepares the runtime of a search before it comes, once per thread count, and runs the search there', async () => {

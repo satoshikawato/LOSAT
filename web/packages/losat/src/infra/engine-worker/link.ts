@@ -5,11 +5,13 @@
 //
 // A link is a MessageChannel that the Engine worker makes (MainLinks.link): it posts one end to the main thread (a 'link'
 // event) and gives the other to the thread worker or the keeper. The link carries messages only once the worker's end
-// said hello and the main thread's answer came back (openLink, answerLink): in Playwright's Firefox 151, a port that a
-// worker moved carried no message while that worker ran synchronously, until that worker's event loop had turned for a
-// few milliseconds (also not after a setTimeout of 0 ms); once a message had gone both ways, it carried them, in
-// Chromium, Firefox and WebKit (losat-baselines/web-qa-20261119/fix-d8/probe/probe-started*.log). The ThreadHost
-// therefore starts no thread before every thread worker and the keeper have had their answer (thread-host.ts, prepare).
+// said hello and the main thread's answer came back (openLink, answerLink). In Firefox 159 (Playwright 1.65), a port
+// that a worker moved, to a nested worker that already ran, carried no message while the moving worker then ran
+// synchronously for 3 s, and all of them once it returned; after a message had gone both ways first, it carried them
+// during that time, in Chromium 158, Firefox 159 and WebKit 27.2 (losat-baselines/web-qa-20261119/fix-d8/probe/
+// probe-started*.log). An earlier note (memory-keeper.ts, Playwright's Firefox 151) had seen the same also after a
+// setTimeout of 0 ms before the synchronous run, and not after one of 5 ms. The ThreadHost therefore starts no thread
+// before every thread worker and the keeper have had their answer (thread-host.ts, prepare).
 //
 // The links were BroadcastChannels, opened by name on each side. Firefox refuses `new BroadcastChannel()` with
 // SecurityError ("The operation is insecure.") where the site's data is blocked (cookies blocked), on the page and in

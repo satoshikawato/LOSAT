@@ -5,7 +5,8 @@
 // search starts a new generation, whose instance registers the subject again from the run
 // snapshot's bytes (R1). Messages of an older generation are dropped. A worker that ends by
 // itself fails its search: with an error event, or by the release of the Web Lock that it holds
-// for as long as it lives, when it ends without one (worker-life.ts; line WQA's sweep, D2). A runtime is also
+// for as long as it lives, when it ends without one (worker-life.ts; line WQA's sweep, D2; where the browser refuses
+// that lock, nothing tells it). A runtime is also
 // renewed before a search when its instance ran too many searches or its memory grew too
 // much (policy.ts). A preparation hint (prepare) starts the generation, its instance and its
 // thread workers, or that renewal, before the search that would start them. `describe`, `start`
@@ -91,7 +92,10 @@ interface Generation {
    * reference here would keep the memory until this thread collects it.
    */
   keeper: MessagePort | undefined;
-  /** The main thread's ends of the links of the generation's thread workers and keepers (link.ts), closed with it. */
+  /**
+   * The main thread's ends of the links of the generation's current ThreadHost: its keeper's and its thread workers'
+   * (link.ts). They are closed when another host links its keeper, and when the generation ends.
+   */
   readonly links: MessagePort[];
   /**
    * Whether the threaded instance is in use, read and marked synchronously (instance-use.ts,
@@ -359,11 +363,20 @@ export class WasmEngine implements EngineGateway {
    * Answers the main thread's end of a link of a thread worker or the keeper (link.ts): a thread that stopped fails the
    * search, and the keeper's answer to the grow ends the generation (retire). Also while the generation is ending, which
    * may wait for that answer; the links close when it has ended (end).
+   *
+   * A ThreadHost links its keeper first, and the runtime makes a host only once the previous one has ended with its
+   * thread workers and keeper (runtime.ts, load: a search after one on the other module, a failed preparation). The
+   * links before a keeper's lead to workers that are gone: they are closed then. They stayed open until the generation
+   * ended, which with Auto threads alternating small and large searches kept up to 32 more for each switch for the
+   * whole session (the review of line WQA's D8, L1, 2026-11-20).
    */
   private link(generation: Generation, event: WorkerLink): void {
     const { port } = event;
+    if (event.role === 'keeper') {
+      for (const earlier of generation.links.splice(0)) earlier.close();
+      generation.keeper = port;
+    }
     generation.links.push(port);
-    if (event.role === 'keeper') generation.keeper = port;
     answerLink(port, (message) => {
       if (message?.type === 'fault') this.fail(generation, new Error(message.message));
       else if (message?.type === 'grown') this.end(generation, 'grown');

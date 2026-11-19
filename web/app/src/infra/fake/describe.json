@@ -126,7 +126,7 @@
    },
    {
     "flag": "-perc_identity",
-    "help": "Percent identity threshold for filtering HSPs (Blast_HSPTest)",
+    "help": "Percent identity threshold for filtering HSPs (default: 0, no filtering)",
     "takes_value": true
    },
    {
@@ -161,7 +161,7 @@
    },
    {
     "flag": "-max_hsps",
-    "help": "Maximum number of HSPs per subject (unlimited when omitted) Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270",
+    "help": "Maximum number of HSPs per subject (unlimited when omitted)",
     "takes_value": true
    },
    {
@@ -242,7 +242,7 @@
    },
    {
     "flag": "-subject_besthit",
-    "help": "Apply subject best hit filtering (disabled by default). Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135",
+    "help": "Apply subject best hit filtering (disabled by default)",
     "takes_value": false,
     "default": "false",
     "choices": [

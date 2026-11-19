@@ -241,12 +241,17 @@ for (const threaded of [false, true]) {
           assert.ok(WebAssembly.validate(bytes));
           fs.writeFileSync(fixture, bytes);
           // Descriptor 4 keeps the test's stderr for the exit line; for fd 2 the host's standard
-          // error is the slow pipe and its standard output /dev/null.
+          // error is the slow pipe and its standard output /dev/null. The pipeline is a script file
+          // run by `sh`, not a `sh -c` string: the paths reach it only as its arguments, and CodeQL
+          // (js/shell-command-injection-from-environment, alerts #41 and #45) reads every argument
+          // of `sh -c` as part of the command.
           const redirect = fd === 1 ? "4>&2" : "4>&2 2>&1 >/dev/null";
-          const result = spawnSync("sh", ["-c",
-            `{ python3 -c "$3" ${fd} && "$0" "$1" "$2"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }`,
+          const pipeline = path.join(directory, "slow-reader.sh");
+          fs.writeFileSync(pipeline,
+            `{ python3 -c "$4" "$5" && "$1" "$2" "$3"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }\n`);
+          const result = spawnSync("sh", [pipeline,
             process.execPath, path.join(__dirname, threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js"),
-            fixture, NONBLOCK], {
+            fixture, NONBLOCK, String(fd)], {
             env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
           });
           assert.ifError(result.error);

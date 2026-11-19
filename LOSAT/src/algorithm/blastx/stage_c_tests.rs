@@ -520,7 +520,7 @@ fn unported_long_subject_chunking_is_rejected_before_search() {
         .expect_err("unported subject splitting");
     assert_eq!(
         error.to_string(),
-        "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
+        "subject sequence 1 has 5000001 residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
     );
 }
 

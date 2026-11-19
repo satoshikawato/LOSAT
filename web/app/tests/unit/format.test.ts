@@ -23,9 +23,8 @@ describe('formatDateTime', () => {
 });
 
 describe('optionHelp', () => {
-  it("keeps the help's first paragraph without the references to NCBI's sources", () => {
+  it("keeps the help's first paragraph", () => {
     expect(optionHelp('Cost to open a gap [default: 11]\n\nMore text')).toBe('Cost to open a gap [default: 11]');
-    expect(optionHelp('Reward for a match. NCBI reference: blast_options.c:12')).toBe('Reward for a match.');
     expect(optionHelp(undefined)).toBe('');
   });
 });

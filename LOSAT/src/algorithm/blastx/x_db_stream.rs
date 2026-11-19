@@ -176,7 +176,11 @@ impl<'a> XStreamDb<'a> {
                 .map_err(XReadError)?;
             let length = with_sentinels.len() - 2;
             if length > MAX_DBSEQ_LEN {
-                return Err(XReadError(too_long(self.db.oid(ordinal), length)).into());
+                return Err(XReadError(too_long(
+                    format_args!("database sequence {}", self.db.oid(ordinal)),
+                    length,
+                ))
+                .into());
             }
         }
         self.x_cover(first as usize, first as usize + part.len());

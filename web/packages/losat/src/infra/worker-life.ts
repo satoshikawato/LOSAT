@@ -21,7 +21,9 @@ export function webLocks(): LifeLocks | undefined {
 
 /**
  * In the worker: takes the lock `name` and holds it until the worker ends. Resolves with whether it holds it: not
- * without Web Locks, nor when the browser refused the request.
+ * without Web Locks, nor when the browser refused the request. Chromium and Firefox refuse it with SecurityError where
+ * the site's data is blocked (line WQA's sweep, D8, 2026-11-20): the worker works, but no other signal tells the page
+ * that it ended without an error event, so a search of such a worker then waits until it is cancelled.
  */
 export function holdLife(locks: LifeLocks | undefined, name: string): Promise<boolean> {
   if (locks === undefined) return Promise.resolve(false);

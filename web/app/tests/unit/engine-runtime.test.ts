@@ -42,6 +42,15 @@ vi.mock('../../../packages/losat/src/infra/engine-worker/warm-up', async (import
   return { ...actual, warmUp: vi.fn(actual.warmUp) };
 });
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
+import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
+
+/** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
+const NO_LINKS: MainLinks = {
+  link: () => {
+    throw new Error('unused');
+  },
+  fault: () => undefined,
+};
 
 describe('chooseThreads', () => {
   it('keeps an explicit request', () => {
@@ -256,8 +265,7 @@ describe('EngineRuntime.prepare', () => {
         throw new Error('unused');
       },
       builds: { serial: 'serial', threads: 'threads' },
-      faultChannel: 'faults',
-      keeperChannel: 'keeper',
+      main: NO_LINKS,
       use,
     });
     return { runtime, calls };

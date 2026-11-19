@@ -33,18 +33,18 @@ import type { EngineControl } from '../reactor/control.js';
 import { loadReactor } from '../reactor/instance.js';
 import { watchLife, webLocks, type LifeLocks } from '../worker-life.js';
 import { InstanceUse } from './instance-use.js';
+import { answerLink } from './link.js';
 import { chooseThreads, DEFAULT_RENEWAL, limitsHolding, renewalReason, type RenewalLimits } from './policy.js';
 import type {
   EngineCommand,
   EngineEvent,
   EngineInit,
   KeeperGrow,
-  KeeperGrown,
   ModuleSource,
-  ThreadFault,
   WorkerError,
   WorkerCounts,
   WorkerInput,
+  WorkerLink,
   WorkerRun,
 } from './protocol.js';
 
@@ -81,17 +81,18 @@ export const ENGINE_ENDED = 'The part of LOSAT that runs searches stopped. Run t
 interface Generation {
   readonly id: number;
   readonly worker: Worker;
-  readonly faults: BroadcastChannel;
   /** Set after a search whose instance must be renewed before the next one. */
   renew: string | undefined;
   /** The threads and argv of the last preparation posted since the last search (prepare). */
   prepared: string | undefined;
   /**
-   * The channel to the keeper of the threaded instance's shared memory (memory-keeper.ts).
-   * The main thread holds no shared memory: a reference here would keep the memory until this
-   * thread collects it.
+   * The link of the keeper of the threaded instance's shared memory (memory-keeper.ts, link.ts): the last that the Engine
+   * worker posted, the keeper of the memory in use (runtime.ts, load). The main thread holds no shared memory: a
+   * reference here would keep the memory until this thread collects it.
    */
-  readonly keeper: BroadcastChannel;
+  keeper: MessagePort | undefined;
+  /** The main thread's ends of the links of the generation's thread workers and keepers (link.ts), closed with it. */
+  readonly links: MessagePort[];
   /**
    * Whether the threaded instance is in use, read and marked synchronously (instance-use.ts,
    * retire). Undefined where the page cannot share memory: no threaded instance starts then.
@@ -101,7 +102,7 @@ interface Generation {
   readonly lifeLock: string;
   /** Ends the wait for that lock when the Gateway ends the worker itself (end). */
   readonly life: AbortController;
-  /** Whether the generation has ended (end): its worker, its channels and the keeper are gone. */
+  /** Whether the generation has ended (end): its worker, its links and the keeper are gone. */
   ended: boolean;
   /**
    * Whether the worker said that it started (`started`, the answer to `init`): an error before it is a worker that could
@@ -253,15 +254,13 @@ export class WasmEngine implements EngineGateway {
     const worker =
       this.options.createWorker?.() ??
       new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module', name: 'losat-engine' });
-    const faults = new BroadcastChannel(`losat-web:engine-faults:${crypto.randomUUID()}`);
-    const keeper = new BroadcastChannel(`losat-web:engine-keeper:${crypto.randomUUID()}`);
     // A page that cannot share memory with its workers has no SharedArrayBuffer, or cannot post one.
     const use = typeof SharedArrayBuffer === 'function' && globalThis.crossOriginIsolated !== false ? InstanceUse.create() : undefined;
     const generation: Generation = {
       id,
       worker,
-      faults,
-      keeper,
+      keeper: undefined,
+      links: [],
       renew: undefined,
       prepared: undefined,
       use,
@@ -283,15 +282,12 @@ export class WasmEngine implements EngineGateway {
       );
     };
     worker.onmessageerror = () => this.fail(generation, new Error('The engine worker sent a message that could not be read'));
-    faults.onmessage = (event: MessageEvent<ThreadFault>) => this.fail(generation, new Error(event.data.message));
     const { assets } = this.options;
     const init: EngineInit = {
       type: 'init',
       generation: id,
       modules,
       builds: { serial: engineBuildName('serial', assets.serial), threads: engineBuildName('threads', assets.threads) },
-      faultChannel: faults.name,
-      keeperChannel: keeper.name,
       lifeLock: generation.lifeLock,
       ...(use === undefined ? {} : { use: use.buffer }),
     };
@@ -319,9 +315,17 @@ export class WasmEngine implements EngineGateway {
       }
       return;
     }
+    if (event.type === 'link') {
+      this.link(generation, event);
+      return;
+    }
     if (generation !== this.current) return;
     if (event.type === 'started') {
       generation.started = true;
+      return;
+    }
+    if (event.type === 'fault') {
+      this.fail(generation, new Error(event.message));
       return;
     }
     const active = this.active;
@@ -348,6 +352,21 @@ export class WasmEngine implements EngineGateway {
       subjectRetained: result.subjectRetained,
       ...(result.windowMasker === undefined ? {} : { windowMasker: result.windowMasker }),
       ...(result.runFiles === undefined ? {} : { runFiles: result.runFiles }),
+    });
+  }
+
+  /**
+   * Answers the main thread's end of a link of a thread worker or the keeper (link.ts): a thread that stopped fails the
+   * search, and the keeper's answer to the grow ends the generation (retire). Also while the generation is ending, which
+   * may wait for that answer; the links close when it has ended (end).
+   */
+  private link(generation: Generation, event: WorkerLink): void {
+    const { port } = event;
+    generation.links.push(port);
+    if (event.role === 'keeper') generation.keeper = port;
+    answerLink(port, (message) => {
+      if (message?.type === 'fault') this.fail(generation, new Error(message.message));
+      else if (message?.type === 'grown') this.end(generation, 'grown');
     });
   }
 
@@ -398,19 +417,18 @@ export class WasmEngine implements EngineGateway {
     if (generation.ended) return;
     generation.worker.onerror = null;
     generation.worker.onmessageerror = null;
-    if (generation.use?.retire() !== true) {
+    // A use starts only once the keeper's link has had this thread's answer (thread-host.ts, prepare): a runtime in use
+    // has its keeper here.
+    const { keeper } = generation;
+    if (generation.use?.retire() !== true || keeper === undefined) {
       this.end(generation, 'at-once');
       return;
     }
-    const { keeper } = generation;
-    keeper.onmessage = (event: MessageEvent<KeeperGrown>) => {
-      if (event.data?.type === 'grown') this.end(generation, 'grown');
-    };
     const grow: KeeperGrow = { type: 'grow' };
     keeper.postMessage(grow);
   }
 
-  /** Ends a generation once: its worker, with its thread workers and the keeper, and its channels. */
+  /** Ends a generation once: its worker, with its thread workers and the keeper, and its links. */
   private end(generation: Generation, how: RuntimeEnd): void {
     if (generation.ended) return;
     generation.ended = true;
@@ -420,8 +438,7 @@ export class WasmEngine implements EngineGateway {
     generation.worker.onerror = null;
     generation.worker.onmessageerror = null;
     generation.worker.terminate();
-    generation.faults.close();
-    generation.keeper.close();
+    for (const port of generation.links) port.close();
     try {
       this.options.onRuntimeEnd?.(how);
     } catch {

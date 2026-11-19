@@ -67,44 +67,63 @@ async function keepWorkers(page: Page): Promise<void> {
 }
 
 /**
- * Counts the page's open BroadcastChannels by name (`openChannels`), and keeps the names of the channels to the keepers
- * in their order (`keeperChannels`). With `holdKeeper`, the page does not hear a keeper answer that it grew the memory,
- * as while its grow takes long (up to 2 s on a busy machine, gateway.ts).
+ * Keeps the page's ends of the links to the keepers of the engine's shared memory (link.ts), in their order, with the
+ * Engine worker that posted each and whether it is open (`keeperLinks`). With `holdKeeper`, the page does not hear a
+ * keeper answer that it grew the memory, as while its grow takes long (up to 2 s on a busy machine, gateway.ts).
  */
-async function countChannels(page: Page, { holdKeeper = false } = {}): Promise<void> {
+async function watchKeepers(page: Page, { holdKeeper = false } = {}): Promise<void> {
   await page.addInitScript((hold) => {
-    const Native = window.BroadcastChannel;
-    const open: Record<string, number> = {};
-    const keepers: string[] = [];
-    Object.assign(window, { openChannels: open, keeperChannels: keepers });
-    const handler = Object.getOwnPropertyDescriptor(Native.prototype, 'onmessage')!;
-    window.BroadcastChannel = class extends Native {
-      constructor(name: string) {
-        super(name);
-        open[name] = (open[name] ?? 0) + 1;
-        if (!name.startsWith('losat-web:engine-keeper:')) return;
-        keepers.push(name);
-        if (!hold) return;
-        Object.defineProperty(this, 'onmessage', {
-          get: () => handler.get!.call(this),
-          set: (listener: ((event: MessageEvent) => void) | null) =>
-            handler.set!.call(this, listener === null ? null : (event: MessageEvent) => event.data?.type !== 'grown' && listener.call(this, event)),
-        });
-      }
-      override close(): void {
-        open[this.name] = (open[this.name] ?? 0) - 1;
-        super.close();
-      }
+    const keepers: Array<{ readonly worker: Worker; open: boolean }> = [];
+    Object.assign(window, { keeperLinks: keepers });
+    // Worker.prototype's own onmessage, also under a subclass of Worker (keepWorkers).
+    let prototype: object = Worker.prototype;
+    while (Object.getOwnPropertyDescriptor(prototype, 'onmessage') === undefined) prototype = Object.getPrototypeOf(prototype);
+    const workerHandler = Object.getOwnPropertyDescriptor(prototype, 'onmessage')!;
+    const portHandler = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage')!;
+    const keep = (worker: Worker, port: MessagePort) => {
+      const entry = { worker, open: true };
+      keepers.push(entry);
+      const close = port.close.bind(port);
+      port.close = () => {
+        entry.open = false;
+        close();
+      };
+      if (!hold) return;
+      Object.defineProperty(port, 'onmessage', {
+        get: () => portHandler.get!.call(port),
+        set: (listener: ((event: MessageEvent) => void) | null) =>
+          portHandler.set!.call(port, listener === null ? null : (event: MessageEvent) => event.data?.type !== 'grown' && listener.call(port, event)),
+      });
     };
+    Object.defineProperty(prototype, 'onmessage', {
+      configurable: true,
+      get(this: Worker) {
+        return workerHandler.get!.call(this);
+      },
+      set(this: Worker, listener: ((event: MessageEvent) => void) | null) {
+        workerHandler.set!.call(
+          this,
+          listener === null
+            ? null
+            : (event: MessageEvent) => {
+                if (event.data?.type === 'link' && event.data.role === 'keeper') keep(this, event.data.port);
+                listener.call(this, event);
+              },
+        );
+      },
+    });
   }, holdKeeper);
 }
 
-/** Whether the page's channel to the keeper of the `index`th Engine worker it started is open. */
+/** Whether the page's link to the keeper of the `index`th Engine worker it started is open. */
 async function keeperOpen(page: Page, index: number): Promise<boolean> {
   return page.evaluate((at) => {
-    const { openChannels, keeperChannels } = window as unknown as { openChannels: Record<string, number>; keeperChannels: string[] };
-    const name = keeperChannels[at];
-    return name !== undefined && (openChannels[name] ?? 0) > 0;
+    const { keeperLinks, keptWorkers } = window as unknown as {
+      keeperLinks: Array<{ worker: Worker; open: boolean }>;
+      keptWorkers: Record<string, Worker[]>;
+    };
+    const worker = keptWorkers['losat-engine']?.[at];
+    return keeperLinks.some((link) => link.worker === worker && link.open);
   }, index);
 }
 
@@ -113,13 +132,9 @@ async function startedWorkers(page: Page, name: 'losat-data' | 'losat-engine'): 
   return page.evaluate((which) => (window as unknown as { keptWorkers: Record<string, Worker[]> }).keptWorkers[which]?.length ?? 0, name);
 }
 
-/** How many of the page's channels to the keepers of the engine's shared memory are open. */
-async function openKeeperChannels(page: Page): Promise<number> {
-  return page.evaluate(() =>
-    Object.entries((window as unknown as { openChannels: Record<string, number> }).openChannels)
-      .filter(([name]) => name.startsWith('losat-web:engine-keeper:'))
-      .reduce((sum, [, count]) => sum + count, 0),
-  );
+/** How many of the page's links to the keepers of the engine's shared memory are open. */
+async function openKeeperLinks(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { keeperLinks: Array<{ open: boolean }> }).keeperLinks.filter((link) => link.open).length);
 }
 
 /** How many workers of `name` the page ended itself. */
@@ -561,14 +576,15 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
   test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
   test.setTimeout(180_000);
   await keepWorkers(page);
-  await countChannels(page);
+  await watchKeepers(page);
   await startLongSearch(page);
+  expect(await openKeeperLinks(page)).toBe(1);
   await endWorker(page, 'losat-engine');
   await waitStatus(page, 1, 'failed', 30_000);
   expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${ENGINE_ENDED} A failed run keeps no results.`);
   // The worker's threads and its keeper ended with it: the page ends its runtime at once. Before, the page waited for the
   // keeper's answer for good, with the keeper's channel open (here in Chromium, Firefox and WebKit).
-  await expect.poll(() => openKeeperChannels(page), { timeout: 15_000 }).toBe(0);
+  await expect.poll(() => openKeeperLinks(page), { timeout: 15_000 }).toBe(0);
   await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
   await page.getByTestId('tab-search').click();
   await submit(page);
@@ -582,7 +598,7 @@ test('a cancelled threaded search whose Engine worker ends before its keeper ans
   test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
   test.setTimeout(180_000);
   await keepWorkers(page);
-  await countChannels(page, { holdKeeper: true });
+  await watchKeepers(page, { holdKeeper: true });
   await startLongSearch(page);
   const engine = (await startedWorkers(page, 'losat-engine')) - 1;
   expect(await keeperOpen(page, engine)).toBe(true);

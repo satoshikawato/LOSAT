@@ -1,0 +1,35 @@
+{
+  "losat_version": "0.2.0",
+  "losat_commit": "93ca2f652617acac09d416c28c293cc8a1a501d1",
+  "ncbi_version": "2.17.0",
+  "rpsbproc_version": "0.5.1",
+  "wasm_commit": "7f7db49c",
+  "toolmt_commit": "095ff0c16",
+  "hardware": "Dual Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz (2 NUMA nodes, 64 physical cores total)",
+  "bp_db_parity": [
+    {
+      "case": "bp",
+      "losat_db_sha16": "3a92bc0410a1ac8a",
+      "ncbi_db_sha16": "3a92bc0410a1ac8a",
+      "equal": "yes"
+    },
+    {
+      "case": "bpff",
+      "losat_db_sha16": "f4ecd9f36f7f2ea1",
+      "ncbi_db_sha16": "f4ecd9f36f7f2ea1",
+      "equal": "yes"
+    }
+  ],
+  "input_checksums": {
+    "/home/kawato/losat-baselines/release-v020-20261025/work/j-speed/results2/n16/runs.tsv": "e88da3985c28b1a8ec2478d5e246ab97f0389542e3605e5c6294bae1d1c3c1b7",
+    "/home/kawato/losat-baselines/release-v020-20261025/work/j-speed/results2/inputs.tsv": "224b7b9a635cf36331d1f7477a909d1611337710d1b89334ba420088c32e8002",
+    "/home/kawato/losat-baselines/release-v020-20261025/work/bench-v020-ext/results/n0.tsv": "a69b14ba0f036ac826d383d2ee0e23121d9a0429491872c02f943921580a83aa",
+    "/home/kawato/losat-baselines/release-v020-20261025/work/bench-v020-ext/results/n1.tsv": "3818d7562f3b7f9a0e187b6a2e5ba928c25bb94d06c42ac65c6fea08ac2ab431",
+    "/home/kawato/losat-baselines/release-v020-20261025/work/bench-v020-ext/results/inputs_ext.tsv": "0109259bfd621a6252a109a5890fb878fd28ab9c3ca4570fd94b2ea497849e69",
+    "/home/kawato/losat-baselines/v020-board-20261030/compact/data/wasm_scale.csv": "9b0079777b42e7b9f45a8077b3137b160d17885a07c7a142a91ff986777deb92",
+    "/home/kawato/losat-baselines/tool-mt-20261116/results/toolmt.json": "03654c992881507e3cb906f0ad7cd43cf1fa6632745b1ea7e8c73602a04578bb",
+    "/home/kawato/losat-baselines/dropin-survey-20261029/perf/ws_results/dt1.tsv": "ed13707aa4fdffe4595063f3531f33f6e6c4d05240ced635bca97ac808a0dfc7",
+    "/home/kawato/losat-baselines/dropin-survey-20261029/perf/ws_results/dt13.tsv": "4837b5c9ed5377bb741237138567f7a3624d00419192c3d4631a4fa380f9d436",
+    "/home/kawato/losat-baselines/dropin-survey-20261029/perf/ws_results/dt15.tsv": "874375b0c374ab31676e348593de3b9b40c19e6c66b0baf5062f8fc391e4d24c"
+  }
+}

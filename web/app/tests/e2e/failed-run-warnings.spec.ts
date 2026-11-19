@@ -6,7 +6,8 @@
 // warnings shown and the error are the native CLI's standard error for the run's own command line,
 // line for line. The FakeEngine fails a run of an empty input with a marked warning. A run of two
 // searches (ABI §7) has the outcome of the search of its own -outfmt: it fails as the command line
-// fails, with that search's warnings only (D3 review, 2026-11-19).
+// fails, with that search's warnings only (D3 review, 2026-11-19), and the formatting warnings of its
+// own format only (D3 review r2, 2026-11-19).
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -158,28 +159,61 @@ test('a run of two searches that its format 0 search fails shows the warnings of
 });
 
 // The run's own -outfmt 6 with -num_alignments 0 (a hit list of 0 for the tabular formats): the
-// command line fails with NCBI's error after the formatting handler's warning (exit status 1), and so
-// does the run, with that warning shown, though outfmt 0, which the run also writes, has a hit list
-// of its own (D3 review, 2026-11-19; it completed before).
-test('a run whose own -outfmt has no hit list fails as the command line does', async ({ page }, testInfo) => {
+// command line fails with NCBI's error after the formatting handler's warning (exit status 1), though
+// outfmt 0, which the run also writes, has a hit list of its own. The form refuses the command line
+// with that error before any run, as it refuses BLASTN's and BLASTX's (D3 review r2, 2026-11-19:
+// BLASTP's validation let it run, and with -evalue 0 gave the e-value's error, which the command
+// line gives only after the hit list's).
+test('a command line whose own -outfmt has no hit list is refused with the command line\'s error', async ({ page }, testInfo) => {
   test.skip(!BUILD_HAS_ENGINE, 'the engine checks the hit list (engine build)');
   const subject = '>s1 ok\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMA\n';
+  const error = 'BLAST query/options error: No hits are being saved';
   await program(page, 'blastp');
-  await openParameters(page);
-  await page.getByTestId('param-num_alignments').fill('0');
-  await page.getByTestId('param-extra').fill('-outfmt 6');
-  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
   await paste(page, 'query', PROTEIN_QUERY);
   await paste(page, 'subject', subject);
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await page.getByTestId('param-evalue').fill('0');
+  await page.getByTestId('param-extra').fill('-outfmt 6');
+  const validation = page.getByTestId('argv-validation');
+  await expect(validation).toHaveAttribute('data-state', 'invalid');
+  await expect(validation).toContainText(error);
+  await expect(validation).not.toContainText('expect value');
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toContainText(error);
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The native standard error: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const directory = mkdtempSync(join(testInfo.outputPath(), 'native-'));
+  writeFileSync(join(directory, 'query.fa'), PROTEIN_QUERY);
+  writeFileSync(join(directory, 'subject.fa'), subject);
+  const cli = spawnSync(NATIVE, ['blastp', '-query', 'query.fa', '-subject', 'subject.fa', '-num_alignments', '0', '-evalue', '0', '-outfmt', '6', '-num_threads', '1'], { cwd: directory });
+  expect(cli.status).toBe(1);
+  expect(String(cli.stderr)).toBe(`Warning: [blastp] Examining 5 or more matches is recommended\n${error}\nPlease refer to the BLAST+ user manual.\n`);
+});
+
+// The formatting handler warns of -line_length for output formats above 4 only (NCBI's
+// blast_args.cpp): a failed run whose own format is outfmt 0 shows the subject's warning alone, as
+// the command line writes it, not the -line_length warning of the tabular formats that the run also
+// writes (D3 review r2, 2026-11-19).
+test('a failed run shows no formatting warning of the formats that its command line does not ask for', async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the formatting warnings of the engine (engine build)');
+  await program(page, 'blastn');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', EMPTY_RECORD);
+  await openParameters(page);
+  await page.getByTestId('param-line_length').fill('80');
   await submit(page);
   await waitStatus(page, 1, 'failed');
   await pickRun(page, 1);
-  const status = page.getByTestId('results-status');
-  await expect(status).toContainText('Run 1 failed: BLAST query/options error: No hits are being saved');
+  await expect(page.getByTestId('results-status')).toContainText(`Run 1 failed: ${ERROR}.`);
   const shown = await page.getByTestId('results-failed-diagnostics').evaluate((element) => element.textContent ?? '');
-  expect(shown).toBe('Warning: [blastp] Examining 5 or more matches is recommended\n');
-  const cli = await nativeRun(page, testInfo, 'blastp', PROTEIN_QUERY, subject);
+  expect(shown).toBe('Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n');
+  expect(await runOptions(page)).toEqual(['-line_length', '80']);
+  const cli = await nativeRun(page, testInfo, 'blastn', QUERY, EMPTY_RECORD);
   if (cli === undefined) return;
-  expect(cli.status).toBe(1);
-  expect(cli.stderr).toBe(`${shown}BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n`);
+  expect(cli.status).toBe(3);
+  expect(cli.stderr).toBe(`${shown}${ERROR}\n`);
 });

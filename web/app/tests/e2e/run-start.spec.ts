@@ -154,6 +154,41 @@ test('a failed TBLASTX run keeps the file of its -logfile, with NCBI\'s error, u
   if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -logfile run.log, failed').toBe(true);
 });
 
+// The file of -logfile holds what the CLI's file holds for the run's own command line (line WQA's
+// sweep, D3 review r2, 2026-11-19). TBLASTX with -num_alignments 0 makes two searches (ABI §7): the
+// tabular formats' fails alone with NCBI's `No hits are being saved`, and the run completes as the
+// CLI's run of outfmt 0, whose file is empty. The other search's warning and error, which the file
+// had, are the run's warnings (ABI §5, stream 3).
+test('the file of -logfile of TBLASTX holds what the CLI writes for the run\'s own command line', async ({ page, browserName }) => {
+  await program(page, 'tblastx');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await page.getByTestId('param-extra').fill('-logfile run.log');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  await page.getByTestId('format-run-files').click();
+  const file = page.getByTestId('run-file-0');
+  await expect(file.getByTestId('run-file-name')).toHaveText('run.log');
+  await expect(file.getByTestId('run-file-empty')).toHaveText('The file is empty.');
+  await shoot(page.getByTestId('results-outputs'), '05-outputs-logfile-two-searches', browserName);
+  const saved = await downloaded(page, () => file.getByTestId('run-file-download-0').click());
+  expect(saved.bytes.length).toBe(0);
+  const native = nativeLogFile(['tblastx', '-num_alignments', '0'], QUERY, SUBJECT);
+  if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -num_alignments 0 -logfile run.log').toBe(true);
+  // The tabular formats' warning and error are the run's warnings.
+  await page.getByTestId('results-view-details').click();
+  const warnings = page.getByTestId('run-diagnostics');
+  await expect(warnings).toBeVisible();
+  expect(await warnings.evaluate((element) => element.textContent ?? '')).toBe(
+    'Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n',
+  );
+});
+
 // -conffile: the engine's start names the file, the form asks for it, and without it the engine's error
 // (the CLI's) keeps the search from starting. A file of any name is read under the argv's name; a file
 // that NCBI cannot read is refused with NCBI's report.

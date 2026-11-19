@@ -3,7 +3,7 @@
 // threaded instance and the memory keeper's channel. The real Engine worker runs in the
 // browsers (tests/e2e/engine.spec.ts).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WasmEngine, type EngineAssets, type WasmEngineOptions } from 'losat';
+import { ENGINE_NOT_STARTED, WasmEngine, type EngineAssets, type WasmEngineOptions } from 'losat';
 import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from 'losat/ports';
 import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
 import {
@@ -511,8 +511,24 @@ describe('WasmEngine', () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'alive', generation: 1 });
     worker.onerror?.({ message: 'out of memory', preventDefault: () => undefined } as ErrorEvent);
     await expect(run).rejects.toThrow('The engine worker stopped: out of memory');
+    expect(worker.terminated).toBe(true);
+    const next = engine.run(request('r2'), output(), () => undefined);
+    await posted(() => workers[1], 1);
+    workers[1]!.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
+    expect((await next).runtimeGeneration).toBe(2);
+  });
+
+  // Line WQA's sweep, D1 (2026-11-19): a worker script that could not be loaded gives an error event without a message,
+  // and the search failed with "The engine worker stopped: an error without a message".
+  it('fails the search with LOSAT\'s own failure when the worker could not start, and starts a new one for the next search', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    worker.onerror?.({ message: '', preventDefault: () => undefined } as ErrorEvent);
+    await expect(run).rejects.toMatchObject({ name: 'UnavailableError', message: ENGINE_NOT_STARTED });
     expect(worker.terminated).toBe(true);
     const next = engine.run(request('r2'), output(), () => undefined);
     await posted(() => workers[1], 1);

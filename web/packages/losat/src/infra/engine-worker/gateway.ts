@@ -14,6 +14,7 @@ import type { RegistryFile } from '../../domain/run-files.js';
 import {
   InputMismatchError,
   RunCancelledError,
+  UnavailableError,
   withRunFiles,
   type EngineGateway,
   type EngineInput,
@@ -64,6 +65,9 @@ export interface WasmEngineOptions {
   readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
 
+/** Why a search fails whose Engine worker could not start: its script or its first message (line WQA's sweep, D1). */
+export const ENGINE_NOT_STARTED = 'LOSAT could not start the part that runs searches';
+
 interface Generation {
   readonly id: number;
   readonly worker: Worker;
@@ -83,6 +87,8 @@ interface Generation {
    * retire). Undefined where the page cannot share memory: no threaded instance starts then.
    */
   readonly use: InstanceUse | undefined;
+  /** Whether the worker said that it started (`alive`): an error before it is a worker that could not start. */
+  started: boolean;
 }
 
 interface ActiveRun {
@@ -229,14 +235,30 @@ export class WasmEngine implements EngineGateway {
     const keeper = new BroadcastChannel(`losat-web:engine-keeper:${crypto.randomUUID()}`);
     // A page that cannot share memory with its workers has no SharedArrayBuffer, or cannot post one.
     const use = typeof SharedArrayBuffer === 'function' && globalThis.crossOriginIsolated !== false ? InstanceUse.create() : undefined;
-    const generation: Generation = { id, worker, faults, keeper, renew: undefined, prepared: undefined, use };
+    const generation: Generation = {
+      id,
+      worker,
+      faults,
+      keeper,
+      renew: undefined,
+      prepared: undefined,
+      use,
+      started: false,
+    };
     worker.onmessage = (event: MessageEvent<EngineEvent>) => this.receive(generation, event.data);
     worker.onerror = (event) => {
       event.preventDefault();
-      this.fail(generation, `The engine worker stopped: ${event.message || 'an error without a message'}`);
+      // A script that could not be loaded gives an error event without a message in Chromium, Firefox and WebKit, and the
+      // search failed with "The engine worker stopped: an error without a message" (line WQA's sweep, D1).
+      this.fail(
+        generation,
+        generation.started
+          ? new Error(`The engine worker stopped: ${event.message || 'an error without a message'}`)
+          : new UnavailableError(ENGINE_NOT_STARTED),
+      );
     };
-    worker.onmessageerror = () => this.fail(generation, 'The engine worker sent a message that could not be read');
-    faults.onmessage = (event: MessageEvent<ThreadFault>) => this.fail(generation, event.data.message);
+    worker.onmessageerror = () => this.fail(generation, new Error('The engine worker sent a message that could not be read'));
+    faults.onmessage = (event: MessageEvent<ThreadFault>) => this.fail(generation, new Error(event.data.message));
     const { assets } = this.options;
     const init: EngineInit = {
       type: 'init',
@@ -263,6 +285,10 @@ export class WasmEngine implements EngineGateway {
 
   private receive(generation: Generation, event: EngineEvent): void {
     if (generation !== this.current || !('generation' in event) || event.generation !== generation.id) return;
+    if (event.type === 'alive') {
+      generation.started = true;
+      return;
+    }
     const active = this.active;
     if (active === undefined || active.settled || active.generation !== generation || active.runId !== event.runId) return;
     if (event.type === 'phase') {
@@ -291,11 +317,11 @@ export class WasmEngine implements EngineGateway {
   }
 
   /** The runtime stopped (a trap in a thread, or the worker itself); its search fails. */
-  private fail(generation: Generation, message: string): void {
+  private fail(generation: Generation, error: Error): void {
     if (generation !== this.current) return;
     this.retire();
     const active = this.active;
-    if (active !== undefined && active.generation === generation) this.settle(active, new Error(message));
+    if (active !== undefined && active.generation === generation) this.settle(active, error);
   }
 
   /**

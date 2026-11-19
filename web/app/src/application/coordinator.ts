@@ -9,6 +9,7 @@
 // included records with their IDs and lengths, which the engine checks at `register`.
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
+  isUnavailable,
   RunCancelledError,
   runFilesOf,
   type EngineGateway,
@@ -25,6 +26,7 @@ import { fastaParser, programById } from '../domain/programs';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
+import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
 import { taskOf } from './results';
 import { Store } from './store';
@@ -154,7 +156,7 @@ export class Coordinator {
       try {
         start = await this.deps.engine.start(argv);
       } catch (error) {
-        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+        return { ok: false, message: uncheckedOptions(error) };
       }
       if (!start.ok) return start;
       let conffile: Prepared['conffile'];
@@ -176,7 +178,7 @@ export class Coordinator {
       try {
         validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
-        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+        return { ok: false, message: uncheckedOptions(error) };
       }
       if (!validation.ok) return validation;
       prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
@@ -208,7 +210,7 @@ export class Coordinator {
         query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
         subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
       } catch (error) {
-        return { ok: false, message: errorMessage(error) };
+        return { ok: false, message: failureText(error) };
       }
       const title = request.title?.trim();
       // The run reads the file under the name that its argv gives the option.
@@ -398,6 +400,8 @@ export class Coordinator {
       const { bytes, sha256, records } = await runInput;
       return Object.freeze({ name, bytes, sha256, revisionIds, records });
     } catch (error) {
+      // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
+      if (isUnavailable(error)) throw error;
       throw new Error(`${role} FASTA: ${errorMessage(error)}`, { cause: error });
     }
   }
@@ -473,7 +477,7 @@ export class Coordinator {
         status: cancelled ? 'cancelled' : 'failed',
         record: {
           endedAt: this.deps.now(),
-          ...(cancelled ? {} : { error: errorMessage(error) }),
+          ...(cancelled ? {} : { error: failureText(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
         },
       });
@@ -541,4 +545,9 @@ function engineInput(input: InputSnapshot): EngineInput {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Why the engine could not check the options of a request: a part of LOSAT that is unavailable is said as the page says it. */
+function uncheckedOptions(error: unknown): string {
+  return isUnavailable(error) ? failureText(error) : `The options could not be checked: ${errorMessage(error)}`;
 }

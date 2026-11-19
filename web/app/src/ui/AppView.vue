@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
 import type { Attention } from '../application/attention';
+import { withRemedy, type Availability } from '../application/availability';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
@@ -23,10 +24,20 @@ const props = defineProps<{
   counts: CountsLoader;
   results: ResultsBrowser;
   attention: Attention;
+  availability: Availability;
   usesFakeEngine: boolean;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
+const availabilityState = useStore(props.availability.state);
+/**
+ * What of LOSAT could not be loaded or stopped, and the remedy, once for the page (line WQA's sweep, D1): a
+ * reload also loses the results of this session, which the page then says.
+ */
+const unavailable = computed(() => {
+  const problem = availabilityState.value.problem;
+  return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some((run) => run.status === 'completed'));
+});
 const tab = ref<'search' | 'results'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const mainTabs = ref<{ focus: () => void }>();
@@ -93,6 +104,7 @@ onUnmounted(() => {
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
+  <p v-if="unavailable" class="error unavailable" role="alert" data-testid="losat-unavailable">{{ unavailable }}</p>
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="dismissResume" />
   <!-- The tabs stay in the page's navigation landmark, which they were before they were tabs (WA2-AX-12). -->
   <nav aria-label="Main">

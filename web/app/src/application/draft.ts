@@ -27,7 +27,7 @@ import {
   type RegistryFile,
   type SequenceKind,
 } from 'losat/domain';
-import { isFileReadError, type EngineGateway, type InputCheck, type ProgramDescription, type StartInfo } from 'losat/ports';
+import { isFileReadError, isUnavailable, type EngineGateway, type InputCheck, type ProgramDescription, type StartInfo } from 'losat/ports';
 import {
   accessionLines,
   accessionsOnALine,
@@ -52,6 +52,7 @@ import { describedSections, formControlOf, formParameters, setFields, type Field
 import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
+import { failureText, withRemedy } from './availability';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import { registryName, unreadableConffile } from './conffile';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
@@ -67,8 +68,11 @@ export type SourceCheck =
   | { readonly state: 'ok'; readonly records: number }
   /** `record` is the index, in the record table, of the record that the message names. */
   | { readonly state: 'refused'; readonly message: string; readonly record?: number }
-  /** The check could not run (not a verdict on the input). */
-  | { readonly state: 'error'; readonly message: string };
+  /**
+   * The check could not run (not a verdict on the input); `unavailable` when a part of LOSAT was (UnavailableError,
+   * line WQA's sweep, D1).
+   */
+  | { readonly state: 'error'; readonly message: string; readonly unavailable?: true };
 
 /** A record table of a source and the records that runs leave out of it. */
 export interface SourceTable {
@@ -92,6 +96,11 @@ export interface DraftSource {
   readonly parser: FastaParserKind;
   /** Why the source could not be indexed (the index scan's error). */
   readonly error?: string;
+  /**
+   * The index failed because a part of LOSAT could not be loaded or stopped (UnavailableError), not because of the
+   * input: the card does not blame the input, and the page says what failed (line WQA's sweep, D1).
+   */
+  readonly unavailable?: true;
   /** The record table: the revision of the data layer that includes every record. */
   readonly base?: DatasetRevision;
   /** Indices of the records that runs leave out, ascending. */
@@ -149,7 +158,9 @@ export interface RoleDraft {
 
 export type Validation =
   | { readonly state: 'idle' | 'checking' | 'ok' }
-  | { readonly state: 'invalid'; readonly message: string };
+  | { readonly state: 'invalid'; readonly message: string }
+  /** The engine could not check the options: a part of LOSAT could not be loaded or stopped (line WQA's sweep, D1). */
+  | { readonly state: 'unavailable'; readonly message: string };
 
 /** The counts of a taxonomy ID that the draft can search with. */
 export interface SavedCountsFile {
@@ -193,6 +204,8 @@ export interface DraftState {
   /** The engine's `describe` of the program, once it has arrived. */
   readonly description?: ProgramDescription;
   readonly descriptionError?: string;
+  /** The describe failed because a part of LOSAT could not be loaded or stopped (UnavailableError): the page says so. */
+  readonly descriptionUnavailable?: true;
   /** The engine's `validate` of the argv that the draft makes now. */
   readonly validation: Validation;
   /**
@@ -306,7 +319,7 @@ export class SearchDraft {
     }
     const description = this.described.get(program);
     // The engine's start of the other program's argv is not this program's (its -conffile row goes until the validation).
-    this.set({ program, description, descriptionError: undefined, message: undefined, start: undefined });
+    this.set({ program, description, descriptionError: undefined, descriptionUnavailable: undefined, message: undefined, start: undefined });
     this.loadDescription(program);
     for (const role of ROLES) {
       const parser = fastaParser(next, role);
@@ -871,7 +884,7 @@ export class SearchDraft {
       try {
         result = await this.prepareAndEnqueue();
       } catch (error) {
-        result = { ok: false, message: `The search could not be started: ${messageOf(error)}` };
+        result = { ok: false, message: isUnavailable(error) ? failureText(error) : `The search could not be started: ${messageOf(error)}` };
       }
       // A started search shows itself: the page moves to the run (stop-describing-ui rule 6).
       if (!result.ok) this.set({ message: { kind: 'error', text: result.message } });
@@ -1031,6 +1044,11 @@ export class SearchDraft {
     }
     for (const source of draft.sources) {
       const where = `${label} (${describeSource(source)})`;
+      if (source.status === 'failed' && source.unavailable === true) {
+        // LOSAT's own failure, not the input's (line WQA's sweep, D1): what the page says.
+        const message = withRemedy(source.error ?? '');
+        return { message, short: message };
+      }
       if (source.status === 'failed') {
         return { message: `${where}: ${source.error ?? 'the input cannot be read'}`, short: `${where} cannot be read.` };
       }
@@ -1114,7 +1132,9 @@ export class SearchDraft {
           this.scheduleValidation();
         },
         (error: unknown) => {
-          if (this.state.get().program === program) this.set({ descriptionError: messageOf(error) });
+          if (this.state.get().program === program) {
+            this.set({ descriptionError: messageOf(error), descriptionUnavailable: isUnavailable(error) ? true : undefined });
+          }
         },
       ),
     );
@@ -1141,6 +1161,7 @@ export class SearchDraft {
       if (kept === undefined) delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
       delete (next as { error?: unknown }).error;
+      delete (next as { unavailable?: unknown }).unavailable;
       delete (next as { indexMs?: unknown }).indexMs;
       if (kept?.indexMs !== undefined) return { ...next, indexMs: kept.indexMs };
       return next;
@@ -1195,6 +1216,7 @@ export class SearchDraft {
         ...source,
         status: 'failed',
         error: messageOf(error),
+        ...(isUnavailable(error) ? { unavailable: true } : {}),
         ...(lead === undefined ? {} : { lead }),
       }));
     } finally {
@@ -1234,7 +1256,7 @@ export class SearchDraft {
       }
       check = toSourceCheck(await verdict, source);
     } catch (error) {
-      check = { state: 'error', message: messageOf(error) };
+      check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
     if (this.generations.get(task) !== generation || this.state.get().program !== program) return;
     const checkMs = this.deps.now() - started;
@@ -1320,7 +1342,8 @@ export class SearchDraft {
       // The chosen file changed or went after it was chosen: the browser no longer reads it.
       const message =
         registry !== undefined && isFileReadError(error) ? unreadableConffile(registry.name, registry.file.name, error) : messageOf(error);
-      validation = { state: 'invalid', message };
+      // A part of LOSAT that could not be loaded is not a refusal of the options (line WQA's sweep, D1).
+      validation = isUnavailable(error) ? { state: 'unavailable', message } : { state: 'invalid', message };
     }
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;

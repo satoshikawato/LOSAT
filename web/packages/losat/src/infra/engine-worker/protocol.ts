@@ -155,6 +155,8 @@ export interface WorkerError {
 }
 
 export type EngineEvent =
+  /** The worker started (its script loaded and took `init`): an error before this is a worker that could not start (line WQA's sweep, D1). */
+  | { readonly type: 'alive'; readonly generation: number }
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }

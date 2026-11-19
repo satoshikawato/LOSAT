@@ -194,9 +194,10 @@ describe('loadReactor', () => {
 
   it('refuses bytes of another SHA-256 even when they compile', async () => {
     serve('application/wasm');
-    await expect(loadReactor({ ...asset, sha256: 'b'.repeat(64) })).rejects.toThrow(
-      `the engine file /engine/serial.wasm is not the one of this release (SHA-256 ${asset.sha256})`,
-    );
+    await expect(loadReactor({ ...asset, sha256: 'b'.repeat(64) })).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: `LOSAT could not load its engine file /engine/serial.wasm: it is not the one of this release (SHA-256 ${asset.sha256})`,
+    });
   });
 
   it('compiles from the bytes when the response is not served as Wasm', async () => {
@@ -206,9 +207,38 @@ describe('loadReactor', () => {
     expect(streaming).not.toHaveBeenCalled();
   });
 
+  // Line WQA's sweep, D1 (2026-11-19): a file that could not be downloaded is LOSAT's failure, named with its URL and why;
+  // the browser's own words for a network error ("Failed to fetch") named no file.
   it('reports a response that is not OK', async () => {
     serve('text/plain', 404);
-    await expect(loadReactor(asset)).rejects.toThrow('the engine file /engine/serial.wasm could not be loaded (HTTP 404)');
+    await expect(loadReactor(asset)).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (HTTP 404)',
+    });
+  });
+
+  it('reports a network error with the file, not in the words of the browser', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    await expect(loadReactor(asset)).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error)',
+    });
+  });
+
+  it('reports a connection that ends during the body as a network error', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.subarray(0, 8));
+        controller.error(new TypeError('network error'));
+      },
+    });
+    vi.stubGlobal('fetch', async () => new Response(body, { headers: { 'Content-Type': 'application/octet-stream' } }));
+    await expect(loadReactor(asset)).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error)',
+    });
   });
 });
 

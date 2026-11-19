@@ -4,6 +4,7 @@ import { RunOutputWriter, sha256Hex } from 'losat';
 import { CUSTOM_OUTPUT, type RegistryFile, type RunFile } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
+  UnavailableError,
   withRunFiles,
   type EngineGateway,
   type EnginePhase,
@@ -147,6 +148,40 @@ describe('Coordinator', () => {
     expect(engine.started).toEqual([first, second]);
     expect(new TextDecoder().decode(await data.readOutput(first, 6))).toBe(`${first}\n`);
     expect(await data.readDiagnostics(first)).toBe(`Warning: ${first}\n`);
+  });
+
+  // Line WQA's sweep, D1: a part of LOSAT that could not be loaded is said as the page says it.
+  it('a run that fails for a part of LOSAT that is unavailable fails with it and the remedy', async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine, (data) =>
+      Object.assign(Object.create(data) as DataService, {
+        commitRun: () => Promise.reject(new UnavailableError('LOSAT could not start the part that keeps the results')),
+      }),
+    );
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'running');
+    engine.finish(runId);
+    await waitFor(coordinator, runId, 'failed');
+    expect(viewOf(coordinator, runId)!.record.error).toBe('LOSAT could not start the part that keeps the results. Reload the page.');
+  });
+
+  it('refuses a request with the remedy, not as a fault of the options or the input, when a part of LOSAT is unavailable', async () => {
+    const engine = new ManualEngine();
+    const unavailable = new UnavailableError('LOSAT could not download its engine file /engine/serial.wasm (network error)');
+    engine.start = () => Promise.reject(unavailable);
+    const { coordinator } = setup(engine);
+    expect(await coordinator.enqueue(request)).toEqual({
+      ok: false,
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
+    });
+    const reading = new ManualEngine();
+    const { coordinator: other } = setup(reading, (data) =>
+      Object.assign(Object.create(data) as DataService, { indexSource: () => Promise.reject(unavailable) }),
+    );
+    expect(await other.enqueue(request)).toEqual({
+      ok: false,
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
+    });
   });
 
   it('freezes the snapshot so later edits cannot change a queued job', async () => {

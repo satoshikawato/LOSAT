@@ -56,7 +56,8 @@ function onConffile(event: Event): void {
 
 <template>
   <div class="parameter-form" data-testid="parameter-form">
-    <p v-if="state.descriptionError" class="error">The engine's options could not be read: {{ state.descriptionError }}</p>
+    <!-- A part of LOSAT that could not be loaded is said once, for the page (AppView; line WQA's sweep, D1). -->
+    <p v-if="state.descriptionError && !state.descriptionUnavailable" class="error">The engine's options could not be read: {{ state.descriptionError }}</p>
     <!-- A group, not a fieldset: its rows share the form's label column (CSS subgrid), which
          Chromium does not give a fieldset. Keyed by program: a control's own state ("Other", an
          open help) does not pass to another program's control of the same flag. -->

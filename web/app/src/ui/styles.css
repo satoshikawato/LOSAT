@@ -414,6 +414,15 @@ input[type='radio'] {
   color: #004a73;
 }
 
+/* What of LOSAT could not be loaded or stopped, once for the page (AppView; line WQA's sweep, D1). */
+.unavailable {
+  background: var(--error-bg);
+  border: 1px solid var(--error-line);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin: 8px 0;
+}
+
 .error {
   color: var(--error);
 }

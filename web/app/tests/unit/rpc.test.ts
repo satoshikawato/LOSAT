@@ -104,4 +104,19 @@ describe('rpc', () => {
     await expect(pending).rejects.toThrow('the worker stopped');
     await expect(client.add(1, 2)).rejects.toThrow('the worker stopped');
   });
+
+  it('names what could not start, and tells it once', async () => {
+    const target = new EventTarget();
+    const endpoint: RpcEndpoint = {
+      postMessage: () => undefined,
+      addEventListener: (type, listener) => target.addEventListener(type, listener),
+    };
+    const told: Error[] = [];
+    const client = rpcClient<Service>(endpoint, ['add'], { notStarted: () => new Error('the part could not start'), onEnd: (error) => told.push(error) });
+    const pending = client.add(1, 2);
+    target.dispatchEvent(new Event('error'));
+    target.dispatchEvent(new Event('error'));
+    await expect(pending).rejects.toThrow('the part could not start');
+    expect(told.map((error) => error.message)).toEqual(['the part could not start']);
+  });
 });

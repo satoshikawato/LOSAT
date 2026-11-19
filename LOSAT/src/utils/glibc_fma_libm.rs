@@ -10,16 +10,18 @@
 //! printed with 15 digits (`-outfmt 8`/`11`) multiplies such a difference by ~50.
 //!
 //! Each function below is glibc's code: every fused multiply-add of the compiled glibc function
-//! (read from the disassembly of the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one
-//! [`Fma::fma`] here, every other operation is the same IEEE operation in the same order, and the
-//! tables are glibc's (`tables.rs`). An FMA rounds once, so its result is the same on every target;
-//! how it is computed is the only thing that differs:
+//! (read from the disassembly of the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one call of
+//! an [`Fma`] method here, every other operation is the same IEEE operation in the same order, and
+//! the tables are glibc's (`tables.rs`). An FMA rounds once, so its result is the same on every
+//! target; how it is computed is the only thing that differs:
 //! - [`Fused`] (`f64::mul_add`): the FMA instruction on aarch64, in the x86-64 copies compiled with
 //!   the `fma` feature (taken when the CPU has it, `x86_fma`), and on x86-64 builds that enable
 //!   `fma`; elsewhere the C library's correctly rounded `fma`.
 //! - [`Emulated`]: the same result from IEEE additions and multiplications only, for WebAssembly
 //!   (no FMA instruction; wasi-libc's software `fma` costs ~16 ns per `exp` call) and x86-64 CPUs
-//!   without FMA.
+//!   without FMA. Most of glibc's FMAs add a small product to a larger sum, where a cheap test
+//!   proves the unfused result right; the others say what makes them cheaper (an exact product, an
+//!   exact sum, an integer factor).
 //!
 //! `utils::glibc_fma_libm` is the only place where LOSAT calls a libm function on `f64`:
 //! `clippy.toml` refuses `f64::exp`, `f64::ln`, `f64::log10`, `f64::powf` and the other
@@ -40,12 +42,40 @@ fn d(u: u64) -> f64 {
     f64::from_bits(u)
 }
 
-/// One fused multiply-add: `a * b + c` rounded once to nearest.
+/// One fused multiply-add of glibc's code: `a * b + c` rounded once to nearest. Each variant
+/// names what the operands of that FMA make true; [`Fused`] computes them all with one
+/// instruction, [`Emulated`] uses what they say to do less work.
 pub(crate) trait Fma {
+    /// Finite operands.
     fn fma(a: f64, b: f64, c: f64) -> f64;
+    /// `a * b` is a double: `b` is a power of 2, or `a` is an integer and `b` has the trailing zero
+    /// bits for it.
+    #[inline(always)]
+    fn fma_exact_product(a: f64, b: f64, c: f64) -> f64 {
+        Self::fma(a, b, c)
+    }
+    /// `RN(a * b) + c` is a double: `c` is `-RN(a * b)`, or `-1` with `a * b` in `[0.5, 2]`.
+    #[inline(always)]
+    fn fma_exact_sum(a: f64, b: f64, c: f64) -> f64 {
+        Self::fma(a, b, c)
+    }
+    /// `a` is an integer below 2^26 in magnitude; the product's rounding error reaches the result.
+    #[inline(always)]
+    fn fma_small_int(a: f64, b: f64, c: f64) -> f64 {
+        Self::fma(a, b, c)
+    }
+    /// `|a * b|` is near or above `|c|`, so the product's rounding error reaches the result.
+    #[inline(always)]
+    fn fma_product_led(a: f64, b: f64, c: f64) -> f64 {
+        Self::fma(a, b, c)
+    }
 }
 
 /// `f64::mul_add`.
+#[cfg_attr(
+    all(target_arch = "wasm32", not(test)),
+    expect(dead_code, reason = "WebAssembly has no FMA instruction")
+)]
 pub(crate) struct Fused;
 
 impl Fma for Fused {
@@ -55,19 +85,27 @@ impl Fma for Fused {
     }
 }
 
-/// `a * b + c` rounded once, from IEEE additions and multiplications (Boldo and Melquiond,
-/// "Emulation of FMA and correctly rounded sums: proved algorithms using rounding to odd", IEEE
-/// Trans. Computers 57(4), 2008, algorithm 5.4): the exact product `ph + pl` (Dekker, with
-/// Veltkamp's split), the exact sum `c + ph = sh + sl` (Knuth's TwoSum), `v = sl + pl` rounded to
-/// odd, and `sh + v` rounded to nearest.
+/// `a * b + c` rounded once, from IEEE additions and multiplications. The general way
+/// ([`Emulated::full`]) is Boldo and Melquiond's ("Emulation of FMA and correctly rounded sums:
+/// proved algorithms using rounding to odd", IEEE Trans. Computers 57(4), 2008, algorithm 5.4):
+/// the exact product `p + e` (Dekker, with Veltkamp's split), the exact sum `c + p = sh + sl`
+/// (Knuth's TwoSum), `v = sl + e` rounded to odd, and `sh + v` rounded to nearest. The variants of
+/// [`Fma`] skip what their operands make unneeded, and [`Fma::fma`] first tries a test that
+/// proves the two-rounding `c + RN(a * b)` right.
 ///
 /// Exact for finite operands whose split and product do not overflow (`|a|`, `|b|` below
-/// 2^995) and whose product's exponents sum to -969 or more (no bit of `pl` below 2^-1074), or
+/// 2^995) and whose product's exponents sum to -969 or more (no bit of `e` below 2^-1074), or
 /// that have a zero factor. Every call in this module meets that: the special inputs (zero,
 /// subnormal results, infinity, NaN) leave the functions before their first `fma`, and the
 /// smallest operand products are `tmp * scale` of `exp` (2^-200 * 2^-739, glibc's own bound) and
 /// the powers of the reduced argument `r` (nonzero `|r|` >= 2^-110).
 pub(crate) struct Emulated;
+
+/// The bit of the sign and the bits of the exponent of an `f64`.
+const SIGN_BIT: u64 = 0x8000_0000_0000_0000;
+const EXP_BITS: u64 = 0x7ff0_0000_0000_0000;
+/// 2^-53 + 2^-105: `|p| * E_BOUND` rounded to nearest is at least `|p| * 2^-53` when normal.
+const E_BOUND: u64 = 0x3ca0_0000_0000_0001;
 
 impl Emulated {
     /// Veltkamp's split: `a = hi + lo` with 26 and 27 significant bits.
@@ -77,21 +115,25 @@ impl Emulated {
         let hi = t - (t - a);
         (hi, a - hi)
     }
-}
 
-impl Fma for Emulated {
+    /// `a * b - p` for `p = RN(a * b)`, exact (Dekker).
     #[inline(always)]
-    fn fma(a: f64, b: f64, c: f64) -> f64 {
-        let ph = a * b;
+    fn product_error(a: f64, b: f64, p: f64) -> f64 {
         let (ah, al) = Self::split(a);
         let (bh, bl) = Self::split(b);
-        let pl = (((ah * bh - ph) + ah * bl) + al * bh) + al * bl;
-        let sh = c + ph;
-        let cb = sh - ph;
-        let sl = (c - cb) + (ph - (sh - cb));
-        let v = sl + pl;
+        (((ah * bh - p) + ah * bl) + al * bh) + al * bl
+    }
+
+    /// `c + p + e` rounded once to nearest, for `p + e` an exact product with `p` rounded to
+    /// nearest (Boldo and Melquiond's algorithm 5.4 after the product).
+    #[inline(always)]
+    fn round_sum(c: f64, p: f64, e: f64) -> f64 {
+        let sh = c + p;
+        let cb = sh - p;
+        let sl = (c - cb) + (p - (sh - cb));
+        let v = sl + e;
         let vb = v - sl;
-        let ve = (sl - (v - vb)) + (pl - vb);
+        let ve = (sl - (v - vb)) + (e - vb);
         // Round to odd: an inexact sum with an even last bit moves one step towards `ve`.
         let vbits = v.to_bits();
         let v = if ve != 0.0 && vbits & 1 == 0 {
@@ -103,12 +145,92 @@ impl Fma for Emulated {
         } else {
             v
         };
-        // `v` is zero only when `c + a * b` is `sh` exactly; `sh + 0.0` would lose the sign of -0.
+        // `v` is zero only when `c + p + e` is `sh` exactly; `sh + 0.0` would lose the sign of -0.
         if v == 0.0 {
             sh
         } else {
             sh + v
         }
+    }
+
+    /// The general way: any operands within the bounds above.
+    #[inline(always)]
+    fn full(a: f64, b: f64, c: f64) -> f64 {
+        let p = a * b;
+        Self::round_sum(c, p, Self::product_error(a, b, p))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn full_cold(a: f64, b: f64, c: f64) -> f64 {
+        Self::full(a, b, c)
+    }
+
+    /// `r`, which a variant computed for `a * b + c`; debug builds compare it with the general way.
+    #[inline(always)]
+    fn checked(r: f64, a: f64, b: f64, c: f64) -> f64 {
+        debug_assert_eq!(
+            r.to_bits(),
+            Self::full(a, b, c).to_bits(),
+            "{a:e} * {b:e} + {c:e}"
+        );
+        r
+    }
+}
+
+impl Fma for Emulated {
+    /// `u = c + RN(a * b)` when a test proves it equal to the once-rounded `c + a * b`, else
+    /// [`Emulated::full`]. With `u + z = c + p` exactly (TwoSum) and `a * b = p + e`, the exact
+    /// sum is `u + (z + e)`, which rounds to `u` when `|z| + |e|` is below half the gap from `u`
+    /// to its nearer neighbour (2^(E-53) for `u` in [2^E, 2^(E+1)), 2^(E-54) when `u` is 2^E).
+    /// `|e|` is at most `|p| * 2^-53` for a normal `p` and 2^-1075 below, so at most
+    /// `bound = RN(RN(|p| * E_BOUND) + 2^-1022)`; and `RN(|z| + bound)` below that half gap (a
+    /// power of 2) means `|z| + bound` is below it. The test fails for `|p|` near `|u|` (about
+    /// `2 |p| / |u|` of the arguments) and for `u` below 2^-968, infinite or NaN.
+    #[inline(always)]
+    fn fma(a: f64, b: f64, c: f64) -> f64 {
+        let p = a * b;
+        let u = c + p;
+        let pb = u - c;
+        let z = (c - (u - pb)) + (p - pb);
+        let bound = p.abs() * d(E_BOUND) + f64::MIN_POSITIVE;
+        let ub = u.to_bits() & !SIGN_BIT;
+        let eb = ub & EXP_BITS;
+        let half_gap = d(eb.wrapping_sub(if ub == eb { 54 << 52 } else { 53 << 52 }));
+        if eb.wrapping_sub(55 << 52) < EXP_BITS - (55 << 52) && z.abs() + bound < half_gap {
+            u
+        } else {
+            Self::full_cold(a, b, c)
+        }
+    }
+
+    #[inline(always)]
+    fn fma_exact_product(a: f64, b: f64, c: f64) -> f64 {
+        let r = a * b + c;
+        Self::checked(r, a, b, c)
+    }
+
+    /// `RN(a * b) + c` exact plus the exact rounding error of the product: one rounding.
+    #[inline(always)]
+    fn fma_exact_sum(a: f64, b: f64, c: f64) -> f64 {
+        let p = a * b;
+        let r = (p + c) + Self::product_error(a, b, p);
+        Self::checked(r, a, b, c)
+    }
+
+    /// Dekker's product with `a` as its own high part (an integer below 2^26 splits into itself
+    /// and 0), so only `b` is split; for a constant `b` the compiler folds the split.
+    #[inline(always)]
+    fn fma_small_int(a: f64, b: f64, c: f64) -> f64 {
+        let p = a * b;
+        let (bh, bl) = Self::split(b);
+        let r = Self::round_sum(c, p, (a * bh - p) + a * bl);
+        Self::checked(r, a, b, c)
+    }
+
+    #[inline(always)]
+    fn fma_product_led(a: f64, b: f64, c: f64) -> f64 {
+        Self::full(a, b, c)
     }
 }
 
@@ -172,7 +294,13 @@ fn exp_core<F: Fma, const TAIL: bool>(x: f64, xtail: f64, sign_bias: u64, specia
     let kd = F::fma(x, d(EXP_HEAD[0]), d(EXP_HEAD[1])); // fma(x, InvLn2N, Shift)
     let ki = kd.to_bits();
     let kd = kd - d(EXP_HEAD[1]);
-    let mut r = F::fma(kd, d(EXP_HEAD[3]), F::fma(kd, d(EXP_HEAD[2]), x));
+    // kd * NegLn2hiN is a double for |kd| <= 2^17 (NegLn2hiN has 36 significant bits): |x| < 512.
+    let t1 = if special {
+        F::fma(kd, d(EXP_HEAD[2]), x)
+    } else {
+        F::fma_exact_product(kd, d(EXP_HEAD[2]), x)
+    };
+    let mut r = F::fma(kd, d(EXP_HEAD[3]), t1);
     if TAIL {
         r += xtail;
     }
@@ -238,14 +366,14 @@ fn ln_impl<F: Fma>(x: f64) -> f64 {
         let q3 = F::fma(r3, b(10), F::fma(r2, b(9), F::fma(r, b(8), b(7))));
         let p = F::fma(F::fma(q3, r3, q2), r3, q1);
         let c27 = d(0x41a0_0000_0000_0000); // 0x1p27
-        let t = F::fma(r, c27, r);
-        let rhi = F::fma(-c27, r, t);
+        let t = F::fma_exact_product(r, c27, r);
+        let rhi = F::fma_exact_product(-c27, r, t);
         let rlo = r - rhi;
         let rr = rhi * rhi;
-        let hi = F::fma(rr, b(0), r);
-        let lo = F::fma(rr, b(0), r - hi);
-        let lo = F::fma(b(0) * rlo, r + rhi, lo);
-        let y = F::fma(p, r3, lo);
+        let hi = F::fma_exact_product(rr, b(0), r); // B[0] = -0.5
+        let lo = F::fma_exact_product(rr, b(0), r - hi);
+        let lo = F::fma_product_led(b(0) * rlo, r + rhi, lo);
+        let y = F::fma_product_led(p, r3, lo);
         return hi + y;
     }
     if top.wrapping_sub(0x0010) >= 0x7ff0 - 0x0010 {
@@ -271,15 +399,16 @@ fn ln_impl<F: Fma>(x: f64) -> f64 {
     let invc = d(LOG_TAB[2 * i]);
     let logc = d(LOG_TAB[2 * i + 1]);
     let z = d(iz);
-    let r = F::fma(z, invc, -1.0);
+    // z * invc is within 2^-7 of 1; kd * Ln2hi is a double (|k| < 2^11, Ln2hi has 42 bits).
+    let r = F::fma_exact_sum(z, invc, -1.0);
     let kd = k as f64;
-    let w = F::fma(kd, d(LOG_HEAD[0]), logc);
+    let w = F::fma_exact_product(kd, d(LOG_HEAD[0]), logc);
     let hi = r + w;
-    let lo = F::fma(kd, d(LOG_HEAD[1]), (w - hi) + r);
+    let lo = F::fma_small_int(kd, d(LOG_HEAD[1]), (w - hi) + r);
     let r2 = r * r;
     let a = |j: usize| d(LOG_HEAD[2 + j]);
     let p = F::fma(F::fma(r, a(4), a(3)), r2, F::fma(r, a(2), a(1)));
-    let y = F::fma(r * r2, p, F::fma(r2, a(0), lo));
+    let y = F::fma(r * r2, p, F::fma_product_led(r2, a(0), lo));
     y + hi
 }
 
@@ -360,23 +489,23 @@ fn pow_log_inline<F: Fma>(ix: u64) -> (f64, f64) {
     let logc = d(POW_LOG_TAB[3 * i + 1]);
     let logctail = d(POW_LOG_TAB[3 * i + 2]);
     let a = |j: usize| d(POW_LOG_HEAD[2 + j]);
-    let r = F::fma(z, invc, -1.0);
+    let r = F::fma_exact_sum(z, invc, -1.0);
     // k*Ln2 + log(c) + r.
-    let t1 = F::fma(kd, d(POW_LOG_HEAD[0]), logc);
+    let t1 = F::fma_exact_product(kd, d(POW_LOG_HEAD[0]), logc);
     let t2 = t1 + r;
-    let lo1 = F::fma(kd, d(POW_LOG_HEAD[1]), logctail);
+    let lo1 = F::fma_small_int(kd, d(POW_LOG_HEAD[1]), logctail);
     let lo2 = (t1 - t2) + r;
     let ar = a(0) * r; // A[0] = -0.5
     let ar2 = r * ar;
     let ar3 = r * ar2;
     // k*Ln2 + log(c) + r + A[0]*r*r.
     let hi = t2 + ar2;
-    let lo3 = F::fma(ar, r, -ar2);
+    let lo3 = F::fma_exact_sum(ar, r, -ar2);
     let lo4 = (t2 - hi) + ar2;
     // p = log1p(r) - r - A[0]*r*r, added to the low parts by the last fma.
     let q = F::fma(F::fma(r, a(6), a(5)), ar2, F::fma(r, a(4), a(3)));
     let p = F::fma(ar2, q, F::fma(r, a(2), a(1)));
-    let lo = F::fma(ar3, p, ((lo1 + lo2) + lo3) + lo4);
+    let lo = F::fma_product_led(ar3, p, ((lo1 + lo2) + lo3) + lo4);
     let y = hi + lo;
     (y, (hi - y) + lo)
 }
@@ -478,7 +607,7 @@ fn pow_impl<F: Fma>(x: f64, y: f64) -> f64 {
     }
     let (hi, lo) = pow_log_inline::<F>(ix);
     let ehi = y * hi;
-    let elo = F::fma(y, lo, F::fma(hi, y, -ehi));
+    let elo = F::fma_product_led(y, lo, F::fma_exact_sum(hi, y, -ehi));
     // exp_inline (ehi, elo, sign_bias)
     let abstop = top12(ehi) & 0x7ff;
     if abstop.wrapping_sub(0x3c9) >= 0x408 - 0x3c9 {
@@ -632,6 +761,9 @@ pub(crate) mod variants {
 
     pub fn fma_emulated(a: f64, b: f64, c: f64) -> f64 {
         Emulated::fma(a, b, c)
+    }
+    pub fn fma_emulated_full(a: f64, b: f64, c: f64) -> f64 {
+        Emulated::full(a, b, c)
     }
     pub fn exp_emulated(x: f64) -> f64 {
         exp_impl::<Emulated>(x)
@@ -897,9 +1029,15 @@ mod tests {
                 }
                 _ => a.mul_add(b, -ph) * r.unif(-3.0, 3.0) - ph * 0.5,
             };
+            let want = bits(a.mul_add(b, c));
             assert_eq!(
                 bits(v::fma_emulated(a, b, c)),
-                bits(a.mul_add(b, c)),
+                want,
+                "a={a:e} b={b:e} c={c:e}"
+            );
+            assert_eq!(
+                bits(v::fma_emulated_full(a, b, c)),
+                want,
                 "a={a:e} b={b:e} c={c:e}"
             );
         }

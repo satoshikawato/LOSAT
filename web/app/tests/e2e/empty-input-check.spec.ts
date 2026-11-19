@@ -1,12 +1,13 @@
 // An input that holds no sequence (an empty file, white space only, a defline alone) is read and run as
-// the command line runs it, but its card shows no "Accepted" check mark: it says that a search finds
-// nothing in it and that the run may end with an error (line WQA's sweep, D4, 2026-11-19). NCBI BLAST+
-// 2.17.0 warns of such an input or ends the run with an error, by role, program and the other inputs; an
-// input with an empty record among records with residues runs with a warning, and keeps the mark.
+// the command line runs it, but its card shows no "Accepted" check mark: it says that the input adds
+// nothing to the search and that the run may end with an error (line WQA's sweep, D4, 2026-11-19). NCBI
+// BLAST+ 2.17.0 warns of such an input or ends the run with an error, by role, program and the other
+// inputs; an input with an empty record among records with residues runs with a warning, and keeps the
+// mark. One whose records with residues are left out says so (D4 review).
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
-import { openFiles, openSearch, paste, pickRun, program, submit, waitStatus, type Role } from './support/search';
+import { openFiles, openSearch, paste, pickRun, program, showRecords, submit, waitStatus, type Role } from './support/search';
 
 test.setTimeout(180_000);
 
@@ -14,7 +15,9 @@ test.beforeEach(async ({ page }) => {
   await openSearch(page);
 });
 
-const NO_SEQUENCE = 'This input has no sequence: a search finds nothing in it, and the run may end with an error. Add a sequence or remove it.';
+const NO_SEQUENCE = 'This input has no sequence, so it adds nothing to the search, and the run may end with an error. Add a sequence or remove it.';
+const EXCLUDED =
+  'Only records without a sequence are included, so this input adds nothing to the search, and the run may end with an error. Include a record that has a sequence, or remove this input.';
 const SEQUENCE = '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n';
 /** The inputs, and whether each holds no sequence. */
 const INPUTS = [
@@ -50,6 +53,18 @@ for (const role of ['query', 'subject'] as const) {
       await expect(page.getByTestId(`${role}-source-${index}`)).toContainText(input.name);
       await expectCheck(page, role, index, input.none);
     }
+    // one-empty.fa with its two records with residues left out: only its empty record is included.
+    const mixed = INPUTS.findIndex((input) => input.name === 'one-empty.fa');
+    await showRecords(page, role, mixed);
+    await page.getByTestId(`${role}-source-${mixed}-record-0`).uncheck();
+    await page.getByTestId(`${role}-source-${mixed}-record-2`).uncheck();
+    const check = page.getByTestId(`${role}-source-${mixed}-check`);
+    await expect(check).toHaveAttribute('data-sequence', 'excluded');
+    await expect(check).toHaveText(EXCLUDED);
+    await expect(check.locator('svg')).toHaveCount(0);
+    await page.getByTestId(`${role}-source-${mixed}-record-0`).check();
+    await expect(check).not.toHaveAttribute('data-sequence');
+    await expect(check).toContainText('Accepted by the BLASTN engine: 2 records');
     // A defline alone, searched alone: the form does not refuse it, and the run ends as the command
     // line's does (NCBI BLAST+ 2.17.0, exit status 3).
     for (let i = INPUTS.length - 1; i >= 0; i--) {

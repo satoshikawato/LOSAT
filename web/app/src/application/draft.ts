@@ -1494,20 +1494,25 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
 }
 
 /**
- * Whether what runs take of a source that is read holds no residue: it has no record (an empty file,
- * white space only), or every record that runs take has none (a defline alone). The engine reads such
- * an input, as NCBI's reader does, and runs search it as the command line does: a search finds
- * nothing in it, and NCBI BLAST+ 2.17.0 warns of it or ends the run with an error, by role, program
- * and the other inputs (an empty subject alone: `Empty CBlastQueryVector`; a lone subject record
- * without residues: `The average subject length is too short` in BLASTN and TBLASTX, a warning in the
- * others; an empty query alone: `Query is Empty!`, a warning; a lone query record without residues:
- * `Sequence contains no data`, an error). So its card shows no "Accepted" mark (line WQA's sweep, D4,
- * 2026-11-19). A source whose records are all left out is not one: runs leave it out.
+ * Why what runs take of a source that is read holds no residue, if it holds none: `none`, the input has
+ * no residue at all (an empty file, white space only, deflines alone); `excluded`, it has records with
+ * residues, but they are left out and the records included have none. The engine reads such an input,
+ * as NCBI's reader does, and runs search it as the command line does: it adds nothing to the search,
+ * and NCBI BLAST+ 2.17.0 warns of it or ends the run with an error, by role, program and the other
+ * inputs (an empty subject alone: `Empty CBlastQueryVector`; a lone subject record without residues:
+ * `The average subject length is too short` in BLASTN and TBLASTX, a warning in the others; an empty
+ * query alone: `Query is Empty!`, a warning; a lone query record without residues: `Sequence contains
+ * no data`, an error). So its card shows no "Accepted" mark (line WQA's sweep, D4, 2026-11-19; D4
+ * review). Undefined for a source with an included record that has residues, and for one whose
+ * records are all left out: runs leave it out.
  */
-export function holdsNoSequence(source: DraftSource): boolean {
-  if (source.status !== 'ready' || source.base === undefined) return false;
+export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefined {
+  if (source.status !== 'ready' || source.base === undefined) return undefined;
+  const { records } = source.base;
+  if (records.length === 0) return 'none';
   const included = includedOf(source);
-  return source.base.records.length === 0 || (included.length > 0 && included.every((record) => record.length === 0));
+  if (included.length === 0 || included.some((record) => record.length > 0)) return undefined;
+  return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
 function nameOf(source: DraftSource, role: InputRole): string {

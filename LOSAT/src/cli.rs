@@ -813,6 +813,24 @@ pub fn render_rpsbproc_message(error: &clap::Error) -> String {
     render_rpsbproc_text(&text)
 }
 
+/// The text of a parser error as the command line writes it, which LOSAT Web's ABI v2 returns as
+/// it is (`web/adapter/tests/v_abi.js` compares the two): `render_message`, or
+/// `render_rpsbproc_message` for `losat rpsbproc`, ending with a line end. clap's own errors have
+/// one; LOSAT's own refusals and syntax errors (`clap::Error::raw`: an option LOSAT refuses by
+/// name, an unknown option, a missing value) are made without one, and the shell prompt would
+/// follow on the message's line. ABI v1 (frozen) and the library return `render_message`.
+pub fn command_line_message(error: &clap::Error, rpsbproc: bool) -> String {
+    let mut message = if rpsbproc {
+        render_rpsbproc_message(error)
+    } else {
+        render_message(error)
+    };
+    if error.use_stderr() && !message.ends_with('\n') {
+        message.push('\n');
+    }
+    message
+}
+
 /// `render_rpsbproc_message` of a part of a message.
 fn render_rpsbproc_text(text: &str) -> String {
     let mut message = text

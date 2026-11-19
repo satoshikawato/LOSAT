@@ -364,6 +364,30 @@ fn search_program_help_says_what_outfmt_writes() {
     }
 }
 
+/// LOSAT's own refusals and syntax errors (not NCBI's text) end with a line end, as clap's own
+/// errors do, so that the shell prompt starts a line of its own (`cli::command_line_message`).
+#[test]
+fn argument_refusals_end_with_a_line_end() {
+    for words in [
+        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-html"][..],
+        &["blastn", "-query", "q.fa", "-subject", "q.fa", "-remote"],
+        &["blastn", "-no_such_option"],
+        &["blastn", "-query"],
+        &["makeblastdb", "-no_such_option"],
+        &["rpsbproc", "-no_such_option"],
+        &["no_such_program"],
+    ] {
+        let output = run(losat(), words);
+        assert_eq!(output.status.code(), Some(2), "{words:?} {output:?}");
+        let text = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(text.starts_with("error: "), "{words:?}: {text:?}");
+        assert!(
+            text.ends_with('\n') && !text.ends_with("\n\n"),
+            "{words:?}: {text:?}"
+        );
+    }
+}
+
 /// No program's `-help` or `-h` text shows a source reference (they belong in `//` comments),
 /// and the hint at the foot of the help is true: `-h` prints the summary and `-help` the full
 /// text, so a hint names the other one in NCBI's single-dash form.
@@ -455,7 +479,7 @@ fn refusals_by_name_have_one_form_and_the_hint_says_help() {
             }
         }
         let expected =
-            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM");
+            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
         assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     }
     // blastx's other refusals by name (`-gilist`, `-use_sw_tback`) have the same form.
@@ -464,7 +488,7 @@ fn refusals_by_name_have_one_form_and_the_hint_says_help() {
         assert_eq!(output.status.code(), Some(2), "{option} {output:?}");
         assert_eq!(
             String::from_utf8(output.stderr).unwrap(),
-            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's BLASTX")
+            format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's BLASTX\n")
         );
     }
 }

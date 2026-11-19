@@ -98,7 +98,11 @@ interface Generation {
   readonly lifeLock: string;
   /** Ends the wait for that lock when the Gateway ends the worker itself (retire). */
   readonly life: AbortController;
-  /** Whether the worker said that it started (`alive`): an error before it is a worker that could not start. */
+  /**
+   * Whether the worker said that it started (`started`, the answer to `init`): an error before it is a worker that could
+   * not start, and one after it a worker that stopped, also during its first search, whose error read as "could not
+   * start" while the worker said so only once it held its lock (line WQA's sweep, D2; its review, M1, 2026-11-19).
+   */
   started: boolean;
 }
 
@@ -301,9 +305,12 @@ export class WasmEngine implements EngineGateway {
 
   private receive(generation: Generation, event: EngineEvent): void {
     if (generation !== this.current || !('generation' in event) || event.generation !== generation.id) return;
-    if (event.type === 'alive') {
+    if (event.type === 'started') {
       generation.started = true;
-      // The worker holds its lock now: the page may wait for it.
+      return;
+    }
+    if (event.type === 'life') {
+      // The worker holds its lock now, and no preparation or search of it has started: the page may wait for the lock.
       if (event.held && this.locks !== undefined) {
         watchLife(this.locks, generation.lifeLock, generation.life.signal, () => this.fail(generation, new Error(ENGINE_ENDED)));
       }

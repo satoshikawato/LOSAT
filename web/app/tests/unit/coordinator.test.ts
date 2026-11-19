@@ -32,7 +32,11 @@ const request: SearchRequest = {
   requestedThreads: 'auto',
 };
 
-function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataService) => DataGateway = (d) => d) {
+function setup(
+  engine: EngineGateway = new FakeEngine(),
+  wrap: (data: DataService) => DataGateway = (d) => d,
+  dataWorkerEnded?: Promise<Error>,
+) {
   const store = new MemoryBlockStore();
   let token = 0;
   const data = new DataService({
@@ -56,6 +60,7 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     now: () => 1000,
     newRunId: () => `run-${++id}`,
     digest: sha256Hex,
+    ...(dataWorkerEnded === undefined ? {} : { dataWorkerEnded }),
   });
   return { coordinator, data, store, saved };
 }
@@ -117,7 +122,11 @@ class ManualEngine implements EngineGateway {
       this.lateFinish = () => onPhase('finalizing');
     });
   }
-  cancel(): void {}
+  /** The runs that were cancelled, in order. */
+  readonly cancelled: string[] = [];
+  cancel(runId: string): void {
+    this.cancelled.push(runId);
+  }
   /** Ends a run, with the files that it made besides its outputs. */
   finish(runId: string, runFiles?: readonly RunFile[]) {
     this.pending.get(runId)?.resolve(runFiles);
@@ -202,6 +211,51 @@ describe('Coordinator', () => {
     engine.finish(runId);
     await waitFor(coordinator, runId, 'failed');
     expect(viewOf(coordinator, runId)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
+  });
+
+  // Line WQA's sweep, D2, its review, L2 (2026-11-19): when the Data worker ended during a search, the page said so at
+  // once, but the run went on "Searching" and failed only when the search ended, at the commit of its results.
+  it('a run whose Data worker ended during its search fails at once, and its search ends', async () => {
+    const engine = new ManualEngine();
+    let end: (error: Error) => void = () => undefined;
+    const ended = new Promise<Error>((resolve) => (end = resolve));
+    const { coordinator } = setup(engine, undefined, ended);
+    const first = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'running');
+    end(new UnavailableError('The part of LOSAT that keeps the results stopped'));
+    await waitFor(coordinator, first, 'failed');
+    expect(viewOf(coordinator, first)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
+    expect(engine.cancelled).toEqual([first]);
+  });
+
+  it('a run whose Data worker ended while its outputs were staged starts no search', async () => {
+    const engine = new ManualEngine();
+    let end: (error: Error) => void = () => undefined;
+    const ended = new Promise<Error>((resolve) => (end = resolve));
+    let stage: () => void = () => undefined;
+    const staged = new Promise<void>((resolve) => (stage = resolve));
+    const { coordinator } = setup(
+      engine,
+      (inner) => {
+        const gateway = Object.create(inner) as DataGateway;
+        // The outputs are staged, and the answer comes after the Data worker ended.
+        gateway.openRun = async (runId, outputs) => {
+          const port = await inner.openRun(runId, outputs);
+          await staged;
+          return port;
+        };
+        return gateway;
+      },
+      ended,
+    );
+    const first = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'preparing');
+    end(new UnavailableError('The part of LOSAT that keeps the results stopped'));
+    await ended;
+    stage();
+    await waitFor(coordinator, first, 'failed');
+    expect(viewOf(coordinator, first)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
+    expect(engine.started).toEqual([]);
   });
 
   it('refuses a request with the remedy, not as a fault of the options or the input, when a part of LOSAT is unavailable', async () => {

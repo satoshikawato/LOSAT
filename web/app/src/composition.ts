@@ -72,6 +72,7 @@ export function createApp(options: AppOptions = {}): App {
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
     digest: sha256Hex,
+    dataWorkerEnded,
   });
   const draft = new SearchDraft({
     engine,
@@ -80,10 +81,12 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
+  const availability = new Availability({ draft: draft.state, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
     draft,
+    unavailable: () => availability.state.get().problem,
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
   });
@@ -107,6 +110,5 @@ export function createApp(options: AppOptions = {}): App {
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  const availability = new Availability({ draft: draft.state, dataWorkerEnded });
   return { coordinator, draft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
 }

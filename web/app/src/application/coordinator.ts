@@ -4,7 +4,8 @@
 // Ordering rule for cancel versus commit: a run can be cancelled until it ends. A cancel while it
 // is `finalizing` ends the wait for its results, which are deleted if they come later: a Data
 // worker that stopped answering kept such a run "Organizing results" for good, with no Cancel
-// (line WQA's sweep, D2, 2026-11-19).
+// (line WQA's sweep, D2, 2026-11-19). When the Data worker ends, the active run ends at once,
+// with its search: it could not keep its results (the review of D2, L2).
 //
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
@@ -91,6 +92,8 @@ export interface CoordinatorDeps {
   readonly newRunId: () => string;
   /** The lower-case hex SHA-256 of bytes (the package's `sha256Hex`), for the registry file of a snapshot. */
   readonly digest: (bytes: Uint8Array) => Promise<string>;
+  /** Settles when the Data worker could not start or ended, with the error of its calls from then on. */
+  readonly dataWorkerEnded?: Promise<Error>;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -121,12 +124,16 @@ export class Coordinator {
    */
   private readonly conffiles = new Map<string, Blob>();
   private active: string | undefined;
-  /** Ends the wait of the active run for the Data worker's commit of its results, when the run is cancelled meanwhile (cancel). */
-  private stopCommitWait: (() => void) | undefined;
+  /**
+   * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
+   * are organized (cancel), or the end of the Data worker (dataWorkerEnded).
+   */
+  private stopActive: ((error: Error) => void) | undefined;
   private nextNumber = 1;
 
   constructor(private readonly deps: CoordinatorDeps) {
     void this.refreshStorage();
+    void deps.dataWorkerEnded?.then((error) => this.dataWorkerEnded(error));
   }
 
   /** Validates the request with the engine and, if valid, freezes it as a queued run. */
@@ -288,7 +295,21 @@ export class Coordinator {
     }
     this.cancelRequested.add(runId);
     this.deps.engine.cancel(runId);
-    if (this.active === runId) this.stopCommitWait?.();
+    if (this.active === runId) this.stopActive?.(new RunCancelledError(runId));
+  }
+
+  /**
+   * The Data worker ended: the active run cannot keep its results, so it fails now with the error of the Data worker's
+   * calls, and its search ends. Before, the search went on, and the run failed only at its commit, when the search
+   * ended, while the page already said that the Data worker had stopped (line WQA's sweep, D2; its review, L2, 2026-11-19).
+   * The runs queued behind it fail when they start, as each call of the Data worker fails at once.
+   */
+  private dataWorkerEnded(error: Error): void {
+    const runId = this.active;
+    if (runId === undefined) return;
+    // First the run's wait, so that it ends with this error rather than with the cancel of its search.
+    this.stopActive?.(error);
+    this.deps.engine.cancel(runId);
   }
 
   /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName, with its format's media type. */
@@ -427,16 +448,25 @@ export class Coordinator {
     const startedAt = this.deps.now();
     // The files that the run made besides its outputs, which a completed and a failed run keep.
     let runFiles: readonly RunFile[] | undefined;
+    // Why the run was stopped (stopActive), if it was.
+    let stop: Error | undefined;
+    const stopped = new Promise<never>((_, reject) => {
+      this.stopActive = (error) => {
+        stop ??= error;
+        reject(error);
+      };
+    });
+    stopped.catch(() => undefined);
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
       staged = true;
-      // A cancel while the outputs were staged found no search to end: the engine has not started it.
-      if (this.cancelRequested.has(runId)) {
+      // A stop while the outputs were staged found no search to end: the engine has not started it, and does not.
+      if (stop !== undefined) {
         output.close();
-        throw new RunCancelledError(runId);
+        throw stop;
       }
-      const runtime = await this.deps.engine.run(
+      const search = this.deps.engine.run(
         {
           runId,
           argv: snapshot.argv,
@@ -452,10 +482,16 @@ export class Coordinator {
         runFiles = runFilesOf(error);
         throw error;
       });
+      const runtime = await Promise.race([search, stopped]);
       runFiles = runtime.runFiles;
-      if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
+      if (stop !== undefined) throw stop;
       this.update(runId, { status: 'finalizing' });
-      const result = await this.commitUnlessCancelled(runId);
+      const commit = this.deps.data.commitRun(runId);
+      const result = await Promise.race([commit, stopped]).catch((error: unknown) => {
+        // Results that the commit makes after the run ended are deleted.
+        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
+        throw error;
+      });
       this.update(runId, {
         status: 'completed',
         result,
@@ -487,7 +523,7 @@ export class Coordinator {
         },
       });
     } finally {
-      this.stopCommitWait = undefined;
+      this.stopActive = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
       this.cancelRequested.delete(runId);
@@ -495,33 +531,6 @@ export class Coordinator {
       void this.refreshStorage();
       this.pump();
     }
-  }
-
-  /**
-   * The Data worker's commit of the active run's results, unless the run is cancelled before it answers (cancel): the
-   * wait then ends with RunCancelledError, and results that the commit makes later are deleted.
-   */
-  private commitUnlessCancelled(runId: string): Promise<ResultSetRef> {
-    const commit = this.deps.data.commitRun(runId);
-    return new Promise<ResultSetRef>((resolve, reject) => {
-      let waiting = true;
-      commit.then(
-        (result) => {
-          waiting = false;
-          resolve(result);
-        },
-        (error: unknown) => {
-          waiting = false;
-          reject(error);
-        },
-      );
-      this.stopCommitWait = () => {
-        if (!waiting) return;
-        waiting = false;
-        reject(new RunCancelledError(runId));
-        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
-      };
-    });
   }
 
   /** Phase events are accepted only for the active, non-cancelled run. */

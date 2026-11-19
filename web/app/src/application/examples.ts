@@ -6,7 +6,10 @@
 // failure ends the load, and a failure names the site and leaves the draft as it was. Delete
 // removes the saved copy and the subject sources made from it, in this tab and in the others.
 // "Save to folder…" (or "Download") writes the saved copy outside the browser's storage (line
-// WF-3); LOSAT does not read it back by itself: "Open FASTA files…" opens it.
+// WF-3); LOSAT does not read it back by itself: "Open FASTA files…" opens it. While a part of LOSAT
+// could not be loaded or stopped, a set is not loaded: the line says what the page says (line WQA's
+// sweep, D1; its review, M2, 2026-11-19).
+import { isUnavailable } from 'losat/ports';
 import {
   EXAMPLE_BYTE_LIMIT,
   EXAMPLE_SETS,
@@ -27,6 +30,7 @@ import type {
   SavedExample,
 } from '../ports/example';
 import type { FileSaver } from '../ports/download';
+import { withRemedy } from './availability';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
@@ -61,6 +65,8 @@ export interface ExamplesDeps {
   readonly deletions?: ExampleDeletions;
   /** Where a saved copy can be written; without it, "Save to folder…" and "Download" are not offered. */
   readonly saver?: FileSaver;
+  /** What of LOSAT could not be loaded or stopped (Availability's problem); undefined while LOSAT works. */
+  readonly unavailable?: () => string | undefined;
 }
 
 export class ExampleLoader {
@@ -99,9 +105,18 @@ export class ExampleLoader {
     }
   }
 
-  /** Loads a set into the draft for the current mode. */
+  /**
+   * Loads a set into the draft for the current mode. While a part of LOSAT could not be loaded or stopped, the load
+   * fails at once with what the page says: the set was downloaded whole (8 to 37 MB), and then the file was blamed, as
+   * the engine's decoders that inflate it, or the Data worker that keeps it, were what could not be used.
+   */
   load(id: ExampleId): void {
     this.cancel();
+    const problem = this.deps.unavailable?.();
+    if (problem !== undefined) {
+      this.update({ note: undefined, load: { id, progress: { state: 'failed', message: withRemedy(problem) } } });
+      return;
+    }
     const controller = new AbortController();
     this.running = controller;
     this.track(this.loadSet(exampleById(id), controller.signal));
@@ -199,8 +214,16 @@ export class ExampleLoader {
     progress({ state: 'reading' });
     // A copy being deleted is gone first, so that the draft never gets a file that is about to go.
     await this.deleting.get(set.id);
-    const kept = await this.deps.store.readExample(set.id, set.url).catch(() => undefined);
+    let unavailable: Error | undefined;
+    const kept = await this.deps.store.readExample(set.id, set.url).catch((error: unknown) => {
+      if (isUnavailable(error)) unavailable = error;
+      return undefined;
+    });
     if (signal.aborted) return;
+    if (unavailable !== undefined) {
+      fail(withRemedy(unavailable.message));
+      return;
+    }
     if (kept !== undefined) {
       this.finish(set, kept.file, kept.copy);
       return;
@@ -294,6 +317,8 @@ function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: Exa
       return refusedSentence(host, result.status);
     case 'corrupt':
       return `The file from ${host} could not be decompressed (${result.detail}).`;
+    case 'unavailable':
+      return withRemedy(result.detail);
     case 'too-large':
       return `The file from ${host} is larger than ${EXAMPLE_BYTE_LIMIT / (1024 * 1024)} MiB decompressed.`;
   }

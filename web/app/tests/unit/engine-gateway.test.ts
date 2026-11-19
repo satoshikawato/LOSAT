@@ -532,11 +532,14 @@ describe('WasmEngine', () => {
     expect(worker.terminated).toBe(true);
   });
 
-  it('fails the search when the worker fails, and starts a new generation for the next one', async () => {
+  // Line WQA's sweep, D2, its review, M1 (2026-11-19): the worker said that it started only once it held its lock, which
+  // a search posted with `init` came before, so a worker that failed during its first search read as one that could not
+  // start ("LOSAT could not start the part that runs searches. Reload the page."). It says so at once now.
+  it('fails the search when the worker fails, also before it holds its lock, and starts a new generation for the next one', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
-    worker.send({ type: 'alive', generation: 1, held: false });
+    worker.send({ type: 'started', generation: 1 });
     worker.onerror?.({ message: 'out of memory', preventDefault: () => undefined } as ErrorEvent);
     await expect(run).rejects.toThrow('The engine worker stopped: out of memory');
     expect(worker.terminated).toBe(true);
@@ -572,7 +575,9 @@ describe('WasmEngine', () => {
     expect(name).toMatch(/^losat-web:engine-life:/);
     // The page waits for the lock only once the worker holds it.
     expect(locks.waiting.has(name)).toBe(false);
-    worker.send({ type: 'alive', generation: 1, held: true });
+    worker.send({ type: 'started', generation: 1 });
+    expect(locks.waiting.has(name)).toBe(false);
+    worker.send({ type: 'life', generation: 1, held: true });
     expect(locks.waiting.has(name)).toBe(true);
     locks.release(name);
     await expect(run).rejects.toThrow(ENGINE_ENDED);
@@ -588,7 +593,8 @@ describe('WasmEngine', () => {
     const { engine, workers } = setup(undefined, { locks });
     const run = engine.run(request('r1'), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
-    worker.send({ type: 'alive', generation: 1, held: true });
+    worker.send({ type: 'started', generation: 1 });
+    worker.send({ type: 'life', generation: 1, held: true });
     expect(locks.waiting.size).toBe(1);
     engine.cancel('r1');
     await expect(run).rejects.toBeInstanceOf(RunCancelledError);
@@ -596,7 +602,8 @@ describe('WasmEngine', () => {
     const next = engine.run(request('r2'), output(), () => undefined);
     const second = await posted(() => workers[1], 1);
     // Without Web Locks (or a refused request) the worker holds no lock: none is waited for.
-    second.send({ type: 'alive', generation: 2, held: false });
+    second.send({ type: 'started', generation: 2 });
+    second.send({ type: 'life', generation: 2, held: false });
     expect(locks.waiting.size).toBe(0);
     second.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
     expect((await next).runtimeGeneration).toBe(2);

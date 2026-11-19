@@ -7,7 +7,7 @@
 // Data worker (WholeFileInflater, the path of a source named .gz: one decoder in the app, the
 // command line's; swebok-improve SW8 D2), and a body that something on the way already decoded is
 // kept as it is. Nothing is sent but the request for the file's URL.
-import { INFLATED_TOO_LARGE, type WholeFileInflater } from 'losat/ports';
+import { INFLATED_TOO_LARGE, isUnavailable, type WholeFileInflater } from 'losat/ports';
 import type { DownloadProgress, DownloadRequest, DownloadResult, FileDownloader } from '../../ports/example';
 import { dateOf } from '../../domain/download-sentences';
 import { ask, contentLength, messageOf, PART_BYTES } from './http';
@@ -107,6 +107,9 @@ async function readBody(
   } catch (error) {
     if (signal.aborted) throw signal.reason;
     if (error instanceof Error && error.name === INFLATED_TOO_LARGE) return { ok: false, reason: 'too-large' };
+    // The engine's decoders could not be loaded, or the Data worker stopped: the file was blamed for it, "could not be
+    // decompressed" (line WQA's sweep, D1; its review, M2, 2026-11-19).
+    if (isUnavailable(error)) return { ok: false, reason: 'unavailable', detail: messageOf(error) };
     return { ok: false, reason: 'corrupt', detail: messageOf(error) };
   }
   signal.throwIfAborted();

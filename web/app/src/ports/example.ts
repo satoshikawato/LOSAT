@@ -31,6 +31,11 @@ export type DownloadResult =
   | { readonly ok: false; readonly reason: 'refused'; readonly status: number }
   /** The gzip data could not be decompressed (cut short or damaged): the engine's sentence. */
   | { readonly ok: false; readonly reason: 'corrupt'; readonly detail: string }
+  /**
+   * A part of LOSAT that the decompression needs could not be loaded or stopped (an UnavailableError's message): no
+   * fault of the file (line WQA's sweep, D1; its review, M2, 2026-11-19).
+   */
+  | { readonly ok: false; readonly reason: 'unavailable'; readonly detail: string }
   | { readonly ok: false; readonly reason: 'too-large' };
 
 export interface FileDownloader {

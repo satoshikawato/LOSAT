@@ -1,7 +1,7 @@
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from 'losat';
-import type { WholeFileInflater } from 'losat/ports';
+import { UnavailableError, type WholeFileInflater } from 'losat/ports';
 import { siteHeaders } from '../../build/headers';
 import { SearchDraft } from '../../src/application/draft';
 import { ExampleLoader } from '../../src/application/examples';
@@ -30,6 +30,7 @@ function setup(
     deletions?: ExampleDeletions;
     wrapStore?: (store: MemoryExampleStore) => ExampleStore;
     saver?: FakeFileSaver;
+    unavailable?: () => string | undefined;
   } = {},
 ) {
   let token = 0;
@@ -59,6 +60,7 @@ function setup(
     draft,
     ...(options.deletions === undefined ? {} : { deletions: options.deletions }),
     ...(options.saver === undefined ? {} : { saver: options.saver }),
+    ...(options.unavailable === undefined ? {} : { unavailable: options.unavailable }),
   });
   const settle = async () => {
     await examples.idle();
@@ -196,6 +198,46 @@ describe('ExampleLoader', () => {
       state: 'failed',
       message: 'ftp.ncbi.nlm.nih.gov could not be reached (Failed to fetch).',
     });
+  });
+
+  // Line WQA's sweep, D1, its review, M2 (2026-11-19): with the engine file not downloaded, a press downloaded the whole set
+  // (8 MB for 16S, 37 MB for PDB) and then said "The file from ftp.ncbi.nlm.nih.gov could not be decompressed (LOSAT
+  // could not download its engine file …)": the file was blamed for the decoders that could not be loaded.
+  it('loads no set while a part of LOSAT is unavailable, and says what the page says', async () => {
+    const UNAVAILABLE = 'LOSAT could not download its engine file /engine/serial.wasm (network error)';
+    let problem: string | undefined = UNAVAILABLE;
+    const { draft, examples, downloader, settle } = setup({ unavailable: () => problem });
+    draft.setPaste('query', '>old\nACGT\n');
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    expect(examples.state.get().load).toEqual({
+      id: 'refseq-16s-bacteria',
+      progress: { state: 'failed', message: `${UNAVAILABLE}. Reload the page.` },
+    });
+    expect(downloader.requests).toEqual([]);
+    expect(draft.state.get().query.paste).toBe('>old\nACGT\n');
+    problem = undefined;
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    expect(downloader.requests.map((request) => request.url)).toEqual([SIXTEEN_S.url]);
+    expect(examples.state.get().loaded).toEqual({ id: 'refseq-16s-bacteria', count: 1 });
+  });
+
+  it('says what the page says when the decoders or the store of the sets stop during a load, not that the file is damaged', async () => {
+    const STOPPED = 'The part of LOSAT that keeps the results stopped';
+    const { examples, settle } = setup({ files: { [SIXTEEN_S.url]: { ok: false, reason: 'unavailable', detail: STOPPED } } });
+    examples.load('refseq-16s-bacteria');
+    await settle();
+    expect(examples.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.` });
+    // The store that keeps the saved copies stopped: no download starts.
+    const { examples: other, downloader, settle: settleOther } = setup({
+      wrapStore: (store) =>
+        Object.assign(Object.create(store) as ExampleStore, { readExample: () => Promise.reject(new UnavailableError(STOPPED)) }),
+    });
+    other.load('refseq-16s-bacteria');
+    await settleOther();
+    expect(other.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.` });
+    expect(downloader.requests).toEqual([]);
   });
 
   it('uses the set in this tab when the browser keeps nothing, or when the storage is full', async () => {
@@ -463,6 +505,10 @@ describe('BrowserFileDownloader', () => {
     const sentence = "'x.fna.gz' is named .gz but is not gzip data (incomplete deflate stream); LOSAT reads a file named .gz through gzip";
     const engine: WholeFileInflater = { inflateFile: () => Promise.reject(new Error(sentence)) };
     expect((await run(() => new Response(gz), { inflater: engine })).result).toEqual({ ok: false, reason: 'corrupt', detail: sentence });
+    // Decoders that could not be loaded are no fault of the file (line WQA's sweep, D1; its review, M2).
+    const missing = 'LOSAT could not download its engine file /engine/serial.wasm (network error)';
+    const unloaded: WholeFileInflater = { inflateFile: () => Promise.reject(new UnavailableError(missing)) };
+    expect((await run(() => new Response(gz), { inflater: unloaded })).result).toEqual({ ok: false, reason: 'unavailable', detail: missing });
     // Too large once inflated, and too large as it comes.
     expect((await run(() => new Response(gz), { maxBytes: 100 })).result).toEqual({ ok: false, reason: 'too-large' });
     const large = await run(() => new Response(TEXT), { maxBytes: 100 });

@@ -59,6 +59,15 @@ export interface ThreadHostOptions {
   readonly startTimeoutMs?: number;
 }
 
+/**
+ * What failed in a worker, from its error event. A script that does not load fires a plain Event, without a message: a
+ * thread worker's then read "a thread worker failed: undefined" (the second review of line WQA's D1 and D2, L3,
+ * 2026-11-19).
+ */
+function workerError(event: ErrorEvent | Event): string {
+  return ('message' in event && event.message) || 'its script did not load';
+}
+
 export class ThreadHostError extends Error {
   constructor(message: string) {
     super(message);
@@ -93,8 +102,7 @@ export class ThreadHost {
       if (event.data?.type === 'ready') this.keeperReady = true;
     };
     this.keeper.onerror = (event) => {
-      // A script that does not load fires a plain Event, without a message.
-      this.keeperError = `the memory keeper failed: ${event.message || 'its script did not load'}`;
+      this.keeperError = `the memory keeper failed: ${workerError(event)}`;
     };
     const keep: KeeperCommand = {
       type: 'keep',
@@ -239,7 +247,7 @@ export class ThreadHost {
       if (event.data?.type === 'failed') slot.error = event.data.message;
     };
     worker.onerror = (event) => {
-      slot.error = `a thread worker failed: ${event.message}`;
+      slot.error = `a thread worker failed: ${workerError(event)}`;
       // An error that ended a thread that ran counts it off.
       if (!this.options.use.endThread(state, SLOT_FAILED)) Atomics.store(state, 0, SLOT_FAILED);
     };

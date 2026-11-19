@@ -4,6 +4,7 @@ import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { EngineGateway } from 'losat/ports';
 import { Attention } from './application/attention';
+import { Availability } from './application/availability';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
@@ -32,6 +33,8 @@ export interface App {
   readonly results: ResultsBrowser;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
   readonly attention: Attention;
+  /** Whether LOSAT itself works: a part that could not be loaded, or that stopped (line WQA's sweep, D1 and D2). */
+  readonly availability: Availability;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
   readonly usesFakeEngine: boolean;
 }
@@ -50,7 +53,9 @@ export interface AppOptions {
  * Wasm engine; a build without them is a development build with the FakeEngine.
  */
 export function createApp(options: AppOptions = {}): App {
-  const data = startDataWorker();
+  let dataWorkerEnd: (error: Error) => void = () => undefined;
+  const dataWorkerEnded = new Promise<Error>((resolve) => (dataWorkerEnd = resolve));
+  const data = startDataWorker((error) => dataWorkerEnd(error));
   const engine: EngineGateway =
     ENGINE_ASSETS === null
       ? new FakeEngine({ phaseDelayMs: 50 })
@@ -67,6 +72,7 @@ export function createApp(options: AppOptions = {}): App {
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
     digest: sha256Hex,
+    dataWorkerEnded,
   });
   const draft = new SearchDraft({
     engine,
@@ -75,10 +81,12 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
+  const availability = new Availability({ draft, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
     draft,
+    availability,
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
   });
@@ -102,5 +110,5 @@ export function createApp(options: AppOptions = {}): App {
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, examples, counts, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
 }

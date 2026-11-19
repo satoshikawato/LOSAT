@@ -70,8 +70,16 @@ const shownFlag = computed(() => (taxidField.value !== undefined && countsBy.val
 /** The file chosen for the option, which the run reads under the option's value. */
 const chosenFile = computed(() => props.state.files[props.state.program][props.field.flag]);
 const fileInput = ref<HTMLInputElement | null>(null);
+/**
+ * The engine's options could not be read, as a part of LOSAT could not be loaded or stopped: the field says so, as an
+ * input card does, where it showed a control with no choices or a blank box ("Optimize for" with no tasks; line WQA's
+ * sweep, D1; its review, L1, 2026-11-19). The page says what failed (AppView).
+ */
+const unread = computed(() => props.state.descriptionUnavailable === true);
 /** A checkbox of a row carries its name after the box, as NCBI's checkboxes of a row do. */
-const boxInRow = computed(() => props.inline === true && (asCheckbox.value || props.field.kind === 'filter' || props.field.kind === 'file'));
+const boxInRow = computed(
+  () => props.inline === true && !unread.value && (asCheckbox.value || props.field.kind === 'filter' || props.field.kind === 'file'),
+);
 /** A choice whose default is one of its choices shows it; otherwise "Default" stands for it. */
 const defaultChosen = computed(() => fallback.value !== undefined && choices.value.includes(fallback.value));
 
@@ -170,18 +178,19 @@ function onList(next: string): void {
     :data-testid="`${id}-field`"
   >
     <component
-      :is="field.kind === 'radio' ? 'span' : 'label'"
+      :is="field.kind === 'radio' || unread ? 'span' : 'label'"
       v-if="!boxInRow"
       :id="`${id}-label`"
       class="param-label"
-      :for="field.kind === 'radio' ? undefined : id"
+      :for="field.kind === 'radio' || unread ? undefined : id"
     >
       <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
       {{ field.label }} <span class="flag">{{ field.flag }}</span>
       <span v-if="changed" class="visually-hidden">, changed from the default</span>
     </component>
     <div class="param-control">
-      <div v-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" v-bind="mark()" :data-testid="id">
+      <span v-if="unread" class="muted" :data-testid="`${id}-unread`">Not read.</span>
+      <div v-else-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" v-bind="mark()" :data-testid="id">
         <label v-for="choice in choices" :key="choice" class="radio">
           <input
             type="radio"
@@ -377,7 +386,7 @@ function onList(next: string): void {
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>
       </span>
-      <span v-if="field.hint && (field.kind !== 'file' || (fileOn && countsBy === 'file'))" class="param-hint">{{ field.hint }}</span>
+      <span v-if="!unread && field.hint && (field.kind !== 'file' || (fileOn && countsBy === 'file'))" class="param-hint">{{ field.hint }}</span>
       <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
       <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
       <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->

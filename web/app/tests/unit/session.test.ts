@@ -106,6 +106,8 @@ describe('working session ownership', () => {
     });
     expect(session.store).toBe(store);
     expect(session.fallbackReason).toBeUndefined();
+    // The page learns from its release that the worker ended (line WQA's sweep, D2).
+    expect(session.lock).toBe(SESSION_LOCK_PREFIX + 'own');
     expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 1 });
   });
 
@@ -141,6 +143,8 @@ describe('working session ownership', () => {
     expect(session.store.backend).toBe('memory');
     expect(session.fallbackReason).toBe(FULL_REASON);
     expect(session.fallbackError).toBe('StorageFullError: ' + new StorageFullError().message);
+    // Held all the same: the worker keeps it until it ends.
+    expect(session.lock).toBe(SESSION_LOCK_PREFIX + 'own');
     // Results kept in memory have a budget (S09). The note under the page names it as the
     // storage-full message does (review of WQA D5, M1).
     expect((session.store as MemoryBlockStore).capacityBytes()).toBe(MEMORY_RESULTS_CAPACITY_BYTES);
@@ -164,6 +168,7 @@ describe('working session ownership', () => {
     });
     expect(opened).toBe(false);
     expect(session.store.backend).toBe('memory');
+    expect(session.lock).toBeUndefined();
     expect(session.fallbackReason).toBe(UNSUPPORTED_REASON);
     expect(session.fallbackError).toBe('StorageUnsupportedError: this browser has no Web Locks API');
     expect(await session.cleanup).toEqual({
@@ -197,6 +202,7 @@ describe('working session ownership', () => {
     // other tab was asked, so there is no note about them (review of WQA D5, M2).
     expect(session.fallbackReason).toBe(REFUSED_REASON);
     expect(session.fallbackError).toBe('SecurityError: The request was denied.');
+    expect(session.lock).toBeUndefined();
     expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 0 });
   });
 

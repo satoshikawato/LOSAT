@@ -3,7 +3,7 @@
 // threaded instance and the memory keeper's channel. The real Engine worker runs in the
 // browsers (tests/e2e/engine.spec.ts).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WasmEngine, type EngineAssets, type WasmEngineOptions } from 'losat';
+import { ENGINE_ENDED, ENGINE_NOT_STARTED, WasmEngine, type EngineAssets, type LifeLocks, type WasmEngineOptions } from 'losat';
 import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from 'losat/ports';
 import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
 import {
@@ -51,6 +51,31 @@ class FakeWorker {
 
   send(event: EngineEvent): void {
     this.onmessage?.({ data: event } as MessageEvent<EngineEvent>);
+  }
+}
+
+/**
+ * Web Locks as the Gateway uses them to learn that a worker ended (worker-life.ts): a request waits until `release`, as
+ * the page's request for the lock of a worker waits until the worker ends, or until its signal aborts.
+ */
+class FakeLocks implements LifeLocks {
+  readonly waiting = new Map<string, { readonly signal: AbortSignal | undefined; readonly grant: () => void }>();
+
+  request(name: string, options: { readonly signal?: AbortSignal }, callback: () => unknown): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      this.waiting.set(name, { signal: options.signal, grant: () => resolve(callback()) });
+      options.signal?.addEventListener('abort', () => {
+        this.waiting.delete(name);
+        reject(new DOMException('aborted', 'AbortError'));
+      });
+    });
+  }
+
+  /** The worker that held `name` ended: the page's request is granted. */
+  release(name: string): void {
+    const waiting = this.waiting.get(name);
+    this.waiting.delete(name);
+    waiting?.grant();
   }
 }
 
@@ -507,16 +532,176 @@ describe('WasmEngine', () => {
     expect(worker.terminated).toBe(true);
   });
 
-  it('fails the search when the worker fails, and starts a new generation for the next one', async () => {
+  // Line WQA's sweep, D2, its review, M1 (2026-11-19): the worker said that it started only once it held its lock, which
+  // a search posted with `init` came before, so a worker that failed during its first search read as one that could not
+  // start ("LOSAT could not start the part that runs searches. Reload the page."). It says so at once now.
+  it('fails the search when the worker fails, also before it holds its lock, and starts a new generation for the next one', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'started', generation: 1 });
     worker.onerror?.({ message: 'out of memory', preventDefault: () => undefined } as ErrorEvent);
     await expect(run).rejects.toThrow('The engine worker stopped: out of memory');
     expect(worker.terminated).toBe(true);
     const next = engine.run(request('r2'), output(), () => undefined);
     await posted(() => workers[1], 1);
     workers[1]!.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
+    expect((await next).runtimeGeneration).toBe(2);
+  });
+
+  // Line WQA's sweep, D1 (2026-11-19): a worker script that could not be loaded gives an error event without a message,
+  // and the search failed with "The engine worker stopped: an error without a message".
+  it('fails the search with LOSAT\'s own failure when the worker could not start, and starts a new one for the next search', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    worker.onerror?.({ message: '', preventDefault: () => undefined } as ErrorEvent);
+    await expect(run).rejects.toMatchObject({ name: 'UnavailableError', message: ENGINE_NOT_STARTED });
+    expect(worker.terminated).toBe(true);
+    const next = engine.run(request('r2'), output(), () => undefined);
+    await posted(() => workers[1], 1);
+    workers[1]!.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
+    expect((await next).runtimeGeneration).toBe(2);
+  });
+
+  // Line WQA's sweep, D2 (2026-11-19): a worker that ends without an error event (Worker.terminate(), self.close(), a
+  // browser that ends it) left its search "Searching" for good. The release of the lock that it held tells.
+  it('fails the search when its worker ended without an error event, which the release of its lock tells', async () => {
+    const locks = new FakeLocks();
+    const { engine, workers } = setup(undefined, { locks });
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const name = worker.init.lifeLock;
+    expect(name).toMatch(/^losat-web:engine-life:/);
+    // The page waits for the lock only once the worker holds it.
+    expect(locks.waiting.has(name)).toBe(false);
+    worker.send({ type: 'started', generation: 1 });
+    expect(locks.waiting.has(name)).toBe(false);
+    worker.send({ type: 'life', generation: 1, held: true });
+    expect(locks.waiting.has(name)).toBe(true);
+    locks.release(name);
+    await expect(run).rejects.toThrow(ENGINE_ENDED);
+    expect(worker.terminated).toBe(true);
+    const next = engine.run(request('r2'), output(), () => undefined);
+    await posted(() => workers[1], 1);
+    workers[1]!.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
+    expect((await next).runtimeGeneration).toBe(2);
+  });
+
+  // The second review of line WQA's D1 and D2, L1 (2026-11-19): the threaded instance was in use, so the Gateway waited
+  // for the keeper to grow the memory; Firefox had ended the keeper with the worker, and the wait never ended.
+  it('ends at once the generation of a worker that ended during a threaded search, without waiting for its keeper', async () => {
+    const locks = new FakeLocks();
+    const ends: string[] = [];
+    const { engine, workers } = setup(undefined, { locks, onRuntimeEnd: (end) => ends.push(end) });
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const asked: unknown[] = [];
+    // The keeper ended with the worker: it answers nothing.
+    const keeper = fakeKeeper(worker, (message) => {
+      asked.push(message);
+      return undefined;
+    });
+    worker.send({ type: 'started', generation: 1 });
+    worker.send({ type: 'life', generation: 1, held: true });
+    expect(worker.use.enter()).toBe(true);
+    locks.release(worker.init.lifeLock);
+    await expect(run).rejects.toThrow(ENGINE_ENDED);
+    expect(worker.terminated).toBe(true);
+    expect(ends).toEqual(['at-once']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toEqual([]);
+    keeper.close();
+  });
+
+  // The third review of line WQA's D1 and D2, L2 (2026-11-19): the Gateway stopped waiting for the worker's lock once the
+  // generation began to end, so a generation already waiting for its keeper was never told that its worker ended: the
+  // wait never ended, with two channels open. It waits for the lock until the generation has ended.
+  describe('ends at once a generation that waits for its keeper when its worker ends', () => {
+    /** A threaded search whose worker holds its lock (unless `life` is false) and calls into the threaded instance. */
+    async function threadedSearch({ life = true } = {}) {
+      const locks = new FakeLocks();
+      const ends: string[] = [];
+      const { engine, workers } = setup(undefined, { locks, onRuntimeEnd: (end) => ends.push(end) });
+      const run = engine.run(request('r1', 4), output(), () => undefined);
+      const worker = await posted(() => workers[0], 1);
+      const asked: unknown[] = [];
+      // The keeper has not answered yet; it ends with the worker.
+      const keeper = fakeKeeper(worker, (message) => {
+        asked.push(message);
+        return undefined;
+      });
+      worker.send({ type: 'started', generation: 1 });
+      if (life) worker.send({ type: 'life', generation: 1, held: true });
+      expect(worker.use.enter()).toBe(true);
+      return { engine, run, worker, locks, ends, asked, keeper };
+    }
+
+    /** The generation waits for the keeper; the worker's end ends it at once. */
+    async function endsAtOnceWhenTheWorkerEnds({ worker, locks, ends, asked, keeper }: Awaited<ReturnType<typeof threadedSearch>>) {
+      await until(() => asked.length === 1);
+      expect(worker.terminated).toBe(false);
+      expect(ends).toEqual([]);
+      expect(locks.waiting.has(worker.init.lifeLock)).toBe(true);
+      locks.release(worker.init.lifeLock);
+      expect(worker.terminated).toBe(true);
+      expect(ends).toEqual(['at-once']);
+      keeper.close();
+    }
+
+    it('after a cancel', async () => {
+      const search = await threadedSearch();
+      search.engine.cancel('r1');
+      await expect(search.run).rejects.toBeInstanceOf(RunCancelledError);
+      await endsAtOnceWhenTheWorkerEnds(search);
+    });
+
+    it('after an error of the worker', async () => {
+      const search = await threadedSearch();
+      search.worker.onerror?.({ message: 'out of memory', preventDefault: () => undefined } as ErrorEvent);
+      await expect(search.run).rejects.toThrow('The engine worker stopped: out of memory');
+      await endsAtOnceWhenTheWorkerEnds(search);
+    });
+
+    it('after a cancel that came before the worker said that it holds its lock', async () => {
+      const search = await threadedSearch({ life: false });
+      search.engine.cancel('r1');
+      await expect(search.run).rejects.toBeInstanceOf(RunCancelledError);
+      search.worker.send({ type: 'life', generation: 1, held: true });
+      await endsAtOnceWhenTheWorkerEnds(search);
+    });
+
+    it('and stops waiting for the lock once the keeper answered', async () => {
+      const search = await threadedSearch();
+      const keeper = fakeKeeper(search.worker, () => ({ type: 'grown' }));
+      search.engine.cancel('r1');
+      await expect(search.run).rejects.toBeInstanceOf(RunCancelledError);
+      await until(() => search.worker.terminated);
+      expect(search.ends).toEqual(['grown']);
+      expect(search.locks.waiting.size).toBe(0);
+      keeper.close();
+      search.keeper.close();
+    });
+  });
+
+  it('does not wait for the lock of a worker that it ends itself, nor of one that holds none', async () => {
+    const locks = new FakeLocks();
+    const { engine, workers } = setup(undefined, { locks });
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'started', generation: 1 });
+    worker.send({ type: 'life', generation: 1, held: true });
+    expect(locks.waiting.size).toBe(1);
+    engine.cancel('r1');
+    await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+    expect(locks.waiting.size).toBe(0);
+    const next = engine.run(request('r2'), output(), () => undefined);
+    const second = await posted(() => workers[1], 1);
+    // Without Web Locks (or a refused request) the worker holds no lock: none is waited for.
+    second.send({ type: 'started', generation: 2 });
+    second.send({ type: 'life', generation: 2, held: false });
+    expect(locks.waiting.size).toBe(0);
+    second.send({ type: 'done', generation: 2, runId: 'r2', ok: true, result: RESULT });
     expect((await next).runtimeGeneration).toBe(2);
   });
 

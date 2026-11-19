@@ -7,6 +7,7 @@ import type { OutputStream } from '../../ports/run-output.js';
 import { EngineStoppedError } from '../reactor/abi.js';
 import { loadReactor } from '../reactor/instance.js';
 import { RunOutputWriter } from '../run-output/writer.js';
+import { holdLife, webLocks } from '../worker-life.js';
 import { InstanceUse } from './instance-use.js';
 import {
   HOLD_USE_CHANNEL,
@@ -29,7 +30,7 @@ const scope = self as unknown as {
 
 let generation = 0;
 let runtime: EngineRuntime | undefined;
-// Preparations and searches use the runtime one after another, in the order they came.
+// Preparations and searches use the runtime one after another, in the order they came, after the worker took its lock (init).
 let previous: Promise<unknown> = Promise.resolve();
 // The latest preparation that waits for its turn: newer ones replace it, and a search drops
 // it (the search prepares for itself).
@@ -100,6 +101,14 @@ function holdIfArmed(use: InstanceUse | undefined): void {
 
 function init(command: EngineInit): void {
   generation = command.generation;
+  // Tells the Gateway at once that this worker started: an error from now on is a worker that stopped (line WQA's sweep, D1).
+  scope.postMessage({ type: 'started', generation });
+  // Holds the worker's lock until it ends (worker-life.ts), and tells the Gateway so before any preparation or search of
+  // the worker takes its turn: the Gateway can wait for the lock only once the worker holds it. A search posted with
+  // `init` (the first search of a new worker: after a cancel, before the warm-up, after a renewal) reached its
+  // synchronous call into the engine before the lock was granted, so the Gateway did not wait for the lock during that
+  // search, and a worker ended then left it "Searching" for good (line WQA's sweep, D2; its review, H1, 2026-11-19).
+  previous = holdLife(webLocks(), command.lifeLock).then((held) => scope.postMessage({ type: 'life', generation: command.generation, held }));
   let serial: ReturnType<typeof moduleOf> | undefined;
   let threads: ReturnType<typeof moduleOf> | undefined;
   const use = command.use === undefined ? undefined : new InstanceUse(command.use);

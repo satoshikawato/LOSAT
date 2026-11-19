@@ -37,13 +37,9 @@ fn run_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let (query, _) = crate::store::register(words[0], 0, &input(query)).unwrap();
     let (subject, _) = crate::store::register(words[0], 1, &input(subject)).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-    let result = crate::store::with_inputs(
-        program,
-        query,
-        subject,
-        writes_archive(words),
-        |queries, subjects| run(words, queries, subjects),
-    );
+    let result = crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
+        run(words, queries, subjects)
+    });
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();
     let mut streams = BTreeMap::new();
@@ -268,7 +264,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -281,12 +277,12 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
     );
     let version = start_json(&["blastn", "-version"]).unwrap_err();
     assert_eq!(version, parse(&["blastn", "-version"]).unwrap_err());

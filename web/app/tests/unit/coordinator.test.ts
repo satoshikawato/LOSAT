@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT, type RegistryFile, type RunFile } from 'losat/domain';
+import { CUSTOM_OUTPUT, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   withRunFiles,
@@ -83,9 +83,11 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
   private readonly pending = new Map<string, { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void }>();
   lateFinish?: () => void;
+  /** The IDs that the outputs of the next runs show (a run of -parse_deflines). */
+  shownIds?: ShownIds;
 
   async describe() {
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
@@ -108,7 +110,13 @@ class ManualEngine implements EngineGateway {
           writer.write(6, new TextEncoder().encode(`${req.runId}\n`));
           writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(`Warning: ${req.runId}\n`));
           writer.end();
-          resolve({ path: 'fake', threads: 1, engineBuild: 'manual', ...(runFiles === undefined ? {} : { runFiles }) });
+          resolve({
+            path: 'fake',
+            threads: 1,
+            engineBuild: 'manual',
+            ...(runFiles === undefined ? {} : { runFiles }),
+            ...(this.shownIds === undefined ? {} : { shownIds: this.shownIds }),
+          });
         },
         reject,
       });
@@ -128,7 +136,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {
@@ -460,6 +468,23 @@ describe('Coordinator', () => {
 
   // ABI v2 stream 8 (line RG E1w-3b): the file of -logfile comes with the engine's answer, also when
   // the run fails, and the run keeps it; a cancelled run keeps none.
+  // line WQA's sweep, D7, 2026-11-19: the results name the records of a -parse_deflines run as its outputs do.
+  it('keeps the IDs that the outputs of a run show, where the engine read them from the deflines', async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine);
+    const plain = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, plain, 'running');
+    engine.finish(plain);
+    await waitFor(coordinator, plain, 'completed');
+    expect('shownIds' in viewOf(coordinator, plain)!.record).toBe(false);
+    engine.shownIds = { query: ['AB000001.1'], subject: ['NP_000006.1'] };
+    const parsed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, parsed, 'running');
+    engine.finish(parsed);
+    await waitFor(coordinator, parsed, 'completed');
+    expect(viewOf(coordinator, parsed)!.record.shownIds).toEqual({ query: ['AB000001.1'], subject: ['NP_000006.1'] });
+  });
+
   it('keeps the files that a run made besides its outputs, of a completed and of a failed run, and none of a cancelled one', async () => {
     const engine = new ManualEngine();
     const { coordinator, saved } = setup(engine);

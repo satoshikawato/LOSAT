@@ -70,11 +70,13 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 3 since the signal of stream 9, which makes the
-/// host discard a stream that failed alone after a chunk of it was sent (line RG item T7-W).
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 4 since `losat_web2_register_inputs`, which
+/// reads the inputs of a run with `-parse_deflines` (line WQA's sweep, D7, 2026-11-19); 3 since the
+/// signal of stream 9, which makes the host discard a stream that failed alone after a chunk of it
+/// was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    3
+    4
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -156,6 +158,35 @@ pub unsafe extern "C" fn losat_web2_register(
         let (handle, response) = store::register(program, role, bytes(bytes_ptr, bytes_len))?;
         emit(STREAM_RESPONSE, response.as_bytes());
         i32::try_from(handle).map_err(|_| "input handle space exhausted".to_string())
+    })
+}
+
+/// Reads the query and the subject FASTA of the run of `argv` together, as the CLI reads its
+/// `-query` and `-subject` files for that argv (`store::register_inputs`): the inputs of a run with
+/// `-parse_deflines`, whose ids are read in one scope for the query and the subjects. Emits the
+/// *inputs* JSON (both handles and their records) on stream 2; only the run of `argv` takes the
+/// handles.
+///
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_register_inputs(
+    argv_ptr: *const u8,
+    argv_len: usize,
+    query_ptr: *const u8,
+    query_len: usize,
+    subject_ptr: *const u8,
+    subject_len: usize,
+) -> i32 {
+    guarded(|| {
+        let argv = words(text(argv_ptr, argv_len, "argv")?);
+        let (_, _, response) = store::register_inputs(
+            &argv,
+            bytes(query_ptr, query_len),
+            bytes(subject_ptr, subject_len),
+        )?;
+        emit(STREAM_RESPONSE, response.as_bytes());
+        Ok(0)
     })
 }
 
@@ -353,7 +384,7 @@ pub unsafe extern "C" fn losat_web2_run(
             program,
             query_handle,
             subject_handle,
-            run::writes_archive(&argv),
+            &argv,
             |queries, subjects| run::run(&argv, queries, subjects),
         )??;
         Ok(0)

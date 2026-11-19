@@ -276,13 +276,13 @@ async function toAlignments(id: HspId): Promise<void> {
             </dd>
             <template v-if="selected.snapshot.query.records.length === 1">
               <dt>Query ID</dt>
-              <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0) }}</dd>
+              <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>
               <dt>Query Length</dt>
               <dd data-testid="results-query-length">{{ formatCount(selected.snapshot.query.records[0]!.length) }} {{ units.query }}</dd>
             </template>
             <template v-if="selected.snapshot.subject.records.length === 1">
               <dt>Subject ID</dt>
-              <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0) }}</dd>
+              <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0, selected.record.shownIds) }}</dd>
               <dt>Subject Length</dt>
               <dd data-testid="results-subject-length">{{ formatCount(selected.snapshot.subject.records[0]!.length) }} {{ units.subject }}</dd>
             </template>

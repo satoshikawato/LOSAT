@@ -541,7 +541,7 @@ export class ResultsBrowser {
     const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
     if (byScore) this.scores ??= shownScores(table, loaded.out6);
     const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
-      recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx),
+      recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx, loaded.run.record.shownIds),
       this.row(subject.rows[0]!).sseqid,
     ]);
     const order = new Map(query.subjects.map((subject, i) => [subject.sIdx, i + 1]));
@@ -638,7 +638,7 @@ export class ResultsBrowser {
     loaded.run.snapshot.query.records.forEach((record, qIdx) => {
       const group = loaded.index.queries.get(qIdx);
       if (filters.queriesWithHitsOnly && group === undefined) return;
-      const id = recordName(record.id, 'query', qIdx);
+      const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
       if (text !== '' && !id.toLowerCase().includes(text)) return;
       entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
     });

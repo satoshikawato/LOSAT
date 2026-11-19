@@ -640,6 +640,16 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
     });
   }
 
+  // line WQA's sweep, D7, 2026-11-19: the warm-up of a -parse_deflines search reads its inputs together, as the search
+  // does; the built-in query and subject have IDs of their own, so no record is both.
+  it('warms up a -parse_deflines search of every program', async () => {
+    const abi = await open();
+    for (const program of PROGRAMS) {
+      expect(warmUp(abi, [program.id, '-query', 'query.fa', '-subject', 'subject.fa', '-parse_deflines']), program.id).toBe(true);
+    }
+    expect(abi.stoppedBy).toBeUndefined();
+  });
+
   it('reports an argv that the engine refuses, and the instance still runs searches', async () => {
     const abi = await open();
     expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-word_size', '-1'])).toBe(false);

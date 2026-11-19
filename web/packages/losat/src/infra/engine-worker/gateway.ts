@@ -285,6 +285,7 @@ export class WasmEngine implements EngineGateway {
       runtimeGeneration: generation.id,
       memory: result.memory,
       subjectRetained: result.subjectRetained,
+      ...(result.shownIds === undefined ? {} : { shownIds: result.shownIds }),
       ...(result.windowMasker === undefined ? {} : { windowMasker: result.windowMasker }),
       ...(result.runFiles === undefined ? {} : { runFiles: result.runFiles }),
     });

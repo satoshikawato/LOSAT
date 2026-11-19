@@ -152,8 +152,14 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
         # those formats to compare: the adapter's tests cover the row (run.rs).
         if any(argv[k:k + 2] == ["-num_alignments", "0"] for k in range(len(argv) - 1)):
             continue
-        # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`).
-        if "-parse_deflines" in argv:
+        # -parse_deflines runs in LOSAT Web since line WQA's sweep, D7, 2026-11-19 (the host reads the
+        # inputs together, `losat_web2_register_inputs`), except the pd.self rows other than outfmt 0:
+        # a record that is both a query and a subject and has masks, which LOSAT refuses for outfmt 0
+        # by failing the whole call, so the Web's search of 0, 6 and 7 fails where the CLI writes 6
+        # and 7 (open: the refusal is to be outfmt 0's alone; the adapter's
+        # `parse_deflines_runs_write_ncbis_outputs` holds the rows to that refusal).
+        if "-parse_deflines" in argv and row["fixture_id"].startswith("pd.self.") \
+                and not row["fixture_id"].endswith(".0"):
             continue
         # `register` refuses a `>?` gap line (maintainer decision 3, as in fasta_input): a row
         # whose input has one is a CLI case.
@@ -221,10 +227,6 @@ def fasta_input() -> list[dict]:
     for (program, task, query, subject, args), rows in sorted(grouped.items()):
         paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
         if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
-            continue
-        # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`), as in
-        # `outfmt0_fixtures`.
-        if "-parse_deflines" in shlex.split(args):
             continue
         argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
         argv += ["-task", task] if task else []

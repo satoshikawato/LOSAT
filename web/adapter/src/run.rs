@@ -52,6 +52,17 @@ impl Program {
         }
     }
 
+    /// The program in the library API's terms.
+    pub fn api(self) -> losat::api::Program {
+        match self {
+            Self::Blastp => losat::api::Program::Blastp,
+            Self::Tblastn => losat::api::Program::Tblastn,
+            Self::Blastn => losat::api::Program::Blastn,
+            Self::Tblastx => losat::api::Program::Tblastx,
+            Self::Blastx => losat::api::Program::Blastx,
+        }
+    }
+
     /// The output formats that the engine implements for this program; a run writes
     /// exactly these, each on the stream of the same number.
     pub fn formats(self) -> &'static [u32] {
@@ -188,12 +199,6 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
                 "{key} is not accepted: a run writes every output format of the program"
             ));
         }
-        // The records are registered and read before the options of a run are known
-        // (`store::register`), so their ids could not be parsed: the run would write the report
-        // of a search without the option.
-        if matches!(key, "-parse_deflines" | "--parse_deflines") {
-            return Err(format!("{key} is not supported in the browser yet"));
-        }
     }
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
@@ -257,6 +262,21 @@ fn read_outfmt(
     };
     let number = choice.number as u32;
     Ok((program, command, Requested { custom, number }))
+}
+
+/// Whether a run of `words` (program name first) takes its query and subject from
+/// `store::register_inputs`, which reads them together for its argv, and not from `register`: an
+/// argv with `-parse_deflines` (`parse_deflines_of`), whose reading of the inputs needs the argv
+/// (the ids of the deflines, read in one scope of ids for the query and the subjects), that is not
+/// a dry run, which reads no input. False for an argv that the CLI's parser rejects.
+pub fn inputs_together(words: &[&str]) -> bool {
+    let dry_run = matches!(
+        losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])),
+        losat::web_adapter::Preparsed::Words { dryrun: true, .. }
+    );
+    !dry_run
+        && parse_words(words)
+            .is_ok_and(|(_, command)| losat::web_adapter::parse_deflines_of(&command))
 }
 
 /// Whether the run of `words` writes the BLAST archive (outfmt 11), whose Bioseqs show the whole
@@ -342,9 +362,10 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 /// The *start* JSON of `losat_web2_start` (docs/web/abi_v2.md §4, §9): what NCBI's application
 /// reads of the argv `words` (program name first) before its arguments (`preparse`): the file of
 /// the last `-conffile` (which the host registers as kind 2 before it validates), the file of
-/// `-logfile` (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`) and whether
-/// the run is a dry run. An unknown program, and a version word, which LOSAT Web refuses, are
-/// errors.
+/// `-logfile` (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`), whether
+/// the run is a dry run, and whether the run takes its inputs from `losat_web2_register_inputs`
+/// (`inputs_together`: an argv with `-parse_deflines`). An unknown program, and a version word,
+/// which LOSAT Web refuses, are errors.
 pub fn start_json(words: &[&str]) -> Result<String, String> {
     use losat::web_adapter::Preparsed;
     Program::parse(words.first().copied().unwrap_or(""))?;
@@ -368,7 +389,11 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
         &mut out,
         losat::web_adapter::log_file(arguments).and_then(|name| name.to_str()),
     );
-    let _ = write!(out, ",\"dry_run\":{dryrun}}}");
+    let _ = write!(
+        out,
+        ",\"dry_run\":{dryrun},\"register_inputs\":{}}}",
+        inputs_together(words)
+    );
     Ok(out)
 }
 
@@ -2003,19 +2028,249 @@ mod tests {
         }
     }
 
-    // LOSAT Web gives the engine subject records: BLASTP's `-db` (a database read from
-    // files, CLI only until LOSAT Web takes a database) is rejected by `validate` and by
-    // The CLI writes these records' ids from the option; a run here has read them without it.
+    // `-parse_deflines` is the CLI's option (line WQA's sweep, D7, 2026-11-19): `validate` takes it,
+    // and the host gives a run of it the inputs of `register_inputs` (`inputs_together`; the
+    // *start* JSON's `register_inputs`), but not a dry run, which reads no input.
     #[test]
-    fn parse_deflines_is_rejected() {
+    fn parse_deflines_reads_the_inputs_together() {
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
-            let expected = "-parse_deflines is not supported in the browser yet";
-            assert_eq!(validate(&words).unwrap_err(), expected);
-            assert_eq!(run(&words, &[], &[]).unwrap_err(), expected);
+            assert_eq!(validate(&words), Ok(()));
+            assert!(inputs_together(&words), "{program}");
+            assert!(start_json(&words)
+                .unwrap()
+                .ends_with(",\"register_inputs\":true}"));
+            let dry = [&words[..], &["-dryrun"]].concat();
+            assert!(!inputs_together(&dry), "{program}");
+            assert!(start_json(&dry)
+                .unwrap()
+                .ends_with(",\"register_inputs\":false}"));
+            assert!(!inputs_together(&words[..5]), "{program}");
+            assert!(!inputs_together(&[&words[..], &["-nosuchoption"]].concat()));
         }
     }
 
+    /// The `shown_id` of each record of the *register* response `response` (no escape in them).
+    fn shown_ids(response: &str) -> Vec<String> {
+        response
+            .split("\"shown_id\":\"")
+            .skip(1)
+            .map(|rest| rest[..rest.find('"').unwrap()].to_string())
+            .collect()
+    }
+
+    // A run with `-parse_deflines` writes NCBI's bytes (line WQA's sweep, D7, 2026-11-19): every row
+    // of NCBI's frozen outputs of the five programs with the option (LOSAT/tests/outfmt0_manifest.tsv,
+    // rows pd.* and the others), in its format, its inputs registered together for its argv
+    // (`registered_streams`), and stream 3 NCBI's standard error. The IDs that the *inputs*
+    // response shows for the records are the first two columns of outfmt 6 (`qaccver`, `saccver`),
+    // which the application's results show.
+    #[test]
+    fn parse_deflines_runs_write_ncbis_outputs() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        let rows = manifest_rows_with(|program, _, files, extra| {
+            Program::parse(program).is_ok()
+                && files.is_empty()
+                && extra
+                    .split_whitespace()
+                    .any(|word| word == "-parse_deflines")
+        });
+        // Not a PSSM query (a query column `pssm-gz:`, `-in_pssm`), which LOSAT Web does not take.
+        let rows: Vec<_> = rows
+            .into_iter()
+            .filter(|(_, argv)| !argv[2].starts_with("pssm"))
+            .collect();
+        let programs: std::collections::BTreeSet<&str> =
+            rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
+        assert_eq!(programs.len(), 5, "{programs:?}");
+        assert!(rows.len() >= 130, "{}", rows.len());
+        let (mut shown, mut refused) = (0, 0);
+        for (id, argv) in &rows {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            // Rows that LOSAT Web does not run, each with its refusal, so that this test shows
+            // when one runs: a `>?` gap line, which the store refuses (maintainer decision 3), and
+            // the pd.self rows other than outfmt 0, a record that is both a query and a subject
+            // and has masks: the engine refuses it for outfmt 0 by failing the whole call
+            // (`believed::refuse_shared_masks`), and LOSAT Web writes outfmt 0 in every call, so
+            // the argv's other formats fail with it where the command line writes them (open
+            // after line WQA's sweep, D7, 2026-11-19: the refusal is to be outfmt 0's alone,
+            // `FormatRefusal`, in BLASTN, BLASTP and TBLASTX).
+            let gap_line = [&query, &subject].iter().any(|bytes| {
+                bytes
+                    .split(|b| *b == b'\n')
+                    .any(|line| line.starts_with(b">?"))
+            });
+            let shared_masks = id.starts_with("pd.self.") && !id.ends_with(".0");
+            let streams = match try_registered_streams(&words, &query, &subject) {
+                Ok(streams) => {
+                    assert!(!gap_line && !shared_masks, "{id}: LOSAT Web runs it now");
+                    streams
+                }
+                Err(error) if gap_line => {
+                    assert!(error.contains("is a gap line ('>?')"), "{id}: {error}");
+                    refused += 1;
+                    continue;
+                }
+                Err(error) if shared_masks => {
+                    assert!(
+                        error.contains(
+                            "is both a query and a subject under -parse_deflines and has masks"
+                        ),
+                        "{id}: {error}"
+                    );
+                    refused += 1;
+                    continue;
+                }
+                Err(error) => panic!("{id}: {error}"),
+            };
+            let outfmt = at("-outfmt");
+            let stream = match outfmt {
+                "0" => 0,
+                "6" => 6,
+                "7" => 7,
+                _ => STREAM_CUSTOM,
+            };
+            let ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
+            let ours = streams.get(&stream).cloned().unwrap_or_default();
+            assert!(ours == ncbi, "{id}: stream {stream}\n{}", text(&ours));
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = streams
+                .get(&STREAM_DIAGNOSTICS)
+                .cloned()
+                .unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            if outfmt != "6" {
+                continue;
+            }
+            let (query_handle, subject_handle, response) =
+                crate::store::register_inputs(&words, &query, &subject).unwrap();
+            crate::store::release(query_handle).unwrap();
+            crate::store::release(subject_handle).unwrap();
+            let split = response.find(",\"subject\":").unwrap();
+            let (query_ids, subject_ids) =
+                (shown_ids(&response[..split]), shown_ids(&response[split..]));
+            let hits = text(streams.get(&STREAM_HITS).map_or(&[][..], Vec::as_slice));
+            let index = |line: &str, field: &str| {
+                let at = line.find(field).unwrap() + field.len();
+                line[at..]
+                    .split(',')
+                    .next()
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap()
+            };
+            for (hit, row) in hits.lines().zip(text(&ncbi).lines()) {
+                let columns: Vec<&str> = row.split('\t').collect();
+                assert_eq!(
+                    query_ids[index(hit, "\"q_idx\":")],
+                    columns[0],
+                    "{id}: {hit}"
+                );
+                assert_eq!(
+                    subject_ids[index(hit, "\"s_idx\":")],
+                    columns[1],
+                    "{id}: {hit}"
+                );
+                shown += 1;
+            }
+        }
+        assert!(shown > 0);
+        eprintln!(
+            "{} rows, {refused} refused, {shown} outfmt 6 rows' ids",
+            rows.len()
+        );
+    }
+
+    // The errors of a run with `-parse_deflines` are the CLI's, in its order (line WQA's sweep, D7,
+    // 2026-11-19; the texts are those of the native CLI of this branch for the same inputs, less its
+    // `Error: ` and line end): the subjects are read before the query, so a subject's error comes
+    // first, also before LOSAT Web's refusal of a gap line in the query; a subject input without
+    // records ends the run before the query is read; a ranged id fails a run that writes the BLAST
+    // archive alone. A dry run reads no input.
+    #[test]
+    fn parse_deflines_errors_are_the_clis() {
+        let words = |outfmt: &'static str| {
+            vec![
+                "blastn",
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-parse_deflines",
+                "-outfmt",
+                outfmt,
+            ]
+        };
+        let good: &[u8] = b">s1 x\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTT\n";
+        let dup: &[u8] = b">a x\nACGTACGTACGTAAACCCGGGTTT\n>a y\nACGTACGTAAAACCCGGGTTTAAA\n";
+        let no_defline: &[u8] = b"ACGTACGTACGT\n";
+        let gap: &[u8] = b">q1 x\nACGT\n>?10\nACGT\n";
+        let ranged: &[u8] = b">rs:3-20 ranged\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTT\n";
+        let error = |outfmt, query: &[u8], subject: &[u8]| {
+            try_registered_streams(&words(outfmt), query, subject).unwrap_err()
+        };
+        let dup_subject = "two subject records have the Seq-id lcl|a under -parse_deflines (NCBI \
+                           BLAST+ shows the first for both); this is not supported by LOSAT's BLASTN";
+        assert_eq!(
+            error("6", dup, good),
+            "two query records have the Seq-id lcl|a under -parse_deflines in one query batch, or \
+             in any with -subject or outfmt 5 (NCBI BLAST+'s scope holds both and searches the \
+             letters of the first for both); this is not supported by LOSAT's BLASTN"
+        );
+        assert_eq!(error("6", good, dup), dup_subject);
+        assert_eq!(error("6", gap, dup), dup_subject);
+        let gap_alone = error("6", gap, good);
+        assert!(gap_alone.contains("is a gap line ('>?')"), "{gap_alone}");
+        // A reader's error of the query comes before LOSAT Web's refusal of its gap line, as the CLI
+        // reads it: here a query and a subject record of one id and other letters.
+        let shared_gap: &[u8] = b">s1 x\nACGT\n>?10\nACGT\n";
+        assert_eq!(
+            error("6", shared_gap, good),
+            "a query and a subject record have the Seq-id lcl|s1 under -parse_deflines (NCBI \
+             BLAST+ shows them as one sequence); this is not supported by LOSAT's BLASTN"
+        );
+        assert_eq!(
+            error("6", no_defline, good),
+            "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1"
+        );
+        assert_eq!(
+            error("6", good, no_defline),
+            "BLAST query/options error: Query input doesn't start with a defline or comment, line \
+             1\0\nPlease refer to the BLAST+ user manual."
+        );
+        assert_eq!(
+            error("6", no_defline, b"\n"),
+            "BLAST engine error: Empty CBlastQueryVector"
+        );
+        assert_eq!(
+            error("11", good, ranged),
+            "a subject Seq-id with a range under -parse_deflines in the BLAST archive is not \
+             supported by LOSAT's BLASTN"
+        );
+        assert_eq!(
+            error("11", ranged, good),
+            "a query Seq-id with a range under -parse_deflines in the BLAST archive is not \
+             supported by LOSAT's BLASTN"
+        );
+        // Without the archive the ranged record runs, and shows the id that NCBI generates for it.
+        let streams = registered_streams(&words("6"), good, ranged);
+        assert!(text(&streams[&6]).starts_with("s1\tranged\t100.000\t48\t"));
+        let (query, subject, response) =
+            crate::store::register_inputs(&words("6"), good, ranged).unwrap();
+        crate::store::release(query).unwrap();
+        crate::store::release(subject).unwrap();
+        assert_eq!(shown_ids(&response), ["s1", "ranged"]);
+        // A dry run registers its inputs one at a time, as any run without the option.
+        let dry = [&words("6")[..], &["-dryrun"]].concat();
+        assert!(!inputs_together(&dry));
+    }
+
+    // LOSAT Web gives the engine subject records: BLASTP's `-db` (a database read from
+    // files, CLI only until LOSAT Web takes a database) is rejected by `validate` and by
     // `run`, before any search.
     #[test]
     fn a_database_search_is_rejected() {
@@ -2384,26 +2639,41 @@ mod tests {
         assert_eq!(custom("blastn", "17 SQ"), Ok(Some("17 SQ".to_string())));
     }
 
-    /// The streams of `run` over inputs that the program's reader reads (`store::register`).
+    /// The streams of `run` over inputs that the program's reader reads, as a host registers them
+    /// for the argv (`store::register`, or `store::register_inputs` where `inputs_together`).
     fn registered_streams(
         words: &[&str],
         query: &[u8],
         subject: &[u8],
     ) -> std::collections::BTreeMap<u32, Vec<u8>> {
+        try_registered_streams(words, query, subject).unwrap()
+    }
+
+    /// `registered_streams`, or the error of the registration or the run.
+    fn try_registered_streams(
+        words: &[&str],
+        query: &[u8],
+        subject: &[u8],
+    ) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, String> {
         let program = Program::parse(words[0]).unwrap();
-        let (query, _) = crate::store::register(words[0], 0, query).unwrap();
-        let (subject, _) = crate::store::register(words[0], 1, subject).unwrap();
+        let (query, subject) = if inputs_together(words) {
+            let (query, subject, _) = crate::store::register_inputs(words, query, subject)?;
+            (query, subject)
+        } else {
+            let (query, _) = crate::store::register(words[0], 0, query)?;
+            let (subject, _) = crate::store::register(words[0], 1, subject).inspect_err(|_| {
+                crate::store::release(query).unwrap();
+            })?;
+            (query, subject)
+        };
         crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-        let result = crate::store::with_inputs(
-            program,
-            query,
-            subject,
-            writes_archive(words),
-            |queries, subjects| run(words, queries, subjects),
-        );
+        let result =
+            crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
+                run(words, queries, subjects)
+            });
         crate::store::release(query).unwrap();
         crate::store::release(subject).unwrap();
-        result.unwrap().unwrap();
+        result??;
         let mut streams = std::collections::BTreeMap::new();
         crate::emit::EMITTED.with(|emitted| {
             for (stream, bytes) in emitted.borrow().iter() {
@@ -2413,7 +2683,7 @@ mod tests {
                     .extend_from_slice(bytes);
             }
         });
-        streams
+        Ok(streams)
     }
 
     /// NCBI BLAST+ 2.17.0's frozen outputs of `-outfmt` with fields, for every program
@@ -3281,6 +3551,14 @@ mod tests {
     /// format number, files column)` holds, as (fixture id, argv): the arguments of
     /// `run_oracle.search_argv` (none of the rows taken here quotes a value).
     fn manifest_rows(keep: impl Fn(&str, &str, &str) -> bool) -> Vec<(String, Vec<String>)> {
+        manifest_rows_with(|program, number, files, _| keep(program, number, files))
+    }
+
+    /// `manifest_rows` for which `keep(program, format number, files column, extra arguments)`
+    /// holds.
+    fn manifest_rows_with(
+        keep: impl Fn(&str, &str, &str, &str) -> bool,
+    ) -> Vec<(String, Vec<String>)> {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
         let manifest =
             std::fs::read_to_string(format!("{root}/tests/outfmt0_manifest.tsv")).unwrap();
@@ -3302,7 +3580,12 @@ mod tests {
                 .unwrap()
                 .trim_start_matches('+');
             let number = number.trim_start_matches('0');
-            if !keep(field("program"), number, field("files")) {
+            if !keep(
+                field("program"),
+                number,
+                field("files"),
+                field("extra_args"),
+            ) {
                 continue;
             }
             let extra = field("extra_args");
@@ -3380,9 +3663,9 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 57 rows of the manifest that a
-    // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
-    // store refuses: maintainer decision 3), stream 4 and stream 3.
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 58 rows of the manifest that a
+    // run takes (not the one with a `>?` gap line, which the store refuses: maintainer decision 3),
+    // stream 4 and stream 3.
     #[test]
     fn blastx_writes_ncbis_archive() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
@@ -3395,13 +3678,12 @@ mod tests {
         let rows = manifest_rows(|program, number, _| program == "blastx" && number == "11");
         let rows: Vec<_> = rows
             .into_iter()
-            .filter(|(_, argv)| !argv.iter().any(|word| word == "-parse_deflines"))
             .filter(|(_, argv)| {
                 let file = |flag: &str| &argv[argv.iter().position(|w| w == flag).unwrap() + 1];
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 57);
+        assert_eq!(rows.len(), 58);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
@@ -3414,6 +3696,15 @@ mod tests {
                 .unwrap_or_default();
             let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
             assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+        }
+    }
+
+    /// A BLASTN argv that writes the BLAST archive (`whole`) or not.
+    fn argv_writing_archive(whole: bool) -> &'static [&'static str] {
+        if whole {
+            &["blastn", "-query", "q", "-subject", "s", "-outfmt", "11"]
+        } else {
+            &["blastn", "-query", "q", "-subject", "s"]
         }
     }
 
@@ -3430,7 +3721,7 @@ mod tests {
                 Program::Blastn,
                 handle,
                 subject,
-                whole,
+                argv_writing_archive(whole),
                 |queries, subjects| {
                     let source = |record: &FastaRecord| {
                         record.source.as_ref().map(|source| source.defline.clone())
@@ -3477,12 +3768,20 @@ mod tests {
             let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
             let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
             let defline = |whole: bool| {
-                crate::store::with_inputs(Program::Blastn, handle, subject, whole, |queries, _| {
-                    queries
-                        .iter()
-                        .map(|record| record.source.as_ref().map(|source| source.defline.clone()))
-                        .collect::<Vec<_>>()
-                })
+                crate::store::with_inputs(
+                    Program::Blastn,
+                    handle,
+                    subject,
+                    argv_writing_archive(whole),
+                    |queries, _| {
+                        queries
+                            .iter()
+                            .map(|record| {
+                                record.source.as_ref().map(|source| source.defline.clone())
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                )
                 .unwrap()
             };
             assert_eq!(defline(false), vec![None; kept_lines.len()], "{fasta:?}");

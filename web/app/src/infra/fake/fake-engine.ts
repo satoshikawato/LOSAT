@@ -51,10 +51,11 @@ export class FakeEngine implements EngineGateway {
 
   /**
    * NCBI's application start is not imitated: no registry file, no file of the run, no dry run (its
-   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list).
+   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list), and no
+   * inputs read together (a run of `-parse_deflines` reads its records as one without it).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
   }
 
   /**

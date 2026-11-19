@@ -6,13 +6,13 @@
 // Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
-import type { RecordKey } from '../../domain/dataset.js';
+import type { RecordKey, ShownIds } from '../../domain/dataset.js';
 import { FileReadError, type StartResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 3;
-/** Stream 2: the JSON response of describe, register, scan_end, inflate_begin, start and file_end. */
+export const ABI_VERSION = 4;
+/** Stream 2: the JSON response of describe, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
 export const INFLATED_STREAM = 5;
@@ -55,6 +55,7 @@ export interface AbiExports {
   readonly losat_web2_start: Export;
   readonly losat_web2_validate: Export;
   readonly losat_web2_register: Export;
+  readonly losat_web2_register_inputs: Export;
   readonly losat_web2_release: Export;
   readonly losat_web2_scan_begin: Export;
   readonly losat_web2_scan_chunk: Export;
@@ -107,6 +108,18 @@ export interface RegisteredInput {
   readonly handle: number;
   readonly records: readonly RecordKey[];
 }
+
+/**
+ * The inputs of one run that `losat_web2_register_inputs` read together for its argv (a run with
+ * `-parse_deflines`; ABI v2 §4, §9 *inputs*), and the IDs that its outputs show for their records.
+ */
+export interface RegisteredInputs {
+  readonly query: RegisteredInput;
+  readonly subject: RegisteredInput;
+  readonly shownIds: ShownIds;
+}
+
+type RecordsResponse = { handle: number; records: Array<{ id: string; length: number; shown_id?: string }> };
 
 /**
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
@@ -203,14 +216,23 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile` and whether it is a dry run; or the CLI's message for an
-   * argv that the engine cannot start (a version word, a program that ABI v2 does not run).
+   * `-conffile`, the file of its `-logfile`, whether it is a dry run and whether its inputs are read
+   * together (`registerInputs`); or the CLI's message for an argv that the engine cannot start (a
+   * version word, a program that ABI v2 does not run).
    */
   start(argv: readonly string[]): StartResult {
     const status = this.call(this.exports.losat_web2_start, [encoder.encode(argv.join('\0'))]);
     if (status < 0) return { ok: false, message: this.lastError() };
-    const json = this.response() as { conffile: string | null; log_file: string | null; dry_run: boolean };
-    return { ok: true, start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run } };
+    const json = this.response() as {
+      conffile: string | null;
+      log_file: string | null;
+      dry_run: boolean;
+      register_inputs: boolean;
+    };
+    return {
+      ok: true,
+      start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run, registerInputs: json.register_inputs },
+    };
   }
 
   /** Undefined if the argv is valid, else the CLI's error text. */
@@ -227,6 +249,40 @@ export class ReactorAbi {
     } catch (error) {
       // A handle whose response cannot be read is not used: give its copy of the input back.
       if (this.stopped === undefined) this.release(handle);
+      throw error;
+    }
+  }
+
+  /**
+   * Reads the query and the subject of the run of `argv` together, as the CLI reads its `-query` and
+   * `-subject` for that argv (ABI v2 §4 `losat_web2_register_inputs`): the inputs of a run whose
+   * *start* JSON says `register_inputs` (`-parse_deflines`, line WQA's sweep, D7, 2026-11-19). Only
+   * the run of `argv` takes the two handles; the error is the CLI's message for these inputs.
+   */
+  registerInputs(argv: readonly string[], query: Uint8Array, subject: Uint8Array): RegisteredInputs {
+    this.check(this.call(this.exports.losat_web2_register_inputs, [encoder.encode(argv.join('\0')), query, subject]));
+    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse };
+    const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
+    try {
+      const read = (input: RecordsResponse) => ({
+        handle: input.handle,
+        records: Object.freeze(input.records.map(({ id, length }) => ({ id, length }))),
+      });
+      const shown = (input: RecordsResponse) =>
+        Object.freeze(
+          input.records.map(({ shown_id }) => {
+            if (typeof shown_id !== 'string') throw new Error('a record of register_inputs has no shown_id');
+            return shown_id;
+          }),
+        );
+      return {
+        query: read(response.query),
+        subject: read(response.subject),
+        shownIds: Object.freeze({ query: shown(response.query), subject: shown(response.subject) }),
+      };
+    } catch (error) {
+      // Handles whose response cannot be read are not used: give their copies of the inputs back.
+      if (this.stopped === undefined) for (const handle of handles) this.release(handle);
       throw error;
     }
   }

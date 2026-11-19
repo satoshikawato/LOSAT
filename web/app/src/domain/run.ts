@@ -1,6 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
-import type { CountsFile, CountsUse, ProgramId, RecordKey, RunFile } from 'losat/domain';
+import type { CountsFile, CountsUse, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
 
 export type RunStatus =
@@ -114,6 +114,11 @@ export interface RunRecord {
   };
   /** The engine searched the subject that it held from an earlier search (R1). */
   readonly subjectRetained?: boolean;
+  /**
+   * The IDs that the run's outputs show for its records, where the engine read them from the
+   * deflines (-parse_deflines; line WQA's sweep, D7, 2026-11-19): the names of the records in the results.
+   */
+  readonly shownIds?: ShownIds;
   /** What the run did with its WindowMasker counts file. */
   readonly windowMasker?: CountsRecord;
   /**

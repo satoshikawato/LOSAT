@@ -29,6 +29,7 @@ import {
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
   type FileInfo,
+  type RegisteredInputs,
 } from '../reactor/abi.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance.js';
@@ -174,15 +175,22 @@ export class EngineRuntime {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
     const abi = loaded.instance.abi;
-    // What the engine holds for this search alone: the registry file of -conffile and the query. Each
-    // is released once, before `end` or when the search fails, unless the instance stopped.
+    // What the engine holds for this search alone: the registry file of -conffile, the query, and the
+    // subject of inputs read together for this argv (`registerInputs`). Each is released once, before
+    // `end` or when the search fails, unless the instance stopped.
     let registry = registryHandle;
     let query: number | undefined;
+    let ownSubject: number | undefined;
     const release = () => {
       if (abi.stoppedBy !== undefined) return;
       if (query !== undefined) {
         const handle = query;
         query = undefined;
+        abi.release(handle);
+      }
+      if (ownSubject !== undefined) {
+        const handle = ownSubject;
+        ownSubject = undefined;
         abi.release(handle);
       }
       if (registry !== undefined) {
@@ -194,15 +202,28 @@ export class EngineRuntime {
     try {
       const invalid = abi.validate(argv);
       if (invalid !== undefined) throw new EngineCallError(invalid);
+      const started = abi.start(argv);
+      if (!started.ok) throw new EngineCallError(started.message);
 
-      const registered = abi.register(request.program, ROLE_QUERY, request.query.bytes);
+      // -parse_deflines (line WQA's sweep, D7, 2026-11-19): the CLI reads the subjects and then the
+      // query of this argv in one scope of IDs, so the engine reads both inputs together for it, and
+      // the two handles are this search's alone. The retained subject, read without the IDs, is
+      // released first: the instance does not hold two copies of the subject.
+      let together: RegisteredInputs | undefined;
+      if (started.start.registerInputs) {
+        this.releaseRetained(loaded);
+        together = abi.registerInputs(argv, request.query.bytes, request.subject.bytes);
+        ownSubject = together.subject.handle;
+      }
+      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
       query = registered.handle;
       const queryMismatch = recordMismatch(request.query.records, registered.records);
       if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
-      const subjectRetained = loaded.retained?.key === request.subject.key;
-      const subject = this.subject(loaded, request);
+      const subjectRetained = together === undefined && loaded.retained?.key === request.subject.key;
+      const subject = together?.subject ?? this.subject(loaded, request);
       const subjectMismatch = recordMismatch(request.subject.records, subject.records);
       if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+      const shownIds = together?.shownIds;
 
       const writer = new RunOutputWriter(request.output);
       const linearBytesBefore = abi.memoryBytes();
@@ -240,6 +261,7 @@ export class EngineRuntime {
         ...(fallbackReason === undefined ? {} : { fallbackReason }),
         memory: { linearBytesBefore, linearBytesAfter, instanceRuns: loaded.runs },
         subjectRetained,
+        ...(shownIds === undefined ? {} : { shownIds }),
         ...(windowMasker === undefined ? {} : { windowMasker }),
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
         ...(runFiles.length === 0 ? {} : { runFiles }),
@@ -365,13 +387,18 @@ export class EngineRuntime {
   private subject(loaded: Loaded, request: WorkerRun): Retained {
     const abi = loaded.instance.abi;
     if (loaded.retained?.key === request.subject.key) return loaded.retained;
-    if (loaded.retained !== undefined) {
-      abi.release(loaded.retained.handle);
-      loaded.retained = undefined;
-    }
+    this.releaseRetained(loaded);
     const registered = abi.register(request.program, ROLE_SUBJECT, request.subject.bytes);
     loaded.retained = { key: request.subject.key, handle: registered.handle, records: registered.records };
     return loaded.retained;
+  }
+
+  /** Releases the subject that the instance retains, if it retains one. */
+  private releaseRetained(loaded: Loaded): void {
+    if (loaded.retained === undefined) return;
+    const handle = loaded.retained.handle;
+    loaded.retained = undefined;
+    loaded.instance.abi.release(handle);
   }
 
   private async load(path: RuntimePath): Promise<Loaded> {

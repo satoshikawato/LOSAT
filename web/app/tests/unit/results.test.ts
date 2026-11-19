@@ -625,6 +625,18 @@ describe('ResultsBrowser', () => {
     expect(results.state.get().qIdx).toBe(1);
   });
 
+  // line WQA's sweep, D7, 2026-11-19: a run of -parse_deflines names its records by the IDs that its
+  // outputs show (the run record's shownIds), in the query list and in the filters.
+  it('lists and filters the records of a -parse_deflines run by the IDs that the outputs show', async () => {
+    const { results } = setup({ record: { shownIds: { query: ['AB000001.1', 'AB000002.1'], subject: ['NP_1.1', 'NP_2.1', 'NP_3.1'] } } });
+    await results.open('r1');
+    expect(results.state.get().queries.map((q) => q.id)).toEqual(['AB000001.1', 'AB000002.1']);
+    results.setFilters({ queryText: 'ab000002' });
+    expect(results.state.get().queries.map((q) => q.id)).toEqual(['AB000002.1']);
+    results.setFilters({ queryText: 'AB000001', subjectText: 'np_1.1' });
+    expect(results.state.get().subjects.map((s) => s.sIdx)).toEqual([0]);
+  });
+
   it('opens another run without view filters, and keeps them for the same run', async () => {
     const { results, runs, view } = setup();
     runs.set({ runs: [view, { ...view, snapshot: snapshot('r2') }] });

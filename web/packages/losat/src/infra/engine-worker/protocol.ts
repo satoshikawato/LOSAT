@@ -2,7 +2,7 @@
 // thread workers (thread-worker.ts) and the keeper of their shared memory (memory-keeper.ts).
 // Every message of the Engine worker carries the runtime generation it belongs to; the main
 // thread drops messages of an older one.
-import type { RecordKey } from '../../domain/dataset.js';
+import type { RecordKey, ShownIds } from '../../domain/dataset.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RegistryFile, RunFile } from '../../domain/run-files.js';
 import type { EnginePhase } from '../../ports/engine.js';
@@ -134,6 +134,8 @@ export interface WorkerRunResult {
   readonly memory: MemoryRecord;
   /** Whether the search used the subject that the instance held (plan §4.6 R1). */
   readonly subjectRetained: boolean;
+  /** The IDs that the outputs show for the records, where the engine read them from the deflines (-parse_deflines). */
+  readonly shownIds?: ShownIds;
   /** What the run did with its WindowMasker counts file, when it had one. */
   readonly windowMasker?: CountsUse;
   /** The bytes of the counts file that the instance holds after the run (the renewal's high-water mark allows for them); absent when it holds none. */

@@ -7,7 +7,10 @@
 //
 // One subject is registered once per program and reused by consecutive runs with other
 // queries and options (plan §4.6). The serial reactor runs with 1 thread, the threaded
-// reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7).
+// reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7). A search whose
+// *start* JSON says `register_inputs` (-parse_deflines) reads its query and subject together for
+// each run's argv (`losat_web2_register_inputs`, abi_v2.md §4; line WQA's sweep, D7, 2026-11-19),
+// and the IDs that the response shows for the records are the first two columns of outfmt 6.
 //
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
 // exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well, for a
@@ -407,7 +410,7 @@ function checkFailure(run, expected, search, label) {
   }
 }
 
-function checkHits(streams, program, label, queryIds) {
+function checkHits(streams, program, label, queryIds, shownIds) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
@@ -430,6 +433,10 @@ function checkHits(streams, program, label, queryIds) {
     if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
     const id = queryIds[record.q_idx];
     if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
+    if (shownIds) {
+      assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+      assert.equal(fields[1], shownIds.subject[record.s_idx], `${label}: the shown subject ID of HSP ${index}`);
+    }
     // A subject beyond the alignments that outfmt 0 shows (for example BLASTN's 250) has
     // no section and no heading.
     if (record.out0 === null) {
@@ -437,10 +444,20 @@ function checkHits(streams, program, label, queryIds) {
       return;
     }
     const section = out0.subarray(record.out0[0], record.out0[1]).toString();
+    // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty
+    // heading, and NCBI's line stands in place of each alignment (showalign.cpp:1976-1981;
+    // LOSAT's report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
+    if (/^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/.test(section)) {
+      assert.equal(record.out0_subject[0], record.out0_subject[1], `${label}: the empty heading of HSP ${index}`);
+      assert.ok(record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+      return;
+    }
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
     assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
-    assert.ok(heading.startsWith("> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+    // A local id that is not shown leaves "> " before the title; under -parse_deflines the
+    // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).
+    assert.ok(heading.startsWith(shownIds ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
   });
   return records.length;
 }
@@ -471,7 +488,9 @@ function checkSurface(reactor, native) {
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
   assert.equal(started.status, 0, started.error);
-  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true });
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true, register_inputs: false });
+  const parsed = reactor.call("losat_web2_start", ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
   assert.equal(reactor.call("losat_web2_validate", conffile).error, 'Critical: (106.23) Registry file "e1w3a.ini" not found, aborting.');
   const registry = Buffer.from("[BLAST]\n");
@@ -660,7 +679,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 3);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 4);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
@@ -671,14 +690,16 @@ async function main() {
       const query = inputPath(search, "-query"), subject = inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
       const subjectKey = `${program} ${subject}`;
-      if (!subjects.has(subjectKey)) {
+      const started = reactor.call("losat_web2_start", search.argv.join("\0"));
+      const together = started.status === 0 && JSON.parse(started.streams.get(2).toString()).register_inputs === true;
+      if (!together && !subjects.has(subjectKey)) {
         const registered = reactor.call("losat_web2_register", program, 1, fs.readFileSync(subject));
         assert.ok(registered.status > 0, `register subject: ${registered.error}`);
         subjects.set(subjectKey, registered.status);
       }
-      const q = reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
-      assert.ok(q.status > 0, `register query: ${q.error}`);
-      const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
+      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
+      if (q) assert.ok(q.status > 0, `register query: ${q.error}`);
+      let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       const taxid = registerTaxidCounts(reactor, counts, search);
       const named = registerCounts(reactor, counts, search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
@@ -695,9 +716,27 @@ async function main() {
             assert.equal(validated.status, 0, `${engine.name} n${threads} ${search.cases.join(",")}: validate: ${validated.error}`);
           }
         }
-        const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
-        if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
+        let handles = [q?.status, subjects.get(subjectKey)], shownIds;
+        if (together) {
+          const inputs = reactor.call("losat_web2_register_inputs", argv, fs.readFileSync(query), fs.readFileSync(subject));
+          if (inputs.status < 0) {
+            // The CLI fails reading the inputs, before any output.
+            assert.equal(search.expect, "failure", `${label}: register_inputs: ${inputs.error}`);
+            assert.ok(inputs.error.length > 0 && expected.stderr.toString().endsWith(`${inputs.error}\n`), `${label}: the CLI's error (${inputs.error})`);
+            for (const format of FORMATS[program]) assert.equal(expected.outputs.get(format).length, 0, `${label}: the CLI writes no outfmt ${format}`);
+            results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {}, failure: inputs.error });
+            console.log(`ok ${label} (fails as the CLI, reading the inputs)`);
+            continue;
+          }
+          const response = JSON.parse(inputs.streams.get(2).toString());
+          handles = [response.query.handle, response.subject.handle];
+          queryIds = response.query.records.map((record) => record.id);
+          shownIds = { query: response.query.records.map((record) => record.shown_id), subject: response.subject.records.map((record) => record.shown_id) };
+        }
+        const run = reactor.call("losat_web2_run", argv, ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        if (together) for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
         if (search.expect === "failure") {
           checkFailure(run, expected, search, label);
           results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
@@ -746,11 +785,12 @@ async function main() {
         }
         assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(expected.stderr), `${label}: diagnostics`);
         row.diagnostics = sha256(expected.stderr);
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds) : null;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
+        if (together) row.inputs = "register_inputs";
         results.push(row);
         console.log(`ok ${label}`);
       }
-      assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
+      if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
     }
     for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);

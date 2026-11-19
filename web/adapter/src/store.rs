@@ -1,6 +1,8 @@
 //! Registered inputs (docs/web/abi_v2.md §4 `register`, plan §4.6 R1): the records
 //! read by the program's own FASTA reader (the engine's port of NCBI BLAST+'s
-//! `CBlastFastaInputSource`), kept under a handle so that one subject serves several runs.
+//! `CBlastFastaInputSource`), kept under a handle so that one subject serves several runs; and
+//! the inputs of one run read together for its argv (`register_inputs`, a run with
+//! `-parse_deflines`).
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -29,6 +31,10 @@ pub struct Registered {
     /// The deflines that the BLAST archive cannot make from the title (`read_deflines`); the
     /// records themselves keep no source.
     pub deflines: KeptDeflines,
+    /// The argv of the one run whose inputs `register_inputs` read for it: the records are what the
+    /// CLI's reader gives that argv (the ids of the deflines, the deflines that its archive shows),
+    /// and only that run takes them. `None` for the records of `register`.
+    pub run: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -250,33 +256,15 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     // A query of white space only is NCBI's `Query is Empty!` at run time; a query with
     // blank and comment lines only is not empty, and its first batch (`eEOF`, no query)
     // fails every run, so `register` fails with NCBI's error (port plan Q2).
-    if role == ROLE_QUERY && records.is_empty() && !losat::web_adapter::is_blank(bytes) {
-        return Err(format!(
-            "{:#}",
-            losat::web_adapter::engine_error("Empty CBlastQueryVector")
-        )
-        .trim_end_matches('\n')
-        .to_string());
+    if role == ROLE_QUERY {
+        check_query_batch(bytes, &records)?;
     }
     check_scan(role_name, &scanned, &records)?;
     let deflines = read_deflines(bytes, config, &scanned, &records).map_err(reader_error)?;
-    let mut response = String::from("{\"handle\":");
+    let mut response = String::new();
     let mut store = store().lock().expect("input store");
-    store.next = store
-        .next
-        .checked_add(1)
-        .ok_or_else(|| "input handle space exhausted".to_string())?;
-    let handle = store.next;
-    let _ = write!(response, "{handle},\"records\":[");
-    for (index, record) in records.iter().enumerate() {
-        if index > 0 {
-            response.push(',');
-        }
-        let _ = write!(response, "{{\"index\":{index},\"id\":");
-        json::string(&mut response, &record_id(record.title()));
-        let _ = write!(response, ",\"length\":{}}}", record.seq().len());
-    }
-    response.push_str("]}");
+    let handle = store.next_handle()?;
+    write_records(&mut response, handle, &scanned, &records, None);
     store.entries.insert(
         handle,
         Registered {
@@ -284,9 +272,188 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
             program,
             records,
             deflines,
+            run: None,
         },
     );
     Ok((handle, response))
+}
+
+/// NCBI's `BLAST engine error: Empty CBlastQueryVector`, without the CLI's line end: the error of
+/// a query input whose first batch has no query (`check_query_batch`), and of a subject input
+/// without records, which ends the CLI before it reads the query (`register_inputs`).
+fn empty_query_vector() -> String {
+    format!(
+        "{:#}",
+        losat::web_adapter::engine_error("Empty CBlastQueryVector")
+    )
+    .trim_end_matches('\n')
+    .to_string()
+}
+
+/// NCBI's error of a query input whose first batch has no query although it is not white space
+/// only (blank and comment lines; `register`).
+fn check_query_batch(bytes: &[u8], records: &[FastaRecord]) -> Result<(), String> {
+    if records.is_empty() && !losat::web_adapter::is_blank(bytes) {
+        return Err(empty_query_vector());
+    }
+    Ok(())
+}
+
+impl Store {
+    /// A handle that no input has had.
+    fn next_handle(&mut self) -> Result<u32, String> {
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or_else(|| "input handle space exhausted".to_string())?;
+        Ok(self.next)
+    }
+}
+
+/// The handle and the records of a *register* response (docs/web/abi_v2.md §9), `{"handle":…,
+/// "records":[…]}`: each record's index, ID (the index scan's: the title up to its first space) and
+/// length, and with `shown` (`register_inputs`) the ID that the tabular outputs show for it
+/// (`tabular_id`).
+fn write_records(
+    out: &mut String,
+    handle: u32,
+    scanned: &[scan::ScanRecord],
+    records: &[FastaRecord],
+    shown: Option<(u32, bool)>,
+) {
+    let _ = write!(out, "{{\"handle\":{handle},\"records\":[");
+    for (index, (scan, record)) in scanned.iter().zip(records).enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{{\"index\":{index},\"id\":");
+        json::string(out, &scan.id);
+        let _ = write!(out, ",\"length\":{}", record.seq().len());
+        if let Some((role, protein)) = shown {
+            out.push_str(",\"shown_id\":");
+            json::string(out, &tabular_id(record, role, protein));
+        }
+        out.push('}');
+    }
+    out.push_str("]}");
+}
+
+/// The ID that the tabular outputs (outfmt 6 and 7) show for a record of `role` read by the reader
+/// of `protein` letters: the `qaccver` of a query (`FastaRecord::shown_id`; with `-parse_deflines`
+/// the accession and version of the ids that the reader read, `AB000001.1` of
+/// `>gb|AB000001.1| ...`) and the `saccver` of a subject (`FastaRecord::subject_tabular_id`), the
+/// first two columns of the CLI's default fields. Where the engine gives no `saccver` (a record
+/// whose title NCBI cannot decode, or whose ids LOSAT refuses, which a report of it shows or refuses
+/// as the CLI does), the subject's `shown_id`. Bytes that are not UTF-8 become U+FFFD.
+fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
+    let saccver = match role {
+        ROLE_SUBJECT => record.subject_tabular_id(protein).ok().flatten(),
+        _ => None,
+    };
+    match saccver {
+        Some(id) => String::from_utf8_lossy(&id).into_owned(),
+        None => String::from_utf8_lossy(record.shown_id()).into_owned(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-207
+// ```c++
+//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                           db_adapter, scope);
+//         ...
+//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+// ```
+/// Reads the query and subject FASTA bytes of the run of `words` (program name first) together, as
+/// the CLI reads its `-query` and `-subject` files for that argv: the library's reading of the
+/// inputs of a search (`read_search_inputs`, which the library API's `read_inputs` reads with):
+/// with `-parse_deflines` the ids of the deflines, read in one scope of ids, the subjects first,
+/// and the query's `-strand`; and as the argv's reader, which keeps the deflines when the argv
+/// writes the BLAST archive and then refuses a ranged id as it reads it. The records are checked
+/// against the index scans of the same bytes, as `register` checks them, and kept under a query
+/// handle and a subject handle that only the run of `words` takes (`with_inputs`). Returns the
+/// handles and the *inputs* JSON (docs/web/abi_v2.md §9): the *register* response of each, with
+/// each record's `shown_id` (`tabular_id`).
+///
+/// The errors are the CLI's, in its order. The scans come first: LOSAT Web's refusals and the
+/// reader's own errors, as in `register`. A scan that fails gives the error of the reading when the
+/// reading fails (the CLI fails with that error, whatever the scan refused), and its own error
+/// otherwise. A subject without records ends the run with NCBI's `Empty CBlastQueryVector` before
+/// the query is read, as it ends the CLI (`register` registers it, and the run gives the error).
+pub fn register_inputs(
+    words: &[&str],
+    query: &[u8],
+    subject: &[u8],
+) -> Result<(u32, u32, String), String> {
+    let (program, command) = crate::run::parse(words)?;
+    let read = || {
+        losat::web_adapter::read_search_inputs(
+            program.api(),
+            &command,
+            Some(crate::run::writes_archive(words)),
+            query,
+            subject,
+        )
+        .map_err(|error| error.to_string())
+    };
+    let scan = |role: u32| {
+        let bytes = if role == ROLE_QUERY { query } else { subject };
+        scan::scan_ncbi(bytes, reader_of(program, role).1)
+    };
+    let subject_scan = scan(ROLE_SUBJECT);
+    if subject_scan
+        .as_ref()
+        .is_ok_and(|records| records.is_empty())
+    {
+        return Err(empty_query_vector());
+    }
+    let (subject_scan, query_scan) = match (subject_scan, scan(ROLE_QUERY)) {
+        (Ok(subject_scan), Ok(query_scan)) => (subject_scan, query_scan),
+        (subject_scan, query_scan) => {
+            let refusal = subject_scan.err().or(query_scan.err()).unwrap_or_default();
+            return Err(read().err().unwrap_or(refusal));
+        }
+    };
+    let (queries, subjects) = read()?;
+    check_query_batch(query, &queries)?;
+    check_scan("query", &query_scan, &queries)?;
+    check_scan("subject", &subject_scan, &subjects)?;
+    let run: Vec<String> = words.iter().map(|word| word.to_string()).collect();
+    let mut store = store().lock().expect("input store");
+    let (query_handle, subject_handle) = (store.next_handle()?, store.next_handle()?);
+    let mut response = String::from("{\"query\":");
+    let shown = |role: u32| Some((role, reader_of(program, role).1));
+    write_records(
+        &mut response,
+        query_handle,
+        &query_scan,
+        &queries,
+        shown(ROLE_QUERY),
+    );
+    response.push_str(",\"subject\":");
+    write_records(
+        &mut response,
+        subject_handle,
+        &subject_scan,
+        &subjects,
+        shown(ROLE_SUBJECT),
+    );
+    response.push('}');
+    for (handle, role, records) in [
+        (query_handle, ROLE_QUERY, queries),
+        (subject_handle, ROLE_SUBJECT, subjects),
+    ] {
+        store.entries.insert(
+            handle,
+            Registered {
+                role,
+                program,
+                records,
+                deflines: Vec::new(),
+                run: Some(run.clone()),
+            },
+        );
+    }
+    Ok((query_handle, subject_handle, response))
 }
 
 /// Fails unless the index scan found the reader's records: the same number, and for each
@@ -297,12 +464,14 @@ fn check_scan(
     scanned: &[scan::ScanRecord],
     records: &[FastaRecord],
 ) -> Result<(), String> {
+    // A record whose ids the reader read from its defline (`-parse_deflines`) has the title after
+    // them: the scan's ID, the defline's first word, is not the title's.
     let agrees = |scan: &scan::ScanRecord, record: &FastaRecord| {
         let mut counts = [0u64; 256];
         for &byte in record.seq() {
             counts[byte.to_ascii_uppercase() as usize] += 1;
         }
-        scan.id == record_id(record.title())
+        (record.believed().is_some() || scan.id == record_id(record.title()))
             && scan.length == record.seq().len() as u64
             && *scan.residue_counts == counts
     };
@@ -330,17 +499,22 @@ pub fn release(handle: u32) -> Result<(), String> {
 }
 
 /// Calls `work` with the records of a query handle and a subject handle registered for
-/// `program`. For a run that writes the BLAST archive (`whole`), every record has a source while
+/// `program`, for the run of the argv `words`. For a run that writes the BLAST archive
+/// (`run::writes_archive`), every record of `register` has a source while
 /// `work` runs, as the CLI's reader gives each record when the run writes the archive
 /// (`ReaderConfig::with_defline`): its defline where `>` and the title do not give it
 /// (`read_deflines`), and a record that a range cuts keeps its whole letters for the archive's
 /// Bioseq (`FastaRecord::cut`, `archive_letters`). Afterwards the records have no source again, as
 /// every other run sees them.
+///
+/// The handles of `register_inputs` are the inputs of the run of their argv alone, both of them,
+/// and the records are as its reader gave them; a run that reads the ids of the deflines
+/// (`run::inputs_together`) takes no other: its report would be that of a search without the option.
 pub fn with_inputs<R>(
     program: Program,
     query: u32,
     subject: u32,
-    whole: bool,
+    words: &[&str],
     work: impl FnOnce(&[FastaRecord], &[FastaRecord]) -> R,
 ) -> Result<R, String> {
     let mut store = store().lock().expect("input store");
@@ -361,6 +535,23 @@ pub fn with_inputs<R>(
             ));
         }
     }
+    let read_for = |handle: u32| store.entries[&handle].run.as_deref();
+    let read_together = match (read_for(query), read_for(subject)) {
+        (None, None) if crate::run::inputs_together(words) => {
+            return Err(
+                "-parse_deflines needs the inputs of register_inputs, which reads the ids of the deflines"
+                    .to_string(),
+            )
+        }
+        (None, None) => false,
+        (Some(query_run), Some(subject_run)) if query_run == words && subject_run == words => true,
+        _ => {
+            return Err(format!(
+                "query handle {query} and subject handle {subject} are not the inputs that register_inputs read for this argv"
+            ))
+        }
+    };
+    let whole = !read_together && crate::run::writes_archive(words);
     if whole {
         set_sources(&mut store, [query, subject], true);
     }
@@ -494,16 +685,88 @@ mod tests {
         );
     }
 
+    // The handles of `register_inputs` are the inputs of the run of their argv alone, and a run with
+    // `-parse_deflines` takes no others (line WQA's sweep, D7, 2026-11-19): handles of `register`
+    // would bring records without the ids, a mix would pair inputs read apart.
+    #[test]
+    fn inputs_read_together_belong_to_their_argv() {
+        let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let (query_bytes, subject_bytes) =
+            (b">gb|AB000001.1| q\nMKTAYIAKQR\n", b">s1 t\nMKTAYIAKQR\n");
+        let (query, subject, response) =
+            register_inputs(&words, query_bytes, subject_bytes).unwrap();
+        assert!(
+            response.contains(r#""id":"gb|AB000001.1|","length":10,"shown_id":"AB000001.1""#),
+            "{response}"
+        );
+        assert!(
+            response.contains(r#""id":"s1","length":10,"shown_id":"s1""#),
+            "{response}"
+        );
+        let ids = |queries: &[FastaRecord], subjects: &[FastaRecord]| {
+            (
+                queries[0].believed().is_some(),
+                subjects[0].believed().is_some(),
+            )
+        };
+        assert_eq!(
+            with_inputs(Program::Blastp, query, subject, &words, ids),
+            Ok((true, true))
+        );
+        let other = [
+            "blastp",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-parse_deflines",
+            "-seg",
+            "yes",
+        ];
+        let error = with_inputs(Program::Blastp, query, subject, &other, |_, _| ()).unwrap_err();
+        assert!(
+            error.contains("are not the inputs that register_inputs read for this argv"),
+            "{error}"
+        );
+        let (plain_query, _) = register("blastp", ROLE_QUERY, query_bytes).unwrap();
+        let (plain_subject, _) = register("blastp", ROLE_SUBJECT, subject_bytes).unwrap();
+        let mixed =
+            with_inputs(Program::Blastp, plain_query, subject, &words, |_, _| ()).unwrap_err();
+        assert!(
+            mixed.contains("are not the inputs that register_inputs read for this argv"),
+            "{mixed}"
+        );
+        assert_eq!(
+            with_inputs(Program::Blastp, plain_query, plain_subject, &words, |_, _| ()).unwrap_err(),
+            "-parse_deflines needs the inputs of register_inputs, which reads the ids of the deflines"
+        );
+        // Without the option the handles of `register` are the inputs, as before.
+        let plain = &words[..5];
+        assert!(with_inputs(
+            Program::Blastp,
+            plain_query,
+            plain_subject,
+            plain,
+            |_, _| ()
+        )
+        .is_ok());
+        for handle in [query, subject, plain_query, plain_subject] {
+            release(handle).unwrap();
+        }
+    }
+
     // Another program's handle cannot bring a record to a run.
     #[test]
     fn a_handle_belongs_to_its_program() {
         let (query, _) = register("blastp", ROLE_QUERY, b">q t\nACXGT\n").unwrap();
         let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
-        let error = with_inputs(Program::Blastn, query, subject, false, |_, _| ()).unwrap_err();
+        let words = ["blastn", "-query", "q", "-subject", "s"];
+        let error = with_inputs(Program::Blastn, query, subject, &words, |_, _| ()).unwrap_err();
         assert!(
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
-        assert!(with_inputs(Program::Blastp, query, subject, false, |_, _| ()).is_err());
+        let words = ["blastp", "-query", "q", "-subject", "s"];
+        assert!(with_inputs(Program::Blastp, query, subject, &words, |_, _| ()).is_err());
     }
 }

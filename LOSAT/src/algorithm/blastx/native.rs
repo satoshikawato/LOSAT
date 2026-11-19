@@ -1759,6 +1759,7 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
     error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
+        || error.is::<super::database::LongSubjectRefusal>()
         || error.is::<NativeError>()
 }
 

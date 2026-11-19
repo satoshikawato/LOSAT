@@ -180,9 +180,13 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
   await expect
     .poll(() => told(page, 'status'))
     .toContainEqual(expect.stringContaining('1 record looks like protein sequences, but BLASTN reads the query as nucleotide.'));
+  // The reader's error before the first record: a run ends with it, as the command line does, so the
+  // card warns (line WQA's D10, 2026-11-19).
   await page.getByTestId('query-input').fill(`\uFEFF>q1\n${dna(3, 60)}\n`);
-  await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'failed');
-  await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringContaining('This input cannot be read: '));
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '');
+  await expect
+    .poll(() => told(page, 'status'))
+    .toContainEqual(expect.stringContaining('A run ends with this error before it reads a record, as the command line does: '));
 });
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');

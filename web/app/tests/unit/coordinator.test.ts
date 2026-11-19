@@ -658,7 +658,9 @@ describe('Coordinator', () => {
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
     const query = (await data.indexSource(source.sourceId, 1)).revisionId;
     const result = await coordinator.enqueueAll([
-      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
+      // A gap line, which LOSAT Web's index refuses (a reader's error ends the records instead: line
+      // WQA's D10, 2026-11-19).
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '>s\nAC\n>?5\nAC\n' } },
     ]);
     expect(result.ok).toBe(false);
     expect(runInputs.size).toBe(0);

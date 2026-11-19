@@ -253,10 +253,11 @@ test('accessions on one line are put one per line by one press, for Fetch (WA2-O
   const away = await stubSources(page);
   await openSearch(page);
   // Accessions on one line, separated by white space or commas, cannot be read (NCBI's reader
-  // error): one press puts each on its own line, where Fetch takes them.
+  // error, which a run ends with: line WQA's D10, 2026-11-19): one press puts each on its own line,
+  // where Fetch takes them.
   for (const text of ['AB000001.1 MH011443.1', 'AB000001.1,MH011443.1', 'ab000001.1, MH011443.1\n']) {
     await paste(page, 'query', text);
-    await expect(page.getByTestId('query-source-0-error')).toContainText('This input cannot be read: ');
+    await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
     await expect(page.getByTestId('query-source-0-split-accessions')).toHaveText('Put each accession on its own line');
     await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
     await expect(page.getByTestId('query-fetch-row')).toHaveCount(0);

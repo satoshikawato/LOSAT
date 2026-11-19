@@ -58,7 +58,10 @@ const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequence
  * 2026-11-19).
  */
 const readerError = computed(() => (props.source.check?.state === 'ok' ? props.source.check.readerError : undefined));
-const readerErrorText = (message: string) => `A run reads the records before this error and then stops with it, as the command line does: ${message}`;
+const readerErrorText = (message: string) =>
+  records.value.length === 0
+    ? `A run ends with this error before it reads a record, as the command line does: ${message}`
+    : `A run reads the records before this error and then stops with it, as the command line does: ${message}`;
 /**
  * The input cannot be read from its start: the scan failed, or the reader's error comes before its first record. The hints that
  * make its first line readable (a defline, '>', the byte order mark) are for such an input, with the reader's message.

@@ -423,7 +423,10 @@ function customStream(search) {
 function checkFailure(run, expected, search, label) {
   const program = search.program;
   assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
-  assert.ok(run.error.length > 0 && expected.stderr.toString().endsWith(run.error), `${label}: the CLI's error (${run.error})`);
+  // An NCBI error is the CLI's text with its line end; LOSAT's own error (two query records of one ID
+  // under -parse_deflines) is what the CLI writes after `Error: `, without the line end.
+  const cliError = run.error.endsWith("\n") ? run.error : `Error: ${run.error}\n`;
+  assert.ok(run.error.length > 0 && expected.stderr.toString().endsWith(cliError), `${label}: the CLI's error (${run.error})`);
   for (const format of FORMATS[program]) {
     const sent = run.streams.get(format) || Buffer.alloc(0);
     assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);

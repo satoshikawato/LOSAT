@@ -75,7 +75,12 @@ const engine = new WasmEngine({ assets: ENGINE_ASSETS, control });
 port, onPhase)` runs one search. The outputs arrive on the `MessagePort` as chunks of each
 stream; `RunOutputReceiver` reads them on the other end of a `MessageChannel`. `EngineInput.records`
 holds the ID and length of every record of the input. `ReactorScanner` produces them, and the
-engine checks them before it searches.
+engine checks them before it searches. When the reader fails on a query record, the scan ends there:
+its records are those before it, and `reader_error` gives the command line's message and the offset
+of that record. Pass the query's bytes from that offset on after the records you keep, and the run
+searches the query batches before the record and ends with that message, as the command line does.
+A subject with such a record is refused when it is registered, as the command line reads every
+subject before its first query.
 
 The engine tells the host which outputs a run could not write: for each, it sends stream 9
 (`DISCARD_STREAM`), whose 4 bytes are that output's stream number as a little-endian unsigned

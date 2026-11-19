@@ -1509,28 +1509,29 @@ struct XGroup {
     scan_bf: bool,
     /// The presence-vector rank of a compacted table, empty for a table of the full backbone.
     rank: Vec<u32>,
-    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): for a table of the full backbone that NCBI's loop scanned
-    /// and the scan on presence bytes takes (`x_scan_bf::x_tbx_scans_byte`), its presence bytes,
-    /// made by the first scan of the table (`scan`, `x_scan_bf::x_tbx_presence`) and freed with
-    /// it; `None` for the others.
+    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table of the full backbone that
+    /// NCBI's loop scanned and the scan on presence bytes takes (`x_scan_bf::x_tbx_scans_byte`),
+    /// `None` for the others. `XPairPar::prepare` makes them (`x_make_presence`) when every table of
+    /// the batch is built; they are freed with the table.
     ///
-    /// The bytes are not made where the table is built. The group tables of a batch are built one
-    /// after the other on one thread, and bytes made there (#1228: 32 KiB a table) sat between
-    /// them in that thread's heap. On Sakai x MG1655 `-subject` at 16 threads (84 slice tables of
-    /// LOSAT_X_TBXQSLICE, 2.6 MiB of bytes) glibc then kept the freed tables in the main heap after
-    /// the seed release (`[heap]` 624 MiB to the end of the run, 58 MiB with the switch off), and
-    /// the linking took its memory elsewhere: max RssAnon 2,225 MiB against 1,984 MiB with the
-    /// switch off. Made by the first scan, the bytes leave the build's allocations as they are with
-    /// the switch off (1,983 MiB), and they live as long as their table, never longer.
-    presence: Option<OnceLock<crate::algorithm::tblastx::x_scan_byte::XPresence>>,
+    /// Bytes made where each table was built (#1228: 32 KiB a table) sat between the group tables,
+    /// which a batch builds one after the other on one thread, in that thread's heap. On Sakai x
+    /// MG1655 `-subject` at 16 threads (84 slice tables of LOSAT_X_TBXQSLICE, 2.6 MiB of bytes)
+    /// glibc then kept the freed tables in the main heap after the seed release (`[heap]` 624 MiB
+    /// to the end of the run, 58 MiB with the switch off), and max RssAnon was 2,225 MiB against
+    /// 1,984 MiB with the switch off. The scan reads this field as before: a lazy cell read in
+    /// `scan` (made by its first call) gave the same memory as the switch off but changed the code
+    /// of the units' scan loops (`scan_unit_bf`: two stack reloads per hit, 5.6 % more
+    /// instructions on ViPTreeGen's Begomovirus.40).
+    presence: Option<crate::algorithm::tblastx::x_scan_byte::XPresence>,
 }
 
 impl XGroup {
     // No NCBI counterpart: the layout of a group table (`x_scan_bf::x_compact`); its cells,
     // entries and presence bits are those of `lookup`.
     /// The group of `lookup`. A table the branch-free scan takes (`x_scan_bf_for`: fewer than
-    /// half of its cells have entries) keeps only the cells with entries; the others get a place
-    /// for their presence bytes when LOSAT_X_TBXSCANBYTE scans them (`x_tbx_scans_byte`).
+    /// half of its cells have entries) keeps only the cells with entries; the others get their
+    /// presence bytes when LOSAT_X_TBXSCANBYTE scans them (`x_make_presence`).
     fn new(mut lookup: BlastAaLookupTable, q_min: u32, q_max: u32) -> Self {
         let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
         let rank = if scan_bf {
@@ -1538,19 +1539,16 @@ impl XGroup {
         } else {
             Vec::new()
         };
-        let presence = if scan_bf {
+        if scan_bf {
             crate::algorithm::tblastx::x_scan_bf::x_reach_scan_byte_not_taken();
-            None
-        } else {
-            crate::algorithm::tblastx::x_scan_bf::x_tbx_scans_byte(&lookup).then(OnceLock::new)
-        };
+        }
         Self {
             lookup,
             q_min,
             q_max,
             scan_bf,
             rank,
-            presence,
+            presence: None,
         }
     }
 
@@ -1564,19 +1562,28 @@ impl XGroup {
             crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(true);
             true
         };
-        let presence = if scan_bf {
+        if scan_bf {
             crate::algorithm::tblastx::x_scan_bf::x_reach_scan_byte_not_taken();
-            None
-        } else {
-            crate::algorithm::tblastx::x_scan_bf::x_tbx_scans_byte(&g.table).then(OnceLock::new)
-        };
+        }
         Self {
             lookup: g.table,
             q_min: g.q_min,
             q_max: g.q_max,
             scan_bf,
             rank: g.rank,
-            presence,
+            presence: None,
+        }
+    }
+
+    // No NCBI counterpart: the presence vector in another layout, made once per table.
+    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): makes the presence bytes of this table when the scan on
+    /// presence bytes takes it (a table of the full backbone, `x_tbx_scans_byte`); called once per
+    /// table by `XPairPar::prepare` after the batch's tables are built.
+    fn x_make_presence(&mut self) {
+        if !self.scan_bf && crate::algorithm::tblastx::x_scan_bf::x_tbx_scans_byte(&self.lookup) {
+            self.presence = Some(crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(
+                &self.lookup,
+            ));
         }
     }
 
@@ -1585,8 +1592,7 @@ impl XGroup {
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // ```
     /// One scan call of this group's table: `x_scan_subject_byte` on a table with presence bytes
-    /// (LOSAT_X_TBXSCANBYTE; the first call makes them), `x_scan_subject` (LOSAT_X_TBXSCANBF's
-    /// choice), or
+    /// (LOSAT_X_TBXSCANBYTE), `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
     /// `x_scan_subject_compact` on a compacted table. The offset array holds
     /// `x_offset_pairs_len(array_size)` entries.
     #[inline(always)]
@@ -1598,14 +1604,7 @@ impl XGroup {
         array_size: i32,
         scan_range: &mut [i32; 3],
     ) -> i32 {
-        if let Some(cell) = &self.presence {
-            // The first scan of the table makes the bytes, out of line: `get_or_init` inlined
-            // here changed the code of the units' scan loops (`scan_unit_bf`: 5.6 % more
-            // instructions on ViPTreeGen's Begomovirus.40).
-            let presence = match cell.get() {
-                Some(presence) => presence,
-                None => self.x_first_presence(cell),
-            };
+        if let Some(presence) = &self.presence {
             crate::algorithm::tblastx::x_scan_bf::x_scan_subject_byte(
                 &self.lookup,
                 presence,
@@ -1636,19 +1635,6 @@ impl XGroup {
                 scan_range,
             )
         }
-    }
-
-    // No NCBI counterpart: the presence vector in another layout, made once per table.
-    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of this table in `cell` (its
-    /// `presence`), made now by the first scan that needs them; a scan of another thread that asks
-    /// at the same time waits for them.
-    #[cold]
-    #[inline(never)]
-    fn x_first_presence<'a>(
-        &'a self,
-        cell: &'a OnceLock<crate::algorithm::tblastx::x_scan_byte::XPresence>,
-    ) -> &'a crate::algorithm::tblastx::x_scan_byte::XPresence {
-        cell.get_or_init(|| crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&self.lookup))
     }
 
     /// The entries of cell `index` (none for a cell without its presence bit).
@@ -2336,7 +2322,7 @@ impl<M: TbxScore> XPairPar<M> {
             );
             return None;
         }
-        let (groups, sliced, stub) = match b.lut {
+        let (mut groups, mut sliced, stub) = match b.lut {
             // PAIRLUT: the groups built at the lookup build site (`lut_build`); the batch's table
             // is the stub the build site took.
             Some(lut) => {
@@ -2426,6 +2412,17 @@ impl<M: TbxScore> XPairPar<M> {
             && b.sc.x_sent_walks()
             && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         let ctx_of = x_ctx_table(b.lookup, ctx_table_on());
+        // EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of the tables the scan on presence
+        // bytes takes, made now that every table of the batch is built, not between the tables
+        // (`XGroup::presence`).
+        for group in groups.iter_mut().chain(
+            sliced
+                .iter_mut()
+                .flatten()
+                .flat_map(x_tbx_qslice::XSliced::slices_mut),
+        ) {
+            group.x_make_presence();
+        }
         Some(Self {
             groups,
             stub,

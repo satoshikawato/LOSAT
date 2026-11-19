@@ -74,7 +74,8 @@ pub(crate) fn x_tbx_scan_byte() -> crate::algorithm::tblastx::x_scan_byte::XScan
 // No NCBI counterpart: chooses LOSAT's scan for a table, once per table.
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): whether `x_tbx_scan_byte` scans `lookup` on presence bytes
 /// (on, the table `fits`, sparse if the mode asks; decided from `pv`, `x_table_takes`), else
-/// NCBI's loop. The bytes are made by the first scan of the table (`x_tbx_presence`).
+/// NCBI's loop. The unit path makes the bytes after it has built the batch's tables
+/// (`x_tbx_presence`).
 pub(crate) fn x_tbx_scans_byte(lookup: &BlastAaLookupTable) -> bool {
     let mode = x_tbx_scan_byte();
     if !mode.on() {
@@ -85,12 +86,11 @@ pub(crate) fn x_tbx_scans_byte(lookup: &BlastAaLookupTable) -> bool {
     taken
 }
 
-// No NCBI counterpart: the presence bytes of a table, made once per table by its first scan.
+// No NCBI counterpart: the presence bytes of a table, made once per table.
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table `x_tbx_scans_byte` took. The
-/// unit path makes them when a scan first needs them (`x_pair_par.rs` `XGroup::scan`), on the
-/// thread of that scan, and frees them with the table: the thread that builds the group tables
-/// one after the other makes no allocation between them for this switch (`x_pair_par.rs`
-/// `XGroup::presence`).
+/// unit path makes them once every table of the batch is built (`x_pair_par.rs`
+/// `XPairPar::prepare`), not between the tables (`XGroup::presence`), and frees them with the
+/// table.
 pub(crate) fn x_tbx_presence(
     lookup: &BlastAaLookupTable,
 ) -> crate::algorithm::tblastx::x_scan_byte::XPresence {

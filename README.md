@@ -591,6 +591,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 
 ## Documentation
 
+- [User manual](docs/manual/src/introduction.md): installation, a quick start, one page for each program, output formats, databases, and the differences from NCBI BLAST+
 - [v0.2.0 release record](docs/release/v0.2.0.md)
 - [v0.1.0 historical release scope](docs/archive/v0.1.0_scope.md)
 - [v0.1.0 NCBI Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)

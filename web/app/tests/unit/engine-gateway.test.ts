@@ -588,6 +588,32 @@ describe('WasmEngine', () => {
     expect((await next).runtimeGeneration).toBe(2);
   });
 
+  // The second review of line WQA's D1 and D2, L1 (2026-11-19): the threaded instance was in use, so the Gateway waited
+  // for the keeper to grow the memory; Firefox had ended the keeper with the worker, and the wait never ended.
+  it('ends at once the generation of a worker that ended during a threaded search, without waiting for its keeper', async () => {
+    const locks = new FakeLocks();
+    const ends: string[] = [];
+    const { engine, workers } = setup(undefined, { locks, onRuntimeEnd: (end) => ends.push(end) });
+    const run = engine.run(request('r1', 4), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    const asked: unknown[] = [];
+    // The keeper ended with the worker: it answers nothing.
+    const keeper = fakeKeeper(worker, (message) => {
+      asked.push(message);
+      return undefined;
+    });
+    worker.send({ type: 'started', generation: 1 });
+    worker.send({ type: 'life', generation: 1, held: true });
+    expect(worker.use.enter()).toBe(true);
+    locks.release(worker.init.lifeLock);
+    await expect(run).rejects.toThrow(ENGINE_ENDED);
+    expect(worker.terminated).toBe(true);
+    expect(ends).toEqual(['at-once']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toEqual([]);
+    keeper.close();
+  });
+
   it('does not wait for the lock of a worker that it ends itself, nor of one that holds none', async () => {
     const locks = new FakeLocks();
     const { engine, workers } = setup(undefined, { locks });

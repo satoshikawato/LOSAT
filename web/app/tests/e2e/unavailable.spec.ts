@@ -12,7 +12,9 @@
 // The review of D1 and D2 (2026-11-19): the first search of a new Engine worker was not watched (H1), and an error
 // during it read as a worker that could not start (M1); an Example with LOSAT unavailable downloaded its whole set and
 // then blamed the file (M2); "Task Selection" and "Algorithm parameters" showed controls with no choices or values
-// (L1); a search went on after the Data worker ended (L2).
+// (L1); a search went on after the Data worker ended (L2). Its second review: one failed download of the engine file
+// was said for the whole session (M1); a threaded runtime whose worker ended was never finished in Firefox (L1); "The part
+// of LOSAT that runs searches stopped." did not say what to do (L2).
 import { gzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
@@ -25,6 +27,8 @@ const ENGINE_ONLY = 'the FakeEngine build has no engine modules nor Engine worke
 const RELOAD = 'Reload the page.';
 const DATA_NOT_STARTED = `LOSAT could not start the part that keeps the results. ${RELOAD}`;
 const DATA_ENDED = `The part of LOSAT that keeps the results stopped. ${RELOAD}`;
+// The next search starts another Engine worker (the second review of D1 and D2, L2).
+const ENGINE_ENDED = 'The part of LOSAT that runs searches stopped. Run the search again.';
 const QUERY = '>q1\nACGTACGTACGTAGCTAGCTAGCATCGATCGACTAGCTAGCATCGACTAGC\n';
 const SUBJECT = '>s1\nACGTACGTACGTAGCTAGCTAGCATCGATCGACTAGCTAGCATCGACTAGC\n';
 
@@ -51,6 +55,34 @@ async function keepWorkers(page: Page): Promise<void> {
       }
     };
   });
+}
+
+/** Counts the page's open BroadcastChannels by name (`openChannels`). */
+async function countChannels(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const Native = window.BroadcastChannel;
+    const open: Record<string, number> = {};
+    Object.assign(window, { openChannels: open });
+    window.BroadcastChannel = class extends Native {
+      constructor(name: string) {
+        super(name);
+        open[name] = (open[name] ?? 0) + 1;
+      }
+      override close(): void {
+        open[this.name] = (open[this.name] ?? 0) - 1;
+        super.close();
+      }
+    };
+  });
+}
+
+/** How many of the page's channels to the keepers of the engine's shared memory are open. */
+async function openKeeperChannels(page: Page): Promise<number> {
+  return page.evaluate(() =>
+    Object.entries((window as unknown as { openChannels: Record<string, number> }).openChannels)
+      .filter(([name]) => name.startsWith('losat-web:engine-keeper:'))
+      .reduce((sum, [, count]) => sum + count, 0),
+  );
 }
 
 /** How many workers of `name` the page ended itself. */
@@ -167,6 +199,33 @@ for (const how of ['network error', 500] as const) {
   });
 }
 
+test('once the engine file downloads after a failed download, the page no longer says that LOSAT is unavailable', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+  test.setTimeout(120_000);
+  // The first request for the serial module fails, as a network glitch at load does; the next ones are answered.
+  let requests = 0;
+  await page.context().route(
+    (url) => /^\/engine\/losat-web-serial-[^/]*\.wasm$/.test(url.pathname),
+    (route) => (++requests === 1 ? route.abort('failed') : route.continue()),
+  );
+  const away = await stubExampleHost(page);
+  await openSearch(page);
+  await pasteBoth(page);
+  // Before, the page said for the whole session that LOSAT could not download its engine file, and to reload it,
+  // losing the results; the options said "Not read." and the Examples were refused.
+  await expect(page.getByTestId('losat-unavailable')).toHaveCount(0, { timeout: 15_000 });
+  expect(requests).toBeGreaterThan(1);
+  await expect(page.getByTestId('program-selection').locator('input')).not.toHaveCount(0);
+  await submit(page);
+  await waitStatus(page, 1, 'completed', 60_000);
+  await page.getByTestId('tab-search').click();
+  await page.getByTestId('example-refseq-16s-bacteria').click();
+  await expect(page.getByTestId('subject-source-0')).toContainText('bacteria.16SrRNA.fna', { timeout: 30_000 });
+  await expect(page.getByTestId('example-error')).toHaveCount(0);
+  expect(away).toEqual([SIXTEEN_S.url]);
+  await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
+});
+
 test('the options say that they were not read when the engine file cannot be downloaded', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
   await failRequests(page, /^\/engine\/losat-web-serial-[^/]*\.wasm$/, 'network error');
@@ -259,10 +318,14 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
   test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
   test.setTimeout(180_000);
   await keepWorkers(page);
+  await countChannels(page);
   await startLongSearch(page);
   await endWorker(page, 'losat-engine');
   await waitStatus(page, 1, 'failed', 30_000);
-  expect(await runMessage(page, 1)).toBe('Run 1 failed: The part of LOSAT that runs searches stopped. A failed run keeps no results.');
+  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${ENGINE_ENDED} A failed run keeps no results.`);
+  // The worker's threads and its keeper ended with it: the page ends its runtime at once. Before, the page waited for the
+  // keeper's answer for good, with the keeper's channel open (here in Chromium, Firefox and WebKit).
+  await expect.poll(() => openKeeperChannels(page), { timeout: 15_000 }).toBe(0);
   await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
   await page.getByTestId('tab-search').click();
   await submit(page);
@@ -274,7 +337,7 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
 // started, so the page did not watch it: a worker ended during that search left the run "Searching" for good (the review
 // of D2, H1), and an error then read "LOSAT could not start the part that runs searches. Reload the page." (M1).
 for (const [end, sentence] of [
-  ['ends', 'The part of LOSAT that runs searches stopped.'],
+  ['ends', ENGINE_ENDED],
   ['fails', 'The engine worker stopped: out of memory.'],
 ] as const) {
   test(`the first search of a new Engine worker fails with what stopped when the worker ${end} during it`, async ({ page }) => {

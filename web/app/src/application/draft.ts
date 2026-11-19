@@ -1128,8 +1128,9 @@ export class SearchDraft {
       description.then(
         (value) => {
           this.described.set(program, value);
-          if (this.state.get().program === program) this.set({ description: value });
+          if (this.state.get().program === program) this.set({ description: value, descriptionError: undefined, descriptionUnavailable: undefined });
           this.scheduleValidation();
+          this.engineAnswered();
         },
         (error: unknown) => {
           if (this.state.get().program === program) {
@@ -1138,6 +1139,37 @@ export class SearchDraft {
         },
       ),
     );
+  }
+
+  /**
+   * The engine answered a describe, an index or a check: what the form could not ask it while a part of LOSAT could not
+   * be loaded is asked again. An engine file that failed to download is downloaded again by the next call, so one
+   * network error at load left "Not read." on the options and the page's "Reload the page" for the whole session, also
+   * after searches completed (the second review of line WQA's D1 and D2, M1, 2026-11-19). A question is pending until
+   * it answers, and is asked again only by a later answer.
+   */
+  private engineAnswered(): void {
+    const state = this.state.get();
+    this.askOptionsAgain();
+    for (const role of ROLES) {
+      for (const source of state[role].sources) {
+        if (source.status === 'failed' && source.unavailable === true) this.reindex(role, source.key, this.parserOf(role));
+        else if (source.status === 'ready' && source.check?.state === 'error' && source.check.unavailable === true) {
+          this.scheduleCheck(role, source.key, 0);
+        }
+      }
+    }
+    if (state.validation.state === 'unavailable') this.scheduleValidation();
+  }
+
+  /**
+   * Asks the engine for the options again if it could not answer them before. A validation that the engine answered
+   * asks only this: a validation follows every index, also one that failed, which would otherwise be read again after
+   * each validation; the options that answer ask the rest again (engineAnswered).
+   */
+  private askOptionsAgain(): void {
+    const { descriptionUnavailable, program } = this.state.get();
+    if (descriptionUnavailable === true && !this.descriptions.has(program)) this.loadDescription(program);
   }
 
   private parserOf(role: InputRole): FastaParserKind {
@@ -1210,6 +1242,7 @@ export class SearchDraft {
       }));
       this.noteRevision(sourceId, base.revisionId);
       this.scheduleCheck(role, key, 0);
+      this.engineAnswered();
     } catch (error) {
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
@@ -1263,6 +1296,7 @@ export class SearchDraft {
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
     );
+    if (check.state !== 'error') this.engineAnswered();
   }
 
   /** The revision of a source's selection: its record table, or a revision without the excluded records. */
@@ -1323,11 +1357,14 @@ export class SearchDraft {
     let validation: Validation;
     let start: StartInfo | undefined;
     let registry: ChosenRegistryFile | undefined;
+    // Whether the engine answered (its start did), whatever the verdict.
+    let answered = false;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
       // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
       // has the parser's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
+      answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.
       if (this.generations.get('validate') !== generation) return;
       if (!started.ok) {
@@ -1349,6 +1386,7 @@ export class SearchDraft {
     this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation, start });
     this.prepareEngine();
+    if (answered) this.askOptionsAgain();
   }
 
   /** The registry file of the argv's `-conffile`: the chosen file under the argv's name (`registryName`); undefined without either. */

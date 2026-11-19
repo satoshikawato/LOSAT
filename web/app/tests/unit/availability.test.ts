@@ -17,8 +17,11 @@ import { NodeInflater } from './support/node-inflater';
 
 const SERIAL = 'LOSAT could not download its engine file /engine/losat-web-serial-0123.wasm (network error)';
 
-/** A search form whose Data worker cannot load the engine's serial module: every call that needs it fails so. */
-function setup(fail: { readonly describe?: boolean; readonly index?: boolean; readonly check?: boolean; readonly validate?: boolean } = {}) {
+/**
+ * A search form whose Data worker cannot load the engine's serial module: every call that needs it fails so, while its
+ * flag in `fail` is set (a test clears it when the module downloads).
+ */
+function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; validate?: boolean } = {}) {
   let token = 0;
   const data = new DataService({
     store: new MemoryBlockStore(),
@@ -30,8 +33,14 @@ function setup(fail: { readonly describe?: boolean; readonly index?: boolean; re
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
   const unavailable = () => Promise.reject(new UnavailableError(SERIAL));
-  if (fail.index === true) data.indexSource = unavailable;
-  if (fail.check === true) data.checkInput = unavailable;
+  const calls = { index: 0 };
+  const indexSource = data.indexSource.bind(data);
+  data.indexSource = (...args) => {
+    calls.index++;
+    return fail.index === true ? unavailable() : indexSource(...args);
+  };
+  const checkInput = data.checkInput.bind(data);
+  data.checkInput = (...args) => (fail.check === true ? unavailable() : checkInput(...args));
   const fake = new FakeEngine();
   const engine = {
     describe: (program: ProgramDescription['program']) => (fail.describe === true ? unavailable() : fake.describe(program)),
@@ -50,7 +59,7 @@ function setup(fail: { readonly describe?: boolean; readonly index?: boolean; re
     now: () => 0,
     debounceMs: 0,
   });
-  return { draft };
+  return { draft, calls };
 }
 
 const sourceOf = (draft: SearchDraft, role: 'query' | 'subject'): DraftSource => draft.state.get()[role].sources[0]!;
@@ -114,6 +123,75 @@ describe('a part of LOSAT that is unavailable, in the search form', () => {
     draft.setPaste('query', '>q\nACGT\n');
     await draft.idle();
     expect(availability.state.get()).toEqual({ problem: 'The part of LOSAT that keeps the results stopped' });
+  });
+});
+
+// The second review of line WQA's D1 and D2, M1 (2026-11-19): an engine file that failed to download once is downloaded
+// again by the next call, but the options were asked only at load and when the mode changed. One network error at load
+// left "Not read." on the options and "Reload the page; the results of this session are then lost." on the page for the
+// whole session, also after a search completed, and the Examples were refused.
+describe('a part of LOSAT that could not be loaded and then can', () => {
+  const never = new Promise<Error>(() => undefined);
+
+  it('the options are read again once the engine answers, and the page no longer says that LOSAT is unavailable', async () => {
+    const fail = { describe: true, validate: true };
+    const { draft } = setup(fail);
+    const availability = new Availability({ draft: draft.state, dataWorkerEnded: never });
+    await draft.idle();
+    expect(availability.state.get()).toEqual({ problem: SERIAL });
+    fail.describe = false;
+    fail.validate = false;
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    expect(draft.state.get().description?.program).toBe('blastn');
+    expect(draft.state.get()).not.toHaveProperty('descriptionError');
+    expect(draft.state.get()).not.toHaveProperty('descriptionUnavailable');
+    expect(availability.state.get()).toEqual({});
+  });
+
+  it('a validation that the engine answers is enough', async () => {
+    const fail = { describe: true };
+    const { draft } = setup(fail);
+    await draft.idle();
+    expect(unavailableOf(draft.state.get())).toBe(SERIAL);
+    fail.describe = false;
+    draft.setExtra('-qcov_hsp_perc 50');
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('ok');
+    expect(draft.state.get().description?.program).toBe('blastn');
+    expect(unavailableOf(draft.state.get())).toBeUndefined();
+  });
+
+  it('inputs that could not be read or checked for it are read and checked again', async () => {
+    const fail = { index: true, check: false };
+    const { draft } = setup(fail);
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', unavailable: true });
+    fail.index = false;
+    fail.check = true;
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(sourceOf(draft, 'subject').check).toEqual({ state: 'error', message: SERIAL, unavailable: true });
+    fail.check = false;
+    draft.setPaste('query', '>q2\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'subject').check?.state).toBe('ok');
+    expect(unavailableOf(draft.state.get())).toBeUndefined();
+  });
+
+  it('an input that still cannot be read for it is not read again after each validation', async () => {
+    const { draft, calls } = setup({ index: true });
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    const reads = calls.index;
+    draft.setExtra('-qcov_hsp_perc 50');
+    await draft.idle();
+    draft.setExtra('-qcov_hsp_perc 60');
+    await draft.idle();
+    expect(calls.index).toBe(reads);
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', unavailable: true });
   });
 });
 

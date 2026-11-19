@@ -49,8 +49,8 @@ import type {
 } from './protocol.js';
 
 /**
- * How a runtime ended (retire): at once (its threaded instance was not in use), or once the
- * keeper grew the shared memory.
+ * How a runtime ended (retire): at once (its threaded instance was not in use, or its worker had
+ * ended), or once the keeper grew the shared memory.
  */
 export type RuntimeEnd = 'at-once' | 'grown';
 
@@ -72,8 +72,11 @@ export interface WasmEngineOptions {
 
 /** Why a search fails whose Engine worker could not start: its script or its first message (line WQA's sweep, D1). */
 export const ENGINE_NOT_STARTED = 'LOSAT could not start the part that runs searches';
-/** Why a search fails whose Engine worker ended without an error event (line WQA's sweep, D2); the next search starts another. */
-export const ENGINE_ENDED = 'The part of LOSAT that runs searches stopped';
+/**
+ * Why a search fails whose Engine worker ended without an error event (line WQA's sweep, D2). The next search starts
+ * another worker, which the sentence says: it said only what stopped (the second review of D1 and D2, L2, 2026-11-19).
+ */
+export const ENGINE_ENDED = 'The part of LOSAT that runs searches stopped. Run the search again.';
 
 interface Generation {
   readonly id: number;
@@ -312,7 +315,7 @@ export class WasmEngine implements EngineGateway {
     if (event.type === 'life') {
       // The worker holds its lock now, and no preparation or search of it has started: the page may wait for the lock.
       if (event.held && this.locks !== undefined) {
-        watchLife(this.locks, generation.lifeLock, generation.life.signal, () => this.fail(generation, new Error(ENGINE_ENDED)));
+        watchLife(this.locks, generation.lifeLock, generation.life.signal, () => this.fail(generation, new Error(ENGINE_ENDED), { workerEnded: true }));
       }
       return;
     }
@@ -343,10 +346,13 @@ export class WasmEngine implements EngineGateway {
     });
   }
 
-  /** The runtime stopped (a trap in a thread, or the worker itself); its search fails. */
-  private fail(generation: Generation, error: Error): void {
+  /**
+   * The runtime stopped (a trap in a thread, or the worker itself); its search fails. `workerEnded`: the worker has
+   * ended (the release of its lock), with its thread workers and its keeper.
+   */
+  private fail(generation: Generation, error: Error, { workerEnded = false } = {}): void {
     if (generation !== this.current) return;
-    this.retire();
+    this.retire({ workerEnded });
     const active = this.active;
     if (active !== undefined && active.generation === generation) this.settle(active, error);
   }
@@ -367,9 +373,13 @@ export class WasmEngine implements EngineGateway {
    * Engine worker ends none of its thread workers and not the keeper, also after the instance
    * stopped (ThreadHost.terminate, runtime.ts dispose), and the keeper answers also when the grow
    * fails (memory-keeper.ts). Until then the ended search may still run and write to its output
-   * port, whose Data worker side the coordinator discards.
+   * port, whose Data worker side the coordinator discards. A worker that has ended (`workerEnded`) took its
+   * threads and its keeper with it: no thread can grow the memory, and no keeper answers, so the
+   * generation ends at once. It waited for the keeper's answer for good, with its two channels open,
+   * when the keeper ended with the worker before it answered (the second review of line WQA's D1 and
+   * D2, L1, 2026-11-19: Firefox; unavailable.spec.ts: also Chromium and WebKit).
    */
-  private retire(): void {
+  private retire({ workerEnded = false } = {}): void {
     const generation = this.current;
     if (generation === undefined) return;
     this.current = undefined;
@@ -392,7 +402,7 @@ export class WasmEngine implements EngineGateway {
         // An observer does not change how the runtime ends.
       }
     };
-    if (generation.use?.retire() !== true) {
+    if (workerEnded || generation.use?.retire() !== true) {
       end('at-once');
       return;
     }

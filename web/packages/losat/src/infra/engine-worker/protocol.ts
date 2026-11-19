@@ -26,10 +26,12 @@ export interface EngineInit {
   readonly modules: { readonly serial: ModuleSource; readonly threads: ModuleSource };
   /** Engine build names for the run records. */
   readonly builds: { readonly serial: string; readonly threads: string };
-  /** BroadcastChannel on which thread workers report a thread that stopped. */
-  readonly faultChannel: string;
-  /** BroadcastChannel on which the Gateway asks the keeper of the shared memory to grow it (memory-keeper.ts). */
-  readonly keeperChannel: string;
+  /**
+   * The Web Lock that the worker holds for as long as it lives (worker-life.ts): the Gateway learns from its release
+   * that the worker ended without an error event (line WQA's sweep, D2). The worker answers `started` at once, and
+   * `life` once it holds the lock, before any preparation or search of the worker starts.
+   */
+  readonly lifeLock: string;
   /**
    * Whether the threaded instance is in use (instance-use.ts), shared with the Gateway. Absent
    * where the page cannot share memory with a worker: no threaded instance starts then.
@@ -155,6 +157,19 @@ export interface WorkerError {
 }
 
 export type EngineEvent =
+  /**
+   * The worker started: its script loaded and took `init`. An error before this is a worker that could not start (line
+   * WQA's sweep, D1); an error after it, a worker that stopped.
+   */
+  | { readonly type: 'started'; readonly generation: number }
+  /**
+   * Whether the worker holds the lock `lifeLock` (EngineInit), posted before any preparation or search of the worker
+   * starts: the Gateway waits for that lock from then on, also during the worker's first search (line WQA's sweep, D2).
+   */
+  | { readonly type: 'life'; readonly generation: number; readonly held: boolean }
+  | WorkerLink
+  /** A fault of the ThreadHost itself (a thread that did not start in time), which ends the runtime as a thread's does. */
+  | ({ readonly generation: number } & ThreadFault)
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
@@ -176,7 +191,8 @@ export interface ThreadPrepare {
   readonly memory: WebAssembly.Memory;
   /** Int32Array(1) on a SharedArrayBuffer: the slot state. */
   readonly slot: SharedArrayBuffer;
-  readonly faultChannel: string;
+  /** The worker's link to the main thread (link.ts), on which it reports a thread that stopped (ThreadFault). */
+  readonly faults: MessagePort;
   /** The use count of the instance (instance-use.ts): a thread counts itself off when it returns. */
   readonly use: SharedArrayBuffer;
 }
@@ -197,7 +213,7 @@ export interface ThreadStart {
 
 export type ThreadCommand = ThreadPrepare | ThreadStart;
 
-/** Posted on the fault BroadcastChannel when a thread stops (for example, a trap). */
+/** Posted on a thread worker's link when its thread stops (for example, a trap). */
 export interface ThreadFault {
   readonly type: 'fault';
   readonly tid: number;
@@ -208,26 +224,52 @@ export interface ThreadFault {
 
 /**
  * From the ThreadHost to the keeper of its shared memory (memory-keeper.ts): the memory and
- * the BroadcastChannel on which the Gateway asks the keeper to grow it.
+ * the keeper's link to the main thread (link.ts), on which the Gateway asks it to grow the memory.
  */
 export interface KeeperCommand {
   readonly type: 'keep';
   readonly memory: WebAssembly.Memory;
   readonly maximumPages: number;
-  readonly channel: string;
+  readonly port: MessagePort;
 }
 
-/** From the keeper to the ThreadHost: it holds the memory and listens (ThreadHost.prepare waits for it). */
+/**
+ * From the keeper to the ThreadHost: it holds the memory, and its link carries messages (ThreadHost.prepare waits for it).
+ */
 export interface KeeperReady {
   readonly type: 'ready';
 }
 
-/** From the Gateway to the keeper on the channel: grow the memory to its maximum. */
+/** From the Gateway to the keeper on its link: grow the memory to its maximum. */
 export interface KeeperGrow {
   readonly type: 'grow';
 }
 
-/** The keeper's answer on the channel, after the grow. */
+/** The keeper's answer on its link, after the grow. */
 export interface KeeperGrown {
   readonly type: 'grown';
 }
+
+// --- links ------------------------------------------------------------------------------
+
+/** Whose link a port is: a thread worker's, which reports faults, or the keeper's, which the Gateway asks to grow the memory. */
+export type LinkRole = 'thread' | 'keeper';
+
+/**
+ * From the Engine worker to the main thread: the main thread's end of the link of a thread worker or the keeper (link.ts),
+ * posted before the worker or the keeper gets the other end.
+ */
+export interface WorkerLink {
+  readonly type: 'link';
+  readonly generation: number;
+  readonly role: LinkRole;
+  readonly port: MessagePort;
+}
+
+/** The first message of a link, from the worker's end, and the main thread's answer to it (link.ts). */
+export interface LinkHello {
+  readonly type: 'hello';
+}
+
+/** A message on a link. */
+export type LinkMessage = LinkHello | ThreadFault | KeeperGrow | KeeperGrown;

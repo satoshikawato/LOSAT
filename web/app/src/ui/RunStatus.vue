@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, onBeforeUpdate, onUnmounted, onUpdated, ref, watch, watchEffect } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { isTerminal, type RunStatus } from '../domain/run';
+import { withUnit } from '../domain/units';
 import { announce } from './announcer';
 import { formatDuration } from './format';
 import LosatLoader from './LosatLoader.vue';
@@ -45,7 +46,8 @@ const elapsed = computed(() => {
   return startedAt === undefined ? undefined : formatDuration((endedAt ?? now.value) - startedAt);
 });
 
-const cancellable = (run: RunView) => !isTerminal(run.status) && run.status !== 'finalizing';
+/** Until it ends: a run whose results the Data worker does not commit can be ended too (line WQA's sweep, D2). */
+const cancellable = (run: RunView) => !isTerminal(run.status);
 
 /** The run that searches while this one waits (runs search one at a time). */
 const ahead = computed(() => {
@@ -84,7 +86,7 @@ const phaseTimes = computed(() => {
   if (startedAt === undefined || times === undefined) return '';
   return (['preparing', 'running', 'finalizing'] as const)
     .filter((phase) => times[phase] !== undefined)
-    .map((phase) => `${PHASE_LABELS[phase]} at ${((times[phase]! - startedAt) / 1000).toFixed(1)} s`)
+    .map((phase) => `${PHASE_LABELS[phase]} at ${withUnit(((times[phase]! - startedAt) / 1000).toFixed(1), 's')}`)
     .join(', ');
 });
 </script>

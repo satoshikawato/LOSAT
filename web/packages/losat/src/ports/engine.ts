@@ -168,6 +168,24 @@ export function isFileReadError(error: unknown): error is Error {
   return error instanceof Error && error.name === 'FileReadError';
 }
 
+/**
+ * A part of LOSAT could not be loaded, or stopped: an engine file that could not be downloaded, a worker that could not
+ * start or that ended (line WQA's sweep, D1 and D2, 2026-11-19). It is no verdict on the inputs or the options, and a
+ * page says it as LOSAT's own failure. Its message names the part and why, as a clause. An error that crosses a worker
+ * keeps its name only (`isUnavailable`).
+ */
+export class UnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'UnavailableError';
+  }
+}
+
+/** Whether an error is an UnavailableError, also one rebuilt from its name after it crossed a worker. */
+export function isUnavailable(error: unknown): error is Error {
+  return error instanceof Error && error.name === 'UnavailableError';
+}
+
 /** Thrown (as a rejection) by `run` after `cancel` was called for that run. */
 export class RunCancelledError extends Error {
   constructor(readonly runId: string) {

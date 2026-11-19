@@ -599,6 +599,7 @@ mod tests {
         translated_context_group,
     };
     use super::*;
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     /// xorshift64, for reproducible random lists (as in `x_hsp_inplace.rs`).
     struct Rng(u64);
@@ -899,7 +900,10 @@ mod tests {
     #[test]
     fn the_slices_give_the_reference_list_serially_and_on_pools() {
         let (params, contexts) = two_query_contexts();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts
+            .iter()
+            .map(|c| c.karlin_params.k.glibc_ln())
+            .collect();
         let cutoffs = cutoff_sets();
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
             .ok()
@@ -1021,7 +1025,10 @@ mod tests {
     #[test]
     fn empty_single_and_one_group_lists() {
         let (params, contexts) = two_query_contexts();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts
+            .iter()
+            .map(|c| c.karlin_params.k.glibc_ln())
+            .collect();
         let linking = LinkingParams {
             subject_len_nucl: 300_000,
             gap_decay_rate: 0.5,

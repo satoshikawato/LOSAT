@@ -677,7 +677,7 @@ describe('SearchDraft accessions (line WF-1)', () => {
     draft.setPaste('query', 'NC_000001.11');
     draft.fetchAccessions('query');
     await draft.idle();
-    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().query.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10\u00a0MB') });
   });
 });
 
@@ -965,7 +965,7 @@ describe('SearchDraft accessions by groups, one site a press (line WF-5)', () =>
     await draft.idle();
     draft.fetchGroup('subject', 0, 'cncb');
     await draft.idle();
-    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10 MB') });
+    expect(draft.state.get().subject.fetch).toMatchObject({ state: 'failed', message: expect.stringContaining('larger than 10\u00a0MB') });
     expect(draft.state.get().subject.fetched).toEqual({ 1: { fasta: P, source: 'ncbi' } });
   });
 

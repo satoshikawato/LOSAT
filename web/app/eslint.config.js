@@ -42,6 +42,21 @@ export default tseslint.config(
   restrict(['src/application/**'], ['infra', 'ui', 'vue']),
   restrict(['src/infra/**'], ['application', 'ui', 'vue']),
   restrict(['src/ui/**'], ['infra']),
+  // Firefox refuses `new BroadcastChannel()` where the site's data is blocked, and the page did not start (line WQA's
+  // sweep, D5, 2026-11-19): the application opens its channels with siteChannel, which tells no other tab then.
+  {
+    files: ['src/**'],
+    ignores: ['src/infra/browser/site-channel.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='BroadcastChannel']",
+          message: "The browser refuses a BroadcastChannel where the site's data is blocked: open it with siteChannel (src/infra/browser/site-channel.ts).",
+        },
+      ],
+    },
+  },
   // The e2e tests take `test` from tests/e2e/support/test.ts, which puts the WebKit pages'
   // wake lock stand-in in place.
   {

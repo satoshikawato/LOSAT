@@ -1,14 +1,18 @@
 // Application coordinator (plan §5.5): one active run, a FIFO queue, and the run state
 // machine  queued -> preparing -> running -> finalizing -> completed | cancelled | failed.
 //
-// Ordering rule for cancel versus commit: a run can be cancelled until it enters
-// `finalizing`; after that, cancel requests are ignored and the run completes.
+// Ordering rule for cancel versus commit: a run can be cancelled until it ends. A cancel while it
+// is `finalizing` ends the wait for its results, which are deleted if they come later: a Data
+// worker that stopped answering kept such a run "Organizing results" for good, with no Cancel
+// (line WQA's sweep, D2, 2026-11-19). When the Data worker ends, the active run ends at once,
+// with its search: it could not keep its results (the review of D2, L2).
 //
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
+  isUnavailable,
   RunCancelledError,
   runFilesOf,
   type EngineGateway,
@@ -25,6 +29,7 @@ import { fastaParser, programById } from '../domain/programs';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
+import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
 import { taskOf } from './results';
 import { Store } from './store';
@@ -87,6 +92,8 @@ export interface CoordinatorDeps {
   readonly newRunId: () => string;
   /** The lower-case hex SHA-256 of bytes (the package's `sha256Hex`), for the registry file of a snapshot. */
   readonly digest: (bytes: Uint8Array) => Promise<string>;
+  /** Settles when the Data worker could not start or ended, with the error of its calls from then on. */
+  readonly dataWorkerEnded?: Promise<Error>;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -117,10 +124,16 @@ export class Coordinator {
    */
   private readonly conffiles = new Map<string, Blob>();
   private active: string | undefined;
+  /**
+   * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
+   * are organized (cancel), or the end of the Data worker (dataWorkerEnded).
+   */
+  private stopActive: ((error: Error) => void) | undefined;
   private nextNumber = 1;
 
   constructor(private readonly deps: CoordinatorDeps) {
     void this.refreshStorage();
+    void deps.dataWorkerEnded?.then((error) => this.dataWorkerEnded(error));
   }
 
   /** Validates the request with the engine and, if valid, freezes it as a queued run. */
@@ -154,7 +167,7 @@ export class Coordinator {
       try {
         start = await this.deps.engine.start(argv);
       } catch (error) {
-        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+        return { ok: false, message: uncheckedOptions(error) };
       }
       if (!start.ok) return start;
       let conffile: Prepared['conffile'];
@@ -176,7 +189,7 @@ export class Coordinator {
       try {
         validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
-        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+        return { ok: false, message: uncheckedOptions(error) };
       }
       if (!validation.ok) return validation;
       prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
@@ -208,7 +221,7 @@ export class Coordinator {
         query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
         subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
       } catch (error) {
-        return { ok: false, message: errorMessage(error) };
+        return { ok: false, message: failureText(error) };
       }
       const title = request.title?.trim();
       // The run reads the file under the name that its argv gives the option.
@@ -259,9 +272,8 @@ export class Coordinator {
   }
 
   /**
-   * Cancels the runs of a group: the running one, if it can still be cancelled, and the
-   * queued ones (plan §5.2). Finished runs and a run that is finalizing are left alone;
-   * the operation is not atomic.
+   * Cancels the runs of a group: the active one and the queued ones (plan §5.2). Finished
+   * runs are left alone; the operation is not atomic.
    */
   cancelGroup(groupId: string): void {
     const members = this.state.get().runs.filter((run) => run.snapshot.group?.groupId === groupId);
@@ -270,10 +282,10 @@ export class Coordinator {
     for (const run of members) this.cancel(run.snapshot.runId);
   }
 
-  /** Cancels a queued or running run. Runs that are finalizing or finished are left alone. */
+  /** Cancels a queued or active run (one that is finalizing too). Finished runs are left alone. */
   cancel(runId: string): void {
     const view = this.find(runId);
-    if (view === undefined || isTerminal(view.status) || view.status === 'finalizing') return;
+    if (view === undefined || isTerminal(view.status)) return;
     const queuedIndex = this.queue.indexOf(runId);
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
@@ -282,6 +294,21 @@ export class Coordinator {
       return;
     }
     this.cancelRequested.add(runId);
+    this.deps.engine.cancel(runId);
+    if (this.active === runId) this.stopActive?.(new RunCancelledError(runId));
+  }
+
+  /**
+   * The Data worker ended: the active run cannot keep its results, so it fails now with the error of the Data worker's
+   * calls, and its search ends. Before, the search went on, and the run failed only at its commit, when the search
+   * ended, while the page already said that the Data worker had stopped (line WQA's sweep, D2; its review, L2, 2026-11-19).
+   * The runs queued behind it fail when they start, as each call of the Data worker fails at once.
+   */
+  private dataWorkerEnded(error: Error): void {
+    const runId = this.active;
+    if (runId === undefined) return;
+    // First the run's wait, so that it ends with this error rather than with the cancel of its search.
+    this.stopActive?.(error);
     this.deps.engine.cancel(runId);
   }
 
@@ -398,6 +425,8 @@ export class Coordinator {
       const { bytes, sha256, records } = await runInput;
       return Object.freeze({ name, bytes, sha256, revisionIds, records });
     } catch (error) {
+      // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
+      if (isUnavailable(error)) throw error;
       throw new Error(`${role} FASTA: ${errorMessage(error)}`, { cause: error });
     }
   }
@@ -419,16 +448,25 @@ export class Coordinator {
     const startedAt = this.deps.now();
     // The files that the run made besides its outputs, which a completed and a failed run keep.
     let runFiles: readonly RunFile[] | undefined;
+    // Why the run was stopped (stopActive), if it was.
+    let stop: Error | undefined;
+    const stopped = new Promise<never>((_, reject) => {
+      this.stopActive = (error) => {
+        stop ??= error;
+        reject(error);
+      };
+    });
+    stopped.catch(() => undefined);
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
       staged = true;
-      // A cancel while the outputs were staged found no search to end: the engine has not started it.
-      if (this.cancelRequested.has(runId)) {
+      // A stop while the outputs were staged found no search to end: the engine has not started it, and does not.
+      if (stop !== undefined) {
         output.close();
-        throw new RunCancelledError(runId);
+        throw stop;
       }
-      const runtime = await this.deps.engine.run(
+      const search = this.deps.engine.run(
         {
           runId,
           argv: snapshot.argv,
@@ -444,10 +482,16 @@ export class Coordinator {
         runFiles = runFilesOf(error);
         throw error;
       });
+      const runtime = await Promise.race([search, stopped]);
       runFiles = runtime.runFiles;
-      if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
+      if (stop !== undefined) throw stop;
       this.update(runId, { status: 'finalizing' });
-      const result = await this.deps.data.commitRun(runId);
+      const commit = this.deps.data.commitRun(runId);
+      const result = await Promise.race([commit, stopped]).catch((error: unknown) => {
+        // Results that the commit makes after the run ended are deleted.
+        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
+        throw error;
+      });
       this.update(runId, {
         status: 'completed',
         result,
@@ -467,17 +511,19 @@ export class Coordinator {
         },
       });
     } catch (error) {
-      if (staged) await this.deps.data.discardRun(runId).catch(() => undefined);
+      // Not waited for: a Data worker that does not answer must not keep the run from ending (line WQA's sweep, D2).
+      if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {
           endedAt: this.deps.now(),
-          ...(cancelled ? {} : { error: errorMessage(error) }),
+          ...(cancelled ? {} : { error: failureText(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
         },
       });
     } finally {
+      this.stopActive = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
       this.cancelRequested.delete(runId);
@@ -541,4 +587,9 @@ function engineInput(input: InputSnapshot): EngineInput {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Why the engine could not check the options of a request: a part of LOSAT that is unavailable is said as the page says it. */
+function uncheckedOptions(error: unknown): string {
+  return isUnavailable(error) ? failureText(error) : `The options could not be checked: ${errorMessage(error)}`;
 }

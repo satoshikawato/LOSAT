@@ -3,6 +3,7 @@
 // the Data worker. Blocks of one working session live under tmp/<session-token>/; their
 // names are internal tokens, never input names.
 import {
+  asStorageFull,
   checkRange,
   isStorageFull,
   isStorageRemoved,
@@ -83,17 +84,17 @@ export class OpfsBlockStore implements BlockStore {
         try {
           this.root = await this.session.reopen();
         } catch (reopenError) {
-          throw isStorageFull(reopenError) ? new StorageFullError() : new StorageRemovedError(undefined, reopenError);
+          throw isStorageFull(reopenError) ? asStorageFull(reopenError) : new StorageRemovedError(undefined, reopenError);
         }
         try {
           opened = await open();
         } catch (again) {
-          if (isStorageFull(again)) throw new StorageFullError();
+          if (isStorageFull(again)) throw asStorageFull(again);
           throw mayBeStorageRemoved(again) ? new StorageRemovedError(undefined, again) : again;
         }
       }
     } catch (error) {
-      throw isStorageFull(error) ? new StorageFullError() : error;
+      throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     const { directory, file, handle } = opened;
     if (this.blocks.has(path)) {
@@ -114,7 +115,7 @@ export class OpfsBlockStore implements BlockStore {
         } catch (error) {
           if (!isStorageFull(error)) throw error;
           block.state = 'full';
-          throw new StorageFullError();
+          throw asStorageFull(error);
         }
         block.length += written;
         this.used += written;
@@ -139,7 +140,7 @@ export class OpfsBlockStore implements BlockStore {
         try {
           block.handle.flush();
         } catch (error) {
-          throw isStorageFull(error) ? new StorageFullError() : error;
+          throw isStorageFull(error) ? asStorageFull(error) : error;
         }
         block.handle.close();
         block.handle = undefined;
@@ -226,7 +227,7 @@ export class OpfsBlockStore implements BlockStore {
 /** OPFS for the working sessions (session.ts): tmp/ and the directory of each session. */
 export const opfsAccess: OpfsAccess = {
   async space() {
-    return opfsSessionSpace(await tmpDirectory());
+    return opfsSessionSpace(await (await firstRoot(opfsStorage())).getDirectoryHandle(TMP_DIRECTORY, { create: true }));
   },
   /**
    * Opens tmp/<token>/, checked by writing, sealing, reading and removing a small block.
@@ -249,19 +250,36 @@ export const opfsAccess: OpfsAccess = {
   },
 };
 
-async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
+function opfsStorage(): StorageManager {
   const storage = (globalThis.navigator as Navigator | undefined)?.storage;
   if (typeof storage?.getDirectory !== 'function') {
     throw new StorageUnsupportedError('this browser has no Origin Private File System');
   }
-  let root: FileSystemDirectoryHandle;
-  try {
-    root = await storage.getDirectory();
-  } catch (error) {
-    // The root of the site's storage itself: the browser gives this page none (session.ts).
-    throw new StorageRefusedError(error);
+  return storage;
+}
+
+/**
+ * The root of the site's storage when a session starts (`space()`), the first thing that asks for
+ * it. A refusal from the start is StorageRefusedError (session.ts): SecurityError (Firefox's private
+ * windows, a site whose data is blocked), or UnknownError again on a second try (WebKit's ephemeral
+ * sessions, as Safari's private windows, answer it every time; a passing fault would not).
+ * Anything else, a full storage among them, stays the browser's error.
+ */
+async function firstRoot(storage: StorageManager): Promise<FileSystemDirectoryHandle> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await storage.getDirectory();
+    } catch (error) {
+      const name = (error as { name?: unknown }).name;
+      if (name === 'UnknownError' && attempt < 2) continue;
+      throw name === 'SecurityError' || name === 'UnknownError' ? new StorageRefusedError(error) : error;
+    }
   }
-  return root.getDirectoryHandle(TMP_DIRECTORY, { create: true });
+}
+
+/** tmp/ once the session has the storage (`open()` and its `reopen`): a failure there is the browser's error. */
+async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
+  return (await opfsStorage().getDirectory()).getDirectoryHandle(TMP_DIRECTORY, { create: true });
 }
 
 /** Whether tmp/<token>/ is not there (a lookup that does not make it). */

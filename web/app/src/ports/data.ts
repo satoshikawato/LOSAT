@@ -127,16 +127,16 @@ export type CleanupState =
       readonly state: 'unavailable';
       /** In LOSAT's words, never the browser's message. */
       readonly reason: string;
-      /** The name of the browser's error behind it (SecurityError…), for developers. */
-      readonly errorName?: string;
+      /** The error behind it, "<name>: <message>", for developers (data-error). */
+      readonly error?: string;
     };
 
 export interface StorageInfo {
   readonly backend: StorageBackend;
   /** Why OPFS is not used, when the backend is memory: LOSAT's words, never the browser's message. */
   readonly fallbackReason?: string;
-  /** The name of the browser's error behind fallbackReason (SecurityError…), for developers. */
-  readonly fallbackErrorName?: string;
+  /** The error behind fallbackReason, "<name>: <message>", for developers (data-error). */
+  readonly fallbackError?: string;
   /** Bytes that this working session holds in temporary storage. */
   readonly sessionBytes: number;
   /** The browser's estimate for the whole site (`navigator.storage.estimate`); not a guarantee. */

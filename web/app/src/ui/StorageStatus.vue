@@ -19,11 +19,11 @@ const removed = computed(() =>
     :data-removed-sessions="removed"
   >
     <!-- Nothing in the normal case (stop-describing-ui rule 4): the warnings only. -->
-    <!-- One sentence in LOSAT's words; the name of the browser's error, for developers, is in data-error (line WQA's sweep, D5). -->
-    <p v-if="storage.fallbackReason" class="warning" data-testid="storage-memory-note" :data-error="storage.fallbackErrorName">
-      Results are kept in this tab's memory only, because {{ storage.fallbackReason }}.
+    <!-- One sentence in LOSAT's words; the browser's error, for developers, is in data-error (line WQA's sweep, D5). -->
+    <p v-if="storage.fallbackReason" class="warning" data-testid="storage-memory-note" :data-error="storage.fallbackError">
+      Results are kept in this tab's memory only and are lost when it is closed or reloaded, because {{ storage.fallbackReason }}.
     </p>
-    <p v-if="storage.cleanup.state === 'unavailable'" class="note" :data-error="storage.cleanup.errorName">
+    <p v-if="storage.cleanup.state === 'unavailable'" class="note" data-testid="storage-cleanup-note" :data-error="storage.cleanup.error">
       Temporary data of closed tabs is not removed: {{ storage.cleanup.reason }}.
     </p>
   </section>

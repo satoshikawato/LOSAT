@@ -40,8 +40,9 @@ export const STORAGE_FULL_MESSAGE =
   'Earlier results are kept.';
 
 export class StorageFullError extends Error {
-  constructor(message = STORAGE_FULL_MESSAGE) {
-    super(message);
+  /** `cause`: the browser's error (QuotaExceededError), kept for developers (session.ts). */
+  constructor(message = STORAGE_FULL_MESSAGE, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
     this.name = 'StorageFullError';
   }
 }
@@ -94,9 +95,9 @@ export const MEMORY_FULL_MESSAGE =
   'Not enough temporary storage for the results of this run: this browser keeps results in memory, ' +
   'at most 512 MB in a tab. Earlier results are kept.';
 
-/** The StorageFullError of a storage-full error, keeping its message (memory or browser storage). */
+/** The StorageFullError of a storage-full error, keeping its message (memory or browser storage), or the browser's error as its cause. */
 export function asStorageFull(error: unknown): StorageFullError {
-  return error instanceof StorageFullError ? error : new StorageFullError();
+  return error instanceof StorageFullError ? error : new StorageFullError(undefined, error);
 }
 
 /** True for StorageFullError and for the browser's QuotaExceededError. */

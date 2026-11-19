@@ -2,7 +2,7 @@
 // 2026-11-19). The application keeps results in the tab's memory and says why in LOSAT's words:
 // the note quoted the browser's exception, "(Security error when calling GetDirectory)" in Firefox
 // and "(The operation failed for an unknown transient reason (e.g. out of memory).)" in WebKit,
-// which reads as if memory ran out. The name of the browser's error stays in the note's
+// which reads as if memory ran out. The browser's error, name and message, stays in the note's
 // data-error attribute, for developers.
 //
 // Firefox: a private window (browser.privatebrowsing.autostart). WebKit: Playwright's context is
@@ -14,7 +14,7 @@ import { test } from './support/test';
 import { openApp } from './support/browser';
 
 const NOTE =
-  "Results are kept in this tab's memory only, because the browser does not let this site store files here, as in a private window.";
+  "Results are kept in this tab's memory only and are lost when it is closed or reloaded, because the browser does not let this site store files here, as in a private window.";
 /** What each browser said, which the page must not repeat. */
 const BROWSER_WORDS = /Security error|GetDirectory|transient|out of memory|access is denied/i;
 const ERROR_NAME = { chromium: 'SecurityError', firefox: 'SecurityError', webkit: 'UnknownError' } as const;
@@ -44,7 +44,7 @@ test('a private window keeps results in memory and says why in LOSAT words, not 
     await expect(status).toHaveAttribute('data-backend', 'memory');
     const note = status.getByTestId('storage-memory-note');
     await expect(note).toHaveText(NOTE);
-    await expect(note).toHaveAttribute('data-error', ERROR_NAME[browserName as keyof typeof ERROR_NAME]);
+    await expect(note).toHaveAttribute('data-error', new RegExp(`^${ERROR_NAME[browserName as keyof typeof ERROR_NAME]}: .`));
     expect(await status.innerText()).not.toMatch(BROWSER_WORDS);
   } finally {
     await privateBrowser?.close();

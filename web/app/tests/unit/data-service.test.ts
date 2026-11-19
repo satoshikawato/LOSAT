@@ -197,7 +197,7 @@ describe('DataService runs and storage status', () => {
     let settle!: (value: { state: 'done'; removedSessions: number }) => void;
     const { data } = service({
       fallbackReason: 'the browser does not let this site store files here, as in a private window',
-      fallbackErrorName: 'SecurityError',
+      fallbackError: 'SecurityError: Security error when calling GetDirectory',
       cleanup: new Promise((resolve) => {
         settle = resolve;
       }),
@@ -206,7 +206,7 @@ describe('DataService runs and storage status', () => {
     expect(await data.storageInfo()).toEqual({
       backend: 'memory',
       fallbackReason: 'the browser does not let this site store files here, as in a private window',
-      fallbackErrorName: 'SecurityError',
+      fallbackError: 'SecurityError: Security error when calling GetDirectory',
       sessionBytes: 0,
       estimate: { usage: 10, quota: 1000 },
       cleanup: { state: 'pending' },

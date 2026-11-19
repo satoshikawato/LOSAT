@@ -1079,7 +1079,7 @@ test('outfmt 6 and 7 that could not be written: the notice says so, not that the
   await run(page, 1);
   await openRun(page, 1);
   const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-output"]');
-  await expect(notice).toHaveText('outfmt 6 and 7 could not be written (their error is under Warnings in Run details), so this run has no HSP records.');
+  await expect(notice).toHaveText('outfmt 6 and 7 could not be written, so this run has no HSP records. Their error is under Warnings in Run details.');
   expect(await noticeKinds(page)).toEqual(['no-tabular-output']);
   await showOutput(page, 1, 0, false);
   expect(await text(page.getByTestId('result-output'))).toContain('Sequence with id Subject_1 no longer exists in database...alignment skipped');

@@ -82,15 +82,19 @@ searches the query batches before the record and ends with that message, as the 
 A subject with such a record is refused when it is registered, as the command line reads every
 subject before its first query.
 
-The engine tells the host which outputs a run could not write: for each, it sends stream 9
-(`DISCARD_STREAM`), whose 4 bytes are that output's stream number as a little-endian unsigned
-integer, and the host drops everything that arrived of that stream, which then stays empty. It comes
-for each output that fails on its own, whether or not some of its chunks were sent, and for each
-output of a search that fails in a run of two searches; the error is on stream 3, and the run goes
-on with the other outputs. These signals are the only sign of an output that could not be written:
-an empty stream is not one (outfmt 6 of a search without hits is empty). `RunOutputReceiver`
-reports each signal through `onDiscard`, its required third argument (`new RunOutputReceiver(port,
-onChunk, onDiscard)`; `onDiscard(stream)` drops what arrived of that output), and
+The engine tells the host which outputs a run could not write, and where their errors are: for
+each, it sends stream 9 (`DISCARD_STREAM`), whose 8 bytes are that output's stream number and then
+the place of its error, each a little-endian unsigned integer (`discardSignal` reads them), and the
+host drops everything that arrived of that stream, which then stays empty. The place is where the
+run writes its messages: stream 3, or the file of `-logfile` (stream 8), where TBLASTX with
+`-logfile NAME` writes them as the command line does, or nowhere (`ERROR_NOWHERE`: TBLASTX's
+`-logfile ""` or `-logfile /dev/null`). The signal comes for each output that fails on its own,
+whether or not some of its chunks were sent, and for each output of a search that fails in a run of
+two searches, and the run goes on with the other outputs. These signals are the only sign of an
+output that could not be written: an empty stream is not one (outfmt 6 of a search without hits is
+empty). `RunOutputReceiver` reports each signal through `onDiscard`, its required third argument
+(`new RunOutputReceiver(port, onChunk, onDiscard)`; `onDiscard(stream, error)` drops what arrived
+of that output, whose error is at `error`: `'diagnostics'`, `'logfile'` or `'nowhere'`), and
 `RunOutputMessage` has a `discard` variant for it.
 
 A host that keeps every chunk would keep output that the command line does not write.

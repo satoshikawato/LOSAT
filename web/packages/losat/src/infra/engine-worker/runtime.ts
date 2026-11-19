@@ -16,11 +16,11 @@
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';
-import { isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
+import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputErrorPlace, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
 import {
-  discardedStream,
+  discardSignal,
   DISCARD_STREAM,
   EngineCallError,
   FILE_REGISTRY,
@@ -237,7 +237,7 @@ export class EngineRuntime {
         abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
-          else if (stream === DISCARD_STREAM) writer.discard(discardedOutput(bytes));
+          else if (stream === DISCARD_STREAM) writer.discard(...discardedOutput(bytes));
           else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
         });
       } catch (error) {
@@ -454,14 +454,23 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * The output that the engine's signal of stream 9 names (ABI v2 §5): an output stream of the run
- * that failed. Another number breaks the ABI.
+ * The output that the engine's signal of stream 9 names (ABI v2 §5), an output stream of the run
+ * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
+ * file of -logfile) or nowhere. Another number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): RunOutput {
-  const stream = discardedStream(bytes);
+function discardedOutput(bytes: Uint8Array): [RunOutput, OutputErrorPlace] {
+  const { stream, errorStream } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  return stream;
+  const error = errorStream === undefined ? 'nowhere' : ERROR_PLACES.get(errorStream);
+  if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
+  return [stream, error];
 }
+
+/** The place of an error that a signal of stream 9 gives as a stream (ABI v2 §5). */
+const ERROR_PLACES: ReadonlyMap<number, OutputErrorPlace> = new Map([
+  [DIAGNOSTICS_STREAM, 'diagnostics'],
+  [RUN_FILES_STREAM, 'logfile'],
+]);
 
 /** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
 function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {

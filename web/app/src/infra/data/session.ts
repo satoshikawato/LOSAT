@@ -166,6 +166,11 @@ export interface DataSessionEnv {
 
 export interface DataSession {
   readonly store: BlockStore;
+  /**
+   * The name of the session's lock, while the worker holds it (until it ends); undefined without one. The page learns
+   * from its release that the worker ended (data-worker/gateway.ts; line WQA's sweep, D2).
+   */
+  readonly lock?: string;
   /** Why the session uses memory instead of OPFS, in LOSAT's words (REFUSED_REASON…). */
   readonly fallbackReason?: string;
   /** The error behind fallbackReason, "<name>: <message>" (the browser's, under LOSAT's wrappers), for developers. */
@@ -200,11 +205,12 @@ export async function startDataSession(env: DataSessionEnv): Promise<DataSession
     // (review of line WQA's sweep, D5, M2, 2026-11-19).
     return memorySession(fallbackOf(error, UNRESERVED_REASON), STORAGE_UNREACHED);
   }
+  const lock = SESSION_LOCK_PREFIX + token;
   let space: SessionSpace;
   try {
     space = await env.opfs.space();
   } catch (error) {
-    return memorySession(fallbackOf(error, UNOPENED_REASON), STORAGE_UNREACHED);
+    return memorySession(fallbackOf(error, UNOPENED_REASON), STORAGE_UNREACHED, lock);
   }
   const reclaim = () =>
     reclaimAbandonedSessions(readable(space), locks, token).then(
@@ -216,13 +222,13 @@ export async function startDataSession(env: DataSessionEnv): Promise<DataSession
       }),
     );
   try {
-    return { store: await env.opfs.open(token), cleanup: reclaim() };
+    return { store: await env.opfs.open(token), lock, cleanup: reclaim() };
   } catch {
     const cleanup = await reclaim();
     try {
-      return { store: await env.opfs.open(token), cleanup: Promise.resolve(cleanup) };
+      return { store: await env.opfs.open(token), lock, cleanup: Promise.resolve(cleanup) };
     } catch (error) {
-      return memorySession(fallbackOf(error, BROKEN_REASON), cleanup);
+      return memorySession(fallbackOf(error, BROKEN_REASON), cleanup, lock);
     }
   }
 }
@@ -235,12 +241,14 @@ interface Fallback {
 /** The cleanup of a session that never reached the storage: it removes nothing, and the memory note says why. */
 const STORAGE_UNREACHED: CleanupState = { state: 'done', removedSessions: 0 };
 
-function memorySession(fallback: Fallback, cleanup: CleanupState): DataSession {
+/** A session in memory; `lock` when the worker holds its lock all the same (its release tells the page it ended). */
+function memorySession(fallback: Fallback, cleanup: CleanupState, lock?: string): DataSession {
   const store = new MemoryBlockStore({ capacityBytes: MEMORY_RESULTS_CAPACITY_BYTES, fullMessage: MEMORY_FULL_MESSAGE });
   return {
     store,
     fallbackReason: fallback.reason,
     ...(fallback.error === undefined ? {} : { fallbackError: fallback.error }),
+    ...(lock === undefined ? {} : { lock }),
     cleanup: Promise.resolve(cleanup),
   };
 }

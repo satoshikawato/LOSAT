@@ -68,7 +68,7 @@ const readerErrorText = (message: string) =>
  */
 const stopsAtStart = computed(
   () =>
-    props.source.status === 'failed' ||
+    (props.source.status === 'failed' && !unread.value) ||
     (props.source.status === 'ready' && props.source.base?.readerError !== undefined && records.value.length === 0),
 );
 const readMessage = computed(() => props.source.error ?? props.source.base?.readerError?.message);
@@ -81,6 +81,14 @@ const splitsAccessions = computed(
   () => props.source.origin === 'paste' && props.source.status !== 'indexing' && accessionsOnALine(props.state[props.role].paste) !== undefined,
 );
 const hasMark = computed(() => props.source.lead !== undefined && 'mark' in props.source.lead);
+/**
+ * The input could not be read because a part of LOSAT could not be loaded or stopped (line WQA's sweep, D1): the card
+ * does not blame the input, nor offer to change it; the page says what failed and what to do (AppView).
+ */
+const unread = computed(() => props.source.status === 'failed' && props.source.unavailable === true);
+/** What the card says of such an input, and of one whose check could not run for the same reason. */
+const UNREAD = 'Not read.';
+const UNCHECKED = 'Not checked.';
 /**
  * The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04).
  * Not when the box is a list of accessions, whose button puts them one per line, and so says the same.
@@ -170,7 +178,9 @@ const verdict = computed(() => {
     duplicateCount.value,
     formatName.value,
   ]);
-  if (source.status === 'failed') {
+  if (unread.value) {
+    parts.push(UNREAD);
+  } else if (source.status === 'failed') {
     parts.push(`This input cannot be read: ${source.error ?? ''}`);
     if (fetchHint.value) parts.push(FETCH_HINT);
     if (markHint.value) parts.push(markHint.value);
@@ -182,7 +192,7 @@ const verdict = computed(() => {
       parts.push(noSequence.value ? NO_SEQUENCE_TEXT[noSequence.value] : `Accepted by the ${programLabel.value} engine: ${recordsText(check.records)}`);
     }
     else if (check.state === 'refused') parts.push(`The ${programLabel.value} engine refuses this input: ${check.message}`);
-    else if (check.state === 'error') parts.push(`The input could not be checked here (${check.message}).`);
+    else if (check.state === 'error') parts.push(check.unavailable === true ? UNCHECKED : `The input could not be checked here (${check.message}).`);
     if (otherKind.value > 0) {
       parts.push(
         `${formatCount(otherKind.value)} ${otherKind.value === 1 ? 'record looks' : 'records look'} like ${otherKindName.value} sequences, but ${programLabel.value} reads the ${props.role} as ${kind.value}.`,
@@ -226,7 +236,8 @@ watch(verdict, (now) => {
 
     <p v-if="source.status === 'indexing'" class="muted"><LosatLoader />Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
-      <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
+      <p v-if="unread" class="muted" :data-testid="`${testid}-unread`">{{ UNREAD }}</p>
+      <p v-else class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>
     </template>
     <template v-else>
       <p class="summary" :data-testid="`${testid}-summary`">
@@ -276,6 +287,9 @@ watch(verdict, (now) => {
           Exclude record #{{ refusedRecord + 1 }} ({{ records[refusedRecord]?.id }})
         </button>
       </div>
+      <p v-else-if="source.check?.state === 'error' && source.check.unavailable" class="muted" :data-testid="`${testid}-check`" data-check="error">
+        {{ UNCHECKED }}
+      </p>
       <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
         The input could not be checked here ({{ source.check.message }}).
       </p>

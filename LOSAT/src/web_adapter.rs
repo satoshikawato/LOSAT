@@ -44,7 +44,7 @@ where
 // registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).
 pub use crate::api::start::CallerStart;
 pub use crate::blastinput::ncbi_environment::{
-    log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles,
+    log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
 pub use crate::report::run_files::{FileReceiver, RunFiles};
 

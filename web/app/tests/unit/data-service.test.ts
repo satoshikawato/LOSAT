@@ -304,26 +304,34 @@ describe('DataService runs and storage status', () => {
   });
 
   // The engine's signal of stream 9 (ABI v2 §5): an output that failed, alone in the search of the others or with its
-  // search in a run of two searches, is empty and named in the result, also where no chunk of it came (line WQA's
-  // sweep, D7, 2026-11-19); an empty output that the engine did not name is not.
-  it('names the outputs that the engine said failed in the result, and keeps them empty', async () => {
+  // search in a run of two searches, is empty and named in the result with where its error is, as the engine said,
+  // also where no chunk of it came (line WQA's sweep, D7, 2026-11-19 and 2026-11-20); an empty output that the engine
+  // did not name is not.
+  it('names the outputs that the engine said failed in the result, with where their errors are, and keeps them empty', async () => {
     const { data } = service();
     const writer = new RunOutputWriter(await data.openRun('run-1'));
     writer.write(0, encoder.encode('BLASTN 2.17.0+\n'));
     writer.write(6, encoder.encode('row\n'));
-    writer.discard(0);
+    writer.discard(0, 'diagnostics');
     writer.write(7, encoder.encode('# BLASTN\n'));
     writer.end();
     const result = await data.commitRun('run-1');
-    expect(result.failed).toEqual([0]);
+    expect(result.failed).toEqual([{ output: 0, error: 'diagnostics' }]);
     expect(result.byteLengths).toEqual({ 0: 0, 6: 4, 7: 9 });
     expect(await data.readOutput('run-1', 0)).toEqual(new Uint8Array(0));
     const tabular = new RunOutputWriter(await data.openRun('run-2'));
-    tabular.discard(7);
-    tabular.discard(6);
-    tabular.write(0, encoder.encode('BLASTN 2.17.0+\n'));
+    tabular.discard(7, 'logfile');
+    tabular.discard(6, 'logfile');
+    tabular.write(0, encoder.encode('TBLASTX 2.17.0+\n'));
     tabular.end();
-    expect((await data.commitRun('run-2')).failed).toEqual([6, 7]);
+    expect((await data.commitRun('run-2')).failed).toEqual([
+      { output: 6, error: 'logfile' },
+      { output: 7, error: 'logfile' },
+    ]);
+    const nowhere = new RunOutputWriter(await data.openRun('run-4'));
+    nowhere.discard(6, 'nowhere');
+    nowhere.end();
+    expect((await data.commitRun('run-4')).failed).toEqual([{ output: 6, error: 'nowhere' }]);
     const empty = new RunOutputWriter(await data.openRun('run-3'));
     empty.end();
     const none = await data.commitRun('run-3');

@@ -16,7 +16,7 @@ import { expect, type Download, type Locator, type Page } from '@playwright/test
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openParameters, openSearch, paste, pickRun, program, storedOutputs, submit, waitStatus } from './support/search';
+import { chooseRun, openFiles, openParameters, openSearch, paste, pickRun, program, storedOutputs, submit, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 
@@ -152,6 +152,76 @@ test('a failed TBLASTX run keeps the file of its -logfile, with NCBI\'s error, u
   expect(saved.bytes.toString('utf8')).toBe(shown);
   const native = nativeLogFile(['tblastx'], QUERY, EMPTY_SUBJECT);
   if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -logfile run.log, failed').toBe(true);
+});
+
+// TBLASTX writes the messages of its run into the file of -logfile, as the CLI does: the error of outfmt 6 and 7 that
+// could not be written is there, not under Warnings (line WQA's sweep, D7, 2026-11-20). The engine says where it is
+// (ABI v2 §5, stream 9), and the notice and the Outputs point there: -num_alignments 0, whose hit list of 0 fails the
+// tabular formats, and a subject title that NCBI cannot decode, which stops them. With -logfile /dev/null the error
+// is written nowhere, and the notice says so.
+test('TBLASTX with -logfile: the outputs that could not be written point to the file of -logfile, which holds their error', async ({ page }) => {
+  const notice = (kind: string) => page.locator(`[data-testid="results-notice"][data-kind="${kind}"]`);
+  const cases = [
+    {
+      subject: SUBJECT,
+      alignments: '0',
+      extra: '-logfile run.log',
+      kind: 'no-tabular-hits',
+      text: '-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+\'s "No hits are being saved" error, in the file of the run\'s -logfile, run.log, under Outputs), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.',
+      error: 'No hits are being saved',
+      place: "in the file of the run's -logfile, run.log, under Outputs",
+    },
+    {
+      subject: Buffer.concat([Buffer.from('>Subject_9 bad x'), Buffer.from([0x81]), Buffer.from(`y title\n${dna(7, 300)}\n`)]),
+      alignments: undefined,
+      extra: '-logfile run.log',
+      kind: 'no-tabular-output',
+      text: "outfmt 6 and 7 could not be written, so this run has no HSP records. Their error is in the file of the run's -logfile, run.log, under Outputs.",
+      error: 'subject record 1 (Subject_9) has a title whose non-UTF-8 bytes',
+      place: "in the file of the run's -logfile, run.log, under Outputs",
+    },
+    {
+      subject: SUBJECT,
+      alignments: '0',
+      extra: '-logfile /dev/null',
+      kind: 'no-tabular-hits',
+      text: '-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+\'s "No hits are being saved" error, not kept, as the run\'s -logfile writes its messages nowhere), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.',
+      error: undefined,
+      place: "not kept, as the run's -logfile writes its messages nowhere",
+    },
+  ] as const;
+  for (const [index, { subject, alignments, extra, kind, text, error, place }] of cases.entries()) {
+    // Each case on a page of its own: its run is run 1.
+    if (index > 0) await openSearch(page);
+    const run = 1;
+    await program(page, 'tblastx');
+    await paste(page, 'query', QUERY);
+    if (typeof subject === 'string') await paste(page, 'subject', subject);
+    else await openFiles(page, 'subject', [{ name: 'subject.fa', text: subject }]);
+    await openParameters(page);
+    // -num_alignments is a field of the form.
+    if (alignments !== undefined) await page.getByTestId('param-num_alignments').fill(alignments);
+    await page.getByTestId('param-extra').fill(extra);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await expect(notice(kind)).toHaveText(text);
+    await page.getByTestId('results-view-outputs').click();
+    await page.getByTestId('format-6').click();
+    await expect(page.getByTestId('outputs-not-written')).toHaveText(`outfmt 6 could not be written: its error is ${place}.`);
+    await page.getByTestId('format-0').click();
+    await expect(page.getByTestId('outputs-not-written')).toHaveCount(0);
+    if (error !== undefined) {
+      await page.getByTestId('format-run-files').click();
+      await expect(page.getByTestId('run-file-0').getByTestId('run-file-text')).toContainText(error);
+    } else {
+      await expect(page.getByTestId('format-run-files')).toHaveCount(0);
+    }
+    // Stream 3 holds none of it.
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-diagnostics-none')).toBeVisible();
+  }
 });
 
 // -conffile: the engine's start names the file, the form asks for it, and without it the engine's error

@@ -2,7 +2,7 @@
 // sorting and filtering with engine values, the limits and the orientation, the
 // verification badge, and the ResultsBrowser's selection by HSP identity.
 import { describe, expect, it } from 'vitest';
-import type { HspRecord, ProgramDescription } from 'losat/ports';
+import type { HspRecord, OutputErrorPlace, ProgramDescription } from 'losat/ports';
 import type { AppState, RunView } from '../../src/application/coordinator';
 import { noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
@@ -29,7 +29,9 @@ import {
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import type { FailedOutput } from '../../src/ports/data';
 import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
+import { outputErrorPlace } from '../../src/ui/output-error-text';
 
 // --- a small run: two queries (the second without hits), three subjects ----------------------
 
@@ -696,37 +698,50 @@ describe('ResultsBrowser', () => {
     expect(running.results.state.get().phase).toBe('ready');
   });
 
-  // The outputs that the run could not write are the engine's word (its signal of stream 9, `ResultSetRef.failed`),
-  // not a guess from their lengths: outfmt 0 that failed alone in the search of the other formats, or whose search
-  // of its own (-num_alignments) failed; outfmt 6 and 7 that failed, which leave the run without HSP records (line
-  // WQA's sweep, D7, 2026-11-19).
-  it('takes the outputs that could not be written from the engine, in one search or in a search of their own', async () => {
-    const result = (failed: readonly (0 | 6 | 7)[], out0 = 0) => ({ runId: 'r1', byteLengths: { 0: out0, 6: 10, 7: 10 }, hitCount: 4, failed });
+  // The outputs that the run could not write, and where their errors are, are the engine's word (its signal of
+  // stream 9, `ResultSetRef.failed`), not a guess from their lengths or the program: outfmt 0 that failed alone in the
+  // search of the other formats, or whose search of its own (-num_alignments) failed; outfmt 6 and 7 that failed,
+  // which leave the run without HSP records; their errors on stream 3 or in the file of TBLASTX's -logfile, or nowhere
+  // (line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
+  it('takes the outputs that could not be written, and where their errors are, from the engine', async () => {
+    const result = (failed: readonly FailedOutput[], out0 = 0) => ({ runId: 'r1', byteLengths: { 0: out0, 6: 10, 7: 10 }, hitCount: 4, failed });
     const one = ['blastn', '-query', 'q.fa', '-subject', 's.fa'];
     const separate = [...one, '-num_alignments', '3'];
-    const cases: ReadonlyArray<readonly [readonly string[], readonly (0 | 6 | 7)[], number, boolean]> = [
-      [one, [0], 0, true],
-      [separate, [0], 0, true],
+    const failedIn = (error: OutputErrorPlace, ...outputs: readonly (0 | 6 | 7)[]): FailedOutput[] => outputs.map((output) => ({ output, error }));
+    const cases: ReadonlyArray<readonly [readonly string[], readonly FailedOutput[], number, OutputErrorPlace | undefined, OutputErrorPlace | undefined]> = [
+      [one, failedIn('diagnostics', 0), 0, 'diagnostics', undefined],
+      [separate, failedIn('diagnostics', 0), 0, 'diagnostics', undefined],
+      [separate, failedIn('logfile', 0), 0, 'logfile', undefined],
       // An empty outfmt 0 that the engine did not name: written, as the engine said.
-      [one, [], 0, false],
-      [separate, [], 0, false],
-      [one, [6, 7], 100, false],
+      [one, [], 0, undefined, undefined],
+      [separate, [], 0, undefined, undefined],
+      [one, failedIn('diagnostics', 6, 7), 100, undefined, 'diagnostics'],
+      [one, failedIn('nowhere', 6, 7), 100, undefined, 'nowhere'],
     ];
-    for (const [argv, failed, out0, expected] of cases) {
+    for (const [argv, failed, out0, outfmt0Error, tabularError] of cases) {
       const { results } = setup({ argv, result: result(failed, out0) });
       await results.open('r1');
       const loaded = results.state.get().loaded!;
-      expect(loaded.outfmt0Failed, JSON.stringify([argv, failed])).toBe(expected);
-      expect(loaded.tabularFailed, JSON.stringify([argv, failed])).toBe(failed.includes(6));
+      expect(loaded.outfmt0Error, JSON.stringify([argv, failed])).toBe(outfmt0Error);
+      expect(loaded.tabularError, JSON.stringify([argv, failed])).toBe(tabularError);
     }
-    const tabular = setup({ specs: [], result: result([6, 7], 100) });
+    const tabular = setup({ specs: [], result: result(failedIn('logfile', 6, 7), 100) });
     await tabular.results.open('r1');
     expect(noHspReason(tabular.results.state.get())).toBe('no-tabular-output');
-    expect(NO_HSP_TEXT['no-tabular-output']).toBe(
-      'outfmt 6 and 7 could not be written (their error is under Warnings in Run details), so this run has no HSP records.',
-    );
+    expect(NO_HSP_TEXT['no-tabular-output']).toBe('outfmt 6 and 7 could not be written, so this run has no HSP records.');
+    // The words of each place: the run's Warnings, the file of its -logfile under Outputs (by the name of the run's
+    // file), or nowhere.
+    const run = tabular.results.state.get().loaded!.run;
+    const logged = { ...run, record: { ...run.record, runFiles: [{ name: 'run.log', bytes: new Uint8Array(0) }] } };
+    expect(outputErrorPlace('diagnostics', run)).toBe('under Warnings in Run details');
+    expect(outputErrorPlace('logfile', logged)).toBe("in the file of the run's -logfile, run.log, under Outputs");
+    expect(outputErrorPlace('nowhere', run)).toBe("not kept, as the run's -logfile writes its messages nowhere");
     // -num_alignments 0 keeps its own notice: the tabular search fails because of that hit list.
-    const zero = setup({ specs: [], argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-num_alignments', '0'], result: result([6, 7], 100) });
+    const zero = setup({
+      specs: [],
+      argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-num_alignments', '0'],
+      result: result(failedIn('diagnostics', 6, 7), 100),
+    });
     await zero.results.open('r1');
     expect(noHspReason(zero.results.state.get())).toBe('no-tabular-hits');
   });

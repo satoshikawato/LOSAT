@@ -19,7 +19,7 @@ import {
 } from '../../../packages/losat/src/infra/engine-worker/protocol';
 import { ThreadHost, ThreadHostError } from '../../../packages/losat/src/infra/engine-worker/thread-host';
 
-type Behaviour = 'ready-and-start' | 'ready-never-start' | 'never-ready';
+type Behaviour = 'ready-and-start' | 'ready-never-start' | 'never-ready' | 'not-loaded';
 
 class FakeThreadWorker {
   state: Int32Array | undefined;
@@ -36,7 +36,9 @@ class FakeThreadWorker {
     if (command.type === 'prepare') {
       this.state = new Int32Array(command.slot);
       this.use = new InstanceUse(command.use);
-      if (this.behaviour !== 'never-ready') Atomics.store(this.state, 0, SLOT_READY);
+      // A script that does not load fires a plain Event, without a message.
+      if (this.behaviour === 'not-loaded') setTimeout(() => this.onerror?.(new Event('error') as ErrorEvent), 1);
+      else if (this.behaviour !== 'never-ready') Atomics.store(this.state, 0, SLOT_READY);
       return;
     }
     const started = new Int32Array(command.started);
@@ -309,6 +311,13 @@ describe('ThreadHost', () => {
     expect(Atomics.load(workers[0]!.state!, 0)).toBe(SLOT_FAILED);
     await expect(threads.prepare(1)).rejects.toThrow('a thread worker failed: boom');
     expect(threads.terminate()).toBe(true);
+  });
+
+  // The second review of line WQA's D1 and D2, L3 (2026-11-19): such a worker read "a thread worker failed: undefined".
+  it('fails to prepare with a sentence when a thread worker\'s script does not load', async () => {
+    const { threads } = host('not-loaded', 5_000);
+    await expect(threads.prepare(1)).rejects.toThrow(/^a thread worker failed: its script did not load$/);
+    threads.terminate();
   });
 
   it('fails to prepare when the keeper does not start in time, or fails', async () => {

@@ -1,6 +1,6 @@
 // Data worker side of the run output channel (ports/run-output.ts).
 import type { RunOutput } from '../../domain/output-format.js';
-import { isRunOutput, OUTPUT_STREAMS, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
+import { isOutputErrorPlace, isRunOutput, OUTPUT_STREAMS, type OutputErrorPlace, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
 
 export type RunOutputResult =
   /** `end` arrived and its totals agree with what arrived. */
@@ -20,12 +20,13 @@ export class RunOutputReceiver {
 
   /**
    * `onChunk` receives each chunk in order until the output finishes, and `onDiscard` each
-   * `discard` among them (drop what arrived of that output); neither may throw.
+   * `discard` among them (drop what arrived of that output, whose error is at `error`); neither may
+   * throw.
    */
   constructor(
     private readonly port: MessagePort,
     onChunk: (stream: OutputStream, bytes: Uint8Array) => void,
-    onDiscard: (stream: RunOutput) => void,
+    onDiscard: (stream: RunOutput, error: OutputErrorPlace) => void,
   ) {
     this.finished = new Promise((resolve) => {
       this.settle = resolve;
@@ -41,7 +42,7 @@ export class RunOutputReceiver {
   private receive(
     message: unknown,
     onChunk: (stream: OutputStream, bytes: Uint8Array) => void,
-    onDiscard: (stream: RunOutput) => void,
+    onDiscard: (stream: RunOutput, error: OutputErrorPlace) => void,
   ): void {
     if (this.done) return;
     const data = message as Partial<RunOutputMessage> | null;
@@ -51,8 +52,8 @@ export class RunOutputReceiver {
       onChunk(data.stream as OutputStream, data.bytes);
       return;
     }
-    if (data?.type === 'discard' && isRunOutput(data.stream)) {
-      onDiscard(data.stream);
+    if (data?.type === 'discard' && isRunOutput(data.stream) && isOutputErrorPlace(data.error)) {
+      onDiscard(data.stream, data.error);
       return;
     }
     if (data?.type === 'end' && typeof data.chunks === 'number' && typeof data.bytes === 'number') {

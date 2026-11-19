@@ -19,7 +19,9 @@ import type { EngineCommand, EngineEvent, WorkerRun } from '../../../packages/lo
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import {
   discardedStream,
+  discardSignal,
   DISCARD_STREAM,
+  ERROR_NOWHERE,
   EngineCallError,
   EngineStoppedError,
   FILE_CHUNK_BYTES,
@@ -620,23 +622,44 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect(calls.slice(-5)).toEqual(['validate tblastx -query q.fa -subject s.fa -num_threads 1', 'register query', 'register subject', 'run', 'release 105']);
   });
 
-  it("forwards the engine's discard of an output (stream 9) to the Data worker, between the chunks in their order", async () => {
-    const { abi } = fakeAbi({ discard: new Uint8Array([6, 0, 0, 0]) });
-    const { run, delivered, close } = workerRun([]);
-    await runtimeWith(abi).run(run, () => undefined);
-    expect(await delivered()).toEqual([
-      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
-      { type: 'discard', stream: 6 },
-      { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
-      { type: 'end', chunks: 2, bytes: 19 },
-    ]);
-    close();
-    expect(discardedStream(new Uint8Array([7, 0, 0, 0]))).toBe(7);
-    expect(() => discardedStream(new Uint8Array([6, 0]))).toThrow('a signal of stream 9 has 2 bytes, not 4');
-    // A signal that names a stream which is not an output of a run breaks the ABI: the run fails.
-    for (const signal of [new Uint8Array([1, 0, 0, 0]), new Uint8Array([6, 0, 0, 1])]) {
+  it("forwards the engine's discard of an output (stream 9) to the Data worker with where its error is, between the chunks in their order", async () => {
+    // The signal of 8 bytes: the stream, then the place of its error (stream 3, stream 8 for the file of -logfile, or
+    // 0xffffffff for nowhere; line WQA's sweep, D7, 2026-11-20).
+    const signal = (stream: number, place: number) => {
+      const bytes = new Uint8Array(8);
+      new DataView(bytes.buffer).setUint32(0, stream, true);
+      new DataView(bytes.buffer).setUint32(4, place, true);
+      return bytes;
+    };
+    for (const [place, error] of [
+      [3, 'diagnostics'],
+      [8, 'logfile'],
+      [ERROR_NOWHERE, 'nowhere'],
+    ] as const) {
+      const { abi } = fakeAbi({ discard: signal(6, place) });
+      const { run, delivered, close } = workerRun([]);
+      await runtimeWith(abi).run(run, () => undefined);
+      expect(await delivered()).toEqual([
+        { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+        { type: 'discard', stream: 6, error },
+        { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
+        { type: 'end', chunks: 2, bytes: 19 },
+      ]);
+      close();
+    }
+    expect(discardedStream(signal(7, 3))).toBe(7);
+    expect(discardSignal(signal(7, 8))).toEqual({ stream: 7, errorStream: 8 });
+    expect(discardSignal(signal(0, ERROR_NOWHERE))).toEqual({ stream: 0, errorStream: undefined });
+    expect(() => discardedStream(new Uint8Array([6, 0, 0, 0]))).toThrow('a signal of stream 9 has 4 bytes, not 8');
+    // A signal that names a stream which is not an output of a run, or a place that holds no error, breaks the ABI:
+    // the run fails.
+    for (const [bytes, error] of [
+      [signal(1, 3), 'which is not an output of a run'],
+      [signal(0x1000006, 3), 'which is not an output of a run'],
+      [signal(6, 6), 'on stream 6, which holds no error'],
+    ] as const) {
       const broken = workerRun([]);
-      await expect(runtimeWith(fakeAbi({ discard: signal }).abi).run(broken.run, () => undefined)).rejects.toThrow('which is not an output of a run');
+      await expect(runtimeWith(fakeAbi({ discard: bytes }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
       broken.close();
     }
   });

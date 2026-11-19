@@ -279,6 +279,12 @@ impl XSliced {
     pub(super) fn slices(&self) -> &[XGroup] {
         &self.slices
     }
+
+    /// The group's slice tables, in slice order, to make their presence bytes
+    /// (`XPairPar::prepare`, LOSAT_X_TBXSCANBYTE).
+    pub(super) fn slices_mut(&mut self) -> &mut [XGroup] {
+        &mut self.slices
+    }
 }
 
 // No NCBI counterpart: the stub's `longest_chain` reads every table (module doc, item 5).

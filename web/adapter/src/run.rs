@@ -200,7 +200,7 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
     let argv = std::iter::once("losat").chain(words.iter().copied());
     let cli: Cli = losat::web_adapter::try_parse_cli(argv)
-        .map_err(|error| losat::web_adapter::render_message(&error))?;
+        .map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     Ok((program, cli.command))
 }
@@ -356,7 +356,7 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
         Preparsed::Version(_) => {
             let argv = std::iter::once("losat").chain(words.iter().copied());
             return Err(match losat::web_adapter::try_parse_cli(argv) {
-                Err(error) => losat::web_adapter::render_message(&error),
+                Err(error) => losat::web_adapter::command_line_message(&error, false),
                 Ok(_) => unreachable!("the parser refuses a version word"),
             });
         }
@@ -1714,7 +1714,7 @@ mod tests {
                 .unwrap_err();
                 assert_eq!(
                     parse(&both).unwrap_err(),
-                    losat::web_adapter::render_message(&cli),
+                    losat::web_adapter::command_line_message(&cli, false),
                     "{program} {option}"
                 );
                 assert!(parse(&both).unwrap_err().contains("cannot be used with"));
@@ -1731,7 +1731,7 @@ mod tests {
                 std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
-            .map_err(|error| losat::web_adapter::render_message(&error));
+            .map_err(|error| losat::web_adapter::command_line_message(&error, false));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
@@ -1870,7 +1870,7 @@ mod tests {
             .unwrap_err();
             assert_eq!(
                 parse(words).unwrap_err(),
-                losat::web_adapter::render_message(&cli),
+                losat::web_adapter::command_line_message(&cli, false),
                 "{words:?}"
             );
         }

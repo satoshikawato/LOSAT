@@ -280,17 +280,35 @@ fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
     // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
     // first batch with a valid context, as the reader's errors.
     if let Some((ordinal, length)) = first_too_long {
-        return Err(too_long(db.oid(ordinal), length));
+        return Err(too_long(
+            format_args!("database sequence {}", db.oid(ordinal)),
+            length,
+        ));
     }
     Ok(longest)
 }
 
-/// LOSAT's refusal of database sequence `oid` of `length` residues, longer than
-/// `MAX_DBSEQ_LEN`.
-pub(super) fn too_long(oid: crate::seqdb::Oid, length: usize) -> anyhow::Error {
-    anyhow::anyhow!(
-        "database sequence {oid} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
-    )
+/// LOSAT's refusal of a subject longer than `MAX_DBSEQ_LEN`, not an error of NCBI's engine: it
+/// gets no `BLAST engine error:` (`native::search_error_as_is`). The one refusal of a database
+/// sequence and of a `-subject` record.
+#[derive(Debug)]
+pub(crate) struct LongSubjectRefusal(String);
+
+impl std::fmt::Display for LongSubjectRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for LongSubjectRefusal {}
+
+/// LOSAT's refusal of the subject `what` (`database sequence 0`, `subject sequence 1`) of
+/// `length` residues, longer than `MAX_DBSEQ_LEN`.
+pub(super) fn too_long(what: impl std::fmt::Display, length: usize) -> anyhow::Error {
+    LongSubjectRefusal(format!(
+        "{what} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
+    ))
+    .into()
 }
 
 /// The reported sequences of one query batch, by rank (their order of ordinal ids): the

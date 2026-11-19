@@ -110,9 +110,10 @@ jobs:
       # (2026-11-11 its DNS failed and jobs hung for hours; 2026-11-18 its mirror delivered
       # 50-100 kB/s and the install step timed out at 10, then at 25 minutes). The tag must be
       # @playwright/test's version in web/app/package.json: the "Playwright image matches" step.
-      # The digest pins the image as the actions here are pinned by SHA (the image that the green
-      # runs of 2026-11-18 pulled); a bump changes the tag and the digest together.
-      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      # The digest pins the image as the actions here are pinned by SHA; a bump changes the tag and
+      # the digest together (the tag's multi-arch index digest, the Docker-Content-Digest header of
+      # https://mcr.microsoft.com/v2/playwright/manifests/<tag>).
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
       # Playwright's CI advice for Chromium in a container: a shared IPC namespace, and an init
       # process that reaps the browsers' children.
       # Firefox's sandbox makes a user namespace, which Docker's default seccomp profile refuses

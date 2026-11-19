@@ -544,10 +544,25 @@ fn x_search_core(
             !subjects.is_empty() || !matches!(subjects, Subjects::Fasta(_)),
             "BLASTX preliminary requires a protein subject"
         );
-        ensure!(
-            longest_subject <= 5_000_000,
-            "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
-        );
+        // The refusal of a database sequence (`database::too_long`): the `-subject` record is
+        // named by its number in the file (`Subject_N`).
+        if longest_subject > super::database::MAX_DBSEQ_LEN {
+            return Err(match &subjects {
+                Subjects::Fasta(records) => {
+                    let (index, length) = records
+                        .iter()
+                        .map(|record| record.sequence.len())
+                        .enumerate()
+                        .find(|(_, length)| *length > super::database::MAX_DBSEQ_LEN)
+                        .expect("the longest subject is above the limit");
+                    super::database::too_long(
+                        format_args!("subject sequence {}", index + 1),
+                        length,
+                    )
+                }
+                _ => super::database::too_long("a database sequence", longest_subject),
+            });
+        }
         if subjects.is_unreadable() {
             return Err(super::subjects::UnreadableSubjects.into());
         }

@@ -25,7 +25,7 @@ import { EngineRuntime } from './runtime.js';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<EngineCommand>) => void) | null;
-  postMessage(message: EngineEvent): void;
+  postMessage(message: EngineEvent, transfer?: Transferable[]): void;
 };
 
 let generation = 0;
@@ -116,8 +116,15 @@ function init(command: EngineInit): void {
     serial: async () => (await (serial ??= moduleOf(command.modules.serial))).module,
     threads: () => (threads ??= moduleOf(command.modules.threads)),
     builds: command.builds,
-    faultChannel: command.faultChannel,
-    keeperChannel: command.keeperChannel,
+    main: {
+      // One end to the main thread, the other to the thread worker or the keeper (link.ts).
+      link: (role) => {
+        const channel = new MessageChannel();
+        scope.postMessage({ type: 'link', generation: command.generation, role, port: channel.port2 }, [channel.port2]);
+        return channel.port1;
+      },
+      fault: (fault) => scope.postMessage({ ...fault, generation: command.generation }),
+    },
     use,
     ...(__LOSAT_TEST_HOOKS__ ? { beforeOutput: stopIfArmed, onUse: () => holdIfArmed(use) } : {}),
   });

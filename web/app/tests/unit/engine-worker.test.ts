@@ -11,9 +11,14 @@ import type { EngineCommand, EngineEvent, EngineInit, WorkerPrepare, WorkerRun }
 
 /** What the worker did, in order: the type of each message that it posted, and each call into its runtime. */
 const done = vi.hoisted(() => [] as string[]);
+/** The options of the latest runtime that the worker made. */
+const made = vi.hoisted(() => ({ options: undefined as unknown }));
 
 vi.mock('../../../packages/losat/src/infra/engine-worker/runtime', () => ({
   EngineRuntime: class {
+    constructor(options: unknown) {
+      made.options = options;
+    }
     run(request: { readonly runId: string }): Promise<unknown> {
       done.push(`search ${request.runId}`);
       return Promise.resolve({ path: 'serial', threads: 1, engineBuild: 'serial', memory: {}, subjectRetained: false });
@@ -43,8 +48,6 @@ const INIT: EngineInit = {
   generation: 1,
   modules: { serial: { asset: { url: '/engine/serial.wasm', sha256: '' } }, threads: { asset: { url: '/engine/threads.wasm', sha256: '' } } },
   builds: { serial: 'serial', threads: 'threads' },
-  faultChannel: 'faults',
-  keeperChannel: 'keeper',
   lifeLock: 'losat-web:engine-life:1',
 } as unknown as EngineInit;
 
@@ -55,12 +58,16 @@ function run(runId: string): WorkerRun {
 }
 
 /** Starts the worker's module with `locks` as its Web Locks; returns how to post a command to it. */
-async function startWorker(locks: LifeLocks | undefined): Promise<{ post: (command: EngineCommand) => void; events: EngineEvent[] }> {
+async function startWorker(
+  locks: LifeLocks | undefined,
+): Promise<{ post: (command: EngineCommand) => void; events: EngineEvent[]; transfers: Array<Transferable[] | undefined> }> {
   const events: EngineEvent[] = [];
+  const transfers: Array<Transferable[] | undefined> = [];
   const scope = {
     onmessage: null as ((event: MessageEvent<EngineCommand>) => void) | null,
-    postMessage(event: EngineEvent) {
+    postMessage(event: EngineEvent, transfer?: Transferable[]) {
       events.push(event);
+      transfers.push(transfer);
       done.push(event.type);
     },
   };
@@ -68,7 +75,7 @@ async function startWorker(locks: LifeLocks | undefined): Promise<{ post: (comma
   vi.stubGlobal('navigator', { locks });
   vi.resetModules();
   await import('../../../packages/losat/src/infra/engine-worker/engine-worker');
-  return { post: (command) => scope.onmessage?.({ data: command } as MessageEvent<EngineCommand>), events };
+  return { post: (command) => scope.onmessage?.({ data: command } as MessageEvent<EngineCommand>), events, transfers };
 }
 
 /** Lets every promise and timer that is due settle. */
@@ -115,5 +122,35 @@ describe('Engine worker', () => {
     await settle();
     expect(done).toEqual(['started', 'life', 'search r1', 'done']);
     expect(events.find((event) => event.type === 'life')).toEqual({ type: 'life', generation: 1, held: false });
+  });
+
+  // Line WQA's sweep, D8 (2026-11-20): the thread workers and the keeper reached the page on BroadcastChannels, which
+  // Firefox refuses where the site's data is blocked. The worker makes their links and posts the page's end of each.
+  it("posts the page's end of each link that its runtime makes, and the faults of its thread host", async () => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        constructor() {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        }
+      },
+    );
+    const { post, events, transfers } = await startWorker(undefined);
+    post({ ...INIT, generation: 3 });
+    const { main } = made.options as { main: { link(role: 'thread' | 'keeper'): MessagePort; fault(fault: unknown): void } };
+    const keeper = main.link('keeper');
+    const linked = events.at(-1) as { type: string; generation: number; role: string; port: MessagePort };
+    expect(linked).toMatchObject({ type: 'link', generation: 3, role: 'keeper' });
+    expect(transfers.at(-1)).toEqual([linked.port]);
+    // The two ends are one channel.
+    const heard = new Promise((resolve) => {
+      linked.port.onmessage = (event: MessageEvent) => resolve(event.data);
+    });
+    keeper.postMessage({ type: 'hello' });
+    expect(await heard).toEqual({ type: 'hello' });
+    keeper.close();
+    linked.port.close();
+    main.fault({ type: 'fault', tid: 2, message: 'The engine stopped: thread 2 did not start in time' });
+    expect(events.at(-1)).toEqual({ type: 'fault', generation: 3, tid: 2, message: 'The engine stopped: thread 2 did not start in time' });
   });
 });

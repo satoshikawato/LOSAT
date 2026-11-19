@@ -36,6 +36,15 @@ import {
   type AbiExports,
   type FileInfo,
 } from '../../../packages/losat/src/infra/reactor/abi';
+import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
+
+/** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
+const NO_LINKS: MainLinks = {
+  link: () => {
+    throw new Error('unused');
+  },
+  fault: () => undefined,
+};
 
 // --- the form and the argv ---------------------------------------------------------------------
 
@@ -306,8 +315,7 @@ function runtimeWith(abi: ReactorAbi) {
     },
     builds: { serial: 'serial', threads: 'threads' },
     use: undefined,
-    faultChannel: 'faults',
-    keeperChannel: 'keeper',
+    main: NO_LINKS,
   });
   // The runtime holds this instance as one that a search loaded.
   (runtime as unknown as { loaded: unknown }).loaded = {

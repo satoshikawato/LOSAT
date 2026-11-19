@@ -21,7 +21,12 @@ export function webLocks(): LifeLocks | undefined {
 
 /**
  * In the worker: takes the lock `name` and holds it until the worker ends. Resolves with whether it holds it: not
- * without Web Locks, nor when the browser refused the request.
+ * without Web Locks, nor when the browser refused the request. Chromium and Firefox refuse it with SecurityError where
+ * the site's data is blocked (line WQA's sweep, D8, 2026-11-20). The worker works then, but nothing tells the page that
+ * it ended without an error event: no browser signals the end of a worker on a MessagePort either (no close event, no
+ * error when posting to it; the review of D8, losat-baselines/web-qa-20261119/wqa2/review-d8-probe/close.log). Such an
+ * end leaves the page as before D2: a search of the Engine worker waits until it is cancelled, and the calls of
+ * the Data worker (its lock is that of its session, data-worker.ts in the application) wait for good.
  */
 export function holdLife(locks: LifeLocks | undefined, name: string): Promise<boolean> {
   if (locks === undefined) return Promise.resolve(false);

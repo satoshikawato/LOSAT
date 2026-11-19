@@ -40,6 +40,7 @@ import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from
 import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
+import type { MainLinks } from './link.js';
 import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
@@ -48,9 +49,8 @@ export interface RuntimeOptions {
   readonly serial: () => Promise<WebAssembly.Module>;
   readonly threads: () => Promise<{ readonly module: WebAssembly.Module; readonly artifact: ReactorArtifact }>;
   readonly builds: { readonly serial: string; readonly threads: string };
-  readonly faultChannel: string;
-  /** The channel of the keeper of the threaded instance's shared memory (memory-keeper.ts). */
-  readonly keeperChannel: string;
+  /** The links of the thread workers and the keeper of the threaded instance's shared memory to the main thread (link.ts). */
+  readonly main: MainLinks;
   /**
    * Whether the threaded instance is in use, shared with the Gateway (instance-use.ts): the
    * calls into it and the threads of its search pool count, and the Gateway ends this worker
@@ -412,7 +412,7 @@ export class EngineRuntime {
   private async load(path: RuntimePath): Promise<Loaded> {
     const current = this.loaded;
     if (current?.path === path && current.instance.abi.stoppedBy === undefined) return current;
-    // A second keeper on the Gateway's channel could answer for the other memory.
+    // The Gateway asks the keeper whose link came last (gateway.ts): the keeper of the other memory ends first.
     if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
       const instance = await instantiateSerial(await this.options.serial());
@@ -427,8 +427,7 @@ export class EngineRuntime {
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
     const { memory, maximumPages } = createSharedMemory(artifact.memory);
-    const { faultChannel, keeperChannel } = this.options;
-    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel, use });
+    const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
       this.loaded = { path, instance, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };

@@ -122,19 +122,19 @@
       "A": {
         "name": "integrated_runtime",
         "tool": "LOSAT/tests/certify_integrated_runtime_v010.py",
-        "evidence_sha256": "df1f04404e2cf1c5f85d2c3d43e1155e14c63204bebaa573c94f601a9caeaa03",
+        "evidence_sha256": "8416f1b2d0f3faf8dd915d9adf7b5b5f05407d3d21527d122640706fcef88d82",
         "evidence_manifest": "docs/evidence/release_v020/A/MANIFEST.tsv"
       },
       "D": {
         "name": "oracle_rerun_subject",
         "tool": "docs/evidence/losat_web_e2a/run_oracle.py + check_losat.py",
-        "evidence_sha256": "425097b34b488a2ad4fd530e4d9745563410dd76998ac2c3939541a2a725b99e",
+        "evidence_sha256": "64627fb7d30a53cc2db6372be379a3cf1c0db09f7a056c23d0335a474862a329",
         "evidence_manifest": "docs/evidence/release_v020/D/MANIFEST.tsv"
       },
       "E": {
         "name": "oracle_rerun_db",
         "tool": "LOSAT/tests/db_search_fixtures.py freeze + check",
-        "evidence_sha256": "6dbc4c3b8257f4ae38d03b21d2efa0c747aa6601fbed6b38ae9d65bdace0535e",
+        "evidence_sha256": "9087274ef0cbad116ce2b71bc6ad809cc0ce14306354d7b74878fb37e829d68a",
         "evidence_manifest": "docs/evidence/release_v020/E/MANIFEST.tsv"
       }
     },

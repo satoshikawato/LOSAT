@@ -1,6 +1,6 @@
 {
   "result": "INTEGRATED_RUNTIME_CERTIFIED",
-  "certified_sha": "93ca2f652617acac09d416c28c293cc8a1a501d1",
+  "certified_sha": "55571400853c253f2a5e26d50a468193762bf045",
   "cert_toolchain": {
     "rustc_vV": [
       "rustc 1.92.0 (ded5c06cf 2025-12-08)",
@@ -72,7 +72,7 @@
       ]
     },
     "official_source_archive": {
-      "path": "/home/losatbench/losat-bench/work/rl4cert-93ca2f652/ncbi-src/ncbi-blast-2.17.0+-src.tar.gz",
+      "path": "/home/losatbench/losat-bench/work/rl4cert-555714008/ncbi-src/ncbi-blast-2.17.0+-src.tar.gz",
       "sha256": "502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147"
     }
   },

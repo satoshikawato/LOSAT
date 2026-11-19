@@ -1,5 +1,5 @@
 LOSAT pure-Rust runtime boundary audit
-production_rust_files	756
+production_rust_files	758
 temporary_production_findings	0
 cargo_links_findings	2
 rust_implemented_abi	14

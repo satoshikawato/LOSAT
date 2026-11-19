@@ -1,2 +1,2 @@
-7343715b5e551b28d2f0b141603954b930135ae02a026ba94dba74581742fa6d LOSAT/target/release/losat
-1d03a83d2d7f807267fb5b78f53b841998187ebaee403a6b1fcae10c338ef8f3 LOSAT/target/serial-command/wasm32-wasip1/release/losat.wasm
+c10abfcdfd18bca88c4c7885f83ec0e04ab3292c04919767c5842cf607ffbdb4  LOSAT/target/release/losat
+c4c32e09e566a54015f83ac83b5d276f186cb32ad99f0dd5b4fb96652034ef1e  LOSAT/target/serial-command/wasm32-wasip1/release/losat.wasm

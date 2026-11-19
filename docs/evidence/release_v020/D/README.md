@@ -1,18 +1,18 @@
 # v0.2.0 release test set D: the `-subject` rows re-run against NCBI BLAST+ 2.17.0
 
 Set D of [the release test plan](../../../release/v0.2.0_certification_plan.md) (section 2) on the
-candidate commit `C` = `93ca2f652617acac09d416c28c293cc8a1a501d1`, 2026-11-19.
+candidate commit `C` = `55571400853c253f2a5e26d50a468193762bf045`, 2026-11-20, 05:30-05:50 JST.
 
 - Where: the Linux x86_64 workstation (Intel Xeon Gold 6338, Linux 6.8), CPUs booked untimed on NUMA
   node 0. NCBI BLAST+ 2.17.0 is the official Linux x64 archive; every binary has the SHA-256 of the
-  oracle on the release machine (`ncbi_bin.sha256`, compared file by file on 2026-11-19).
+  oracle on the release machine (`ncbi_bin.sha256`, the same list as the file-by-file comparison of 2026-11-19).
 - LOSAT: `cargo build --release --locked` of `C` with Rust 1.92.0 (`toolchain.txt`, `losat_bin.sha256`).
 - Rows: `LOSAT/tests/outfmt0_manifest.tsv`, 2,602 rows (blastn 635, blastp 591, blastx 529, tblastn 404,
   tblastx 348, psiblast 95).
 
 | Step | Command (from the repository root) | Result |
 | --- | --- | --- |
-| NCBI re-run | `TMPDIR=/tmp python3 docs/evidence/losat_web_e2a/run_oracle.py --bin-dir <NCBI bin> --out <tmp>` | `# fixtures=2602 differing=[]`: every NCBI output has the frozen hash (681 s) |
+| NCBI re-run | `TMPDIR=/tmp python3 docs/evidence/losat_web_e2a/run_oracle.py --bin-dir <NCBI bin> --out <tmp>` | `# fixtures=2602 differing=[]`: every NCBI output has the frozen hash (913 s) |
 | Frozen files untouched | `git status --porcelain` | empty |
 | LOSAT, 1 thread | `python3 docs/evidence/losat_web_e2a/check_losat.py --losat <losat> --threads 1` | `# fixtures=2602 differing=[]` |
 | LOSAT, 2 threads | same with `--threads 2` | `# fixtures=2602 differing=[]` |

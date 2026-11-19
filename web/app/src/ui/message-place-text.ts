@@ -1,0 +1,61 @@
+// Where messages of a run are, in the words of the results (line WQA's sweep, D7, 2026-11-20): the error of an output
+// that the run could not write (`ResultSetRef.failed`), and the run's warnings (`LoadedRun.messages`), each at the place
+// that the engine gave, never one guessed from the program or the argv. The run's diagnostics are its Warnings in Run
+// details; the file of its -logfile is a tab of the Outputs (TBLASTX writes the messages of its run there, as the CLI
+// does); a -logfile that names no file writes them nowhere.
+import type { MessagePlace } from 'losat/domain';
+import type { RunView } from '../application/coordinator';
+
+/**
+ * A piece of the words of a place: an option name, which the page shows unbroken (`option-name`, as other option names
+ * in the results: the narrow screen broke "-logfile" after its hyphen), or plain words (`PlaceWords.vue` shows them).
+ */
+export interface PlacePart {
+  readonly text: string;
+  readonly option?: true;
+}
+
+/** What follows "its error is" (or "their error is"): where an error of `run` is, in parts (`placeText` joins them). */
+export function placeParts(place: MessagePlace, run: RunView): readonly PlacePart[] {
+  switch (place) {
+    case 'diagnostics':
+      return [{ text: 'under Warnings in Run details' }];
+    case 'logfile': {
+      const names = (run.record.runFiles ?? []).map((file) => file.name).join(', ');
+      return [{ text: "in the file of the run's " }, LOGFILE, { text: `${names === '' ? '' : `, ${names},`} under Outputs` }];
+    }
+    case 'nowhere':
+      return [{ text: "not kept, as the run's " }, LOGFILE, { text: ' writes its messages nowhere' }];
+  }
+}
+
+const LOGFILE: PlacePart = { text: '-logfile', option: true };
+
+/** The words of `placeParts` as one text. */
+export function placeText(place: MessagePlace, run: RunView): string {
+  return joined(placeParts(place, run));
+}
+
+/** What Run details says under Warnings where the engine wrote none to the diagnostics and they are where its messages go. */
+export const NO_WARNINGS = 'The engine wrote no warnings.';
+
+/**
+ * What Run details says under Warnings besides the run's diagnostics (`diagnostics`, stream 3), from where the run's
+ * messages went (`messages`, the engine's word): where its warnings are when they did not go to the diagnostics (the
+ * file of its -logfile, or nowhere), said also when the diagnostics hold lines; that the engine wrote none only where
+ * they go to the diagnostics and those are empty; else nothing.
+ */
+export function warningsPlaceParts(messages: MessagePlace, diagnostics: string, run: RunView): readonly PlacePart[] | undefined {
+  if (messages === 'diagnostics') return diagnostics === '' ? [{ text: NO_WARNINGS }] : undefined;
+  return [{ text: `${diagnostics === '' ? "The run's warnings are" : "The run's other warnings are"} ` }, ...placeParts(messages, run), { text: '.' }];
+}
+
+/** The words of `warningsPlaceParts` as one text, or undefined where Warnings says nothing besides the diagnostics. */
+export function warningsPlaceText(messages: MessagePlace, diagnostics: string, run: RunView): string | undefined {
+  const parts = warningsPlaceParts(messages, diagnostics, run);
+  return parts === undefined ? undefined : joined(parts);
+}
+
+function joined(parts: readonly PlacePart[]): string {
+  return parts.map((part) => part.text).join('');
+}

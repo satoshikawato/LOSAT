@@ -218,9 +218,60 @@ test('TBLASTX with -logfile: the outputs that could not be written point to the 
     } else {
       await expect(page.getByTestId('format-run-files')).toHaveCount(0);
     }
-    // Stream 3 holds none of it.
+    // Stream 3 holds none of it, and Run details says where the run's warnings are (line WQA's sweep, D7, 2026-11-20).
     await page.getByTestId('results-view-details').click();
-    await expect(page.getByTestId('run-diagnostics-none')).toBeVisible();
+    await expect(page.getByTestId('run-diagnostics-place')).toHaveText(`The run's warnings are ${place}.`);
+    await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+    await expect(page.getByTestId('run-diagnostics-none')).toHaveCount(0);
+  }
+});
+
+// Run details says where the run's warnings are, as the engine says (ABI v2 §5, stream 10; line WQA's sweep, D7,
+// 2026-11-20): TBLASTX writes the messages of its run into the file of -logfile, as the CLI does (the warning of
+// -max_target_seqs 1 here), or nowhere with -logfile /dev/null; with -logfile -, and in BLASTN whatever the -logfile,
+// they are its Warnings. "The engine wrote no warnings" is said only where the warnings go and none came.
+test("Run details says where the run's warnings are: the file of -logfile, nowhere, or its Warnings", async ({ page, browserName }) => {
+  const cases = [
+    { id: 'tblastx', extra: '-logfile run.log', place: "The run's warnings are in the file of the run's -logfile, run.log, under Outputs.", file: 'Examining 5' },
+    { id: 'tblastx', extra: '-logfile /dev/null', place: "The run's warnings are not kept, as the run's -logfile writes its messages nowhere.", file: undefined },
+    { id: 'tblastx', extra: '-logfile -', place: undefined, file: undefined },
+    { id: 'blastn', extra: '-logfile run.log', place: undefined, file: '' },
+  ] as const;
+  for (const [index, { id, extra, place, file }] of cases.entries()) {
+    // Each case on a page of its own: its run is run 1.
+    if (index > 0) await openSearch(page);
+    const run = 1;
+    await program(page, id);
+    await paste(page, 'query', QUERY);
+    await paste(page, 'subject', SUBJECT);
+    await openParameters(page);
+    // "Max target sequences" is a field of the form.
+    await page.getByTestId('param-max_target_seqs').selectOption('other');
+    await page.getByTestId('param-max_target_seqs-other').fill('1');
+    await page.getByTestId('param-extra').fill(extra);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await page.getByTestId('results-view-details').click();
+    const warning = `Warning: [${id}] Examining 5 or more matches is recommended`;
+    if (place === undefined) {
+      await expect(page.getByTestId('run-diagnostics')).toContainText(warning);
+      await expect(page.getByTestId('run-diagnostics-place')).toHaveCount(0);
+    } else {
+      await expect(page.getByTestId('run-diagnostics-place')).toHaveText(place);
+      await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+    }
+    await expect(page.getByTestId('run-diagnostics-none')).toHaveCount(0);
+    await shoot(page.getByTestId('run-details'), `07-run-details-${id}-${extra.replace(/[^a-z]+/g, '-')}`, browserName);
+    await page.getByTestId('results-view-outputs').click();
+    if (file === undefined) await expect(page.getByTestId('format-run-files')).toHaveCount(0);
+    else {
+      await page.getByTestId('format-run-files').click();
+      const shown = page.getByTestId('run-file-0');
+      if (file === '') await expect(shown.getByTestId('run-file-empty')).toHaveText('The file is empty.');
+      else await expect(shown.getByTestId('run-file-text')).toContainText(warning);
+    }
   }
 });
 

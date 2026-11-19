@@ -4,7 +4,7 @@
 // thread drops messages of an older one.
 import type { RecordKey, ShownIds } from '../../domain/dataset.js';
 import type { CountsUse } from '../../domain/counts.js';
-import type { RegistryFile, RunFile } from '../../domain/run-files.js';
+import type { MessagePlace, RegistryFile, RunFile } from '../../domain/run-files.js';
 import type { EnginePhase } from '../../ports/engine.js';
 import type { OutputStream } from '../../ports/run-output.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
@@ -140,6 +140,8 @@ export interface WorkerRunResult {
   readonly memory: MemoryRecord;
   /** Whether the search used the subject that the instance held (plan §4.6 R1). */
   readonly subjectRetained: boolean;
+  /** Where the run's messages go, as the engine said (stream 10; `RuntimeInfo.messages`). */
+  readonly messages: MessagePlace;
   /** The IDs that the outputs show for the records, where the engine read them from the deflines (-parse_deflines). */
   readonly shownIds?: ShownIds;
   /** What the run did with its WindowMasker counts file, when it had one. */

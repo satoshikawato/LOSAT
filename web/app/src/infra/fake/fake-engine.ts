@@ -102,7 +102,8 @@ export class FakeEngine implements EngineGateway {
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', ...(windowMasker === undefined ? {} : { windowMasker }) };
+    // Its warning goes to the diagnostics (stream 3), as without -logfile.
+    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', messages: 'diagnostics', ...(windowMasker === undefined ? {} : { windowMasker }) };
   }
 
   cancel(runId: string): void {

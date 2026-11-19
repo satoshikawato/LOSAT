@@ -4,8 +4,8 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import type { ProgramId, RecordKey, RunOutput, SequenceKind } from 'losat/domain';
-import type { OutputErrorPlace, ProgramDescription } from 'losat/ports';
+import type { MessagePlace, ProgramId, RecordKey, RunOutput, SequenceKind } from 'losat/domain';
+import type { ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
@@ -120,15 +120,22 @@ export interface LoadedRun {
    * failed alone in the search of the other formats, or its search of its own (-num_descriptions / -num_alignments)
    * failed (abi_v2.md §5, §7). Undefined where outfmt 0 was written (line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
    */
-  readonly outfmt0Error: OutputErrorPlace | undefined;
+  readonly outfmt0Error: MessagePlace | undefined;
   /**
    * Where the error of outfmt 6 is when the run could not write it, as the engine said (`failedOutput`), so that it
    * has no HSP records (they point into outfmt 6, abi_v2.md §8); outfmt 7 stops at the same row. Undefined where
    * outfmt 6 was written.
    */
-  readonly tabularError: OutputErrorPlace | undefined;
+  readonly tabularError: MessagePlace | undefined;
   readonly badge: Badge;
+  /** The run's diagnostics (stream 3): the lines that the CLI writes to its standard error. */
   readonly diagnostics: string;
+  /**
+   * Where the run's messages went, as the engine said (`RunRecord.messages`): to the diagnostics, or, for TBLASTX with
+   * -logfile, to the file of -logfile or nowhere, so that empty diagnostics are not taken for a run without warnings
+   * (line WQA's sweep, D7, 2026-11-20).
+   */
+  readonly messages: MessagePlace;
   readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
   readonly units: Units;
   /** The task that the search used: the argv's -task, or the engine's default; undefined for a program without tasks. */
@@ -266,6 +273,8 @@ export class ResultsBrowser {
         this.deps.data.readDiagnostics(runId),
       ]);
       if (token !== this.loadToken) return;
+      const messages = run.record.messages;
+      if (messages === undefined) throw new Error('the record of the run does not say where its messages went');
       const program = programById(run.snapshot.program);
       const kinds = { query: program.query, subject: program.subject };
       const limits = hitLimits(run.snapshot.argv, description.parameters);
@@ -290,6 +299,7 @@ export class ResultsBrowser {
           this.deps.verification,
         ),
         diagnostics,
+        messages,
         kinds,
         units: { query: residueUnit(kinds.query), subject: residueUnit(kinds.subject) },
         ...taskOf(run.snapshot.argv, description),
@@ -690,7 +700,7 @@ export class ResultsBrowser {
  * Where the error of the output `output` of a run is when the run could not write it, as the engine said
  * (`ResultSetRef.failed`); undefined where the run wrote it, or has no result.
  */
-export function failedOutput(run: RunView, output: RunOutput): OutputErrorPlace | undefined {
+export function failedOutput(run: RunView, output: RunOutput): MessagePlace | undefined {
   return run.result?.failed.find((failed) => failed.output === output)?.error;
 }
 

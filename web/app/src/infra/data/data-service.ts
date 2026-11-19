@@ -13,6 +13,7 @@ import {
   type FastaParserKind,
   type IndexedRecord,
   type InputRole,
+  type MessagePlace,
   type ProgramId,
   type RecordKey,
   type RunOutput,
@@ -24,7 +25,6 @@ import {
   type HspRecord,
   type InputCheck,
   type InputChecker,
-  type OutputErrorPlace,
   type OutputStream,
   type RecordScanner,
 } from 'losat/ports';
@@ -92,7 +92,7 @@ interface StagedRun {
   readonly receiver: RunOutputReceiver;
   readonly lengths: Lengths;
   /** The outputs that the engine said failed, with where their errors are (its discards, `clear`): `ResultSetRef.failed`. */
-  readonly failed: Map<RunOutput, OutputErrorPlace>;
+  readonly failed: Map<RunOutput, MessagePlace>;
   /** HSP records so far: the lines of stream 1 that are not blank, as `readHits` reads them. */
   hitLines: number;
   /** The current line of stream 1 has a character other than white space. */
@@ -384,7 +384,7 @@ export class DataService implements DataGateway {
    * §5: it failed alone, or its search failed in a run of two searches), and drops what the run received of it: the
    * output stays empty. After a failure, the run keeps nothing.
    */
-  private clear(run: StagedRun, stream: RunOutput, error: OutputErrorPlace): void {
+  private clear(run: StagedRun, stream: RunOutput, error: MessagePlace): void {
     if (run.failure !== undefined) return;
     try {
       const writer = run.writers.get(stream);

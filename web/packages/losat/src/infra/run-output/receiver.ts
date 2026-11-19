@@ -1,6 +1,7 @@
 // Data worker side of the run output channel (ports/run-output.ts).
 import type { RunOutput } from '../../domain/output-format.js';
-import { isOutputErrorPlace, isRunOutput, OUTPUT_STREAMS, type OutputErrorPlace, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
+import { isMessagePlace, type MessagePlace } from '../../domain/run-files.js';
+import { isRunOutput, OUTPUT_STREAMS, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
 
 export type RunOutputResult =
   /** `end` arrived and its totals agree with what arrived. */
@@ -26,7 +27,7 @@ export class RunOutputReceiver {
   constructor(
     private readonly port: MessagePort,
     onChunk: (stream: OutputStream, bytes: Uint8Array) => void,
-    onDiscard: (stream: RunOutput, error: OutputErrorPlace) => void,
+    onDiscard: (stream: RunOutput, error: MessagePlace) => void,
   ) {
     this.finished = new Promise((resolve) => {
       this.settle = resolve;
@@ -42,7 +43,7 @@ export class RunOutputReceiver {
   private receive(
     message: unknown,
     onChunk: (stream: OutputStream, bytes: Uint8Array) => void,
-    onDiscard: (stream: RunOutput, error: OutputErrorPlace) => void,
+    onDiscard: (stream: RunOutput, error: MessagePlace) => void,
   ): void {
     if (this.done) return;
     const data = message as Partial<RunOutputMessage> | null;
@@ -52,7 +53,7 @@ export class RunOutputReceiver {
       onChunk(data.stream as OutputStream, data.bytes);
       return;
     }
-    if (data?.type === 'discard' && isRunOutput(data.stream) && isOutputErrorPlace(data.error)) {
+    if (data?.type === 'discard' && isRunOutput(data.stream) && isMessagePlace(data.error)) {
       onDiscard(data.stream, data.error);
       return;
     }

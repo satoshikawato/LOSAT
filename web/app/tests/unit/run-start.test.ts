@@ -21,12 +21,14 @@ import {
   discardedStream,
   discardSignal,
   DISCARD_STREAM,
-  ERROR_NOWHERE,
   EngineCallError,
   EngineStoppedError,
   FILE_CHUNK_BYTES,
   FILE_REGISTRY,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
+  PLACE_NOWHERE,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -433,7 +435,16 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
  * refuses it, as the adapter does. `discard`: after outfmt 6, the signal of stream 9 that discards
  * it (its bytes), then outfmt 7 (ABI v2 §5).
  */
-function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array } = {}) {
+/** The signal of stream 10 (ABI v2 §5): the place of the run's messages, 4 bytes (line WQA's sweep, D7, 2026-11-20). */
+function placeSignal(place: number): Uint8Array {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, place, true);
+  return bytes;
+}
+
+function fakeAbi(
+  options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array; messages?: Uint8Array | 'none' } = {},
+) {
   const calls: string[] = [];
   let handle = 100;
   let stopped: EngineStoppedError | undefined;
@@ -476,6 +487,7 @@ function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean
     fileRelease: (file: number) => void calls.push(`file release ${file}`),
     run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
       calls.push('run');
+      if (options.messages !== 'none') sink(MESSAGES_STREAM, options.messages ?? placeSignal(3));
       sink(6, encode('q\ts\n'));
       if (options.discard !== undefined) {
         sink(DISCARD_STREAM, options.discard);
@@ -634,7 +646,7 @@ describe("the Engine worker's runtime and the files of a run", () => {
     for (const [place, error] of [
       [3, 'diagnostics'],
       [8, 'logfile'],
-      [ERROR_NOWHERE, 'nowhere'],
+      [PLACE_NOWHERE, 'nowhere'],
     ] as const) {
       const { abi } = fakeAbi({ discard: signal(6, place) });
       const { run, delivered, close } = workerRun([]);
@@ -649,7 +661,7 @@ describe("the Engine worker's runtime and the files of a run", () => {
     }
     expect(discardedStream(signal(7, 3))).toBe(7);
     expect(discardSignal(signal(7, 8))).toEqual({ stream: 7, errorStream: 8 });
-    expect(discardSignal(signal(0, ERROR_NOWHERE))).toEqual({ stream: 0, errorStream: undefined });
+    expect(discardSignal(signal(0, PLACE_NOWHERE))).toEqual({ stream: 0, errorStream: undefined });
     expect(() => discardedStream(new Uint8Array([6, 0, 0, 0]))).toThrow('a signal of stream 9 has 4 bytes, not 8');
     // A signal that names a stream which is not an output of a run, or a place that holds no error, breaks the ABI:
     // the run fails.
@@ -660,6 +672,36 @@ describe("the Engine worker's runtime and the files of a run", () => {
     ] as const) {
       const broken = workerRun([]);
       await expect(runtimeWith(fakeAbi({ discard: bytes }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
+      broken.close();
+    }
+  });
+
+  // line WQA's sweep, D7, 2026-11-20: where the run's messages went is the engine's word (its signal of stream 10), which
+  // the run gives with its result, not a stream for the Data worker; a run without it, or with a place that holds no
+  // messages, breaks the ABI.
+  it("gives where the run's messages went (stream 10) with its result, and nothing of it to the Data worker", async () => {
+    for (const [place, messages] of [
+      [3, 'diagnostics'],
+      [8, 'logfile'],
+      [PLACE_NOWHERE, 'nowhere'],
+    ] as const) {
+      const { abi } = fakeAbi({ messages: placeSignal(place) });
+      const { run, delivered, close } = workerRun([]);
+      expect((await runtimeWith(abi).run(run, () => undefined)).messages).toBe(messages);
+      expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }, { type: 'end', chunks: 1, bytes: 4 }]);
+      close();
+    }
+    expect(messagesSignal(placeSignal(3))).toBe(3);
+    expect(messagesSignal(placeSignal(8))).toBe(8);
+    expect(messagesSignal(placeSignal(PLACE_NOWHERE))).toBeUndefined();
+    expect(() => messagesSignal(new Uint8Array(8))).toThrow('a signal of stream 10 has 8 bytes, not 4');
+    for (const [messages, error] of [
+      ['none', 'the engine did not say where the messages of the run go (stream 10)'],
+      [placeSignal(6), 'the engine put the messages of the run on stream 6, which holds no messages'],
+      [new Uint8Array(3), 'a signal of stream 10 has 3 bytes, not 4'],
+    ] as const) {
+      const broken = workerRun([]);
+      await expect(runtimeWith(fakeAbi({ messages }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
       broken.close();
     }
   });
@@ -768,7 +810,7 @@ describe('the gateway and the files of a run', () => {
     const posted = (await runPosted(1)).conffile!;
     expect(posted.name).toBe('c.ini');
     expect(posted.file).toBe(CONFFILE.file);
-    const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false };
+    const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false, messages: 'diagnostics' as const };
     send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...result, runFiles: [LOG] } });
     expect((await completed).runFiles).toEqual([LOG]);
 

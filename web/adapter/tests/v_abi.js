@@ -31,7 +31,8 @@
 // format followed by each such format's error (the last line of its CLI run's standard error), as
 // the adapter writes a refusal of a format that failed alone (abi_v2.md §7), and the run's signals of
 // stream 9 name them and no other stream, each with the place of its error, which holds it (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
-// format then is that stream, and no stream 4 is written).
+// format then is that stream, and no stream 4 is written). Every run that succeeds says once where its messages go
+// (stream 10): stream 3 without -logfile (line WQA's sweep, D7, 2026-11-20).
 //
 // A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
 // the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
@@ -824,6 +825,16 @@ async function main() {
           else if (place === 8) assert.ok(run.streams.has(8), `${label}: the error of stream ${stream} is in the file of -logfile, which the run did not give`);
           else assert.equal(place, 0xffffffff, `${label}: the place of the error of stream ${stream}`);
         }
+        // The run's signal of stream 10 says where its messages go (abi_v2.md §5; line WQA's sweep, D7, 2026-11-20): one
+        // signal of 4 bytes; stream 3 without -logfile; the file of -logfile only where the run gave it.
+        const messages = run.streams.get(10) || Buffer.alloc(0);
+        assert.equal(messages.length, 4, `${label}: one signal of 4 bytes (stream 10)`);
+        const messagesPlace = messages.readUInt32LE(0);
+        assert.ok([3, 8, 0xffffffff].includes(messagesPlace), `${label}: the place of the run's messages (${messagesPlace})`);
+        if (!search.argv.some((word) => word === "-logfile" || word.startsWith("-logfile="))) {
+          assert.equal(messagesPlace, 3, `${label}: the run's messages go to stream 3 without -logfile`);
+        }
+        if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
         if (search.fails_alone) row.fails_alone = search.fails_alone;
         row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
         if (together) row.inputs = "register_inputs";

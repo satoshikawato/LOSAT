@@ -1370,6 +1370,7 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
 /// to its standard error during the run go where the run's messages go, as they come
 /// (`CallerStart::sink`: the file of `-logfile` in TBLASTX, else stream 3), and the error that ends
 /// the run with an NCBI message is posted there too (`CallerStart::post`), as on the command line.
+/// The host is told first where they go (`emit::messages`, stream 10).
 fn run_started(
     words: &[&str],
     query: &[FastaRecord],
@@ -1377,15 +1378,17 @@ fn run_started(
     started: &mut CallerStart,
     diagnostics: &mut StreamWriter,
 ) -> Result<(), String> {
+    // Where the messages written to the sink end up, which the host is told first (stream 10): the
+    // place of the run's messages, and of the errors of the outputs that fail (line WQA's sweep, D7,
+    // 2026-11-20).
+    let place = crate::emit::place(started.messages_place());
+    crate::emit::messages(place);
     let Some(parsed) = started_command(words, started)? else {
         diagnostics.finish();
         return Ok(());
     };
     let settings = started.settings()?.clone();
     let mut posted = None;
-    // Where the messages written to the sink end up: the place of the errors of the outputs that
-    // fail (line WQA's sweep, D7, 2026-11-20).
-    let place = crate::emit::error_place(started.messages_place());
     let searched = {
         let mut sink = started.sink(diagnostics);
         search_all(
@@ -1435,7 +1438,7 @@ struct Done {
 }
 
 /// Where the messages of a run go (`search_all`): the writer of the messages that the command line
-/// writes to its standard error, and the place where its bytes end up (`emit::error_place`: stream
+/// writes to its standard error, and the place where its bytes end up (`emit::place`: stream
 /// 3, the file of `-logfile`, or nowhere), which holds the error of each output that fails.
 struct RunMessages<'w> {
     writer: &'w mut (dyn std::io::Write + Send),

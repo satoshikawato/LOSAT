@@ -164,6 +164,7 @@ after a trap (§4, "After a trap").
 | `8` | the files of a run besides its outputs (line RG item E1w-3a): the file of `-logfile NAME` (§4, `losat_web2_start`), named `NAME`, as a ZIP archive with stored entries as stream 4's. It is emitted after the run, only when the run has such a file, and also when the run fails (the host keeps it: TBLASTX's file then holds NCBI's error, and a start that ended holds what the CLI writes to the file) |
 | `5` | the inflated bytes of `inflate_chunk` and `inflate_end` (§4): each call sends what the decoder released during it, in chunks of at most 1 MiB, in order; the host copies them during the call |
 | `9` | a run's signal that one output stream (0, 6, 7 or 4) of this run failed, that the host discards what it received of it, and where its error is: each `emit` on stream 9 is one signal of 8 bytes, that stream's number and then the place of its error, each an unsigned 32-bit little-endian integer. The place is where the run writes its messages, which hold the error: `3`, stream 3; `8`, the file of `-logfile` (stream 8), where TBLASTX with `-logfile NAME` writes them, as the CLI does; `0xFFFFFFFF`, nowhere, where TBLASTX's `-logfile ""` or `-logfile /dev/null` sends them, as on the CLI (the adapter takes the place from LOSAT's start of the run, `CallerStart::messages_place`, where its messages go). It comes for every stream that fails alone (§7), whether or not a chunk of it was sent, and for each stream of a search that fails in a run of two searches (§7); no chunk of that stream follows, the stream of the run is empty, and the run goes on with the other streams. A host tells from these signals alone which outputs a run could not write and where their errors are (an empty stream is not such a sign: outfmt 6 of a search without hits is empty). Since ABI version 3 after a chunk was sent (4 bytes, the stream), since version 4 for every such stream, with the place of its error (§10) |
+| `10` | a run's signal of where its messages go: the messages that the CLI writes to its standard error without `-logfile` (its warnings, and the errors that end the run or fail one of its outputs). One `emit` of 4 bytes, the place as an unsigned 32-bit little-endian integer, with the values of stream 9's places: `3`, stream 3; `8`, the file of `-logfile` (stream 8), where TBLASTX with `-logfile NAME` writes them, as the CLI does; `0xFFFFFFFF`, nowhere, where TBLASTX's `-logfile ""` or `-logfile /dev/null` sends them, as on the CLI. The adapter takes it from LOSAT's start of the run (`CallerStart::messages_place`), the source of stream 9's places too. It comes once in every run whose start does not end it, a dry run's included, before the run's outputs. A host tells from it whether an empty stream 3 is a run without warnings (place `3`) or one whose warnings are elsewhere; stream 3 may still hold lines where the place is not `3` (a run of two searches writes there what the later search adds, §5 stream 3). Since ABI version 4 (line WQA's sweep, D7, 2026-11-20; §10) |
 
 The adapter sends each output stream in chunks of 1 MiB as they fill, and the rest when
 the run ends, so an output never has to fit in linear memory as a whole. Stream 2 is
@@ -174,6 +175,8 @@ received, except stream 8. A stream that fails alone (§7), and each stream of a
 in a run of two searches, is followed by its signal on stream 9: the host discards what it
 received of that stream (a chunk of it may have been sent before it failed) and keeps the others,
 and the signal says where the stream's error is (stream 3, the file of `-logfile`, or nowhere).
+The signal of stream 10, where the run's messages go, comes before the outputs, once in every run
+whose start did not end it.
 
 ## 6. Memory ownership
 
@@ -412,7 +415,9 @@ record that is both a query and a subject and has masks fails stream 0 alone (§
 stream 9 comes for every output stream that fails, alone or with its search in a run of two
 searches, where version 3 sent it only after a chunk of the stream, and has 8 bytes, the stream and
 the place of its error (stream 3, the file of `-logfile`, or nowhere; 2026-11-20), so that a host
-knows which outputs a run could not write and where their errors are (§5). A host of version 3 registers each input alone,
+knows which outputs a run could not write and where their errors are (§5). The signal of stream 10
+says where each run's messages go (the same places; 2026-11-20), so that a host does not take an
+empty stream 3 for a run without warnings when TBLASTX's `-logfile` took them. A host of version 3 registers each input alone,
 so its runs of the option would now fail rather than be refused at `validate`: the application
 refuses a module of version 3, and a host of version 3 refuses a module of version 4. Runs without
 the option give the streams of version 3.

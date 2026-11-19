@@ -4,6 +4,7 @@
 //! `conf_missing` of line RG `E/SURVEY_E1.md`).
 
 use super::*;
+use crate::emit::{PLACE_NOWHERE, STREAM_MESSAGES};
 use std::collections::BTreeMap;
 
 /// The inputs of each program (`LOSAT/tests/fasta/outfmt11`, as the command line's tests).
@@ -85,6 +86,16 @@ fn run_files(streams: &BTreeMap<u32, Vec<u8>>) -> Option<Vec<(String, String)>> 
     })
 }
 
+/// The place of the run's messages that its signal of stream 10 gives (`emit::messages`), or `None`
+/// where the run sent none (a start that ended the run). One signal per run (line WQA's sweep, D7,
+/// 2026-11-20).
+fn messages_place(streams: &BTreeMap<u32, Vec<u8>>) -> Option<u32> {
+    streams.get(&STREAM_MESSAGES).map(|bytes| {
+        assert_eq!(bytes.len(), 4, "one signal of stream 10");
+        u32::from_le_bytes(bytes[..].try_into().unwrap())
+    })
+}
+
 /// The signals of stream 9: each failed stream and the place of its error (`emit::discard`).
 fn signals(streams: &BTreeMap<u32, Vec<u8>>) -> Vec<(u32, u32)> {
     let bytes = streams
@@ -142,6 +153,13 @@ fn the_logfile_is_a_file_of_the_run() {
             "{program}"
         );
         assert_eq!(run_files(&plain), None, "{program}");
+        // The host is told where the run's messages go: stream 3 without -logfile, the file of
+        // -logfile (stream 8) in TBLASTX with one (line WQA's sweep, D7, 2026-11-20).
+        assert_eq!(
+            messages_place(&plain),
+            Some(STREAM_DIAGNOSTICS),
+            "{program}"
+        );
         let mut words = plain_words.clone();
         words.extend(["-logfile", "run.log"]);
         validate(&words).unwrap();
@@ -163,6 +181,11 @@ fn the_logfile_is_a_file_of_the_run() {
             (stderr, Some(vec![("run.log".to_string(), file)])),
             "{program}"
         );
+        let place = match to_log {
+            true => STREAM_RUN_FILES,
+            false => STREAM_DIAGNOSTICS,
+        };
+        assert_eq!(messages_place(&logged), Some(place), "{program}");
         // `-logfile=NAME` is the same word.
         let mut joined = plain_words.clone();
         joined.push("-logfile=run.log");
@@ -181,6 +204,12 @@ fn the_logfile_is_a_file_of_the_run() {
                 (expected.to_string(), None),
                 "{program} {value:?}"
             );
+            let place = if quiet {
+                PLACE_NOWHERE
+            } else {
+                STREAM_DIAGNOSTICS
+            };
+            assert_eq!(messages_place(&streams), Some(place), "{program} {value:?}");
             assert_eq!(streams.get(&6), plain.get(&6), "{program} {value:?}");
         }
         let mut words = plain_words.clone();
@@ -190,6 +219,7 @@ fn the_logfile_is_a_file_of_the_run() {
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), refusal, "{program}");
         assert_eq!(run_files(&streams), None, "{program}");
+        assert_eq!(messages_place(&streams), None, "{program}");
     }
 }
 
@@ -261,9 +291,15 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
         validate(&words).unwrap();
         let (result, streams) = run_of(&words);
         result.unwrap();
+        // No output; the host is told where the run's messages go (stream 10).
         assert_eq!(
             streams.keys().copied().collect::<Vec<u32>>(),
-            Vec::<u32>::new(),
+            [STREAM_MESSAGES],
+            "{program}"
+        );
+        assert_eq!(
+            messages_place(&streams),
+            Some(STREAM_DIAGNOSTICS),
             "{program}"
         );
         let (result, streams) = run_of(&argv(program, &["-dryrun", "-logfile", "run.log"]));
@@ -273,6 +309,11 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
             Some(vec![("run.log".to_string(), String::new())]),
             "{program}"
         );
+        let place = match program {
+            "tblastx" => STREAM_RUN_FILES,
+            _ => STREAM_DIAGNOSTICS,
+        };
+        assert_eq!(messages_place(&streams), Some(place), "{program}");
         assert!(validate(&argv(program, &["-dryrun", "-evalue", "x"])).is_err());
     }
 }
@@ -342,6 +383,11 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
         // (line WQA's sweep, D7, 2026-11-20).
         let on_stream_3 = vec![(6, STREAM_DIAGNOSTICS), (7, STREAM_DIAGNOSTICS)];
         assert_eq!(signals(&plain), on_stream_3, "{program}");
+        assert_eq!(
+            messages_place(&plain),
+            Some(STREAM_DIAGNOSTICS),
+            "{program}"
+        );
         let mut words = plain_words.clone();
         words.extend(["-logfile", "run.log"]);
         let (result, logged) = run_of(&words);
@@ -362,12 +408,14 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
             _ => STREAM_DIAGNOSTICS,
         };
         assert_eq!(signals(&logged), [(6, place), (7, place)], "{program}");
+        // The run's messages go where the errors of its outputs are (stream 10).
+        assert_eq!(messages_place(&logged), Some(place), "{program}");
         // `-logfile -` is the standard error, stream 3; `""` and `/dev/null` are nowhere in
         // TBLASTX (the CLI writes the error nowhere), stream 3 in the others.
         for (name, place) in [
             ("-", STREAM_DIAGNOSTICS),
-            ("", crate::emit::ERROR_NOWHERE),
-            ("/dev/null", crate::emit::ERROR_NOWHERE),
+            ("", PLACE_NOWHERE),
+            ("/dev/null", PLACE_NOWHERE),
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -382,6 +430,7 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
                 [(6, place), (7, place)],
                 "{program} {name:?}"
             );
+            assert_eq!(messages_place(&streams), Some(place), "{program} {name:?}");
             let on_3 = stream_text(&streams, STREAM_DIAGNOSTICS);
             assert_eq!(
                 on_3.contains("No hits are being saved"),
@@ -402,7 +451,11 @@ fn a_dry_run_does_not_read_the_outfmt() {
         validate(&words).unwrap();
         let (result, streams) = run_of(&words);
         result.unwrap();
-        assert!(streams.is_empty(), "{outfmt}");
+        assert_eq!(
+            streams.keys().copied().collect::<Vec<u32>>(),
+            [STREAM_MESSAGES],
+            "{outfmt}"
+        );
         let words = argv("tblastx", &["-outfmt", outfmt]);
         assert!(validate(&words).is_err(), "{outfmt}");
     }

@@ -26,9 +26,13 @@ pub const STREAM_RUN_FILES: u32 = 8;
 /// run of two searches), with where its error is: the host discards what it received of it
 /// (`discard`; docs/web/abi_v2.md §5).
 pub const STREAM_DISCARD: u32 = 9;
-/// The place of the error of a failed output (`discard`) that the run wrote nowhere: TBLASTX's
-/// `-logfile ""` or `-logfile /dev/null`, where the run's messages go.
-pub const ERROR_NOWHERE: u32 = u32::MAX;
+/// The signal of where the messages of a run go (`messages`; docs/web/abi_v2.md §5): the messages
+/// that the command line writes to its standard error without `-logfile`. Line WQA's sweep, D7,
+/// 2026-11-20.
+pub const STREAM_MESSAGES: u32 = 10;
+/// The place "nowhere" in the signals of `STREAM_DISCARD` and `STREAM_MESSAGES` (`place`): the
+/// messages of TBLASTX's `-logfile ""` or `-logfile /dev/null`, which the run writes nowhere.
+pub const PLACE_NOWHERE: u32 = u32::MAX;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]
@@ -57,7 +61,7 @@ pub fn emit(stream: u32, bytes: &[u8]) {
 }
 
 /// Tells the host that `stream` failed in this run, that it discards what it received of it, and
-/// where the error of the stream is (`error`, `error_place`): one `emit` on `STREAM_DISCARD` of 8
+/// where the error of the stream is (`error`, `place`): one `emit` on `STREAM_DISCARD` of 8
 /// bytes, the stream's number and then the place, each an unsigned 32-bit little-endian number,
 /// for each output stream that failed, also where no chunk of it was sent. The run sends nothing
 /// more of that stream (docs/web/abi_v2.md §5).
@@ -68,14 +72,22 @@ pub fn discard(stream: u32, error: u32) {
     emit(STREAM_DISCARD, &signal);
 }
 
-/// The place of an error that the run wrote where its messages go (`place`,
-/// `CallerStart::messages_place`), as a signal of stream 9 gives it (`discard`): the stream that
-/// holds it (stream 3, or stream 8 for the file of `-logfile`), or `ERROR_NOWHERE`.
-pub fn error_place(place: losat::web_adapter::TextPlace) -> u32 {
+/// Tells the host where the messages of this run go (`place`, from LOSAT's start of the run,
+/// `CallerStart::messages_place`): one `emit` on `STREAM_MESSAGES` of 4 bytes, the place as an
+/// unsigned 32-bit little-endian number, once per run whose start did not end it, before its
+/// outputs (docs/web/abi_v2.md §5; line WQA's sweep, D7, 2026-11-20).
+pub fn messages(place: u32) {
+    emit(STREAM_MESSAGES, &place.to_le_bytes());
+}
+
+/// A place of text that a run writes (`losat::web_adapter::TextPlace`), as the signals of
+/// `STREAM_DISCARD` and `STREAM_MESSAGES` give it: the stream that holds it (stream 3, or stream 8
+/// for the file of `-logfile`), or `PLACE_NOWHERE`.
+pub fn place(place: losat::web_adapter::TextPlace) -> u32 {
     match place {
         losat::web_adapter::TextPlace::StandardError => STREAM_DIAGNOSTICS,
         losat::web_adapter::TextPlace::LogFile => STREAM_RUN_FILES,
-        losat::web_adapter::TextPlace::Nowhere => ERROR_NOWHERE,
+        losat::web_adapter::TextPlace::Nowhere => PLACE_NOWHERE,
     }
 }
 

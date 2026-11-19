@@ -19,6 +19,22 @@ export interface RunFile {
   readonly bytes: Uint8Array;
 }
 
+/**
+ * Where messages of a run are, as the engine says (docs/web/abi_v2.md §5): where the run's messages go (its signal of
+ * stream 10, `RuntimeInfo.messages`), and where the error of an output that the run could not write is (its signal of
+ * stream 9). `diagnostics`, the run's diagnostics (stream 3, the CLI's standard error); `logfile`, the file of the run's
+ * -logfile (stream 8: TBLASTX writes the messages of its run there, as the CLI does); `nowhere`, where -logfile names no
+ * file (TBLASTX's `-logfile ""` or `-logfile /dev/null`, which write them nowhere, as the CLI does). Line WQA's sweep,
+ * D7, 2026-11-20.
+ */
+export type MessagePlace = 'diagnostics' | 'logfile' | 'nowhere';
+export const MESSAGE_PLACES: readonly MessagePlace[] = Object.freeze(['diagnostics', 'logfile', 'nowhere']);
+
+/** Whether `value` is a place of messages of a run (`MessagePlace`). */
+export function isMessagePlace(value: unknown): value is MessagePlace {
+  return MESSAGE_PLACES.includes(value as MessagePlace);
+}
+
 const LOCAL_HEADER = 0x04034b50;
 const CENTRAL_HEADER = 0x02014b50;
 const END_OF_CENTRAL_DIRECTORY = 0x06054b50;

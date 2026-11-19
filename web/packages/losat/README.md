@@ -82,7 +82,7 @@ each, it sends stream 9 (`DISCARD_STREAM`), whose 8 bytes are that output's stre
 the place of its error, each a little-endian unsigned integer (`discardSignal` reads them), and the
 host drops everything that arrived of that stream, which then stays empty. The place is where the
 run writes its messages: stream 3, or the file of `-logfile` (stream 8), where TBLASTX with
-`-logfile NAME` writes them as the command line does, or nowhere (`ERROR_NOWHERE`: TBLASTX's
+`-logfile NAME` writes them as the command line does, or nowhere (`PLACE_NOWHERE`: TBLASTX's
 `-logfile ""` or `-logfile /dev/null`). The signal comes for each output that fails on its own,
 whether or not some of its chunks were sent, and for each output of a search that fails in a run of
 two searches, and the run goes on with the other outputs. These signals are the only sign of an
@@ -100,6 +100,13 @@ file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
 second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
 run fails, `runFilesOf(error)` returns it.
+
+`RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
+to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of
+`-logfile`, where TBLASTX with `-logfile NAME` writes them as the command line does) or `'nowhere'`
+(TBLASTX's `-logfile ""` or `-logfile /dev/null`). The engine sends it once per run, before the
+outputs, on stream 10 (`MESSAGES_STREAM`): 4 bytes, the place as a little-endian unsigned integer
+(`messagesSignal` reads it). An empty stream 3 means no warnings only where it is `'diagnostics'`.
 
 In a worker or in Node, the serial module can also be called directly:
 

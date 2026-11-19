@@ -12,3 +12,6 @@
   in Run details, or, for TBLASTX with `-logfile`, in that file under Outputs (where the command
   line writes it), or that it was not kept (`-logfile /dev/null`). Before, the results said that outfmt 0 showed the alignments of "the first 0
   subjects", or that the query had no hits.
+- LOSAT Web: Run details says where a run's warnings are when TBLASTX's `-logfile` takes them, as on
+  the command line: in that file under Outputs, or not kept (`-logfile /dev/null`). Before, it said
+  "The engine wrote no warnings." for such a run, whose warnings were in the file.

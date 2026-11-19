@@ -12,11 +12,12 @@
 // later BLASTN searches. A search with -conffile gives the engine the registry file for that
 // search only, and the files that a run makes besides its outputs (stream 8: the file of
 // -logfile) come back with its result, or with its error when it fails (line RG E1w-3b); they
-// never go to the Data worker.
+// never go to the Data worker. Where the run's messages go (stream 10: the diagnostics, the file of
+// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type RunFile } from '../../domain/run-files.js';
+import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';
-import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputErrorPlace, type OutputStream } from '../../ports/run-output.js';
+import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
 import {
@@ -26,6 +27,8 @@ import {
   FILE_REGISTRY,
   FILE_WINDOW_MASKER_COUNTS,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
@@ -231,12 +234,14 @@ export class EngineRuntime {
       // The engine's standard error of this search only, for a stop message.
       loaded.instance.wasi.clear();
       phase('running');
-      // The run's files (stream 8) stay here, apart from the outputs.
+      // The run's files (stream 8) stay here, apart from the outputs, and so does where its messages go (stream 10).
       const archive: Uint8Array[] = [];
+      let messages: MessagePlace | undefined;
       try {
         abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
+          else if (stream === MESSAGES_STREAM) messages = messagesPlace(bytes);
           else if (stream === DISCARD_STREAM) writer.discard(...discardedOutput(bytes));
           else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
         });
@@ -246,6 +251,7 @@ export class EngineRuntime {
         throw abi.stoppedBy === undefined ? failedWithFiles(error, archive) : error;
       }
       const runFiles = readRunFiles(archive);
+      if (messages === undefined) throw new Error(`the engine did not say where the messages of the run go (stream ${MESSAGES_STREAM})`);
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
       loaded.ran.add(request.argv.join('\0'));
@@ -262,6 +268,7 @@ export class EngineRuntime {
         ...(fallbackReason === undefined ? {} : { fallbackReason }),
         memory: { linearBytesBefore, linearBytesAfter, instanceRuns: loaded.runs },
         subjectRetained,
+        messages,
         ...(shownIds === undefined ? {} : { shownIds }),
         ...(windowMasker === undefined ? {} : { windowMasker }),
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
@@ -458,16 +465,27 @@ function messageOf(error: unknown): string {
  * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
  * file of -logfile) or nowhere. Another number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): [RunOutput, OutputErrorPlace] {
+function discardedOutput(bytes: Uint8Array): [RunOutput, MessagePlace] {
   const { stream, errorStream } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  const error = errorStream === undefined ? 'nowhere' : ERROR_PLACES.get(errorStream);
+  const error = errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
   if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
   return [stream, error];
 }
 
-/** The place of an error that a signal of stream 9 gives as a stream (ABI v2 §5). */
-const ERROR_PLACES: ReadonlyMap<number, OutputErrorPlace> = new Map([
+/**
+ * Where the run's messages go, as the engine's signal of stream 10 says (ABI v2 §5): stream 3 (the diagnostics), stream 8
+ * (the run's files: the file of -logfile) or nowhere. Another number breaks the ABI (line WQA's sweep, D7, 2026-11-20).
+ */
+function messagesPlace(bytes: Uint8Array): MessagePlace {
+  const stream = messagesSignal(bytes);
+  const place = stream === undefined ? 'nowhere' : PLACES.get(stream);
+  if (place === undefined) throw new Error(`the engine put the messages of the run on stream ${stream}, which holds no messages`);
+  return place;
+}
+
+/** The place of messages that a signal of stream 9 or 10 gives as a stream (ABI v2 §5). */
+const PLACES: ReadonlyMap<number, MessagePlace> = new Map([
   [DIAGNOSTICS_STREAM, 'diagnostics'],
   [RUN_FILES_STREAM, 'logfile'],
 ]);

@@ -7,7 +7,8 @@ import { noHspReason, type ResultsState } from '../application/results';
 import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
 import { NO_HSP_TEXT } from './no-hsp-text';
-import { outputErrorPlace } from './output-error-text';
+import { placeParts } from './message-place-text';
+import PlaceWords from './PlaceWords.vue';
 import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ state: ResultsState }>();
@@ -22,15 +23,15 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
 const sorted = computed(() => props.state.loaded?.limits.sorted === true);
-/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; '' where it was written. */
+/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; undefined where it was written. */
 const outfmt0Error = computed(() => {
   const loaded = props.state.loaded;
-  return loaded?.outfmt0Error === undefined ? '' : outputErrorPlace(loaded.outfmt0Error, loaded.run);
+  return loaded?.outfmt0Error === undefined ? undefined : placeParts(loaded.outfmt0Error, loaded.run);
 });
-/** Where the error of outfmt 6 and 7 is, in words, when the run could not write them, as the engine said; '' where they were written. */
+/** Where the error of outfmt 6 and 7 is, in words, when the run could not write them, as the engine said; undefined where they were written. */
 const tabularError = computed(() => {
   const loaded = props.state.loaded;
-  return loaded?.tabularError === undefined ? '' : outputErrorPlace(loaded.tabularError, loaded.run);
+  return loaded?.tabularError === undefined ? undefined : placeParts(loaded.tabularError, loaded.run);
 });
 /** Why the selected query shows no HSP (the Dot Plot tab says the same in place of its plot). */
 const reason = computed(() => noHspReason(props.state));
@@ -48,11 +49,11 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
     </div>
     <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
       <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved"
-      error<template v-if="tabularError !== ''">, {{ tabularError }}</template>), so this run has no HSP records; outfmt 0 is written as BLAST+
+      error<template v-if="tabularError !== undefined">, <PlaceWords :parts="tabularError" /></template>), so this run has no HSP records; outfmt 0 is written as BLAST+
       writes it.
     </p>
     <p v-else-if="reason === 'no-tabular-output'" class="notice" data-testid="results-notice" data-kind="no-tabular-output">
-      {{ NO_HSP_TEXT['no-tabular-output'] }} Their error is {{ tabularError }}.
+      {{ NO_HSP_TEXT['no-tabular-output'] }} Their error is <PlaceWords :parts="tabularError ?? []" />.
     </p>
     <p v-else-if="reason === 'no-queries'" class="notice" data-testid="results-notice" data-kind="no-queries">
       {{ NO_HSP_TEXT['no-queries'] }}
@@ -75,8 +76,8 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         ({{ limitGiven ? '' : 'the default of ' }}<span class="option-name">{{ limitFlag }}</span>: {{ formatCount(limit) }}). More
         subjects may match; a search with a larger <span class="option-name">{{ limitFlag }}</span> would show them.
       </p>
-      <p v-if="totals.subjects > 0 && outfmt0Error !== ''" class="notice" data-testid="results-notice" data-kind="outfmt0-failed">
-        outfmt 0 could not be written (its error is {{ outfmt0Error }}), so no alignment is linked to this query's
+      <p v-if="totals.subjects > 0 && outfmt0Error !== undefined" class="notice" data-testid="results-notice" data-kind="outfmt0-failed">
+        outfmt 0 could not be written (its error is <PlaceWords :parts="outfmt0Error" />), so no alignment is linked to this query's
         {{ plural(totals.subjects, 'subject') }}. outfmt 6 and 7 hold the HSPs.
       </p>
       <p

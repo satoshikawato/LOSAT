@@ -6,7 +6,7 @@ import type { OutputFormat } from '../domain/output-format.js';
 import type { ResolvedDefault } from '../domain/parameters.js';
 import type { ProgramId } from '../domain/programs.js';
 import type { CountsFile, CountsUse } from '../domain/counts.js';
-import type { RegistryFile, RunFile } from '../domain/run-files.js';
+import type { MessagePlace, RegistryFile, RunFile } from '../domain/run-files.js';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -110,6 +110,12 @@ export interface RuntimeInfo {
   readonly memory?: EngineMemory;
   /** The engine searched the subject that it held from an earlier search (plan §4.6 R1). */
   readonly subjectRetained?: boolean;
+  /**
+   * Where the run's messages go, as the engine said (ABI v2 §5, stream 10): the messages that the CLI writes to its
+   * standard error without -logfile. The diagnostics, or, for TBLASTX with -logfile, the file of -logfile or nowhere,
+   * as on the CLI (line WQA's sweep, D7, 2026-11-20).
+   */
+  readonly messages: MessagePlace;
   /**
    * The IDs that the run's outputs show for its records, where the engine read them from the
    * deflines (-parse_deflines; line WQA's sweep, D7, 2026-11-19).

@@ -159,7 +159,7 @@
       "comparator": "mixed",
       "comparator_note": "NCBI executed for the native pairs (blastp 9 x 3 repeats, tblastx 20 x repeats); serial Wasm = raw-byte equality with native",
       "tool": "LOSAT/tests/certify_integrated_runtime_v010.py --expected-sha C",
-      "where": "local",
+      "where": "ws",
       "expected_duration": "3-5.6 h",
       "evidence_key": "local_evidence.A"
     },
@@ -191,7 +191,7 @@
       "comparator": "ncbi_executed",
       "comparator_note": "run_oracle.py re-runs the oracle and fails on any hash different from the frozen column; then LOSAT vs frozen at 1, 2, 4 threads",
       "tool": "docs/evidence/losat_web_e2a/run_oracle.py then check_losat.py",
-      "where": "local",
+      "where": "ws",
       "expected_duration": "about 1 h",
       "evidence_key": "local_evidence.D"
     },
@@ -202,7 +202,7 @@
       "comparator": "ncbi_executed",
       "comparator_note": "db_search_fixtures.py freeze into a scratch checkout of C; git status --porcelain of the frozen files must be empty; then check",
       "tool": "LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin <oracle>, then check --losat <C binary>",
-      "where": "local",
+      "where": "ws",
       "expected_duration": "under 1 h",
       "evidence_key": "local_evidence.E"
     },

@@ -825,7 +825,7 @@ struct Failed {
     /// the run's messages go there (`CallerStart::post`); `None` for LOSAT's own errors.
     native: Option<Vec<u8>>,
     /// Whether the search had written a byte of any of its formats. The host discards
-    /// the streams of a failed run, but a search that wrote nothing leaves the other
+    /// the output streams of a failed run, but a search that wrote nothing leaves the other
     /// searches' streams as the CLI writes them.
     wrote: bool,
 }
@@ -1260,8 +1260,11 @@ fn give_blastn_counts(
     }
 }
 
-/// Runs the searches of the run and emits its streams. On failure nothing more is emitted
-/// and the host discards what it received.
+/// Runs the searches of the run and emits its streams. On failure the output streams stop, and
+/// the host discards what it received of them; the run still sends stream 3 (what the CLI writes
+/// to its standard error before the error that ends the run, without that error, which is the
+/// run's) and stream 8 (the file of `-logfile`), which the host keeps with the failed run
+/// (docs/web/abi_v2.md §5).
 ///
 /// Without `-num_descriptions` and `-num_alignments` this is one search that writes every
 /// format. With them it is one search per distinct hit list size of the formats
@@ -1287,7 +1290,10 @@ fn give_blastn_counts(
 /// (`outputs`). It is followed by what the CLI's standard error for format 0 adds to it (the
 /// lines of the format 0 search's diagnostics that stream 3 does not hold yet, then its error
 /// when it failed, or the refusal of format 0 when it failed alone), so that each text comes
-/// once (`Diagnostics`).
+/// once (`Diagnostics`). In a run that fails it stops before the error that ends the run: where
+/// the format 0 search ends it, stream 3 has that search's warnings that it does not hold yet,
+/// and where every search failed, the format 0 search's warnings and error follow the tabular
+/// search's warnings.
 pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Result<(), String> {
     let files = Arc::new(RunFileArchive::default());
     let run_files = RunFiles::Receiver(files.clone());
@@ -1434,6 +1440,8 @@ fn search_all(
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
     // What the first search of a run of several wrote to stream 3.
     let mut first_diagnostics = Vec::new();
+    // The search whose error ends the run (`fails_run`); no search follows it.
+    let mut ending = None;
     // The searches of the run share one thread pool (`with_run_pool`): a browser holds a thread
     // worker for every thread that may start, and the threads of a pool may not have returned when
     // the next pool starts, so each pool of its own needed thread workers of its own.
@@ -1467,34 +1475,37 @@ fn search_all(
             };
             // The CLI rejects an `-outfmt` whose custom delimiter a field uses: the failure of its
             // search (the tabular one) is never tolerated.
-            if let Err(failed) = &result {
-                if fails_run(failed, rejected && custom_accepted) {
-                    posted.clone_from(&failed.native);
-                    return Err(failed.message.clone());
-                }
-            }
+            let ends =
+                matches!(&result, Err(failed) if fails_run(failed, rejected && custom_accepted));
             outcomes.push((result, scratch));
+            if ends {
+                ending = Some(outcomes.len() - 1);
+                break;
+            }
         }
         Ok(())
     })?;
-    if outcomes.iter().all(|(result, _)| result.is_err()) {
-        // The CLI fails every format; the error is that of the tabular formats.
-        return Err(match outcomes.remove(0).0 {
-            Err(failed) => {
-                *posted = failed.native;
-                failed.message
-            }
-            Ok(_) => unreachable!("every search failed"),
-        });
-    }
+    // When every search failed, the CLI fails every format; the error is that of the tabular
+    // formats.
+    let ending = ending.or_else(|| {
+        outcomes
+            .iter()
+            .all(|(result, _)| result.is_err())
+            .then_some(0)
+    });
     // Stream 3: the CLI's standard error of each search in turn, its warnings and then its error
-    // or the refusals of its formats that failed alone, each text once (`Diagnostics`).
+    // or the refusals of its formats that failed alone, each text once (`Diagnostics`). In a run
+    // that fails, up to the error that ends it, which is the run's error and not stream 3's: a
+    // format 0 search that ends a run of two searches gives its warnings that stream 3 does not
+    // hold yet, after the tabular search's error where that search failed alone (WQA D3 review,
+    // 2026-11-19).
     let mut texts = Diagnostics::after(&first_diagnostics);
     for (position, (result, scratch)) in outcomes.iter().enumerate() {
         if position > 0 {
             texts.warnings(scratch, &mut *diagnostics);
         }
         match result {
+            Err(failed) if ending == Some(position) => texts.held(&failed.cli_stderr),
             Err(failed) => texts.error(&failed.cli_stderr, &mut *diagnostics),
             Ok(done) => {
                 for (_, refused) in &done.refused {
@@ -1502,6 +1513,15 @@ fn search_all(
                 }
             }
         }
+    }
+    if let Some(position) = ending {
+        return Err(match outcomes.swap_remove(position).0 {
+            Err(failed) => {
+                *posted = failed.native;
+                failed.message
+            }
+            Ok(_) => unreachable!("the search that ends the run failed"),
+        });
     }
     let mut searched: Vec<Searched> = Vec::new();
     let mut tabular_failed = false;
@@ -1613,6 +1633,14 @@ impl<'t> Diagnostics<'t> {
     fn error(&mut self, text: &'t [u8], sink: &mut dyn std::io::Write) {
         if !self.errors.contains(&text) {
             let _ = sink.write_all(text);
+            self.held(text);
+        }
+    }
+
+    /// The error that ends the run, `text`, which the run gives as its error: stream 3 does not
+    /// write it, and holds it as written, so that no later search writes it again.
+    fn held(&mut self, text: &'t [u8]) {
+        if !self.errors.contains(&text) {
             self.errors.push(text);
             self.hold(text);
         }
@@ -3699,9 +3727,17 @@ mod tests {
             String::from_utf8(streams[&3].clone()).unwrap(),
             "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nError: a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN\n"
         );
-        // The same on the other options of the format 0 search: both searches rejected fails.
+        // The same on the other options of the format 0 search: both searches rejected fails,
+        // with the error of the tabular formats. Stream 3 is the CLI's standard error for
+        // outfmt 6 up to that error, then the format 0 search's error, which the CLI writes for
+        // outfmt 0 (native LOSAT, 2026-11-19; NCBI crashes there).
         let both = [&words[..], &["-num_alignments", "0"]].concat();
-        assert!(run(&both, &query, &subject).is_err());
+        let (error, failed) = failed_streams(&both, &query, &subject);
+        assert!(error.contains("No hits are being saved"), "{error}");
+        assert_eq!(
+            text(&failed[&STREAM_DIAGNOSTICS]),
+            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nError: a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN\n"
+        );
         assert!(validate(&both).is_err());
     }
 
@@ -4492,6 +4528,52 @@ mod tests {
             }
         });
         (error, streams)
+    }
+
+    // A format 0 search that ends a run of two searches (§7) gives its warnings too. BLASTP with
+    // `-num_alignments 0` and a subject whose first record has no residues and whose second is
+    // titled `, ,`: the tabular search fails alone before it reads the subject (the CLI's
+    // standard error for `-outfmt 6`: the handler's warning, then NCBI's error), and the format 0
+    // search, the argv's own `-outfmt 0`, reads the subject, warns, and fails the run on the
+    // title, where the CLI writes the same warning before its error (native LOSAT and NCBI BLAST+
+    // 2.17.0 2026-11-19, `fix-diagnostics/native/twosearch`; NCBI crashes after the warning). Stream
+    // 3 is the CLI's standard error for `-outfmt 6` followed by the warning of `-outfmt 0`.
+    #[test]
+    fn a_format_0_search_that_fails_the_run_gives_its_warnings() {
+        let query = [FastaRecord::new(
+            "Query_1",
+            b"p",
+            b"MKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMAWRSTY",
+        )];
+        let subject = [
+            FastaRecord::new("Subject_1", b"empty record", b""),
+            FastaRecord::new(
+                "Subject_2",
+                b", ,",
+                b"MKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMA",
+            ),
+        ];
+        let words = [
+            "blastp",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-num_alignments",
+            "0",
+        ];
+        let (error, streams) = failed_streams(&words, &query, &subject);
+        assert!(
+            error.contains("subject record 2 has a title of punctuation"),
+            "{error}"
+        );
+        assert_eq!(
+            text(streams.get(&STREAM_DIAGNOSTICS).map_or(&[][..], Vec::as_slice)),
+            "Warning: [blastp] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\nWarning: [blastp] Subject_1 empty record: Subject sequence contains no data\n"
+        );
+        for stream in [0, 6, 7, STREAM_HITS] {
+            assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
+        }
     }
 
     // A run that fails gives on stream 3 what the command line writes to its standard error before

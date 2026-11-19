@@ -84,6 +84,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
         let error = run_local_blastp(
             args,
             &records(&query, ReaderConfig::query("BLASTP", true, true)),
+            &crate::api::QueryEnd::Input,
             &records(&subject, ReaderConfig::subject("BLASTP", true, true)),
             "",
             "",
@@ -111,6 +112,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
         let error = run_local_blastn(
             args,
             &records(&nquery, ReaderConfig::query("BLASTN", false, true)),
+            &crate::api::QueryEnd::Input,
             &records(&nsubject, ReaderConfig::subject("BLASTN", false, true)),
             &mut outputs,
         )
@@ -178,12 +180,14 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
                 Commands::Tblastn(args) => run_local_tblastn(
                     args,
                     &records(query, ReaderConfig::query("TBLASTN", true, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(&nsubject, ReaderConfig::subject("TBLASTN", false, true)),
                     &mut outputs,
                 ),
                 Commands::Tblastx(args) => run_local_tblastx(
                     args,
                     &records(query, ReaderConfig::query("TBLASTX", false, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(&nsubject, ReaderConfig::subject("TBLASTX", false, true)),
                     &mut outputs,
                 ),
@@ -338,6 +342,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
                 Commands::Blastp(args) => run_local_blastp(
                     args,
                     &records(query, ReaderConfig::query("BLASTP", true, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(subject, ReaderConfig::subject("BLASTP", true, true)),
                     "",
                     "",
@@ -346,24 +351,28 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
                 Commands::Blastn(args) => run_local_blastn(
                     args,
                     &records(query, ReaderConfig::query("BLASTN", false, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(subject, ReaderConfig::subject("BLASTN", false, true)),
                     &mut outputs,
                 ),
                 Commands::Blastx(args) => run_local_blastx(
                     args,
                     &records(query, ReaderConfig::query("BLASTX", false, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(subject, ReaderConfig::subject("BLASTX", true, true)),
                     &mut outputs,
                 ),
                 Commands::Tblastn(args) => run_local_tblastn(
                     args,
                     &records(query, ReaderConfig::query("TBLASTN", true, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(subject, ReaderConfig::subject("TBLASTN", false, true)),
                     &mut outputs,
                 ),
                 Commands::Tblastx(args) => run_local_tblastx(
                     args,
                     &records(query, ReaderConfig::query("TBLASTX", false, true)),
+                    &crate::api::QueryEnd::Input,
                     &records(subject, ReaderConfig::subject("TBLASTX", false, true)),
                     &mut outputs,
                 ),

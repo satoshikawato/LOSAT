@@ -15,7 +15,7 @@ use anyhow::Result;
 /// 		return true;
 /// ```
 /// `in >> c` skips the characters of C's `isspace`: the test is `NStr::IsBlank`'s
-/// (`ncbi_str::is_blank`), public for the Web adapter (`web_adapter::is_blank`).
+/// (`ncbi_str::is_blank`); the library API's `read_query_records` reads it too.
 pub fn is_blank(bytes: &[u8]) -> bool {
     crate::ncbi_str::is_blank(bytes)
 }

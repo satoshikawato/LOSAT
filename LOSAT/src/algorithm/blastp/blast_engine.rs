@@ -34,6 +34,7 @@ use crate::algorithm::tblastx::lookup::{
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
+use crate::api::QueryEnd;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
@@ -6216,6 +6217,7 @@ fn search_cli(
 pub fn run_local(
     mut args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[FastaRecord],
     query_label: &str,
     subject_label: &str,
@@ -6244,11 +6246,12 @@ pub fn run_local(
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
-            let no_query = query_records.is_empty() && !pssm_query(&args);
+            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
                     args,
                     query_records,
+                    query_end,
                     subject_records,
                     query_label,
                     subject_label,
@@ -6261,6 +6264,7 @@ pub fn run_local(
     run_local_formats(
         args,
         query_records,
+        query_end,
         subject_records,
         query_label,
         subject_label,
@@ -6444,6 +6448,7 @@ fn pssm_check_scope(args: &BlastpArgs) -> crate::algorithm::psiblast::pssm::Pssm
 fn run_local_formats(
     args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[FastaRecord],
     _query_label: &str,
     subject_label: &str,
@@ -6519,7 +6524,7 @@ fn run_local_formats(
     search(
         args,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         &subjects,
         None,
         subject_label,
@@ -6546,6 +6551,7 @@ fn run_local_formats(
 pub fn run_local_database(
     mut args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -6566,13 +6572,13 @@ pub fn run_local_database(
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
-            let no_query = query_records.is_empty() && !pssm_query(&args);
+            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, settings, view)
+                search_database(args, query_records, query_end, settings, view)
             });
             outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, settings, outputs),
+        None => search_database(args, query_records, query_end, settings, outputs),
     }
 }
 
@@ -6580,6 +6586,7 @@ pub fn run_local_database(
 fn search_database(
     args: BlastpArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -6618,7 +6625,7 @@ fn search_database(
     search(
         resolved,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         &no_subjects,
         Some(&database),
         "",

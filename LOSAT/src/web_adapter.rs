@@ -114,11 +114,12 @@ pub use crate::config::ScoringMatrix;
 // the registered inputs; its records are `api::FastaRecord`. The inputs of a run whose reading
 // needs its options (`-parse_deflines`: the ids of the deflines, read in one scope of ids for the
 // query and the subjects) are read together, by the reading of the library API's `read_inputs`.
-pub use crate::api::input::{parse_deflines_of, read_search_inputs};
+// A query is read as the command line's query batches read it (`read_query_records`): the records
+// before the reader's error, and the error, which the run meets in its batch.
+pub use crate::api::input::{parse_deflines_of, read_query_records, read_search_inputs};
 pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
-pub use crate::blastinput::input_files::is_blank;
 
 /// The options of `program`'s command line that the browser's searches of records do not take:
 /// the search strategy file, which the library API refuses too (`api::search::file_options`), and

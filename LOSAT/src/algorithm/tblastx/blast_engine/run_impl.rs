@@ -1813,6 +1813,7 @@ fn search_cli(
 pub fn run_local(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1840,9 +1841,10 @@ pub fn run_local(
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local(args, query_records, subject_records, view)
+                run_local(args, query_records, query_end, subject_records, view)
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            let no_query = query_records.is_empty() && query_end.is_input();
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
     // The thread count is checked before the inputs are read, as on the command line (`run`).
@@ -1871,7 +1873,7 @@ pub fn run_local(
     search(
         args,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         query_range,
         SubjectSource::Fasta {
             records: searched_subjects,
@@ -1900,6 +1902,7 @@ pub fn run_local(
 pub fn run_local_database(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1922,11 +1925,12 @@ pub fn run_local_database(
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, settings, view)
+                search_database(args, query_records, query_end, settings, view)
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, settings, outputs),
+        None => search_database(args, query_records, query_end, settings, outputs),
     }
 }
 
@@ -1934,6 +1938,7 @@ pub fn run_local_database(
 fn search_database(
     mut args: TblastxArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1951,7 +1956,7 @@ fn search_database(
     search(
         args,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         query_range,
         SubjectSource::Database(&database),
         outputs,

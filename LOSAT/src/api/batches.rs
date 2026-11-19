@@ -43,7 +43,7 @@ use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
+use crate::blastinput::seq_range::{next_ranged_batch, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
@@ -206,6 +206,10 @@ pub struct Batches<'a> {
     /// The query records that NCBI's reader skips (`-query_loc`).
     skipped: Vec<bool>,
     next_query: usize,
+    /// Whether the end of the query records (`Inputs::query_end`: blank lines or a reader error)
+    /// is still to come: in the batch that reads past the last record, or in a batch of its own
+    /// when the last batch reached its size.
+    end_pending: bool,
     hsps_before: usize,
     searched_one: bool,
     finished: bool,
@@ -258,6 +262,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             skipped: vec![false; lengths.len()],
             lengths,
             next_query: 0,
+            end_pending: false,
             hsps_before: 0,
             searched_one: false,
             finished: false,
@@ -311,6 +316,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         lengths,
         skipped,
         next_query: 0,
+        end_pending: inputs.pssm.is_none() && !inputs.end().is_input(),
         hsps_before: 0,
         searched_one: false,
         finished: false,
@@ -329,23 +335,36 @@ impl Batches<'_> {
         self.lengths.len()
     }
 
-    /// The records of the next batch. A batch size of 0 reads no record: the rest goes to the
-    /// program, which fails as the command line fails (no batch follows either way).
-    fn next_range(&self) -> Range<usize> {
+    /// The records of the next batch, and whether the batch reached its size. A batch size of 0
+    /// reads no record: the rest goes to the program, which fails as the command line fails (no
+    /// batch follows either way).
+    fn next_range(&self) -> (Range<usize>, bool) {
         let start = self.next_query;
-        let end = next_ranged_batch_end(&self.lengths, &self.skipped, start, self.sizes.current());
-        start..if end > start { end } else { self.lengths.len() }
+        let (end, reached) =
+            next_ranged_batch(&self.lengths, &self.skipped, start, self.sizes.current());
+        if end > start {
+            (start..end, reached)
+        } else {
+            (start..self.lengths.len(), false)
+        }
     }
 
-    /// Searches the batch `range`, as the command line's loop searches it.
-    fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
+    /// Searches the batch `range`, as the command line's loop searches it. The end of the query
+    /// records comes in the batch that reads past the last record before reaching its size
+    /// (`reads_on`), and only there (line WQA's D10, 2026-11-19).
+    fn search_batch(&mut self, range: Range<usize>, reads_on: bool) -> Result<Batch, Error> {
+        let ends_reading = reads_on && range.end == self.lengths.len();
         let inputs = match self.inputs.pssm {
             Some(_) => self.inputs,
             None => Inputs {
                 query: &self.inputs.query[range.clone()],
+                query_end: self.inputs.query_end.filter(|_| ends_reading),
                 ..self.inputs
             },
         };
+        if ends_reading {
+            self.end_pending = false;
+        }
         let mut command = self.search.command(inputs)?;
         let query_range = query_range_of(&command);
         match &mut command {
@@ -468,14 +487,15 @@ impl Iterator for Batches<'_> {
                 diagnostics: std::mem::take(&mut self.start_messages),
             }));
         }
-        // Queries without a record are one call: NCBI's `Query is Empty!`.
-        let done = self.next_query >= self.lengths.len() && self.searched_one;
+        // Queries without a record are one call: NCBI's `Query is Empty!`. An end of the records
+        // that the last batch did not meet (it reached its size) is a batch of its own.
+        let done = self.next_query >= self.lengths.len() && self.searched_one && !self.end_pending;
         if self.finished || done {
             return None;
         }
-        let range = self.next_range();
+        let (range, reached) = self.next_range();
         self.next_query = range.end;
-        let batch = self.search_batch(range);
+        let batch = self.search_batch(range, !reached);
         self.searched_one = true;
         self.finished = batch.is_err();
         Some(batch)

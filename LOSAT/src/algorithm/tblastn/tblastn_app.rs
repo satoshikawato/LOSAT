@@ -17,6 +17,7 @@ use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
+use crate::api::QueryEnd;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
@@ -1109,6 +1110,7 @@ fn before_prolog(
 pub fn run_local(
     mut args: TblastnArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1135,14 +1137,15 @@ pub fn run_local(
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
-            let no_query = query_records.is_empty() && args.in_pssm.is_none();
+            let no_query =
+                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, subject_records, view)
+                run_local_formats(args, query_records, query_end, subject_records, view)
             });
             return outputs.finish_archive(&handle, no_query, result);
         }
     }
-    run_local_formats(args, query_records, subject_records, outputs)
+    run_local_formats(args, query_records, query_end, subject_records, outputs)
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
@@ -1212,6 +1215,7 @@ fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> R
 pub fn run_local_database(
     mut args: TblastnArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1232,13 +1236,14 @@ pub fn run_local_database(
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
-            let no_query = query_records.is_empty() && args.in_pssm.is_none();
+            let no_query =
+                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, settings, view)
+                search_database(args, query_records, query_end, settings, view)
             });
             outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, settings, outputs),
+        None => search_database(args, query_records, query_end, settings, outputs),
     }
 }
 
@@ -1246,6 +1251,7 @@ pub fn run_local_database(
 fn search_database(
     mut args: TblastnArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1281,7 +1287,9 @@ fn search_database(
             outputs,
         );
     }
-    if query_records.is_empty() {
+    // Records of an input read to its end; an end that reads past them (blank lines, a reader
+    // error) is met in the first batch (`QueryEnd`).
+    if query_records.is_empty() && query_end.is_input() {
         outputs
             .diagnostics
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
@@ -1294,7 +1302,7 @@ fn search_database(
         resolved,
         batch_size,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         &[],
         &crate::blastinput::seq_range::Placements::default(),
         None,
@@ -1306,6 +1314,7 @@ fn search_database(
 fn run_local_formats(
     mut args: TblastnArgs,
     query_records: &[FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1362,7 +1371,9 @@ fn run_local_formats(
             outputs,
         );
     }
-    if query_records.is_empty() {
+    // Records of an input read to its end; an end that reads past them (blank lines, a reader
+    // error) is met in the first batch (`QueryEnd`).
+    if query_records.is_empty() && query_end.is_input() {
         outputs
             .diagnostics
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
@@ -1376,7 +1387,7 @@ fn run_local_formats(
         resolved,
         batch_size,
         query_records,
-        QueryReading::Records,
+        query_end.reading(),
         searched_subjects,
         subject_placements,
         None,

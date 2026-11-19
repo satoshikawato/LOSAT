@@ -20,6 +20,7 @@ use super::{
 };
 use crate::algorithm::common::database::library_subject;
 use crate::api::local_blast::{FormatProbe, ReportOutputs, ReportedSubject};
+use crate::api::QueryEnd;
 use crate::blastinput::app::{self, Program};
 use crate::blastinput::fasta_reader;
 use crate::blastinput::seq_range::{
@@ -63,6 +64,7 @@ use std::io::{self, Write};
 pub fn run_local(
     mut args: BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[fasta_reader::FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -85,17 +87,20 @@ pub fn run_local(
                 search_records(
                     &args,
                     query_records,
+                    query_end,
                     subject_records,
                     (choices, resolutions),
                     Some(&handle),
                     view,
                 )
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
         None => search_records(
             &args,
             query_records,
+            query_end,
             subject_records,
             (choices, resolutions),
             None,
@@ -108,6 +113,7 @@ pub fn run_local(
 fn search_records(
     args: &BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
+    query_end: &QueryEnd,
     subject_records: &[fasta_reader::FastaRecord],
     (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
     archive: Option<&crate::report::archive::ArchiveHandle>,
@@ -164,7 +170,9 @@ fn search_records(
     //            	return BLAST_EXIT_SUCCESS;
     //         }
     // ```
-    if query_records.is_empty() {
+    // Records of an input read to its end; an end that reads past them (blank lines, a reader
+    // error) is met in the first batch (`reader_batches`).
+    if query_records.is_empty() && query_end.is_input() {
         diagnostics.write_all(b"Warning: [blastx] Query is Empty!\n")?;
         return Ok(());
     }
@@ -174,6 +182,7 @@ fn search_records(
     let xml_scan = scan_xml_titles(
         &resolved,
         query_records,
+        query_end,
         args.lcase_masking,
         query_range,
         batch_size,
@@ -220,6 +229,7 @@ fn search_records(
         &RunReports {
             lowercase: args.lcase_masking,
             query_records,
+            query_end,
             query_range,
             batch_size,
             choices: &choices,
@@ -276,6 +286,8 @@ struct RunReports<'a> {
     /// `-lcase_masking`.
     lowercase: bool,
     query_records: &'a [fasta_reader::FastaRecord],
+    /// How the reading of the records ended (`reader_batches`).
+    query_end: &'a QueryEnd,
     query_range: Option<SequenceRange>,
     /// The letters of a reader batch.
     batch_size: usize,
@@ -316,6 +328,7 @@ struct RunReports<'a> {
 fn scan_xml_titles(
     resolved: &[ResolvedOptions],
     query_records: &[fasta_reader::FastaRecord],
+    query_end: &QueryEnd,
     lowercase: bool,
     query_range: Option<SequenceRange>,
     batch_size: usize,
@@ -339,6 +352,7 @@ fn scan_xml_titles(
     super::blast_xml::scan_queries(&resolved[0], holds_back, true, &mut |deliver| {
         reader_batches(
             query_records,
+            query_end,
             lowercase,
             query_range,
             batch_size,
@@ -377,9 +391,14 @@ fn batch_shown<'a>(
 /// starts more than one letter past its end is not searched and adds nothing, so the last batch
 /// can hold none (NCBI's `Empty CBlastQueryVector`). Only the batch being read is kept. The
 /// skipped records are kept for the batch's scope (`FastaRecord::skipped`) with `keep_skipped`
-/// (`input::FastaStream::keep_skipped`).
+/// (`input::FastaStream::keep_skipped`). After the records comes `end`, as BLASTX's reader meets
+/// it after the last record it read (`input::read_fasta_stream_batches`): a reader error stops the
+/// reading in the batch being read, after the messages of its records and of the record the reader
+/// failed on, so that batch is never delivered (line WQA's D10, 2026-11-19); blank lines alone, an
+/// input without a record, are a batch without a query (NCBI's `Empty CBlastQueryVector`).
 fn reader_batches(
     query_records: &[fasta_reader::FastaRecord],
+    end: &QueryEnd,
     lowercase: bool,
     query_range: Option<SequenceRange>,
     batch_size: usize,
@@ -427,7 +446,14 @@ fn reader_batches(
             (letters, records_read) = (0, 0);
         }
     }
-    if records_read > 0 {
+    if let QueryEnd::Error(error) = end {
+        if !error.warnings().is_empty() {
+            warn(error.warnings())?;
+        }
+        return Err(error.app_error());
+    }
+    let no_record = query_records.is_empty() && matches!(end, QueryEnd::BlankLines);
+    if records_read > 0 || no_record {
         super::input::attach_skipped(&mut batch, &mut skipped);
         deliver(&batch)?;
     }
@@ -580,6 +606,7 @@ fn write_run(
     let &RunReports {
         lowercase,
         query_records,
+        query_end,
         query_range,
         batch_size,
         choices,
@@ -667,6 +694,7 @@ fn write_run(
      -> Result<()> {
         reader_batches(
             query_records,
+            query_end,
             lowercase,
             query_range,
             batch_size,
@@ -1008,6 +1036,7 @@ fn write_run(
 pub fn run_local_database(
     mut args: BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1031,17 +1060,20 @@ pub fn run_local_database(
                 search_database(
                     &args,
                     query_records,
+                    query_end,
                     settings,
                     (choices, resolutions),
                     Some(&handle),
                     view,
                 )
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
         None => search_database(
             &args,
             query_records,
+            query_end,
             settings,
             (choices, resolutions),
             None,
@@ -1054,6 +1086,7 @@ pub fn run_local_database(
 fn search_database(
     args: &BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
+    query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
     archive: Option<&crate::report::archive::ArchiveHandle>,
@@ -1124,7 +1157,7 @@ fn search_database(
             )?;
         }
     }
-    if query_records.is_empty() {
+    if query_records.is_empty() && query_end.is_input() {
         outputs
             .diagnostics
             .write_all(b"Warning: [blastx] Query is Empty!\n")?;
@@ -1163,6 +1196,7 @@ fn search_database(
     let xml_scan = scan_xml_titles(
         &resolved,
         query_records,
+        query_end,
         args.lcase_masking,
         query_range,
         batch_size,
@@ -1174,6 +1208,7 @@ fn search_database(
         &RunReports {
             lowercase: args.lcase_masking,
             query_records,
+            query_end,
             query_range,
             batch_size,
             choices: &choices,

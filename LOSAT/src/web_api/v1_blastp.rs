@@ -112,6 +112,7 @@ pub(super) fn run_web_pair_bytes(
     run_local(
         args,
         &queries,
+        &crate::api::QueryEnd::Input,
         &subjects,
         query_label,
         subject_label,

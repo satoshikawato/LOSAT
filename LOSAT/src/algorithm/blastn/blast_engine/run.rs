@@ -8974,6 +8974,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
 pub fn run_local(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -8997,17 +8998,19 @@ pub fn run_local(
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, subject_records, view)
+                run_local_formats(args, query_records, query_end, subject_records, view)
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            let no_query = query_records.is_empty() && query_end.is_input();
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
-    run_local_formats(args, query_records, subject_records, outputs)
+    run_local_formats(args, query_records, query_end, subject_records, outputs)
 }
 
 fn run_local_formats(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -9066,7 +9069,7 @@ fn run_local_formats(
     search(
         args,
         SearchQueries::Records(query_records),
-        QueryReading::Records,
+        query_end.reading(),
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -9109,6 +9112,7 @@ fn run_local_formats(
 pub fn run_local_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -9134,11 +9138,26 @@ pub fn run_local_database(
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, output_formats, settings, view)
+                search_database(
+                    args,
+                    query_records,
+                    query_end,
+                    output_formats,
+                    settings,
+                    view,
+                )
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, output_formats, settings, outputs),
+        None => search_database(
+            args,
+            query_records,
+            query_end,
+            output_formats,
+            settings,
+            outputs,
+        ),
     }
 }
 
@@ -9146,6 +9165,7 @@ pub fn run_local_database(
 fn search_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
@@ -9173,7 +9193,7 @@ fn search_database(
     search(
         args,
         SearchQueries::Records(query_records),
-        QueryReading::Records,
+        query_end.reading(),
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -14857,6 +14877,7 @@ mod tests {
             run_local(
                 options.blastn,
                 &reader_records(&query, ReaderConfig::query("BLASTN", false, false)),
+                &crate::api::QueryEnd::Input,
                 &reader_records(&subject, ReaderConfig::subject("BLASTN", false, false)),
                 &mut ReportOutputs::single("6", OutputSink::Writer(&mut output), &mut stderr),
             )

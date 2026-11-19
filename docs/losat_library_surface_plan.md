@@ -555,3 +555,15 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | 入口 | `losat`（すべて）、`losat/domain`、`losat/ports`。内部（instance-use、protocol、thread host、memory keeper、runtime、warm-up）は出さない |
 | build（P-N1 の PR b） | `npm run build -w losat`（`LOSAT_WEB_REACTORS` が要る）が `dist/` を作る: tsc の JS と型（相対 import は `.js`、worker の URL も `.js`）、Engine worker の試験用の旗 `__LOSAT_TEST_HOOKS__` を `false` に（アプリの build の define と同じ。識別子だけを構文木で置き換える）、2 つの reactor（読み込みとガードは `build/reactors.ts`、アプリの build と同じ関数）と同一性の記録 `reactors/artifacts.json`、URL と digest の `losat/reactors`（`ENGINE_ASSETS`）、`abi.json`（package・engine の版と、serial reactor が返す `losat_web2_abi_version`）、公開用の `package.json`、README、LICENSE。版は `LOSAT/Cargo.toml` と同じでなければ build が止まる |
 | 関門 | web.yml の `v-abi` job: package を build して試験（`npm pack --dry-run` の中身が src の module ごとの JS と型・reactor・記録・README・LICENSE だけ、公開用の manifest、試験用の旗が残らない、ABI の表、reactor の digest、README の例が NCBI の凍結 bytes と同じ）、その `dist/reactors` で V-ABI quick、`npm pack` の tarball を artifact `npm-package`（7 日）に。`npm publish` は保守者（`dist/` で、または artifact の tarball で） |
+
+## 16. query の reader の誤りは、その record の batch で（線 WQA の D10、2026-11-19）
+
+CLI は query を batch ごとに読む（`CBlastInput::GetNextSeqBatch`、`blast_input.cpp:140-152`）。reader が読めない query record は、その前の batch の報告を書いたあと、その record を読む batch で run を終える。`read_inputs` は全部を先に読み、最初の報告の前に失敗していた。LOSAT Web も同じで、入力のカードが run の前に断っていた（DECISIONS 15：CLI と同じに始まり、同じに終わる）。
+
+| 項目 | 形 |
+|---|---|
+| 読む | `read_input_records(search, query, subject)` が `InputRecords { query, query_end, subject }` を返す。`query_end: QueryEnd` は `Input`（入力の終わり）、`BlankLines`（空行と comment 行だけ。NCBI の eEOF で batch が終わり、何も無ければ最初の batch に query が無く `Empty CBlastQueryVector`）、`Error(QueryError)`（reader の誤り。CLI の文言と、その record について reader がそれまでに書いた警告）。subject の誤りはここで失敗する（CLI は最初の query の前に subject を全部読む）。`read_inputs` は形を変えず、`Error` のときは従来どおり `Error::Input` |
+| 検索 | `Inputs::query_end(&end)`（`InputRecords::inputs`、`database`）。`run` と `run_batches` は records の後にその終わりを置き、CLI の batch と同じ所で誤りを返す。各 program の `run_local` は query の次に `query_end` を取り（`run_local(args, query, query_end, subject, outputs)`、blastp は subject の後にラベル 2 つ）、`QueryReading` に渡す。BLASTX の batch の繰り返しは、その batch で誤りを上げる |
+| CLI | CLI の読み方（`fasta_reader::read_queries`、`QueryReading`）は変えない |
+| LOSAT Web | adapter の `register` と `register_inputs` が `read_query_records` で読み、終わりを handle に持たせて run に渡す。scan は reader の誤りで止まり、`reader_error`（offset と文言）を返す（docs/web/abi_v2.md §4、§9） |
+| 試験 | `api/reader_end_tests.rs`：5 program で、2 番目の batch にある誤りの報告と誤りが CLI と一致すること、`run_batches` の終わり、comment 行だけの query |

@@ -386,10 +386,11 @@ pub fn emit_start(words: &[&str]) -> Result<(), String> {
 /// tables do not support, with NCBI's message (for a batch of one query), and TBLASTX's
 /// checks of its options alone (NCBI's `-evalue` check, the options that LOSAT's TBLASTX
 /// rejects).
-/// BLASTN's checks include the hit list size, which differs between the searches of a run
-/// (`search_groups`): the run is valid when at least one search is (`run` lets the others
-/// fail, see there), and the error is that of the first search, the tabular formats'.
-/// `run` leaves them to the engine, which reports them as the CLI does.
+/// BLASTN's and BLASTX's checks include the hit list size, which differs between the searches of
+/// a run (`search_groups`): they are those of the search of the argv's own format (`own_search`),
+/// whose outcome is the run's (`run`, `search_all`), as the CLI checks the argv's `-outfmt` alone.
+/// The other search's rejection fails only its formats, which the argv does not ask for.
+/// `run` leaves the other checks to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let started = start(
@@ -411,6 +412,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
     let groups = search_groups(&outputs(program, &requested), &command);
+    let own = &groups[own_search(&groups)];
     let custom_check = || custom_handler_check(program, custom);
     // A custom delimiter that a field uses makes the CLI reject the argv, whatever the hit list
     // sizes of the searches: its error is that of the CLI's checks with the argv's `-outfmt`, which
@@ -444,18 +446,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .map_err(|error| format!("{error:#}"))
             // The formatting handler comes after the query options (`process_options`).
             .and_then(|()| custom_check())
-            .and_then(|()| {
-                let mut first_error = None;
-                for group in &groups {
-                    match blastn_group_check(&mut args, group) {
-                        Ok(()) => return Ok(()),
-                        Err(error) => {
-                            first_error.get_or_insert(error);
-                        }
-                    }
-                }
-                first_error.map_or(Ok(()), Err)
-            })?,
+            .and_then(|()| blastn_group_check(&mut args, own))?,
         // The checks of the options read the formats as without `-outfmt` (`parse_run`); with an
         // `-outfmt` whose custom delimiter the CLI rejects they read the argv's (`with_custom`),
         // and fail as the CLI's.
@@ -480,26 +471,12 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
-        // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
-        // each format (the hit list size). Its ranges are read among them, where its run reads
-        // them: after LOSAT's limits of the options (`blastx::check_options`).
+        // The checks of the argv's own search's formats, as for BLASTN: BLASTX resolves its
+        // options for each format (the hit list size). Its ranges are read among them, where its
+        // run reads them: after LOSAT's limits of the options (`blastx::check_options`); the
+        // handler's check of a custom delimiter follows them.
         Commands::Blastx(args) => {
-            // The tabular search's formats hold the argv's `-outfmt`: its error is the run's.
-            if custom_rejected {
-                return blastx_group_check(&args, &groups[0]).and_then(|()| custom_check());
-            }
-            let mut first_error = None;
-            for group in &groups {
-                match blastx_group_check(&args, group) {
-                    Ok(()) => return Ok(()),
-                    Err(error) => {
-                        first_error.get_or_insert(error);
-                    }
-                }
-            }
-            if let Some(error) = first_error {
-                return Err(error);
-            }
+            blastx_group_check(&args, own).and_then(|()| custom_check())?;
         }
         _ => {}
     }
@@ -507,10 +484,10 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
 }
 
 /// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
-/// uses to separate its entries), with the CLI's message. `validate` and `run` ask it whether the
-/// CLI rejects the argv: `validate` then reports the error of the program's checks of the options
-/// with that `-outfmt`, which make it where the CLI does (BLASTN's right after the query range),
-/// and `run` tolerates no failed search. A run's engine makes it (`run_local`).
+/// uses to separate its entries), with the CLI's message. `validate` asks it whether the CLI
+/// rejects the argv, and then reports the error of the program's checks of the options with that
+/// `-outfmt`, which make it where the CLI does (BLASTN's right after the query range). A run's
+/// engine makes it (`run_local`) in the argv's own search, whose error is the run's (`search_all`).
 fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), String> {
     let Some(outfmt) = custom else {
         return Ok(());
@@ -525,8 +502,7 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
 /// BLASTN's checks of the options for the search of the output formats `group`, whose hit list
 /// size is the one the CLI derives for them: the checks that `run_local` makes before it reads
 /// a query (`process_options`: the counts of the report, `check_scoring_options`; then
-/// `check_losat_limits`). `validate` runs it for each search of a run, and `run` asks it which
-/// search is rejected (`group_rejected`).
+/// `check_losat_limits`). `validate` runs it for the argv's own search (`own_search`).
 ///
 /// It does not check the Karlin-Altschul tables (scores and gap costs without a row, NCBI's
 /// `Error: Substitution scores ...`) nor LOSAT's limit of greedy gap costs: a CLI run meets them
@@ -561,8 +537,8 @@ fn blastn_group_check(
 }
 
 /// BLASTX's checks (`blastx::check_options`) for the search of the output formats `group`, as
-/// `run_local` makes them before it searches. `validate` runs it for each search of a run, and
-/// `run` asks it which search is rejected (`group_rejected`).
+/// `run_local` makes them before it searches. `validate` runs it for the argv's own search
+/// (`own_search`).
 fn blastx_group_check(
     args: &losat::web_adapter::BlastxArgs,
     group: &[Output],
@@ -571,30 +547,17 @@ fn blastx_group_check(
     losat::web_adapter::check_blastx_options(args, &outfmts).map_err(|error| format!("{error:#}"))
 }
 
-/// Whether the options' checks reject the search of the output formats `group`, as the CLI
-/// rejects those formats alone because of their hit list size: BLASTN's and BLASTX's checks
-/// fail (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1;
-/// `blastx_group_check`), or, for the other programs, the hit list size is 0. `run` tolerates
-/// a failed search of a two-search run only for this reason (`fails_run`). With the checks
-/// themselves as the predicate, a search that fails them for another reason than its hit list
-/// (for example `-evalue 0`) is rejected as the other search is, so `run` fails with the
-/// tabular search's error, which `validate` reports.
-fn group_rejected(command: &mut Commands, group: &[Output]) -> bool {
-    match command {
-        Commands::Blastn(args) => blastn_group_check(args, group).is_err(),
-        Commands::Blastx(args) => blastx_group_check(args, group).is_err(),
-        _ => hit_list_size(command, group[0].number) == 0,
-    }
-}
-
-/// Whether the failure of one search fails the run. A failed search of a run of two
-/// searches is tolerated only when it wrote no byte of its formats and `rejected` says that
-/// the options' checks reject its hit list size (`group_rejected`); any other error (for
-/// example a thread pool that cannot start) fails the run. When the other search fails too,
-/// `run` fails with the tabular search's error. (A format whose report the engine refuses fails
-/// alone inside its search, `Searched::refused`.)
-fn fails_run(failed: &Failed, rejected: bool) -> bool {
-    failed.wrote || !rejected
+/// The search of a run (`search_groups`) that writes the argv's own format (`Output::requested`).
+/// Its outcome is the run's (`search_all`): the CLI runs that format alone, so the run completes
+/// when that search does, and fails with its error and the warnings that it wrote before it when it
+/// fails (line WQA's sweep, D3 review M1, 2026-11-19). The other search writes only formats that the
+/// argv does not ask for (the Web writes outfmt 0, 6 and 7 for every run, line NP): its failure
+/// fails those formats alone, as the CLI's run of each of them alone fails.
+fn own_search(groups: &[Vec<Output>]) -> usize {
+    groups
+        .iter()
+        .position(|group| group.iter().any(|output| output.requested))
+        .expect("the argv's format is one of the run's outputs (`outputs`)")
 }
 
 /// Records the byte range of every HSP row (stream 6) and section (stream 0), and of
@@ -824,15 +787,18 @@ struct Failed {
     /// NCBI's message (a `NativeError`), which the CLI also writes to the file of `-logfile` when
     /// the run's messages go there (`CallerStart::post`); `None` for LOSAT's own errors.
     native: Option<Vec<u8>>,
-    /// Whether the search had written a byte of any of its formats. The host discards
-    /// the output streams of a failed run, but a search that wrote nothing leaves the other
-    /// searches' streams as the CLI writes them.
-    wrote: bool,
+    /// The streams of the search's formats of which a chunk reached the host
+    /// (`StreamWriter::sent`): where the search fails alone (`search_all`), the host is told to
+    /// discard them (`emit::discard`).
+    sent: Vec<u32>,
+    /// An error of the adapter itself (the output ranges, the archive of outfmt 13 or 14), which
+    /// no CLI run has: it ends the run, whichever search it comes from (`search_all`).
+    fault: bool,
 }
 
 impl Failed {
     /// `error` is the engine's `anyhow::Error`, which this crate does not name.
-    fn new<E>(error: &E, wrote: bool) -> Self
+    fn new<E>(error: &E) -> Self
     where
         E: std::ops::Deref<Target = dyn std::error::Error + Send + Sync + 'static>
             + std::fmt::Display
@@ -849,7 +815,8 @@ impl Failed {
             message: format!("{error:#}"),
             cli_stderr,
             native,
-            wrote,
+            sent: Vec::new(),
+            fault: false,
         }
     }
 }
@@ -1051,7 +1018,8 @@ fn search(
                         cli_stderr: format!("{error}\n").into_bytes(),
                         message: format!("the archive of outfmt {}: {error}", format.number),
                         native: None,
-                        wrote: true,
+                        sent: Vec::new(),
+                        fault: true,
                     })
                 }
             }
@@ -1060,10 +1028,16 @@ fn search(
         };
     }
     if let Err(error) = outcome {
-        let wrote = writers
+        let sent = formats
             .iter()
-            .any(|writer| writer.position().load(Ordering::SeqCst) > 0);
-        return Err(Failed::new(&error, wrote));
+            .zip(&writers)
+            .filter(|(_, writer)| writer.sent())
+            .map(|(format, _)| format.stream)
+            .collect();
+        return Err(Failed {
+            sent,
+            ..Failed::new(&error)
+        });
     }
     // The formats that failed alone: their writers are dropped with what they hold, the host
     // discards what it received of them, and the recorder forgets their events.
@@ -1079,7 +1053,7 @@ fn search(
                     crate::emit::discard(format.stream);
                 }
                 recorder.forget(index);
-                refused.push((format.stream, Failed::new(&error, false)));
+                refused.push((format.stream, Failed::new(&error)));
             }
         }
     }
@@ -1094,7 +1068,8 @@ fn search(
             cli_stderr: message.clone().into_bytes(),
             message,
             native: None,
-            wrote: true,
+            sent: Vec::new(),
+            fault: true,
         });
     }
     Ok(Searched {
@@ -1274,26 +1249,23 @@ fn give_blastn_counts(
 /// a record gets the section of format 0 only where the search of format 0 has exactly its HSPs
 /// (`link_format0`) (docs/web/abi_v2.md §5, §7, §8).
 ///
-/// A search of a two-search run that fails before it writes a byte of its formats, and
-/// that the options' checks reject because of its hit list size (`group_rejected`:
-/// `-num_alignments 0` for the tabular formats, a BLASTN `-num_descriptions` of 2,147,483,598
-/// or more for format 0, where N + 50 overflows the 32-bit preliminary hit list size), does
-/// not fail the run when the other search succeeds, as the CLI fails that format alone: the
-/// streams of its formats stay empty (with no tabular search there are no records). Any other
-/// error of a search (for example a thread pool that cannot start) fails the run, as does a
-/// failure after a byte was written; so do both searches failing, as the CLI fails every
-/// format.
+/// The run's outcome is that of the search of the argv's own format (`own_search`), as the CLI
+/// runs the argv: the run completes when that search completes, and fails with its error when it
+/// fails, with stream 3 the CLI's standard error for the argv up to that error (that search's
+/// warnings). The failure of the other search of a run of two searches (`-num_alignments 0` for the
+/// tabular formats, a BLASTN `-num_descriptions` of 2,147,483,598 or more for format 0, where N + 50
+/// overflows the 32-bit preliminary hit list size) fails its formats alone, as the CLI fails those
+/// formats alone: their streams stay empty, what the host received of them is discarded, and
+/// without the tabular search there are no records. A fault of the adapter itself (`Failed::fault`)
+/// fails the run in any search.
 ///
-/// Stream 3 is the CLI's standard error for the tabular formats (the tabular search's
-/// diagnostics, with its error when it failed, or the refusals of its formats that failed
-/// alone): for `-outfmt 6`, or for the argv's `-outfmt` when it has an output of its own
+/// Stream 3 of a run that completes is the CLI's standard error for the tabular formats (the
+/// tabular search's diagnostics, with its error when it failed, or the refusals of its formats that
+/// failed alone): for `-outfmt 6`, or for the argv's `-outfmt` when it has an output of its own
 /// (`outputs`). It is followed by what the CLI's standard error for format 0 adds to it (the
 /// lines of the format 0 search's diagnostics that stream 3 does not hold yet, then its error
 /// when it failed, or the refusal of format 0 when it failed alone), so that each text comes
-/// once (`Diagnostics`). In a run that fails it stops before the error that ends the run: where
-/// the format 0 search ends it, stream 3 has that search's warnings that it does not hold yet,
-/// and where every search failed, the format 0 search's warnings and error follow the tabular
-/// search's warnings.
+/// once (`Diagnostics`).
 pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Result<(), String> {
     let files = Arc::new(RunFileArchive::default());
     let run_files = RunFiles::Receiver(files.clone());
@@ -1357,9 +1329,11 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
 
 /// `run` after the application start `started` (`started_command`: the argv, the settings that
 /// LOSAT refuses, a dry run's end), then the searches. The messages that the command line writes
-/// to its standard error during the run go where the run's messages go, as they come
-/// (`CallerStart::sink`: the file of `-logfile` in TBLASTX, else stream 3), and the error that ends
-/// the run with an NCBI message is posted there too (`CallerStart::post`), as on the command line.
+/// to its standard error during the run go where the run's messages go (`CallerStart::sink`: the
+/// file of `-logfile` in TBLASTX, else stream 3), as they come, or when the searches end where the
+/// outcome of the run decides which of them the CLI writes for the argv (`search_all`), and the
+/// error that ends the run with an NCBI message is posted there after them (`CallerStart::post`),
+/// as on the command line.
 fn run_started(
     words: &[&str],
     query: &[FastaRecord],
@@ -1432,34 +1406,33 @@ fn search_all(
 ) -> Result<Done, String> {
     let (program, command, requested) = parsed;
     let groups = search_groups(&outputs(program, &requested), &command);
-    let custom_accepted = custom_handler_check(program, requested.custom.as_deref()).is_ok();
+    let own = own_search(&groups);
     let threads = num_threads(&command);
     let counts = window_masker_counts(&command);
     let mut command = Some(command);
-    // Each search: what it wrote or why it failed, and (after the first) its diagnostics.
+    // The warnings of the argv's own search are stream 3's whatever the outcome: as the first
+    // search it writes them as it goes (with a copy where a next search follows, whose lines repeat
+    // them, `Diagnostics`). Those of a search before it are stream 3's only when the run completes:
+    // they are held until the searches end, as are those of a search after the first.
+    let streamed = own == 0;
+    // Each search: what it wrote or why it failed, and the warnings that it wrote to the standard
+    // error (the first search's where it streamed them, only where a next search follows).
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
-    // What the first search of a run of several wrote to stream 3.
-    let mut first_diagnostics = Vec::new();
-    // The search whose error ends the run (`fails_run`); no search follows it.
+    // The search whose error ends the run: the argv's own search (`own_search`), or one with a
+    // fault of the adapter. No search follows it.
     let mut ending = None;
     // The searches of the run share one thread pool (`with_run_pool`): a browser holds a thread
     // worker for every thread that may start, and the threads of a pool may not have returned when
     // the next pool starts, so each pool of its own needed thread workers of its own.
     losat::web_adapter::with_run_pool(threads, program.name(), || -> Result<(), String> {
-        for group in &groups {
+        for (position, group) in groups.iter().enumerate() {
             let mut command = match command.take() {
                 Some(command) => command,
                 None => parse(words)?.1,
             };
             give_counts(&mut command, counts.as_ref(), settings);
-            let mut scratch = Vec::new();
-            // Whether the options' checks reject this search, found before `search` takes the
-            // command.
-            let rejected = group_rejected(&mut command, group);
-            // The first search writes to stream 3 as it goes, kept where a next search follows;
-            // the next searches' warnings, which repeat the reader's and the queries' warnings of
-            // the first, are held until the searches end (`Diagnostics`).
-            let result = match (outcomes.is_empty(), groups.len() > 1) {
+            let mut warnings = Vec::new();
+            let result = match (streamed && position == 0, groups.len() > 1) {
                 (true, false) => search(command, group, query, subject, &mut *diagnostics),
                 (true, true) => search(
                     command,
@@ -1468,60 +1441,62 @@ fn search_all(
                     subject,
                     &mut Kept {
                         sink: &mut *diagnostics,
-                        copy: &mut first_diagnostics,
+                        copy: &mut warnings,
                     },
                 ),
-                (false, _) => search(command, group, query, subject, &mut scratch),
+                (false, _) => search(command, group, query, subject, &mut warnings),
             };
-            // The CLI rejects an `-outfmt` whose custom delimiter a field uses: the failure of its
-            // search (the tabular one) is never tolerated.
-            let ends =
-                matches!(&result, Err(failed) if fails_run(failed, rejected && custom_accepted));
-            outcomes.push((result, scratch));
+            let ends = matches!(&result, Err(failed) if position == own || failed.fault);
+            outcomes.push((result, warnings));
             if ends {
-                ending = Some(outcomes.len() - 1);
+                ending = Some(position);
                 break;
             }
         }
         Ok(())
     })?;
-    // When every search failed, the CLI fails every format; the error is that of the tabular
-    // formats.
-    let ending = ending.or_else(|| {
-        outcomes
-            .iter()
-            .all(|(result, _)| result.is_err())
-            .then_some(0)
-    });
-    // Stream 3: the CLI's standard error of each search in turn, its warnings and then its error
-    // or the refusals of its formats that failed alone, each text once (`Diagnostics`). In a run
-    // that fails, up to the error that ends it, which is the run's error and not stream 3's: a
-    // format 0 search that ends a run of two searches gives its warnings that stream 3 does not
-    // hold yet, after the tabular search's error where that search failed alone (WQA D3 review,
-    // 2026-11-19).
-    let mut texts = Diagnostics::after(&first_diagnostics);
-    for (position, (result, scratch)) in outcomes.iter().enumerate() {
-        if position > 0 {
-            texts.warnings(scratch, &mut *diagnostics);
-        }
-        match result {
-            Err(failed) if ending == Some(position) => texts.held(&failed.cli_stderr),
-            Err(failed) => texts.error(&failed.cli_stderr, &mut *diagnostics),
-            Ok(done) => {
-                for (_, refused) in &done.refused {
-                    texts.error(&refused.cli_stderr, &mut *diagnostics);
-                }
-            }
-        }
-    }
+    // A run that fails: stream 3 is the CLI's standard error for the argv up to its error, which
+    // is the run's error and not stream 3's: the warnings of the argv's own search alone, which the
+    // CLI's run of the argv writes, not those of a search before it, which writes formats that the
+    // argv does not ask for (line WQA's sweep, D3 review M1, 2026-11-19).
     if let Some(position) = ending {
-        return Err(match outcomes.swap_remove(position).0 {
+        let (result, warnings) = outcomes.swap_remove(position);
+        if position == own && !streamed {
+            let _ = diagnostics.write_all(&warnings);
+        }
+        return Err(match result {
             Err(failed) => {
                 *posted = failed.native;
                 failed.message
             }
             Ok(_) => unreachable!("the search that ends the run failed"),
         });
+    }
+    // A run that completes: stream 3 is the CLI's standard error of each search in turn, its
+    // warnings and then its error (a search that failed alone: its formats are empty, and the host
+    // discards what it received of them) or the refusals of its formats that failed alone, each
+    // text once (`Diagnostics`).
+    if !streamed {
+        let _ = diagnostics.write_all(&outcomes[0].1);
+    }
+    let mut texts = Diagnostics::after(&outcomes[0].1);
+    for (position, (result, warnings)) in outcomes.iter().enumerate() {
+        if position > 0 {
+            texts.warnings(warnings, &mut *diagnostics);
+        }
+        match result {
+            Err(failed) => {
+                for &stream in &failed.sent {
+                    crate::emit::discard(stream);
+                }
+                texts.error(&failed.cli_stderr, &mut *diagnostics);
+            }
+            Ok(done) => {
+                for (_, refused) in &done.refused {
+                    texts.error(&refused.cli_stderr, &mut *diagnostics);
+                }
+            }
+        }
     }
     let mut searched: Vec<Searched> = Vec::new();
     let mut tabular_failed = false;
@@ -1556,8 +1531,8 @@ fn search_all(
     Ok(Done { writers, records })
 }
 
-/// A writer to `sink` that keeps a copy of what it writes in `copy` (`search_all`: the first
-/// search's diagnostics, which the next searches' warnings repeat).
+/// A writer to `sink` that keeps a copy of what it writes in `copy` (`search_all`: the warnings of
+/// the argv's own search as the first, which the next search's warnings repeat).
 struct Kept<'w> {
     sink: &'w mut (dyn std::io::Write + Send),
     copy: &'w mut Vec<u8>,
@@ -1575,8 +1550,8 @@ impl std::io::Write for Kept<'_> {
     }
 }
 
-/// Stream 3 of a run (`search_all`, docs/web/abi_v2.md §5): the CLI's standard error of each
-/// search in turn, where each text comes once. A search after the first writes only the lines of
+/// Stream 3 of a run that completes (`search_all`, docs/web/abi_v2.md §5): the CLI's standard
+/// error of each search in turn, where each text comes once. A search after the first writes only the lines of
 /// its warnings that stream 3 does not hold yet: the reader's and the queries' warnings, which
 /// every search of the run writes (up to the place where its formats end), come with the first
 /// search, and so does a formatting handler's line that both searches write (`Examining 5 or
@@ -1591,8 +1566,7 @@ struct Diagnostics<'t> {
 }
 
 impl<'t> Diagnostics<'t> {
-    /// Stream 3 after the first search's warnings `first` (what it wrote to stream 3 as it
-    /// went).
+    /// Stream 3 after the first search's warnings `first`.
     fn after(first: &'t [u8]) -> Self {
         let mut texts = Diagnostics {
             lines: std::collections::HashMap::new(),
@@ -1633,14 +1607,6 @@ impl<'t> Diagnostics<'t> {
     fn error(&mut self, text: &'t [u8], sink: &mut dyn std::io::Write) {
         if !self.errors.contains(&text) {
             let _ = sink.write_all(text);
-            self.held(text);
-        }
-    }
-
-    /// The error that ends the run, `text`, which the run gives as its error: stream 3 does not
-    /// write it, and holds it as written, so that no later search writes it again.
-    fn held(&mut self, text: &'t [u8]) {
-        if !self.errors.contains(&text) {
             self.errors.push(text);
             self.hold(text);
         }
@@ -1853,12 +1819,17 @@ mod tests {
             error.starts_with("BLAST query/options error: expect value"),
             "{error}"
         );
-        // validate reports BLASTX's checks of each search's options, as the run does (NCBI's
-        // errors and LOSAT's refusals); the tabular search that -num_alignments 0 rejects alone
-        // is tolerated, as `run` tolerates it.
+        // validate reports BLASTX's checks of the argv's own search's options, as the run does
+        // (NCBI's errors and LOSAT's refusals); the tabular search that -num_alignments 0 rejects
+        // alone fails only its formats where the argv's own is outfmt 0, as in `run`.
         let blastx = ["blastx", "-query", "q", "-subject", "s"];
         assert!(validate(&blastx).is_ok());
         assert!(validate(&[&blastx[..], &["-num_alignments", "0"]].concat()).is_ok());
+        assert!(
+            validate(&[&blastx[..], &["-num_alignments", "0", "-outfmt", "7"]].concat())
+                .unwrap_err()
+                .starts_with("BLAST query/options error: No hits are being saved")
+        );
         for (extra, start) in [
             (
                 &["-evalue", "0"][..],
@@ -2132,14 +2103,6 @@ mod tests {
                 let (name, residues) = entry.split_once('\n').unwrap();
                 FastaRecord::new(name, name.as_bytes(), residues.trim_end().as_bytes())
             })
-            .collect()
-    }
-
-    /// The program's formats `numbers` (`Program::formats`), as a search group holds them.
-    fn formats(numbers: &[u32]) -> Vec<Output> {
-        numbers
-            .iter()
-            .map(|&number| Output::format(number))
             .collect()
     }
 
@@ -3696,15 +3659,37 @@ mod tests {
         assert!(validate(&both)
             .unwrap_err()
             .contains("No hits are being saved"));
-        // validate accepts -num_alignments 0: the format 0 search is valid.
+        // validate accepts -num_alignments 0: the format 0 search, the argv's own, is valid.
         validate(&words).unwrap();
+        // The argv's own -outfmt 6, 7 or a tabular -outfmt with fields is the tabular search's: the
+        // run fails as the CLI's run of that argv (exit 1), whose standard error is stream 3 and
+        // then the run's error, and validate rejects it with that error (native LOSAT 16bef7acd,
+        // 2026-11-19; line WQA's sweep, D3 review, 2026-11-19).
+        for outfmt in ["6", "7", "6 qseqid sseqid"] {
+            let tabular = [&words[..], &["-outfmt", outfmt]].concat();
+            let (error, failed) = failed_streams(&tabular, &query, &subject);
+            assert_eq!(
+                format!("{}{error}", diagnostics_of(&failed)),
+                ERR6_ND3_NA0,
+                "-outfmt {outfmt}"
+            );
+            assert_outputs_empty(&failed, &format!("-outfmt {outfmt}"));
+            assert_eq!(validate(&tabular).unwrap_err(), error, "-outfmt {outfmt}");
+        }
     }
 
-    // The reverse: a -num_descriptions of 2,147,483,598 or more (N + 50 overflows) makes BLASTN's preliminary hit list
-    // size for format 0 only (the tabular formats ignore -num_descriptions). The CLI's outfmt 6
-    // and 7 succeed and its outfmt 0 fails with LOSAT's error (NCBI crashes there); the run
-    // writes the tabular formats and the records as the CLI does, stream 0 stays empty, and
-    // stream 3 is the CLI's standard error for outfmt 6 followed by that for outfmt 0.
+    /// LOSAT's error for BLASTN's `-num_descriptions 2147483647`, whose preliminary hit list size
+    /// overflows (the CLI writes it after `Error: `).
+    const OVERFLOW: &str = "a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN";
+
+    // The reverse: a -num_descriptions of 2,147,483,598 or more (N + 50 overflows) makes BLASTN's
+    // preliminary hit list size for format 0 only (the tabular formats ignore -num_descriptions).
+    // The CLI's outfmt 6 and 7 succeed and its outfmt 0 fails with LOSAT's error (NCBI crashes
+    // there). With the argv's `-outfmt 6` the run writes the tabular formats and the records as the
+    // CLI does, stream 0 stays empty, and stream 3 is the CLI's standard error for outfmt 6 followed
+    // by that for outfmt 0. Without `-outfmt` the argv's own outfmt 0 fails the run as the CLI
+    // fails (exit 1, LOSAT's error alone), and validate rejects it (native LOSAT 16bef7acd,
+    // 2026-11-19; line WQA's sweep, D3 review, 2026-11-19).
     #[test]
     fn a_hit_list_size_that_overflows_fails_format_0_only() {
         let query = fasta(SPLIT_QUERY);
@@ -3712,8 +3697,9 @@ mod tests {
         let plain_words = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
         let plain = streams(&plain_words, &query, &subject).unwrap();
         let words = [&plain_words[..], &["-num_descriptions", "2147483647"]].concat();
-        validate(&words).unwrap();
-        let streams = streams(&words, &query, &subject).unwrap();
+        let tabular = [&words[..], &["-outfmt", "6"]].concat();
+        validate(&tabular).unwrap();
+        let streams = streams(&tabular, &query, &subject).unwrap();
         // The tabular formats are the plain run's (-num_descriptions is ignored by them).
         for stream in [6, 7] {
             assert_eq!(streams[&stream], plain[&stream], "stream {stream}");
@@ -3725,59 +3711,178 @@ mod tests {
         assert!(records.lines().all(|line| line.contains("\"out0\":null")));
         assert_eq!(
             String::from_utf8(streams[&3].clone()).unwrap(),
-            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nError: a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN\n"
+            format!("Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nError: {OVERFLOW}\n")
         );
-        // The same on the other options of the format 0 search: both searches rejected fails,
-        // with the error of the tabular formats. Stream 3 is the CLI's standard error for
-        // outfmt 6 up to that error, then the format 0 search's error, which the CLI writes for
-        // outfmt 0 (native LOSAT, 2026-11-19; NCBI crashes there).
+        // The argv's own outfmt 0: the CLI writes LOSAT's error alone.
+        let (error, failed) = failed_streams(&words, &query, &subject);
+        assert_eq!(error, OVERFLOW);
+        assert_eq!(diagnostics_of(&failed), "");
+        assert_outputs_empty(&failed, "outfmt 0");
+        assert_eq!(validate(&words).unwrap_err(), error);
+        // Both searches rejected (`-num_alignments 0` too): the run fails with the error of the
+        // argv's own search, after the warnings that it wrote, as the CLI's run of the argv: LOSAT's
+        // error alone for outfmt 0, the handler's lines and NCBI's error for `-outfmt 6`.
         let both = [&words[..], &["-num_alignments", "0"]].concat();
         let (error, failed) = failed_streams(&both, &query, &subject);
-        assert!(error.contains("No hits are being saved"), "{error}");
+        assert_eq!(error, OVERFLOW);
+        assert_eq!(diagnostics_of(&failed), "");
+        assert_eq!(validate(&both).unwrap_err(), error);
+        let both = [&both[..], &["-outfmt", "6"]].concat();
+        let (error, failed) = failed_streams(&both, &query, &subject);
         assert_eq!(
-            text(&failed[&STREAM_DIAGNOSTICS]),
-            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nError: a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN\n"
+            format!("{}{error}", diagnostics_of(&failed)),
+            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
         );
-        assert!(validate(&both).is_err());
+        assert_eq!(validate(&both).unwrap_err(), error);
     }
 
-    // The tolerance of a failed search is the options' checks' rejection of its hit list
-    // size and nothing else: any other error (a thread pool that cannot start, which a real
-    // run cannot trigger cheaply: the pool is built by the engine from the host's threads)
-    // fails the run, as does a failure after a byte was written.
+    // The argv's own search decides the run (`own_search`; line WQA's sweep, D3 review, 2026-11-19).
+    // `-num_alignments 0` gives the tabular formats a hit list of 0, which the CLI rejects. With the
+    // argv's `-outfmt 6`, `7` or a tabular `-outfmt` with fields (the first search) the run fails as
+    // the CLI fails (exit 1): stream 3 and then the error are the CLI's standard error, the
+    // handler's warning and NCBI's error, and no output is kept; BLASTN's and BLASTX's validate
+    // rejects the argv with that error, the other programs' leaves the hit list to the run.
+    // Without `-outfmt` (outfmt 0, the second search) the run completes: format 0 is written, the
+    // tabular formats fail alone, and stream 3 is the CLI's standard error for `-outfmt 6` (native
+    // LOSAT 16bef7acd, 2026-11-19, every program).
     #[test]
-    fn only_a_rejected_hit_list_size_is_tolerated() {
-        let failed = |wrote| Failed {
-            message: "failed to build blastn pool with 4 threads".into(),
-            cli_stderr: Vec::new(),
-            native: None,
-            wrote,
-        };
-        assert!(fails_run(&failed(false), false));
-        assert!(fails_run(&failed(true), true));
-        assert!(fails_run(&failed(true), false));
-        assert!(!fails_run(&failed(false), true));
-        // The predicate is the options' checks': rejected for a hit list of 0 and for the
-        // overflow of N + 50, not for 2^30 or any other size the CLI accepts.
-        let command = |extra: &[&str]| {
+    fn the_argv_s_own_search_decides_the_run() {
+        let protein: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let nucleotides = random_nucleotides(300, 11);
+        let cases: [(&str, &[u8], &[u8]); 5] = [
+            ("blastp", protein, protein),
+            ("tblastn", protein, CODING),
+            ("blastn", &nucleotides, &nucleotides),
+            ("tblastx", CODING, CODING),
+            ("blastx", CODING, protein),
+        ];
+        for (program, query, subject) in cases {
+            let query = [FastaRecord::new("q", b"q", query)];
+            let subject = [FastaRecord::new("s", b"s", subject)];
             let words = [
-                &["blastn", "-query", "q", "-subject", "s", "-task", "blastn"][..],
-                extra,
-            ]
-            .concat();
-            parse(&words).unwrap().1
+                program,
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-num_alignments",
+                "0",
+            ];
+            let cli = format!("Warning: [{program}] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n");
+            for outfmt in ["6", "7", "6 qseqid sseqid"] {
+                let argv = [&words[..], &["-outfmt", outfmt]].concat();
+                let label = format!("{program} -outfmt {outfmt}");
+                let (error, failed) = failed_streams(&argv, &query, &subject);
+                assert_eq!(
+                    format!("{}{error}", diagnostics_of(&failed)),
+                    cli,
+                    "{label}"
+                );
+                assert_outputs_empty(&failed, &label);
+                match program {
+                    "blastn" | "blastx" => {
+                        assert_eq!(validate(&argv).unwrap_err(), error, "{label}")
+                    }
+                    _ => validate(&argv).unwrap(),
+                }
+            }
+            validate(&words).unwrap();
+            let completed = streams(&words, &query, &subject).unwrap();
+            assert!(
+                text(&completed[&0]).contains("Sequences producing significant alignments"),
+                "{program}"
+            );
+            for stream in [1, 6, 7] {
+                assert!(
+                    completed.get(&stream).is_none_or(Vec::is_empty),
+                    "{program} {stream}"
+                );
+            }
+            assert_eq!(text(&completed[&3]), cli, "{program}");
+        }
+    }
+
+    // A run of two searches that fails gives the CLI's standard error for the argv up to its error
+    // (line WQA's sweep, D3 review M1, 2026-11-19): the warnings of the argv's own search, not
+    // those of the other search, which writes formats that the argv does not ask for. A subject
+    // whose one record has no residues fails BLASTN and TBLASTX with `-num_descriptions 5` (format
+    // 0 has a hit list size of its own): the CLI's outfmt 0 writes the subject's warning and the
+    // error, its `-outfmt 6` the handler's `-num_descriptions` line first. A BLASTP subject titled
+    // `, ,` fails the CLI's outfmt 0 with LOSAT's error and no warning; its `-outfmt 6` completes,
+    // where stream 0 fails alone (native LOSAT 16bef7acd, 2026-11-19).
+    #[test]
+    fn a_failed_run_of_two_searches_gives_the_warnings_of_the_argv_s_own_search() {
+        let letters = random_nucleotides(300, 11);
+        let query = [FastaRecord::new("Query_1", b"q1", &letters)];
+        let empty = [FastaRecord::new("Subject_1", b"empty record", b"")];
+        let ignored = |program: &str| {
+            format!("Warning: [{program}] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\n")
         };
-        let rejected =
-            |extra: &[&str], group: &[u32]| group_rejected(&mut command(extra), &formats(group));
-        assert!(rejected(&["-num_alignments", "0"], &[6, 7]));
-        assert!(!rejected(&["-num_alignments", "0"], &[0]));
-        assert!(rejected(&["-num_descriptions", "2147483598"], &[0]));
-        assert!(!rejected(&["-num_descriptions", "2147483597"], &[0]));
-        assert!(!rejected(&["-num_descriptions", "1073741824"], &[0]));
-        assert!(!rejected(&[], &[6, 7, 0]));
-        let mut blastp = parse(&["blastp", "-num_alignments", "0"]).unwrap().1;
-        assert!(group_rejected(&mut blastp, &formats(&[6])));
-        assert!(!group_rejected(&mut blastp, &formats(&[0])));
+        for program in ["blastn", "tblastx"] {
+            let words = [
+                program,
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-num_descriptions",
+                "5",
+            ];
+            let warning = format!(
+                "Warning: [{program}] Subject_1 empty record: Subject sequence contains no data\n"
+            );
+            for (outfmt, expected) in [
+                (&[][..], warning.clone()),
+                (
+                    &["-outfmt", "6"][..],
+                    format!("{}{warning}", ignored(program)),
+                ),
+            ] {
+                let label = format!("{program} {outfmt:?}");
+                let argv = [&words[..], outfmt].concat();
+                let (error, failed) = failed_streams(&argv, &query, &empty);
+                assert_eq!(
+                    error.trim_end(),
+                    "BLAST engine error: The average subject length is too short",
+                    "{label}"
+                );
+                assert_eq!(diagnostics_of(&failed), expected, "{label}");
+                assert_outputs_empty(&failed, &label);
+            }
+        }
+        let protein: &[u8] = b"MKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMA";
+        let query = [FastaRecord::new(
+            "Query_1",
+            b"p",
+            b"MKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMAWRSTY",
+        )];
+        let subject = [
+            FastaRecord::new("Subject_1", b"s1 ok", protein),
+            FastaRecord::new("Subject_2", b", ,", protein),
+        ];
+        let words = [
+            "blastp",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-num_descriptions",
+            "5",
+        ];
+        let (error, failed) = failed_streams(&words, &query, &subject);
+        assert!(
+            error.starts_with("subject record 2 has a title of punctuation"),
+            "{error}"
+        );
+        assert_eq!(diagnostics_of(&failed), "");
+        assert_outputs_empty(&failed, "blastp");
+        let tabular = streams(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap();
+        assert!(!tabular[&6].is_empty());
+        assert!(tabular.get(&0).is_none_or(Vec::is_empty));
+        assert_eq!(
+            text(&tabular[&3]),
+            format!("{}Error: {error}\n", ignored("blastp"))
+        );
     }
 
     // A coding sequence of the protein of `q_idx_is_the_registered_index`.
@@ -3939,16 +4044,23 @@ mod tests {
             "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
         );
         // Both searches fail, each for its own reason (the tabular formats' hit list is checked
-        // before the e-value): the run fails with the tabular search's error, as validate.
+        // before the e-value): the run fails with the error of the argv's own search, as validate,
+        // which is the CLI's for the argv: the e-value's for outfmt 0, NCBI's of the hit list
+        // after the handler's warning for `-outfmt 6` (native LOSAT 16bef7acd, 2026-11-19).
         let both = [&words[..], &["-num_alignments", "0", "-evalue", "0"]].concat();
-        let error = run(&both, &query, &subject).unwrap_err();
-        assert!(error.contains("No hits are being saved"), "{error}");
-        assert_eq!(validate(&both).unwrap_err(), error);
-        let mut format0 = parse(&both).unwrap().1;
-        assert!(
-            group_rejected(&mut format0, &formats(&[0]))
-                && group_rejected(&mut format0, &formats(&[6, 7]))
+        let (error, failed) = failed_streams(&both, &query, &subject);
+        assert_eq!(
+            format!("{}{error}", diagnostics_of(&failed)),
+            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n"
         );
+        assert_eq!(validate(&both).unwrap_err(), error);
+        let tabular = [&both[..], &["-outfmt", "6"]].concat();
+        let (error, failed) = failed_streams(&tabular, &query, &subject);
+        assert_eq!(
+            format!("{}{error}", diagnostics_of(&failed)),
+            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
+        assert_eq!(validate(&tabular).unwrap_err(), error);
     }
 
     // BLASTX reads -query_loc and -subject_loc as the CLI does (DW-39): the rows give record
@@ -4530,14 +4642,34 @@ mod tests {
         (error, streams)
     }
 
-    // A format 0 search that ends a run of two searches (§7) gives its warnings too. BLASTP with
+    /// Stream 3 of a run as text.
+    fn diagnostics_of(streams: &std::collections::BTreeMap<u32, Vec<u8>>) -> String {
+        text(
+            streams
+                .get(&STREAM_DIAGNOSTICS)
+                .map_or(&[][..], Vec::as_slice),
+        )
+    }
+
+    /// A failed run sent nothing of its outputs and records (each fits in one chunk).
+    fn assert_outputs_empty(streams: &std::collections::BTreeMap<u32, Vec<u8>>, label: &str) {
+        for stream in [0, 6, 7, STREAM_CUSTOM, STREAM_HITS] {
+            assert!(
+                streams.get(&stream).is_none_or(Vec::is_empty),
+                "{label}: stream {stream}"
+            );
+        }
+    }
+
+    // A format 0 search that ends a run of two searches (§7) gives its warnings, and only its: the
+    // run's stream 3 and error are the CLI's standard error for the argv. BLASTP with
     // `-num_alignments 0` and a subject whose first record has no residues and whose second is
-    // titled `, ,`: the tabular search fails alone before it reads the subject (the CLI's
-    // standard error for `-outfmt 6`: the handler's warning, then NCBI's error), and the format 0
-    // search, the argv's own `-outfmt 0`, reads the subject, warns, and fails the run on the
-    // title, where the CLI writes the same warning before its error (native LOSAT and NCBI BLAST+
-    // 2.17.0 2026-11-19, `fix-diagnostics/native/twosearch`; NCBI crashes after the warning). Stream
-    // 3 is the CLI's standard error for `-outfmt 6` followed by the warning of `-outfmt 0`.
+    // titled `, ,`: the tabular search fails alone before it reads the subject, and the format 0
+    // search, the argv's own `-outfmt 0`, reads the subject, warns, and fails the run on the title,
+    // where the CLI writes the same warning before its error (native LOSAT and NCBI BLAST+ 2.17.0
+    // 2026-11-19, `fix-diagnostics/native/twosearch`; NCBI crashes after the warning). The tabular
+    // search's warning and error, which the CLI writes for `-outfmt 6` only, are not stream 3's
+    // (line WQA's sweep, D3 review M1, 2026-11-19).
     #[test]
     fn a_format_0_search_that_fails_the_run_gives_its_warnings() {
         let query = [FastaRecord::new(
@@ -4568,12 +4700,10 @@ mod tests {
             "{error}"
         );
         assert_eq!(
-            text(streams.get(&STREAM_DIAGNOSTICS).map_or(&[][..], Vec::as_slice)),
-            "Warning: [blastp] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\nWarning: [blastp] Subject_1 empty record: Subject sequence contains no data\n"
+            diagnostics_of(&streams),
+            "Warning: [blastp] Subject_1 empty record: Subject sequence contains no data\n"
         );
-        for stream in [0, 6, 7, STREAM_HITS] {
-            assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
-        }
+        assert_outputs_empty(&streams, "blastp");
     }
 
     // A run that fails gives on stream 3 what the command line writes to its standard error before

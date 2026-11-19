@@ -9,9 +9,6 @@
   blastn no longer says custom fields are "not yet ported", tblastx no longer says "without custom
   fields", and blastp, blastx, tblastn, psiblast and rpsblast no longer show an empty line. One
   helper (`cli::outfmt_help`) writes all of them.
-- LOSAT's own argument refusals and syntax errors (`-html`, `-remote`, an unknown option, a missing
-  value) end with a line end, as clap's own errors do, so the shell prompt no longer lands on the
-  message's line. NCBI's texts are not among them.
 - No program's `-help` shows source references any more (blastn's `-perc_identity`, `-max_hsps` and
   `-subject_besthit` showed "NCBI reference: ncbi-blast/c++/... ```c ..."): the references are `//`
   comments next to the fields in every program's argument structs. The hint at the foot of blastn's
@@ -20,8 +17,7 @@
 - blastx refuses an NCBI option that LOSAT does not run (`-html`, `-remote`, `-gilist`,
   `-use_sw_tback`, ...) in the form of the other programs ("error: the NCBI BLAST+ option -html is
   not supported by LOSAT's BLASTX", exit status 2) instead of "unsupported BLASTX option '-html':
-  outside the declared local FASTA scope", and an argument error ends with "For more information,
-  try '-help'." (NCBI's form) instead of '--help'.
+  outside the declared local FASTA scope".
 - blastx refuses a protein subject of more than 5,000,000 residues in one form from a `-subject`
   record and from a database sequence ("subject sequence 1 has 5000001 residues; a subject longer
   than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by

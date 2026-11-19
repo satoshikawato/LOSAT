@@ -108,8 +108,8 @@
       "H": {
         "workflow": "ci.yml",
         "name": "promotion_pr_rust_job",
-        "run_id": null,
-        "conclusion": null
+        "run_id": 44518843443,
+        "conclusion": "success"
       },
       "I": {
         "workflow": "release-readiness-v020.yml",

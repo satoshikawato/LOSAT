@@ -253,3 +253,40 @@ fn the_default_directory_is_the_executables_and_the_links_are_relative() {
     );
     fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The top level's `-help` names every program that `losat` runs (the `Commands:` list and the
+/// "Other programs" list, derived from the entry names), and none of the notes that went stale.
+#[test]
+fn top_level_help_names_every_program() {
+    for words in [&["-help"][..], &["-h"], &["--help"]] {
+        let help = run(losat(), words);
+        let text = String::from_utf8_lossy(&help.stdout).into_owned();
+        for program in PROGRAMS {
+            assert!(
+                text.lines()
+                    .any(|line| line.split_whitespace().next() == Some(program)),
+                "{words:?}: no line for {program}\n{text}"
+            );
+        }
+        for stale in [
+            "format version 4\n",
+            "its first round",
+            "(local blast",
+            "(local tblast",
+        ] {
+            assert!(!text.contains(stale), "{words:?}: {stale:?}\n{text}");
+        }
+        // NCBI's headings stay (BRIG reads them), and so does the shims note.
+        assert!(text.starts_with("USAGE\n"), "{text}");
+        assert!(text.contains("\nDESCRIPTION\n"), "{text}");
+        assert!(text.contains("losat -install-shims [DIR]"), "{text}");
+        // An "Other programs" line has a description.
+        for program in ["blastdbcmd", "dustmasker", "segmasker", "convert2blastmask"] {
+            let line = text
+                .lines()
+                .find(|line| line.split_whitespace().next() == Some(program))
+                .unwrap();
+            assert!(line.trim().len() > program.len() + 2, "{line:?}");
+        }
+    }
+}

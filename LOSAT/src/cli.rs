@@ -153,13 +153,57 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
+/// What a program that `main_entry` runs before clap reads the command line (the programs of
+/// `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's argument
+/// reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION line of
+/// the program (its first line; `convert2blastmask`'s continues in NCBI's text).
+fn entry_program_description(name: &str) -> &'static str {
+    match name {
+        "blastdbcmd" => "BLAST database client",
+        "dustmasker" => "Low complexity region masker based on Symmetric DUST algorithm",
+        "segmasker" => "Low complexity region masker based on the SEG algorithm",
+        "convert2blastmask" => {
+            "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
+        }
+        _ => "",
+    }
+}
+
+/// The `after_help` of the top level: the programs that `losat NAME` runs and `Commands` does not
+/// list (derived from `ENTRY_NAMES` and the subcommands of `Commands`, so that a new name shows
+/// up), and the shims. No NCBI counterpart.
+fn top_level_after_help() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        let commands = <Commands as clap::Subcommand>::augment_subcommands(clap::Command::new("losat"));
+        let others: Vec<&str> = ENTRY_NAMES
+            .into_iter()
+            .filter(|name| commands.find_subcommand(name).is_none())
+            .collect();
+        let width = others.iter().map(|name| name.len()).max().unwrap_or(0);
+        let mut text = String::new();
+        if !others.is_empty() {
+            text.push_str("Other programs (losat <program> -help shows each one's options):\n");
+            for name in others {
+                text.push_str(&format!(
+                    "  {name:<width$}  {}\n",
+                    entry_program_description(name)
+                ));
+            }
+            text.push('\n');
+        }
+        text.push_str("To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat -install-shims [DIR]   (default: the directory of this executable)");
+        text
+    })
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "losat",
     version,
     about = "Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions",
     help_template = LOSAT_HELP_TEMPLATE,
-    after_help = "To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat -install-shims [DIR]   (default: the directory of this executable)"
+    after_help = top_level_after_help()
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -174,10 +218,10 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                   "Translated Query-Protein Subject BLAST"));
     // ```
-    /// Translated nucleotide query vs protein subject (local blastx)
+    /// Translated nucleotide query vs protein subject (blastx)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
-    /// Pairwise nucleotide alignment (megablast [default], blastn)
+    /// Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)
     #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
@@ -189,7 +233,7 @@ pub enum Commands {
     Tblastx(tblastx::TblastxArgs),
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     // static const string kProgram("tblastn"); SetTask("tblastn");
-    /// Protein query vs translated nucleotide subject (local tblastn)
+    /// Protein query vs translated nucleotide subject (tblastn)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastn(tblastn::TblastnArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
@@ -199,7 +243,7 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                           "Position-Specific Iterated BLAST"));
     // ```
-    /// Position-Specific Iterated BLAST (psiblast; its first round)
+    /// Position-Specific Iterated BLAST (psiblast)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
@@ -228,7 +272,7 @@ pub enum Commands {
     //                   "Application to create BLAST databases, version "
     //                   + CBlastVersion().Print());
     // ```
-    /// makeblastdb: create a BLAST database from a FASTA file, format version 4
+    /// makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
     #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65

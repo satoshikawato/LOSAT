@@ -119,16 +119,37 @@ export interface RunStore {
 
 export type StorageBackend = 'opfs' | 'memory';
 
+/**
+ * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
+ * is then the only copy of the results, so running out of it would end the tab and lose
+ * every result; the budget makes it the same recoverable failure as a full OPFS instead.
+ * The engine's own memory comes on top (up to 4 GiB less one page, plan TD-7).
+ */
+export const MEMORY_RESULTS_CAPACITY_BYTES = 512 * 1024 * 1024;
+/**
+ * MEMORY_RESULTS_CAPACITY_BYTES as the page says it, "512 MB" (of 1024 × 1024 bytes): in the
+ * message when it is reached, and in the note that says results are kept in memory.
+ */
+export const MEMORY_RESULTS_CAPACITY = `${MEMORY_RESULTS_CAPACITY_BYTES / (1024 * 1024)} MB`;
+
 /** Removal of the temporary data that closed tabs left behind (plan §5.6). */
 export type CleanupState =
   | { readonly state: 'pending' }
   | { readonly state: 'done'; readonly removedSessions: number }
-  | { readonly state: 'unavailable'; readonly reason: string };
+  | {
+      readonly state: 'unavailable';
+      /** In LOSAT's words, never the browser's message. */
+      readonly reason: string;
+      /** The error behind it, "<name>: <message>", for developers (data-error). */
+      readonly error?: string;
+    };
 
 export interface StorageInfo {
   readonly backend: StorageBackend;
-  /** Why OPFS is not used, when the backend is memory. */
+  /** Why OPFS is not used, when the backend is memory: LOSAT's words, never the browser's message. */
   readonly fallbackReason?: string;
+  /** The error behind fallbackReason, "<name>: <message>", for developers (data-error). */
+  readonly fallbackError?: string;
   /** Bytes that this working session holds in temporary storage. */
   readonly sessionBytes: number;
   /** The browser's estimate for the whole site (`navigator.storage.estimate`); not a guarantee. */

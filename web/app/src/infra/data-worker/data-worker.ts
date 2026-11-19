@@ -88,6 +88,7 @@ const service = started.then(
     new DataService({
       store: session.store,
       ...(session.fallbackReason === undefined ? {} : { fallbackReason: session.fallbackReason }),
+      ...(session.fallbackError === undefined ? {} : { fallbackError: session.fallbackError }),
       cleanup: session.cleanup,
       scanner,
       inflater,

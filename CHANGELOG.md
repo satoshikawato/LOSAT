@@ -938,6 +938,35 @@ a release moves them under `[Unreleased]` below.
 
 ### Fixes
 
+- `losat -help` names every program that `losat` runs: blastdbcmd, dustmasker, segmasker and
+  convert2blastmask are listed under "Other programs" (derived from the entry names that
+  `--install-shims` links). Stale notes are gone: makeblastdb says it writes format version 5 by
+  default (4 with `-blastdb_version 4`), psiblast no longer says "its first round", blastx and
+  tblastn no longer say "local" (both search `-db` too), and blastn names its four tasks.
+- The `-outfmt` help of every search program says what it writes: blastn 0 to 18 and 20, blastp,
+  blastx, tblastn and tblastx 0 to 16, 18 and 20, psiblast 0, 6, 7, 10 and 20, rpsblast 0, 6, 7 and
+  10 (and what `-in_pssm` limits), that 6, 7, 10 and 20 take a field list, and the default fields.
+  blastn no longer says custom fields are "not yet ported", tblastx no longer says "without custom
+  fields", and blastp, blastx, tblastn, psiblast and rpsblast no longer show an empty line. One
+  helper (`cli::outfmt_help`) writes all of them.
+- No program's `-help` shows source references any more (blastn's `-perc_identity`, `-max_hsps` and
+  `-subject_besthit` showed "NCBI reference: ncbi-blast/c++/... ```c ..."): the references are `//`
+  comments next to the fields in every program's argument structs. The hint at the foot of blastn's
+  help is true: `-h` ("see more with '-help'") prints the summary and `-help` ("see a summary with
+  '-h'") the full text.
+- blastx refuses an NCBI option that LOSAT does not run (`-html`, `-remote`, `-gilist`,
+  `-use_sw_tback`, ...) in the form of the other programs ("error: the NCBI BLAST+ option -html is
+  not supported by LOSAT's BLASTX", exit status 2) instead of "unsupported BLASTX option '-html':
+  outside the declared local FASTA scope".
+- blastx refuses a protein subject of more than 5,000,000 residues in one form from a `-subject`
+  record and from a database sequence ("subject sequence 1 has 5000001 residues; a subject longer
+  than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by
+  LOSAT's BLASTX", exit status 1, as "database sequence 0 has ..."); the `-subject` record got
+  "BLAST engine error: BLASTX preliminary protein-subject splitting above 5000000 residues is not
+  implemented" with exit status 3 before. Subjects up to 5,000,000 residues are unchanged.
+- LOSAT's own argument refusals and syntax errors (`-html`, `-remote`, an unknown option, a missing
+  value) end with a line end, as clap's own errors do, so the shell prompt no longer lands on the
+  message's line. LOSAT Web returns the same text from its ABI v2 `validate`; ABI v1 is unchanged.
 - Windows: makeblastdb's log time (`Building a new DB, current time:`) and the database's date
   (blastdbcmd `-info`'s `Date:`, a report's `Posted date:`) are the local time, as NCBI BLAST+
   writes them on Windows, where they were UTC: LOSAT reads `TZ` in the form of Microsoft's C
@@ -2558,6 +2587,24 @@ a release moves them under `[Unreleased]` below.
 
 ### Packaging, tests and documentation
 
+- docs: a user manual (`docs/manual`, built with mdBook into a website): installation, a quick start, moving from NCBI BLAST+ and from LOSAT v0.1.0, one page for each program, and reference pages on databases, output formats, platforms, differences from NCBI BLAST+ and what LOSAT refuses. `scripts/check_manual_links.py` checks its links before each build.
+- docs: README's program table names `-outfmt 18` for the five search programs (the output-format table
+  and the programs had it); the refusal list no longer says that `blastx` refuses `-query_loc` and
+  `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 (it writes NCBI BLAST+ 2.17.0's bytes there) and
+  names the refusal of a protein subject over 5,000,000 residues in `blastx`.
+  `docs/losatx_blastx_native_cli.md` drops its old status (HOLD) and its list of 30 fields.
+- docs: `docs/release/v0.1.0.md` says v0.1.0 was published (GitHub Release, 2026-09-17); the "Configuration
+  boundary" of `docs/cli_v2_migration.md` says that stdin and `-db` were missing at v0.1.0 and work since
+  v0.2.0; README says that `--install-shims` replaces a link or copy an earlier LOSAT made.
+- docs: README's output-format table says "all five programs" for outfmt 11 (it said every program) and
+  points to the program table for the formats of `psiblast`, `rpsblast` and `rpstblastn`; the
+  `convert2blastmask` paragraph no longer says that `losat makeblastdb` lacks `-mask_data`.
+- docs: README says that the Web GUI follows the page layout of NCBI BLAST (it said "the layout and terms";
+  its words are LOSAT's own).
+- CI: the nightly dependency audit also checks web/'s npm lock file (`npm audit`) and the pinned Python test tools (`pip-audit`), next to the RustSec check of the three Cargo lock files, in one script (`scripts/dependency_advisories.sh`). Dependabot alerts watch only `main`, which lags `dev` by weeks.
+- CI: CodeQL scans dev every night (nightly.yml) and fails while any code scanning alert is open on it; a pull request that changes `.github/` gets a CodeQL scan of its workflows that the required check `rust` waits for; `codeql.yml` can be called for the caller's own commit (`own_commit`, `languages`).
+- CI: the v0.2.0 release-candidate workflow (`release-readiness-v020.yml`) gains jobs `codeql-candidate` (CodeQL of the candidate, no open alert) and `security` (the dependency audit of the candidate); the handoff requires both.
+- Tests: the WASI runner's slow-reader pipe tests run their shell pipeline from a script file instead of `sh -c`, which CodeQL reported as a shell command built from absolute paths (code scanning alert #45).
 - Tests: the hand-written threaded Wasm commands of `LOSAT/tests/test_wasi_runners.js` now wait for
   their threads with the thread count they compared, not with a second load of it. A thread that
   added the last count between the two loads and notified before the wait began left the command

@@ -302,10 +302,13 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
 
 // NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_engine_err` of line RG `E/SURVEY_E1.md`): TBLASTX
 // writes the messages of its run, and the error that ends it, to the `-logfile` file. In LOSAT Web
-// the file of a run that failed comes on stream 8 too, and a run of two searches (here the tabular
-// formats' hit list size of 0, which fails them alone) writes into it what stream 3 has without
-// `-logfile`. The command line's file of the failed run (ws, the gate's build of this branch, NCBI's
-// text): `BLAST query/options error: expect value ...`.
+// the file of a run that failed comes on stream 8 too. The file holds what the CLI's file holds for
+// the argv: in a run of two searches (here the tabular formats' hit list size of 0, which fails them
+// alone) the CLI's file of outfmt 0 is empty, and what the other search adds goes to stream 3, as
+// without `-logfile` (native LOSAT 16bef7acd, review r2 probe `result6-base.txt`; line WQA's sweep,
+// D3 review r2, 2026-11-19: the file had the other search's warning and error). The command line's
+// file of the failed run (ws, the gate's build of this branch, NCBI's text): `BLAST query/options
+// error: expect value ...`.
 #[test]
 fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
     let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);
@@ -334,13 +337,9 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
         let (result, logged) = run_of(&words);
         result.unwrap();
         assert_eq!(logged.get(&0), plain.get(&0), "{program}");
-        let expected = match program {
-            "tblastx" => (String::new(), stderr),
-            _ => (stderr, String::new()),
-        };
         assert_eq!(
             (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
-            (expected.0, Some(vec![("run.log".to_string(), expected.1)])),
+            (stderr, Some(vec![("run.log".to_string(), String::new())])),
             "{program}"
         );
     }

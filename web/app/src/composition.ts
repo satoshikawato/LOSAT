@@ -86,7 +86,7 @@ export function createApp(options: AppOptions = {}): App {
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
     draft,
-    unavailable: () => availability.recheck(),
+    availability,
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
   });

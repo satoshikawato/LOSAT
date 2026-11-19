@@ -8,8 +8,11 @@ import type { ProgramDescription, StartResult } from 'losat/ports';
 import { Availability, failureText, unavailableOf, withRemedy } from '../../src/application/availability';
 import type { EnqueueAllResult } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
+import { ExampleLoader } from '../../src/application/examples';
+import { exampleById } from '../../src/domain/examples';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
+import { FakeFileDownloader, MemoryExampleStore } from '../../src/infra/fake/fake-examples';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
@@ -33,9 +36,13 @@ function newGate() {
 /**
  * A search form whose Data worker cannot load the engine's serial module: every call that needs it fails so, while its
  * flag in `fail` is set when it is made (a test clears it when the module downloads). With `gate`, an index made while
- * the gate is on answers only at its release.
+ * the gate is on answers only at its release; so do a describe and a validation (start) with their flag in `hold`.
  */
-function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; validate?: boolean } = {}, gate = newGate()) {
+function setup(
+  fail: { describe?: boolean; index?: boolean; check?: boolean; validate?: boolean } = {},
+  gate = newGate(),
+  hold: { describe?: boolean; start?: boolean } = {},
+) {
   let token = 0;
   const data = new DataService({
     store: new MemoryBlockStore(),
@@ -48,21 +55,29 @@ function setup(fail: { describe?: boolean; index?: boolean; check?: boolean; val
   });
   const unavailable = () => Promise.reject(new UnavailableError(SERIAL));
   const calls = { index: 0 };
+  /** The answer of a call made now: at the gate's release while it is on (`held` too). */
+  const gated = <T>(answer: () => Promise<T>, held = true): Promise<T> =>
+    gate.on && held ? new Promise<void>((resolve) => gate.held.push(resolve)).then(answer) : answer();
   const indexSource = data.indexSource.bind(data);
   data.indexSource = (...args) => {
     calls.index++;
     const failing = fail.index === true;
-    const answer = () => (failing ? unavailable() : indexSource(...args));
-    return gate.on ? new Promise<void>((resolve) => gate.held.push(resolve)).then(answer) : answer();
+    return gated(() => (failing ? unavailable() : indexSource(...args)));
   };
   const checkInput = data.checkInput.bind(data);
   data.checkInput = (...args) => (fail.check === true ? unavailable() : checkInput(...args));
   const fake = new FakeEngine();
   const engine = {
-    describe: (program: ProgramDescription['program']) => (fail.describe === true ? unavailable() : fake.describe(program)),
-    start: async (): Promise<StartResult> => {
-      if (fail.validate === true) throw new UnavailableError(SERIAL);
-      return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+    describe: (program: ProgramDescription['program']) => {
+      const failing = fail.describe === true;
+      return gated(() => (failing ? unavailable() : fake.describe(program)), hold.describe === true);
+    },
+    start: (): Promise<StartResult> => {
+      const failing = fail.validate === true;
+      return gated(async () => {
+        if (failing) throw new UnavailableError(SERIAL);
+        return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+      }, hold.start === true);
     },
     validate: async () => ({ ok: true }) as const,
     prepare: () => undefined,
@@ -358,6 +373,132 @@ describe('Run LOSAT and the Examples ask the engine again before they refuse', (
     gate.release();
     expect(await pressed).toEqual({ ok: false, message: `${SERIAL}. Reload the page.` });
     expect(calls.index).toBe(4);
+  });
+
+  // The fifth review, M1 (2026-11-19): what the form asked again read as asked while on its way (the options described,
+  // the inputs indexing, the validation checking), so a second press awaited nothing: refused at once with "Reload the
+  // page", which stayed once the answers came; or, while nothing read as unavailable, downloaded at once.
+  describe('an Example pressed while the form asks the engine again', () => {
+    const SIXTEEN_S = exampleById('refseq-16s-bacteria');
+    const ITS = exampleById('refseq-its-fungi');
+    const SET = '>NR_102783.2 Bacillus subtilis 16S\nACGTACGTAC\n';
+
+    /** Both inputs pasted while the engine file could not be downloaded (the options too, with `options`); then it is on its way. */
+    async function onItsWay(options: boolean) {
+      const fail = { describe: options, validate: true, index: true };
+      const gate = newGate();
+      const { draft } = setup(fail, gate, { describe: true, start: true });
+      const availability = new Availability({ draft, dataWorkerEnded: never });
+      const downloader = new FakeFileDownloader({ [SIXTEEN_S.url]: SET, [ITS.url]: SET });
+      const store = new MemoryExampleStore({ persistent: true, now: () => Date.UTC(2026, 10, 19) });
+      const examples = new ExampleLoader({ downloader, store, draft, availability });
+      draft.setPaste('query', '>q\nACGT\n');
+      draft.setPaste('subject', '>s\nACGT\n');
+      await draft.idle();
+      expect(availability.state.get()).toEqual({ problem: SERIAL });
+      back(fail);
+      gate.on = true;
+      const requested = () => downloader.requests.map((request) => request.url);
+      const settle = async () => {
+        await examples.idle();
+        await draft.idle();
+      };
+      return { draft, gate, availability, examples, requested, settle };
+    }
+
+    /** The first press, once the questions that it asked again no longer read as unavailable. */
+    async function pressed(probe: Awaited<ReturnType<typeof onItsWay>>): Promise<void> {
+      probe.examples.load(SIXTEEN_S.id);
+      await until(() => probe.gate.held.length > 0 && probe.draft.state.get().validation.state !== 'unavailable');
+    }
+
+    for (const options of [true, false]) {
+      const at = options ? 'the options too could not be read' : 'the options were read';
+      it(`waits at Cancel and the same set again for the answers on their way, and loads the set (${at})`, async () => {
+        const probe = await onItsWay(options);
+        await pressed(probe);
+        probe.examples.cancel();
+        probe.examples.load(SIXTEEN_S.id);
+        await later(5);
+        expect(probe.examples.state.get().load).toEqual({ id: SIXTEEN_S.id, progress: { state: 'asking' } });
+        expect(probe.requested()).toEqual([]);
+        probe.gate.release();
+        await probe.settle();
+        expect(probe.availability.state.get()).toEqual({});
+        expect(probe.examples.state.get().load).toBeUndefined();
+        expect(probe.examples.state.get().loaded?.id).toBe(SIXTEEN_S.id);
+        expect(probe.requested()).toEqual([SIXTEEN_S.url]);
+      });
+
+      it(`waits at the other set for the answers on their way, and loads it (${at})`, async () => {
+        const probe = await onItsWay(options);
+        await pressed(probe);
+        probe.examples.load(ITS.id);
+        await later(5);
+        expect(probe.examples.state.get().load).toEqual({ id: ITS.id, progress: { state: 'asking' } });
+        expect(probe.requested()).toEqual([]);
+        probe.gate.release();
+        await probe.settle();
+        expect(probe.examples.state.get().loaded?.id).toBe(ITS.id);
+        expect(probe.requested()).toEqual([ITS.url]);
+      });
+
+      it(`waits while Run LOSAT asks again, and then loads the set (${at})`, async () => {
+        const probe = await onItsWay(options);
+        const run = probe.draft.submit();
+        await until(() => probe.gate.held.length > 0 && probe.draft.state.get().validation.state !== 'unavailable');
+        probe.examples.load(SIXTEEN_S.id);
+        await later(5);
+        expect(probe.examples.state.get().load).toEqual({ id: SIXTEEN_S.id, progress: { state: 'asking' } });
+        expect(probe.requested()).toEqual([]);
+        probe.gate.release();
+        expect((await run).ok).toBe(true);
+        await probe.settle();
+        expect(probe.examples.state.get().loaded?.id).toBe(SIXTEEN_S.id);
+        expect(probe.requested()).toEqual([SIXTEEN_S.url]);
+      });
+    }
+
+    it('waits for the options that a validation asked again', async () => {
+      const fail = { describe: true };
+      const gate = newGate();
+      const { draft } = setup(fail, gate, { describe: true });
+      const availability = new Availability({ draft, dataWorkerEnded: never });
+      draft.setPaste('query', '>q\nACGT\n');
+      draft.setPaste('subject', '>s\nACGT\n');
+      await draft.idle();
+      expect(availability.state.get()).toEqual({ problem: SERIAL });
+      expect(draft.state.get().validation.state).toBe('ok');
+      fail.describe = false;
+      gate.on = true;
+      // A validation that the engine answers (of an edit) asks the options again.
+      draft.setField('-evalue', '1');
+      await until(() => gate.held.length === 1 && draft.state.get().validation.state === 'ok');
+      const answer = Promise.race([availability.recheck(), later(50).then(() => 'did not wait')]);
+      expect(await answer).toBe('did not wait');
+      const rechecked = availability.recheck();
+      gate.release();
+      expect(await rechecked).toBeUndefined();
+    });
+  });
+
+  // The fifth review, L2 (2026-11-19): a row refused with "Reload the page" kept it once Run LOSAT brought LOSAT back.
+  it('an Example refused while the engine could not answer says nothing once Run LOSAT brought LOSAT back', async () => {
+    const { fail, draft } = await pastedWhileUnavailable();
+    const availability = new Availability({ draft, dataWorkerEnded: never });
+    const downloader = new FakeFileDownloader({});
+    const examples = new ExampleLoader({ downloader, store: new MemoryExampleStore({ persistent: true, now: () => 0 }), draft, availability });
+    examples.load('refseq-16s-bacteria');
+    await examples.idle();
+    expect(examples.state.get().load).toEqual({
+      id: 'refseq-16s-bacteria',
+      progress: { state: 'failed', message: `${SERIAL}. Reload the page.`, unavailable: true },
+    });
+    back(fail);
+    expect(await draft.submit()).toEqual({ ok: true, runIds: ['r0'] });
+    expect(availability.state.get()).toEqual({});
+    expect(examples.state.get().load).toBeUndefined();
+    expect(downloader.requests).toEqual([]);
   });
 
   it('a Data worker that ended is not asked again', async () => {

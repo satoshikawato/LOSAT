@@ -263,6 +263,13 @@ export class SearchDraft {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly workers = new Map<string, () => void>();
   private readonly pending = new Set<Promise<unknown>>();
+  /**
+   * What askAgain asked the engine again that has not answered yet. While it is on its way, the question reads as
+   * asked (the options are described, the input indexing, the validation checking), so a later askAgain, which asks
+   * only what failed, waits for it: an Example pressed again then asked nothing and was refused with "Reload the page"
+   * also once the answers came (the fifth review of line WQA's D1 and D2, M1, 2026-11-19).
+   */
+  private readonly asking = new Set<Promise<unknown>>();
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
   private readonly race: SourceRace;
@@ -1160,8 +1167,9 @@ export class SearchDraft {
    * page" for the whole session, also after searches completed (the second review of line WQA's D1 and D2, M1,
    * 2026-11-19). It is asked when the engine answers the options, an index or a check, when Run LOSAT is pressed, and
    * before an Example is loaded (Availability.recheck). A question is pending until it answers; one that fails asks
-   * nothing again. Settles once what it asked has answered (and a validation that it asked has run), not the rest of
-   * the form's work: an Example waited for all of it, a large index or a fetch too (the fourth review, M1).
+   * nothing again. Settles once what it asked has answered (and a validation that it asked has run), and what an
+   * earlier call asked that has not answered yet (asking), not the rest of the form's work: an Example waited for all
+   * of it, a large index or a fetch too (the fourth review, M1).
    */
   askAgain(): Promise<void> {
     const state = this.state.get();
@@ -1179,7 +1187,16 @@ export class SearchDraft {
     const validation = state.validation.state === 'unavailable';
     if (validation) this.scheduleValidation();
     // The answers schedule a validation of their own; one that was unavailable has answered once none is left.
-    return Promise.allSettled(asked).then(() => (validation ? this.validationSettled() : undefined));
+    if (asked.length > 0 || validation) this.keepAsking(Promise.allSettled(asked).then(() => (validation ? this.validationSettled() : undefined)));
+    return Promise.allSettled([...this.asking]).then(() => undefined);
+  }
+
+  /** Keeps a question asked again among those on their way (asking) until it answers. */
+  private keepAsking<T>(work: Promise<T>): Promise<T> {
+    this.asking.add(work);
+    const done = () => this.asking.delete(work);
+    work.then(done, done);
+    return work;
   }
 
   /** What the engine could not answer because a part of LOSAT could not be loaded, by question (unavailableOf). */
@@ -1200,11 +1217,12 @@ export class SearchDraft {
   /**
    * Asks the engine for the options again if it could not answer them before. A validation that the engine answered
    * asks only this: a validation follows every index, also one that failed, which would otherwise be read again after
-   * each validation; the options that answer ask the rest again (askAgain).
+   * each validation; the options that answer ask the rest again (askAgain). They are on their way (asking) until they
+   * answer, also when a validation asked them.
    */
   private askOptionsAgain(): Promise<void> | undefined {
     const { descriptionUnavailable, program } = this.state.get();
-    return descriptionUnavailable === true && !this.descriptions.has(program) ? this.loadDescription(program) : undefined;
+    return descriptionUnavailable === true && !this.descriptions.has(program) ? this.keepAsking(this.loadDescription(program)) : undefined;
   }
 
   private parserOf(role: InputRole): FastaParserKind {

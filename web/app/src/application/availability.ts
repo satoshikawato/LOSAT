@@ -42,10 +42,11 @@ export class Availability {
    * that could not be downloaded may download now. The Data worker does not come back. An Example decides on it; it
    * was refused with "Reload the page", and asked nothing, also once the engine file downloaded again (the third
    * review of line WQA's D1 and D2, M1, 2026-11-19). It waits for the answers to what the form asked again, not for
-   * the rest of the form's work (its fourth review, M1).
+   * the rest of the form's work (its fourth review, M1), also for those still on their way when nothing reads as
+   * unavailable meanwhile: a second press was refused at once, or downloaded at once (its fifth review, M1).
    */
   async recheck(): Promise<string | undefined> {
-    if (this.ended === undefined && this.state.get().problem !== undefined) await this.deps.draft.askAgain();
+    if (this.ended === undefined) await this.deps.draft.askAgain();
     return this.state.get().problem;
   }
 

@@ -31,21 +31,22 @@ import type {
   SavedExample,
 } from '../ports/example';
 import type { FileSaver } from '../ports/download';
-import { withRemedy } from './availability';
+import { withRemedy, type Availability } from './availability';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
 export type ExampleLoad =
   /**
-   * Asking LOSAT again whether it can be used (ExamplesDeps.unavailable), before any request: the row shows the load
-   * busy, with Cancel, and its sentence as before the press.
+   * Asking LOSAT again whether it can be used (Availability.recheck), before any request: the row shows the load
+   * busy, with Cancel.
    */
   | { readonly state: 'asking' }
   /** Looking for the saved copy. */
   | { readonly state: 'reading' }
   | { readonly state: 'downloading'; readonly bytes: number; readonly total?: number }
   | { readonly state: 'saving' }
-  | { readonly state: 'failed'; readonly message: string };
+  /** With `unavailable`, refused as a part of LOSAT could not be loaded (Availability): it goes once LOSAT works. */
+  | { readonly state: 'failed'; readonly message: string; readonly unavailable?: true };
 
 export interface ExamplesState {
   /** The saved copy of each set that was looked up; null when there is none. */
@@ -72,10 +73,10 @@ export interface ExamplesDeps {
   /** Where a saved copy can be written; without it, "Save to folder…" and "Download" are not offered. */
   readonly saver?: FileSaver;
   /**
-   * What of LOSAT could not be loaded or stopped, once the search form asked the engine again (Availability.recheck);
-   * undefined while LOSAT works.
+   * Whether LOSAT works: what of it could not be loaded or stopped, once the search form asked the engine again
+   * (recheck); without it, LOSAT is taken to work.
    */
-  readonly unavailable?: () => Promise<string | undefined>;
+  readonly availability?: Pick<Availability, 'state' | 'recheck'>;
 }
 
 export class ExampleLoader {
@@ -91,6 +92,12 @@ export class ExampleLoader {
       if (set === undefined) return;
       this.deps.draft.dropExample(set.id);
       this.setSaved(set.id, null);
+    });
+    // A load refused as a part of LOSAT could not be loaded said "Reload the page" also once LOSAT worked again (the
+    // fifth review of line WQA's D1 and D2, L2, 2026-11-19).
+    deps.availability?.state.subscribe(({ problem }) => {
+      const { load } = this.state.get();
+      if (problem === undefined && load?.progress.state === 'failed' && load.progress.unavailable === true) this.update({ load: undefined });
     });
   }
 
@@ -217,10 +224,12 @@ export class ExampleLoader {
     // LOSAT was asked again, it had no state, so the row showed no Cancel, and a mode change or a Delete did not end it:
     // the set then downloaded and was saved for a mode the user had left (the fourth review of D1 and D2, M1).
     progress({ state: 'asking' });
-    const problem = await this.deps.unavailable?.();
+    await this.deps.availability?.recheck();
     if (signal.aborted) return;
+    // As it is now: what the page says may have changed since the answer.
+    const problem = this.deps.availability?.state.get().problem;
     if (problem !== undefined) {
-      fail(withRemedy(problem));
+      progress({ state: 'failed', message: withRemedy(problem), unavailable: true });
       return;
     }
     // A mode that has no button for the set gets none of it.

@@ -17,7 +17,7 @@ import { FakeDeletionChannel, FakeFileDownloader, FakeFileSaver, MemoryExampleSt
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore } from '../../src/ports/example';
+import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore, FileDownloader } from '../../src/ports/example';
 import { NodeInflater } from './support/node-inflater';
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
@@ -275,6 +275,39 @@ describe('ExampleLoader', () => {
     expect(other.examples.state.get().load).toBe(failed);
   });
 
+  // The sixth review of D1 and D2 (2026-11-20): a set pressed while the engine file was still on its way downloaded at
+  // once, its inflation then waited for that file, which failed: the row said "Downloading 43 bytes of 43 bytes…" while
+  // it waited, and "Reload the page" also once LOSAT worked again.
+  it('waits for LOSAT while the set is inflated, and drops a refusal of its inflation once LOSAT works', async () => {
+    const availability = heldAvailability();
+    const { draft } = setup();
+    let inflated: () => void = () => undefined;
+    const downloader: FileDownloader = {
+      download: async (_request, onProgress) => {
+        onProgress({ bytes: 43, total: 43 });
+        onProgress({ bytes: 43, total: 43, inflating: true });
+        await new Promise<void>((resolve) => (inflated = resolve));
+        return { ok: false, reason: 'unavailable', detail: UNAVAILABLE };
+      },
+    };
+    const store = new MemoryExampleStore({ persistent: true, now: () => 0 });
+    const examples = new ExampleLoader({ downloader, store, draft, availability });
+    examples.load('refseq-16s-bacteria');
+    availability.answer();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(examples.state.get().load).toEqual({ id: 'refseq-16s-bacteria', progress: { state: 'inflating' } });
+    inflated();
+    await examples.idle();
+    expect(examples.state.get().load).toEqual({
+      id: 'refseq-16s-bacteria',
+      progress: { state: 'failed', message: `${UNAVAILABLE}. Reload the page.`, unavailable: true },
+    });
+    // The page says it too, and then LOSAT works again.
+    availability.set(UNAVAILABLE);
+    availability.set();
+    expect(examples.state.get().load).toBeUndefined();
+  });
+
   // A problem that the page says only after the recheck answered refuses the load all the same.
   it('decides on what the page says once the recheck answered', async () => {
     const availability = heldAvailability();
@@ -342,7 +375,7 @@ describe('ExampleLoader', () => {
     const { examples, settle } = setup({ files: { [SIXTEEN_S.url]: { ok: false, reason: 'unavailable', detail: STOPPED } } });
     examples.load('refseq-16s-bacteria');
     await settle();
-    expect(examples.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.` });
+    expect(examples.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.`, unavailable: true });
     // The store that keeps the saved copies stopped: no download starts.
     const { examples: other, downloader, settle: settleOther } = setup({
       wrapStore: (store) =>
@@ -350,7 +383,7 @@ describe('ExampleLoader', () => {
     });
     other.load('refseq-16s-bacteria');
     await settleOther();
-    expect(other.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.` });
+    expect(other.state.get().load?.progress).toEqual({ state: 'failed', message: `${STOPPED}. Reload the page.`, unavailable: true });
     expect(downloader.requests).toEqual([]);
   });
 
@@ -594,8 +627,30 @@ describe('BrowserFileDownloader', () => {
     expect(result).toMatchObject({ ok: true, downloadedBytes: gz.length, version: '2026-10-27' });
     // The body is the set's file as its site names it.
     expect(given).toEqual([['x.fna.gz', EXAMPLE_BYTE_LIMIT]]);
-    expect(progress.at(-1)).toEqual({ bytes: gz.length, total: gz.length });
+    // The whole body, and then its inflation (the sixth review of line WQA's D1 and D2, 2026-11-20).
+    expect(progress.slice(-2)).toEqual([
+      { bytes: gz.length, total: gz.length },
+      { bytes: gz.length, total: gz.length, inflating: true },
+    ]);
     expect(calls[0]![1]).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer' });
+  });
+
+  it('says that the body is being inflated before the decoders answer', async () => {
+    const gz = gzipSync(TEXT);
+    const seen: DownloadProgress[] = [];
+    let atInflation: DownloadProgress | undefined;
+    const downloader = new BrowserFileDownloader({
+      inflater: {
+        inflateFile: (file, maxBytes) => {
+          atInflation = seen.at(-1);
+          return inflateFile(file, new NodeInflater(), maxBytes);
+        },
+      },
+      fetch: async () => new Response(gz),
+    });
+    const request = { url: 'https://ftp.ncbi.nlm.nih.gov/x.fna.gz', maxBytes: EXAMPLE_BYTE_LIMIT, fileName: 'x.fna' };
+    await downloader.download(request, (p) => seen.push(p), new AbortController().signal);
+    expect(atInflation).toEqual({ bytes: gz.length, inflating: true });
   });
 
   it('keeps a body that is not gzip as it is, without the inflation, and names UniProt releases', async () => {
@@ -603,6 +658,7 @@ describe('BrowserFileDownloader', () => {
     expect(await text(result)).toBe(TEXT);
     expect(result).toMatchObject({ version: 'UniProt release 2026_03' });
     expect(progress.at(-1)).toEqual({ bytes: TEXT.length });
+    expect(progress.some((p) => p.inflating === true)).toBe(false);
     expect(given).toEqual([]);
   });
 

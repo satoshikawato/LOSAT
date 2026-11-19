@@ -20,6 +20,12 @@ export interface DownloadRequest {
 export interface DownloadProgress {
   readonly bytes: number;
   readonly total?: number;
+  /**
+   * The body is downloaded and the engine's decoders inflate it, which first loads their part of LOSAT: the line said
+   * "Downloading 43 bytes of 43 bytes…" while the engine file was on its way (the sixth review of line WQA's D1 and D2,
+   * 2026-11-20).
+   */
+  readonly inflating?: true;
 }
 
 export type DownloadResult =

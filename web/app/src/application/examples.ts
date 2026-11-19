@@ -44,8 +44,13 @@ export type ExampleLoad =
   /** Looking for the saved copy. */
   | { readonly state: 'reading' }
   | { readonly state: 'downloading'; readonly bytes: number; readonly total?: number }
+  /** The set is downloaded, and the engine's decoders inflate it (DownloadProgress.inflating). */
+  | { readonly state: 'inflating' }
   | { readonly state: 'saving' }
-  /** With `unavailable`, refused as a part of LOSAT could not be loaded (Availability): it goes once LOSAT works. */
+  /**
+   * With `unavailable`, refused as a part of LOSAT could not be loaded or stopped (an UnavailableError, with the remedy):
+   * it goes once LOSAT works (Availability).
+   */
   | { readonly state: 'failed'; readonly message: string; readonly unavailable?: true };
 
 export interface ExamplesState {
@@ -217,6 +222,8 @@ export class ExampleLoader {
       if (!signal.aborted) this.update({ load: { id: set.id, progress: next } });
     };
     const fail = (message: string) => progress({ state: 'failed', message });
+    // Not the set's fault: what the page says, with the remedy, until LOSAT works again (the constructor).
+    const refuse = (problem: string) => progress({ state: 'failed', message: withRemedy(problem), unavailable: true });
     this.update({ note: undefined });
     // While a part of LOSAT could not be loaded or stopped, the load fails with what the page says, before any
     // download: the set was downloaded whole (8 to 37 MB), and then the file was blamed, as the engine's decoders that
@@ -229,7 +236,7 @@ export class ExampleLoader {
     // As it is now: what the page says may have changed since the answer.
     const problem = this.deps.availability?.state.get().problem;
     if (problem !== undefined) {
-      progress({ state: 'failed', message: withRemedy(problem), unavailable: true });
+      refuse(problem);
       return;
     }
     // A mode that has no button for the set gets none of it.
@@ -247,7 +254,7 @@ export class ExampleLoader {
     });
     if (signal.aborted) return;
     if (unavailable !== undefined) {
-      fail(withRemedy(unavailable.message));
+      refuse(unavailable.message);
       return;
     }
     if (kept !== undefined) {
@@ -259,7 +266,8 @@ export class ExampleLoader {
     try {
       result = await this.deps.downloader.download(
         { url: set.url, maxBytes: EXAMPLE_BYTE_LIMIT, fileName: set.fileName },
-        ({ bytes, total }) => progress({ state: 'downloading', bytes, ...(total === undefined ? {} : { total }) }),
+        ({ bytes, total, inflating }) =>
+          progress(inflating === true ? { state: 'inflating' } : { state: 'downloading', bytes, ...(total === undefined ? {} : { total }) }),
         signal,
       );
     } catch (error) {
@@ -267,8 +275,10 @@ export class ExampleLoader {
       return;
     }
     if (signal.aborted) return;
+    // A set refused at its inflation kept "Reload the page" once LOSAT worked again (the sixth review, L1).
     if (!result.ok) {
-      fail(downloadProblem(result, set));
+      if (result.reason === 'unavailable') refuse(result.detail);
+      else fail(downloadProblem(result, set));
       return;
     }
     const { data, downloadedBytes, version } = result;
@@ -333,8 +343,8 @@ export class ExampleLoader {
   }
 }
 
-/** Why a download brought no set, for the Example line. */
-function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: ExampleSet): string {
+/** Why a download brought no set, for the Example line (a part of LOSAT that is unavailable is refused as the page says it). */
+function downloadProblem(result: Exclude<DownloadResult, { ok: true } | { reason: 'unavailable' }>, set: ExampleSet): string {
   const host = exampleHost(set);
   switch (result.reason) {
     case 'unreachable':
@@ -343,8 +353,6 @@ function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: Exa
       return refusedSentence(host, result.status);
     case 'corrupt':
       return `The file from ${host} could not be decompressed (${result.detail}).`;
-    case 'unavailable':
-      return withRemedy(result.detail);
     case 'too-large':
       return `The file from ${host} is larger than ${withUnit(EXAMPLE_BYTE_LIMIT / (1024 * 1024), 'MiB')} decompressed.`;
   }

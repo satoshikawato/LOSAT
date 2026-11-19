@@ -102,6 +102,7 @@ async function readBody(
   // The engine's decoders inflate the body in the Data worker, as they inflate the source
   // `<fileName>.gz` (the set's file on its site), with the limit on the inflated bytes.
   let inflated: File;
+  onProgress({ bytes: downloaded, ...(total === undefined ? {} : { total }), inflating: true });
   try {
     inflated = await inflater.inflateFile(new File([body], `${request.fileName}.gz`), request.maxBytes);
   } catch (error) {

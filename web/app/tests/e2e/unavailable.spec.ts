@@ -19,12 +19,14 @@
 // was never finished when its worker ended (L2). Its fourth review: an Example that waited while LOSAT was asked again
 // showed nothing and could not be ended (M1); Run LOSAT did not ask again what was in flight at the press (L1). Its fifth
 // review: an Example pressed again while LOSAT was asked again was refused at once (M1); the waiting row offered the
-// download from NCBI (L1); a row refused while LOSAT was unavailable said "Reload the page" once LOSAT worked (L2).
+// download from NCBI (L1); a row refused while LOSAT was unavailable said "Reload the page" once LOSAT worked (L2). Its
+// sixth review: the same for a set whose inflation waited for the engine file, which said meanwhile that it downloaded.
 import { gzipSync } from 'node:zlib';
 import { expect, type Page, type Route } from '@playwright/test';
 import { test } from './support/test';
 import { exampleById } from '../../src/domain/examples';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { navigate } from './support/navigate';
 import { E2E_ORIGIN } from './support/origin';
 import { fasta, openFiles, openParameters, openSearch, paste, pickRun, program, runMessage, submit, waitStatus } from './support/search';
 
@@ -414,6 +416,35 @@ test('an Example refused while LOSAT was unavailable no longer says to reload on
   await expect(page.getByTestId('example-error')).toHaveCount(0);
   await expect(page.getByTestId('example-refseq-16s-bacteria-note')).toHaveText('Downloads 8.0 MB from ftp.ncbi.nlm.nih.gov');
   expect(away).toEqual([]);
+});
+
+// The sixth review of D1 and D2 (2026-11-20): a set pressed while the engine file was still on its way at load downloaded
+// at once (nothing read as unavailable yet), and its inflation waited for that file: the row said "Downloading 43 bytes
+// of 43 bytes from ftp.ncbi.nlm.nih.gov…" meanwhile, and once the file failed, "Reload the page" also after LOSAT worked.
+test('an Example whose inflation waits for the engine file says so, and no longer says to reload once LOSAT works', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+  test.setTimeout(120_000);
+  const file = await engineFile(page);
+  file.mode = 'hold';
+  const away = await stubExampleHost(page);
+  await navigate(page, '/');
+  const row = 'example-refseq-16s-bacteria';
+  await expect(page.getByTestId(row)).toBeVisible();
+  await expect.poll(() => file.held.length).toBeGreaterThan(0);
+  await page.getByTestId(row).click();
+  await expect.poll(() => away.length, { timeout: 15_000 }).toBe(1);
+  // Soft: the rest says whether the refusal goes too.
+  await expect.soft(page.getByTestId(`${row}-note`)).toHaveText(WAITING);
+  await expect(page.getByTestId(`${row}-cancel`)).toBeVisible();
+  file.mode = 'fail';
+  for (const route of file.held.splice(0)) await route.abort('failed');
+  await expect(page.getByTestId('example-error')).toHaveText(/^LOSAT could not download its engine file .*\. Reload the page\.$/, { timeout: 15_000 });
+  // The connection is back; a pasted query reads the engine file again.
+  file.mode = 'pass';
+  await paste(page, 'query', QUERY);
+  await expect(page.getByTestId('losat-unavailable')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('example-error')).toHaveCount(0);
+  expect(away).toEqual([SIXTEEN_S.url]);
 });
 
 // The fourth review of D1 and D2, L1 (2026-11-19): a question in flight at the press that failed after it was not asked

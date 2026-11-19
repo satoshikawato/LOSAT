@@ -497,6 +497,10 @@ input[type='radio'] {
   border-bottom: 3px solid var(--accent);
   padding: 0;
   margin: 12px 0 8px;
+  /* A fieldset is at least as wide as its content's longest unbreakable line (min-inline-size:
+     min-content): at 320 px the tabs' names made it 16 px wider than the search panel, and the
+     page 2 px wider than the window (line WQA's random walk, 2026-11-19). */
+  min-inline-size: 0;
 }
 
 .program-tab {
@@ -2228,6 +2232,8 @@ pre.range-text {
   .program-tabs {
     flex-wrap: nowrap;
     gap: 2px;
+    /* The tabs' type size follows the row's width (cqi), and the row's width is the panel's. */
+    container-type: inline-size;
   }
 
   .program-tab {
@@ -2237,6 +2243,18 @@ pre.range-text {
     padding: 10px 2px 9px;
     border-radius: 6px 6px 0 0;
     font-size: 0.9em;
+  }
+
+  /* Below 360 px the names would pass their tabs' borders: the type shrinks with the row so that
+     each name fits its tab. A tab is (100cqi - 8px) / 5 wide (five tabs, four 2 px gaps); a name
+     wider than its tab's content starts 3 px in (1 px border, 2 px padding); the widest,
+     "TBLASTN" in Inter 600, is up to 4.76 em wide (Chromium at 12 px; Firefox and WebKit 4.67).
+     With 1 px to spare and 4.8 em: 3px + 4.8em <= (100cqi - 8px) / 5 - 1px, so the size is at
+     most (100cqi - 28px) / 24 (10.8 px in a 320 px window, 12.5 px at 359 px). */
+  @media (max-width: 359px) {
+    .program-tab {
+      font-size: min(0.9em, calc((100cqi - 28px) / 24));
+    }
   }
 
   /* Larger targets for touch. */

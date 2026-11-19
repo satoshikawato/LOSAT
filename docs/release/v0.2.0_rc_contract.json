@@ -28,7 +28,7 @@
     "cross_runner_binary_equality_required": false
   },
   "certification_lineage": {
-    "candidate_sha": "703caed171944b0763c2efa4b3ef58805099fc47",
+    "candidate_sha": "93ca2f652617acac09d416c28c293cc8a1a501d1",
     "candidate_sha_note": "must equal the commit every run of certification_set used (C); 40 lowercase hex digits when filled. Every GitHub run is dispatched on a branch whose head is C: cert/<first 9 hex of C>, or dev while dev's head is C (v0.2.0: runs C and F, the two runs that chose C); the merge commit M of the promotion PR has C's tree (git diff --quiet C M), and R is M plus document-only commits on release/0.2",
     "runtime_input_paths": [
       "LOSAT/src",
@@ -71,19 +71,19 @@
       "B": {
         "workflow": "platform-native-certification.yml",
         "name": "platform_native_certification",
-        "run_id": 44380742515,
-        "conclusion": "success"
+        "run_id": 44518763102,
+        "conclusion": null
       },
       "C": {
         "workflow": "platform-checks.yml",
         "name": "platform_checks",
-        "run_id": 44379367097,
+        "run_id": 44507339981,
         "conclusion": "success"
       },
       "F": {
         "workflow": "nightly.yml",
         "name": "nightly",
-        "run_id": 44379373410,
+        "run_id": 44507345009,
         "conclusion": "success"
       },
       "G": {
@@ -92,16 +92,16 @@
         "required_consecutive_green": 3,
         "runs": [
           {
-            "run_id": 44380768166,
+            "run_id": 44507727312,
             "conclusion": "success"
           },
           {
-            "run_id": 44391117368,
-            "conclusion": "success"
+            "run_id": 44516544170,
+            "conclusion": null
           },
           {
-            "run_id": 44403465721,
-            "conclusion": "success"
+            "run_id": null,
+            "conclusion": null
           }
         ]
       },
@@ -122,19 +122,19 @@
       "A": {
         "name": "integrated_runtime",
         "tool": "LOSAT/tests/certify_integrated_runtime_v010.py",
-        "evidence_sha256": "7410266dbdb5979756764fbe9dae059a894b2925389f97c75d85f74bd210b255",
+        "evidence_sha256": "df1f04404e2cf1c5f85d2c3d43e1155e14c63204bebaa573c94f601a9caeaa03",
         "evidence_manifest": "docs/evidence/release_v020/A/MANIFEST.tsv"
       },
       "D": {
         "name": "oracle_rerun_subject",
         "tool": "docs/evidence/losat_web_e2a/run_oracle.py + check_losat.py",
-        "evidence_sha256": "a30cdb6fc7f557fbae9b72f2d3f41f1d3f9ebdca634d65f9cf306f7eb712642b",
+        "evidence_sha256": "425097b34b488a2ad4fd530e4d9745563410dd76998ac2c3939541a2a725b99e",
         "evidence_manifest": "docs/evidence/release_v020/D/MANIFEST.tsv"
       },
       "E": {
         "name": "oracle_rerun_db",
         "tool": "LOSAT/tests/db_search_fixtures.py freeze + check",
-        "evidence_sha256": "f1a0c19b7fc0b4d51672f3d625f947d8623f5f028afd30b192a2c110028db3ee",
+        "evidence_sha256": "6dbc4c3b8257f4ae38d03b21d2efa0c747aa6601fbed6b38ae9d65bdace0535e",
         "evidence_manifest": "docs/evidence/release_v020/E/MANIFEST.tsv"
       }
     },

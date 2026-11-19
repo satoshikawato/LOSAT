@@ -37,10 +37,10 @@ import { openApp } from './support/browser';
 
 /** The note when the browser refuses the site's storage (SecurityError). */
 const REFUSED_NOTE =
-  "Results are kept in this tab's memory (at most 512 MB), because the browser does not let this site store files (a private window, or site data blocked in the browser's settings).";
+  "Results are kept in this tab's memory (at most 512\u00a0MB), because the browser does not let this site store files (a private window, or site data blocked in the browser's settings).";
 /** The note when the site's storage could not be opened (a lasting UnknownError, or another failure). */
 const UNOPENED_NOTE =
-  "Results are kept in this tab's memory (at most 512 MB), because the browser storage of this site could not be opened (a private window may have none).";
+  "Results are kept in this tab's memory (at most 512\u00a0MB), because the browser storage of this site could not be opened (a private window may have none).";
 /** What each browser said, which the page must not repeat. */
 const BROWSER_WORDS =
   /Security error|GetDirectory|transient|out of memory|access is denied|request was denied|not allowed in this context|create actor|state cached|interface object/i;
@@ -104,6 +104,39 @@ test('a site whose data the browser blocks keeps results in memory, with no note
     await expectMemoryNote(await openApp(window), REFUSED_NOTE, 'SecurityError');
   } finally {
     await blockingBrowser?.close();
+  }
+});
+
+// A number and its unit stay on one line (line WQA's sweep, D9, 2026-11-19): at 390 px the note broke
+// "(at most 512" / "MB)". The size is joined to its unit by a no-break space, so that at no width of a
+// phone's screen (the widths below, the note's text reflowed at each) do its two words fall on two lines.
+test("the storage note's size and its unit never fall on two lines", async ({ context }) => {
+  await context.route('**/assets/data-worker-*.js', async (route) => {
+    const response = await route.fetch();
+    const refuse =
+      "LockManager.prototype.request = () => Promise.reject(new DOMException('The request was denied.', 'SecurityError'));\n" +
+      'StorageManager.prototype.getDirectory = () => ' +
+      "Promise.reject(new DOMException('Storage directory access is denied.', 'SecurityError'));\n";
+    await route.fulfill({ response, body: refuse + (await response.text()) });
+  });
+  const page = await openApp(context);
+  await expectMemoryNote(page, REFUSED_NOTE, 'SecurityError');
+  const note = page.getByTestId('storage-memory-note');
+  for (let width = 280; width <= 520; width += 4) {
+    await page.setViewportSize({ width, height: 844 });
+    const lines = await note.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const found = /512[\s\u00a0]MB/.exec(node.textContent ?? '');
+        if (found === null) continue;
+        const range = document.createRange();
+        range.setStart(node, found.index);
+        range.setEnd(node, found.index + found[0].length);
+        return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+      }
+      return 0;
+    });
+    expect(lines, `lines of "512 MB" at ${width} px`).toBe(1);
   }
 });
 

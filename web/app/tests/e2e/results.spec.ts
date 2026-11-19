@@ -822,7 +822,7 @@ for (const c of PROGRAM_CASES) {
     await show(page, 'dotplot');
     const canvas = page.getByTestId('dotplot-canvas');
     await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('results-dotplot').getByTestId('hsp-list').getAttribute('data-count'))!);
-    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
+    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+\\u00a0${c.units.query}\\) against subject .* \\([\\d,]+\\u00a0${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
         (c.id === 'tblastn' ? `, subject frame ${frames}.` : c.id === 'blastx' ? `, query frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
@@ -830,7 +830,7 @@ for (const c of PROGRAM_CASES) {
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
     // 26: TBLASTN's query, BLASTX's subject), unless the shorter side was raised to 120 px (then the
     // note says so).
-    const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
+    const [queryLength, subjectLength] = /\(([\d,]+)\u00a0\w+\) against subject .* \(([\d,]+)\u00a0\w+\)\./
       .exec(await text(page.getByTestId('dotplot')))!
       .slice(1)
       .map((n) => Number(n.replace(/,/g, '')));
@@ -847,7 +847,7 @@ for (const c of PROGRAM_CASES) {
     await expect(canvas).toHaveAttribute('data-titles', /^\[/);
     // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa,
     // where its room holds the note with the unit (BLASTX's short subject axis may not).
-    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3 nt per aa)?' : '');
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3\u00a0nt per aa)?' : '');
     // Where the room is short, the ID is cut with an ellipsis and the unit kept.
     const subjectTitle = (await titles())[1];
     const shown = new RegExp(`^Subject (.+) \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`).exec(subjectTitle);
@@ -859,7 +859,7 @@ for (const c of PROGRAM_CASES) {
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b
       // screen review finding 4).
       await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
-      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3 nt per aa)`);
+      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3\u00a0nt per aa)`);
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(page.getByTestId('dotplot-scale-note')).toBeVisible();
       await expect.poll(async () => (await titles())[0]).toBe(`Query ${fields[0]} (aa)`);

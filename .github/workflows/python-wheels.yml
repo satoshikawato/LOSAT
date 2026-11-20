@@ -192,7 +192,7 @@ jobs:
       # First, so that a run that would upload something else than the release stops within a minute:
       # PyPI takes the source of the tag v<version> only; on TestPyPI anything else is a notice.
       - name: The release's tag
-        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'nowhere'
+        if: github.event_name == 'workflow_dispatch' # TEMPORARY: && inputs.publish != 'nowhere'
         env:
           PUBLISH: ${{ inputs.publish }}
         run: |

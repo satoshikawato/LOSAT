@@ -14,6 +14,9 @@ name: Publish crate
 # The first version of a crate can only be published with a token. After it, crates.io's Trusted
 # Publishing (no stored secret, as python-wheels.yml uses for PyPI) can be set up for the crate.
 on:
+  # TEMPORARY (removed before this PR is final): one run of job `check` on this branch.
+  push:
+    branches: [ci/publish-pypi-crates]
   workflow_dispatch:
     inputs:
       publish:

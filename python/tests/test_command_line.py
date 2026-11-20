@@ -93,6 +93,9 @@ def test_diagnostics_hold_the_bytes_that_the_command_line_writes(command_line, t
     batches = list(search.batches(*inputs))
     assert b"".join(batch.diagnostics_bytes for batch in batches) == stderr
     assert "".join(batch.diagnostics for batch in batches) == outcome.diagnostics
+    written = search.run_to_file(*inputs, outfmt="6", path=tmp_path / "report.tsv")
+    assert written.diagnostics_bytes == stderr
+    assert written.diagnostics == outcome.diagnostics
 
 
 def test_the_keywords_mean_what_the_words_mean(command_line):
@@ -158,7 +161,7 @@ def test_a_dry_run_searches_nothing_and_reads_no_input(command_line, tmp_path):
     assert outcome.diagnostics == ""
     assert log.read_bytes() == b""
     out = tmp_path / "out.txt"
-    assert search.run_to_file(*inputs, outfmt="6", path=out) == ""
+    assert search.run_to_file(*inputs, outfmt="6", path=out).diagnostics_bytes == b""
     assert not out.exists()
     batches = list(search.batches(*inputs))
     assert len(batches) == 1

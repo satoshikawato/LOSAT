@@ -81,7 +81,7 @@ psiblast's rounds of each query follow one another in the table, round 1 first: 
 
 ## Files
 
-`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns what the command line writes to its standard error, as text (U+FFFD for a byte that is not UTF-8).
+`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns a `FileOutcome`: what the command line writes to its standard error, as `diagnostics_bytes` and as the text `diagnostics`.
 
 ## Long searches
 
@@ -113,7 +113,7 @@ print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options
 
 `ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure: `message_bytes` holds its bytes, and `str(error)` is the text.
 
-Every text that pylosat gives of what the command line writes (`str(error)`, `outcome.diagnostics`, `batch.diagnostics`, `ToolOutput.diagnostics` and `.text`, the return of `run_to_file`) has one U+FFFD per maximal ill-formed subpart of its bytes, as `bytes.decode("utf-8", "replace")` gives; the bytes are `message_bytes`, `diagnostics_bytes` and `ToolOutput.bytes`.
+Every text that pylosat gives of what the command line writes (`str(error)`, `outcome.diagnostics`, `batch.diagnostics`, `ToolOutput.diagnostics` and `.text`, `FileOutcome.diagnostics` from `run_to_file`) has one U+FFFD per maximal ill-formed subpart of its bytes, as `bytes.decode("utf-8", "replace")` gives; the bytes are `message_bytes`, `diagnostics_bytes` and `ToolOutput.bytes`.
 
 ## Development
 

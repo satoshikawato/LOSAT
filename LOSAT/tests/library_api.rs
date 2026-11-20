@@ -2813,8 +2813,7 @@ fn a_tool_error_holds_the_bytes_that_the_command_line_writes() {
         String::from_utf8_lossy(written)
     );
     assert!(matches!(error, Error::Search(_)), "{error:?}");
-    let message: &[u8] = error.message().as_ref();
-    assert_eq!(message, written, "{error:?}");
+    assert_eq!(error.message(), written, "{error:?}");
     assert_eq!(error.to_string(), String::from_utf8_lossy(written));
 }
 

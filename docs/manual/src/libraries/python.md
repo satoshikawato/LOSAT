@@ -100,10 +100,11 @@ Everything a search returns can be pickled, so a process pool can return it.
 
 ## Writing to a file
 
-`run_to_file` is the command line's `-out`. Use it for large reports and for `-outfmt 13` and `14`, whose side files are written next to the file. It returns what the command line writes to its standard error, as text (U+FFFD for a byte that is not UTF-8).
+`run_to_file` is the command line's `-out`. Use it for large reports and for `-outfmt 13` and `14`, whose side files are written next to the file. It returns a `FileOutcome`: what the command line writes to its standard error, as `diagnostics_bytes` and as the text `diagnostics` (U+FFFD for a byte that is not UTF-8).
 
 ```python
-diagnostics = search.run_to_file(query, subject, outfmt="14", path="report.xml")
+written = search.run_to_file(query, subject, outfmt="14", path="report.xml")
+print(written.diagnostics)
 ```
 
 ## Long searches

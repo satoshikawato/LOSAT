@@ -219,31 +219,33 @@ pub fn run<'py>(
 }
 
 /// The report of `outfmt` written to the file `path`, as the command line's `-out` writes it, with
-/// the side files of outfmt 13 and 14 next to it; returns what the command line writes to its
-/// standard error, as text (one U+FFFD per maximal ill-formed subpart of its bytes).
+/// the side files of outfmt 13 and 14 next to it; returns the bytes that the command line writes
+/// to its standard error.
 #[pyfunction]
-pub fn run_to_file(
-    py: Python<'_>,
+pub fn run_to_file<'py>(
+    py: Python<'py>,
     program: &str,
     argv: Vec<String>,
     query: NamedQuery,
     subject: NamedSubject,
     outfmt: &str,
     path: PathBuf,
-) -> PyResult<String> {
-    py.detach(|| {
-        let loaded = Loaded::read(program, &argv, query, subject)?;
-        let mut diagnostics = Vec::new();
-        api::run_to_file(
-            &loaded.search,
-            loaded.inputs(),
-            outfmt,
-            &path,
-            &mut diagnostics,
-        )?;
-        Ok(String::from_utf8_lossy(&diagnostics).into_owned())
-    })
-    .map_err(exception)
+) -> PyResult<Bound<'py, PyBytes>> {
+    let diagnostics = py
+        .detach(|| {
+            let loaded = Loaded::read(program, &argv, query, subject)?;
+            let mut diagnostics = Vec::new();
+            api::run_to_file(
+                &loaded.search,
+                loaded.inputs(),
+                outfmt,
+                &path,
+                &mut diagnostics,
+            )?;
+            Ok(diagnostics)
+        })
+        .map_err(exception)?;
+    Ok(PyBytes::new(py, &diagnostics))
 }
 
 /// A tool of the library API (`api::run_makeblastdb` and the others).

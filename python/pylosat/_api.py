@@ -345,6 +345,20 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class FileOutcome:
+    """What `Search.run_to_file` returned; the report is in its file."""
+
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this search: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart (a byte
+        that is not UTF-8, from a title read from a Latin-1 file, for example)."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
+
+
+@dataclass(frozen=True)
 class Batch:
     """The results of one of NCBI's query batches."""
 
@@ -515,20 +529,21 @@ class Search:
         *,
         outfmt: str,
         path: str | os.PathLike[str],
-    ) -> str:
+    ) -> FileOutcome:
         """Runs the search and writes the report of `outfmt` to the file `path`, as `-out path`.
 
         Outfmt 13 and 14 come through here: their side files lie next to `path`. Returns what the
-        command line writes to its standard error, as text with one U+FFFD per maximal ill-formed
-        subpart of its bytes. The GIL is released.
+        command line writes to its standard error (`FileOutcome`). The GIL is released.
         """
-        return _pylosat.run_to_file(
-            self._program,
-            list(self._argv),
-            _query(query),
-            _subject(subject),
-            outfmt,
-            os.fspath(path),
+        return FileOutcome(
+            _pylosat.run_to_file(
+                self._program,
+                list(self._argv),
+                _query(query),
+                _subject(subject),
+                outfmt,
+                os.fspath(path),
+            )
         )
 
     def batches(self, query: Sequences | Pssm, subject: Sequences | Database) -> Batches:

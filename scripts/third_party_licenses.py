@@ -5,9 +5,9 @@ copies of the license files in step.
 No NCBI counterpart: this is LOSAT's own packaging tooling.
 
 Why: the license texts of MIT, BSD, Zlib and Apache-2.0 code ask that the notice travel with every
-copy, binaries included. LOSAT's crate, wheel and release archives carry the compiled code of its
-Cargo dependencies, of the Rust standard library and (in the WASI builds) of wasi-libc, and none of
-them listed these. `THIRD_PARTY_NOTICES` (written by hand) names the code copied into LOSAT's own
+copy, binaries included. LOSAT's release archives, wheels and LOSAT Web (the npm package
+web/packages/losat) carry the compiled code of its Cargo dependencies, of the Rust standard library
+and (in the WASI builds) of wasi-libc, and none of them listed these (the crate carries source only). `THIRD_PARTY_NOTICES` (written by hand) names the code copied into LOSAT's own
 source; this script writes the other half, `THIRD_PARTY_LICENSES`, from `Cargo.lock`:
 
 - the crates of each build (BUILDS below), as Cargo's resolver links them: `cargo tree -e
@@ -18,7 +18,10 @@ source; this script writes the other half, `THIRD_PARTY_LICENSES`, from `Cargo.l
   of an `AND`; the full Apache License 2.0 once at the end;
 - the Rust standard library and its out-of-tree crates (scripts/third_party_licenses/
   rust-<version>-library.txt), and wasi-libc (wasi-libc-<commit>.txt) for the WASI builds, which are
-  committed inputs because Cargo does not list them and CI has no Rust toolchain documentation.
+  committed inputs because Cargo does not list them. The Rust ones start from the toolchain's
+  share/doc/rust/COPYRIGHT-library.html (the rustc component), which omits the registry crates that the
+  standard library's `backtrace` feature adds; the bundle pins the texts with a sha256, so that the
+  output does not depend on the toolchain installed where CI runs.
 
 A license text that the script cannot find or classify fails the run: nothing falls through.
 Trailing whitespace of every line is stripped and line ends are `\\n` in the output, so the bytes do
@@ -118,17 +121,18 @@ APACHE_FILE = "Apache-2.0.txt"
 INPUT_ORIGINS = {
     APACHE_FILE: "https://raw.githubusercontent.com/rust-lang/rust/1.92.0/LICENSE-APACHE",
     "rust-1.92.0-library.txt": "the toolchain's share/doc/rust/COPYRIGHT-library.html and licenses/, "
-    "the registry crates of STD_CRATES, rust-lang/rust 1.92.0 LICENSE-MIT",
+    "the registry crates of STD_CRATES, rust-lang/rust 1.92.0 LICENSE-MIT and library/compiler-builtins/LICENSE.txt",
     "wasi-libc-3f7eb4c7.txt": "https://github.com/WebAssembly/wasi-libc at 3f7eb4c7d6ede4dde3c4bffa6ed14e8d656fe93f",
 }
 INPUT_SHA256 = {
     APACHE_FILE: "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
-    "rust-1.92.0-library.txt": "c4753b80113bb9b7d9c50126b440940103d089b5d1aa4ccd7d22a6c20b342a55",
+    "rust-1.92.0-library.txt": "bf05decc03b10368e2ddbad0dfd47de1b1bd77fb909633dc113ab16c1e93faef",
     "wasi-libc-3f7eb4c7.txt": "d2e4a63c223afff5387e10e067c5eb6d592c05f422d968d1473c0450afe9d419",
 }
 RUST_VERSION = "1.92.0"
 RUST_BUNDLE = f"rust-{RUST_VERSION}-library.txt"
 RUST_TAG_URL = f"https://raw.githubusercontent.com/rust-lang/rust/{RUST_VERSION}"
+COMPILER_BUILTINS_LICENSE = "library/compiler-builtins/LICENSE.txt"  # the standard library links compiler_builtins
 # rustc 1.92.0 ships the wasm32-wasip1(-threads) libc.a and crt1-*.o of wasi-sdk 27
 # (src/ci/docker/host-x86_64/dist-various-2/Dockerfile of rust-lang/rust at 1.92.0:
 # wasi-sdk-27.0-x86_64-linux.tar.gz; the toolchain's libc.a carries the string
@@ -166,14 +170,18 @@ STD_IN_TREE = (
     ("library/core/src/unicode/unicode_data.rs", "Unicode-3.0", ("1991-2024 Unicode, Inc",)),
 )
 
-# Preference among the alternatives of an `OR` (lower is taken); a license not listed is never
-# taken (a GPL option is never the choice) and fails the run when nothing else is left.
+# Preference among the alternatives of an `OR` (lower is taken): MIT where offered, else the next
+# most permissive (the public-domain dedications, which ask for nothing, then the licenses that ask
+# for a notice, Apache-2.0 with the LLVM exception, which lifts its notice conditions for object
+# code, before plain Apache-2.0). A license not listed is never taken (a GPL option is never the
+# choice) and fails the run when nothing else is left.
 RANK = {
     "MIT": 0, "MIT-0": 0,
-    "ISC": 1, "BSD-2-Clause": 1, "BSD-3-Clause": 1, "Zlib": 1, "0BSD": 1,
-    "Unicode-3.0": 2, "bzip2-1.0.6": 2, "BSL-1.0": 2, "Unlicense": 2, "CC0-1.0": 2,
-    "Apache-2.0": 3,
+    "0BSD": 1, "Unlicense": 1, "CC0-1.0": 1,
+    "ISC": 2, "BSD-2-Clause": 2, "BSD-3-Clause": 2, "Zlib": 2,
+    "Unicode-3.0": 3, "bzip2-1.0.6": 3, "BSL-1.0": 3,
     "Apache-2.0 WITH LLVM-exception": 4,
+    "Apache-2.0": 5,
 }
 APACHE = "Apache-2.0"
 INFINITY = 99
@@ -207,6 +215,10 @@ NOTES = {
 CUT_BEFORE = {
     "chrono": "[2]: <http://www.apache.org/licenses/LICENSE-2.0>",  # MIT block, then the Apache text
 }
+# Crates whose license file holds the full Apache License 2.0 next to other text: the standard text
+# (printed once, in section 5) is cut out and a line says so; what comes before and after stays.
+CUT_APACHE_BODY = frozenset({"libm"})
+APACHE_BODY_CUT_LINE = "[The Apache License 2.0 text of this file is printed once, in section 5.]"
 # Crates that ship no license file for their license: the standard text of the license is the one
 # at the end of this file. name -> what to say.
 NO_LICENSE_FILE = {
@@ -327,6 +339,12 @@ def normalize(text: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def drop_leading_blank_lines(text: str) -> str:
+    """The texts that the Rust inputs took from COPYRIGHT-library.html start with an empty line,
+    which would print as two blank lines under the heading."""
+    return text.lstrip("\n")
+
+
 def collapse(text: str) -> str:
     return " ".join(text.split())
 
@@ -390,10 +408,32 @@ def select_texts(name: str, chosen: list[str], files: dict[str, str]) -> Texts:
                     if marker not in text:
                         raise LicenseError(f"{name}: {file_name} has no {marker!r} any more")
                     text = normalize(text[: text.index(marker)])
+                if wanted != APACHE and name in CUT_APACHE_BODY:
+                    text = cut_apache_body(name, file_name, text)
                 target.append((file_name, text))
     notices = [(f, files[f]) for f in sorted(files) if role(f) == "notice"]
     copyrights = [(f, files[f]) for f in sorted(files) if role(f) == "copyright"]
     return Texts(printed, apache, notices, copyrights)
+
+
+def cut_apache_body(name: str, file_name: str, text: str) -> str:
+    """The text without the full Apache License 2.0 that it holds (from its title line to the last
+    line of the appendix, "limitations under the License."), a line saying where the text is
+    printed in its place. The cut part must be the standard text; otherwise the run fails."""
+    lines = text.split("\n")
+    starts = [n for n, line in enumerate(lines) if line.strip() == "Apache License"]
+    if len(starts) != 1:
+        raise LicenseError(f"{name}: {file_name} has {len(starts)} lines 'Apache License', expected one")
+    ends = [n for n, line in enumerate(lines) if n > starts[0] and line.strip().endswith("limitations under the License.")]
+    if len(ends) != 1:
+        raise LicenseError(f"{name}: {file_name} has {len(ends)} lines 'limitations under the License.' after the Apache text, expected one")
+    cut = "\n".join(lines[starts[0]: ends[0] + 1])
+    flat, flat_standard = collapse(cut), collapse(apache_standard_text())
+    # The standard text up to its appendix (a crate's own appendix may differ in indentation only).
+    if flat.split("END OF TERMS AND CONDITIONS")[0] != flat_standard.split("END OF TERMS AND CONDITIONS")[0]:
+        raise LicenseError(f"{name}: the Apache text in {file_name} differs from the standard Apache-2.0 text; read it "
+                           "and decide before the script leaves it out")
+    return normalize("\n".join(lines[: starts[0]] + [APACHE_BODY_CUT_LINE] + lines[ends[0] + 1:]))
 
 
 def apache_extras(name: str, file_name: str, text: str, standard: str) -> list[str]:
@@ -432,7 +472,8 @@ def read_bundle(path: Path) -> list[tuple[dict, str]]:
             blocks[-1][1].append(line)
         elif line:
             raise LicenseError(f"{path}: text before the first block")
-    return [(header, normalize("\n".join(lines)) if "\n".join(lines).strip() else "") for header, lines in blocks]
+    return [(header, drop_leading_blank_lines(normalize("\n".join(lines))) if "\n".join(lines).strip() else "")
+            for header, lines in blocks]
 
 
 def write_bundle(path: Path, blocks: Iterable[tuple[dict, str]]) -> None:
@@ -603,7 +644,9 @@ def head(builds_text: list[str]) -> list[str]:
         "THIRD_PARTY_LICENSES",
         "",
         "The licenses of the code that LOSAT's binaries link: the `losat` command, the `pylosat`",
-        "wheel and LOSAT Web (its two Wasm reactors). LOSAT itself is MIT-licensed (LICENSE).",
+        "wheel and LOSAT Web (its two Wasm reactors). LOSAT's own work is under the MIT License",
+        "(LICENSE); the code written by NCBI is in the public domain in the United States",
+        "(THIRD_PARTY_NOTICES).",
         "",
         "This file is generated by scripts/third_party_licenses.py from Cargo.lock (LOSAT/, python/",
         "and web/adapter/) and the license files of the crates; do not edit it by hand. Code that",
@@ -689,6 +732,7 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
 def render_rust(blocks: list[tuple[dict, str]]) -> list[str]:
     meta = next(h for h, _ in blocks if h["kind"] == "meta")
     own = next((h, t) for h, t in blocks if h["kind"] == "rust-license")
+    builtins = next((h, t) for h, t in blocks if h["kind"] == "compiler-builtins-license")
     lines = [
         f"The standard library of rustc {meta['channel']} (the `std`, `core` and `alloc` crates) is",
         "statically linked into every Rust binary; Cargo does not list it. Its notice file is the",
@@ -729,10 +773,12 @@ def render_rust(blocks: list[tuple[dict, str]]) -> list[str]:
               "License: MIT AND Apache-2.0 WITH LLVM-exception AND (MIT OR Apache-2.0)",
               "Linked into: every build",
               "Note: the standard library links the compiler_builtins crate, Rust's port of LLVM compiler-rt's "
-              "builtins and of libm routines (authors: Jorge Aparicio and contributors; its license text: "
-              f"https://github.com/rust-lang/rust/blob/{RUST_VERSION}/library/compiler-builtins/LICENSE.txt). The "
-              "LLVM exception of the Apache License 2.0 lifts sections 4(a), 4(b) and 4(d) for portions embedded "
-              "in object code.", ""]
+              "builtins and of libm routines (authors: Jorge Aparicio and contributors). Its license file "
+              f"({builtins[0]['origin'].removeprefix(RUST_TAG_URL + '/')} of rust {RUST_VERSION}) is printed below, but for "
+              "the text of the Apache License 2.0, which is printed once, in section 5. The LLVM exception of "
+              "the Apache License 2.0 lifts sections 4(a), 4(b) and 4(d) for portions embedded in object code."]
+    wrap(lines, cut_apache_body("compiler_builtins", builtins[0]["file"], builtins[1]), builtins[0]["file"])
+    lines.append("")
     return lines
 
 
@@ -854,10 +900,12 @@ def refresh_rust_inputs() -> int:
                     registry[key] = (package["license"], read_license_files(Path(package["manifest_path"]).parent, package.get("license_file")))
     blocks: list[tuple[dict, str]] = [({"kind": "meta", "channel": RUST_VERSION, "rustc": version,
                                        "origin": "share/doc/rust/COPYRIGHT-library.html and licenses/ of the toolchain; registry crates for the ones it omits; "
-                                                 f"{RUST_TAG_URL}/LICENSE-MIT",
+                                                 f"{RUST_TAG_URL}/LICENSE-MIT, {RUST_TAG_URL}/{COMPILER_BUILTINS_LICENSE}",
                                        "copyright_library_html_sha256": hashlib.sha256(notice.read_bytes()).hexdigest()}, "")]
     blocks.append(({"kind": "rust-license", "file": "LICENSE-MIT", "origin": f"{RUST_TAG_URL}/LICENSE-MIT"},
                    normalize(fetch(f"{RUST_TAG_URL}/LICENSE-MIT").decode("utf-8"))))
+    blocks.append(({"kind": "compiler-builtins-license", "file": "LICENSE.txt", "origin": f"{RUST_TAG_URL}/{COMPILER_BUILTINS_LICENSE}"},
+                   normalize(fetch(f"{RUST_TAG_URL}/{COMPILER_BUILTINS_LICENSE}").decode("utf-8"))))
     for path, expr, copyright_lines in STD_IN_TREE:
         blocks.append(({"kind": "in-tree", "path": path, "license": expr, "copyright": list(copyright_lines)}, ""))
     blocks.append(({"kind": "license-text", "license": "Unicode-3.0", "origin": "licenses/Unicode-3.0.txt of the toolchain"},

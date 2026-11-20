@@ -10,6 +10,8 @@ selection, the stale check and the copies. CI's `rust lint` job also runs the sc
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 import sys
 import tempfile
 import unittest
@@ -49,6 +51,16 @@ class ChooseTests(unittest.TestCase):
     def test_and_takes_every_part(self) -> None:
         self.assertEqual(tpl.choose("Apache-2.0 AND MIT"), ["Apache-2.0", "MIT"])
         self.assertEqual(tpl.choose("(MIT OR Apache-2.0) AND Unicode-3.0"), ["MIT", "Unicode-3.0"])
+
+    def test_the_more_permissive_alternative_wins(self) -> None:
+        # MIT first; then what asks for nothing; then notice licenses; the LLVM exception lifts the
+        # notice conditions of Apache-2.0 for object code.
+        for expr, wanted in (("Apache-2.0 WITH LLVM-exception OR Apache-2.0", "Apache-2.0 WITH LLVM-exception"),
+                             ("Apache-2.0 OR Apache-2.0 WITH LLVM-exception", "Apache-2.0 WITH LLVM-exception"),
+                             ("Unlicense OR BSD-3-Clause", "Unlicense"), ("BSD-2-Clause OR CC0-1.0", "CC0-1.0"),
+                             ("ISC OR 0BSD", "0BSD"), ("Zlib OR Unicode-3.0", "Zlib"),
+                             ("Apache-2.0 WITH LLVM-exception OR BSL-1.0", "BSL-1.0")):
+            self.assertEqual(tpl.choose(expr), [wanted], expr)
 
     def test_single_licenses(self) -> None:
         for expr in ("MIT", "Zlib", "bzip2-1.0.6", "Apache-2.0", "Unicode-3.0", "CC0-1.0"):
@@ -120,6 +132,36 @@ class FileTests(unittest.TestCase):
         with self.assertRaises(tpl.LicenseError):
             tpl.select_texts("chrono", ["MIT"], {"LICENSE.txt": MIT_TEXT})
 
+    def test_apache_body_is_cut_where_the_crate_ships_it_inside_another_file(self) -> None:
+        standard = tpl.apache_standard_text()
+        # The cut runs from the title line to "limitations under the License." (the end of the
+        # appendix); what comes before and after stays.
+        appendix = ("\nAPPENDIX: How to apply the Apache License to your work.\n\n"
+                    "   See the License for the specific language governing permissions and\n"
+                    "   limitations under the License.\n")
+        text = (f"{MIT_TEXT}\nAs a contributor, you agree that:\n\n{'-' * 78}\n{standard}{appendix}"
+                f"{'-' * 78}\nCopyright (c) 2018 Jorge Aparicio\n")
+        texts = tpl.select_texts("libm", ["MIT"], {"LICENSE.txt": text})
+        (_, printed), = texts.licenses
+        self.assertNotIn("TERMS AND CONDITIONS", printed)
+        self.assertIn(tpl.APACHE_BODY_CUT_LINE, printed)
+        self.assertIn("As a contributor", printed)
+        self.assertIn("Copyright (c) 2018 Jorge Aparicio", printed)
+        # A crate that is not listed keeps the text whole.
+        (_, whole), = tpl.select_texts("other", ["MIT"], {"LICENSE.txt": text}).licenses
+        self.assertIn("TERMS AND CONDITIONS", whole)
+        # A different Apache text, or none, fails.
+        with self.assertRaises(tpl.LicenseError):
+            tpl.select_texts("libm", ["MIT"], {"LICENSE.txt": text.replace("Grant of Copyright License", "Grant of Rights")})
+        with self.assertRaises(tpl.LicenseError):
+            tpl.select_texts("libm", ["MIT"], {"LICENSE.txt": MIT_TEXT})
+
+    def test_read_bundle_drops_leading_blank_lines_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "bundle.txt"
+            path.write_text('@@@ {"a": 1}\n\n\nfirst  \n\nsecond\n\n@@@ {"b": 2}\n', encoding="utf-8")
+            self.assertEqual(tpl.read_bundle(path), [({"a": 1}, "first\n\nsecond\n"), ({"b": 2}, "")])
+
     def test_read_license_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -189,6 +231,75 @@ class TreeTests(unittest.TestCase):
         self.assertEqual({b.manifest_dir for b in tpl.BUILDS if b.group == tpl.CLI}, {"LOSAT"})
         self.assertEqual({b.manifest_dir for b in tpl.BUILDS if b.group == tpl.WHEEL}, {"python"})
         self.assertEqual({b.manifest_dir for b in tpl.BUILDS if b.group == tpl.WEB}, {"web/adapter"})
+
+
+class BuildsMatchTheWorkflowsTests(unittest.TestCase):
+    """BUILDS is copied by hand from the workflows; a target or a feature added there without a row
+    in BUILDS would ship crates that THIRD_PARTY_LICENSES does not list."""
+
+    @staticmethod
+    def flags_of(command: str) -> tuple[str, ...]:
+        words = command.split()
+        flags: tuple[str, ...] = ()
+        if "--no-default-features" in words:
+            flags += ("--no-default-features",)
+        if "--features" in words:
+            flags += ("--features", words[words.index("--features") + 1])
+        return flags
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        contract = json.loads((REPO_ROOT / "docs/release/v0.2.0_rc_contract.json").read_text(encoding="utf-8"))
+        cls.artifacts = [a for a in contract["artifacts"] if a["kind"] != "source"]
+        cls.builds = {(b.group, b.triple, b.flags) for b in tpl.BUILDS}
+
+    def of_group(self, group: str) -> set[tuple[str, tuple[str, ...]]]:
+        return {(triple, flags) for g, triple, flags in self.builds if g == group}
+
+    def test_the_cli_rows_are_the_release_contract(self) -> None:
+        contract = set()
+        for artifact in self.artifacts:
+            command = artifact["build_command"]
+            self.assertIn("--bin losat", command)
+            contract.add((artifact["target"], self.flags_of(command)))
+        self.assertEqual(self.of_group(tpl.CLI), contract)
+
+    def test_the_cli_rows_are_what_the_release_readiness_workflow_builds(self) -> None:
+        text = (REPO_ROOT / ".github/workflows/release-readiness-v020.yml").read_text(encoding="utf-8")
+        native = {m for m in re.findall(r"target_triple: (\S+)", text) if m != "source" and not m.startswith("wasm32")}
+        wasm = {(m[0], self.flags_of(m[1])) for m in
+                re.findall(r"cargo build --release --bin losat --target (\S+)([^\n]*?) --locked", text)}
+        self.assertEqual({t for t, _ in self.of_group(tpl.CLI)}, native | {t for t, _ in wasm})
+        for triple, flags in wasm:
+            self.assertIn((triple, flags), self.of_group(tpl.CLI))
+        # The native job builds with the default features and no --target (the runner's own host).
+        self.assertIn("cd LOSAT && cargo build --release --bin losat --locked", text)
+        self.assertEqual({flags for triple, flags in self.of_group(tpl.CLI) if triple in native}, {()})
+
+    def test_the_wheel_rows_are_the_runners_of_python_wheels(self) -> None:
+        text = (REPO_ROOT / ".github/workflows/python-wheels.yml").read_text(encoding="utf-8")
+        # The matrix is `fromJSON(<pull request> && '["ubuntu-24.04"]' || '[...all runners...]')`.
+        lists = [json.loads(m) for m in re.findall(r"'(\[[^']*\])'", text.split("matrix:", 1)[1].split("runs-on:", 1)[0])]
+        runners = set(max(lists, key=len))
+        by_runner = {a["runner"]: a["target"] for a in self.artifacts if a["kind"] == "native"}
+        self.assertEqual(runners, set(by_runner))
+        self.assertEqual({triple for triple, _ in self.of_group(tpl.WHEEL)}, set(by_runner.values()))
+        self.assertEqual({flags for _, flags in self.of_group(tpl.WHEEL)}, {()})
+        build = re.search(r"-m maturin build[^\n]*(?:\\\n[^\n]*)*", text)
+        assert build is not None
+        self.assertNotIn("--features", build.group(0))
+        self.assertNotIn("--no-default-features", build.group(0))
+        self.assertNotIn("--target", build.group(0))
+
+    def test_the_web_rows_are_the_reactors_of_build_reactors(self) -> None:
+        path = REPO_ROOT / "web/adapter/tools/build_reactors.py"
+        spec = importlib.util.spec_from_file_location("build_reactors_for_licenses", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        reactors = {(triple, tuple(option for option in options if option != "--lib"))
+                    for triple, options, _, _ in module.SPECS.values()}
+        self.assertEqual(self.of_group(tpl.WEB), reactors)
 
 
 class StaleTests(unittest.TestCase):

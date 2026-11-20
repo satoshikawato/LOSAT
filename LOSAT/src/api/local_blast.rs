@@ -742,11 +742,12 @@ pub struct ReportOutputs<'a> {
     /// outfmt 0, 6 and 7 besides the argv's `-outfmt`, and adds what their standard error adds;
     /// line WQA's sweep, D3 review r3, 2026-11-19). Nothing is written where the first format
     /// writes the warnings itself, nor to a place beyond the slice. `None` drops them, as the
-    /// command line, whose one format is the first. The lines that a later format's own writer
-    /// writes besides them (the taxonomy lookups of a tabular field list, outfmt 20's prolog
-    /// warning) go to the diagnostics, as at every format, not to its receiver: LOSAT Web's
-    /// later formats are the plain outfmt 0, 6 and 7, which write none (review r2 of
-    /// 2026-11-20, L1).
+    /// command line, whose one format is the first. In BLASTN, BLASTP, TBLASTN and TBLASTX, a
+    /// later format that gets a receiver also writes its writer's own lines (the taxonomy
+    /// lookups of a tabular field list, outfmt 20's prolog warning), and they go to the
+    /// diagnostics, not to its receiver, so receivers can add lines to the diagnostics there;
+    /// BLASTX gives them to the receiver. LOSAT Web's later formats are the plain outfmt 0, 6
+    /// and 7, which write none (reviews r2 L1 and r3 L2 of 2026-11-20).
     pub later_warnings: Option<&'a mut [Vec<u8>]>,
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the

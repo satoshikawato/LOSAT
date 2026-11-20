@@ -571,7 +571,10 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 
 /// The run's diagnostics as the writer of a query batch's shared warnings for one format
 /// (`write_run`): it tells whether the format wrote any text there, which marks the batch as
-/// warned whatever became of the format's report afterwards.
+/// warned whatever became of the format's report afterwards. No NCBI counterpart: NCBI's
+/// command line writes one format. It counts any text, not only the queries' warnings: the
+/// formats that share the diagnostics in LOSAT Web (outfmt 6 and 7 of the other search) run the
+/// same checks and stop at the same row (review r3 of 2026-11-20, L1).
 struct SharedWarnings<'a> {
     diagnostics: &'a mut dyn Write,
     wrote: bool,

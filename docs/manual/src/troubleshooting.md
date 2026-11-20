@@ -16,7 +16,7 @@ The command exits with status 2 and runs nothing. For an output format that NCBI
 
 **What can I do?** Look the option up in [What LOSAT refuses](refusals.md) and on the page of your program. Options that need NCBI's servers or its GI and IPG databases (`-remote`, `-entrez_query`, `-gilist`, `-ipglist`) are not available. For an option that is refused, use NCBI BLAST+ for that run. The [Introduction](introduction.md) lists the programs and options planned for a later release.
 
-A different message, `error: unknown option or argument '-xyz'; use -help for CLI v2 syntax`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
+A different message, `error: unknown option or argument '-xyz'; use -help to list the options`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
 
 ## `losat --install-shims` stops with "nothing was installed"
 

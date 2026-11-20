@@ -979,7 +979,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     named_refusal(scope.get_name(), name).unwrap_or_else(|| {
         clap::Error::raw(
             ErrorKind::UnknownArgument,
-            format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
+            format!("unknown option or argument '{text}'; use -help to list the options"),
         )
     })
 }

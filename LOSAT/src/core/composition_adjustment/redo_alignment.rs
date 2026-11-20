@@ -1346,7 +1346,7 @@ pub(crate) fn windows_from_translated_aligns(
 //             /* for blastx, temporarily swap subject and query ranges*/
 //             windows[k] = s_WindowInfoNew(begin, end, query_index, 0,
 // ```
-fn windows_from_translated_query_aligns(
+pub(crate) fn windows_from_translated_query_aligns(
     alignments: &Option<Box<BlastCompoAlignment>>,
     query_infos: &[BlastCompoQueryInfo],
     subject_length: i32,
@@ -1484,7 +1484,7 @@ fn windows_from_translated_query_aligns(
 // }
 //
 // ```
-fn translated_query_composition(
+pub(crate) fn translated_query_composition(
     query: &BlastCompoSequenceData,
     range: &BlastCompoSequenceRange,
     align: &BlastCompoAlignment,

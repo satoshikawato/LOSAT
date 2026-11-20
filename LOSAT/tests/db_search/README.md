@@ -29,7 +29,14 @@ FASTA files:
   (records `a_BDV02837.1`, `a_BDV02907.1`, `a_BDV02938.1`, `a_BDV02956.1`) with 2 % of their letters replaced by O, X or U, and a protein of
   `AP027131.faa` (`BDV02481.1_x`) with 3 % replaced by X (a fixed pseudo-random generator; the set was cut down from 1,116
   such proteins while NCBI's result stayed apart from that of a search that reads a stored O as X). In PSIBLAST's
-  iterations 2 and 3 the PSSM scores a stored O with its own column O (`BLAST_SCORE_MIN`), not with column X.
+  iterations 2 and 3 the PSSM scores a stored O with its own score for O (`BLAST_SCORE_MIN` at a position that has
+  aligned sequences, the matrix's score of X at one that has none), not with its score for X.
+- `opssm.faa` (row `db.opssm.inpssm.6`, line NP item DBO): `opssm_o`, 40 random letters, 12 O and 40 random letters (a
+  fixed pseudo-random generator), and `opssm_x`, the same with X. The row's `-in_pssm` query
+  `LOSAT/tests/fixtures/pssm/dbo_qx_o9.asn.gz` is NCBI's `-out_pssm` of `psiblast -query` `q_x` of `oseed_q.faa`
+  `-db oseed -num_iterations 2 -comp_based_stats 0`, with the score for O set to 9 at every position (the other scores
+  and the frequency ratios as NCBI wrote them): NCBI finds the 12 stored O at every query offset, which a search that
+  reads them as X (score -1) does not.
 - `o_stored_bx_q.fna`: `s_x` back-translated with its twelve X as `NNN` codons, the BLASTX query of `db.o_stored.bx.8`
   (BLASTX reads the stored O of `s_o` as stored, 154 identities; `-subject o_stored.faa` reads it as X, 166, row
   `pyl.blastx.ostored.8` of `outfmt0_manifest.tsv`).
@@ -188,6 +195,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "stored O and X in words under the threshold" -blastdb_version 4
     makeblastdb -in tests/db_search/oreal.faa -dbtype prot -out tests/db_search/oreal \
         -title "four proteins with stored O, X and U" -blastdb_version 4
+    makeblastdb -in tests/db_search/opssm.faa -dbtype prot -out tests/db_search/opssm \
+        -title "12 stored O, and X, between random letters" -blastdb_version 4
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr

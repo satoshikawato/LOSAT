@@ -76,9 +76,6 @@ pub(super) use x_redo_db_subjects::XShownResidues;
 // 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
 // 'O', 'J'};
 // ```
-/// NCBIstdaa code of pyrrolysine (O).
-#[cfg(test)]
-const NCBISTDAA_O: u8 = 26;
 /// NCBIstdaa code of the gap character (`-`), which is also the sentinel byte.
 const NCBISTDAA_GAP: u8 = 0;
 
@@ -385,7 +382,7 @@ pub(super) fn blastp_database_search_space(
 //         matrix[i][o_index] = matrix[i][x_index];
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:493-506
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:494-508
 // ```c
 //     score = matrix[w[0]][w[0]];
 //     for (i = 1; i < lookup->word_length; i++)
@@ -405,7 +402,7 @@ pub(super) fn blastp_database_search_space(
 // ```
 // NCBI searches the stored bytes in place, O (26) included. Its lookup table indexes all 28
 // letters (blast_aalookup.c:244), and the query never holds O (the query encoder reads it as X,
-// blast_setup_cxx.cpp:894-899), so a stored O meets a query word only as a neighbour: a word whose
+// blast_setup_cxx.cpp:894-898), so a stored O meets a query word only as a neighbour: a word whose
 // score with O's row and column (those of X, above) is at the threshold or more. A query word whose
 // self score is under the threshold sits under its own letters only, so `AXA` (7 with BLOSUM62,
 // threshold 11) meets a stored `AXA` and not a stored `AOA`. The search therefore reads a stored O
@@ -425,7 +422,7 @@ fn prepare_search_block(
     program: &str,
 ) -> Result<()> {
     let sequences = block.len();
-    let invalid = holds_no_residue_byte(block.protein_bytes());
+    let invalid = holds_non_residue_byte(block.protein_bytes());
     // A well-formed block holds one sentinel byte before its first sequence and one
     // after every sequence.
     let sentinels_in_place = (0..sequences).all(|i| {
@@ -453,7 +450,7 @@ fn prepare_search_block(
 // cycles of a one-thread blastp-fast `-db` search (one 357-residue query against UniRef50 volume
 // 00).
 /// Whether a byte of `bytes` is no NCBIstdaa residue (28 or more).
-fn holds_no_residue_byte(bytes: &[u8]) -> bool {
+fn holds_non_residue_byte(bytes: &[u8]) -> bool {
     const _: () = assert!(BLASTAA_SIZE <= u8::MAX as usize);
     const BLASTAA_SIZE_U8: u8 = BLASTAA_SIZE as u8;
     let mut invalid = 0u8;
@@ -860,14 +857,14 @@ impl ListedSubjects {
     //                                              subject_maybe_biased);
     // ```
     // Here the stored letter matters: a stored O (26) is not the X (21) that the query
-    // holds for its own O (blast_setup_cxx.cpp:894-899), so an O aligned to an O counts
+    // holds for its own O (blast_setup_cxx.cpp:894-898), so an O aligned to an O counts
     // against "near identical" and the subject is then SEG-filtered, where the same
     // records given as `-subject` (O read as X on both sides) are near identical. Shown
     // with the oracle (campaign dbsearch-20261012, `$BUILD_ROOT/dbsearch/db3/exp_o_near`;
     // fixture rows `db.o_stored.*`): NCBI `-db` gives 266 bits where `-subject` gives
     // 307. So the redo reads the stored bytes; its matrices score O as X
-    // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
-    // scores only, which are the same for O and X (`prepare_search_block`).
+    // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage reads the
+    // stored bytes too (`prepare_search_block`).
     /// The listed subjects of a search with every residue read, as the reports of a search
     /// that makes records read them after the redo (`x_list`, then `x_read_shown` with
     /// `XShownResidues::Listed`); the unit tests of the titles start here. The searches
@@ -2680,6 +2677,9 @@ mod tests {
     use crate::seqdb::SeqDbError;
     use crate::stats::lookup_protein_params;
 
+    /// NCBIstdaa code of pyrrolysine (O).
+    const NCBISTDAA_O: u8 = 26;
+
     fn fixture(name: &str) -> String {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/seqdb/db")
@@ -2694,8 +2694,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
     }
 
-    // The byte-by-byte test that `holds_no_residue_byte` makes.
-    fn holds_no_residue_byte_by_byte(bytes: &[u8]) -> bool {
+    // The byte-by-byte test that `holds_non_residue_byte` makes.
+    fn holds_non_residue_byte_by_byte(bytes: &[u8]) -> bool {
         bytes
             .iter()
             .any(|&residue| usize::from(residue) >= BLASTAA_SIZE)
@@ -2704,7 +2704,7 @@ mod tests {
     // Lengths across vectors of 16 and 32 bytes, gap bytes from none to all, O, the last residue
     // (27), the first byte that is none (28) and 255: the flag is that of the byte-by-byte test.
     #[test]
-    fn holds_no_residue_byte_gives_the_value_of_the_byte_by_byte_test() {
+    fn holds_non_residue_byte_gives_the_value_of_the_byte_by_byte_test() {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
         let mut next = || {
             state ^= state << 13;
@@ -2730,10 +2730,10 @@ mod tests {
                             }
                         })
                         .collect();
-                    let expected = holds_no_residue_byte_by_byte(&bytes);
+                    let expected = holds_non_residue_byte_by_byte(&bytes);
                     flagged += usize::from(expected);
                     assert_eq!(
-                        holds_no_residue_byte(&bytes),
+                        holds_non_residue_byte(&bytes),
                         expected,
                         "length {length}, a gap every {gap_every}, {wrong:?}"
                     );
@@ -2742,18 +2742,18 @@ mod tests {
         }
         assert!(flagged > 20, "cases with a byte of 28 or more: {flagged}");
         // Every byte a gap.
-        assert!(!holds_no_residue_byte(&[NCBISTDAA_GAP; 1_000]));
+        assert!(!holds_non_residue_byte(&[NCBISTDAA_GAP; 1_000]));
         // A byte of 28 alone: second, after the first vectors, last of the input.
         for (length, at) in [(2usize, 1usize), (300, 224), (511, 510)] {
             let mut bytes = vec![1u8; length];
             bytes[at] = 28;
-            assert!(holds_no_residue_byte(&bytes), "28 at {at} of {length}");
+            assert!(holds_non_residue_byte(&bytes), "28 at {at} of {length}");
         }
         // O and J, the last two residues.
         let mut bytes = vec![1u8; 300];
         bytes[223] = NCBISTDAA_O;
         bytes[224] = 27;
-        assert!(!holds_no_residue_byte(&bytes));
+        assert!(!holds_non_residue_byte(&bytes));
     }
 
     fn blosum62_gapped() -> KarlinParams {
@@ -3054,7 +3054,7 @@ mod tests {
         }
     }
 
-    // blast_aalookup.c:493-506: NCBI searches a stored O as it is (the lookup meets it as a
+    // blast_aalookup.c:494-508: NCBI searches a stored O as it is (the lookup meets it as a
     // neighbour only, the matrix scores it as X). p03 of the fixture holds every NCBIstdaa
     // letter but the gap (`ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT`).
     #[test]
@@ -3786,10 +3786,10 @@ mod tests {
             let _ = std::fs::remove_dir_all(multi_dir);
         }
 
-        // blast_aalookup.c:493-506 (quoted at `prepare_search_block`): NCBI scans the stored
+        // blast_aalookup.c:494-508 (quoted at `prepare_search_block`): NCBI scans the stored
         // letters. Every driver of the preliminary stage gives the kernel each sequence as it is
         // stored, O (26) of p03 included, between its sentinel bytes, on one volume and on six, at
-        // 1 and 3 threads.
+        // 1 and 3 threads (the window of LOSAT_X_BPDBKEEP in its two waiting sizes).
         #[test]
         fn every_driver_gives_the_kernel_the_stored_letters_o_included() {
             let single = open("prot_v4");
@@ -3800,11 +3800,14 @@ mod tests {
             let volumes = open("prot_mv");
             for (what, db) in [("one volume", &single), ("volumes", &volumes)] {
                 for threads in [1usize, 3] {
+                    let [narrow, wide] = waiting_windows(threads);
                     for driver in [
                         Driver::Cut,
                         Driver::Of(BLOCK_BYTES),
                         Driver::Made(BLOCK_BYTES),
                         Driver::Kept(BLOCK_BYTES),
+                        Driver::Window(BLOCK_BYTES, narrow, None),
+                        Driver::Window(4096, wide, None),
                     ] {
                         let context = format!("{what}, {threads} threads, {driver:?}");
                         let (seen, _) = search_with(db, threads, 2, driver).unwrap();

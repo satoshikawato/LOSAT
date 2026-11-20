@@ -336,9 +336,16 @@ pub(crate) fn calculate_link_hsp_cutoffs(
     } else {
         (subject_length as i32, db_length)
     };
-    // `BLAST_Nint`: rounds half away from zero.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441 (`BLAST_Nint` rounds
+    // half away from zero and converts to `long`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1036-1037 (the `(Int4)`
+    // of that `long`)
+    // An average query length of 0 makes the logarithm -inf: NCBI's `long` is then LONG_MIN (x86-64
+    // cvttsd2si; aarch64 saturates to the same value) and its low 32 bits, the `Int4`, are 0. Rust's
+    // `as i64` saturates to the same LONG_MIN and `as i32` keeps the same low bits; a direct `as i32`
+    // would give i32::MIN. Finite values in range convert the same either way.
     let expected = (kbp.k * query_length as f64 * subject_length as f64).glibc_ln() / kbp.h;
-    let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i32;
+    let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i64 as i32;
     query_length = (query_length - expected_length).max(1);
     subject_length = (subject_length - expected_length).max(1);
     let y_variable = if db_length > subject_length as i64 {
@@ -1639,6 +1646,38 @@ fn next_larger(lh_helper: &[Helper], h_index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1023-1076 (the
+    // average query length, the expected length subtracted from both lengths, and the cutoffs)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441 (`BLAST_Nint`)
+    // An average query length of 0 (a batch of one-strand or very short queries): log(0) is -inf,
+    // NCBI's expected length is 0, and the lengths are not reduced.
+    #[test]
+    fn an_average_query_length_of_zero_takes_ncbis_expected_length_of_zero() {
+        let kbp = KarlinParams {
+            lambda: 0.3176,
+            k: 0.134,
+            h: 0.4012,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        // Two subjects (800 and 300 residues), linking the first: x = 0.25 * log(1100 / 800) *
+        // K / 0.5 * 800, floor(log(x) / Lambda) + 1 = 9. An expected length of 15 (the one of an
+        // average of 1) would give 10.
+        let two = calculate_link_hsp_cutoffs(&kbp, 0, 2400, 3300, true, || 41);
+        assert_eq!(
+            (two.cutoff_small_gap, two.cutoff_big_gap, two.gap_prob),
+            (0, 9, 0.0)
+        );
+        // One subject: the database is the subject, y = log(1) = 0, x = 0, and the big-gap
+        // cutoff is (Int4) floor(-inf) + 1, INT_MIN + 1 (x86-64 and Rust both give INT_MIN for
+        // the conversion of -inf).
+        let one = calculate_link_hsp_cutoffs(&kbp, 0, 10_000, 10_000, true, || 41);
+        assert_eq!(
+            (one.cutoff_small_gap, one.cutoff_big_gap, one.gap_prob),
+            (0, i32::MIN + 1, 0.0)
+        );
+    }
 
     // NCBI blast_parameters.c:788-815 with `DEFAULT_LONGEST_INTRON` 122: the values of
     // `-max_intron_length` on both sides of each branch.

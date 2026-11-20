@@ -68,6 +68,7 @@ fn try_run(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -439,6 +440,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -461,6 +463,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };

@@ -445,7 +445,9 @@ mod tests {
         for program in [Program::Blastp, Program::Tblastn] {
             let error = validate(program, &["-in_msa", "m.aln"]).unwrap_err();
             assert!(
-                !error.to_string_lossy().contains("an alignment as the query"),
+                !error
+                    .to_string_lossy()
+                    .contains("an alignment as the query"),
                 "{program}: {error}"
             );
         }

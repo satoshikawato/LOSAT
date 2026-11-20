@@ -402,16 +402,6 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
                 len / ps as u64
             };
             // SQLite reference (version-3.51.1): src/btree.c:3401-3408 (lockBtree)
-            // ```c
-            //     if( nPage>nPageFile ){
-            //       if( sqlite3WritableSchema(pBt->db)==0 ){
-            //         rc = SQLITE_CORRUPT_BKPT;
-            //         goto page1_init_failed;
-            //       }else{
-            //         nPage = nPageFile;
-            //       }
-            //     }
-            // ```
             // `nPageFile` is the file size in pages rounded up (src/pager.c:3303). SQLite makes
             // this check after the bytes 21..24 and the page size and before `usableSize<480`
             // (btree.c:3361-3412). A larger size in the header would also set the page budget

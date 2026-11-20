@@ -681,11 +681,6 @@ struct WinZone {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/timeset.cpp:67-69
-// ```c++
-//     _timezone.initialize(8 * 3600L);
-//     _daylight.initialize(1);
-//     _dstbias.initialize (-3600);
-// ```
 /// The start values of the time zone globals of UCRT.
 const UCRT_START: UcrtZone = UcrtZone {
     timezone: 8 * 3600,
@@ -695,39 +690,6 @@ const UCRT_START: UcrtZone = UcrtZone {
 };
 
 // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:145-200
-// ```c++
-//     if (GetTimeZoneInformation(&tz_info) != 0xFFFFFFFF)
-//     {
-//         // Record that the API was used:
-//         tz_api_used = 1;
-//
-//         // Derive _timezone value from Bias and StandardBias fields.
-//         timezone = tz_info.Bias * 60;
-//
-//         if (tz_info.StandardDate.wMonth != 0)
-//             timezone += tz_info.StandardBias * 60;
-//
-//         // Check to see if there is a daylight time bias. Since the StandardBias
-//         // has been added into _timezone, it must be compensated for in the
-//         // value computed for _dstbias:
-//         if (tz_info.DaylightDate.wMonth != 0 && tz_info.DaylightBias != 0)
-//         {
-//             daylight = 1;
-//             dstbias = (tz_info.DaylightBias - tz_info.StandardBias) * 60;
-//         }
-//         else
-//         {
-//             daylight = 0;
-//             ...
-//             dstbias = 0;
-//         }
-//         ...
-//     }
-//
-//     _set_timezone(timezone);
-//     _set_daylight(daylight);
-//     _set_dstbias(dstbias);
-// ```
 /// `_tzset` without `TZ`: the zone of `GetTimeZoneInformation` (`None`: the call failed, and
 /// the globals keep their start values with the United States rules). The first `_tzset` of
 /// a process is the one `localtime` makes, so the values before it are the start values.
@@ -757,67 +719,6 @@ fn ucrt_zone_from_system(info: Option<&WinZone>) -> UcrtZone {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:264-335
-// ```c++
-//     rsize_t const tzname_length = 3;
-//     ...
-//     // Skip first few characters if present.
-//     for (rsize_t i = 0; i < tzname_length; ++i)
-//     {
-//         if (*tz_env)
-//         {
-//             ++tz_env;
-//         }
-//     }
-//
-//     // The time difference is of the form:
-//     //     [+|-]hh[:mm[:ss]]
-//     // Check for the minus sign first:
-//     bool const is_negative_difference = *tz_env == L'-';
-//     if (is_negative_difference)
-//     {
-//         ++tz_env;
-//     }
-//     ...
-//     // process, then skip over, the hours
-//     timezone = wcstol(tz_env, &dummy, decimal_base) * 3600;
-//     while (*tz_env == '+' || (*tz_env >= L'0' && *tz_env <= L'9'))
-//     {
-//         ++tz_env;
-//     }
-//
-//     // Check if minutes were specified:
-//     if (*tz_env == L':')
-//     {
-//         // Process, then skip over, the minutes
-//         timezone += wcstol(++tz_env, &dummy, decimal_base) * 60;
-//         while (*tz_env >= L'0' && *tz_env <= L'9')
-//         {
-//             ++tz_env;
-//         }
-//
-//         // Check if seconds were specified:
-//         if (*tz_env == L':')
-//         {
-//             // Process, then skip over, the seconds:
-//             timezone += wcstol(++tz_env, &dummy, decimal_base);
-//             while (*tz_env >= L'0' && *tz_env <= L'9')
-//             {
-//                 ++tz_env;
-//             }
-//         }
-//     }
-//
-//     if (is_negative_difference)
-//     {
-//         timezone = -timezone;
-//     }
-//
-//     // Finally, check for a DST zone suffix:
-//     daylight = *tz_env ? 1 : 0;
-//     ...
-//     _set_timezone(timezone);
-//     _set_daylight(daylight);
-// ```
 /// `_tzset` with a non-empty `TZ` (`tz`, UTF-16 as `_wgetenv_s` gives it): any first three
 /// characters are the zone's name, an offset in hours, minutes and seconds west of UTC
 /// follows, and anything after it makes the zone use the United States DST rules. Each number
@@ -864,55 +765,6 @@ fn ucrt_zone_from_tz(tz: &[u16], space_above_latin1: &dyn Fn(u16) -> bool) -> Uc
 }
 
 // UCRT reference (10.0.26100.0): ucrt/inc/corecrt_internal_strtox.h:248-345
-// ```c++
-//         while (is_space(c, loc))
-//         {
-//             c = source.get();
-//         }
-//     ...
-//     // Optional sign (+ or -):
-//     if (c == '-')
-//     {
-//         flags |= FL_NEGATIVE;
-//     }
-//
-//     if (c == '-' || c == '+')
-//     {
-//         c = source.get();
-//     }
-//     ...
-//     for (;;)
-//     {
-//         unsigned const digit{parse_digit(c)};
-//         if (digit >= static_cast<unsigned>(base))
-//         {
-//             ...
-//             break;
-//         }
-//         ...
-//     }
-//     ...
-//     // If we failed to read any digits, there's no number to be read:
-//     if ((flags & FL_READ_DIGIT) == 0)
-//     {
-//         source.restore_state(initial_state);
-//         return 0;
-//     }
-//
-//     if (is_overflow_condition(flags, number))
-//     {
-//         ptd.get_errno().set(ERANGE);
-//         ...
-//         else if (flags & FL_NEGATIVE)
-//         {
-//             return minimum_signed_value(UnsignedInteger());
-//         }
-//         else
-//         {
-//             return maximum_signed_value(UnsignedInteger());
-//         }
-//     }
-// ```
 /// `wcstol(s, &end, 10)` of UCRT (`ucrt/convert/strtox.cpp:237-243`): leading white space, an
 /// optional sign, then decimal digits; a value outside `long` (32 bits) is `LONG_MIN` or
 /// `LONG_MAX` by its sign; no digit is 0.
@@ -944,47 +796,6 @@ fn ucrt_wcstol(s: &[u16], space_above_latin1: &dyn Fn(u16) -> bool) -> i32 {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/inc/corecrt_internal_strtox.h:88-158
-// ```c++
-// __forceinline int __cdecl wide_character_to_digit(wchar_t const c) throw()
-// {
-//     #define DIGIT_RANGE_TEST(zero) \
-//         if (c < zero)              \
-//             return -1;             \
-//                                    \
-//         if (c < zero + 10)         \
-//             return c - zero;
-//
-//     DIGIT_RANGE_TEST(0x0030)        // 0030;DIGIT ZERO
-//     if (c < 0xFF10)                 // FF10;FULLWIDTH DIGIT ZERO
-//     {
-//         DIGIT_RANGE_TEST(0x0660)    // 0660;ARABIC-INDIC DIGIT ZERO
-//         ... (06F0, 0966, 09E6, 0A66, 0AE6, 0B66, 0C66, 0CE6, 0D66, 0E50, 0ED0, 0F20,
-//              1040, 17E0)
-//         DIGIT_RANGE_TEST(0x1810)    // 1810;MONGOLIAN DIGIT ZERO
-//
-//         return -1;
-//     }
-//
-//     #undef DIGIT_RANGE_TEST
-//
-//     if (c < 0xFF10 + 10)            // FF10;FULLWIDTH DIGIT ZERO
-//         return c - 0xFF10;
-//
-//     return -1;
-// }
-// ...
-// __forceinline unsigned __cdecl parse_digit(wchar_t const c) throw()
-// {
-//     int const value = wide_character_to_digit(c);
-//     if (value != -1)
-//         return static_cast<unsigned>(value);
-//
-//     if (__ascii_iswalpha(c))
-//         return static_cast<unsigned>(__ascii_towupper(c) - 'A' + 10);
-//
-//     return static_cast<unsigned>(-1);
-// }
-// ```
 /// The decimal digit of `c` for `wcstol` in base 10 (letters are digits 10 and up, and so end
 /// a decimal number).
 fn ucrt_wide_digit(c: u16) -> Option<u32> {
@@ -1015,30 +826,8 @@ fn ucrt_wide_digit(c: u16) -> Option<u32> {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/convert/iswctype.cpp:42-54
-// ```c++
-//     if (c == WEOF)
-//         return 0;
-//
-//     if (c < 256)
-//         return static_cast<int>(_pwctype[c] & mask);
-//
-//     wchar_t const wide_character = c;
-//     wint_t char_type = 0;
-//     if (__acrt_GetStringTypeW(CT_CTYPE1, &wide_character, 1, &char_type) == 0)
-//         return 0;
-//
-//     return static_cast<int>(char_type & mask);
-// ```
 // UCRT reference (10.0.26100.0): ucrt/locale/ctype.cpp:53-57, 76, 177, 204 (`_wctype`, the
 // entries with `_SPACE`)
-// ```c++
-//     _SPACE | _CONTROL ,             // 09 (HT)
-//     ... (0A, 0B, 0C)
-//     _SPACE | _CONTROL ,             // 0D (CR)
-//     _SPACE | _BLANK ,               // 20 SPACE
-//     _SPACE | _CONTROL ,             // 85 (NEL / NEXT LINE)
-//     _SPACE ,                        // A0 (NBSP / NO-BREAK SPACE)
-// ```
 /// `iswspace(c)` of UCRT (`is_space` of `wcstol`, `corecrt_internal_strtox.h:185-188`):
 /// UCRT's table up to U+00FF, `space_above_latin1` (the system's character type) above it,
 /// and never `WEOF` (U+FFFF).
@@ -1051,42 +840,10 @@ fn ucrt_iswspace(c: u16, space_above_latin1: &dyn Fn(u16) -> bool) -> bool {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/days.cpp:14-24
-// ```c++
-// extern "C" int const _days[] =
-// {
-//     -1, 30, 58, 89, 119, 150, 180, 211, 242, 272, 303, 333, 364
-// };
-//
-// extern "C" int const _lpdays[] =
-// {
-//     -1, 30, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365
-// };
-// ```
 const UCRT_DAYS: [i32; 13] = [-1, 30, 58, 89, 119, 150, 180, 211, 242, 272, 303, 333, 364];
 const UCRT_LPDAYS: [i32; 13] = [-1, 30, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365];
 
 // UCRT reference (10.0.26100.0): ucrt/inc/corecrt_internal_time.h:153-175
-// ```c++
-// bool __cdecl __crt_time_is_leap_year(TimeType const yr) throw()
-// {
-//     if (yr % 4 == 0 && yr % 100 != 0)
-//         return true;
-//
-//     if ((yr + 1900) % 400 == 0)
-//         return true;
-//
-//     return false;
-// }
-// ...
-// TimeType __cdecl __crt_time_elapsed_leap_years(TimeType const yr) throw()
-// {
-//     static TimeType const leap_years_between_1900_and_1970 = 17;
-//
-//     TimeType const elapsed_leap_years = ((yr - 1) / 4) - ((yr - 1) / 100) + ((yr + 299) / 400);
-//
-//     return elapsed_leap_years - leap_years_between_1900_and_1970;
-// }
-// ```
 /// Years count from 1900 (`tm_year`); division truncates toward zero, as in C.
 fn ucrt_is_leap_year(yr: i64) -> bool {
     (yr % 4 == 0 && yr % 100 != 0) || (yr + 1900) % 400 == 0
@@ -1101,13 +858,6 @@ const UCRT_YEAR_SEC: i64 = 365 * UCRT_DAY_SEC;
 const UCRT_MS_PER_DAY: i64 = UCRT_DAY_SEC * 1000;
 
 // UCRT reference (10.0.26100.0): ucrt/inc/corecrt_internal_time.h:37-40, 98
-// ```c++
-// #define _MAX_LOCAL_TIME (14 * 60 * 60)
-// ...
-// #define _MIN_LOCAL_TIME (-12 * 60 * 60)
-// ...
-//         max_time_t = 0x793582affLL,
-// ```
 const UCRT_MAX_LOCAL_TIME: i64 = 14 * 60 * 60;
 const UCRT_MIN_LOCAL_TIME: i64 = -12 * 60 * 60;
 const UCRT_MAX_TIME64: i64 = 0x7_9358_2aff;
@@ -1124,40 +874,6 @@ struct UcrtTm {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/gmtime.cpp:54-77, 97-134
-// ```c++
-//     // Determine the years since 1900. Start by ignoring leap years:
-//     int tmptim = static_cast<int>(caltim / _YEAR_SEC) + 70;
-//     caltim -= static_cast<__time64_t>(tmptim - 70) * _YEAR_SEC;
-//
-//     // Correct for elapsed leap years:
-//     caltim -= static_cast<__time64_t>(__crt_time_elapsed_leap_years(tmptim)) * _DAY_SEC;
-//
-//     // If we have underflowed the __time64_t range (i.e., if caltim < 0),
-//     // back up one year, adjusting the correction if necessary.
-//     if (caltim < 0)
-//     {
-//         caltim += static_cast<__time64_t>(_YEAR_SEC);
-//         tmptim--;
-//         if (__crt_time_is_leap_year(tmptim))
-//         {
-//             caltim += _DAY_SEC;
-//             ...
-//         }
-//     }
-//     ...
-//     _VALIDATE_RETURN_ERRCODE_NOEXC(caltim >= _MIN_LOCAL_TIME, EINVAL)
-//     ...
-//     _VALIDATE_RETURN_ERRCODE_NOEXC(caltim <= time_traits::max_time_t + _MAX_LOCAL_TIME, EINVAL)
-//     ...
-//     ptm->tm_yday = static_cast<int>(caltim / _DAY_SEC);
-//     caltim -= static_cast<TimeType>(ptm->tm_yday) * _DAY_SEC;
-//     ...
-//     ptm->tm_hour = static_cast<int>(caltim / 3600);
-//     caltim -= static_cast<TimeType>(ptm->tm_hour) * 3600L;
-//
-//     ptm->tm_min = static_cast<int>(caltim / 60);
-//     ptm->tm_sec = static_cast<int>(caltim - (ptm->tm_min) * 60);
-// ```
 /// `_gmtime64_s` of `caltim`; `None` outside its range. Within it the calendar is the
 /// Gregorian one of `LocalTime::from_unix_seconds`.
 fn ucrt_gmtime(caltim: i64) -> Option<UcrtTm> {
@@ -1190,70 +906,7 @@ fn ucrt_gmtime(caltim: i64) -> Option<UcrtTm> {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:446-496
-// ```c++
-//     if (datetype == date_type::day_in_month)
-//     {
-//         // Figure out the year-day of the start of the month:
-//         yearday = 1 + (__crt_time_is_leap_year(year)
-//             ? _lpdays[month - 1]
-//             : _days[month - 1]);
-//
-//         // Figureo ut the day of the week of the start of the month:
-//         monthdow = (yearday + ((year - 70) * 365) +
-//                     __crt_time_elapsed_leap_years(year) + _BASE_DOW) % 7;
-//
-//         // Figure out the year-day of the transition date:
-//         if (monthdow <= dayofweek)
-//             yearday += (dayofweek - monthdow) + (week - 1) * 7;
-//         else
-//             yearday += (dayofweek - monthdow) + week * 7;
-//
-//         // We may have to adjust the calculation above if week == 5 (meaning the
-//         // last instance of the day in the month).  Check if the year falls
-//         // beyond after month and adjust accordingly:
-//         int const days_to_compare = __crt_time_is_leap_year(year)
-//             ? _lpdays[month]
-//             : _days[month];
-//
-//         if (week == 5 && yearday > days_to_compare)
-//         {
-//             yearday -= 7;
-//         }
-//     }
-//     else
-//     {
-//         yearday = __crt_time_is_leap_year(year)
-//             ? _lpdays[month - 1]
-//             : _days[month - 1];
-//
-//         yearday += date;
-//     }
-//
-//     if (trantype == transition_type::start_of_dst)
-//     {
-//         dststart.yd = yearday;
-//         dststart.ms = msec + (1000 * (sec + 60 * (min + 60 * hour)));
-//         ...
-//     }
-//     else // end_of_dst
-//     {
-//         dstend.yd = yearday;
-//         dstend.ms = msec + (1000 * (sec + 60 * (min + 60 * hour)));
-// ```
 // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:546-559 (the choice of the form)
-// ```c++
-//             if (tz_info.DaylightDate.wYear == 0)
-//             {
-//                 cvtdate(
-//                     transition_type::start_of_dst,
-//                     date_type::day_in_month,
-//                     tb->tm_year,
-//                     tz_info.DaylightDate.wMonth,
-//                     tz_info.DaylightDate.wDay,
-//                     tz_info.DaylightDate.wDayOfWeek,
-//                     0,
-//                     ...
-// ```
 /// `cvtdate`: the day of the year (from 0) and the millisecond of the day of the change `c`
 /// in year `yr` (from 1900): with `wYear` 0, the `wDay`-th (5: the last) weekday `wDayOfWeek`
 /// of month `wMonth`; otherwise day `wDay` of month `wMonth`. `None` for a month whose day
@@ -1294,34 +947,6 @@ fn ucrt_cvtdate(c: &WinChange, yr: i64) -> Option<(i64, i64)> {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:611-651
-// ```c++
-//             // The GetTimeZoneInformation API was not used, or failed.  We use
-//             // the USA Daylight Savings Time rules as a fallback.
-//             int startmonth = 3; // March
-//             int startweek  = 2; // Second week
-//             int endmonth   = 11;// November
-//             int endweek    = 1; // First week
-//
-//             // The rules changed in 2007:
-//             if (107 > tb->tm_year)
-//             {
-//                 startmonth = 4; // April
-//                 startweek  = 1; // first week
-//                 endmonth   = 10;// October
-//                 endweek    = 5; // last week
-//             }
-//
-//             cvtdate(
-//                 transition_type::start_of_dst,
-//                 date_type::day_in_month,
-//                 tb->tm_year,
-//                 startmonth,
-//                 startweek,
-//                 0, // Sunday
-//                 0,
-//                 2, // 02:00 (2 AM)
-//                 ...
-// ```
 /// The United States DST changes of year `yr` (from 1900) in the form of `GetTimeZoneInformation`.
 fn ucrt_us_changes(yr: i64) -> [WinChange; 2] {
     let ((start_month, start_week), (end_month, end_week)) = if 107 > yr {
@@ -1340,57 +965,7 @@ fn ucrt_us_changes(yr: i64) -> [WinChange; 2] {
 
 impl UcrtZone {
     // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:498-512 (cvtdate, end of DST)
-    // ```c++
-    //         // The converted date is still a DST date.  We must convert to a standard
-    //         // (local) date while being careful the millisecond field does not
-    //         // overflow or underflow
-    //         _ERRCHECK(_get_dstbias(&dstbias));
-    //         dstend.ms += (dstbias * 1000);
-    //         if (dstend.ms < 0)
-    //         {
-    //             dstend.ms += milliseconds_per_day;
-    //             dstend.yd--;
-    //         }
-    //         else if (dstend.ms >= milliseconds_per_day)
-    //         {
-    //             dstend.ms -= milliseconds_per_day;
-    //             dstend.yd++;
-    //         }
-    // ```
     // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:655-685
-    // ```c++
-    //     // Handle simple cases first:
-    //     if (dststart.yd < dstend.yd)
-    //     {
-    //         // Northern hemisphere ordering:
-    //         if (tb->tm_yday < dststart.yd || tb->tm_yday > dstend.yd)
-    //             return 0;
-    //
-    //         if (tb->tm_yday > dststart.yd && tb->tm_yday < dstend.yd)
-    //             return 1;
-    //     }
-    //     else
-    //     {
-    //         // Southern hemisphere ordering:
-    //         if (tb->tm_yday < dstend.yd || tb->tm_yday > dststart.yd)
-    //             return 1;
-    //
-    //         if (tb->tm_yday > dstend.yd && tb->tm_yday < dststart.yd)
-    //             return 0;
-    //     }
-    //
-    //     long const ms = 1000 * (tb->tm_sec + 60 * tb->tm_min + 3600 * tb->tm_hour);
-    //
-    //     if (tb->tm_yday == dststart.yd)
-    //     {
-    //
-    //         return ms >= dststart.ms ? 1 : 0;
-    //     }
-    //     else
-    //     {
-    //         return ms < dstend.ms ? 1 : 0;
-    //     }
-    // ```
     /// `_isindst` of the local standard time `tm`. The changes are those of `tm`'s year.
     fn is_in_dst(&self, tm: &UcrtTm) -> Option<bool> {
         let [start, end] = self.changes.unwrap_or_else(|| ucrt_us_changes(tm.year));
@@ -1428,34 +1003,6 @@ impl UcrtZone {
     }
 
     // UCRT reference (10.0.26100.0): ucrt/time/localtime.cpp:46-80
-    // ```c++
-    //     _VALIDATE_RETURN_ERRCODE_NOEXC(*ptime >= 0,                       EINVAL);
-    //     _VALIDATE_RETURN_ERRCODE_NOEXC(*ptime <= time_traits::max_time_t, EINVAL);
-    //
-    //     __tzset();
-    //     ...
-    //     if (*ptime > 3 * _DAY_SEC && *ptime < time_traits::max_time_t - 3 * _DAY_SEC)
-    //     {
-    //         ...
-    //         TimeType ltime = *ptime - timezone;
-    //
-    //         errno_t status0 = time_traits::gmtime_s(ptm, &ltime);
-    //         if (status0 != 0)
-    //             return status0;
-    //
-    //         // Check and adjust for daylight savings time:
-    //         if (daylight && _isindst(ptm))
-    //         {
-    //             ltime -= dstbias;
-    //
-    //             errno_t const status1 = time_traits::gmtime_s(ptm, &ltime);
-    //             if (status1 != 0)
-    //                 return status1;
-    //
-    //             ptm->tm_isdst = 1;
-    //         }
-    //     }
-    // ```
     /// `_localtime64_s` of `t` as an offset: the local time is the calendar time of `t` plus
     /// the offset. `None` where `localtime` fails (NCBI's `CTime` then throws). The first and
     /// last three days of `localtime`'s range (to 1970-01-04 00:00:00 and from 3001-01-16
@@ -1477,16 +1024,6 @@ impl UcrtZone {
 }
 
 // UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:347-363
-// ```c++
-//     // Get the value of the TZ environment variable:
-//     wchar_t local_env_buffer[local_env_buffer_size];
-//     wchar_t* const tz_env = get_tz_environment_variable(local_env_buffer);
-//     ...
-//     if (tz_env == nullptr || tz_env[0] == '\0')
-//         return tzset_from_system_nolock();
-//
-//     return tzset_from_environment_nolock(tz_env);
-// ```
 // `get_tz_environment_variable` reads `TZ` with `_wgetenv_s` (`tzset.cpp:76-103`), from the
 // CRT's wide environment, which UCRT makes from the process environment block
 // (`ucrt/env/environment_initialization.cpp:166-188`); the name is compared without case

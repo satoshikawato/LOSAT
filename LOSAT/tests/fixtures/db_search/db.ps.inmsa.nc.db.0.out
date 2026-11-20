@@ -1,0 +1,101 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= gi|2554671
+
+Length=151
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       22.2    1.1  
+BDT63582.1 hypothetical protein [Pasiphaea japonica whispovirus]      19.5    6.7  
+BDT63499.1 tyrosine recombinase [Pasiphaea japonica whispovirus]      19.9    6.9  
+
+
+>BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]
+Length=1243
+
+ Score = 22.2 bits (46),  Expect = 1.1, Method: Composition-based stats.
+ Identities = 3/33 (9%), Positives = 15/33 (45%), Gaps = 0/33 (0%)
+
+Query  61   SKMAKAFHSPRYEGVTAMLLFENPSDIVSLIEA  93
+             K+ +  ++  +   T  +L +   + ++++  
+Sbjct  863  EKLIEGINTTEFSKTTDFVLGKKLGNAITVVMG  895
+
+
+>BDT63582.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=215
+
+ Score = 19.5 bits (39),  Expect = 6.7, Method: Composition-based stats.
+ Identities = 16/98 (16%), Positives = 35/98 (36%), Gaps = 4/98 (4%)
+
+Query  47   SVAPSNVKASAVSVSKMAKAFHSPRY--EGVTAMLLFENPSDIVSLIEAGVPIKTVNVGG  104
+              +P   K++  SV+ + +      Y  E          P +  +  E  +    ++V  
+Sbjct  1    MASPPGFKSTDPSVNSVWEIHDKIGYAIEYQHTFNKRTTPLEKSTWDEQELENFQLDVKC  60
+
+Query  105  MRFENHRRQITKSVSVTEQDIKAFETLSDKGVKLELRQ  142
+            +    +  Q    VS  E ++ A   +  KG  + ++ 
+Sbjct  61   IDRLYYIYQFNDGVSGQEFEMAA--RMLYKGEHVYIQL  96
+
+
+>BDT63499.1 tyrosine recombinase [Pasiphaea japonica whispovirus]
+Length=1203
+
+ Score = 19.9 bits (40),  Expect = 6.9, Method: Composition-based stats.
+ Identities = 5/18 (28%), Positives = 8/18 (44%), Gaps = 0/18 (0%)
+
+Query  95   VPIKTVNVGGMRFENHRR  112
+             P K + VG M     ++
+Sbjct  58   PPAKMIKVGNMTTTKVKK  75
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.145    0.386    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0445    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5742750
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

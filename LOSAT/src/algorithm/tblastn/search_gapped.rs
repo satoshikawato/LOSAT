@@ -2529,6 +2529,31 @@ impl<'a> TargetTranslation<'a> {
         Ok((&target.sequence, target.stop, target.base))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:911-918
+    // The reports translate the subject's codons again with the display's table (the rows of
+    // `stage_e_report::aligned_sequences`), where an ambiguous codon whose residues are D/N, E/Q or
+    // I/L is B, Z or J; the search's translation (`get`) reads X there.
+    /// The residue that the reports show at residue `offset` of frame `frame` of the subject (its
+    /// codon translated by `DisplayCode`), as an NCBIstdaa code; `buffer` holds the codon's
+    /// letters of a packed subject.
+    pub(super) fn shown_residue(
+        &self,
+        frame: i8,
+        offset: usize,
+        buffer: &mut Vec<u8>,
+    ) -> Result<u8> {
+        let n = self.subject.len();
+        let first = 3 * offset + usize::from(frame.unsigned_abs()) - 1;
+        anyhow::ensure!(first + 3 <= n, "TBLASTN shown residue outside the subject");
+        // The codon's three bases, read from its start on the plus strand and from its end on the
+        // minus strand (`DisplayCode::residue` of offset 0 in a frame of the same sign).
+        let start = if frame > 0 { first } else { n - first - 3 };
+        let codon = self.subject.fetch(start, start + 3, buffer);
+        let display = crate::algorithm::tblastx::report::DisplayCode::new(self.code);
+        let letter = display.residue(codon, frame.signum(), 0);
+        Ok(crate::utils::matrix::aa_char_to_ncbistdaa(letter))
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1648-1677
     // ```c
     //                         if (fence_hit) {

@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
     postredo_engine_positives, reap_contained_postredo_hsps, redo_preliminary_match,
-    ConvertedKappaHsp,
+    shown_report_counts, ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::search_gapped::{
@@ -1880,6 +1880,13 @@ fn run_local_search_with_pool(
                         &mut target,
                         scoring.matrix,
                     )?;
+                let (report_ident, report_positives, report_mismatches) = shown_report_counts(
+                    &converted,
+                    &report_queries[context],
+                    &mut target,
+                    scoring.matrix,
+                    (report_ident, report_positives, report_mismatches),
+                )?;
                 Ok(KappaHspPayload {
                     bit_score: bits[index],
                     num_ident: i32::try_from(ident)?,
@@ -4030,6 +4037,13 @@ fn finish_local_ungapped(
                         &mut target,
                         steps.matrix,
                     )?;
+                let (report_ident, report_positives, report_mismatches) = shown_report_counts(
+                    &converted,
+                    &steps.query_nomask[context],
+                    &mut target,
+                    steps.matrix,
+                    (ident, positives, mismatches),
+                )?;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
                 // The bit score of the context's ungapped block: (score * Lambda - ln K) / ln 2.
                 Ok(KappaHspPayload {
@@ -4037,9 +4051,9 @@ fn finish_local_ungapped(
                         / std::f64::consts::LN_2,
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
-                    report_num_ident: ident,
-                    report_num_positives: positives,
-                    report_mismatches: i64::try_from(mismatches)?,
+                    report_num_ident: report_ident,
+                    report_num_positives: report_positives,
+                    report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
                     gap_opens,
@@ -4236,15 +4250,22 @@ fn finish_local_mode0_no_sum_stats(
                         &mut target,
                         scoring.matrix,
                     )?;
+                let (report_ident, report_positives, report_mismatches) = shown_report_counts(
+                    &converted,
+                    &query_nomask[context],
+                    &mut target,
+                    scoring.matrix,
+                    (ident, positives, mismatches),
+                )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda
                         - gapped_params[context].k.glibc_ln())
                         / std::f64::consts::LN_2,
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
-                    report_num_ident: ident,
-                    report_num_positives: positives,
-                    report_mismatches: i64::try_from(mismatches)?,
+                    report_num_ident: report_ident,
+                    report_num_positives: report_positives,
+                    report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
                     gap_opens,

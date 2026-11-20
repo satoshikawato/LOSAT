@@ -322,6 +322,86 @@ pub(super) fn postredo_converted_stats_with_matrix(
     ))
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:983-1021
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2122-2149
+// NCBI's reports count the identities and positives again on the rows' letters, whose subject
+// row is translated again from its codons (`stage_e_report::aligned_sequences`); the search's
+// translation and the rows differ only where an ambiguous codon's residues are D/N, E/Q or I/L:
+// X in the search, B, Z or J in the rows. The Seq-aligns keep the search's counts.
+/// The report counts (identities, positives, mismatches) of `converted`, from `counts`, the
+/// search's counts on `report_query` (`postredo_converted_stats_with_matrix`): each subject
+/// residue that the search reads as X and the reports show as another letter
+/// (`TargetTranslation::shown_residue`) is compared as shown, its positive by the display's
+/// matrix (`protein_display_score`).
+pub(super) fn shown_report_counts(
+    converted: &ConvertedKappaHsp,
+    report_query: &[u8],
+    target: &mut TargetTranslation<'_>,
+    matrix: ScoringMatrix,
+    counts: (usize, usize, usize),
+) -> Result<(usize, usize, usize)> {
+    const X: u8 = 21;
+    const LETTERS: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+    let hsp = &converted.hsp;
+    // The (query, subject residue) pairs of the substitutions whose subject residue is X.
+    let mut read_as_x = Vec::new();
+    {
+        let (subject, _, base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
+        let mut si = super::search_gapped::window_index(hsp.s_start, base)
+            .context("TBLASTN positive subject offset before translation range")?;
+        let end = si + usize::try_from(hsp.s_end - hsp.s_start)?;
+        if !subject
+            .get(si..end)
+            .context("TBLASTN report HSP past its translation")?
+            .contains(&X)
+        {
+            return Ok(counts);
+        }
+        let mut qi = usize::try_from(hsp.q_start)?;
+        for op in &converted.edit_script {
+            let num = op.num() as usize;
+            match op {
+                GapEditOp::Sub(_) => {
+                    for _ in 0..num {
+                        if subject[si] == X {
+                            read_as_x.push((qi, usize::try_from(base + si as isize)?));
+                        }
+                        qi += 1;
+                        si += 1;
+                    }
+                }
+                GapEditOp::Del(_) => si += num,
+                GapEditOp::Ins(_) => qi += num,
+            }
+        }
+    }
+    let (mut ident, mut positives, mut mismatches) = counts;
+    let mut buffer = Vec::new();
+    for (qi, offset) in read_as_x {
+        let shown = target.shown_residue(hsp.frame, offset, &mut buffer)?;
+        if shown == X {
+            continue;
+        }
+        let q = *report_query
+            .get(qi)
+            .context("TBLASTN report query offset overflow")?;
+        let was_ident = q == X;
+        let was_positive =
+            was_ident || crate::utils::matrix::protein_score(matrix, q, X) > 0;
+        let is_ident = q == shown;
+        let is_positive = is_ident
+            || crate::utils::matrix::protein_display_score(
+                matrix,
+                LETTERS[usize::from(q)],
+                LETTERS[usize::from(shown)],
+            ) > 0;
+        ident = ident + usize::from(is_ident) - usize::from(was_ident);
+        mismatches = mismatches + usize::from(was_ident) - usize::from(is_ident);
+        positives = positives + usize::from(is_positive) - usize::from(was_positive);
+    }
+    Ok((ident, positives, mismatches))
+}
+
 /// NCBI's engine positives of an HSP of a redone match (`BlastHSP::num_positives`, which the
 /// Seq-aligns show): `s_ComputeNumIdentities` counts them on the working (masked) query and
 /// the target translation with the score block whose matrix the match's composition
@@ -2806,6 +2886,56 @@ mod tests {
                 observed,
             )
             .unwrap();
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:983-1021
+    // The reports compare the rows' letters: a codon of D/N (RAT) or E/Q (SAR) is X in the search
+    // and B or Z in the rows, an all-N codon X in both. Query X against the B is identical in the
+    // search and in no report; query E against the Z is positive in the reports (BLOSUM62 E/Z 4)
+    // and not in the search (E/X -1). Both strands.
+    #[test]
+    fn report_counts_compare_an_ambiguous_codon_as_the_rows_show_it() {
+        use crate::utils::matrix::aa_char_to_ncbistdaa;
+        let code = GeneticCode::try_from_id(1).unwrap();
+        let query: Vec<u8> = b"MXEXM".iter().map(|&aa| aa_char_to_ncbistdaa(aa)).collect();
+        for (subject, frame) in [
+            (&b"ATGRATSARNNNATG"[..], 1i8),
+            (&b"CATNNNYTSATYCAT"[..], -1i8),
+        ] {
+            let converted = ConvertedKappaHsp {
+                context: 0,
+                hsp: GappedHsp {
+                    frame,
+                    score: 10,
+                    q_start: 0,
+                    q_end: 5,
+                    q_gapped_start: 0,
+                    s_start: 0,
+                    s_end: 5,
+                    s_gapped_start: 0,
+                },
+                edit_script: vec![GapEditOp::Sub(5)],
+                matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+            };
+            let mut target = TargetTranslation::new(subject, &code);
+            let (ident, positives, length, mismatches, _, _) = postredo_converted_stats_with_matrix(
+                &converted,
+                &query,
+                &mut target,
+                ScoringMatrix::Blosum62,
+            )
+            .unwrap();
+            assert_eq!((ident, positives, length, mismatches), (4, 4, 5, 1), "frame {frame}");
+            let shown = shown_report_counts(
+                &converted,
+                &query,
+                &mut target,
+                ScoringMatrix::Blosum62,
+                (ident, positives, mismatches),
+            )
+            .unwrap();
+            assert_eq!(shown, (3, 4, 2), "frame {frame}");
         }
     }
 }

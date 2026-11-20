@@ -9,7 +9,7 @@
 //   with their license files, from the modules of every bundle: the main bundle and the
 //   worker bundles. Vite's own `build.license` reads the main bundle only and skips the helper
 //   code that Vite and Rolldown add as virtual modules, so it is not used.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
@@ -28,9 +28,19 @@ export const NOTICE_FILES = [
 export const NPM_LICENSES_FILE = 'THIRD_PARTY_LICENSES_NPM.txt';
 
 /**
- * The packages whose code a virtual module (an id that starts with "\0") holds. In Vite 8,
- * Rolldown's built-in plugins write Vite's helpers (the module preload polyfill, the preload
- * helper), so those name both. LOSAT's own virtual modules (build/reactors.ts,
+ * Virtual modules (ids that start with "\0") whose code comes from a project that no installed
+ * package's license files name: the build stops at them. Vite's module preload polyfill was
+ * adapted from es-module-shims (MIT, Guy Bedford), as Vite 5's source of it says; Rolldown's
+ * copy of it in Vite 8 says nothing. vite.config.ts turns it off: the site has one chunk and no
+ * modulepreload link, so it would do nothing.
+ */
+const VIRTUAL_WITHOUT_NOTICE: readonly (readonly [prefix: string, why: string])[] = [
+  ['\0vite/modulepreload-polyfill', "Vite's module preload polyfill, adapted from es-module-shims (MIT, Guy Bedford), whose notice no package carries; keep build.modulePreload.polyfill off or give that notice"],
+];
+
+/**
+ * The packages whose code a virtual module holds. In Vite 8, Rolldown's built-in plugins write
+ * Vite's helpers, so those name both. LOSAT's own virtual modules (build/reactors.ts,
  * build/verification.ts) need no notice. A virtual module of any other owner stops the build.
  */
 const VIRTUAL_OWNERS: readonly (readonly [prefix: string, packages: readonly string[]])[] = [
@@ -48,7 +58,9 @@ const LICENSE_ENDS: Readonly<Record<string, string>> = {
   vite: '\n# Licenses of bundled dependencies',
 };
 
-const LICENSE_FILE = /^(?:licen[cs]e|copying)/i;
+/** License, NOTICE (Apache-2.0 section 4(d)) and third-party license files, such as Rolldown's
+ * THIRD-PARTY-LICENSE (the notices of Rollup and esbuild, whose helpers it writes). */
+const LICENSE_FILE = /^(?:licen[cs]e|copying|notice|third[-_]party[-_]licen[cs]es?)(?:[-_.].*)?$/i;
 const RULE = '='.repeat(80);
 
 interface NpmPackage {
@@ -103,6 +115,8 @@ export function npmPackages(moduleIds: Iterable<string>, from: string = APP): Np
   const add = (pkg: NpmPackage) => found.set(`${pkg.name}@${pkg.version}`, pkg);
   for (const id of moduleIds) {
     if (id.startsWith('\0')) {
+      const unnoticed = VIRTUAL_WITHOUT_NOTICE.find(([prefix]) => id.startsWith(prefix));
+      if (unnoticed !== undefined) throw new Error(`the virtual module ${JSON.stringify(id)} is in a bundle: ${unnoticed[1]} (web/app/build/notices.ts)`);
       const owner = VIRTUAL_OWNERS.find(([prefix]) => id.startsWith(prefix));
       if (owner === undefined) {
         throw new Error(`the virtual module ${JSON.stringify(id)} is in a bundle; name the packages of its code in VIRTUAL_OWNERS (web/app/build/notices.ts)`);
@@ -113,12 +127,14 @@ export function npmPackages(moduleIds: Iterable<string>, from: string = APP): Np
     const file = id.split('?')[0]!;
     if (file.split(/[\\/]/).includes('node_modules')) add(packageOfModule(file));
   }
-  return [...found.values()].sort((a, b) => (a.name === b.name ? a.version.localeCompare(b.version) : a.name.localeCompare(b.name)));
+  // Ordered by code unit, so that the file does not depend on the build machine's locale.
+  const key = (pkg: NpmPackage) => `${pkg.name}\0${pkg.version}`;
+  return [...found.values()].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
 }
 
 function licenseTexts(pkg: NpmPackage): string[] {
   const files = readdirSync(pkg.dir)
-    .filter((name) => LICENSE_FILE.test(name))
+    .filter((name) => LICENSE_FILE.test(name) && statSync(join(pkg.dir, name)).isFile())
     .sort();
   if (files.length === 0) throw new Error(`${pkg.name} ${pkg.version}: no license file in ${pkg.dir}`);
   return files.map((name) => {

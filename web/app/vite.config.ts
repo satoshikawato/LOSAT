@@ -56,7 +56,10 @@ export default defineConfig({
   server: { headers: devHeaders },
   preview: { headers },
   worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false }), notices.worker()] },
-  build: { target: 'es2022' },
+  // No module preload polyfill: the site has one chunk and no modulepreload link, so it would do
+  // nothing, and its code (adapted from es-module-shims) has no notice in the site
+  // (build/notices.ts stops the build if it comes back).
+  build: { target: 'es2022', modulePreload: { polyfill: false } },
   test: {
     include: ['tests/unit/**/*.test.ts'],
     environment: 'node',

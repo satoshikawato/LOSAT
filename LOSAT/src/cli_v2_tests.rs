@@ -2459,9 +2459,7 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
         let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
         let text = crate::cli::render_message(&error);
         assert!(
-            text.contains(&format!(
-                "the option -xmlhelp runs on {place}"
-            )),
+            text.contains(&format!("the option -xmlhelp runs on {place}")),
             "{program}: {text}"
         );
     }

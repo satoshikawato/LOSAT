@@ -90,7 +90,7 @@ fn a_seekable_input_rewinds() {
     let input = stream.rewind().expect("a cursor seeks");
     let guessed = guess_encoding(input);
     assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Text));
-    let mut stream = guessed.into_text();
+    let mut stream = guessed.into_stream().expect("a text stream");
     assert!(stream.read(named::BLAST4_REQUEST).0.is_ok());
     assert!(stream.end_of_data());
 }
@@ -198,7 +198,9 @@ fn the_encoding_is_guessed_as_ncbi_guesses_it() {
         assert_eq!(guess(&bytes), encoding, "{name}");
     }
     // A text read from where the guess left the stream: the guess's bytes, then the input.
-    let mut stream = guess_encoding(&text[..]).into_text();
+    let mut stream = guess_encoding(&text[..])
+        .into_stream()
+        .expect("a text stream");
     assert!(stream.read(named::BLAST4_ARCHIVE).0.is_ok());
     assert!(stream.end_of_data());
     let (values, error) = objects(&fixture("bad/other_type"), named::BLAST4_ARCHIVE);

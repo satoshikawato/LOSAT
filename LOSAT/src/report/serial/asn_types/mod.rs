@@ -2,9 +2,10 @@
 //! `datatool` generates from the ASN.1 modules and their `.def` files), for the types that a
 //! PSSM file reaches (`PssmWithParameters`, psiblast and tblastn `-in_pssm`) and those of the
 //! BLAST archive and search strategy (`Blast4-archive`, `Blast4-request`,
-//! `Blast4-get-search-strategy-reply`), and the one generic reader of ASN.1 text that runs on
-//! them (`read`; a stream of objects and its encoding: `stream`; typed access to the values:
-//! `view`). This module owns the table (`table`, generated
+//! `Blast4-get-search-strategy-reply`), and the one generic reader that runs on them (`read`,
+//! over the steps of each encoding: ASN.1 text `read_text`, binary ASN.1 `read_ber`; a stream of
+//! objects and its encoding: `stream`; typed access to the values: `view`). This module owns the
+//! table (`table`, generated
 //! by `scripts/asn_spec_gen.py` and checked against NCBI's generated `*_.cpp` by
 //! `scripts/asn_spec_check.py`) and the generic value (`Value`); the PSSM's typed model
 //! (`report::serial::pssm`) is built from the value at its typed boundary
@@ -41,6 +42,8 @@
 
 mod hooks;
 pub(crate) mod read;
+mod read_ber;
+mod read_text;
 pub(crate) mod stream;
 pub(crate) mod view;
 pub(crate) mod write;
@@ -48,6 +51,8 @@ pub(crate) mod write;
 #[rustfmt::skip]
 pub(crate) mod table;
 
+#[cfg(test)]
+mod read_ber_tests;
 #[cfg(test)]
 mod read_tests;
 #[cfg(test)]

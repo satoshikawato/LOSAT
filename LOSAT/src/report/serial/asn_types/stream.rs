@@ -5,15 +5,15 @@
 //! `-import_search_strategy` (one Blast4-get-search-strategy-reply, or else one Blast4-request,
 //! `ExtractBlast4Request`).
 //!
-//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); the text reader is the
-//! generic reader of the type table (`read`) on a stream read in blocks (`StreamSource`), so one
-//! object at a time is in memory. Binary ASN.1 and XML are recognised and left to their callers:
-//! a front end that reads them into the table's values would take the input from
-//! [`Guessed::into_parts`].
+//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); each encoding is read by
+//! the generic reader of the type table (`read`) over that encoding's front end (`read_text`,
+//! `read_ber`) on a stream read in blocks (`StreamSource`), so one object at a time is in memory.
 
 use std::io::{Read as IoRead, Seek, SeekFrom};
 
 use super::read::{read_object, Read};
+use super::read_ber::Ber;
+use super::read_text::Text;
 use super::Value;
 use crate::ncbi_exception::NcbiException;
 use crate::report::serial::asn_text_reader::{AsnSource, Reader, StreamSource};
@@ -44,9 +44,9 @@ use crate::utils::format_guess::{Format, FormatGuess, Stop};
 // ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Encoding {
-    /// `eTextASN`: read by [`ObjectStream`].
+    /// `eTextASN`: `CObjectIStreamAsn`.
     Text,
-    /// `eBinaryASN`: recognised; LOSAT has no binary reader of the table's types yet.
+    /// `eBinaryASN`: `CObjectIStreamAsnBinary`.
     Binary,
     /// `eXml`: recognised; LOSAT has no XML reader of the table's types yet.
     Xml,
@@ -111,38 +111,52 @@ pub(crate) fn guess_encoding<R: IoRead>(input: R) -> Guessed<R> {
 }
 
 impl<R: IoRead> Guessed<R> {
-    /// The text reader of the stream (`new CObjectIStreamAsn(f)`), from where the guess left it.
-    pub(crate) fn into_text(self) -> ObjectStream<R> {
-        ObjectStream::new(self.input, &self.taken[self.start..])
-    }
-
-    /// The stream from where the guess left it: the bytes the guess took from there, and the
-    /// input after them (the front end of another encoding reads from here).
-    pub(crate) fn into_parts(mut self) -> (Vec<u8>, R) {
-        self.taken.drain(..self.start);
-        (self.taken, self.input)
+    /// The object stream of the encoding guessed (`new CObjectIStreamAsn(f)`,
+    /// `new CObjectIStreamAsnBinary(f)`), from where the guess left the input; `None` for an
+    /// encoding that is not one of them (the caller's invalid input).
+    pub(crate) fn into_stream(self) -> Option<ObjectStream<R>> {
+        let first = &self.taken[self.start..];
+        match self.encoding {
+            Ok(Encoding::Text) => Some(ObjectStream::new(self.input, first)),
+            Ok(Encoding::Binary) => Some(ObjectStream::binary(self.input, first)),
+            _ => None,
+        }
     }
 }
 
-/// The objects of an ASN.1 text stream, read one at a time: one reader for the whole stream, as
-/// NCBI keeps one object stream (its line count and its buffer go on from one object to the
+/// The objects of a serial stream, read one at a time: one reader for the whole stream, as NCBI
+/// keeps one object stream (its position, line count and buffer go on from one object to the
 /// next).
 pub(crate) struct ObjectStream<R: IoRead> {
-    r: Reader<StreamSource<R>>,
+    front: Fronts<R>,
     /// A read failed: NCBI's stream has its fail flags set, and its `EndOfData` is true from
     /// then on.
     failed: bool,
 }
 
+/// The front end of the stream's encoding.
+enum Fronts<R: IoRead> {
+    Text(Text<StreamSource<R>>),
+    Binary(Ber<StreamSource<R>>),
+}
+
 impl<R: IoRead> ObjectStream<R> {
-    /// The objects of `input`, whose first bytes `first` were already taken from it.
+    /// The ASN.1 text objects of `input`, whose first bytes `first` were already taken from it.
     pub(crate) fn new(input: R, first: &[u8]) -> Self {
         ObjectStream {
-            r: Reader::new(
+            front: Fronts::Text(Text::new(Reader::new(
                 StreamSource::new(input, first),
                 "ASN.1 text",
                 "ASN.1 text reader",
-            ),
+            ))),
+            failed: false,
+        }
+    }
+
+    /// The binary ASN.1 objects of `input`, whose first bytes `first` were already taken from it.
+    pub(crate) fn binary(input: R, first: &[u8]) -> Self {
+        ObjectStream {
+            front: Fronts::Binary(Ber::new(StreamSource::new(input, first))),
             failed: false,
         }
     }
@@ -181,35 +195,53 @@ impl<R: IoRead> ObjectStream<R> {
     // ```
     // (`m_Input.EndOfData()` and `HasMore()` of `CIStreamBuffer` ask whether a byte follows,
     // reading the stream for one: the end of the input here.)
+    // The binary stream keeps `EndOfData` of its base: any byte after an object starts the next.
     pub(crate) fn end_of_data(&mut self) -> bool {
-        if self.failed || self.r.src.byte_at(self.r.pos).is_none() {
+        if self.failed {
             return true;
         }
-        self.r.skip_white_space().is_err()
+        match &mut self.front {
+            Fronts::Text(text) => {
+                let r = &mut text.r;
+                r.src.byte_at(r.pos).is_none() || r.skip_white_space().is_err()
+            }
+            Fronts::Binary(ber) => ber.src.byte_at(ber.pos).is_none(),
+        }
     }
 
     /// `in >> object` of the root type `root`: one object, from its file header (`Read`), with
     /// the messages posted. The stream stands after the object's last byte; a failed read leaves
     /// it failed (`end_of_data`).
     pub(crate) fn read(&mut self, root: u16) -> Read<Value> {
-        let read = read_object(&mut self.r, root);
+        let read = match &mut self.front {
+            Fronts::Text(text) => read_object(text, root),
+            Fronts::Binary(ber) => read_object(ber, root),
+        };
         if read.0.is_err() {
             self.failed = true;
         }
         read
     }
 
-    /// The text after what was read: the bytes the stream holds from there, then the input
+    /// The input after what was read: the bytes the stream holds from there, then the input
     /// after them.
     pub(crate) fn into_rest(self) -> (Vec<u8>, R) {
-        let pos = self.r.pos;
-        self.r.src.into_rest(pos)
+        match self.front {
+            Fronts::Text(text) => {
+                let pos = text.r.pos;
+                text.r.src.into_rest(pos)
+            }
+            Fronts::Binary(ber) => ber.src.into_rest(ber.pos),
+        }
     }
 
     /// The bytes the stream keeps.
     #[cfg(test)]
     pub(crate) fn buffered(&self) -> usize {
-        self.r.src.buffered()
+        match &self.front {
+            Fronts::Text(text) => text.r.src.buffered(),
+            Fronts::Binary(ber) => ber.src.buffered(),
+        }
     }
 }
 

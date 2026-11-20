@@ -40,24 +40,47 @@ const DBL_DIG: u32 = 15;
 
 /// The identifier octets of the primitive types and of the constructed types that NCBI
 /// writes (`CObjectStreamAsnBinaryDefs::ETagValue`, include/serial/impl/objstrasnb.hpp, with
-/// `eConstructed` = 0x20 and `eContextSpecific` = 0x80).
-const TAG_BOOLEAN: u8 = 0x01;
-const TAG_INTEGER: u8 = 0x02;
-const TAG_REAL: u8 = 0x09;
-const TAG_ENUMERATED: u8 = 0x0a;
-const TAG_OCTET_STRING: u8 = 0x04;
-const TAG_VISIBLE_STRING: u8 = 0x1a;
-const TAG_STRING_STORE: u8 = 0x41;
-const TAG_SEQUENCE: u8 = 0x30;
-const TAG_SET: u8 = 0x31;
-const TAG_NULL: u8 = 0x05;
+/// `eConstructed` = 0x20 and `eContextSpecific` = 0x80), which NCBI's binary reader expects
+/// (`report::serial::asn_types::read_ber`).
+pub(crate) const TAG_BOOLEAN: u8 = 0x01;
+pub(crate) const TAG_INTEGER: u8 = 0x02;
+pub(crate) const TAG_BIT_STRING: u8 = 0x03;
+pub(crate) const TAG_REAL: u8 = 0x09;
+pub(crate) const TAG_ENUMERATED: u8 = 0x0a;
+pub(crate) const TAG_OCTET_STRING: u8 = 0x04;
+pub(crate) const TAG_UTF8_STRING: u8 = 0x0c;
+pub(crate) const TAG_VISIBLE_STRING: u8 = 0x1a;
+pub(crate) const TAG_STRING_STORE: u8 = 0x41;
+/// An INTEGER with the application class (`MakeTagByte(eApplication, ePrimitive, eInteger)`),
+/// which NCBI's reader takes as an INTEGER (`ExpectIntegerTag`).
+pub(crate) const TAG_APPLICATION_INTEGER: u8 = 0x42;
+pub(crate) const TAG_SEQUENCE: u8 = 0x30;
+pub(crate) const TAG_SET: u8 = 0x31;
+pub(crate) const TAG_NULL: u8 = 0x05;
 /// A constructed context-specific tag (`[i]`, i < 31): `0xa0 | i`.
-const TAG_CONTEXT: u8 = 0xa0;
+pub(crate) const TAG_CONTEXT: u8 = 0xa0;
+/// `eTagClassMask`, `eTagConstructedMask` and `eTagValueMask` of an identifier octet.
+pub(crate) const TAG_CLASS_MASK: u8 = 0xc0;
+pub(crate) const TAG_CONSTRUCTED: u8 = 0x20;
+pub(crate) const TAG_VALUE_MASK: u8 = 0x1f;
+/// `eLongTag`: the tag number follows in base-128 bytes.
+pub(crate) const TAG_LONG: u8 = 0x1f;
 /// `eIndefiniteLengthByte`.
-const INDEFINITE_LENGTH: u8 = 0x80;
+pub(crate) const INDEFINITE_LENGTH: u8 = 0x80;
+/// `eEndOfContentsByte` (and `eZeroLengthByte`): the two bytes `00 00` that close an
+/// indefinite length.
+pub(crate) const END_OF_CONTENTS: u8 = 0x00;
 /// The first content octet of a REAL written in decimal form (`eDecimal`, the NR form is
 /// not selected, CXX-5248).
-const REAL_DECIMAL: u8 = 0x00;
+pub(crate) const REAL_DECIMAL: u8 = 0x00;
+/// `eDecimalEncoding`: the bits of a REAL's first content octet that name its form.
+pub(crate) const REAL_ENCODING_MASK: u8 = 0xc0;
+/// The one-byte REALs (`ESpecialRealValues`): `ePositiveInfinity`, `eNegativeInfinity`,
+/// `eNotANumber`, `eNegativeZero`.
+pub(crate) const REAL_PLUS_INFINITY: u8 = 0x40;
+pub(crate) const REAL_MINUS_INFINITY: u8 = 0x41;
+pub(crate) const REAL_NOT_A_NUMBER: u8 = 0x42;
+pub(crate) const REAL_MINUS_ZERO: u8 = 0x43;
 
 /// The ASN.1 binary encoder, appending one document to `out`.
 pub struct AsnBinaryEncoder<'b> {

@@ -3,7 +3,7 @@
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (losat/ports: run-output.ts), not through these methods.
-import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, MessagePlace, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
 import type { HspRecord, InputCheck } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
@@ -69,6 +69,19 @@ export interface ResultSetRef {
   /** The bytes of each output of the run: the formats that every run writes, and the output of its -outfmt where it has one. */
   readonly byteLengths: Readonly<Record<OutputFormat, number> & Partial<Record<typeof CUSTOM_OUTPUT, number>>>;
   readonly hitCount: number;
+  /**
+   * The outputs that the run could not write, by stream number: those that the engine said failed (its signal of
+   * stream 9, docs/web/abi_v2.md §5: a format that failed alone, or the formats of a search that failed in a run of
+   * two searches), each with where its error is, as the engine said. Each is empty (line WQA's sweep, D7, 2026-11-19
+   * and 2026-11-20).
+   */
+  readonly failed: readonly FailedOutput[];
+}
+
+/** An output that a run could not write, and where its error is (`ResultSetRef.failed`). */
+export interface FailedOutput {
+  readonly output: RunOutput;
+  readonly error: MessagePlace;
 }
 
 /** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */

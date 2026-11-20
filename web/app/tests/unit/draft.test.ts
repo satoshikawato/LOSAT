@@ -47,7 +47,7 @@ function setup(
   const engine = {
     describe: fake.describe.bind(fake),
     start: async (argv: readonly string[]): Promise<StartResult> =>
-      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false } },
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } },
     validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
       registries.push(registry);
@@ -1368,13 +1368,13 @@ describe('SearchDraft submit', () => {
   it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
     const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
     const { draft, registries, requests } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
       validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true }),
     });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
     await draft.idle();
-    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false });
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false });
     draft.setExtra('-conffile settings.ini');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
@@ -1427,7 +1427,7 @@ describe('SearchDraft submit', () => {
       start: (argv) => {
         const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
         const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
-        return { ok: true, start: { conffile: name, logFile: null, dryRun: false } };
+        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false } };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1498,7 +1498,7 @@ describe('SearchDraft submit', () => {
   // -conffile, the argv's name and the file, and says what to do.
   it('says that the file chosen for -conffile could not be read, and asks to choose it again', async () => {
     const { draft } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
       validate: (_argv, registry) => {
         if (registry === undefined) return { ok: true };
         // As the Data worker's error arrives: its name and message (rpc.ts).
@@ -1519,7 +1519,7 @@ describe('SearchDraft submit', () => {
 
   it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
     const { draft, validated } = setup({
-      start: (argv) => (argv.includes('-version') ? { ok: false, message: "error: unexpected argument '-version' found" } : { ok: true, start: { conffile: null, logFile: null, dryRun: false } }),
+      start: (argv) => (argv.includes('-version') ? { ok: false, message: "error: unexpected argument '-version' found" } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } }),
     });
     await draft.idle();
     const before = validated.length;

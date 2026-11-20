@@ -504,6 +504,8 @@ export class Coordinator {
           ...(runtime.runtimeGeneration === undefined ? {} : { runtimeGeneration: runtime.runtimeGeneration }),
           ...(runtime.memory === undefined ? {} : { memory: runtime.memory }),
           ...(runtime.subjectRetained === undefined ? {} : { subjectRetained: runtime.subjectRetained }),
+          messages: runtime.messages,
+          ...(runtime.shownIds === undefined ? {} : { shownIds: runtime.shownIds }),
           ...(runtime.windowMasker === undefined
             ? {}
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),

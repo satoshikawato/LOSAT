@@ -175,6 +175,7 @@ const RESULT: WorkerRunResult = {
   engineBuild: 'losat-web-serial.wasm sha256:aaaaaaaaaaaaaaaa',
   memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 },
   subjectRetained: false,
+  messages: 'diagnostics',
 };
 
 /** Waits until `worker` has received `count` run commands. */
@@ -217,6 +218,7 @@ describe('WasmEngine', () => {
       runtimeGeneration: 1,
       memory: RESULT.memory,
       subjectRetained: true,
+      messages: 'diagnostics',
     });
     expect(phases).toEqual(['running']);
   });

@@ -1951,6 +1951,7 @@ fn search(
             search_letters,
             x_batches,
             |range| LocalStageDProfile {
+                max_intron_length: resolved.max_intron_length,
                 seg: seg.as_ref(),
                 soft_masking: resolved.soft_masking,
                 mask_lowercase: resolved.lcase_masking,
@@ -2021,6 +2022,7 @@ fn search(
                         &query_seqs[range.clone()],
                         search_letters,
                         LocalStageDProfile {
+                            max_intron_length: resolved.max_intron_length,
                             seg: seg.as_ref(),
                             soft_masking: resolved.soft_masking,
                             mask_lowercase: resolved.lcase_masking,

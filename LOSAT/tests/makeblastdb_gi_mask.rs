@@ -278,9 +278,14 @@ fn compare(
             "files: missing {missing:?}, not in makeblastdb's {extra:?}"
         ));
     }
+    // A case that leaves none of the files kept has no directory there.
     let kept = dir.join("db").join(&case.name);
     let c = case_dir.to_str().unwrap();
-    for rel in files_under(&kept) {
+    let kept_files = match kept.is_dir() {
+        true => files_under(&kept),
+        false => Vec::new(),
+    };
+    for rel in kept_files {
         let want = masked_file(&rel, std::fs::read(kept.join(&rel)).unwrap(), c);
         match std::fs::read(case_dir.join(&rel)) {
             Ok(bytes) => {

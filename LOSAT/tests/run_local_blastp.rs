@@ -516,7 +516,7 @@ fn a_batch_of_queries_without_residues_stops() {
     assert!(matches!(error, Error::Search(_)), "{error:?}");
     assert_eq!(
         error.message(),
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
@@ -528,7 +528,7 @@ fn a_batch_of_queries_without_residues_stops() {
     let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "0"], &[]);
     assert_eq!(code, Some(3), "{stderr}");
     assert_eq!(stdout, outputs[0]);
-    assert_eq!(stderr, error.message());
+    assert_eq!(stderr.as_bytes(), error.message());
 
     let mut text = format!(
         ">q1\n{}\n>q2\n{}\n",
@@ -619,8 +619,8 @@ fn what_ends_the_query_reading_comes_with_its_batch() {
     assert!(
         error
             .message()
-            .starts_with("BLAST query error: CFastaReader: ")
-            && stderr.starts_with(error.message()),
+            .starts_with(b"BLAST query error: CFastaReader: ")
+            && stderr.as_bytes().starts_with(error.message()),
         "{error}"
     );
     let mut blank = text.into_bytes();

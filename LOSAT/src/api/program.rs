@@ -72,32 +72,31 @@ impl Program {
             "tblastn" => Ok(Program::Tblastn),
             "tblastx" => Ok(Program::Tblastx),
             "psiblast" => Ok(Program::Psiblast),
-            "makeblastdb" | "makedb" => Err(Error::Argv(format!(
-                "{name} is not a search program: run_makeblastdb runs it"
-            ))),
+            "makeblastdb" | "makedb" => Err(Error::Argv(
+                format!("{name} is not a search program: run_makeblastdb runs it").into(),
+            )),
             "blastdbcmd" => Err(Error::Argv(
-                "blastdbcmd is not a search program: run_blastdbcmd runs it".to_string(),
+                "blastdbcmd is not a search program: run_blastdbcmd runs it".into(),
             )),
             "dustmasker" => Err(Error::Argv(
-                "dustmasker is not a search program: run_dustmasker runs it".to_string(),
+                "dustmasker is not a search program: run_dustmasker runs it".into(),
             )),
             "segmasker" => Err(Error::Argv(
-                "segmasker is not a search program: run_segmasker runs it".to_string(),
+                "segmasker is not a search program: run_segmasker runs it".into(),
             )),
             "convert2blastmask" => Err(Error::Argv(
-                "convert2blastmask is not a search program: run_convert2blastmask runs it"
-                    .to_string(),
+                "convert2blastmask is not a search program: run_convert2blastmask runs it".into(),
             )),
             // rpsblast (series PR, item PS11a) runs on the command line; the API has no program
             // for it yet (its results and options are those of a later item).
             "rpsblast" => Err(Error::Argv(
-                "rpsblast is not available through the library API".to_string(),
+                "rpsblast is not available through the library API".into(),
             )),
             // rpstblastn (series PR, item PS12a) likewise.
             "rpstblastn" => Err(Error::Argv(
-                "rpstblastn is not available through the library API".to_string(),
+                "rpstblastn is not available through the library API".into(),
             )),
-            other => Err(Error::Argv(format!("unknown program '{other}'"))),
+            other => Err(Error::Argv(format!("unknown program '{other}'").into())),
         }
     }
 
@@ -150,13 +149,16 @@ mod tests {
         }
         for tool in ["makeblastdb", "makedb", "blastdbcmd"] {
             let error = Program::parse(tool).unwrap_err();
-            assert!(error.message().contains("not a search program"), "{error}");
+            assert!(
+                error.to_string().contains("not a search program"),
+                "{error}"
+            );
         }
         // rpsblast and rpstblastn run on the command line only (line PS, PS11a, PS12a).
         for program in ["rpsblast", "rpstblastn"] {
             let error = Program::parse(program).unwrap_err();
             assert!(
-                error.message().contains(&format!(
+                error.to_string().contains(&format!(
                     "{program} is not available through the library API"
                 )),
                 "{error}"
@@ -164,7 +166,7 @@ mod tests {
         }
         assert_eq!(
             Program::parse("nosuch"),
-            Err(Error::Argv("unknown program 'nosuch'".to_string()))
+            Err(Error::Argv("unknown program 'nosuch'".into()))
         );
     }
 }

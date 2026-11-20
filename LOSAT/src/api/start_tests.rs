@@ -17,6 +17,7 @@ use crate::api::{
     run, run_batches, run_collect, run_to_file, validate, FastaRecord, Inputs, Program,
 };
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
 const NUCLEOTIDES: &[u8] =
@@ -569,6 +570,7 @@ fn an_out_file_that_cannot_be_made_is_an_error_of_the_run() {
         .unwrap()
         .message
         .clone();
+    let message = String::from_utf8(message).unwrap();
     for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
         std::fs::write(&log, "").unwrap();
         let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
@@ -660,6 +662,7 @@ fn an_outfmt_error_goes_where_the_run_s_errors_go() {
             .unwrap()
             .message
             .clone();
+        let message = String::from_utf8(message).unwrap();
         let refused = Error::Argv(format!("{native:#}").into());
         for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
             let search = validate(program, &["-logfile", path_text(&log)]).unwrap();

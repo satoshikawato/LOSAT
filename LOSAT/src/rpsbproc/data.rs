@@ -23,7 +23,7 @@
 //! flags) are read as NCBI reads them, for their errors, but not kept.
 //! The lookups are NCBI's `CPtrMap`: the rows sorted with NCBI's comparison and searched by
 //! NCBI's binary search. The sort is Rust's stable sort, so rows of one key stay in the order of
-//! the file (NCBI's `std::sort` may leave them in another order; PD-LOSAT-NCBI-DEFECTS 1.54, the
+//! the file (NCBI's `std::sort` may leave them in another order; PD-LOSAT-NCBI-DEFECTS 1.56, the
 //! order of tied hits).
 
 use std::io::{BufRead, BufReader};
@@ -788,7 +788,7 @@ impl CddData {
         // (LOSAT sorts with Rust's stable `sort_by` and the comparisons that the lookups search
         // with, `int_order` and `compare_bytes`, which order every pair of keys: rows of one key
         // keep the order of the file, where NCBI's `sort` may leave them in another. No CDD v3.22
-        // file has two rows of one key. PD-LOSAT-NCBI-DEFECTS 1.54, the order of tied hits.)
+        // file has two rows of one key. PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied hits.)
         let mut by_pssm: Vec<u32> = (0..domains.len() as u32).collect();
         by_pssm.sort_by(|&a, &b| {
             int_order(

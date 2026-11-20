@@ -1587,7 +1587,10 @@ fn is_unported_blastx_arg(name: &str) -> bool {
 #[derive(Debug)]
 pub struct NativeError {
     pub exit: i32,
-    pub message: String,
+    /// The text NCBI's `CATCH_ALL` writes, as bytes: a name of the command line or of a file
+    /// keeps the bytes NCBI's `std::string` keeps (a name that is not UTF-8: probes R1, R3 and R8
+    /// of line LIB-B).
+    pub message: Vec<u8>,
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:178-180
 // ```c++
@@ -1595,9 +1598,10 @@ pub struct NativeError {
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 //     }                                                                       \
 // ```
+/// The text of `message`; a byte that is not UTF-8 reads as U+FFFD (`message` keeps it).
 impl fmt::Display for NativeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&String::from_utf8_lossy(&self.message))
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
@@ -1638,7 +1642,7 @@ impl NativeError {
     pub(crate) fn silent_end() -> Self {
         Self {
             exit: 0,
-            message: String::new(),
+            message: Vec::new(),
         }
     }
 
@@ -1684,12 +1688,12 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: format!("BLAST Database error: {}\n", e.get_msg()),
+                message: format!("BLAST Database error: {}\n", e.get_msg()).into(),
             };
         }
         NativeError {
             exit: 255,
-            message: format!("Error: {}\n", e.what()),
+            message: format!("Error: {}\n", e.what()).into(),
         }
     }
 
@@ -1705,7 +1709,7 @@ impl NativeError {
     pub(crate) fn std_exception(what: &str) -> NativeError {
         NativeError {
             exit: 255,
-            message: format!("Error: {what}\n"),
+            message: format!("Error: {what}\n").into(),
         }
     }
 
@@ -2175,18 +2179,19 @@ pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
 //             "File is not accessible",AsString()));
 // ```
 pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
-    let value = if path.as_os_str().is_empty() {
-        String::new()
-    } else {
-        format!(":  `{}'", path.display())
-    };
-    NativeError {
-        exit: 1,
-        message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible{value}\n"
-        ),
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, quoted in
+    // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
+    // `-subject` and `-out` of a name that is not UTF-8).
+    let mut message =
+        format!("Command line argument error: Argument \"{name}\". File is not accessible")
+            .into_bytes();
+    if !path.as_os_str().is_empty() {
+        message.extend_from_slice(b":  `");
+        message.extend_from_slice(&crate::utils::os_bytes::path_bytes(path));
+        message.push(b'\'');
     }
-    .into()
+    message.push(b'\n');
+    NativeError { exit: 1, message }.into()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
@@ -2244,7 +2249,12 @@ pub(crate) fn create_out_file(
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            eprint!("{}", catch_all_text(&e.message));
+            // `eprint!` of the bytes: a failed write panics as `eprint!`'s does.
+            if let Err(error) =
+                std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&e.message))
+            {
+                panic!("failed printing to stderr: {error}");
+            }
         }
         if e.exit < 0 {
             std::process::abort();
@@ -2268,19 +2278,19 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
 /// `blastinput::app::options_error`, one for the others; NCBI BLAST+ 2.17.0, line RG D3-1 `om/`
 /// cases k02, k03, k06 and `om/mute/` e05, e11). A text without a post (the end of the PSSM file
 /// directly in its root object, exit status 0) stays empty.
-pub(crate) fn catch_all_text(message: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn catch_all_text(message: &[u8]) -> &[u8] {
     if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
-        return std::borrow::Cow::Borrowed(message);
+        return message;
     }
-    if message.starts_with("BLAST query/options error: ")
+    if message.starts_with(b"BLAST query/options error: ")
         && message
-            .strip_suffix('\n')
-            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER))
-            .is_some_and(|s| s.ends_with('\n'))
+            .strip_suffix(b"\n")
+            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER.as_bytes()))
+            .is_some_and(|s| s.ends_with(b"\n"))
     {
-        std::borrow::Cow::Borrowed("\n\n")
+        b"\n\n"
     } else {
-        std::borrow::Cow::Borrowed("\n")
+        b"\n"
     }
 }
 
@@ -2293,10 +2303,10 @@ static POST_ERRORS_IN_RUN: std::sync::atomic::AtomicBool =
 
 /// The text that the run wrote (`post_native_error`), which `exit_on_native_error` does not write
 /// again.
-static POSTED_TEXT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static POSTED_TEXT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
 
 /// Whether the run already wrote `text` (`post_native_error`).
-fn posted(text: &str) -> bool {
+fn posted(text: &[u8]) -> bool {
     POSTED_TEXT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2341,10 +2351,7 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(
-            &mut std::io::stderr(),
-            catch_all_text(&native.message).as_bytes(),
-        );
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&native.message));
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
@@ -2380,13 +2387,13 @@ mod tests {
     #[test]
     fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
         use crate::ncbi_exception::{NcbiException, ThrowSite};
-        let site = crate::seqdb::lookup_throw_site("DB contains no accession info.").unwrap();
+        let site = crate::seqdb::lookup_throw_site(b"DB contains no accession info.").unwrap();
         let error =
             NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
         assert_eq!(error.exit, 2);
         assert_eq!(
             error.message,
-            "BLAST Database error: DB contains no accession info.\n"
+            b"BLAST Database error: DB contains no accession info.\n"
         );
         let other = NcbiException::new(
             ThrowSite {
@@ -2399,7 +2406,10 @@ mod tests {
         );
         let error = NativeError::exception(&other);
         assert_eq!(error.exit, 255);
-        assert_eq!(error.message, format!("Error: {}\n", other.what()));
+        assert_eq!(
+            error.message,
+            format!("Error: {}\n", other.what()).as_bytes()
+        );
     }
 
     #[test]
@@ -2634,11 +2644,11 @@ mod tests {
         let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
         let error: anyhow::Error = NativeError {
             exit: 1,
-            message: text.to_string(),
+            message: text.to_string().into(),
         }
         .into();
         post_native_error(&error);
-        assert!(!posted(text));
+        assert!(!posted(text.as_bytes()));
     }
 
     // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
@@ -2804,13 +2814,7 @@ mod tests {
 pub fn command_line_bytes() -> Vec<u8> {
     let mut line = Vec::new();
     for argument in std::env::args_os() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
-            line.extend_from_slice(argument.as_bytes());
-        }
-        #[cfg(not(unix))]
-        line.extend_from_slice(argument.to_string_lossy().as_bytes());
+        line.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(&argument));
         line.push(b' ');
     }
     line

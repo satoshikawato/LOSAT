@@ -59,6 +59,7 @@ def test_a_batch_that_fails_ends_the_search():
     from pylosat import SearchError
 
     search = Search("blastp")
+    # Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     batches = search.batches(Sequences.from_text(">q\nMKTAYIAKQR\n"), Sequences.from_text(""))
     with pytest.raises(SearchError):
         next(batches)

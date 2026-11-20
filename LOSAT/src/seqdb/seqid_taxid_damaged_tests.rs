@@ -228,7 +228,11 @@ impl ErrorText for String {
 
 impl ErrorText for TaxError {
     fn text(&self) -> String {
-        format!("{self} {} {}", self.message("db"), self.detail())
+        format!(
+            "{self} {} {}",
+            String::from_utf8_lossy(&self.message(b"db")),
+            self.detail()
+        )
     }
 }
 

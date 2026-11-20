@@ -308,7 +308,7 @@ bioconda's gave the same bytes in every case.
   `unsigned int` sum stored in an `int`, wraps, two of the eight Zn sites stay unmapped and no SITES line is printed;
   at K = 2147483576 (`arch/mse76.asn`) the SITES line is printed. Both builds the same.
 
-## Tied hits (line LIB, item S1, PD-LOSAT-NCBI-DEFECTS 1.54)
+## Tied hits (line LIB, item S1, PD-LOSAT-NCBI-DEFECTS 1.56)
 
 The Owner's decision of 2026-11-20: `losat rpsbproc` sorts with Rust's standard stable sort. Hits of one query with
 equal E-value and bit score keep their input order, where NCBI's `std::sort` leaves them in an order of its own. A NaN

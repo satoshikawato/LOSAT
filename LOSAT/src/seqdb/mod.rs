@@ -41,6 +41,7 @@ pub mod column;
 pub mod date;
 pub mod file;
 pub mod filter;
+pub mod gi_mask;
 pub mod header;
 pub mod index;
 pub mod isam;
@@ -215,12 +216,20 @@ pub enum SeqDbError {
     /// `alias::compute_masks`). NCBI's programs report it as `Error: <what()>` with exit
     /// status 255 ([`SeqDbError::ncbi_exception`]).
     Ncbi(crate::ncbi_exception::NcbiException),
+    /// NCBI's `CSeqDBException::eMemoryMappingFailure` of a file that its reader maps without
+    /// testing that it was found (a GI-mask data file, `gi_mask::GiMaskFiles::open`, survey D8 of
+    /// line NP M4c): the exception's text (`GetMsg`). The command lines' catch reports it as
+    /// "Database memory map file error - <text>" ([`SeqDbError::ncbi_message`]), blastdbcmd's
+    /// per-request catch as the text alone ([`SeqDbError::ncbi_request_message`]).
+    MemoryMap(String),
 }
 
 impl std::fmt::Display for SeqDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SeqDbError::NotFound(message) | SeqDbError::Range(message) => f.write_str(message),
+            SeqDbError::NotFound(message)
+            | SeqDbError::Range(message)
+            | SeqDbError::MemoryMap(message) => f.write_str(message),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -292,7 +301,7 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 13] = [
+const NCBI_FORMAT_MESSAGES: [&str; 14] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
@@ -315,6 +324,8 @@ const NCBI_FORMAT_MESSAGES: [&str; 13] = [
     "CBlastDbBlob::x_ReadRaw: hit end of data",
     // seqdbimpl.cpp:2375-2376
     "Error in stored mask algorithm description data.",
+    // seqdbgimask.cpp:213-217
+    "Gi-mask file uses unknown format_version.",
 ];
 
 /// seqdbvol.cpp:3365-3382 (the title or the counts follow), seqdbimpl.cpp:2456-2459 (the volume
@@ -370,6 +381,9 @@ impl SeqDbError {
     pub fn ncbi_message(&self) -> Option<String> {
         match self {
             SeqDbError::NotFound(message) => Some(message.clone()),
+            SeqDbError::MemoryMap(message) => {
+                Some(format!("Database memory map file error - {message}"))
+            }
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
                 .contains(&message.as_str())
                 || message.starts_with(NCBI_EMPTY_DBLIST_PREFIX)
@@ -399,6 +413,21 @@ impl SeqDbError {
             | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:890-892
+    // ```c++
+    //     catch (const CException& e) {
+    //     	ERR_POST(Error << e.GetMsg());
+    //         err_found = 1;
+    // ```
+    /// The text that blastdbcmd's catch of a request prints (`e.GetMsg()`): the text of a
+    /// [`SeqDbError::MemoryMap`] alone, otherwise [`SeqDbError::ncbi_message`].
+    pub fn ncbi_request_message(&self) -> Option<String> {
+        match self {
+            SeqDbError::MemoryMap(message) => Some(message.clone()),
+            _ => self.ncbi_message(),
         }
     }
 
@@ -1053,8 +1082,18 @@ impl SeqDb {
         seqtype: SeqType,
         path: &SearchPath,
     ) -> Result<Self, SeqDbError> {
-        let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
+        let mut tree = alias::resolve_in(name, seqtype, path)?;
+        let gi_masks = tree.gi_masks.take();
+        let mut db = Self::open_tree(tree, name, seqtype)?;
         db.search_path = Some(path.clone());
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:81-91
+        // (`m_UseGiMask` from the alias file's mask list): a database whose alias file names GI
+        // masks has them as its filtering algorithms, and its mask columns are not read. The mask
+        // files are looked for along the search path; nothing is read here.
+        if let Some(names) = gi_masks {
+            let masks = gi_mask::GiMasks::new(names, path.clone(), seqtype, db.volumes.len());
+            db.mask_algorithms = OnceLock::from(MaskAlgorithms::gi(std::sync::Arc::new(masks)));
+        }
         Ok(db)
     }
 

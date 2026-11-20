@@ -63,7 +63,7 @@ impl From<SeqDbError> for Stop {
     /// exception there (exit status 1, not the 2 of an error at opening); LOSAT's is a
     /// refusal.
     fn from(error: SeqDbError) -> Stop {
-        match error.ncbi_message() {
+        match error.ncbi_request_message() {
             Some(text) => Stop::Ncbi(text),
             None => Stop::refused(error.to_string()),
         }
@@ -851,11 +851,11 @@ fn init_search_request(
         //                    "Cannot find string algorithm id in algorithm map.");
         //     }
         // ```
+        // A database with GI masks gives `CSeqDBGiMask::GetAlgorithmId`'s text instead
+        // (`MaskAlgorithms::id_of`).
         let id = match id {
             Some(id) => id,
-            None => source.db.mask_algorithms()?.id_of(value).ok_or_else(|| {
-                Stop::Ncbi("Cannot find string algorithm id in algorithm map.".to_string())
-            })?,
+            None => source.db.mask_algorithms()?.id_of(value).map_err(Stop::Ncbi)?,
         };
         if !is_mask_algo_id_valid(source, id, diag)? {
             return Err(Stop::Ncbi(

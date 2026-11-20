@@ -1443,6 +1443,52 @@ fn header_records_are_decoded() {
     assert!(matches!(decode(&trailing), Err(SeqDbError::Format { .. })));
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139 (quoted
+// at `alias::gi_mask_list`).
+/// `MASKLIST` in the alias file of a database given as one name makes its filtering algorithms
+/// the GI masks it names (ids 0 to N-1 in its order, no file read before one is asked for); over
+/// it in another alias file, or with the database named twice, it is passed over.
+#[test]
+fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
+    let dir = temp_dir("masklist");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("gm.pal"),
+        "TITLE t\nDBLIST prot_v4\nMASKLIST a b \n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("over.pal"), "TITLE o\nDBLIST gm\n").unwrap();
+    let name = dir.join("gm").to_str().unwrap().to_string();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    let algorithms = db.mask_algorithms().unwrap();
+    assert_eq!(algorithms.ids(), vec![0, 1]);
+    assert_eq!(algorithms.id_of("b"), Ok(1));
+    let table = "\nAvailable filtering algorithm(s):\n\nAlgorithm ID  Algorithm name                          \n    0         a                                       \n    1         b                                       \n";
+    assert_eq!(
+        algorithms.id_of("dust"),
+        Err(format!("Filtering algorithm dust does not exist.\n{table}"))
+    );
+    // The files are looked for along the search path (here the current directory), where
+    // there are none.
+    let error = algorithms.details(0).unwrap_err();
+    assert_eq!(
+        error.ncbi_message().as_deref(),
+        Some("Could not open gi-mask index files.")
+    );
+    match algorithms.details(2).unwrap_err() {
+        SeqDbError::Range(text) => {
+            assert_eq!(text, format!("Filtering algorithm ID 2 does not exist.\n{table}"))
+        }
+        other => panic!("{other}"),
+    }
+    let over = dir.join("over").to_str().unwrap().to_string();
+    let twice = format!("{name} {name}");
+    for passed_over in [over.as_str(), twice.as_str()] {
+        let db = SeqDb::open(passed_over, SeqType::Protein).unwrap();
+        assert!(db.mask_algorithms().unwrap().ids().is_empty(), "{passed_over}");
+    }
+}
+
 #[test]
 fn every_filtering_alias_key_is_rejected() {
     let dir = temp_dir("keys");
@@ -1455,7 +1501,6 @@ fn every_filtering_alias_key_is_rejected() {
         "TAXIDLIST",
         "OIDLIST",
         "MEMB_BIT",
-        "MASKLIST",
         "OID_MASK_TYPE",
     ] {
         std::fs::write(

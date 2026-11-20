@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -80,22 +81,15 @@ class SamClRuleTests(unittest.TestCase):
             (Path(tmp) / "t.6.out").write_bytes(self.WITH)
             self.assertEqual(db_fixtures.frozen_stdout({"row_id": "t.6", "outfmt": "6"}, other_build), other_build)
 
-    def test_a_freeze_keeps_the_frozen_report_of_a_run_that_ncbi_ends_by_a_signal(self):
-        # NCBI's crash in a refused row (SIGSEGV) cuts its report at a point that depends on its heap and
-        # the environment: the same binary wrote 17 bytes on ws where the frozen prolog has 349.
+    def test_a_frozen_file_other_than_sam_is_replaced_by_ncbi_s_stdout(self):
+        # Outside outfmt 17 the freeze writes NCBI's stdout as it is, also where it is the start of the frozen
+        # file or the frozen file is its start (no prefix rule: a run that ends by a signal stops the freeze).
         prolog = b"BLASTX 2.17.0+\n\n\nReference: ...\n\nDatabase: x2g\n"
         with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(db_fixtures, "FROZEN", Path(tmp)):
             (Path(tmp) / "c.1.out").write_bytes(prolog)
             row = {"row_id": "c.1", "outfmt": "1"}
-            shorter, longer = prolog[:17], prolog + b"\nQuery= q1\n"
-            for cut in (shorter, longer, prolog):
-                self.assertEqual(db_fixtures.frozen_stdout(row, cut, -11), prolog)
-            # A report that differs before the cut is a new answer, and a run that exits is frozen as it is.
-            other = prolog.replace(b"x2g", b"x3g")
-            self.assertEqual(db_fixtures.frozen_stdout(row, other, -11), other)
-            self.assertEqual(db_fixtures.frozen_stdout(row, shorter, 1), shorter)
-            self.assertEqual(db_fixtures.frozen_stdout(row, shorter), shorter)
-            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "new.1", "outfmt": "1"}, shorter, -11), shorter)
+            for stdout in (prolog[:17], prolog + b"\nQuery= q1\n", prolog.replace(b"x2g", b"x3g"), b""):
+                self.assertEqual(db_fixtures.frozen_stdout(row, stdout), stdout)
 
     def test_the_rule_applies_to_outfmt_17_only(self):
         for outfmt in ("17", "17 SQ", " 17 SR ", "17 SQ SR"):
@@ -175,15 +169,25 @@ class DbSearchFixtureTests(unittest.TestCase):
                 self.assertFalse(db_fixtures.under_valgrind(r), r["row_id"])
                 self.assertIsNone(db_fixtures.copies_cell(r), r["row_id"])
                 # A rejection row whose stdout is a near input's NCBI run (`ncbi-near:`, the bytes LOSAT writes
-                # before it refuses): the stdout cells of that `ncbi` row of its own run, and no file of its own.
-                near = db_fixtures.near_row_id(r)
+                # before it refuses): the stdout cells of that `ncbi` row of its own run, or of its first N bytes
+                # (`ncbi-near: ROW_ID first N bytes`), and no file of its own.
+                near, cut = db_fixtures.near_row_id(r), db_fixtures.near_cut(r)
                 if near:
                     source = by_id[near]
                     self.assertEqual((r["kind"], source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
                                      ("losat-rejection", "ncbi", None, r["outfmt"]), r["row_id"])
-                    self.assertEqual([source[k] for k in ("stdout_sha256", "stdout_bytes")],
-                                     [r[k] for k in ("stdout_sha256", "stdout_bytes")], r["row_id"])
                     self.assertFalse((db_fixtures.FROZEN / f"{r['row_id']}.out").exists(), r["row_id"])
+                    if cut is None:
+                        self.assertEqual([source[k] for k in ("stdout_sha256", "stdout_bytes")],
+                                         [r[k] for k in ("stdout_sha256", "stdout_bytes")], r["row_id"])
+                    else:
+                        self.assertLessEqual(cut, int(source["stdout_bytes"]), r["row_id"])
+                        self.assertEqual(r["stdout_bytes"], str(cut), r["row_id"])
+                if r["stdout_bytes"]:
+                    self.assertTrue((db_fixtures.FROZEN / f"{db_fixtures.frozen_id(r)}.out").exists(), r["row_id"])
+                    data = db_fixtures.expected_stdout(r)
+                    self.assertEqual([db_fixtures.sha256(data), str(len(data))],
+                                     [r["stdout_sha256"], r["stdout_bytes"]], r["row_id"])
                 continue
             # A copy row's expectation is the cut of its whole NCBI output (`ncbi-copies:`).
             if db_fixtures.copies_cell(r) is not None:
@@ -198,6 +202,8 @@ class DbSearchFixtureTests(unittest.TestCase):
             self.assertFalse(near and db_fixtures.under_valgrind(r), r["row_id"])
             if near:
                 source = by_id[near]
+                # An ncbi row takes all of its near row's bytes (rc and stderr too).
+                self.assertIsNone(db_fixtures.near_cut(r), r["row_id"])
                 self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
                                  ("ncbi", None, r["outfmt"]), r["row_id"])
                 self.assertEqual([source[k] for k in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")],
@@ -210,6 +216,23 @@ class DbSearchFixtureTests(unittest.TestCase):
             err = db_fixtures.FROZEN / f"{frozen}.err"
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
+    def test_near_marker_names_a_row_and_its_first_bytes(self):
+        def near(covers):
+            return db_fixtures.near_row({"row_id": "r", "covers": covers})
+        self.assertIsNone(near("a crash | expect: frees memory"))
+        self.assertEqual(near("a | ncbi-near: db.x.1"), ("db.x.1", None))
+        self.assertEqual(near("a | ncbi-near: db.x.1 | expect: b"), ("db.x.1", None))
+        self.assertEqual(near("a | ncbi-near: db.x.1 first 349 bytes | expect: b"), ("db.x.1", 349))
+        self.assertEqual(near("ncbi-near: db.x.1 first 0 bytes"), ("db.x.1", 0))
+        self.assertEqual((db_fixtures.near_row_id({"covers": "ncbi-near: db.x.1 first 9 bytes"}),
+                          db_fixtures.near_cut({"covers": "ncbi-near: db.x.1 first 9 bytes"})), ("db.x.1", 9))
+        self.assertEqual((db_fixtures.near_row_id({"covers": "x"}), db_fixtures.near_cut({"covers": "x"})),
+                         (None, None))
+        # Any other words in the marker's part stop the tool (a cut must not be read as prose, or prose as a cut).
+        for bad in ("ncbi-near: db.x.1 first bytes", "ncbi-near: db.x.1 349", "ncbi-near: db.x.1 first 349 byte",
+                    "ncbi-near: db.x.1 first -1 bytes", "ncbi-near: db.x.1 (the first 349 bytes)", "ncbi-near: | x"):
+            with self.assertRaises(SystemExit, msg=bad):
+                near(bad)
 
     def test_valgrind_marker_is_a_part_of_covers(self):
         self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))
@@ -292,7 +315,8 @@ class DbSearchFixtureTests(unittest.TestCase):
         # only for the near row (the stand-in counts its runs), which may come after the rejection row in the
         # manifest, and no frozen file is written for the rejection row.
         rows = db_fixtures.read_manifest()[1]
-        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_row_id(r)))
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_row_id(r)
+                              and db_fixtures.near_cut(r) is None))
         near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(rejection)))
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir, frozen, runs = Path(tmp) / "bin", Path(tmp) / "frozen", Path(tmp) / "runs"
@@ -314,6 +338,105 @@ class DbSearchFixtureTests(unittest.TestCase):
                              [near["stdout_sha256"], "13", "1"])
             self.assertEqual(near["rc"], "3")
             self.assertEqual(len(written), 1)
+
+    @staticmethod
+    def stand_in(bin_dir: Path, program: str, body: str) -> None:
+        bin_dir.mkdir(exist_ok=True)
+        script = bin_dir / program
+        script.write_text("#!/bin/sh\n" + body)
+        script.chmod(0o755)
+
+    def freeze_rows(self, rows: list[dict[str, str]], bin_dir: Path, frozen: Path) -> list[tuple]:
+        """`freeze` of `rows` alone with the NCBI programs of `bin_dir`, the frozen files in `frozen`: the
+        write_manifest calls (none when the freeze stops)."""
+        written = []
+        with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, rows)), \
+                unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                contextlib.redirect_stdout(io.StringIO()):
+            db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="", valgrind=""))
+        return written
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_gives_a_cut_near_row_the_cells_of_the_first_bytes_of_its_near_run(self):
+        # `ncbi-near: ROW_ID first N bytes` (the crash rows of db.x2g.bx.of, whose stdout is NCBI's prolog): NCBI
+        # runs only for the near row; the rejection row's cells are the sha256 and size of the near run's first N
+        # bytes, its rc stays LOSAT's, and a near run shorter than N stops the freeze.
+        rows = db_fixtures.read_manifest()[1]
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
+        near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(rejection)))
+        cut = db_fixtures.near_cut(rejection)
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen, runs = Path(tmp) / "bin", Path(tmp) / "frozen", Path(tmp) / "runs"
+            (Path(tmp) / "near.out").write_bytes(b"P" * cut + b"\n\nQuery= q\n")
+            self.stand_in(bin_dir, near["program"], f'echo run >> "{runs}"\ncat "{tmp}/near.out"\nexit 255\n')
+            self.assertEqual(len(self.freeze_rows([rejection, near], bin_dir, frozen)), 1)
+            self.assertEqual(runs.read_text(), "run\n")
+            self.assertFalse((frozen / f"{rejection['row_id']}.out").exists())
+            self.assertEqual([rejection[k] for k in ("stdout_sha256", "stdout_bytes", "rc")],
+                             [db_fixtures.sha256(b"P" * cut), str(cut), "1"])
+            self.assertEqual((near["rc"], near["stdout_bytes"]), ("255", str(cut + 11)))
+            (Path(tmp) / "near.out").write_bytes(b"P" * (cut - 1))
+            with self.assertRaisesRegex(SystemExit, f"{re.escape(rejection['row_id'])}: ncbi-near .* fewer than"):
+                self.freeze_rows([rejection, near], bin_dir, frozen)
+            # An ncbi row takes all of its near row's bytes: a cut there stops the freeze.
+            twin = dict(rejection, kind="ncbi")
+            with self.assertRaisesRegex(SystemExit, "takes all of its near row's bytes"):
+                self.freeze_rows([twin, near], bin_dir, frozen)
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_stops_where_ncbi_ends_a_run_by_a_signal(self):
+        # A crash cuts NCBI's report where its heap and the environment decide: no row takes such a stdout. The
+        # freeze stops before it writes the row's files or the manifest, for a rejection row with stdout cells and
+        # no near row as for an ncbi row; a rejection row with a near row is not run at all.
+        rows = db_fixtures.read_manifest()[1]
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and r["stdout_bytes"]
+                              and not xinclude.wants_pssm(r) and not db_fixtures.near_row_id(r)))
+        plain = dict(next(r for r in rows if r["kind"] == "ncbi" and not xinclude.wants_files(r)
+                          and not xinclude.wants_pssm(r) and db_fixtures.rps_cell(r["db"]) is None
+                          and not db_fixtures.under_valgrind(r) and not db_fixtures.near_row_id(r)))
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
+            for row in (rejection, plain):
+                self.stand_in(bin_dir, row["program"], 'printf "BLASTP 2.17.0+\\n"\nkill -SEGV $$\n')
+                with self.assertRaisesRegex(SystemExit, f"{re.escape(row['row_id'])}: NCBI ended its run by signal 11"):
+                    self.freeze_rows([dict(row)], bin_dir, frozen)
+                self.assertFalse((frozen / f"{row['row_id']}.out").exists(), row["row_id"])
+                self.assertFalse((frozen / f"{row['row_id']}.err").exists(), row["row_id"])
+            # The same rows with an exit status are frozen as NCBI wrote them.
+            for row in (rejection, plain):
+                self.stand_in(bin_dir, row["program"], 'printf "BLASTP 2.17.0+\\n"\nexit 3\n')
+                row = dict(row)
+                self.assertEqual(len(self.freeze_rows([row], bin_dir, frozen)), 1)
+                self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"BLASTP 2.17.0+\n")
+                self.assertEqual(row["stdout_bytes"], "15")
+            # A crash of the near row stops the freeze too; the rejection row that names it is never run.
+            cut_row = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
+            near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(cut_row)))
+            self.stand_in(bin_dir, near["program"], 'kill -SEGV $$\n')
+            with self.assertRaisesRegex(SystemExit, f"{re.escape(near['row_id'])}: NCBI ended its run by signal 11"):
+                self.freeze_rows([cut_row, near], bin_dir, frozen)
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT program is a shell script")
+    def test_check_compares_a_cut_near_row_with_the_first_bytes_of_its_near_run(self):
+        # `check` of a rejection row with `ncbi-near: ROW_ID first N bytes` expects exactly the first N bytes of
+        # ROW_ID's frozen stdout (the prolog of the db.x2g.bx.of rows), and LOSAT's rc and expected stderr text.
+        rows = db_fixtures.read_manifest()[1]
+        row = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
+        whole = (db_fixtures.FROZEN / f"{db_fixtures.near_row_id(row)}.out").read_bytes()
+        cut = db_fixtures.near_cut(row)
+        self.assertGreater(len(whole), cut)
+        self.assertEqual(db_fixtures.expected_stdout(row), whole[:cut])
+        with tempfile.TemporaryDirectory() as tmp:
+            losat, out = Path(tmp) / "losat", Path(tmp) / "out"
+            losat.write_text(f'#!/bin/sh\ncat "{out}"\nprintf "BLAST engine error: %s\\n" '
+                             f'{shlex.quote(db_fixtures.expected_text(row))} >&2\nexit {row["rc"]}\n')
+            losat.chmod(0o755)
+            env = db_fixtures.clean_env(dict(os.environ), tmp)
+            for stdout, status in ((whole[:cut], "rejection"), (whole, "differs"), (whole[:cut - 1], "differs"),
+                                   (b"", "differs")):
+                out.write_bytes(stdout)
+                self.assertEqual(db_fixtures.check_row(row, losat, 1, env)[0], status, len(stdout))
 
 
 def pairwise_report(query: str, hits: list[str]) -> str:

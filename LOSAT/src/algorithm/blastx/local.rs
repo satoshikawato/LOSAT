@@ -459,20 +459,12 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     } = run;
     // Whether every format is the archive, which NCBI writes without the prefetch (`render`).
     let only_archive = outputs.only_archive();
-    // Whether the queries' warnings that a structured first format does not write go to the
-    // caller's receiver of a later format's (`ReportOutputs::later_query_warnings`).
-    let takes_later = outputs.takes_later_query_warnings();
     let ReportOutputs {
         formats,
         diagnostics,
-        later_warnings,
         hits: hits_sink,
         observer,
     } = outputs;
-    let mut later = later_warnings
-        .as_mut()
-        .filter(|_| takes_later)
-        .map(|later| &mut **later as &mut (dyn Write + Send));
     // The caller's receivers of the side files of outfmt 13 and 14.
     let side_sinks: Vec<_> = formats
         .iter()
@@ -541,7 +533,6 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         wants_hits,
         only_archive,
         diagnostics,
-        &mut later,
         observer,
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
@@ -575,9 +566,6 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// refusal of each format's checks does (`FormatRefusal`): a format that fails alone writes
 /// nothing after it, and the first format that is still written writes the warnings that the
 /// formats share. `only_archive`: every format is the archive (`ReportOutputs::only_archive`).
-/// `later`: the receiver of the queries' warnings that the first format written does not write (a
-/// structured format), which the first later format that writes them writes there
-/// (`ReportOutputs::later_query_warnings`).
 /// Returns the run's hit list (`wants_hits`) and the database sequences it names.
 #[allow(clippy::too_many_arguments)]
 fn write_run(
@@ -588,7 +576,6 @@ fn write_run(
     wants_hits: bool,
     only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
-    later: &mut Option<&mut (dyn Write + Send)>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
 ) -> Result<(
     Vec<crate::report::pairwise::PairwiseHit>,
@@ -813,10 +800,6 @@ fn write_run(
         // ```
         // Whether a format of the batch wrote the warnings that the formats share.
         let mut warned = false;
-        // Whether a format of the batch wrote the queries' result warnings: the first written, or
-        // where it is structured (`ReportFormat::writes_query_warnings`), the first later one that
-        // writes them, to `later` (line WQA's sweep, D3 review r3, 2026-11-19).
-        let mut result_warned = false;
         for (index, ((writer, options), refusal)) in writers
             .iter_mut()
             .zip(resolved)
@@ -832,17 +815,14 @@ fn write_run(
             // 9; the only text that their writer writes to it, `seqalign::write_blastx_seqalign`)
             // at every format, as the other programs write them.
             let mut quiet = io::sink();
-            let report_format = app::ReportFormat::from_number(i32::from(options.outfmt));
-            let seq_annot = report_format
+            let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
                 .and_then(crate::report::serial::SerialFormat::of)
                 .is_some();
-            let writes = report_format.is_none_or(app::ReportFormat::writes_query_warnings);
             let warns = !warned;
-            let gathers = !warns && writes && !result_warned;
-            let warnings: &mut dyn Write = match (warns || seq_annot, later.as_deref_mut()) {
-                (true, _) => &mut *diagnostics,
-                (false, Some(later)) if gathers => later,
-                _ => &mut quiet,
+            let warnings: &mut dyn Write = if warns || seq_annot {
+                &mut *diagnostics
+            } else {
+                &mut quiet
             };
             // The values of a custom tabular field list are each format's (`reported_batch`
             // read the first format's).
@@ -928,7 +908,6 @@ fn write_run(
             // A format refused by its checks wrote no warning (they come before its warnings and
             // rows, `report::render_queries_with`).
             warned |= warns && !refusal.refused();
-            result_warned |= writes && (warns || gathers) && !refusal.refused();
         }
         first_hsp += match &hits {
             Some(hits) => hits.len(),

@@ -11609,10 +11609,12 @@ fn run_in_pool(
         // its set-up (`SetupQueries_OMF`, above), any other invalid query that of its
         // Karlin-Altschul parameters.
         // A structured format (outfmt 8, 12) writes no result warnings
-        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format, or, where
-        // it is structured, to the caller's receiver of a later format's
-        // (`ReportOutputs::later_query_warnings`).
-        let result_warnings = outputs.first_writes_query_warnings();
+        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
+        let result_warnings = outputs
+            .formats
+            .first()
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
         let filtered_empty = match source {
             SubjectSource::Database(database) => database.filtered_empty(),
             _ => false,
@@ -11626,7 +11628,7 @@ fn run_in_pool(
             .step_by(2)
             .enumerate()
         {
-            if !result_warnings && outputs.later_query_warnings().is_none() {
+            if !result_warnings {
                 continue;
             }
             let mut messages = Vec::new();
@@ -11640,16 +11642,12 @@ fn run_in_pool(
             if batch.searched && filtered_empty {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
-            let text = query_warning(
+            warnings[start + index].lines(&query_warning(
                 "blastn",
                 args.first_query_ordinal + query_input.ordinal(start + index),
                 &batch_records.searched()[index],
                 &messages,
-            );
-            match outputs.later_query_warnings() {
-                Some(later) => later.write_all(&text)?,
-                None => warnings[start + index].lines(&text),
-            }
+            ));
         }
         for (index, messages) in query_fetches.into_iter().enumerate() {
             warnings[start + index].lines(&messages);

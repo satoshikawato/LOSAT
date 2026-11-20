@@ -108,11 +108,7 @@ pub(super) struct ReportPrep<'a, 'o> {
 ///         }
 ///     }
 /// ```
-///
-/// Also returned: the queries' own messages that a structured first format does not write and a
-/// later format does (`ReportOutputs::later_query_warnings`), in the order of the queries, for the
-/// caller's receiver of them (empty where it takes none).
-pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, Vec<u8>) {
+pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
     let ReportPrep {
         args,
         outputs,
@@ -126,12 +122,13 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, V
         ..
     } = *prep;
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
-    // the warnings go with the first format, or, where it is structured, to the caller's receiver
-    // of a later format's (`later`).
-    let result_warnings = outputs.first_writes_query_warnings();
-    let later = outputs.takes_later_query_warnings();
-    let mut later_text = Vec::new();
-    let lines = query_records
+    // the warnings go with the first format.
+    let result_warnings = outputs
+        .formats
+        .first()
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
+    query_records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
@@ -151,8 +148,8 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, V
                 .get(q_idx)
                 .cloned()
                 .unwrap_or_default();
-            if result_warnings || later {
-                let text = if let Some(psi) = args.psi_search.as_deref() {
+            if result_warnings {
+                lines.extend(if let Some(psi) = args.psi_search.as_deref() {
                     // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id;
                     // the messages add those of `PsiBlastSetupScoreBlock`.
                     pssm_hooks::pssm_query_warning(args.app.ncbi_name(), psi, record, &messages)
@@ -165,16 +162,11 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, V
                         record,
                         &messages,
                     )
-                };
-                match result_warnings {
-                    true => lines.extend(text),
-                    false => later_text.extend(text),
-                }
+                });
             }
             lines
         })
-        .collect();
-    (lines, later_text)
+        .collect()
 }
 
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).

@@ -4,6 +4,4 @@
   that its options do not ask for, and no warning or error of the run's other search. A run of two
   searches (`-num_descriptions`, `-num_alignments`) completes or fails as the search of its own
   `-outfmt`, so `blastp -num_alignments 0 -outfmt 6` is refused with "No hits are being saved", as on
-  the command line. A run with a structured `-outfmt` (5, 8, 9, 11 to 17) now also shows the queries'
-  warnings, such as "Sequence contains no data", that outfmt 0, 6 and 7 write. TBLASTX's file of
-  `-logfile` holds what the command line's file holds.
+  the command line. TBLASTX's file of `-logfile` holds what the command line's file holds.

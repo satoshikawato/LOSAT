@@ -370,14 +370,6 @@ impl FormatOutput<'_> {
             .and_then(|choice| ReportFormat::from_number(choice.number))
     }
 
-    /// Whether this output's report writes the queries' result warnings
-    /// (`ReportFormat::writes_query_warnings`; a value that NCBI's reading refuses writes no report,
-    /// and counts as one that does).
-    pub(crate) fn writes_query_warnings(&self) -> bool {
-        self.report_format()
-            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
-    }
-
     /// Whether this output is the BLAST archive (outfmt 11).
     fn is_archive(&self) -> bool {
         self.report_format() == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
@@ -695,14 +687,6 @@ pub struct ReportOutputs<'a> {
     pub formats: Vec<FormatOutput<'a>>,
     /// Receives the warnings that the CLI writes to standard error, each once.
     pub diagnostics: &'a mut (dyn Write + Send),
-    /// Receives the queries' result warnings that the first format does not write and a format
-    /// after it does (`ReportOutputs::later_query_warnings`): a structured first format (outfmt 5,
-    /// 8, 9, 11 to 17) writes none (`ReportFormat::writes_query_warnings`), and the command line's
-    /// run of the later format writes them to its standard error (LOSAT Web writes outfmt 0, 6
-    /// and 7 besides the argv's `-outfmt`, and adds what their standard error adds; line WQA's
-    /// sweep, D3 review r3, 2026-11-19). `None` drops them, as the command line, whose one format
-    /// is the first.
-    pub later_warnings: Option<&'a mut (dyn Write + Send)>,
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the
     /// last block, `LOSAT_X_BPQBLOCK`). The list is shared, not copied: it holds an alignment's
@@ -715,41 +699,6 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
-    /// Whether the first format writes the queries' result warnings with its reports (a call
-    /// without formats too): a structured format does not (`ReportFormat::writes_query_warnings`).
-    pub(crate) fn first_writes_query_warnings(&self) -> bool {
-        self.formats
-            .first()
-            .is_none_or(FormatOutput::writes_query_warnings)
-    }
-
-    /// Whether the queries' result warnings that the first format does not write go to
-    /// `later_warnings` (`later_query_warnings`): a format after the first writes them, and the
-    /// caller takes them.
-    pub(crate) fn takes_later_query_warnings(&self) -> bool {
-        self.later_warnings.is_some()
-            && !self.first_writes_query_warnings()
-            && self
-                .formats
-                .iter()
-                .skip(1)
-                .any(FormatOutput::writes_query_warnings)
-    }
-
-    /// Where the queries' result warnings that the first format does not write go: to
-    /// `later_warnings` where a format after the first writes them, as that format's run writes
-    /// them; `None` where they go nowhere (the first format writes them with its reports, no later
-    /// format writes them, or the caller takes none).
-    pub(crate) fn later_query_warnings(&mut self) -> Option<&mut (dyn Write + Send)> {
-        match self.takes_later_query_warnings() {
-            true => self
-                .later_warnings
-                .as_mut()
-                .map(|later| &mut **later as &mut (dyn Write + Send)),
-            false => None,
-        }
-    }
-
     /// Makes the `-out` file of `run_to_file` (`OutputSink::Out`) where the command line opens its
     /// `-out`: each program's entry calls it after reading the subjects (or the taxid or seqid list
     /// of `-db`) and before processing the options. The other sinks are not opened here.
@@ -842,7 +791,6 @@ impl ReportOutputs<'_> {
         let ReportOutputs {
             formats,
             diagnostics,
-            later_warnings,
             hits,
             observer,
         } = self;
@@ -866,10 +814,6 @@ impl ReportOutputs<'_> {
                 })
                 .collect(),
             diagnostics: &mut tee,
-            // Not saved in the archive: the archive's run (outfmt 11 first) writes none of them.
-            later_warnings: later_warnings
-                .as_mut()
-                .map(|later| &mut **later as &mut (dyn Write + Send)),
             hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
             observer: observer
                 .as_mut()
@@ -908,7 +852,6 @@ impl<'a> ReportOutputs<'a> {
                 refusal: FormatRefusal::FailsCall,
             }],
             diagnostics,
-            later_warnings: None,
             hits: None,
             observer: None,
         }

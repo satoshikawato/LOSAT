@@ -1862,10 +1862,12 @@ fn search(
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
                 } else {
-                    database.x_stream(resolved.num_threads, resolved.db_mask.as_ref()).map(|stream| {
-                        x_stream = Some(stream);
-                        Vec::new()
-                    })
+                    database
+                        .x_stream(resolved.num_threads, resolved.db_mask.as_ref())
+                        .map(|stream| {
+                            x_stream = Some(stream);
+                            Vec::new()
+                        })
                 };
                 match read {
                     Ok(stores) => (stores, None),

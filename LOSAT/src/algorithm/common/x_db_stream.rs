@@ -284,7 +284,10 @@ impl<'a> XDbStream<'a> {
         let ordinal = u32::try_from(ordinal).expect("a database ordinal id fits Uint4");
         X_MASK_READERS.with(|cell| {
             let mut slot = cell.borrow_mut();
-            if slot.as_ref().is_none_or(|readers| readers.stream != self.id) {
+            if slot
+                .as_ref()
+                .is_none_or(|readers| readers.stream != self.id)
+            {
                 *slot = Some(XMaskReaders {
                     stream: self.id,
                     preliminary: SubjectMasks::default(),

@@ -870,12 +870,13 @@ pub(super) fn x_scan_plan(
             XPrelimSubject::Stream(stream, oid, _) => stream.with_block(oid, |sequence| {
                 let length = sequence.len();
                 let ranges = stream.mask_ranges(oid, length)?;
-                let db_mask = ranges.as_deref().map(|ranges| {
-                    super::x_subject_translate::XDbMaskRanges {
-                        ranges,
-                        hard: stream.mask().is_some_and(|mask| mask.hard()),
-                    }
-                });
+                let db_mask =
+                    ranges
+                        .as_deref()
+                        .map(|ranges| super::x_subject_translate::XDbMaskRanges {
+                            ranges,
+                            hard: stream.mask().is_some_and(|mask| mask.hard()),
+                        });
                 super::x_subject_translate::x_packed_bytes_plan(
                     sequence.packed(),
                     length,

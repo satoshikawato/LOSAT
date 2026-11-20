@@ -19,9 +19,8 @@ use super::{
     merge_tblastx_subject_chunk_hits, sort_ungapped_hits_by_score_ncbi,
     tblastx_max_dbseq_len_for_run, tblastx_scan_chunk_size_for_run,
     ungapped_hits_is_sorted_by_score_ncbi, x_db_mask_calls, x_soft_subject_calls, DiagStruct,
-    OffsetPair,
-    OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState, Subjects,
-    TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
+    OffsetPair, OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState,
+    Subjects, TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
     TWO_HIT_CHUNK_MERGE_IS_DEFINED,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;

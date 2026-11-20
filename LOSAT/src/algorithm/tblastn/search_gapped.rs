@@ -1256,11 +1256,11 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         XPrelimSubject::Stream(stream, oid, length)
             if stream.mask().is_none()
                 && super::search_seed::x_lean_subject(
-                x_subject,
-                length,
-                db_gencode,
-                profile.mask_lowercase,
-            ) =>
+                    x_subject,
+                    length,
+                    db_gencode,
+                    profile.mask_lowercase,
+                ) =>
         {
             x_store = stream.read_shared(oid)?;
             XPrelimSubject::Nt(SubjectNt::Packed(&x_store))

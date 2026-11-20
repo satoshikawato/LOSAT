@@ -357,8 +357,9 @@ impl TblastxDatabase {
         threads: usize,
         mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
     ) -> Result<XDbStream<'_>> {
-        Ok(XDbStream::new(&self.db, threads, PROGRAM)?
-            .with_mask(crate::algorithm::common::db_mask_search::SearchMask::of(mask)))
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?.with_mask(
+            crate::algorithm::common::db_mask_search::SearchMask::of(mask),
+        ))
     }
 }
 

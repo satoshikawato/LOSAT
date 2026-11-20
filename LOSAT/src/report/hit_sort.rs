@@ -222,41 +222,6 @@ impl HspScores {
 }
 
 // libstdc++ (GCC 13, the C++ library of NCBI BLAST+'s Linux builds): bits/list.tcc:614-662
-// ```c++
-//       sort(_StrictWeakOrdering __comp)
-//       {
-// 	// Do nothing if the list has length 0 or 1.
-// 	if (this->_M_impl._M_node._M_next != &this->_M_impl._M_node
-// 	    && this->_M_impl._M_node._M_next->_M_next != &this->_M_impl._M_node)
-// 	{
-// 	  using __detail::_Scratch_list;
-// 	  _Scratch_list __carry;
-// 	  _Scratch_list __tmp[64];
-// 	  _Scratch_list* __fill = __tmp;
-// 	  _Scratch_list* __counter;
-// 	  ...
-// 	      do
-// 		{
-// 		  __carry._M_take_one(begin()._M_node);
-//
-// 		  for(__counter = __tmp;
-// 		      __counter != __fill && !__counter->empty();
-// 		      ++__counter)
-// 		    {
-//
-// 		      __counter->merge(__carry, __ptr_comp);
-// 		      __carry.swap(*__counter);
-// 		    }
-// 		  __carry.swap(*__counter);
-// 		  if (__counter == __fill)
-// 		    ++__fill;
-// 		}
-// 	      while ( !empty() );
-//
-// 	      for (__counter = __tmp + 1; __counter != __fill; ++__counter)
-// 		__counter->merge(__counter[-1], __ptr_comp);
-// 	      __fill[-1].swap(this->_M_impl._M_node);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3072-3075
 // ```c++
 //     HspListToHitList(seqalign_hit_list, source);
@@ -298,29 +263,6 @@ pub(crate) fn list_sort<T>(list: &mut Vec<T>, mut comp: impl FnMut(&T, &T) -> bo
 }
 
 // libstdc++ (GCC 13): bits/stl_list.h:194-214
-// ```c++
-// 	merge(_List_node_base& __x, _Cmp __comp)
-// 	{
-// 	  _List_node_base* __first1 = _M_next;
-// 	  _List_node_base* const __last1 = this;
-// 	  _List_node_base* __first2 = __x._M_next;
-// 	  _List_node_base* const __last2 = std::__addressof(__x);
-//
-// 	  while (__first1 != __last1 && __first2 != __last2)
-// 	    {
-// 	      if (__comp(__first2, __first1))
-// 		{
-// 		  _List_node_base* __next = __first2->_M_next;
-// 		  __first1->_M_transfer(__first2, __next);
-// 		  __first2 = __next;
-// 		}
-// 	      else
-// 		__first1 = __first1->_M_next;
-// 	    }
-// 	  if (__first2 != __last2)
-// 	    this->_M_transfer(__first2, __last2);
-// 	}
-// ```
 /// `this.merge(x, comp)`: an element of `x` goes before the element of `this` it is compared
 /// with only when `comp(x's, this's)`; the rest of `x` goes after `this`. `x` is left empty.
 fn merge<T>(this: &mut Vec<T>, x: &mut Vec<T>, comp: &mut impl FnMut(&T, &T) -> bool) {

@@ -444,6 +444,18 @@ pub fn cutoff_score_for_update_tblastx(
     // NCBI: cutoff_e = s_GetCutoffEvalue(program_number) = CUTOFF_E_TBLASTX = 1e-300
     // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
     // dodecay=TRUE means we apply gap decay divisor
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:288,310-311
+    // ```c
+    //    double gap_decay_rate = 0.0;
+    // ...
+    //    if (hit_params && hit_params->link_hsp_params)
+    //       gap_decay_rate = hit_params->link_hsp_params->gap_decay_rate;
+    // ```
+    // Without sum statistics (`-sum_stats false`, no `link_hsp_params`) NCBI passes 0, and the
+    // cutoff is the same: 1e-300 and 1e-300 * (1 - 0.5) are both below the 1e-297 that
+    // `BlastKarlinEtoS_simple` takes at least (blast_stat.c:4049,4059, `K_SMALL_FLOAT` in
+    // `cutoff_score_from_evalue`), so the callers pass `BLAST_GAP_DECAY_RATE` in both modes.
     let mut new_cutoff = blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
         CUTOFF_E_TBLASTX,
         searchsp,

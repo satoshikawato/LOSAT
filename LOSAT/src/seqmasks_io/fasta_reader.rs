@@ -47,12 +47,8 @@ use crate::writedb::fasta_source::reader::{
     Record, SeqInst,
 };
 
-// NCBI reference: libstdc++'s `basic_filebuf::xsgetn` (GCC 14, the compiler of NCBI's 2.17.0
-// build), which NCBI's line reader calls through `istream::read`:
-// ```c++
-//           __throw_ios_failure(__N("basic_filebuf::xsgetn "
-//                                   "error reading the file"), errno);
-// ```
+// libstdc++ (GCC 14, the compiler of NCBI's 2.17.0 build): bits/fstream.tcc
+// (`basic_filebuf::xsgetn`), which NCBI's line reader calls through `istream::read`.
 // (`what()` is the text, `: ` and the `strerror` of `errno`: `-in` naming a directory gives
 // `basic_filebuf::xsgetn error reading the file: Is a directory`, dustmasker and segmasker
 // fixtures `in_dir`.)

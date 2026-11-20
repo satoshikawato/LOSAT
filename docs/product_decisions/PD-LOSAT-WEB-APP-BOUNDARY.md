@@ -1,15 +1,19 @@
 # Product Decision: LOSAT Web application boundary
 
 - Decision ID: `PD-LOSAT-WEB-APP-BOUNDARY`
-- Version: 1.2 (pending the maintainer's answer; 1.1 is in force until then)
-- Date: 2026-09-29; amended 2026-11-04; 1.2 proposed 2026-11-20
+- Version: 1.2
+- Date: 2026-09-29; amended 2026-11-04 and 2026-11-20
 - Status: Accepted by the maintainer on 2026-09-29 (plan decisions DW-1 and DW-49, numbered DW-12 until 2026-11-05, in
   [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md)). 1.1 2026-11-04 (the maintainer's
   instruction of 2026-11-04, recorded in [`docs/web/ncbi_ui_mapping.md`](../web/ncbi_ui_mapping.md)
   §4: a run's mark says "Supported" or "Not yet supported", and LOSAT Web, the README and the
   CLI help do not say "verification", "verify", "verified", "certified" or "certification";
   the sentences' form is Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07). The invariants are unchanged.
+  2026-10-07; the invariants were unchanged). 1.2 2026-11-20 (invariant 2.1 also names the files
+  that the argv names, so that `-db` runs in LOSAT Web as on the CLI; the Owner approved it the
+  same day, with no words: at 14:24 JST the Owner pressed "Ready for review" on pull request
+  #1360, which proposed this text as the answer A of its question Q-DB and named that press as the
+  last step of the answer; line WQA DECISIONS 26 and 33).
 
 ## Scope
 
@@ -133,7 +137,8 @@ be implemented in the engine under the root `AGENTS.md` rules, or not at all.
   read drops the verification and certification words (the maintainer's instruction of
   2026-11-04); the compatibility contract states what the gates compared; Non-goals reworded.
   Invariants unchanged.
-- 1.2 (2026-11-20, proposed by line WQA, pending the maintainer's answer): invariant 2.1 also
+- 1.2 (2026-11-20, proposed by line WQA and approved by the Owner the same day, pull request
+  #1360): invariant 2.1 also
   names the files that the argv names, read as the user gave them, and exports them by name, so
   that `-db` runs in LOSAT Web as on the CLI (the maintainer's rule of 2026-10-22: every option
   of the native CLI works in LOSAT Web). LOSAT Web already gives the engine WindowMasker counts

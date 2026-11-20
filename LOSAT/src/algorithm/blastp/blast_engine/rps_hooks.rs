@@ -399,13 +399,6 @@ pub(super) struct RpsSearched {
     /// `EffectiveSearchSpace` option of a batch.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:351-355
-    /// ```c++
-    /// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
-    /// 		return;
-    ///
-    /// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
-    /// 		return;
-    /// ```
     /// (With `-dbsize` the handle's options are left to each volume's set-up, and the option that
     /// the archive reads is the one the last search of the sequential run left behind.)
     pub(super) last_volume_spaces: Vec<i64>,

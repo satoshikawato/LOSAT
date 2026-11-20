@@ -172,17 +172,6 @@ pub(crate) fn search_sets(
 /// its own total length (`real_db_length`); the reports print volume 0's (`first`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727
-/// ```c
-///    if (eff_len_options->db_length > 0)
-///       db_length = eff_len_options->db_length;
-///    else
-///       db_length = eff_len_params->real_db_length;
-///    ...
-///    if (eff_len_options->dbseq_num > 0)
-///       db_num_seqs = eff_len_options->dbseq_num;
-///    else
-///       db_num_seqs = eff_len_params->real_num_seqs;
-/// ```
 pub(crate) fn per_volume_lengths(dbsize: i64, searchsp: i64, volumes: usize) -> bool {
     volumes >= 2 && (dbsize > 0 || searchsp != 0)
 }

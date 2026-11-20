@@ -700,14 +700,6 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
 /// same offsets. The query side is the profile's consensus.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:482-531
-/// ```c
-///         } else {
-///             subject = subject_blk->sequence;
-///         }
-///     ...
-///         else
-///             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
-/// ```
 /// (`Blast_RedoAlignmentCore` is called with the profile as `query_blk` and `one_query`, the
 /// user's translated query of all frames, as `subject_blk`, blast_traceback.c:1274-1281; the
 /// HSP's subject offsets are in its frame.) The offsets stay inside the buffer, which holds

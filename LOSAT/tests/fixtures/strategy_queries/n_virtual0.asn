@@ -1,0 +1,7 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "v0" }, inst { repr virtual, mol na, length 0 } },
+        seq { id { local str "Query_2" }, descr { title "v5" }, inst { repr virtual, mol na, length 5 } },
+        seq { id { local str "Query_3" }, descr { title "vn" }, inst { repr virtual, mol na } }
+      }
+    }

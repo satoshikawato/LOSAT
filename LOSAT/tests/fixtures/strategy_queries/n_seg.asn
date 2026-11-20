@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "seg" }, inst { repr seg, mol na, length 4, ext seg { whole local str "Other" } } }
+      }
+    }

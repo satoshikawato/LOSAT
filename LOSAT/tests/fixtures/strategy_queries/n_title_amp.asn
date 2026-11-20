@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "a &amp; b &lt;c&gt;  two  spaces" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

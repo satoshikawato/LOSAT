@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_vector_ci.cpp", line 60: Error: (CSeqVectorException::eOutOfRange) ncbi::objects::ThrowOutOfRangeSeq_inst() - reference out of range of Seq-inst data: 2048

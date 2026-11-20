@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/util/sequence.cpp", line 2939: Error: (CObjmgrUtilException::eBadLocation) ncbi::objects::CFastaOstream::x_WriteSeqIds() - Duplicate Seq-id gb|ab000001.1| in FASTA output

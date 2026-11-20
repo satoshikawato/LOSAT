@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "pdelta" }, inst { repr delta, mol aa, length 7, ext delta { literal { length 2, seq-data ncbieaa "MK" }, literal { length 3 }, literal { length 2, seq-data ncbistdaa '0102'H } } } }
+      }
+    }

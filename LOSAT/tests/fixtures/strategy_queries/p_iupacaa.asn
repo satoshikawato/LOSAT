@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "iupacaa" }, inst { repr raw, mol aa, length 8, seq-data iupacaa "MKacUO*-" } }
+      }
+    }

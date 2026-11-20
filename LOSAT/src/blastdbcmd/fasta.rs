@@ -14,6 +14,7 @@ use crate::seqid::model::Dbtag;
 use crate::seqid::parse::parse_ids;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
+use crate::sequence::write_fasta_lines;
 
 use super::letters::{apply_masks, reverse_complement};
 use super::retrieve::{numeric_target, parse_target, Config, Output, Source, Stop};
@@ -174,7 +175,7 @@ impl FastaFormatter {
         if config.strand_minus {
             reverse_complement(&mut letters);
         }
-        write_sequence(&letters, self.width, &mut text);
+        write_fasta_lines(&letters, self.width, &mut text);
         // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
         // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
         out.write_all(&text).map_err(Stop::write)
@@ -644,37 +645,6 @@ fn generated_title(
     Ok(defline.text)
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
-// ```c++
-//             while ( count >= rem_line ) {
-//                 x_WriteBuffer(ptr, rem_line);
-//                 if ( !(current_state & eHardMask) ) {
-//                     ptr += rem_line;
-//                 }
-//                 count -= rem_line;
-//                 m_Out << '\n';
-//                 rem_line = m_Width;
-//             }
-//             if ( count > 0 ) {
-//                 x_WriteBuffer(ptr, count);
-//                 rem_line -= count;
-//             }
-//             it.SetPos(new_pos);
-//         }
-//     }
-//     if ( rem_line < m_Width ) {
-//         m_Out << '\n';
-//     }
-// ```
-/// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
-/// last one shorter, each ended by a line feed.
-fn write_sequence(letters: &[u8], width: u32, out: &mut Vec<u8>) {
-    for line in letters.chunks(width.max(1) as usize) {
-        out.extend_from_slice(line);
-        out.push(b'\n');
-    }
-}
-
 /// `ObjectId` of a `BL_ORD_ID` tag, for tests.
 #[cfg(test)]
 fn ordinal_id(n: i32) -> ParsedSeqId {
@@ -779,16 +749,6 @@ mod tests {
             header(text_ids("gi|654321|gb|AB000002.3|"), Some((4, 19)), true),
             ">AB000002.3:c20-5 title\n"
         );
-    }
-
-    #[test]
-    fn sequence_lines_are_the_width_with_a_shorter_last() {
-        let mut out = Vec::new();
-        write_sequence(b"ACGTACGT", 3, &mut out);
-        assert_eq!(out, b"ACG\nTAC\nGT\n");
-        out.clear();
-        write_sequence(b"ACGTAC", 3, &mut out);
-        assert_eq!(out, b"ACG\nTAC\n");
     }
 
     #[test]

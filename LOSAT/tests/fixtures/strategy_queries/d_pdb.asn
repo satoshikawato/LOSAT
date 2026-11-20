@@ -1,0 +1,6 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { pdb { mol "1ABC", chain-id "B" } }, descr { title "a" }, inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKLV" } },
+        seq { id { pdb { mol "1abc", chain-id "B" } }, descr { title "b" }, inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKLV" } }
+      }
+    }

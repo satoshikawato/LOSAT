@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { embl { accession "X00001", version 1 }, other { accession "NM_000001", version 3 } }, descr { title "refseq" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

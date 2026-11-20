@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "delta" }, inst { repr delta, mol na, length 9, ext delta { literal { length 4, seq-data ncbi2na '1B'H }, literal { length 3 }, literal { length 2, seq-data iupacna "AC" } } } }
+      }
+    }

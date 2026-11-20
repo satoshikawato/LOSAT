@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_map.cpp", line 336: Error: (CSeqMapException::eFail) Cannot resolve lcl|Other: unknown

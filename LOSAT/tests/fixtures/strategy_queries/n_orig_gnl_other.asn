@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { general { db "MYDB", tag str "t2" } }, descr { user { type str "OriginalID", data { { label str "LocalId", data str "md" } } }, title "o5" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

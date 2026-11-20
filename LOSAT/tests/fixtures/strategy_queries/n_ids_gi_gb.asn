@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { gi 1234, genbank { accession "AB000001", version 1 }, local str "x" }, descr { title "gi gb" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

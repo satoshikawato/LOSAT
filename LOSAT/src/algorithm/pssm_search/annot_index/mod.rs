@@ -27,7 +27,7 @@ mod align;
 mod entry;
 mod range;
 mod table;
-mod view;
+pub(crate) mod view;
 
 use range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use view::V;

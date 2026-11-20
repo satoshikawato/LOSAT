@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "nolen" }, inst { repr raw, mol na, seq-data iupacna "ACGTA" } }
+      }
+    }

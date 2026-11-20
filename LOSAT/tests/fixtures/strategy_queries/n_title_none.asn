@@ -1,0 +1,6 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } },
+        seq { id { local str "Query_2" }, descr { user { type str "CFastaReader", data { { label str "DefLine", data str ">x" } } } }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

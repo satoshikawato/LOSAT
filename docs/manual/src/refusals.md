@@ -231,9 +231,12 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
 | `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` allows) | Refused at the first query batch that is searched. NCBI crashes there, whether the batch has hits or not. |
-| `-use_sw_tback` on a query batch that NCBI never finishes or crashes on, or on which it reads past its lists | Refused, as in `blastp` and `tblastn`. See Rare inputs. |
+| `-use_sw_tback` in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4), on a query batch with a hit in a frame whose number is the batch's number of queries or more (with one query in the batch: any hit outside frame +1) | Refused. NCBI reads past its lists there; see below. In this mode most searches that find hits are refused. |
+| `-use_sw_tback` on a query batch that NCBI never finishes or crashes on | Refused, as in `blastp` and `tblastn`. See Rare inputs. |
 
 The error names the sequence and exits with status 1: `Error: subject sequence N has M residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX` for the N-th record of `-subject` (counted from 1), and the same sentence starting with `database sequence N` for a database sequence (N is its position in the database, counted from 0).
+
+With `-use_sw_tback` in e-value mode, NCBI checks each new Smith-Waterman alignment against a list of kept results. It picks the list by the alignment's reading frame: 6 × the query's place in the batch, counted from 0, plus 0 to 5 for frames +1, +2, +3, -1, -2, -3. But it keeps one list per query. A frame whose number is the batch's number of queries or more makes NCBI read past its lists, into its other memory. NCBI then crashes, fails the batch (`Traceback failed`) or goes on with what lies there, and with more than one thread it crashes. LOSAT refuses such a query batch, after the results of the query batches before. A batch holds one query when the query has 10,002 letters or more (NCBI's batch size for `blastx`) or with `BATCH_SIZE=1`; then any hit outside frame +1 is refused. A smaller number makes NCBI check another query's list of the same batch, and LOSAT does the same. E-value mode is `-sum_stats false`, or a `-max_intron_length` of 1 to 4, with which NCBI turns sum statistics off.
 
 <details>
 <summary>Rare inputs</summary>
@@ -249,8 +252,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - LOSAT stops before the first byte of the report, unless the report of a query before it ends with NCBI's exception.
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
 - With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT.
-- With `-use_sw_tback` and E-values in place of sum statistics (`-sum_stats false`), NCBI checks each new Smith-Waterman alignment against a list of kept results. It picks the list by the alignment's reading frame (six per query: 6 × the query's place in the batch, counted from 0, plus 0 to 5 for frames +1, +2, +3, -1, -2, -3), but it keeps one list per query. A frame whose number is the batch's number of queries or more makes NCBI read past its lists: NCBI then crashes or goes on with what it read there. LOSAT refuses such a query batch. A smaller number makes NCBI check another query's list of the same batch, and LOSAT does the same.
-- For these three, LOSAT writes the results of the query batches before and then stops with the error.
+- For these two, LOSAT writes the results of the query batches before and then stops with the error.
 
 </details>
 

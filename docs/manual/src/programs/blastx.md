@@ -86,7 +86,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 LOSAT stops with an error for these `blastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
 - `-best_hit_overhang` and `-best_hit_score_edge`.
-- With `-use_sw_tback`, the rare query batches on which NCBI BLAST+ never finishes, crashes or reads past its lists (see [What LOSAT refuses](../refusals.md)).
+- With `-use_sw_tback` in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4), a query batch with a hit in a frame whose number is the batch's number of queries or more. The number is 6 × the query's place in the batch (counted from 0) plus 0 to 5 for frames +1, +2, +3, -1, -2, -3. With one query in a batch (a query of 10,002 letters or more, or `BATCH_SIZE=1`), any hit outside frame +1 is refused. NCBI BLAST+ reads past its lists there. In this mode, most searches that find hits are refused.
+- With `-use_sw_tback`, a query batch on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
 - `-query_gencode 32`; `blastx` does not accept code 32.
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.

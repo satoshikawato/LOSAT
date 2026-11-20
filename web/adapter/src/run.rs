@@ -5654,7 +5654,7 @@ mod tests {
         // outfmt 7 does not write it again (`blastx::local::write_run`; line WQA, 2026-11-20:
         // stream 3 showed it twice).
         let mut subjects: Vec<FastaRecord> = (1..=250)
-            .map(|number| FastaRecord::new(&format!("Subject_{number}"), b"sbest", b"CVFNR"))
+            .map(|number| FastaRecord::new(format!("Subject_{number}"), b"sbest", b"CVFNR"))
             .collect();
         subjects.push(FastaRecord::new(
             "Subject_251",

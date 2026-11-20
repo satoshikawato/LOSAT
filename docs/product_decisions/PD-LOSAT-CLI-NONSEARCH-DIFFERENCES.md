@@ -244,7 +244,7 @@ BLAST+.
      before the report, each further one on its own line with NCBI's indentation; a post of an
      exception (`Error: (<class>::<code>) <message>`) drops the class and code, and inside a line
      (`Application's initialization failed (<class>::<code>) <message>`) they become `: `, as does a
-     report that follows text on the same line (NCBI's `<message>NCBI C++ Exception:` posts, which
+     report glued to the text before it (NCBI's `<message>NCBI C++ Exception:` posts, which
      read `<message>: <message>`);
      `(m_Pos = <n>)` reads `(position <n>)`;
    - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option

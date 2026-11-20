@@ -191,7 +191,8 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     })
 }
 
-/// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen.
+/// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
+/// error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected_row(program: &str, name: &str) -> Streams {
     let file = |extension: &str| {
         fixtures(program)
@@ -218,7 +219,7 @@ fn expected_row(program: &str, name: &str) -> Streams {
     };
     (
         fs::read(file("out")).unwrap(),
-        err,
+        losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )
 }
@@ -393,6 +394,8 @@ fn merged_rows_that_differ(binary: &Path, program: &str) -> (usize, Vec<String>)
         let Ok(want) = fs::read(ncbi.join(format!("{}.merged", case.name))) else {
             continue;
         };
+        // NCBI's stream in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+        let want = losat::wording::losat_output_bytes(&want).into_owned();
         ran += 1;
         let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
             "masker-merged-{program}-{}-{}",

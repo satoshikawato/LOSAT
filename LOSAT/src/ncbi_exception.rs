@@ -287,6 +287,15 @@ impl NcbiException {
         crate::wording::losat_text(&self.ncbi_what_in(root)).into_owned()
     }
 
+    /// `<text><what()>`, as NCBI posts an exception after a text (`ERR_POST(e.GetMsg() << e.what())`,
+    /// `"... Q(0/1" << e.what()`), in LOSAT's words: the joined text is mapped as a whole, so the
+    /// report is set off from the text before it as in the mapping of NCBI's post
+    /// (`crate::wording::losat_text`).
+    pub(crate) fn what_after(&self, text: &str) -> String {
+        crate::wording::losat_text(&format!("{text}{}", self.ncbi_what_in(NCBI_BUILD_ROOT)))
+            .into_owned()
+    }
+
     /// NCBI's text of [`NcbiException::what_in`], which LOSAT's maps.
     fn ncbi_what_in(&self, root: &str) -> String {
         let mut os = String::from("NCBI C++ Exception:\n");

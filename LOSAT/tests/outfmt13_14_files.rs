@@ -41,8 +41,11 @@ fn frozen() -> PathBuf {
     engine().join("tests/fixtures/outfmt13_14")
 }
 
+/// NCBI's frozen file `name`, in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md
+/// rule 8).
 fn read_frozen(name: &str) -> Vec<u8> {
-    fs::read(frozen().join(name)).unwrap_or_else(|error| panic!("{name}: {error}"))
+    let bytes = fs::read(frozen().join(name)).unwrap_or_else(|error| panic!("{name}: {error}"));
+    losat::wording::losat_output_bytes(&bytes).into_owned()
 }
 
 fn temp_dir(stem: &str) -> PathBuf {

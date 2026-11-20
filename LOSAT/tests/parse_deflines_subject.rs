@@ -756,12 +756,14 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
         // same two files).
         let (status, stdout, stderr) = search(&bad_gi, "5", threads, Some("1"));
         let frozen = |extension: &str| {
-            std::fs::read(
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let bytes = std::fs::read(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("tests/fixtures/outfmt16")
                     .join(format!("prescan_badgi_blastx_5.{extension}")),
             )
-            .unwrap()
+            .unwrap();
+            losat::wording::losat_output_bytes(&bytes).into_owned()
         };
         let code = String::from_utf8(frozen("rc")).unwrap();
         assert_eq!(
@@ -1014,14 +1016,16 @@ fn tblastx_query_anchored_writes_one_record_as_a_query_and_a_subject() {
 }
 
 /// NCBI BLAST+ 2.17.0's standard error where its merge of a query-anchored section throws at
-/// `file`, `line`, in `function`, with `message` (`CATCH_ALL`'s report, exit 255).
+/// `file`, `line`, in `function`, with `message` (`CATCH_ALL`'s report, exit 255), in LOSAT's
+/// words (NCBI's text through `losat::wording`, AGENTS.md rule 8).
 fn merge_exception(file: &str, line: u32, function: &str, message: &str) -> String {
-    format!(
+    losat::wording::losat_text(&format!(
         "Error: NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/\
          PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_\
          1751374548/c++/compilers/unix/../../src/objtools/alnmgr/{file}\", line {line}: Error: \
          (CAlnException::eMergeFailure) ncbi::objects::{function}() - {message}\n\n"
-    )
+    ))
+    .into_owned()
 }
 
 // Line RG T3c fix 2 (PD-LOSAT-NCBI-DEFECTS 1.39, rule 2): `txrep2.fa` is one record of two copies of a

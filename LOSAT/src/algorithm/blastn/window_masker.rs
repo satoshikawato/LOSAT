@@ -513,7 +513,8 @@ mod tests {
         assert_eq!(missing.exit, 255);
         assert_eq!(
             missing.message,
-            format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n")
+            // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+            crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n"))
         );
         // A directory opens and reads nothing on Unix and on WASI: the unknown format. Windows
         // cannot open a directory as a file, so the open fails first there: the "could not open"
@@ -603,7 +604,11 @@ mod tests {
         assert_eq!(posts.text(), b"first\nposted\nposted\n");
         let one = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open \n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n ");
         assert_eq!(error.exit, 3);
-        assert_eq!(error.message, format!("BLAST engine error: {one}{one}\n"));
+        // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+        assert_eq!(
+            error.message,
+            crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n"))
+        );
         // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
         let ascii = open_taxid(10, root, &FileCounts).unwrap();
         let report = ascii.build_error().unwrap().create_report().unwrap();
@@ -647,7 +652,11 @@ mod tests {
             batch_error(&WinMaskError::format(FormatSite::UnitSize), 2, none, none).unwrap();
         assert!(warnings.is_empty());
         assert_eq!(error.exit, 3);
-        assert_eq!(error.message, format!("BLAST engine error: {unit}{unit}\n"));
+        // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+        assert_eq!(
+            error.message,
+            crate::wording::losat_text(&format!("BLAST engine error: {unit}{unit}\n"))
+        );
         let short = WinMaskError::Format {
             site: FormatSite::HashTable,
             warnings: vec!["file read failed: bit array optimizations are not used.".into()],

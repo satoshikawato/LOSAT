@@ -4077,7 +4077,9 @@ mod tests {
                 assert_eq!(registry.path.as_deref(), path, "{text:?} {extra:?}");
                 assert!(
                     registry.load_posts.text().starts_with(
-                        b"Critical: (110.6) [blastn] CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n"
+                        // NCBI's `... file: NCBI C++ Exception:\n    T0 ...` in LOSAT's words
+                        // (`crate::wording::losat_text`) goes on with the message at once.
+                        b"Critical: (110.6) [blastn] CNcbiRegistry: Syntax error in system-wide configuration file: "
                     ),
                     "{text:?} {extra:?}: {}",
                     String::from_utf8_lossy(&registry.load_posts.text())
@@ -4297,12 +4299,13 @@ mod tests {
     }
 
     /// NCBI's post of a `.ncbirc` with `garbage` on line `line` (the official Linux x64 build;
-    /// g_reg probe `partial`).
+    /// g_reg probe `partial`), in LOSAT's words (`crate::wording::losat_text`).
     fn critical(line: usize) -> String {
-        format!(
+        crate::wording::losat_text(&format!(
             "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n",
             crate::ncbi_exception::NCBI_BUILD_ROOT
-        )
+        ))
+        .into_owned()
     }
 
     // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
@@ -4347,7 +4350,12 @@ mod tests {
         let malformed = start(&[]);
         assert_eq!(malformed.usage_report, Ok(String::new()));
         let post = "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 3)\n\n";
-        assert_eq!(malformed.config, Ok(ConfigLoad::Loaded(post.to_string())));
+        assert_eq!(
+            malformed.config,
+            Ok(ConfigLoad::Loaded(
+                crate::wording::losat_text(post).into_owned()
+            ))
+        );
         assert_eq!(
             malformed.settings.unwrap().blastdb,
             Ok(Some("/db".to_string()))
@@ -4357,7 +4365,9 @@ mod tests {
         let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
         assert_eq!(
             start(&[]).config,
-            Ok(ConfigLoad::Failed(report.to_string()))
+            Ok(ConfigLoad::Failed(
+                crate::wording::losat_text(report).into_owned()
+            ))
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -4467,11 +4477,21 @@ mod tests {
         let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
         let failed = start(&[]);
         assert_eq!(failed.usage_report, Ok(critical(3)));
-        assert_eq!(failed.config, Ok(ConfigLoad::Failed(report.to_string())));
+        assert_eq!(
+            failed.config,
+            Ok(ConfigLoad::Failed(
+                crate::wording::losat_text(report).into_owned()
+            ))
+        );
         std::fs::remove_file(&ncbirc).unwrap();
         let failed = start(&[]);
         assert_eq!(failed.usage_report, Ok(String::new()));
-        assert_eq!(failed.config, Ok(ConfigLoad::Failed(report.to_string())));
+        assert_eq!(
+            failed.config,
+            Ok(ConfigLoad::Failed(
+                crate::wording::losat_text(report).into_owned()
+            ))
+        );
         assert!(application_settings(
             "blastn",
             [(

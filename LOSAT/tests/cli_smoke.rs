@@ -1364,9 +1364,11 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
     assert_eq!(output.stdout, plain_blastn.stdout);
     // Megablast without an index: NCBI's warning, then the search without the index.
     let root = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
-    let warning = format!(
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let warning = losat::wording::losat_text(&format!(
         "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index 'db/plain*' not found.\n Database index will not be used.\n"
-    );
+    ))
+    .into_owned();
     let megablast = [
         "blastn", "-query", "q.fna", "-db", "db/plain", "-outfmt", "6",
     ];

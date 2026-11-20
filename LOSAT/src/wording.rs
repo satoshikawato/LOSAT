@@ -88,8 +88,11 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
             if j > header.len() {
                 if let Some(place) = place(&rest[j..]) {
                     // A report glued to the text before it (`Object type= BlastOutput2NCBI C++
-                    // Exception:`) is set off by `: `, as a tag inside a line is.
-                    glue(&mut out);
+                    // Exception:`) is set off by `: `, as a tag inside a line is; after a space
+                    // (`[blastn] NCBI C++ Exception:`) nothing stands for it.
+                    if out.last().is_some_and(|&b| !matches!(b, b' ' | b'\n' | b':')) {
+                        glue(&mut out);
+                    }
                     i += j + place;
                     changed = true;
                     continue;

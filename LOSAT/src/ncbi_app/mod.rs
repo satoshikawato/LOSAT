@@ -533,12 +533,13 @@ mod tests {
         assert_eq!(diag.run_arg_exception(error), 1);
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
-            format!(
+            // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+            crate::wording::losat_text(&format!(
                 "USAGE\n  p [-h]\n\nUse '-help' to print detailed descriptions of command line \
                  arguments\n{}\n\nError: Argument \"in\". X\nError: Application's execution \
                  failed\nError:  (CArgException::eNoFile) Argument \"in\". X\n",
                 "=".repeat(72)
-            )
+            ))
         );
         // `eNoValue` prints no usage.
         let mut stderr = Vec::new();
@@ -550,8 +551,10 @@ mod tests {
         diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
-            "Error: m\nError: Application's execution failed\nError:  (CArgException::eNoValue) \
-             m\n"
+            crate::wording::losat_text(
+                "Error: m\nError: Application's execution failed\nError:  (CArgException::eNoValue) \
+                 m\n"
+            )
         );
     }
 }

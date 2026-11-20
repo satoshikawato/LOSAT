@@ -130,7 +130,8 @@ def losat_bytes(text: bytes) -> bytes:
             if j > i + len(_HEADER):
                 end = _place(text, j) if text.startswith(b"T", j) else None
                 if end is not None:
-                    _glue(out)
+                    if out and out[-1:] not in (b" ", b"\n", b":"):
+                        _glue(out)
                     i = end
                     continue
         if text.startswith(b"T", i) and out.endswith(b" "):

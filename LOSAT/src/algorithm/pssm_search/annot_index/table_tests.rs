@@ -86,12 +86,12 @@ fn data_then_default() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-580 (quoted at
 // `Indexer::sparse_index_at`)
 #[test]
 fn sparse_indexes() {
-    // `indexes`: libstdc++'s `lower_bound`, whose halving on the unsorted { 5, 3, 9 } finds 9
-    // but neither 3 nor 5.
+    // `indexes`: NCBI's `lower_bound` (`utils::lower_bound`), which on the unsorted { 5, 3, 9 }
+    // finds 9 but neither 3 nor 5.
     assert_eq!(
         values(
             "data int { 10, 11, 12 }, sparse indexes { 1, 4, 6 }",

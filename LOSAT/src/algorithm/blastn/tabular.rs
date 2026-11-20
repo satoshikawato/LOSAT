@@ -54,6 +54,7 @@ use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
     TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
+use crate::utils::lower_bound::lower_bound_by;
 
 const PROGRAM: &str = "BLASTN";
 
@@ -558,7 +559,7 @@ impl RangeCollection {
     /// The ranges are not always in the order of `to_open`: a query gap at the first or last subject
     /// letter of a part gives a query range whose `TSeqPos` arithmetic wrapped (`uniq_seq_coverage`).
     /// The position found then depends on which ranges are compared, so they are compared in the
-    /// order NCBI's `lower_bound` compares them (`lower_bound_by`).
+    /// order NCBI's `lower_bound` compares them (`utils::lower_bound`).
     fn lower_bound(&self, start: usize, pos: u32) -> usize {
         lower_bound_by(start, self.0.len(), |i| self.0[i].to_open <= pos)
     }
@@ -666,37 +667,6 @@ impl RangeCollection {
             .iter()
             .fold(0u32, |total, range| total.wrapping_add(range.length()))
     }
-}
-
-/// The position `lower_bound` returns for the indices `start..end`, where `less(i)` answers whether
-/// the element at index `i` is less than the value searched for: the first index for which `less`
-/// answers false when it answers true for every index before that one and false from it on, and
-/// `end` when it answers true for all. For other answers the result is where this search ends,
-/// which is where NCBI's `lower_bound` ends: `less` is asked about the same indices, in the same
-/// order, as the C++ `std::lower_bound` that NCBI's code calls asked a comparator that recorded
-/// its calls, built with g++ 13 (`LOSAT/tests/unit/lower_bound_observed/README.md`).
-///
-/// The search keeps a window of `n` indices from `lo`, at first `start..end`. While the window is
-/// not empty, it asks about the index `n / 2` places into the window. When the answer is true, the
-/// window becomes the indices after that one; otherwise, the indices before it. It returns `lo` of
-/// the empty window.
-///
-/// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:331-334, 355, 369 (the calls of
-/// `lower_bound`, quoted at `RangeCollection::combine_with` and `RangeCollection::subtract`).
-fn lower_bound_by(start: usize, end: usize, mut less: impl FnMut(usize) -> bool) -> usize {
-    let mut lo = start;
-    let mut n = end - start;
-    while n > 0 {
-        let half = n / 2;
-        let probe = lo + half;
-        if less(probe) {
-            lo = probe + 1;
-            n -= half + 1;
-        } else {
-            n = half;
-        }
-    }
-    lo
 }
 
 /// The subject range of an HSP's Seq-align (`GetSeqRange(1)`, record coordinates, 0-based).
@@ -873,98 +843,6 @@ mod tests {
         assert_eq!(pairs(&spanning), [(5, 50)]);
         let zero = collection(&[(5, 9), (0, 4)]);
         assert_eq!(pairs(&zero), [(0, 9)]);
-    }
-
-    /// A tree of `probe_trees.txt`: the index of a call, then the tree after the answer false,
-    /// then the tree after the answer true; or the position returned.
-    enum ProbeTree {
-        Call {
-            index: usize,
-            if_false: Box<ProbeTree>,
-            if_true: Box<ProbeTree>,
-        },
-        Returned(usize),
-    }
-
-    fn parse_probe_tree<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> ProbeTree {
-        let token = tokens.next().expect("a token of the tree");
-        match token.strip_prefix('p') {
-            Some(index) => {
-                let index = index.parse().unwrap();
-                let if_false = Box::new(parse_probe_tree(tokens));
-                let if_true = Box::new(parse_probe_tree(tokens));
-                ProbeTree::Call {
-                    index,
-                    if_false,
-                    if_true,
-                }
-            }
-            None => ProbeTree::Returned(token.strip_prefix('r').unwrap().parse().unwrap()),
-        }
-    }
-
-    /// Every path of a tree: its answers, the indices of its calls, the position returned.
-    type ProbePath = (Vec<bool>, Vec<usize>, usize);
-
-    fn probe_paths(
-        tree: &ProbeTree,
-        answers: &mut Vec<bool>,
-        calls: &mut Vec<usize>,
-        out: &mut Vec<ProbePath>,
-    ) {
-        match tree {
-            ProbeTree::Returned(position) => out.push((answers.clone(), calls.clone(), *position)),
-            ProbeTree::Call {
-                index,
-                if_false,
-                if_true,
-            } => {
-                calls.push(*index);
-                for (answer, subtree) in [(false, if_false), (true, if_true)] {
-                    answers.push(answer);
-                    probe_paths(subtree, answers, calls, out);
-                    answers.pop();
-                }
-                calls.pop();
-            }
-        }
-    }
-
-    // For every sequence of answers of the recorded trees, `lower_bound_by` asks about the
-    // indices that `std::lower_bound` gave its comparator, in the same order, and returns the
-    // same position (`LOSAT/tests/unit/lower_bound_observed/README.md`).
-    #[test]
-    fn lower_bound_asks_in_the_observed_order() {
-        let trees = include_str!("../../../tests/unit/lower_bound_observed/probe_trees.txt");
-        let (mut tree_count, mut path_count) = (0, 0);
-        for line in trees.lines() {
-            let mut tokens = line.split(' ');
-            assert_eq!(tokens.next(), Some("tree"), "{line}");
-            let n: usize = tokens.next().unwrap().parse().unwrap();
-            let start: usize = tokens.next().unwrap().parse().unwrap();
-            let total: usize = tokens.next().unwrap().parse().unwrap();
-            assert!(start + n <= total, "{line}");
-            let tree = parse_probe_tree(&mut tokens);
-            assert_eq!(tokens.next(), None, "{line}");
-            let mut paths = Vec::new();
-            probe_paths(&tree, &mut Vec::new(), &mut Vec::new(), &mut paths);
-            assert_eq!(paths.len(), n + 1, "{line}");
-            for (answers, calls, returned) in paths {
-                let mut asked = Vec::new();
-                let position = lower_bound_by(start, start + n, |i| {
-                    asked.push(i);
-                    answers.get(asked.len() - 1).copied().unwrap_or(false)
-                });
-                assert_eq!(
-                    (asked, position),
-                    (calls, returned),
-                    "{n} from {start}, answers {answers:?}"
-                );
-                path_count += 1;
-            }
-            tree_count += 1;
-        }
-        assert_eq!((tree_count, path_count), (137, 5535));
     }
 
     // Ranges out of the order of `to_open` (a range whose `to_open` wrapped to 0 after larger

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.52
+- Version: 1.53
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -186,6 +186,11 @@
   element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
   run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.51, line RG item X-short-tbx)
+  1.53 2026-11-20 (makeblastdb `-gi_mask`, line NP item M4c-1: the explicit rejection of two
+  masking algorithms whose GI-mask files are the same files, which NCBI writes through two streams
+  whose flushing decides the bytes, rule 3; the GI-mask writer's defects reproduced under rule 2;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.52, line
+  NP item M4a-1c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1054,6 +1059,24 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
+- makeblastdb `-gi_mask` (version 1.53, 2026-11-20, line NP item M4c-1): the GI-mask writer
+  (`seqdb_writer/writedb_gimask.cpp`, `writedb_impl.cpp:338-342, 405-438, 1453-1456`) is ported
+  with its defects, which give deterministic files, messages and exit statuses. A database of one
+  volume gets an alias file whose `DBLIST` is the database's own absolute path, so the metadata
+  step after the build (`CSeqDB`) reads the alias as itself: every file but the `.njs`/`.pjs` is
+  written and the run ends with `BLAST Database error: Illegal configuration: DB alias files are
+  mutually recursive.`, exit status 2; a later build in the same place without `-gi_mask` removes
+  the old database through the same alias and ends the same way (the alias file stays). The masks
+  of a sequence without a GI are dropped before their ranges are checked (a range past such a
+  sequence's end is no error), and an algorithm that reached no sequence with a GI writes no files
+  and is left out of `MASKLIST`. A data volume takes its first record
+  whatever its size, and when the first record does not fit `-max_file_sz` the volume `.00` is
+  never created. A `-gi_mask_name` in a directory that does not exist writes nothing there and is
+  still listed in `MASKLIST`. GIs from 2^31 to 2^32 - 1 are written as the low 32 bits
+  (`GI_TO(int, gi)`). The sum of `CanFit` (`(num_masks *2+1)*4`, an `int` that overflows past
+  268,435,455 ranges) is computed without overflow. Fixtures `LOSAT/tests/seqdb/gi_mask`
+  (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
+  `LOSAT/src/writedb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -1523,6 +1546,21 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and LOSAT writes NCBI's "Cannot get masked range Seq-id"). Unit tests in
   `LOSAT/src/writedb/mask_info/tests.rs`; the fixtures `h_pointer_*` and `b_pointer_*` of
   `make_mask_parse_fixtures.py` hold the cases NCBI completes or fails on without that report.
+- makeblastdb `-gi_mask` (version 1.53, 2026-11-20, line NP item M4c-1, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07): two masking algorithms whose GI-mask files are the
+  same files (one `-gi_mask_name` twice, two names of one path such as `x` and `./x`, or a name
+  that reaches the same directory through a link; on Windows and macOS also two names that differ
+  only in case). `RegisterMaskAlgorithm` makes a `CWriteDB_GiMask` for each algorithm
+  (`writedb_impl.cpp:1342-1346, 1390-1398`), and each opens its own `ofstream` on the same paths
+  (`writedb_gimask.cpp:46-57`): what the files hold after both are written and closed depends on
+  how the C++ library buffers and flushes two streams on one file, which LOSAT does not model.
+  LOSAT refuses the second algorithm when it is registered, before any file of the masks is
+  written (exit 1, "losat makeblastdb: -gi_mask: two masking algorithms would write their GI-mask
+  files under one name ..."); the log head and the removal of an old database of the `-out` name
+  come before, as makeblastdb's own errors of that step. Where one of the two would reach no
+  sequence with a GI (and so write nothing) the input is refused all the same. Unit tests in
+  `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04` of
+  `LOSAT/tests/seqdb/gi_mask` (`make_gi_mask_fixtures.py`).
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

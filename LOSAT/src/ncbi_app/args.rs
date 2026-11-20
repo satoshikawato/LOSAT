@@ -229,8 +229,17 @@ pub(crate) enum Dep {
 /// name, and in the order of insertion among equal names. Which of several conflicts NCBI
 /// reports depends on this order.
 pub(crate) fn dependencies(tool: &Tool) -> Vec<(&'static str, Dep, &'static str)> {
-    let mut deps = Vec::new();
-    for (first, dep, second) in (tool.dependencies)() {
+    dependency_multimap((tool.dependencies)())
+}
+
+/// `m_Dependencies` after the `SetDependency` calls `calls` (in the order of the calls): see
+/// [`dependencies`]. Also for makeblastdb, whose command line LOSAT reads with its own parser
+/// (`writedb::makeblastdb`).
+pub(crate) fn dependency_multimap(
+    calls: Vec<(&'static str, Dep, &'static str)>,
+) -> Vec<(&'static str, Dep, &'static str)> {
+    let mut deps = Vec::with_capacity(2 * calls.len());
+    for (first, dep, second) in calls {
         deps.push((first, dep, second));
         if dep == Dep::Excludes {
             deps.push((second, dep, first));

@@ -24,8 +24,10 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name`, `-oid_masks` and
-//! the other options of `makeblastdb::UNSUPPORTED_OPTIONS`.
+//! `-parse_seqids`. With `-gi_mask` (and `-gi_mask_name`) the masks go instead to the GI-indexed
+//! files of each algorithm (`gi_mask`), and the database gets an alias file that names them.
+//! `losat makeblastdb` refuses `-oid_masks` and the other options of
+//! `makeblastdb::UNSUPPORTED_OPTIONS`.
 
 pub mod bioseq;
 pub mod build_db;
@@ -36,6 +38,7 @@ pub(crate) mod dir_entry;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
+pub(crate) mod gi_mask;
 pub mod header;
 pub(crate) mod id_set;
 pub(crate) mod isam;

@@ -1075,6 +1075,12 @@ impl<'a> BuildDatabase<'a> {
         self.output_db.set_max_file_size(max_file_size);
     }
 
+    /// The constructor's `use_gi_mask` (`makeblastdb -gi_mask`): see [`WriteDb::use_gi_masks`].
+    /// Called before the masking algorithms are registered.
+    pub fn use_gi_masks(&mut self) {
+        self.output_db.use_gi_masks();
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:859-876
     // ```c++
     //         if(bs->IsAa() != m_IsProtein ){
@@ -1273,11 +1279,14 @@ impl<'a> BuildDatabase<'a> {
     // }
     // ```
     // The Seq-ids are `bs->GetId()`: the parsed ids of a sequence with `-parse_seqids`, its
-    // `local id` without it. A sequence with no 31-bit local id has none.
+    // `local id` without it. A sequence with no 31-bit local id has none. The GIs are those of
+    // the first definition line (`bs->GetId()`), in its order; `-gi_mask` requires
+    // `-parse_seqids`.
     //
     // Where NCBI's order of the ranges is the memory addresses', LOSAT's order is written, so that
     // `SetMaskData`'s checks of all the algorithms and the rest of the build run as in NCBI; the
-    // first such sequence is kept (`sequence`: its first Seq-id) for `end_build`.
+    // first such sequence is kept (`sequence`: its first Seq-id) for `end_build`. With `-gi_mask`
+    // the ranges of a sequence without a GI are written nowhere, and their order does not matter.
     fn add_masks_for_seq_id(
         &mut self,
         ids: &[ParsedSeqId],
@@ -1290,9 +1299,16 @@ impl<'a> BuildDatabase<'a> {
         if ranges_are_empty(found.ranges) {
             return Ok(());
         }
-        self.output_db.set_mask_data(found.ranges)?;
+        let gi_masks = self.output_db.uses_gi_masks();
+        let gis: Vec<i64> = match gi_masks {
+            true => ids.iter().filter_map(ParsedSeqId::gi).collect(),
+            false => Vec::new(),
+        };
+        self.output_db.set_mask_data(found.ranges, &gis)?;
         self.found_matching_masks = true;
-        if let (None, Some(seq_ids)) = (&self.address_order, &found.address_ordered) {
+        let written = !gi_masks || !gis.is_empty();
+        if let (None, Some(seq_ids), true) = (&self.address_order, &found.address_ordered, written)
+        {
             self.address_order = Some(address_order_refusal(seq_ids, sequence));
         }
         Ok(())

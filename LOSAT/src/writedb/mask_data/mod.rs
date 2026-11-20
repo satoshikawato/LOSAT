@@ -14,7 +14,12 @@
 //! * [`range_set`]: `CMaskedRangeSet`, the ranges of each sequence.
 //! * [`column`](mod@column): `CWriteDB_Column`, the files of the column of a volume.
 //! * [`MaskWriter`]: the part of `CWriteDB_Impl` that registers algorithms
-//!   and builds the two blobs of a sequence; `WriteDb` holds one.
+//!   and builds the two blobs of a sequence, or with `-gi_mask` hands the ranges to the GI masks
+//!   (`writedb::gi_mask`); `WriteDb` holds one.
+//!
+//! `makeblastdb -gi_mask` decides once, for the whole build, where the masks go
+//! ([`MaskWriter::use_gi_masks`], NCBI's `m_UseGiMask`): without it to the mask column of each
+//! volume, with it to the GI-indexed files of each algorithm, and then no mask column is made.
 //!
 //! Which sequence a mask reaches. A mask is stored under the `CSeq_id_Handle` of its Seq-id and a
 //! sequence looks up every Seq-id of its `Bioseq::GetId()` in order, as
@@ -65,6 +70,7 @@ use column::ColumnMeta;
 pub(crate) use range_set::{ranges_are_empty, MaskedRangeSet, MaskedRanges};
 pub(crate) use registry::MaskInfoRegistry;
 
+use super::gi_mask::GiMasks;
 use super::volume::MaskBlobs;
 use super::WriteDbError;
 
@@ -98,6 +104,9 @@ pub(crate) struct MaskWriter {
     dates: BTreeMap<usize, Vec<u8>>,
     /// The date of a column when the clock cannot be read.
     date_fallback: Option<Vec<u8>>,
+    /// `m_UseGiMask` with `m_GiMasks`: `Some` for a build with `-gi_mask`, whose algorithms
+    /// write GI-indexed files instead of the mask column.
+    gi_masks: Option<GiMasks>,
 }
 
 fn unsupported_late_column() -> WriteDbError {
@@ -183,7 +192,17 @@ impl MaskWriter {
     //     return algorithm_id;
     // }
     // ```
-    // LOSAT writes no GI masks (`-gi_mask` needs `-parse_seqids`).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1453-1456
+    // ```c++
+    //     if (m_UseGiMask) {
+    //         m_MaskAlgoMap[algorithm_id] = m_GiMasks.size();
+    //         m_GiMasks.push_back(CRef<CWriteDB_GiMask>
+    //             (new CWriteDB_GiMask(name, value, m_MaxFileSize)));
+    // ```
+    // With `-gi_mask` the value is the description in the header of the algorithm's index files,
+    // `name` the name of its files, and `max_file_size` (`m_MaxFileSize`, `-max_file_sz`) the
+    // limit of its data volumes; no column is made. The two index files read the clock in their
+    // constructors, the `.gmi` file first.
     /// `RegisterMaskAlgorithm(program, options, name)`.
     pub(crate) fn register_program(
         &mut self,
@@ -191,8 +210,9 @@ impl MaskWriter {
         options: &[u8],
         name: &[u8],
         volumes_exist: bool,
+        max_file_size: u64,
     ) -> Result<i32, WriteDbError> {
-        if self.column_meta.is_none() && volumes_exist {
+        if self.gi_masks.is_none() && self.column_meta.is_none() && volumes_exist {
             return Err(unsupported_late_column());
         }
         let algorithm_id = self.registry.add_program(program, options, name)?;
@@ -205,6 +225,19 @@ impl MaskWriter {
             value.push(b':');
             value.extend_from_slice(&escape_colon(name));
             value.push(b':');
+        }
+        if self.gi_masks.is_some() {
+            let Ok(name) = std::str::from_utf8(name) else {
+                return Err(WriteDbError::Unsupported(
+                    "-gi_mask: the name of a masking algorithm's GI-mask files is not valid UTF-8"
+                        .to_string(),
+                ));
+            };
+            let dates = [self.clock_date()?, self.clock_date()?];
+            if let Some(gi_masks) = self.gi_masks.as_mut() {
+                gi_masks.add(algorithm_id, name, &value, max_file_size, dates)?;
+            }
+            return Ok(algorithm_id);
         }
         self.column_meta_mut(volumes_exist)?.insert(key, value);
         Ok(algorithm_id)
@@ -334,18 +367,43 @@ impl MaskWriter {
     //
     //     ++m_HaveBlob[col_id];
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1342-1346,1390-1398
+    // ```c++
+    //     // No GI is found for the sequence
+    //     // TODO should we generate a warning?
+    //     if (m_UseGiMask && !gis.size()) {
+    //         return;
+    //     }
+    //     ...
+    //     // Gi-based masks
+    //     if (m_UseGiMask) {
+    //         ITERATE(CMaskedRangesVector, r1, ranges) {
+    //             if (r1->offsets.size()) {
+    //                 m_GiMasks[m_MaskAlgoMap[r1->algorithm_id]]
+    //                     ->AddGiMask(gis, r1->offsets);
+    //             }
+    //         }
+    //         return;
+    //     }
+    // ```
     // `seq_length` is `x_ComputeSeqLength()` for the sequence being written,
     // `None` when there is none ("Need sequence data."). All lengths and
     // offsets are 4-byte integers; every size is a multiple of 4, so
-    // `WritePadBytes(4, eSimple)` adds nothing.
-    /// `SetMaskData` (without the GI-mask path): the blobs of the sequence
-    /// being written.
+    // `WritePadBytes(4, eSimple)` adds nothing. With `-gi_mask` the masks of a sequence without a
+    // GI (`gis` empty) are dropped before any check (survey D4), and the checked ranges of the
+    // others go to the GI masks of their algorithms.
+    /// `SetMaskData`: the blobs of the sequence being written, or its ranges under its GIs `gis`
+    /// with `-gi_mask`.
     pub(crate) fn set_mask_data(
         &mut self,
         ranges: &[MaskedRanges],
+        gis: &[i64],
         seq_length: Option<u32>,
         volumes_exist: bool,
     ) -> Result<(), WriteDbError> {
+        if self.gi_masks.is_some() && gis.is_empty() {
+            return Ok(());
+        }
         let Some(seq_length) = seq_length else {
             return Err(WriteDbError::Creation("Need sequence data.".to_string()));
         };
@@ -370,6 +428,12 @@ impl MaskWriter {
             }
         }
 
+        if let Some(gi_masks) = self.gi_masks.as_mut() {
+            for r1 in ranges.iter().filter(|r1| !r1.offsets.is_empty()) {
+                gi_masks.add_gi_mask(r1.algorithm_id, gis, &r1.offsets);
+            }
+            return Ok(());
+        }
         self.column_meta_mut(volumes_exist)?;
         if self.blobs.is_some() {
             return Err(WriteDbError::Creation(
@@ -458,13 +522,43 @@ impl MaskWriter {
         if let Some(date) = self.dates.get(&index) {
             return Ok(date.clone());
         }
+        self.clock_date()
+    }
+
+    /// `CTime(CTime::eCurrent).AsString()`: the date of a column or of a GI-mask index file,
+    /// read from the clock (the date of the build when the clock cannot be read).
+    fn clock_date(&self) -> Result<Vec<u8>, WriteDbError> {
         if let Some(now) = super::time::LocalTime::now() {
             return Ok(now.log_time().into_bytes());
         }
         self.date_fallback.clone().ok_or_else(|| {
             WriteDbError::Other(
-                "the system has no clock for the date of the mask column files".to_string(),
+                "the system has no clock for the date of the mask files".to_string(),
             )
         })
+    }
+
+    /// `m_UseGiMask` set (the `use_gi_mask` argument of `CWriteDB`): the algorithms registered
+    /// from now on write GI-indexed files.
+    pub(crate) fn use_gi_masks(&mut self) {
+        self.gi_masks = Some(GiMasks::default());
+    }
+
+    /// `m_UseGiMask`.
+    pub(crate) fn uses_gi_masks(&self) -> bool {
+        self.gi_masks.is_some()
+    }
+
+    /// The close of the GI masks (`CWriteDB_Impl::Close`, after the last volume's).
+    pub(crate) fn close_gi_masks(&mut self) {
+        if let Some(gi_masks) = self.gi_masks.as_mut() {
+            gi_masks.close();
+        }
+    }
+
+    /// The names of the GI masks after their close (`GetName`, empty for one without GIs), in
+    /// the order of registration; none without `-gi_mask`.
+    pub(crate) fn gi_mask_names(&self) -> impl Iterator<Item = &str> {
+        self.gi_masks.iter().flat_map(GiMasks::names)
     }
 }

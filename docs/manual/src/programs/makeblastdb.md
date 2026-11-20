@@ -36,6 +36,8 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-mask_data` | none | Masks from `dustmasker`, `segmasker`, `windowmasker` or `convert2blastmask` (comma-separated files, ASN.1 text or binary). |
 | `-mask_id` | the name in the mask file | Comma-separated names for the masking algorithms. A name cannot be a number. |
 | `-mask_desc` | none | Comma-separated free-text descriptions of the algorithms. |
+| `-gi_mask` | off | Write the masks as GI-indexed mask files instead of the mask column (see [GI-indexed masks](#gi-indexed-masks)). Needs `-parse_seqids`; not with `-mask_id`. |
+| `-gi_mask_name` | the `-mask_data` names | Comma-separated names of the GI-indexed mask files, one for each mask file. Needs `-mask_data` and `-gi_mask`. |
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
 
@@ -70,6 +72,17 @@ A mask finds its sequence by the same id as in NCBI BLAST+. Build with `-parse_s
 
 A mask file that is damaged stops with makeblastdb's own error and exit status. A text in it with a byte outside the visible ASCII range is stored with `#` in the byte's place, and the run reports it, as makeblastdb does.
 
+### GI-indexed masks
+
+`-gi_mask` writes the masks of each mask file into six files of their own instead of the mask column: `NAME.gmd` and `NAME.gnd` (the masked ranges), `NAME.gmo` and `NAME.gno` (the GIs of the masked sequences) and `NAME.gmi` and `NAME.gni` (their index). `NAME` is the mask file's entry of `-gi_mask_name`, or the mask file's name as you typed it; it is a path from the current directory, not from the database. The database gets an alias file (`.nal` or `.pal`) whose `MASKLIST` line names these files. Only sequences with a GI get masks: the masks of other sequences are left out without a message, and a mask file that reached no sequence with a GI writes no files and is left out of `MASKLIST`.
+
+The files, messages and exit status are those of NCBI's `makeblastdb` 2.17.0, also where NCBI's result is unusable:
+
+- A database in one volume cannot be opened, by NCBI's programs or LOSAT's: its alias file names the database itself. The build writes its files and then ends with `BLAST Database error: Illegal configuration: DB alias files are mutually recursive.` and exit status 2. A database in several volumes (a smaller `-max_file_sz`) does not have this problem, and NCBI's programs read its masks.
+- A rebuild without `-gi_mask` in the same place keeps the alias file of the earlier build, so it ends the same way. Delete the `.nal` or `.pal` file first.
+
+LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` and the other readers refuse a database whose alias file has `MASKLIST` (see [What LOSAT refuses](../refusals.md)).
+
 ### Hash index
 
 `-hash_index` writes the sequence hash index (`.phi`/`.phd`, `.nhi`/`.nhd`). `blastdbcmd -outfmt %h` prints the hash of each sequence.
@@ -86,15 +99,16 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 | --- | --- |
 | `.pin` `.phr` `.psq` (protein), `.nin` `.nhr` `.nsq` (nucleotide) | Index, headers and sequences. |
 | `.pjs` `.njs` | JSON metadata. |
-| `.pal` `.nal` | Alias file, only for a database in several volumes. |
+| `.pal` `.nal` | Alias file, for a database in several volumes or built with `-gi_mask`. |
 | `.pdb` `.ptf` `.pot` `.pto` (protein), `.ndb` `.ntf` `.not` `.nto` (nucleotide) | Version 5 only: the lookup tables for ids and tax ids. |
 | `.psi` `.psd` (protein), `.nsi` `.nsd` (nucleotide) | With `-parse_seqids` in version 4: id indexes. |
 | `.pog` (protein), `.nog` (nucleotide) | With `-parse_seqids`, in version 4 and in version 5: id data. |
 | `.pos` (protein), `.nos` (nucleotide) | With `-parse_seqids` in version 5: ids of each sequence. |
 | `.phi` `.phd` (protein), `.nhi` `.nhd` (nucleotide) | With `-hash_index`. |
 | `.naa` `.nab` `.nac` (nucleotide), `.paa` `.pab` `.pac` (protein) | With `-mask_data`: the mask column. |
+| `.gmd` `.gnd` `.gmo` `.gno` `.gmi` `.gni` | With `-gi_mask`: the GI-indexed masks, named after `-gi_mask_name` (see [GI-indexed masks](#gi-indexed-masks)). Data files of more than one volume are numbered (`NAME.00.gmd`, ...). |
 
-The sequence and header files have the same bytes as NCBI's. The index and metadata files differ only in the creation date they record.
+The sequence and header files have the same bytes as NCBI's. The index and metadata files differ only in the creation date they record. So do the GI-mask index files (`.gmi`, `.gni`) and the alias files, which also record the database's full path when it has one volume.
 
 ## Differences from NCBI BLAST+
 
@@ -106,7 +120,8 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks` and `-metadata_output_prefix`: each stops with an error that names the option.
+- `-randomize`, `-oid_masks` and `-metadata_output_prefix`: each stops with an error that names the option.
+- `-gi_mask` with two mask files whose GI-mask files would be the same files (one `-gi_mask_name` twice, or two names of one path). NCBI writes both into the same files at once, and what they then hold depends on its C++ library.
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin`. Only `fasta` works.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).

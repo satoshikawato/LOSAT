@@ -391,9 +391,68 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
+    // `-gi_mask` needs `-parse_seqids` and excludes `-mask_id`; `-gi_mask_name` needs
+    // `-mask_data` and `-gi_mask` (makeblastdb.cpp:279-288): the parser's errors, exit status 2.
+    assert!(!defaults.gi_mask);
+    assert_eq!(defaults.gi_mask_name, None);
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            "a.asnb,b.asnb",
+            "-gi_mask",
+            "-gi_mask_name",
+            "x,y",
+        ])
+        .unwrap(),
+    );
+    assert!(given.gi_mask);
+    assert_eq!(given.gi_mask_name.as_deref(), Some("x,y"));
+    for words in [
+        &["-dbtype", "nucl", "-gi_mask"][..],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-gi_mask",
+            "-mask_data",
+            "a",
+            "-mask_id",
+            "x",
+        ],
+        &["-dbtype", "nucl", "-gi_mask_name", "x"],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-gi_mask",
+            "-gi_mask_name",
+            "x",
+        ],
+        &["-dbtype", "nucl", "-mask_data", "a", "-gi_mask_name", "x"],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            "a",
+            "-gi_mask",
+            "-gi_mask_name",
+        ],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
+        );
+    }
+
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-gi_mask", "-gi_mask_name", "-randomize", "-oid_masks"] {
+    for option in ["-randomize", "-oid_masks"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -2326,9 +2385,9 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         ("x.faa", Some("db"))
     );
     // The checks that name the command apply.
-    let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
+    let error = makedb(&["-randomize"]).unwrap_err().to_string();
     assert!(
-        error.contains("the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb"),
+        error.contains("the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb"),
         "{error}"
     );
     assert!(makedb(&["-parse_seqids"]).is_ok());

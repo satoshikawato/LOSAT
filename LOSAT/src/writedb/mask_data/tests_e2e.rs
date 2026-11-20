@@ -56,6 +56,7 @@ impl Case {
             mask_data: self.mask_data.as_deref(),
             mask_id: self.mask_id.as_deref(),
             mask_desc: self.mask_desc.as_deref(),
+            gi_mask_name: None,
             root: Some(&self.root),
         }
     }

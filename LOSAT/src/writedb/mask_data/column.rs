@@ -72,7 +72,7 @@ fn write_var_int(out: &mut Vec<u8>, x: u64) {
 //     x_WriteRaw(str.data(),static_cast<int>( str.size()), offsetp);
 // ```
 /// `WriteString(str, eSizeVar)`.
-fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
+pub(crate) fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
     write_var_int(out, text.len() as u64);
     out.extend_from_slice(text);
 }
@@ -104,8 +104,8 @@ fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
 //         x_WriteRaw(& ch, 1, NULL);
 //     }
 // ```
-/// `WritePadBytes(8, eString)`: 1 to 8 bytes, `#` and a NUL at the end.
-fn write_pad_bytes_string(out: &mut Vec<u8>, align: usize) {
+/// `WritePadBytes(align, eString)`: 1 to `align` bytes, `#` and a NUL at the end.
+pub(crate) fn write_pad_bytes_string(out: &mut Vec<u8>, align: usize) {
     let pads = align - out.len() % align;
     out.extend(std::iter::repeat_n(b'#', pads - 1));
     out.push(0);

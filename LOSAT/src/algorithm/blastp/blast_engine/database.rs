@@ -3608,6 +3608,8 @@ mod tests {
                 mask_data: None,
                 mask_id: None,
                 mask_desc: None,
+                gi_mask: false,
+                gi_mask_name: None,
             };
             let now = crate::writedb::time::LocalTime {
                 year: 2026,

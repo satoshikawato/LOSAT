@@ -20,6 +20,7 @@ use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{
     diag_target, ApplicationSettings, DiagStream, DiagTarget,
 };
+use crate::ncbi_app::args::{arg_message, dependency_multimap, Dep};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
@@ -95,7 +96,7 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 //              CArgDescriptions::eInputFile);
 //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
 // ```
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:257-277
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:257-288
 // ```c++
 //     arg_desc->SetCurrentGroup("Sequence masking options");
 //     arg_desc->AddOptionalKey("mask_data", "mask_data_files",
@@ -117,13 +118,25 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 //
 //     arg_desc->SetDependency("mask_id", CArgDescriptions::eRequires, "mask_data");
 //     arg_desc->SetDependency("mask_desc", CArgDescriptions::eRequires, "mask_id");
+//
+//     arg_desc->AddFlag("gi_mask",
+//                       "Create GI indexed masking data.", true);
+//     arg_desc->SetDependency("gi_mask", CArgDescriptions::eExcludes, "mask_id");
+//     arg_desc->SetDependency("gi_mask", CArgDescriptions::eRequires, "parse_seqids");
+//
+//     arg_desc->AddOptionalKey("gi_mask_name", "gi_based_mask_names",
+//                              "Comma-separated list of masking data output files.",
+//                              CArgDescriptions::eString);
+//     arg_desc->SetDependency("gi_mask_name", CArgDescriptions::eRequires, "mask_data");
+//     arg_desc->SetDependency("gi_mask_name", CArgDescriptions::eRequires, "gi_mask");
 // ```
-// LOSAT's parser checks the range of `-taxid`, the exclusion and the requirements (`-taxid_map`
-// needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`); its errors
-// are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's argument
-// reader prints its usage (exit status 1). `check_arguments` repeats the two dependencies for
-// the library. The options of makeblastdb that LOSAT does not support are not registered;
-// `crate::cli` names them in its error.
+// LOSAT's parser checks the range of `-taxid`, the exclusions and the requirements (`-taxid_map`
+// needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`, `-gi_mask`
+// needs `-parse_seqids` and excludes `-mask_id`, `-gi_mask_name` needs `-mask_data` and
+// `-gi_mask`); its errors are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES)
+// where NCBI's argument reader prints its usage (exit status 1). `check_arguments` repeats the
+// dependencies for the library, in NCBI's order and words. The options of makeblastdb that LOSAT
+// does not support are not registered; `crate::cli` names them in its error.
 /// Arguments of `losat makeblastdb`, under makeblastdb's names.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
@@ -178,6 +191,12 @@ pub struct MakedbArgs {
     /// Comma-separated list of free form strings to describe the masking algorithm details
     #[arg(long, value_name = "mask_algo_descriptions", requires = "mask_id")]
     pub mask_desc: Option<String>,
+    /// Create GI indexed masking data.
+    #[arg(long, requires = "parse_seqids", conflicts_with = "mask_id")]
+    pub gi_mask: bool,
+    /// Comma-separated list of masking data output files.
+    #[arg(long, value_name = "gi_based_mask_names", requires_all = ["mask_data", "gi_mask"])]
+    pub gi_mask_name: Option<String>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are
     /// parsed automatically
     #[arg(long)]
@@ -186,16 +205,9 @@ pub struct MakedbArgs {
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`
-/// and `-mask_desc` are read. `-gi_mask` and `-gi_mask_name` write GI-indexed mask files
-/// (item M4c), which LOSAT does not write yet.
-pub const UNSUPPORTED_OPTIONS: [&str; 5] = [
-    "randomize",
-    "gi_mask",
-    "gi_mask_name",
-    "metadata_output_prefix",
-    "oid_masks",
-];
+/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
+/// `-mask_desc`, `-gi_mask` and `-gi_mask_name` are read.
+pub const UNSUPPORTED_OPTIONS: [&str; 3] = ["randomize", "metadata_output_prefix", "oid_masks"];
 
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
@@ -563,6 +575,123 @@ pub fn check_registry_settings(
     }
 }
 
+/// The `SetDependency` calls of makeblastdb's `Init`, in their order (makeblastdb.cpp:276-329,
+/// quoted at `MakedbArgs`).
+fn makeblastdb_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
+    vec![
+        ("mask_id", Dep::Requires, "mask_data"),
+        ("mask_desc", Dep::Requires, "mask_id"),
+        ("gi_mask", Dep::Excludes, "mask_id"),
+        ("gi_mask", Dep::Requires, "parse_seqids"),
+        ("gi_mask_name", Dep::Requires, "mask_data"),
+        ("gi_mask_name", Dep::Requires, "gi_mask"),
+        ("taxid", Dep::Excludes, "taxid_map"),
+        ("taxid_map", Dep::Requires, "parse_seqids"),
+    ]
+}
+
+/// The arguments that a dependency of makeblastdb requires, in the order its `Init` declares
+/// them (makeblastdb.cpp:246-288): the order `x_PostCheck` looks for missing ones in.
+const REQUIRED_IN_ORDER: [&str; 4] = ["parse_seqids", "mask_data", "mask_id", "gi_mask"];
+
+/// Whether the argument `name` of a dependency was given (`args.Exist(name) && args[name]`).
+fn given(args: &MakedbArgs, name: &str) -> bool {
+    match name {
+        "parse_seqids" => args.parse_seqids,
+        "gi_mask" => args.gi_mask,
+        "gi_mask_name" => args.gi_mask_name.is_some(),
+        "mask_data" => args.mask_data.is_some(),
+        "mask_id" => args.mask_id.is_some(),
+        "mask_desc" => args.mask_desc.is_some(),
+        "taxid" => args.taxid.is_some(),
+        "taxid_map" => args.taxid_map.is_some(),
+        _ => false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3181-3204
+// ```c++
+//     ITERATE(TDependencies, dep, m_Dependencies) {
+//         // Skip missing and empty arguments
+//         if (!args.Exist(dep->first)  ||  !args[dep->first]) {
+//             continue;
+//         }
+//         switch ( dep->second.m_Dep ) {
+//         case eRequires:
+//             require.insert(make_pair(dep->second.m_Arg,dep->first));
+//             ...
+//             break;
+//         case eExcludes:
+//             // Excluded exists and is not empty?
+//             if (args.Exist(dep->second.m_Arg)  &&  args[dep->second.m_Arg]) {
+//                 NCBI_THROW(CArgException, eConstraint,
+//                     s_ArgExptMsg(dep->second.m_Arg,
+//                     "Incompatible with argument", dep->first));
+//             }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3263-3277
+// ```c++
+//     ITERATE (list<const CArgDesc*>, it, def_args) {
+//         const CArgDesc& arg = **it;
+//
+//         // Nothing to do if defined in the command-line
+//         if ( args.Exist(arg.GetName()) ) {
+//             continue;
+//         }
+//
+//         if (require.find(arg.GetName()) != require.end() ) {
+//             string requester(require.find(arg.GetName())->second);
+//             // Required argument must be present
+//             NCBI_THROW(CArgException, eConstraint,
+//                 s_ArgExptMsg(arg.GetName(),
+//                 "Must be specified, as it is required by argument", requester));
+//         }
+// ```
+// The first exclusion met in NCBI's `multimap` (`ncbi_app::args::dependency_multimap`) ends the
+// check; else the first missing argument in the order of declaration names the first
+// dependency that required it (`map::insert` keeps the first). `-taxid` with `-taxid_map` meets
+// the dependency of `taxid` first: `Argument "taxid_map". Incompatible with argument:  `taxid'`.
+/// The dependencies of the arguments, checked as NCBI's argument reader checks them after the
+/// parse (`CArgDescriptions::x_PostCheck`), with its sentences. LOSAT's own parser checks them
+/// on the command line; this check serves the library's callers.
+fn check_dependencies(args: &MakedbArgs) -> Result<(), MakedbError> {
+    let mut require: Vec<(&str, &str)> = Vec::new();
+    for (first, dep, second) in dependency_multimap(makeblastdb_dependencies()) {
+        if !given(args, first) {
+            continue;
+        }
+        match dep {
+            Dep::Requires => {
+                if !require.iter().any(|&(name, _)| name == second) {
+                    require.push((second, first));
+                }
+            }
+            Dep::Excludes => {
+                if given(args, second) {
+                    return Err(MakedbError::Argument(arg_message(
+                        second,
+                        "Incompatible with argument",
+                        first,
+                    )));
+                }
+            }
+        }
+    }
+    for name in REQUIRED_IN_ORDER {
+        if given(args, name) {
+            continue;
+        }
+        if let Some(&(_, requester)) = require.iter().find(|&&(required, _)| required == name) {
+            return Err(MakedbError::Argument(arg_message(
+                name,
+                "Must be specified, as it is required by argument",
+                requester,
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not
 /// support, and the format version.
 fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
@@ -584,56 +713,7 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
             args.blastdb_version
         )));
     };
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:322-329
-    // ```c++
-    //     arg_desc->SetConstraint("taxid", new CArgAllowValuesGreaterThanOrEqual(0));
-    //     arg_desc->SetDependency("taxid", CArgDescriptions::eExcludes, "taxid_map");
-    //
-    //     arg_desc->AddOptionalKey("taxid_map", "TaxIDMapFile",
-    //              "Text file mapping sequence IDs to taxonomy IDs.\n"
-    //              "Format:<SequenceId> <TaxonomyId><newline>",
-    //              CArgDescriptions::eInputFile);
-    //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
-    // ```
-    // The parser checks these on the command line (`-taxid` has its range there); a caller of
-    // the library that sets the fields is checked here with the parser's sentences.
-    // The same for the masking options: `-mask_id` requires `-mask_data`, `-mask_desc` requires
-    // `-mask_id` (makeblastdb.cpp:276-277, quoted at `MakedbArgs`).
-    for (name, given, needed, needed_given) in [
-        (
-            "mask_id",
-            args.mask_id.is_some(),
-            "mask_data",
-            args.mask_data.is_some(),
-        ),
-        (
-            "mask_desc",
-            args.mask_desc.is_some(),
-            "mask_id",
-            args.mask_id.is_some(),
-        ),
-    ] {
-        if given && !needed_given {
-            return Err(MakedbError::Argument(format!(
-                "Argument \"{needed}\". Must be specified, as it is required by argument:  \
-                 `{name}'"
-            )));
-        }
-    }
-    if args.taxid_map.is_some() {
-        if !args.parse_seqids {
-            return Err(MakedbError::Argument(
-                "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
-                 `taxid_map'"
-                    .to_string(),
-            ));
-        }
-        if args.taxid.is_some() {
-            return Err(MakedbError::Argument(
-                "Argument \"taxid\". Incompatible with argument:  `taxid_map'".to_string(),
-            ));
-        }
-    }
+    check_dependencies(args)?;
     Ok(version)
 }
 
@@ -1114,6 +1194,25 @@ fn build_database_with_log(
             hash: args.hash_index,
         },
     )?;
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1205,1231-1241
+    // ```c++
+    //     bool use_gi_mask = args["gi_mask"];
+    //     ...
+    //     m_DB.Reset(new CBuildDatabase(dbname,
+    //                                   title,
+    //                                   is_protein,
+    //                                   indexing,
+    //                                   use_gi_mask,
+    //                                   m_LogFile,
+    //                                   long_seqids,
+    //                                   dbver,
+    //                                   limit_defline,
+    //                                   oid_masks,
+    //                                   scan_bioseq_4_cfastareader_usrobj));
+    // ```
+    if args.gi_mask {
+        db.use_gi_masks();
+    }
     let max_file_size = max_file_size(args)?;
     let _ = writeln!(
         db.log(),
@@ -1136,6 +1235,7 @@ fn build_database_with_log(
         mask_data: args.mask_data.as_deref(),
         mask_id: args.mask_id.as_deref(),
         mask_desc: args.mask_desc.as_deref(),
+        gi_mask_name: args.gi_mask_name.as_deref(),
         root: None,
     };
     let masked = {
@@ -1872,11 +1972,128 @@ mod tests {
         map.parse_seqids = true;
         assert!(check_arguments(&map).is_ok());
         map.taxid = Some(1);
+        // NCBI's multimap meets `taxid` (excludes `taxid_map`) first.
         assert_eq!(
             check_arguments(&map).unwrap_err().to_string(),
-            "Command line argument error: Argument \"taxid\". Incompatible with argument:  \
-             `taxid_map'"
+            "Command line argument error: Argument \"taxid_map\". Incompatible with argument:  \
+             `taxid'"
         );
+    }
+
+    /// The dependencies of `-gi_mask` and `-gi_mask_name` among the others, in the order and
+    /// with the words of NCBI's argument reader (makeblastdb 2.17.0, survey M4c probes b5/o01-o08:
+    /// `Error:  (CArgException::eConstraint) <message>` after the usage, status 1).
+    #[test]
+    fn argument_dependencies_follow_ncbis_order() {
+        let base = || {
+            let mut args = parse_makedb_words_for_test();
+            args.dbtype = "nucl".to_string();
+            args
+        };
+        let mut cases: Vec<(MakedbArgs, &str)> = Vec::new();
+        // o01: -mask_data -gi_mask -mask_id
+        let mut a = base();
+        a.mask_data = Some("m".into());
+        a.gi_mask = true;
+        a.mask_id = Some("foo".into());
+        cases.push((
+            a,
+            "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
+        ));
+        // o02: -gi_mask -gi_mask_name
+        let mut a = base();
+        a.gi_mask = true;
+        a.gi_mask_name = Some("x".into());
+        cases.push((
+            a,
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'",
+        ));
+        // o03: -gi_mask_name -taxid_map
+        let mut a = base();
+        a.gi_mask_name = Some("x".into());
+        a.taxid_map = Some("tm.txt".into());
+        cases.push((
+            a,
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `taxid_map'",
+        ));
+        // o04: -gi_mask -taxid_map -mask_data
+        let mut a = base();
+        a.gi_mask = true;
+        a.taxid_map = Some("tm.txt".into());
+        a.mask_data = Some("m".into());
+        cases.push((
+            a,
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'",
+        ));
+        // o05: -parse_seqids -mask_desc -gi_mask_name -gi_mask
+        let mut a = base();
+        a.parse_seqids = true;
+        a.mask_desc = Some("d".into());
+        a.gi_mask_name = Some("x".into());
+        a.gi_mask = true;
+        cases.push((
+            a,
+            "Argument \"mask_data\". Must be specified, as it is required by argument:  \
+             `gi_mask_name'",
+        ));
+        // o06: -gi_mask_name
+        let mut a = base();
+        a.gi_mask_name = Some("x".into());
+        cases.push((
+            a,
+            "Argument \"mask_data\". Must be specified, as it is required by argument:  \
+             `gi_mask_name'",
+        ));
+        // o07: -parse_seqids -gi_mask -mask_id
+        let mut a = base();
+        a.parse_seqids = true;
+        a.gi_mask = true;
+        a.mask_id = Some("foo".into());
+        cases.push((
+            a,
+            "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
+        ));
+        // o08: -gi_mask -mask_id -taxid -taxid_map -mask_data
+        let mut a = base();
+        a.gi_mask = true;
+        a.mask_id = Some("foo".into());
+        a.taxid = Some(9606);
+        a.taxid_map = Some("tm.txt".into());
+        a.mask_data = Some("m".into());
+        cases.push((
+            a,
+            "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
+        ));
+        for (args, message) in cases {
+            let error = check_arguments(&args).unwrap_err();
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(
+                error.to_string(),
+                format!("Command line argument error: {message}")
+            );
+        }
+        let mut a = base();
+        a.parse_seqids = true;
+        a.gi_mask = true;
+        a.mask_data = Some("m".into());
+        a.gi_mask_name = Some("x".into());
+        assert!(check_arguments(&a).is_ok());
+    }
+
+    /// `MakedbArgs` with makeblastdb's defaults and `-dbtype prot`, without the parser's checks.
+    fn parse_makedb_words_for_test() -> MakedbArgs {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            args: MakedbArgs,
+        }
+        Wrap::try_parse_from(["makeblastdb", "--dbtype", "prot"])
+            .unwrap()
+            .args
     }
 
     #[test]

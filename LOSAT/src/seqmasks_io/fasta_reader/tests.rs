@@ -64,23 +64,6 @@ fn run(input: &[u8], protein: bool, parse_seqids: bool) -> Run {
     }
 }
 
-/// `text` with the build tree of each place an exception report names cut off before its
-/// `src/` (NCBI's builds name their own trees, LOSAT names the official release's).
-fn without_build_trees(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(at) = rest.find("T0 \"") {
-        let path = at + 4;
-        out.push_str(&rest[..path]);
-        rest = &rest[path..];
-        if let Some(src) = rest.find("/src/") {
-            rest = &rest[src + 1..];
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
 /// `CSeq_id::GetStringDescr(bioseq, eFormat_FastA)`: the FASTA forms of the ids, joined by
 /// `|` (the test's own form, for the comparison with the masking programs' id lines).
 fn fasta_ids(ids: &[ParsedSeqId]) -> String {
@@ -241,7 +224,9 @@ fn check(case: &Case) -> Vec<String> {
         }
         Some(other) => problems.push(format!("error {other:?}")),
     }
-    if without_build_trees(&stderr) != without_build_trees(&err) {
+    // NCBI's standard error (it names NCBI's own build trees) in LOSAT's words
+    // (`crate::wording::losat_text`).
+    if stderr != crate::wording::losat_text(&err) {
         problems.push(format!("standard error\n{stderr}NCBI\n{err}"));
     }
     if rc.trim() != status.to_string() {
@@ -385,8 +370,11 @@ fn the_error_of_a_record_without_residues() {
     assert_eq!(error.get_msg(), "FASTA-Reader: No residues given");
     assert_eq!(
         error.report_default_ex(106, 16, "Application's execution failed"),
-        "Error: (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)\n\
-         Error: (106.16) Application's execution failed (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)\n"
+        // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+        crate::wording::losat_text(
+            "Error: (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)\n\
+             Error: (106.16) Application's execution failed (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)\n"
+        )
     );
 }
 

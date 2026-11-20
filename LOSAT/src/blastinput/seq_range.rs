@@ -721,9 +721,10 @@ mod tests {
             assert_eq!(native.exit, 255, "{text:?}");
             assert_eq!(
                 native.message,
-                format!(
+                // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+                crate::wording::losat_text(&format!(
                     "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{part}' to {kind} (m_Pos = {pos})\n\n"
-                ),
+                )),
                 "{text:?}"
             );
         }

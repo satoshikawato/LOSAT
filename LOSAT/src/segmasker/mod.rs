@@ -296,12 +296,14 @@ mod tests {
     #[test]
     fn files_that_do_not_open_are_reported_by_what() {
         let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+        // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
         let line = |name: &str, value: &str| {
-            format!(
+            crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbiargs.cpp\", line 618: Error: \
                  (CArgException::eNoFile) Argument \"{name}\". File is not accessible:  \
                  `{value}'\n\n"
-            )
+            ))
+            .into_owned()
         };
         assert_eq!(
             run_words(&["-in", "/nonexistent/x.fa", "-out", "/nonexistent/y"], b""),

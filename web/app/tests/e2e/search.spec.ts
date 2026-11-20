@@ -484,13 +484,13 @@ test("the engine's refusals of option values are shown as the engine writes them
   // A toolkit word in a free-text value (S08+a, D14): the arguments of the Low complexity regions filter.
   await page.getByTestId('param-seg-value').fill('-version');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "error: the NCBI C++ Toolkit option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
+    "error: the option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
   );
   await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText(
-    "error: the NCBI C++ Toolkit option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
+    "error: the option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
   );
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
   // IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs 15/2; a
@@ -1513,7 +1513,7 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(extra).toHaveAccessibleName('Additional options');
   // The engine reads the words as the command line does, and says what it does not read.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).

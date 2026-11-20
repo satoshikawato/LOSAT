@@ -43,13 +43,14 @@ pub(crate) enum Post {
 
 impl Post {
     /// The line that a BLAST application of NCBI posts on its standard error, with its
-    /// diagnostic prefix `program` (the program's name in lower case): the one owner of each
-    /// post's text (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
-    pub(crate) fn line(&self, program: &str) -> Vec<u8> {
+    /// diagnostic prefix `prefix` (the program's name in lower case; none for blast_formatter,
+    /// which sets none): the one owner of each post's text (`ReplacedChar::post`,
+    /// `ncbi_exception::error_post_line`).
+    pub(crate) fn line(&self, prefix: Option<&str>) -> Vec<u8> {
         match self {
-            Post::BadChar(replaced) => replaced.post(Some(program)),
+            Post::BadChar(replaced) => replaced.post(prefix),
             Post::Error(text) => {
-                crate::ncbi_exception::error_post_line(None, Some(program), text.as_bytes())
+                crate::ncbi_exception::error_post_line(None, prefix, text.as_bytes())
             }
         }
     }

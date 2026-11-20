@@ -604,7 +604,13 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 | :--- | :--- |
 | `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20` | Refused, with LOSAT's own error message. |
 | An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
-| A database named in the archive that is not found as NCBI finds a database | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
+| A database named in the archive that cannot be opened here as NCBI opens it (with the archive's taxid list) | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
+| `BL2SEQ_LEGACY` with an archive of `-subject` sequences | Refused, as the search programs refuse it with `-subject`. |
+| An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
+| An archive in a form of ASN.1 text that LOSAT does not read | Refused, with the form named. |
+| A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ aborts after posting it. |
+| A negative hit list size in the archive's options | Refused. NCBI's searches do not write one. |
+| An archive of PHI-BLAST or of the mapper | Refused. |
 | `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
 
 An empty `-rid`, the archive's other errors and the errors of `-outfmt` come as in NCBI.

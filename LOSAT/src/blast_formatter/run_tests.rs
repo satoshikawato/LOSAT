@@ -16,11 +16,6 @@ fn run_words(line: &[&str], input: &[u8]) -> (i32, String, String) {
     )
 }
 
-/// A file that exists: the crate's manifest.
-fn existing_file() -> String {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml").to_string()
-}
-
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
     let usage = crate::ncbi_app::short_usage(HELP);
@@ -184,17 +179,22 @@ fn an_archive_that_does_not_open_is_ncbi_s_argument_error() {
     }
 }
 
-// An archive that opens, the standard input's too, reaches `format_archive`.
+// An input that opens reaches `archive::format_archive`: one that is no archive is NCBI's invalid
+// input (probes P3.077-083), in LOSAT's words (`wording`).
 #[test]
 fn an_archive_that_opens_is_formatted() {
-    let refusal = format!("Error: {}\n", Refusal::ArchiveReader.reason());
-    for archive in [existing_file(), "-".to_string()] {
-        assert_eq!(
-            run_words(&["-archive", &archive], b"Blast4-archive ::= {"),
-            (1, String::new(), refusal.clone()),
-            "{archive}"
-        );
-    }
+    let invalid = format!(
+        "BLAST query/options error: Invalid input format for BLAST Archive.\n{}\n",
+        crate::wording::USER_MANUAL_FOOTER
+    );
+    assert_eq!(
+        run_words(&["-archive", "-", "-outfmt", "8"], b"not an archive\n"),
+        (1, String::new(), invalid.clone())
+    );
+    assert_eq!(
+        run_words(&["-archive", "-", "-outfmt", "8"], b""),
+        (1, String::new(), invalid)
+    );
 }
 
 // `CATCH_ALL`'s posts go where the diagnostics go: the `-logfile` file.

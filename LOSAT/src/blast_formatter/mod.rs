@@ -5,6 +5,7 @@
 //! and writes each one's report. NCBI's `-rid`, which fetches the results of a search from NCBI's
 //! servers, is refused (`refusals`), as the search programs refuse `-remote`.
 
+mod archive;
 mod formatting;
 pub(crate) mod refusals;
 
@@ -305,7 +306,7 @@ impl Options {
 /// servers for the search (`Refusal::Rid`). The errors are `CATCH_ALL`'s (`catch_all`).
 fn run_body(
     args: &Args,
-    _settings: &ApplicationSettings,
+    settings: &ApplicationSettings,
     input: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
@@ -320,7 +321,7 @@ fn run_body(
                 )
             }
         };
-        return format_archive(&Options::of(args), &mut archive, out, diag);
+        return archive::format_archive(&Options::of(args), settings, &mut archive, out, diag);
     }
     let Some(rid) = args.value("rid") else {
         return catch_all(
@@ -337,25 +338,6 @@ fn run_body(
         );
     }
     Refusal::Rid.refuse(diag)
-}
-
-/// The formatting of the archive `archive` with the options `options`, its reports written to
-/// `-out` (`out` is the standard output, for `-out -`), its errors and warnings on `diag`; the exit
-/// status. NCBI's loop over the archive's objects (blast_formatter.cpp:507-531): each object read
-/// (`CRemoteBlast::LoadFromArchive`), then, unless it is the error object, its formatting options
-/// (`formatting::extract_formatting` with the object's hit list size, `formatting::sam_check`
-/// with its program) and its report (`PrintFormattedOutput`, which opens `-out` at the first
-/// one); a read error is NCBI's `Invalid input format for BLAST Archive.` What LOSAT does not
-/// write is refused by name (`Refusal`). The reader of the archive is not part of this build:
-/// every run is refused.
-pub(crate) fn format_archive(
-    options: &Options,
-    archive: &mut dyn Read,
-    out: &mut dyn Write,
-    diag: &mut Diag,
-) -> i32 {
-    let _ = (options, archive, out);
-    Refusal::ArchiveReader.refuse(diag)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:166-180

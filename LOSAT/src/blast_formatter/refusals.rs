@@ -1,9 +1,11 @@
 //! What LOSAT's blast_formatter refuses, by name: the one list of its refusals. Each refusal
-//! stops the run with LOSAT's message instead of writing something else; README.md's "What LOSAT
-//! refuses" names each one (`cli::readme_refusals_tests`). No NCBI counterpart: NCBI's
+//! stops the run with LOSAT's message instead of writing something else; the manual's "What
+//! LOSAT refuses" names each one (`cli::manual_refusals_tests`). No NCBI counterpart: NCBI's
 //! blast_formatter writes every output format from binary, text and XML archives, fetches the
 //! results of `-rid` from NCBI's servers and asks them for the sequences of a database it does
-//! not find (LOSAT's search programs refuse `-remote` alike, line RG DECISIONS 7 and F3-5).
+//! not open (LOSAT's search programs refuse `-remote` alike, line RG DECISIONS 7 and F3-5), and
+//! on some archives that its own programs do not write it reads memory the archive does not
+//! decide or aborts.
 
 use crate::ncbi_app::Diag;
 
@@ -30,12 +32,22 @@ pub(crate) enum Refusal {
     BinaryArchive,
     /// An archive in XML (`-outfmt 11` with `ARCHIVE_FORMAT=xml`).
     XmlArchive,
-    /// The database of an archive (its name) that is not found as NCBI finds a database: NCBI's
-    /// blast_formatter then asks NCBI's servers for its sequences.
+    /// The database of an archive (its name) that NCBI's database reader does not open with the
+    /// archive's taxid list: NCBI's blast_formatter then asks NCBI's servers for its sequences.
     Database(String),
-    /// Every run that reaches the archive, in a build without the archive's reader (removed when
-    /// the reader joins: line RG item F3, step C).
-    ArchiveReader,
+    /// An archive on which NCBI's code reads memory that the archive does not decide, follows a
+    /// null pointer or aborts (`report::archive::read::Stop`, the format guess's undecided
+    /// answer): what NCBI meets.
+    Undecided(&'static str),
+    /// A form of ASN.1 text that LOSAT's reader does not read (its text).
+    UnreadText(String),
+    /// A stored message of the severity `Fatal`, whose post ends NCBI's program (`abort`).
+    FatalMessage,
+    /// A negative hit list size in the archive's options (NCBI's searches write none).
+    HitlistSize(i32),
+    /// An archive of a program whose Seq-annot NCBI's formatter does not name as the others
+    /// (PHI-BLAST, the mapper): its task.
+    Program(&'static str),
 }
 
 impl Refusal {
@@ -62,12 +74,31 @@ impl Refusal {
                 super::PROGRAM
             ),
             Refusal::Database(name) => format!(
-                "the database '{name}' of the BLAST archive is not found here; NCBI BLAST+ then \
-                 asks NCBI's servers for its sequences, which is not supported by LOSAT's {}",
+                "the database '{name}' of the BLAST archive cannot be opened here; NCBI BLAST+ \
+                 then asks NCBI's servers for its sequences, which is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
-            Refusal::ArchiveReader => format!(
-                "reading a BLAST archive is not supported by this build of LOSAT's {} yet",
+            Refusal::Undecided(what) => format!(
+                "a BLAST archive on which NCBI BLAST+ has no defined result ({what}) is not \
+                 supported by LOSAT's {}",
+                super::PROGRAM
+            ),
+            Refusal::UnreadText(text) => format!(
+                "a BLAST archive in a form of ASN.1 text that LOSAT does not read is not \
+                 supported by LOSAT's {} ({text})",
+                super::PROGRAM
+            ),
+            Refusal::FatalMessage => format!(
+                "a BLAST archive with a stored message of severity Fatal, on which NCBI BLAST+ \
+                 aborts, is not supported by LOSAT's {}",
+                super::PROGRAM
+            ),
+            Refusal::HitlistSize(size) => format!(
+                "a BLAST archive whose hit list size is {size} is not supported by LOSAT's {}",
+                super::PROGRAM
+            ),
+            Refusal::Program(task) => format!(
+                "a BLAST archive of {task} is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
         }
@@ -87,19 +118,32 @@ impl Refusal {
         }
     }
 
-    /// The words of README.md's paragraph on blast_formatter that name the refusal; `None` for
-    /// `ArchiveReader`, which no release has.
-    pub(crate) fn readme_words(&self) -> Option<String> {
+    /// The words of the manual's section on blast_formatter (`docs/manual/src/refusals.md`) that
+    /// name the refusal.
+    pub(crate) fn manual_words(&self) -> String {
         match self {
-            Refusal::Rid => Some("`-rid`".to_string()),
-            Refusal::OutputFormat(number) => Some(format!("`{number}`")),
-            Refusal::BinaryArchive => Some("ASN.1 binary".to_string()),
-            Refusal::XmlArchive => Some("XML".to_string()),
-            Refusal::Database(_) => Some("database".to_string()),
-            Refusal::ArchiveReader => None,
+            Refusal::Rid => "`-rid`".to_string(),
+            Refusal::OutputFormat(number) => format!("`{number}`"),
+            Refusal::BinaryArchive => "ASN.1 binary".to_string(),
+            Refusal::XmlArchive => "XML".to_string(),
+            Refusal::Database(_) => "cannot be opened".to_string(),
+            Refusal::Undecided(_) => "no defined result".to_string(),
+            Refusal::UnreadText(_) => "form of ASN.1 text".to_string(),
+            Refusal::FatalMessage => "severity Fatal".to_string(),
+            Refusal::HitlistSize(_) => "negative hit list size".to_string(),
+            Refusal::Program(_) => "PHI-BLAST".to_string(),
         }
     }
 }
+
+impl std::fmt::Display for Refusal {
+    /// The refusal's message (`Refusal::reason`): what `super::catch_all` writes after `Error: `.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason())
+    }
+}
+
+impl std::error::Error for Refusal {}
 
 /// The written formats as a list in words: `8, 9 and 12`.
 fn written_formats() -> String {
@@ -117,8 +161,8 @@ pub(crate) fn output_format(number: i32) -> Option<Refusal> {
     (!WRITTEN_FORMATS.contains(&number)).then_some(Refusal::OutputFormat(number))
 }
 
-/// One refusal of each kind that a release has, the output formats one by one: what README.md
-/// documents (`cli::readme_refusals_tests`).
+/// One refusal of each kind, the output formats one by one: what the manual documents
+/// (`cli::manual_refusals_tests`).
 pub(crate) fn documented() -> Vec<Refusal> {
     let mut refusals = vec![Refusal::Rid];
     refusals.extend(NCBI_FORMATS.into_iter().filter_map(output_format));
@@ -126,6 +170,11 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::BinaryArchive,
         Refusal::XmlArchive,
         Refusal::Database(String::new()),
+        Refusal::Undecided(""),
+        Refusal::UnreadText(String::new()),
+        Refusal::FatalMessage,
+        Refusal::HitlistSize(-1),
+        Refusal::Program("phiblastp"),
     ]);
     refusals
 }

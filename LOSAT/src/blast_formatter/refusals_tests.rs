@@ -34,10 +34,10 @@ fn the_documented_refusals_are_one_of_each_kind() {
     );
     assert!(documented.contains(&Refusal::BinaryArchive));
     assert!(documented.contains(&Refusal::XmlArchive));
-    assert!(!documented.contains(&Refusal::ArchiveReader));
-    assert!(documented
-        .iter()
-        .all(|refusal| refusal.readme_words().is_some()));
+    assert!(documented.contains(&Refusal::FatalMessage));
+    for refusal in &documented {
+        assert!(!refusal.manual_words().is_empty(), "{refusal:?}");
+    }
 }
 
 #[test]
@@ -52,9 +52,12 @@ fn the_texts_are_losat_s() {
     );
     assert_eq!(
         Refusal::Database("nt".to_string()).reason(),
-        "the database 'nt' of the BLAST archive is not found here; NCBI BLAST+ then asks NCBI's \
-         servers for its sequences, which is not supported by LOSAT's BLAST_FORMATTER"
+        "the database 'nt' of the BLAST archive cannot be opened here; NCBI BLAST+ then asks \
+         NCBI's servers for its sequences, which is not supported by LOSAT's BLAST_FORMATTER"
     );
+    // A refusal travels as an error to `catch_all`, which writes its reason.
+    let error: anyhow::Error = Refusal::FatalMessage.into();
+    assert_eq!(format!("{error:#}"), Refusal::FatalMessage.reason());
     for refusal in documented() {
         let reason = refusal.reason();
         assert!(reason.contains("LOSAT's BLAST_FORMATTER"), "{reason}");

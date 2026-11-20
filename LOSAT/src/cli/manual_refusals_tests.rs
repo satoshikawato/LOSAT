@@ -266,9 +266,7 @@ fn every_blast_formatter_refusal_is_in_its_manual_section() {
     );
     let mut missing = Vec::new();
     for refusal in crate::blast_formatter::refusals::documented() {
-        let words = refusal
-            .readme_words()
-            .expect("a refusal that a release has");
+        let words = refusal.manual_words();
         if !paragraph.iter().any(|line| line.contains(&words)) {
             missing.push(format!(
                 "blast_formatter: {refusal:?} ({words}) is refused by LOSAT but the manual's section `## blast_formatter` does not name it"

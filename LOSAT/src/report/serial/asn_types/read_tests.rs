@@ -240,7 +240,7 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
     );
     assert_eq!(posts.len(), 1);
     assert_eq!(
-        posts[0].line("psiblast"),
+        posts[0].line(Some("psiblast")),
         b"Error: (803.7) [psiblast] Seqdesc.title\nBad char [0x1] in string at line 1\na\x01b\n"
     );
     // Two bytes, the line of each piece, `""`, a piece of 128 bytes.
@@ -257,7 +257,7 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
         panic!()
     };
     assert_eq!(**comment, Value::Str(format!("#\"qz#{long}#").into_bytes()));
-    let messages: Vec<Vec<u8>> = posts.iter().map(|post| post.line("tblastn")).collect();
+    let messages: Vec<Vec<u8>> = posts.iter().map(|post| post.line(Some("tblastn"))).collect();
     assert_eq!(
         messages,
         [
@@ -526,7 +526,7 @@ fn the_delayed_member_is_kept_as_read() {
     let (list, posts) = read(named::AUTH_LIST, bad);
     assert!(list.is_ok());
     assert_eq!(
-        posts[0].line("psiblast"),
+        posts[0].line(Some("psiblast")),
         b"Error: (803.7) [psiblast] Auth-list.names.str.E\nBad char [0x1] in string at line 1\n"
     );
     serial(named::AUTH_LIST, "Auth-list ::= { names str { 5 } }");
@@ -569,7 +569,7 @@ fn variation_ref_moves_and_drops_its_deprecated_members() {
     let (dropped, posts) = read_variation("population-data { },");
     assert_eq!(dropped.member(member("population-data")), None);
     assert_eq!(
-        posts[0].line("psiblast"),
+        posts[0].line(Some("psiblast")),
         b"Error: [psiblast] Variation-ref.population-data is deprecated and will be ignored\n"
     );
     let (both, posts) =
@@ -582,7 +582,7 @@ fn variation_ref_moves_and_drops_its_deprecated_members() {
         ]))
     );
     assert_eq!(
-        posts[0].line("tblastn"),
+        posts[0].line(Some("tblastn")),
         b"Error: [tblastn] Both Variation-ref.validated and Variation-ref.variant-properties.other-validation are set; ignoring Variation-ref.validated\n"
     );
 }

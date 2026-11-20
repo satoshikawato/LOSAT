@@ -1,0 +1,1 @@
+- Manual: a Third-party notices page for the manual's website (mdBook's theme under MPL-2.0 and the scripts and styles it bundles).

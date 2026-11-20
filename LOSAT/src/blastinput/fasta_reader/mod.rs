@@ -565,23 +565,11 @@ impl std::error::Error for ReadError {}
 
 impl ReadError {
     /// The error as the programs end with it: a reader exception is NCBI's `BLAST query
-    /// error: <message>` with exit 1, a rejection is LOSAT's, and a failed write of the
-    /// messages is the write error.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
-    /// ```c++
-    ///     catch (const CObjReaderParseException& e) {                             \
-    ///         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-    ///         exit_code = BLAST_INPUT_ERROR;                                      \
-    ///     }                                                                       \
-    /// ```
+    /// error: <message>` with exit 1 (`blastinput::app::query_error`, the one producer of that
+    /// line), a rejection is LOSAT's, and a failed write of the messages is the write error.
     pub fn into_app_error(self) -> anyhow::Error {
         match self {
-            ReadError::Parse { message, .. } => crate::cli::NativeError {
-                exit: 1,
-                message: format!("BLAST query error: {message}\n"),
-            }
-            .into(),
+            ReadError::Parse { message, .. } => crate::blastinput::app::query_error(&message),
             ReadError::Unsupported(error) => error,
             ReadError::Write(error) => error.into(),
         }

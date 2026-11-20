@@ -209,9 +209,11 @@ fn library_with(
         &mut [(outfmt, &mut report)],
         &mut diagnostics,
     );
-    let error = result
-        .err()
-        .map(|error| error.message().trim_end().to_string());
+    let error = result.err().map(|error| {
+        String::from_utf8_lossy(error.message())
+            .trim_end()
+            .to_string()
+    });
     (report, error)
 }
 
@@ -227,13 +229,31 @@ fn batches_with(
     let records = read_input_records(&search, query, subject).expect("the subject reads");
     let batches = match run_batches(&search, records.inputs()) {
         Ok(batches) => batches,
-        Err(error) => return (0, Some(error.message().trim_end().to_string())),
+        Err(error) => {
+            return (
+                0,
+                Some(
+                    String::from_utf8_lossy(error.message())
+                        .trim_end()
+                        .to_string(),
+                ),
+            )
+        }
     };
     let mut rows = 0;
     for batch in batches {
         match batch {
             Ok(batch) => rows += batch.hsps.len(),
-            Err(error) => return (rows, Some(error.message().trim_end().to_string())),
+            Err(error) => {
+                return (
+                    rows,
+                    Some(
+                        String::from_utf8_lossy(error.message())
+                            .trim_end()
+                            .to_string(),
+                    ),
+                )
+            }
         }
     }
     (rows, None)
@@ -282,7 +302,7 @@ fn a_reader_error_ends_the_search_in_its_batch_as_on_the_command_line() {
             // `read_inputs` fails before any report.
             let search = validate(case.program, options).unwrap();
             let early = read_inputs(&search, &query, &subject).unwrap_err();
-            assert_eq!(early, Error::Input(cli_error), "{name}");
+            assert_eq!(early, Error::Input(cli_error.into_bytes()), "{name}");
         }
     }
 }
@@ -651,9 +671,12 @@ fn run_batches_ends_with_the_reader_error_in_its_batch() {
     assert_eq!(first.query_indices, 0..10);
     assert!(!first.hsps.is_empty());
     let error = second.as_ref().expect_err("the batch of the record");
-    assert!(error.message().starts_with(BAD_LINE), "{error}");
+    assert!(error.message().starts_with(BAD_LINE.as_bytes()), "{error}");
     let (_, cli_error) = command_line(case.program, &query, &case.subject);
-    assert_eq!(error.message().trim_end(), cli_error.unwrap());
+    assert_eq!(
+        String::from_utf8_lossy(error.message()).trim_end(),
+        cli_error.unwrap()
+    );
 
     // An error in the first batch: no batch is searched.
     let query = with_bad_record(fasta(2, &case.query));

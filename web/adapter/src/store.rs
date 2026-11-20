@@ -330,7 +330,7 @@ fn write_records(
     out.push(']');
     if let QueryEnd::Error(error) = end {
         out.push_str(",\"reader_error\":");
-        json::string(out, error.message());
+        json::string(out, &String::from_utf8_lossy(error.message()));
     }
     out.push('}');
 }
@@ -416,7 +416,7 @@ pub fn register_inputs(
             return Err(match read() {
                 Err(error) => error,
                 Ok(records) => match records.query_end {
-                    QueryEnd::Error(error) => error.message().to_string(),
+                    QueryEnd::Error(error) => String::from_utf8_lossy(error.message()).into_owned(),
                     QueryEnd::Input | QueryEnd::BlankLines => refusal,
                 },
             });

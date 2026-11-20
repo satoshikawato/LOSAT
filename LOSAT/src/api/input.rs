@@ -319,8 +319,8 @@ pub enum QueryEnd {
 /// the reader's messages about the record that it wrote before the error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryError {
-    /// The command line's message without its last newline (`Error::Input`'s text).
-    message: String,
+    /// The command line's message without its last newline (`Error::Input`'s bytes).
+    message: Vec<u8>,
     /// The reader's messages about the record, before the error.
     warnings: Vec<u8>,
     failure: ReadFailure,
@@ -336,9 +336,9 @@ enum ReadFailure {
         message: String,
         line: u64,
     },
-    /// `ReadError::Unsupported`, LOSAT's refusal: its text, and its exit status where it is a
-    /// `NativeError`.
-    Refused { exit: Option<i32>, text: String },
+    /// `ReadError::Unsupported`, LOSAT's refusal: its text (a `NativeError`'s bytes), and its
+    /// exit status where it is a `NativeError`.
+    Refused { exit: Option<i32>, text: Vec<u8> },
 }
 
 impl QueryError {
@@ -361,19 +361,17 @@ impl QueryError {
                     },
                     None => ReadFailure::Refused {
                         exit: None,
-                        text: format!("{refusal:#}"),
+                        text: format!("{refusal:#}").into_bytes(),
                     },
                 }
             }
             // The messages of the records are kept, not written: no write fails here.
             ReadError::Write(error) => ReadFailure::Refused {
                 exit: None,
-                text: error.to_string(),
+                text: error.to_string().into_bytes(),
             },
         };
-        let message = format!("{:#}", error.into_app_error())
-            .trim_end_matches('\n')
-            .to_string();
+        let message = super::error::input_bytes(&error.into_app_error());
         Self {
             message,
             warnings,
@@ -381,8 +379,9 @@ impl QueryError {
         }
     }
 
-    /// The command line's message, without its last newline: what [`read_inputs`] fails with.
-    pub fn message(&self) -> &str {
+    /// The command line's message, without its last newline: what [`read_inputs`] fails with
+    /// (`Error::Input`).
+    pub fn message(&self) -> &[u8] {
         &self.message
     }
 
@@ -409,7 +408,7 @@ impl QueryError {
                 .into(),
             ),
             ReadFailure::Refused { exit: None, text } => {
-                ReadError::Unsupported(anyhow::anyhow!("{text}"))
+                ReadError::Unsupported(anyhow::anyhow!("{}", String::from_utf8_lossy(text)))
             }
         }
     }
@@ -428,7 +427,7 @@ impl QueryError {
 
 impl std::fmt::Display for QueryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&String::from_utf8_lossy(&self.message))
     }
 }
 

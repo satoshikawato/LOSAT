@@ -7,6 +7,7 @@ words, and results are what the engine returned.
 
 from __future__ import annotations
 
+import builtins
 import functools
 import numbers
 import operator
@@ -322,8 +323,14 @@ class Outcome:
     1's (`rounds`)."""
     rounds: list[QueryRounds] = field(repr=False)
     """By query record: the statistics of each of its rounds and whether they converged."""
-    diagnostics: str
-    """What the command line writes to its standard error for this search."""
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this search: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart (a byte
+        that is not UTF-8, from a title read from a Latin-1 file, for example)."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
 
     def queries(self) -> list[QueryHits]:
         """The results of each query record, also of those without hits."""
@@ -338,6 +345,20 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class FileOutcome:
+    """What `Search.run_to_file` returned; the report is in its file."""
+
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this search: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart (a byte
+        that is not UTF-8, from a title read from a Latin-1 file, for example)."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
+
+
+@dataclass(frozen=True)
 class Batch:
     """The results of one of NCBI's query batches."""
 
@@ -349,8 +370,13 @@ class Batch:
     """One entry per query of `query_indices`."""
     rounds: list[QueryRounds] = field(repr=False)
     """One entry per query of `query_indices`, as in `Outcome.rounds`."""
-    diagnostics: str
-    """What the command line writes to its standard error for this batch."""
+    diagnostics_bytes: bytes
+    """What the command line writes to its standard error for this batch: its bytes."""
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
 
     def queries(self) -> list[QueryHits]:
         """The results of each query of the batch."""
@@ -503,19 +529,21 @@ class Search:
         *,
         outfmt: str,
         path: str | os.PathLike[str],
-    ) -> str:
+    ) -> FileOutcome:
         """Runs the search and writes the report of `outfmt` to the file `path`, as `-out path`.
 
         Outfmt 13 and 14 come through here: their side files lie next to `path`. Returns what the
-        command line writes to its standard error. The GIL is released.
+        command line writes to its standard error (`FileOutcome`). The GIL is released.
         """
-        return _pylosat.run_to_file(
-            self._program,
-            list(self._argv),
-            _query(query),
-            _subject(subject),
-            outfmt,
-            os.fspath(path),
+        return FileOutcome(
+            _pylosat.run_to_file(
+                self._program,
+                list(self._argv),
+                _query(query),
+                _subject(subject),
+                outfmt,
+                os.fspath(path),
+            )
         )
 
     def batches(self, query: Sequences | Pssm, subject: Sequences | Database) -> Batches:
@@ -535,11 +563,20 @@ class ToolOutput:
     """What a database program writes: its standard output and its standard error."""
 
     bytes: bytes
-    diagnostics: str
+    """The standard output's bytes."""
+    # `builtins.bytes`: in the class body, the field above has the type's name.
+    diagnostics_bytes: builtins.bytes
+    """The standard error's bytes."""
 
     @property
     def text(self) -> str:
-        return self.bytes.decode(errors="replace")
+        """`bytes` as text, with one U+FFFD per maximal ill-formed subpart."""
+        return self.bytes.decode("utf-8", "replace")
+
+    @property
+    def diagnostics(self) -> str:
+        """`diagnostics_bytes` as text, with one U+FFFD per maximal ill-formed subpart."""
+        return self.diagnostics_bytes.decode("utf-8", "replace")
 
 
 def makeblastdb(*words: str, input: bytes | str = b"") -> ToolOutput:

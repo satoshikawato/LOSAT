@@ -262,7 +262,7 @@ class DbSearchFixtureTests(unittest.TestCase):
                       and db_fixtures.rps_cell(r["db"]) is None)
         rps = first(lambda r: r["kind"] == "ncbi" and db_fixtures.rps_cell(r["db"]) is not None)
         rejection = first(lambda r: r["kind"] == "losat-rejection" and r["stdout_bytes"]
-                          and not xinclude.wants_pssm(r))
+                          and not xinclude.wants_pssm(r) and not db_fixtures.near_row_id(r))
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
             bin_dir.mkdir()

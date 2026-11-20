@@ -104,7 +104,7 @@ ruzstd = "0.9"
 #     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
 # ```
 # LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969 (`GET_PAGESIZE`; LMDB's
-# notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2)
+# notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB))
 # Rust system calls for the native readable-byte hint (`io`), and for the page size
 # of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
 # (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's

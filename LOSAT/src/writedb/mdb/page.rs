@@ -28,7 +28,7 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
-// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2.)
+// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2 (LMDB).)
 
 //! Byte layout of LMDB pages, nodes and records (LMDB 0.9.24 as built into NCBI BLAST+,
 //! 64-bit little-endian, `MDB_DEVEL` off). Accessors over a page buffer: a page starts at

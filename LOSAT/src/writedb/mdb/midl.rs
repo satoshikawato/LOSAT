@@ -1,7 +1,7 @@
 // Derived from midl.c and midl.h of LMDB 0.9.24 as bundled in NCBI BLAST+ 2.17.0,
 // c++/src/util/lmdb/, which carry this notice:
 //
-// /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
+// This work is part of OpenLDAP Software <http://www.openldap.org/>.
 //
 // Copyright 2000-2019 The OpenLDAP Foundation.
 // Portions Copyright 2001-2018 Howard Chu, Symas Corp.
@@ -15,7 +15,7 @@
 // top-level directory of the distribution or, alternatively, at
 // <http://www.OpenLDAP.org/license.html>.
 //
-// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2.)
+// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2 (LMDB).)
 
 //! ID lists of LMDB (`c++/src/util/lmdb/midl.c`): an IDL is a list of page numbers whose
 //! element 0 is the number of IDs, kept in descending order. Here an IDL is a `Vec<u64>` whose

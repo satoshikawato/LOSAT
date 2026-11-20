@@ -114,6 +114,8 @@ jobs:
         run: python3 scripts/third_party_licenses.py --check
       - name: Third-party licenses script tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_third_party_licenses.py'
+      - name: Wheel smoke license check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_wheel_smoke_licenses.py'
       - name: Public API checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
       - name: Release-candidate tooling tests

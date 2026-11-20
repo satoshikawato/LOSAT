@@ -1,6 +1,6 @@
 // Code of Microsoft's C runtime (UCRT), from the sources that Microsoft publishes under the
 // MIT License in the NuGet package Microsoft.Windows.SDK.CRTSource 10.0.22621.3
-// (ucrt/...; also in THIRD_PARTY_NOTICES, section 6). The package's LICENSE:
+// (ucrt/...; also in THIRD_PARTY_NOTICES, section 6 (UCRT)). The package's LICENSE:
 //
 // MIT License
 //

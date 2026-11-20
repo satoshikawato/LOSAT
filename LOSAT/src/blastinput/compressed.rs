@@ -1069,7 +1069,7 @@ const BZIP2_WINDOW: usize = 8 * 1024;
 /// streams after it (`PD-LOSAT-NCBI-DEFECTS`, makeblastdb exception; line GZ, DECISIONS 9).
 ///
 /// bzip2 0.6.1 reference: src/bufread.rs:178-221 (`impl<R: BufRead> Read for BzDecoder<R>`)
-/// (bzip2's notice and the MIT License: THIRD_PARTY_NOTICES, section 7.)
+/// (bzip2's notice and the MIT License: THIRD_PARTY_NOTICES, section 7 (bzip2).)
 struct Bzip2Streams {
     data: bzip2::Decompress,
     /// The stream ended (`done`): a new one starts where more input follows.
@@ -1233,7 +1233,7 @@ struct ZstdFrames {
 ///
 /// ruzstd 0.9.1 reference: src/decoding/frame.rs:6-85 (`read_frame_header`), 213-240
 /// (`frame_content_size_bytes`, `dictionary_id_bytes`); RFC 8878 3.1.1.1 and 3.1.2.
-/// (ruzstd's notice and the MIT License: THIRD_PARTY_NOTICES, section 8.)
+/// (ruzstd's notice and the MIT License: THIRD_PARTY_NOTICES, section 8 (ruzstd).)
 fn frame_header_len(unit: &[u8]) -> usize {
     const MAGIC: u32 = 0xFD2F_B528;
     let Some(magic) = unit.first_chunk::<4>() else {

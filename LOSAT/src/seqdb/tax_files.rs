@@ -23,8 +23,8 @@ pub const NO_ACCESSION_INFO: &str = "DB contains no accession info.";
 /// Text of NCBI's catch block of `GetOid` / `GetOids` for any LMDB error; `dbname` is the base
 /// name of the `.ndb` file. (`MDB_NOTFOUND` there gives "Seqid list specified but no accession
 /// table is found in `<dbname>`", which cannot happen once the table exists.)
-pub fn accessions_lookup_error(dbname: &str) -> String {
-    format!("Accessions to Oids lookup error in {dbname}")
+pub fn accessions_lookup_error(dbname: &[u8]) -> Vec<u8> {
+    [b"Accessions to Oids lookup error in ".as_slice(), dbname].concat()
 }
 
 fn le_u32(v: &[u8], what: &str) -> Result<u32, String> {
@@ -436,11 +436,13 @@ pub enum TaxError {
 impl TaxError {
     /// The message NCBI throws (`CSeqDBException`, `eArgErr`) for this failure; `dbname` is the
     /// base name of the `.ntf` file, e.g. `nt.ntf`. `Data` has no NCBI text and gives its detail.
-    pub fn message(&self, dbname: &str) -> String {
+    pub fn message(&self, dbname: &[u8]) -> Vec<u8> {
         match self {
-            TaxError::NoTaxInfo => format!("No taxonomy info found in {dbname}"),
-            TaxError::Lookup(_) => format!("Taxonomy Id to Oids lookup error in {dbname}"),
-            TaxError::Data(m) => m.clone(),
+            TaxError::NoTaxInfo => [b"No taxonomy info found in ".as_slice(), dbname].concat(),
+            TaxError::Lookup(_) => {
+                [b"Taxonomy Id to Oids lookup error in ".as_slice(), dbname].concat()
+            }
+            TaxError::Data(m) => m.clone().into_bytes(),
         }
     }
 
@@ -1240,16 +1242,16 @@ mod tests {
         let nto: Vec<u8> = Vec::new();
         let e = get_oids_for_tax_ids(&env, &nto, 7, &set(&[1])).unwrap_err();
         assert_eq!(e, TaxError::NoTaxInfo);
-        assert_eq!(e.message("p5.ptf"), "No taxonomy info found in p5.ptf");
+        assert_eq!(e.message(b"p5.ptf"), b"No taxonomy info found in p5.ptf");
         assert_eq!(get_db_tax_ids(&env).unwrap_err(), TaxError::NoTaxInfo);
         assert_eq!(
-            accessions_lookup_error("p5.pdb"),
-            "Accessions to Oids lookup error in p5.pdb"
+            accessions_lookup_error(b"p5.pdb"),
+            b"Accessions to Oids lookup error in p5.pdb"
         );
         let e = TaxError::Lookup("detail".into());
         assert_eq!(
-            e.message("x.ntf"),
-            "Taxonomy Id to Oids lookup error in x.ntf"
+            e.message(b"x.ntf"),
+            b"Taxonomy Id to Oids lookup error in x.ntf"
         );
         assert_eq!(e.detail(), "detail");
         // volinfo/volname with different counts and a missing volinfo: synthetic LMDB is covered in lmdb_read

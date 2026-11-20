@@ -1,0 +1,7 @@
+# BLASTN 2.17.0+
+# Query: NC_002655.2 Escherichia coli O157:H7 str. EDL933, complete sequence
+# Database: User specified sequence set (Input: tests/fasta/MG1655.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+NC_002655.2	NC_000913.3	97.601	3001	53	2	1	3000	1	2983	0.0	5396
+# BLAST processed 1 queries

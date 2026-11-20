@@ -4,10 +4,17 @@ pub mod entry_names;
 pub(crate) mod format_guess;
 pub mod genetic_code;
 pub mod glibc_fma_libm;
+// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:331-334 (and the other calls of
+// `lower_bound` named in the module): the position, asked in the order observed of
+// `std::lower_bound`.
+pub(crate) mod lower_bound;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:252-262 (`CRpsMmappedFile`,
 // quoted in the module).
 pub(crate) mod mapped_file;
 pub mod matrix;
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99, 615-621 (a file name's bytes in
+// NCBI's messages, quoted in the module).
+pub(crate) mod os_bytes;
 pub(crate) mod process_id;
 // No NCBI counterpart: whether two names are one file where there are no inode numbers (WASI).
 pub(crate) mod same_file;

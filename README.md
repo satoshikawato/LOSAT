@@ -182,5 +182,3 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 ## License
 
 [MIT License](LICENSE). Citation metadata: [CITATION.cff](CITATION.cff).
-
-The decoder of bit vectors in ASN.1 Seq-tables is ported from the BitMagic library (http://bitmagic.io), Apache License 2.0: see `LOSAT/src/algorithm/pssm_search/annot_index/BITMAGIC_LICENSE.txt`.

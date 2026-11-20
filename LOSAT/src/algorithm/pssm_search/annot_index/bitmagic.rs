@@ -1856,13 +1856,13 @@ fn gap_set_at(gap: &mut Arr, val: u16, pos: u16, curr: usize) -> Result<u16, Fai
 /// On a GAP block that is one (`valid`: ends that increase up to 65535 at the header's last index)
 /// the three builds' searches find the same entry, the first at or above `pos`: `gap_bfind`'s
 /// binary steps (BitMagic 8.0.1: bmfunc.h:1835-1886) keep that entry within `[start, end]` and its
-/// scan stops at it; `sse2_gap_bfind` (bmsse2.h:1444-1499) and `sse42_gap_bfind`
-/// (bmsse4.h:1389-1455) take the same binary steps and then the first lane at or above `pos`, or
-/// the count of such lanes, of increasing entries, which is that entry. So one search runs there, a
-/// binary search for that entry (the scalar build's where the buffer holds fewer entries than the
-/// header names). `gap_set_value` leaves a GAP block that is one while its last index fits the
-/// header's 13 bits (a block of the vector stays below 1280 entries by its level), so `valid` holds
-/// for the later bits of the block.
+/// scan stops at it; `sse2_gap_bfind` (BitMagic 8.0.1: bmsse2.h:1444-1499) and `sse42_gap_bfind`
+/// (BitMagic 8.0.1: bmsse4.h:1389-1455) take the same binary steps and then the first lane at or
+/// above `pos`, or the count of such lanes, of increasing entries, which is that entry. So one
+/// search runs there, a binary search for that entry (the scalar build's where the buffer holds
+/// fewer entries than the header names). `gap_set_value` leaves a GAP block that is one while its
+/// last index fits the header's 13 bits (a block of the vector stays below 1280 entries by its
+/// level), so `valid` holds for the later bits of the block.
 fn gap_set_value(
     gap: &mut Arr,
     val: bool,
@@ -1913,6 +1913,298 @@ fn gap_set_value(
     let end = *end;
     *gap = builds.swap_remove(0).1;
     Ok(end)
+}
+
+/// `gap_set_value(val, buf, pos)` for the positions `list` in their order, on `gap_temp_block_`
+/// (`gap`) holding a GAP block that is one, while its last index is below 8190 (so that the next
+/// position cannot take it past the header's 13 bits): the count of positions done. `gap` ends as
+/// those calls leave it, the entries past the block's new end included. `bits` is a work bitmap
+/// of which only the words of the positions are used, `tail` and `runs` work arrays.
+///
+/// Why this is what the calls leave. On a GAP block that is one, `gap_set_value` (BitMagic 8.0.1:
+/// bmfunc.h:4075-4140, `gap_set_at` here) leaves the GAP block of the bits with `pos` set to
+/// `val` (one again while its last index fits the header), so after the list the block is the runs
+/// of the bits, whatever the order. The calls read the bits of the positions and of their
+/// neighbours: this function holds the words of the positions (a neighbour in a word not held has
+/// the block's bit, which no position changes), sets the positions there in the list's order, and
+/// writes the runs' ends inside those words between the block's entries outside them, which stay
+/// as they are. Each call moves the last index by the runs that it splits or joins, which its
+/// neighbours' bits give: +2 inside a run, 0 at a run's border, -2 where it fills a run of one bit
+/// between two runs of `val`, +1 or -1 at bit 0 or 65535. A call writes no entry past its new last
+/// index (its `memmove`s and stores end there), and the entries past it keep what they held: 65535
+/// at the old last index, and, where it joins runs, the end of the run before the last one at the
+/// index below it. So after the list an entry between the new last index and the highest one that
+/// the calls reached holds what the last call to drop it left there (`tail`), and the written
+/// entries reach that highest index. The cost is that of the list, the block's entries and the
+/// words held, whatever the list's order.
+fn gap_set_list(
+    gap: &mut Arr,
+    val: bool,
+    list: &[u16],
+    bits: &mut Block,
+    tail: &mut Vec<u16>,
+    runs: &mut Vec<u16>,
+) -> usize {
+    if list.is_empty() {
+        return 0;
+    }
+    let head = gap.v[0];
+    let e0 = usize::from(head >> 3);
+    let first_value = head & 1 != 0;
+    // the words of the positions: the words held
+    let mut words = [0u64; 16];
+    for &pos in list {
+        let w = usize::from(pos >> 6);
+        words[w >> 6] |= 1 << (w & 63);
+    }
+    let first_word = words
+        .iter()
+        .position(|&m| m != 0)
+        .map_or(0, |i| i << 6 | words[i].trailing_zeros() as usize);
+    let ends = &gap.v[1..=e0];
+    // their bits, from the block's runs (run `j`, from 0, ends at `ends[j]`; bit 0 is
+    // `first_value`, and each end flips the bits above it)
+    let mut j = ends.partition_point(|&e| u32::from(e) < (first_word as u32) << 6);
+    for (i, &m) in words.iter().enumerate() {
+        let mut m = m;
+        while m != 0 {
+            let w = i << 6 | m.trailing_zeros() as usize;
+            m &= m - 1;
+            let base = (w as u32) << 6;
+            while u32::from(ends[j]) < base {
+                j += 1;
+            }
+            let mut word = if first_value ^ (j & 1 != 0) {
+                u64::MAX
+            } else {
+                0
+            };
+            while u32::from(ends[j]) < base + 63 {
+                word ^= u64::MAX << (u32::from(ends[j]) - base + 1);
+                j += 1;
+            }
+            bits[w] = word;
+        }
+    }
+    // the last run: its first bit and its value
+    let mut start = if e0 == 1 {
+        0
+    } else {
+        u32::from(ends[e0 - 2]) + 1
+    };
+    let mut last_value = first_value ^ ((e0 - 1) & 1 != 0);
+    let (mut end, mut highest) = (e0, e0);
+    let v = u64::from(val);
+    // a bit of a word held, or the block's in the others
+    let held = |bits: &Block, q: u32| {
+        let w = (q >> 6) as usize;
+        if words[w >> 6] >> (w & 63) & 1 != 0 {
+            bits[w] >> (q & 63) & 1
+        } else {
+            u64::from(first_value ^ (ends.partition_point(|&e| u32::from(e) < q) & 1 != 0))
+        }
+    };
+    let mut done = 0;
+    while done < list.len() && end < (1 << 13) - 2 {
+        // the positions that cannot take the last index to 8190 (each moves it by 2 at most)
+        let to = list.len().min(done + ((1 << 13) - 1 - end) / 2);
+        for &pos in &list[done..to] {
+            let p = u32::from(pos);
+            let (w, b) = ((p >> 6) as usize, p & 63);
+            let word = bits[w];
+            // 1 where the bit is `val`
+            let is_val = word ^ v.wrapping_sub(1);
+            if is_val >> b & 1 != 0 {
+                continue;
+            }
+            // each neighbour of `val` joins a run (-1), each other one splits one (+1)
+            let grow = if b.wrapping_sub(1) < 62 {
+                let around = is_val >> (b - 1);
+                2 - 2 * ((around & 1) + (around >> 2 & 1)) as isize
+            } else {
+                let mut grow = 0;
+                if p > 0 {
+                    grow += if held(bits, p - 1) == v { -1 } else { 1 };
+                }
+                if p < 65535 {
+                    grow += if held(bits, p + 1) == v { -1 } else { 1 };
+                }
+                grow
+            };
+            bits[w] = word ^ 1 << b;
+            if grow < 0 {
+                highest = highest.max(end);
+                if tail.len() <= end {
+                    tail.resize(end + 1, 0);
+                }
+                tail[end] = 65535;
+                if grow == -2 {
+                    tail[end - 1] = (start - 1) as u16;
+                }
+            }
+            if p + 1 >= start {
+                if p >= start {
+                    // in the last run, whose value is not `val`
+                    if p < 65535 {
+                        start = p + 1;
+                    } else {
+                        last_value = val;
+                        start = if start < 65535 {
+                            65535
+                        } else {
+                            run_start(bits, &words, ends, first_value, 65534, val)
+                        };
+                    }
+                } else {
+                    // the last bit of the run before the last one, whose value is not `val`:
+                    // it joins the last run
+                    start = if p > 0 && held(bits, p - 1) == u64::from(last_value) {
+                        run_start(bits, &words, ends, first_value, p - 1, last_value)
+                    } else {
+                        p
+                    };
+                }
+            }
+            end = end.wrapping_add_signed(grow);
+        }
+        done = to;
+    }
+    let highest = highest.max(end);
+    // the new entries: the block's below the first word held stay; then, for each stretch of
+    // words held, the block's entries before it, the runs' ends in it, and the end at its last bit
+    // where the bit after it (the block's) differs; then the block's entries after the last
+    let below = ends.partition_point(|&e| u32::from(e) + 1 < (first_word as u32) << 6);
+    // at most 8191 entries (the last index stays below 8192)
+    runs.clear();
+    runs.reserve((e0 + 2 * list.len()).min(1 << 13));
+    let mut j = below;
+    let mut carry = 0;
+    let mut next = usize::MAX;
+    for (i, &m) in words.iter().enumerate() {
+        let mut m = m;
+        while m != 0 {
+            let w = i << 6 | m.trailing_zeros() as usize;
+            m &= m - 1;
+            if w != next {
+                if next != usize::MAX {
+                    close_stretch(runs, ends, first_value, &mut j, (next as u32) << 6, carry);
+                }
+                let from = (w as u32) << 6;
+                while u32::from(ends[j]) + 1 < from {
+                    runs.push(ends[j]);
+                    j += 1;
+                }
+                // the bit before the stretch: the block's (`ends[j] >= from - 1`), or bit 0's
+                carry = if from == 0 {
+                    bits[0] & 1
+                } else {
+                    u64::from(first_value ^ (j & 1 != 0))
+                };
+            }
+            let word = bits[w];
+            let mut changes = word ^ (word << 1 | carry);
+            carry = word >> 63;
+            while changes != 0 {
+                runs.push((((w as u32) << 6 | changes.trailing_zeros()) - 1) as u16);
+                changes &= changes - 1;
+            }
+            next = w + 1;
+        }
+    }
+    close_stretch(runs, ends, first_value, &mut j, (next as u32) << 6, carry);
+    runs.extend_from_slice(&ends[j..]);
+    debug_assert_eq!(below + runs.len(), end);
+    let first = if words[0] & 1 != 0 {
+        bits[0] & 1 != 0
+    } else {
+        first_value
+    };
+    gap.v[below + 1..=end].copy_from_slice(runs);
+    gap.v[0] = (head & 6) | u16::from(first) | (end as u16) << 3;
+    if highest > end {
+        gap.v[end + 1..=highest].copy_from_slice(&tail[end + 1..=highest]);
+    }
+    gap.hw = gap.hw.max(highest + 1);
+    done
+}
+
+/// `gap_set_list`'s end of a stretch of words held, before bit `after`: the block's entries up to
+/// that bit are passed, and the stretch's last bit (`carry`) is an end where the bit `after` (the
+/// block's) differs; at bit 65535 it is the last end.
+fn close_stretch(
+    runs: &mut Vec<u16>,
+    ends: &[u16],
+    first_value: bool,
+    j: &mut usize,
+    after: u32,
+    carry: u64,
+) {
+    while *j < ends.len() && u32::from(ends[*j]) < after {
+        *j += 1;
+    }
+    if after > 65535 {
+        runs.push(65535);
+    } else if carry != u64::from(first_value ^ (*j & 1 != 0)) {
+        runs.push((after - 1) as u16);
+    }
+}
+
+/// The first bit of the run of `value` that holds bit `x` (`value`) in `gap_set_list`'s bits: in
+/// `bits` for the words marked in `words`, the block's (`first_value`, `ends`) in the others.
+fn run_start(
+    bits: &Block,
+    words: &[u64; 16],
+    ends: &[u16],
+    first_value: bool,
+    x: u32,
+    value: bool,
+) -> u32 {
+    let other = if value { u64::MAX } else { 0 };
+    // the bits from `at` to `x` are `value`
+    let mut at = x;
+    while at > 0 {
+        let w = ((at - 1) >> 6) as usize;
+        if words[w >> 6] >> (w & 63) & 1 != 0 {
+            let differ = (bits[w] ^ other) & u64::MAX >> (63 - ((at - 1) & 63));
+            if differ != 0 {
+                return ((w as u32) << 6) + (64 - differ.leading_zeros());
+            }
+            at = (w as u32) << 6;
+            continue;
+        }
+        // the block's run that holds the bit below `at`
+        let j = ends.partition_point(|&e| u32::from(e) < at - 1);
+        if first_value ^ (j & 1 != 0) != value {
+            return at;
+        }
+        let from = if j == 0 {
+            0
+        } else {
+            u32::from(ends[j - 1]) + 1
+        };
+        // the run goes on into the next word marked below where it reaches it (or the bit above)
+        match marked_below(words, w) {
+            Some(u) if from <= (u as u32 + 1) << 6 => at = (u as u32 + 1) << 6,
+            _ => return from,
+        }
+    }
+    0
+}
+
+/// The highest word marked in `words` below word `w`.
+fn marked_below(words: &[u64; 16], w: usize) -> Option<usize> {
+    let (mut i, bit) = (w >> 6, w & 63);
+    let mut m = words[i] & ((1u64 << bit) - 1);
+    loop {
+        if m != 0 {
+            return Some(i << 6 | (63 - m.leading_zeros() as usize));
+        }
+        if i == 0 {
+            return None;
+        }
+        i -= 1;
+        m = words[i];
+    }
 }
 
 // BitMagic 8.0.1: bmfunc.h:3000-3034 (`gap_restore_mins`)
@@ -2531,6 +2823,10 @@ struct Scratch {
     ex1: Arr,
     wflags: Box<Block>,
     tmp: Box<Block>,
+    /// `gap_set_list`'s entries past the block's end and the block's new entries (each grown at
+    /// its use).
+    tail: Vec<u16>,
+    runs: Vec<u16>,
 }
 
 impl Default for Scratch {
@@ -2543,6 +2839,8 @@ impl Default for Scratch {
             ex1: Arr::new(EX_ENTRIES),
             wflags: Box::new([0; 1024]),
             tmp: Box::new([0; 1024]),
+            tail: Vec::new(),
+            runs: Vec::new(),
         }
     }
 }
@@ -3035,7 +3333,8 @@ impl Decoder<'_> {
     // case of `read_gap_block`), :4701-4739 (`decode_mins`, `decode_min_max`)
     /// Token 61. With exceptions, `gap_set_value` sets or clears the GAP block in
     /// `gap_temp_block_` bit by bit, as NCBI's builds do (`gap_set_value`: on a GAP block that is
-    /// not one they may differ), then the block is ORed in as the other GAP tokens.
+    /// not one they may differ), then the block is ORed in as the other GAP tokens. While the
+    /// block is one, a list's bits are set at once (`gap_set_list`, the same entries).
     fn gap_v3(&mut self, nb: u32) -> Result<(), Fail> {
         let build = self.build;
         let s = &mut self.s;
@@ -3102,7 +3401,14 @@ impl Decoder<'_> {
             for _ in 0..2 {
                 let (h3f, count) = bin.decode_array(&mut s.ex0, &mut s.wflags, 0)?;
                 let value = h3f & 0x10 != 0;
-                for &pos in &s.ex0.v[..count as usize] {
+                let list = &s.ex0.v[..count as usize];
+                // the list at once while the block is one, then bit by bit
+                let done = if valid {
+                    gap_set_list(gap, value, list, &mut s.tmp, &mut s.tail, &mut s.runs)
+                } else {
+                    0
+                };
+                for &pos in &list[done..] {
                     let end = gap_set_value(gap, value, pos, valid, build)?;
                     valid &= end < 1 << 13;
                 }

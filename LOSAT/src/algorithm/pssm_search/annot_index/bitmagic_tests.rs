@@ -550,6 +550,188 @@ fn bits_set_in_a_gap_block_that_is_one_need_one_search() {
 }
 
 #[test]
+fn a_list_set_at_once_leaves_what_the_calls_leave() {
+    // token 61's list on a GAP block that is one (`gap_set_list`, then bit by bit from where it
+    // stops) against `gap_set_value` bit by bit: the same written entries of `gap_temp_block_`,
+    // those past the block's end included, in any order of the list, with joins, splits, bits 0
+    // and 65535, repeats, and lists that take the block to the header's 13 bits
+    let mut state = 777u64;
+    let mut next = |n: u32| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((state >> 33) % u64::from(n)) as u32
+    };
+    let mut bits: Box<Block> = Box::new([0; 1024]);
+    let (mut tail, mut entries) = (Vec::new(), Vec::new());
+    // cases that stop at the 13-bit edge, and cases whose calls leave entries past the end
+    let (mut stops, mut left) = (0, 0);
+    for case in 0..2000 {
+        // a GAP block that is one: sorted distinct ends, 65535 last
+        let runs = match case % 4 {
+            0 => 1 + next(4),
+            1 => 1 + next(60),
+            2 => 1 + next(600),
+            _ => 1 + next(3000),
+        } as usize;
+        let mut ends: Vec<u16> = (0..runs - 1).map(|_| next(65535) as u16).collect();
+        if case % 5 == 0 {
+            // runs of one bit, which a position fills to join the runs around it
+            let ones: Vec<u16> = ends
+                .iter()
+                .map(|&e| e.saturating_add(1).min(65534))
+                .collect();
+            ends.extend(ones);
+        }
+        ends.sort_unstable();
+        ends.dedup();
+        ends.push(65535);
+        let mut start = Arr::new(GAP_ENTRIES);
+        start.v[0] = (ends.len() as u16) << 3 | next(2) as u16;
+        start.v[1..=ends.len()].copy_from_slice(&ends);
+        // entries left past the block by earlier tokens
+        let stale = next(40) as usize;
+        for k in 0..stale {
+            start.v[ends.len() + 1 + k] = next(65536) as u16;
+        }
+        start.hw = ends.len() + 1 + stale;
+        let val = next(2) == 1;
+        let count = match if case % 7 == 0 { 3 } else { next(5) } {
+            0 => next(4),
+            1 => next(100),
+            2 => next(1000),
+            3 => 4000 + next(300),
+            _ => next(6000),
+        } as usize;
+        let near: Vec<u16> = ends.clone();
+        let centres: Vec<u32> = (0..1 + next(6)).map(|_| next(65536)).collect();
+        let list: Vec<u16> = (0..count)
+            .map(|k| match case % 7 {
+                // isolated bits in order, toward the 13-bit edge
+                0 => (2 * k + 1).min(65535) as u16,
+                // bits next to the block's ends: joins and borders
+                1 => {
+                    let e = near[next(near.len() as u32) as usize];
+                    e.wrapping_add(next(3) as u16).wrapping_sub(1)
+                }
+                2 => [0, 1, 2, 65533, 65534, 65535][next(6) as usize],
+                // bits around a few places, apart: stretches of words between words not read
+                3 => (centres[next(centres.len() as u32) as usize] + next(130)).min(65535) as u16,
+                _ => next(65536) as u16,
+            })
+            .collect();
+        let mut list = list;
+        if case % 3 == 0 {
+            list.sort_unstable();
+        }
+        let mut by_bit = start.clone();
+        let mut valid = true;
+        let mut want = Ok(());
+        for &pos in &list {
+            match gap_set_value(&mut by_bit, val, pos, valid, None) {
+                Ok(end) => valid &= end < 1 << 13,
+                Err(fail) => {
+                    want = Err(fail);
+                    break;
+                }
+            }
+        }
+        let mut at_once = start.clone();
+        let done = gap_set_list(&mut at_once, val, &list, &mut bits, &mut tail, &mut entries);
+        let mut valid = true;
+        let mut got = Ok(());
+        for &pos in &list[done..] {
+            match gap_set_value(&mut at_once, val, pos, valid, None) {
+                Ok(end) => valid &= end < 1 << 13,
+                Err(fail) => {
+                    got = Err(fail);
+                    break;
+                }
+            }
+        }
+        assert_eq!(got, want, "case {case}");
+        assert_eq!(at_once.hw, by_bit.hw, "case {case}");
+        assert!(at_once.written() == by_bit.written(), "case {case}");
+        stops += usize::from(done < list.len());
+        let end = usize::from(by_bit.v[0] >> 3);
+        left += usize::from(valid && by_bit.written()[end + 1..] != start.v[end + 1..by_bit.hw]);
+    }
+    assert!(stops > 20 && left > 200, "{stops} {left}");
+}
+
+#[test]
+fn a_run_start_reads_the_block_where_no_word_is_held() {
+    // `run_start` against the bits read one by one: those of the words held in `bits`, the
+    // block's elsewhere (the held words hold anything; the others hold garbage that it must not
+    // read); runs that cross words held and words not held, and start at a word's first bit
+    let mut state = 4242u64;
+    let mut next = |n: u32| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((state >> 33) % u64::from(n)) as u32
+    };
+    let mut bits: Box<Block> = Box::new([0; 1024]);
+    for case in 0..20000 {
+        let mut ends: Vec<u16> = (0..next(12))
+            .map(|_| match next(3) {
+                0 => 64 * (1 + next(31)) - 1,
+                1 => 64 * next(32),
+                _ => next(2048),
+            } as u16)
+            .collect();
+        ends.sort_unstable();
+        ends.dedup();
+        ends.push(65535);
+        let first_value = next(2) == 1;
+        let block_bit = |q: u32| {
+            let j = ends.partition_point(|&e| u32::from(e) < q);
+            first_value ^ (j & 1 != 0)
+        };
+        // bit `x`, in a word held or not
+        let x = next(33 * 64);
+        let (xw, x_held) = ((x >> 6) as usize, next(2) == 0);
+        let value = if x_held { next(2) == 1 } else { block_bit(x) };
+        let mut words = [0u64; 16];
+        for w in 0..33 {
+            let word = if next(3) == 0 {
+                words[0] |= 1 << w;
+                match next(3) {
+                    0 => 0u64.wrapping_sub(u64::from(value)),
+                    1 => (0..64).fold(0, |m, b| m | u64::from(block_bit(w << 6 | b)) << b),
+                    _ => u64::from(next(1 << 31)) << 33 ^ u64::from(next(1 << 31)) << 1,
+                }
+            } else {
+                u64::from(next(1 << 31)) << 32 ^ u64::from(next(1 << 31))
+            };
+            bits[w as usize] = word;
+        }
+        if x_held {
+            words[0] |= 1 << xw;
+            bits[xw] = bits[xw] & !(1 << (x & 63)) | u64::from(value) << (x & 63);
+        } else {
+            words[0] &= !(1 << xw);
+        }
+        let view = |q: u32| {
+            if words[0] >> (q >> 6) & 1 != 0 {
+                bits[(q >> 6) as usize] >> (q & 63) & 1 != 0
+            } else {
+                block_bit(q)
+            }
+        };
+        let mut want = x;
+        while want > 0 && view(want - 1) == value {
+            want -= 1;
+        }
+        assert_eq!(
+            run_start(&bits, &words, &ends, first_value, x, value),
+            want,
+            "case {case}"
+        );
+    }
+}
+
+#[test]
 fn long_gaps_are_converted_to_bits() {
     // token 14 with 1300 entries (above 1276): converted, so only its runs of 1s count
     let mut ends = vec![10u16, 20, 5, 7];

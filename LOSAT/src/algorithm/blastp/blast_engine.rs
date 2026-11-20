@@ -11760,7 +11760,10 @@ fn run_call(
             // ```
             // The e-value sort below reads the best e-value and the first HSP of each list,
             // which `-max_hsps` keeps, so it follows the cut as NCBI's does.
-            if args.max_hsps_per_subject > 0 || args.query_cov_hsp_perc > 0.0 {
+            if args.max_hsps_per_subject > 0
+                || args.query_cov_hsp_perc > 0.0
+                || args.subject_besthit
+            {
                 for hsp_list in hit_list
                     .hsplist_array
                     .iter_mut()
@@ -11775,6 +11778,21 @@ fn run_call(
                         )
                     }) {
                         update_best_evalue(hsp_list);
+                    }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
+                    // `-subject_besthit` (one context per query; the best e-value stays).
+                    if args.subject_besthit {
+                        crate::core::blast_hits::subject_besthit(
+                            &mut hsp_list.hsps,
+                            false,
+                            |hsp| crate::core::blast_hits::BestHitExtent {
+                                context: 0,
+                                query_frame: 0,
+                                offset: hsp.q_start as i64 - 1,
+                                end: hsp.q_end as i64,
+                                query_length: 0,
+                            },
+                        );
                     }
                 }
                 if args.query_cov_hsp_perc > 0.0 {
@@ -12871,6 +12889,7 @@ mod tests {
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
             culling_limit: None,
+            subject_besthit: false,
             ungapped: false,
             xdrop_ungap: None,
             xdrop_gap: None,

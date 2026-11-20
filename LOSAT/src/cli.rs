@@ -923,7 +923,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "negative_gilist",
     "negative_ipglist",
     "remote",
-    "subject_besthit",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -1480,7 +1479,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "subject_besthit",
     "use_sw_tback",
 ];
 
@@ -1511,7 +1509,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "subject_besthit",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {

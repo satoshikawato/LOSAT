@@ -502,6 +502,8 @@ pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bo
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::Sam
+                    | ReportFormat::ArchiveFormat
+                    | ReportFormat::Xml
             )
         {
             bail!(

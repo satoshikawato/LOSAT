@@ -1327,8 +1327,8 @@ fn pairwise_hits(
                     hsp.s_start,
                     hsp.s_end,
                     &payload.edit_script,
-                    &report_masks,
                 )?;
+                let (qseq, masks) = query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end)?;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
                 // ```c++
                 // void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
@@ -1475,7 +1475,7 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
-                    masks: None,
+                    masks,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
@@ -1666,6 +1666,51 @@ fn write_pairwise(
     Ok(())
 }
 
+/// The masks of the outfmt 0 query row `row` of an HSP (`PairwiseHit::masks`), which holds the
+/// searched letters `q_start..q_end` (0-based, `q_end` excluded): the query's masks
+/// `report_masks` (half-open in the searched letters, frame 0: the list `pairwise_hits` hands to
+/// the query-anchored sections, which show the same masks) at the row's columns
+/// (`HspMasks::set_row`, `x_FillLocList`), which `x_OutputSeq` puts in lower case when it writes
+/// the row; and the row with them in lower case (`HspMasks::lower_row`), as the hit records of
+/// the library API and the Web adapter show it. `None` when no mask meets the row. The subject
+/// row has no masks: it is a translation (width 3, a frame of ±1 to 3), and the subjects' masks
+/// have no frame (`anchored`), so NCBI shows none of them there.
+fn query_row_masks(
+    row: String,
+    report_masks: &[(usize, usize)],
+    q_start: i32,
+    q_end: i32,
+) -> Result<(String, Option<Box<crate::report::query_anchored::HspMasks>>)> {
+    if report_masks.is_empty() {
+        return Ok((row, None));
+    }
+    let range = (
+        u32::try_from(q_start)?,
+        u32::try_from(q_end)?.saturating_sub(1),
+    );
+    let mut masks = crate::report::query_anchored::HspMasks::default();
+    let letters = row.as_bytes();
+    masks.set_row(
+        0,
+        0,
+        letters,
+        |column| letters[column] != b'-',
+        range,
+        true,
+        1,
+        report_masks
+            .iter()
+            .filter(|&&(left, right)| left < right)
+            .map(|&(left, right)| (left as u32, right as u32 - 1, 0)),
+    );
+    if masks.is_empty() {
+        return Ok((row, None));
+    }
+    let mut row = row.into_bytes();
+    masks.lower_row(0, &mut row);
+    Ok((String::from_utf8(row)?, Some(Box::new(masks))))
+}
+
 // NCBI c++/src/objtools/align_format/tabular.cpp:971-1021;
 // c++/src/objtools/align_format/showalign.cpp:2122-2149:
 // alnVec->GetWholeAlnSeqString(0,m_QuerySeq);
@@ -1698,7 +1743,6 @@ fn aligned_sequences(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
-    report_masks: &[(usize, usize)],
 ) -> Result<(String, String)> {
     ensure!(!script.is_empty(), "TBLASTN report HSP has no edit script");
     let (translated, _, base) = target.get(frame, s_start, s_end)?;
@@ -1763,8 +1807,6 @@ fn aligned_sequences(
                     let &sa = translated
                         .get(s)
                         .context("TBLASTN report subject offset overflow")?;
-                    // NCBI blast_format.cpp:1541-1557 renders filter locations
-                    // as lowercase in the pairwise query sequence.
                     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
                     // ```c++
                     // inline unsigned char s_ASCII_MustBeLowerToUpper(unsigned char c)
@@ -1780,21 +1822,9 @@ fn aligned_sequences(
                     //             OpenMask();
                     //             ++m_CurrentPos;
                     // ```
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
-                    // ```c++
-                    //                     } else if (m_SeqLocChar==eLowerCase){
-                    //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-                    // ```
-                    let qa = qa.to_ascii_uppercase();
-                    let displayed = if report_masks
-                        .iter()
-                        .any(|&(left, right)| left <= q && q < right)
-                    {
-                        qa.to_ascii_lowercase()
-                    } else {
-                        qa
-                    };
-                    query_string.push(char::from(displayed));
+                    // The Bioseq's letters, upper case; the masks' lower case is
+                    // `x_OutputSeq`'s (`query_row_masks`).
+                    query_string.push(char::from(qa.to_ascii_uppercase()));
                     ensure!(
                         NCBISTDAA_TO_AA.get(sa as usize).is_some(),
                         "invalid TBLASTN subject amino acid"
@@ -1819,36 +1849,8 @@ fn aligned_sequences(
                     let &qa = query
                         .get(q)
                         .context("TBLASTN report query offset overflow")?;
-                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
-                    // ```c++
-                    // inline unsigned char s_ASCII_MustBeLowerToUpper(unsigned char c)
-                    // {
-                    //     return c + ('A' - 'a');
-                    // }
-                    // ```
-                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:945-949
-                    // ```c++
-                    //         case eCharType_MaskedNonGap:
-                    //             CloseGap(pos == 0);
-                    //             m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
-                    //             OpenMask();
-                    //             ++m_CurrentPos;
-                    // ```
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
-                    // ```c++
-                    //                     } else if (m_SeqLocChar==eLowerCase){
-                    //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-                    // ```
-                    let qa = qa.to_ascii_uppercase();
-                    let displayed = if report_masks
-                        .iter()
-                        .any(|&(left, right)| left <= q && q < right)
-                    {
-                        qa.to_ascii_lowercase()
-                    } else {
-                        qa
-                    };
-                    query_string.push(char::from(displayed));
+                    // The Bioseq's letters (`GapEditOp::Sub`).
+                    query_string.push(char::from(qa.to_ascii_uppercase()));
                     subject_string.push('-');
                     q += 1;
                 }
@@ -1874,7 +1876,6 @@ pub(super) fn aligned_sequences_into(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
-    report_masks: &[(usize, usize)],
     query_string: &mut String,
     subject_string: &mut String,
 ) -> Result<()> {
@@ -1889,7 +1890,6 @@ pub(super) fn aligned_sequences_into(
         s_start,
         s_end,
         script,
-        report_masks,
     )?;
     Ok(())
 }

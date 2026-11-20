@@ -210,3 +210,23 @@ test('a press on the Search tab while another run is shown is a click: the short
     Math.round(tab / 2),
   );
 });
+
+// Review r2 of W-2, M1 (2026-11-21): a press whose release the page never saw (a right press, whose release a context
+// menu takes) held until the next press: the Results tab, chosen with the keyboard after it, kept the taller Search
+// form's height below it. Only a press of the main button holds now, and a lost release ends it at the next move.
+test('a right press whose release never comes leaves the page its height', async ({ page }) => {
+  await openSearch(page);
+  const main = page.locator('main');
+  const height = async () => (await main.boundingBox())!.height;
+  await page.getByTestId('tab-results').click();
+  const results = await height();
+  await page.getByTestId('tab-search').click();
+  expect(await height(), 'the Search form is taller than the Results tab with no run').toBeGreaterThan(results + 100);
+  const form = (await page.getByTestId('search-panel').boundingBox())!;
+  await page.mouse.move(form.x + form.width / 2, form.y + form.height / 2);
+  await page.mouse.down({ button: 'right' });
+  // The release does not come; the keyboard goes on.
+  await page.getByTestId('tab-search').focus();
+  await press(page, 'ArrowRight', 'tab-results');
+  await expect.poll(height).toBeCloseTo(results, 0);
+});

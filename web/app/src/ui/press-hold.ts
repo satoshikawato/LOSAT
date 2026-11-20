@@ -4,18 +4,21 @@
 // its status, another run shown, a list closed by the press), the browser moved the page up by as
 // much, and the release came on another control: the press was no click. So from a press until its
 // click, the element (the page's main area) keeps at least the height that the page had at the
-// press; a press never makes it shorter. A press that ends without a click (cancelled by the
-// browser, or released elsewhere and followed by a move or a key) ends the hold as well.
+// press; a press never makes it shorter.
 //
 // What the page says above its tabs is not in the main area: when it went (or came) between a press
 // and its release, everything below it moved by as much, with the same end (W-3, 2026-11-21: a mode
-// pressed as LOSAT became available again was not chosen). So the page also learns when a press
-// starts and ends (`pressed`), and keeps what it says there as it was until then (AppView).
+// pressed as LOSAT was asked again was not chosen). So the page also learns when a press starts and
+// ends (`pressed`), and keeps what it says there as it was until then (AppView).
 //
-// The hold ends on events: as the click's dispatch starts (its target is chosen by then, and what the
-// click itself does is not held), or when the press ends without one. A timer only ends a hold whose
-// click never came (a touch that drags, a long touch): a tap's click may come in a later task than
-// its release.
+// Only a press of the main button (a mouse's left one, a touch, a pen's tip) can be a click, so only
+// it holds (a right press's release may go to its context menu). The hold ends on events: as the click's dispatch starts (its target is chosen by then, and
+// what the click itself does is not held), or when the page learns that the press ended without one:
+// the browser cancels it, or the pointer is released and then moves or a key is pressed. A release
+// that the page never sees (another window taken during the press) ends it as well: the page sees the
+// pointer move with no button down, or the window lose the focus (review r2 of W-2, M1: until then,
+// such a press held until the next one). A timer only ends a hold whose click never came after its
+// release (a touch that drags, a long touch): a tap's click may come in a later task than its release.
 
 /** How long after its release a press whose click has not come still holds. */
 const UNCLICKED_MS = 1000;
@@ -45,6 +48,7 @@ export function holdWhilePressed(
     pressed(false);
   };
   const onDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return;
     // A primary pointer starts a new press: a pointer whose release never came is forgotten.
     if (event.isPrimary) down.clear();
     down.add(event.pointerId);
@@ -78,12 +82,19 @@ export function holdWhilePressed(
   const onClick = (): void => {
     if (down.size === 0) release();
   };
-  /** A press released without a click: the pointer moves on with no button down, or a key is pressed. */
+  /** A press released without a click (also a release that the page did not see): a move with no button down, or a key. */
   const onMove = (event: PointerEvent): void => {
-    if (pressing && down.size === 0 && event.buttons === 0) release();
+    if (event.buttons === 0) down.delete(event.pointerId);
+    if (pressing && down.size === 0) release();
   };
   const onKey = (): void => {
     if (down.size === 0) release();
+  };
+  /** The window loses the focus: the page no longer sees the pointer, nor its release. */
+  const onBlur = (event: Event): void => {
+    if (event.target !== view) return;
+    down.clear();
+    release();
   };
   const capture = { capture: true, passive: true };
   target.addEventListener('pointerdown', onDown, capture);
@@ -92,6 +103,7 @@ export function holdWhilePressed(
   target.addEventListener('pointermove', onMove, capture);
   target.addEventListener('keydown', onKey, capture);
   view?.addEventListener('click', onClick, capture);
+  view?.addEventListener('blur', onBlur, { passive: true });
   return () => {
     target.removeEventListener('pointerdown', onDown, capture);
     target.removeEventListener('pointerup', onUp, capture);
@@ -99,6 +111,7 @@ export function holdWhilePressed(
     target.removeEventListener('pointermove', onMove, capture);
     target.removeEventListener('keydown', onKey, capture);
     view?.removeEventListener('click', onClick, capture);
+    view?.removeEventListener('blur', onBlur);
     down.clear();
     release();
   };

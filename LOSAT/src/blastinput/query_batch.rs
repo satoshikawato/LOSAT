@@ -198,13 +198,6 @@ pub(crate) fn outfmts_have_xml<'a>(outfmts: impl IntoIterator<Item = &'a str>) -
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:157-163 (quoted at
 // `seq_range::next_ranged_batch_end`)
-// ```c++
-//         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-//
-//         if (loc->IsInt()) {
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-// ```
 /// NCBI's reader's count of the query records into its batches under `-parse_deflines`
 /// (`CBlastInput::GetNextSeqBatch`): each record by the length of its id in the scope, where a
 /// repeated id (`Meets::Repeat`) finds its first record, so that the repeat counts the first
@@ -346,11 +339,6 @@ pub(crate) struct QueryScope {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
 // (`CBlastInput::GetNextSeqBatch`, quoted at `seq_range::next_ranged_batch_end`)
-// ```c++
-//         if (loc->IsInt()) {
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-// ```
 /// How the ids of a query record meet the ids of the records of its scope before it
 /// (`QueryScope::meets`; line WQA D10 rounds 5 and 5r, 2026-11-20).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -740,29 +728,8 @@ impl ScopeRefusal {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-276 (each program's batch loop)
-// ```c++
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-// ...
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (`BLAST_GapAlignSetUp`)
-// ```c
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-// ```
 /// The error of a query batch that LOSAT refuses for two queries of one scope with one id
 /// (`refusal`), in NCBI's order of the batch (line WQA D10 round 5, 2026-11-20; review 3 of D10,
 /// M1). The caller has written the reports of the batches before and the batch's reader messages,
@@ -1840,6 +1807,42 @@ mod tests {
         // Without -parse_deflines each record counts its own letters.
         let batch = BatchCount::next_batch(None, &|_| None, &lengths, &none, 0, 10);
         assert_eq!(batch, (3, true));
+    }
+
+    /// What `BatchCount`'s scope holds beside `QueryScopes`' with the run's scope (`-subject`,
+    /// outfmt 5), where both keep every query's keys (review 5 of line WQA D10, L2): run with
+    /// `--ignored --nocapture`, it prints the entries and the table bytes of each for 1,000,000
+    /// queries `>qN` of 2 letters.
+    #[test]
+    #[ignore]
+    fn batch_count_scope_of_a_million_queries() {
+        use super::{BatchCount, QueryScopeSpan, QueryScopes};
+        let mut text = Vec::new();
+        for query in 0..1_000_000 {
+            text.extend_from_slice(format!(">q{query}\nMK\n").as_bytes());
+        }
+        let records = parsed_records(&text);
+        let mut count = BatchCount::new(QueryScopeSpan::Run, "BLASTP");
+        for record in &records {
+            count.count(record.believed(), record.seq().len(), false);
+        }
+        let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
+        scopes.add_batch(&records, 0).expect("no repeated id");
+        // A hashbrown table holds its capacity's entries and a control byte each.
+        let bytes = |scope: &super::QueryScope| {
+            scope.keys.capacity() * (8 + 1) + scope.first_records.capacity() * (24 + 1)
+        };
+        for (name, scope) in [
+            ("BatchCount", &count.scope),
+            ("QueryScopes", &scopes.scopes[0]),
+        ] {
+            println!(
+                "{name}: keys {} first_records {} table bytes {}",
+                scope.keys.len(),
+                scope.first_records.len(),
+                bytes(scope)
+            );
+        }
     }
 
     #[test]

@@ -169,4 +169,15 @@ write('avgmid_bn.fna', [('q1', 'N' * 90), ('q1', rand_nt5(60)), ('q2', rand_nt5(
 # set up in the skipped record's letters (NCBI: BLAST engine error, exit 3), so LOSAT refuses it.
 write('skip_bp.faa', [('q1', g2_aa[100:110]), ('q2', g2_aa[:60]), ('q1', g2_aa[60:120]), bad])
 write('skip_bn.fna', [('q1', g2_nt[300:310]), ('q1', g2_nt[:60])])
+# Rows that fail where a cut of the batches loses the skipped record's place (line WQA D10 round 7, review 5 of D10, M1;
+# rows .skipcount.*): a q1 that -query_loc skips counts 0 but joins the scope, so with BATCH_SIZE=220 (blastn, blastx,
+# tblastx; -query_loc 40-100) skipcount_bn counts 0 + 180 + 30 and the batch reads the refused line (NCBI's reader
+# error), where a cut that counted the skipped q1's own 30 nucleotides would end the batch at the second q1 (240) and
+# refuse it; tblastn takes skip_bp.faa with BATCH_SIZE=75 (0 + 60 + 10, against 80). And rows that fail where the scope
+# is not emptied after a batch against a database (review 5, M2; rows .h4.db.*): q1 of 60 letters, q2 of 40 (the first
+# batch, BATCH_SIZE=100; 180, 120 and 300 nucleotides), then q1 of 10 and q1 of 60: in the emptied scope the second
+# batch counts 10 + 10 and reads the refused line; a scope kept from the first batch would count 60 + 60 and refuse.
+write('skipcount_bn.fna', [('q1', g2_nt[400:430]), ('q2', g2_nt[:180]), ('q1', g2_nt[180:360]), bad])
+write('h4_bp.faa', [('q1', g2_aa[:60]), ('q2', g2_aa[60:100]), ('q1', g2_aa[100:110]), ('q1', g2_aa[110:170]), bad])
+write('h4_bn.fna', [('q1', g2_nt[:180]), ('q2', g2_nt[180:300]), ('q1', g2_nt[300:330]), ('q1', g2_nt[330:510]), bad])
 print(sorted(os.listdir(out)))

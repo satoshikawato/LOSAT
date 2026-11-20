@@ -240,13 +240,6 @@ fn batches_with(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216-222
-// ```c++
-//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-//         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
-// ...
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-// ```
 // With `-parse_deflines` (the batches' Seq-id scopes, `query_batch::QueryScopes`) and with
 // `-query_loc` (a cut of each record, the batch counting the whole record) the run ends alike
 // (review L3, 2026-11-20).
@@ -670,15 +663,43 @@ fn run_batches_ends_with_the_reader_error_in_its_batch() {
     assert!(batches[0].is_err());
 }
 
+// `run_batches` cuts its batches as NCBI's reader counts the records (`batches::batch_count`,
+// `Batches::next_range`; review 5 of line WQA D10, L1): with `-parse_deflines` and `-subject`, a
+// repeated id counts its first record's letters. BLASTP's batches hold 10000 letters: a `q1` of
+// 9950 and a second `q1` of 10 (g2a's form) fill the first batch, which LOSAT refuses; a `q1` of
+// 100 and a second `q1` of 9950 (g2b's) count 200, so the batch reads the line that the reader
+// refuses, the reader's error. Counted by their own letters, the two would swap.
+#[test]
+fn run_batches_counts_a_repeated_id_by_its_first_records_letters() {
+    let protein = |length, seed| letters(b"ACDEFGHIKLMNPQRSTVWY", length, seed);
+    let named = |name: &str, sequence: &[u8]| fasta_named(&[name.to_string()], sequence);
+    let subject = named("s1", &protein(200, 21));
+    let options = ["-parse_deflines"];
+    for (first, second, refused) in [(9950, 10, true), (100, 9950, false)] {
+        let mut text = named("q1", &protein(first, 22));
+        text.extend_from_slice(&named("q1", &protein(second, 23)));
+        let text = with_bad_record(text);
+        let name = format!("q1 of {first}, q1 of {second}");
+        let (_, cli_error) = command_line_with(Program::Blastp, &text, &subject, &options, "6");
+        let cli_error = cli_error.expect("an error");
+        if refused {
+            assert!(
+                cli_error.contains("two query records have the Seq-id lcl|q1"),
+                "{name}: {cli_error}"
+            );
+        } else {
+            assert!(cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
+        }
+        let (rows, error) = batches_with(Program::Blastp, &text, &subject, &options);
+        assert_eq!(
+            (rows, error.as_deref()),
+            (0, Some(cli_error.as_str())),
+            "{name}"
+        );
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-// ```c++
-// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-//     : m_QueryVector(& queries)
-// {
-//     if (queries.Empty()) {
-//         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-//     }
-// ```
 // A query of blank and comment lines only is not NCBI's `Query is Empty!` (white space only): its
 // first batch has no query, which every program refuses.
 #[test]

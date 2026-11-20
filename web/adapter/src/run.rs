@@ -2401,21 +2401,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
-    // ```c++
-    //     while (size_read < GetBatchSize()) {
-    //
-    //         if (End())
-    //             break;
-    //
-    //         CRef<CBlastSearchQuery> q;
-    //         try { q.Reset(m_Source->GetNextSequence(scope)); }
-    //         catch (const CObjReaderParseException& e) {
-    //             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-    //                 break;
-    //             }
-    //             throw;
-    //         }
-    // ```
     // A reader's error on a query record ends the run in the query batch that reads the record,
     // after the batches before, as the CLI's batches do (line WQA's D10, 2026-11-19; before,
     // `register` refused the input and `register_inputs` failed before the run, with the reader's

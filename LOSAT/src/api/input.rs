@@ -251,10 +251,6 @@ pub fn read_inputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-// ```
 /// Reads the query and subject FASTA bytes of `search` as [`read_inputs`] does, and keeps how the
 /// reading of the query ended ([`QueryEnd`]): the command line reads its queries one batch at a
 /// time, so a query record that its reader cannot read ends the run in the batch that reads it,
@@ -302,21 +298,6 @@ impl InputRecords {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
-// ```c++
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-// ```
 /// How the reading of a query input ended after its records ([`InputRecords::query_end`]): what
 /// the command line's query batches meet after the last record read. A search meets it in the
 /// batch being read when the records run out before the batch reaches its size, and else in a

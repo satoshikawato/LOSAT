@@ -1541,15 +1541,6 @@ fn seq_id_line(line: &[u8], protein: bool) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
-// ```c++
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-// ```
 /// The records of a scan, and the reader's own error that ended them (`CheckDataLine`): the
 /// command line's query batches search the records before it and end with the error in the batch
 /// that reads the record (line WQA's D10, 2026-11-19).

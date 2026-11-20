@@ -453,8 +453,11 @@ fn reader_batches(
         records_read += 1;
         let interval = query_range.map(|range| record_interval(&range, length));
         let skipped_now = matches!(interval, Some(RecordInterval::PastEnd));
-        let counted = match count.as_mut() {
+        // A skipped record counts 0 and joins the scope (`BatchCount::count`), as in the stream
+        // reader (`input::emit_fasta_batch`).
+        letters += match count.as_mut() {
             Some(count) => count.count(record.believed(), length, skipped_now),
+            None if skipped_now => 0,
             None => length,
         };
         match interval {
@@ -474,7 +477,6 @@ fn reader_batches(
                 continue;
             }
         }
-        letters += counted;
         batch.push(query);
         if letters >= batch_size {
             super::input::attach_skipped(&mut batch, &mut skipped);

@@ -171,6 +171,10 @@ pub(crate) struct EvenGapLinkParams {
     /// `s_RevCompareHSPsTbx` and at the end by `s_FwdCompareHSPsTransl` (`even_gap_link_hsps`
     /// says why NCBI's `s_RevCompareHSPsTransl` before it changes nothing).
     pub(crate) query_translated: bool,
+    /// `Blast_SubjectIsTranslated` (TBLASTN's ungapped search): the subject length passed to the
+    /// linking is in nucleotides, and each query frame divides it and the context's length
+    /// adjustment by `CODON_LENGTH` (`link_frame`).
+    pub(crate) subject_translated: bool,
 }
 
 impl EvenGapLinkParams {
@@ -192,6 +196,7 @@ impl EvenGapLinkParams {
             cutoff_small_gap: 0,
             cutoff_big_gap: 0,
             query_translated: false,
+            subject_translated: false,
         }
     }
 
@@ -206,6 +211,16 @@ impl EvenGapLinkParams {
             cutoff_small_gap: cutoffs.cutoff_small_gap,
             cutoff_big_gap: cutoffs.cutoff_big_gap,
             query_translated,
+            subject_translated: false,
+        }
+    }
+
+    /// The parameters of TBLASTN's ungapped linking with one subject: `ungapped` with a protein
+    /// query and a translated subject.
+    pub(crate) fn ungapped_translated_subject(cutoffs: LinkCutoffs) -> Self {
+        Self {
+            subject_translated: true,
+            ..Self::ungapped(cutoffs, false)
         }
     }
 
@@ -368,14 +383,15 @@ pub(crate) fn calculate_link_hsp_cutoffs(
     }
 }
 
-/// One HSP as the linking reads it (`BlastHSP`): its context, its query and subject ranges
-/// (0-based, the end exclusive, `query.offset`/`query.end`, in the context's letters) and its raw
-/// score. The subject is not translated, so its frame is 0 for every HSP (a translated subject,
-/// TBLASTN's ungapped search, would add `subject.frame`: the sign splits the query frames and
-/// `s_RevCompareHSPsTbn` orders by it after the context).
+/// One HSP as the linking reads it (`BlastHSP`): its context, its subject frame
+/// (`subject.frame`: 0 for an untranslated subject; TBLASTN's ungapped search gives the frame of
+/// the translated subject, whose sign splits the query frames and orders the HSPs after the
+/// context in `s_RevCompareHSPsTbn`), its query and subject ranges (0-based, the end exclusive,
+/// `query.offset`/`query.end`, in the context's letters) and its raw score.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LinkHsp {
     pub(crate) context: usize,
+    pub(crate) subject_frame: i8,
     pub(crate) query_offset: i32,
     pub(crate) query_end: i32,
     pub(crate) subject_offset: i32,
@@ -540,12 +556,15 @@ struct Helper {
 // 		return -1;
 // 	return 0;
 // ```
-/// `s_RevCompareHSPsTbn` (the subject frames are all 0), with the query frame (`frame1`, `frame2`:
-/// `context / strand_factor`) in place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375)
-/// for a translated query, whose `NUM_FRAMES / 2` is the `strand_factor` 3.
+/// `s_RevCompareHSPsTbn`, with the query frame (`frame1`, `frame2`: `context / strand_factor`) in
+/// place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375) for a translated query, whose
+/// `NUM_FRAMES / 2` is the `strand_factor` 3 (its subjects are not translated, so their frames
+/// are 0 and the sign test below changes nothing). Of two frames of different signs the larger
+/// frame has the larger sign, so the test is an ascending comparison of the signs.
 fn rev_compare_tbn(h1: &LinkHsp, frame1: usize, h2: &LinkHsp, frame2: usize) -> Ordering {
     frame1
         .cmp(&frame2)
+        .then(h1.subject_frame.signum().cmp(&h2.subject_frame.signum()))
         .then(h2.query_offset.cmp(&h1.query_offset))
         .then(h2.query_end.cmp(&h1.query_end))
         .then(h2.subject_offset.cmp(&h1.subject_offset))
@@ -645,9 +664,10 @@ pub(crate) fn link_in_place<T>(
 /// Links the HSPs of one subject (`s_BlastEvenGapLinkHSPs` for an untranslated subject) and
 /// gives `emit` the list NCBI builds, in its order: every HSP once, with its linked set's e-value
 /// and size. `contexts` gives the values of a context (`LinkHsp::context`); `subject_length` is the
-/// subject's length in letters. `contexts` is a trait object so that one copy of the linking serves
-/// every caller (a generic one was copied into each, which made the binary 35 KB larger and moved
-/// the default searches' code pages).
+/// subject's length in letters (in nucleotides for a translated subject,
+/// `EvenGapLinkParams::subject_translated`). `contexts` is a trait object so that one copy of the
+/// linking serves every caller (a generic one was copied into each, which made the binary 35 KB
+/// larger and moved the default searches' code pages).
 ///
 /// NCBI's `qsort` calls are stable sorts here (the comparators are partial: HSPs with the same
 /// start keep the order of the previous sort), as TBLASTX's port sorts them.
@@ -755,7 +775,11 @@ pub(crate) fn even_gap_link_hsps(
         frames.last_mut().expect("one frame").1 += 1;
         nodes[slot].prev = Link::from((index > 0).then_some(slot - 1));
         nodes[slot].next = Link::from((index + 1 < total_number_of_hsps).then_some(slot + 1));
-        if index > 0 && sorted[index].frame != sorted[index - 1].frame {
+        if index > 0
+            && (sorted[index].frame != sorted[index - 1].frame
+                || sorted[index].hsp.subject_frame.signum()
+                    != sorted[index - 1].hsp.subject_frame.signum())
+        {
             frames.last_mut().expect("one frame").1 -= 1;
             frames.push((slot, 1));
             nodes[slot - 1].next = Link::NONE;
@@ -813,6 +837,7 @@ pub(crate) fn even_gap_link_hsps(
                 gap_decay_rate,
                 cutoff,
                 ignore_small_gaps,
+                subject_translated: params.subject_translated,
             },
         );
     }
@@ -919,6 +944,7 @@ struct LinkConstants {
     gap_decay_rate: f64,
     cutoff: [i64; 2],
     ignore_small_gaps: bool,
+    subject_translated: bool,
 }
 
 /// The linking of one query frame (`for (frame_index=0; ...)` of `s_BlastEvenGapLinkHSPs`).
@@ -940,6 +966,7 @@ fn link_frame(
         gap_decay_rate,
         cutoff,
         ignore_small_gaps,
+        subject_translated,
     } = k;
     let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1].hsp };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:554-591
@@ -953,7 +980,13 @@ fn link_frame(
     //       query_length = query_info->contexts[query_context].query_length;
     //       query_length = MAX(query_length - length_adjustment, 1);
     //       subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
-    // ...
+    //       /* If subject is translated, length adjustment is given in nucleotide
+    //          scale. */
+    //       if (Blast_SubjectIsTranslated(program_number))
+    //       {
+    //          length_adjustment /= CODON_LENGTH;
+    //          subject_length /= CODON_LENGTH;
+    //       }
     //       subject_length = MAX(subject_length - length_adjustment, 1);
     //
     //       lh_helper[0].ptr = hp_start;
@@ -976,9 +1009,14 @@ fn link_frame(
     // frame of a translated query too (NCBI's `query_context`).
     let query_context = hsp_of(frame_start).context;
     let ctx = contexts(query_context);
-    let length_adjustment = ctx.length_adjustment;
+    let mut length_adjustment = ctx.length_adjustment;
     let query_length = (ctx.query_length - length_adjustment).max(1);
-    let subject_length = (subject_length_orig - length_adjustment).max(1);
+    let mut subject_length = subject_length_orig;
+    if subject_translated {
+        length_adjustment /= 3;
+        subject_length /= 3;
+    }
+    let subject_length = (subject_length - length_adjustment).max(1);
     let eff_searchsp = ctx.eff_searchsp;
 
     lh_helper[0].ptr = HP_START;
@@ -1702,6 +1740,7 @@ mod tests {
     fn hsp(q: (i32, i32), s: (i32, i32), score: i32) -> LinkHsp {
         LinkHsp {
             context: 0,
+            subject_frame: 0,
             query_offset: q.0,
             query_end: q.1,
             subject_offset: s.0,
@@ -1742,6 +1781,83 @@ mod tests {
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:528-531
+    // ```c
+    //             ((H->hsp->context/strand_factor) !=
+    // 	     (H->prev->hsp->context/strand_factor) ||
+    //              (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
+    // ```
+    #[test]
+    fn hsps_on_subject_frames_of_opposite_signs_link_apart() {
+        // The pair of `two_hsps_in_order_on_both_sequences_link_into_one_set`, on subject frames
+        // of the same sign and of opposite signs.
+        let params = EvenGapLinkParams::ungapped_translated_subject(LinkCutoffs {
+            cutoff_small_gap: 0,
+            cutoff_big_gap: 1,
+            gap_prob: 0.0,
+        });
+        let pair = |f1: i8, f2: i8| {
+            [
+                LinkHsp {
+                    subject_frame: f1,
+                    ..hsp((200, 260), (500, 560), 60)
+                },
+                LinkHsp {
+                    subject_frame: f2,
+                    ..hsp((10, 60), (20, 70), 80)
+                },
+            ]
+        };
+        let same = linked(&pair(1, 3), context(), 3000, &params);
+        assert!(same.iter().all(|l| l.num == 2), "{same:?}");
+        let apart = linked(&pair(-1, 3), context(), 3000, &params);
+        assert!(apart.iter().all(|l| l.num == 1), "{apart:?}");
+        // The final list is in the order of the query starts whatever the frames.
+        assert_eq!(apart.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:563-571
+    // ```c
+    //       subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
+    //       /* If subject is translated, length adjustment is given in nucleotide
+    //          scale. */
+    //       if (Blast_SubjectIsTranslated(program_number))
+    //       {
+    //          length_adjustment /= CODON_LENGTH;
+    //          subject_length /= CODON_LENGTH;
+    //       }
+    //       subject_length = MAX(subject_length - length_adjustment, 1);
+    // ```
+    #[test]
+    fn a_translated_subject_divides_its_length_and_the_adjustment_by_three() {
+        // A set of two takes the subject length into its e-value: 3,001 nucleotides and the
+        // adjustment 40 give 1,000 - 13 = 987 letters, the length 1,027 of an untranslated subject
+        // with the whole adjustment subtracted.
+        let cutoffs = LinkCutoffs {
+            cutoff_small_gap: 0,
+            cutoff_big_gap: 1,
+            gap_prob: 0.0,
+        };
+        let hsps = [hsp((200, 260), (500, 560), 60), hsp((10, 60), (20, 70), 80)];
+        let translated = linked(
+            &hsps,
+            context(),
+            3001,
+            &EvenGapLinkParams::ungapped_translated_subject(cutoffs),
+        );
+        let protein = |subject_length| {
+            linked(
+                &hsps,
+                context(),
+                subject_length,
+                &EvenGapLinkParams::ungapped(cutoffs, false),
+            )
+        };
+        assert!(translated.iter().all(|l| l.num == 2), "{translated:?}");
+        assert_eq!(translated, protein(1027));
+        assert_ne!(translated, protein(1000));
+    }
+
     #[test]
     fn the_preliminary_cutoff_keeps_hsps_at_or_below_it_out_of_small_gap_sets() {
         // Close HSPs (a gap of 10 letters on both sequences) with scores at the small-gap cutoff:
@@ -1775,6 +1891,7 @@ mod tests {
             cutoff_small_gap: 0,
             cutoff_big_gap: 1,
             query_translated: false,
+            subject_translated: false,
         };
         let out = linked(&hsps, ctx, 100 * n + 100, &params);
         assert_eq!(out.len(), n as usize);

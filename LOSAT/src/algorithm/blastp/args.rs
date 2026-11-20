@@ -1331,8 +1331,14 @@ impl BlastpArgs {
                         .psiblast_pssm
                         .as_ref()
                         .is_some_and(|pssm| pssm.out_ascii_pssm.is_some()),
+                    descriptors_observed: self.export_search_strategy.is_some()
+                        || self.psiblast_pssm.as_ref().is_some_and(|pssm| {
+                            pssm.save_each_pssm
+                                || (pssm.out_pssm.is_some() && !pssm.save_pssm_after_last_round)
+                        }),
                 },
                 pssm_reader,
+                diagnostics,
             )?),
             None => None,
         };

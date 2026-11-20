@@ -329,7 +329,11 @@ These refusals apply to every search program that reads databases.
 | Option or value | What happens |
 | :--- | :--- |
 | `-phi_pattern` | Refused: not yet supported. |
-| `-in_msa` with an alignment in FASTA, PHYLIP, NEXUS, Sequin or MultAlin format | Refused: not yet supported. Only Clustal alignments are read. |
+| `-in_msa` with a PHYLIP header of 0 sequences, or an empty command (a lone `;`) in a NEXUS file | Refused. NCBI crashes (a division by zero, a null pointer). |
+| `-in_msa` with a FASTA alignment whose rows have different lengths, where a row that holds the query is shorter than the first row, or the first row has a letter past the end of a shorter row | Refused. NCBI swaps or reads the shorter row past its end, and its result depends on the memory allocator. Make the rows the same length. |
+| `-in_msa` with a defline that NCBI cannot take apart (a PHYLIP `>` defline with a short name), or a number in a PHYLIP header that does not fit an integer | Refused. NCBI stops with an uncaught exception. |
+| `-in_msa` with a `secondary-accession` modifier, a `primary-accession` modifier that is not UTF-8, or a `molecule` or `mol-type` modifier that makes the query a nucleotide sequence | Refused. NCBI stops with an exception or an engine error that LOSAT does not reproduce yet, or (for a descending range of accessions) does not stop. |
+| `-in_msa` with a modifier on the query's defline that sets a descriptor, a protein feature, a strand or a topology, with `-out_pssm` (without `-save_pssm_after_last_round`), `-save_each_pssm` or `-export_search_strategy` | Refused. NCBI writes those into the query that the files carry, and LOSAT writes only its title. Without those options the modifiers change nothing in the output, and the run goes on. |
 | `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
@@ -606,7 +610,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 ## On the list for a later release
 
 - The programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`.
-- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format.
+- `psiblast -phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write.
 - `-html`.

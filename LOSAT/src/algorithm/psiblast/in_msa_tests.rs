@@ -148,6 +148,7 @@ fn scoring(matrix_name: &str, gap_open: i32, gap_extend: i32) -> MsaScoring<'_> 
         gap_open,
         gap_extend,
         save_ascii_pssm: false,
+        descriptors_observed: false,
     }
 }
 
@@ -448,7 +449,7 @@ fn pssm_of(
         master_index,
         ignore_master,
     };
-    let pssm = pssm_from_msa(&input, scoring);
+    let pssm = pssm_from_msa(&input, scoring, &mut std::io::sink());
     let _ = std::fs::remove_dir_all(&dir);
     pssm
 }
@@ -635,6 +636,7 @@ fn the_id_refusals_name_the_master_sequence() {
             &input,
             &scoring("BLOSUM62", 11, 1),
             crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+            &mut std::io::sink(),
         )
         .err()
         .unwrap();

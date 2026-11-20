@@ -41,7 +41,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`;
-- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format;
+- `psiblast -phi_pattern`;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
 - the `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write;
 - `-html`.

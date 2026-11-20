@@ -43,7 +43,7 @@ use crate::core::psi::{
     PsiScoreBlk,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::pssm::{PssmQuery, SeqData, SeqEntry, SeqInst};
+use crate::report::serial::pssm::{PssmQuery, SeqData, SeqEntry, SeqInst, Seqdesc};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
 use super::pssm::{blast_options_error, error_code_to_string, msa_pssm_with_parameters};
@@ -69,6 +69,11 @@ pub(crate) struct MsaScoring<'a> {
     pub(crate) gap_extend: i32,
     /// `-out_ascii_pssm` is given (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
     pub(crate) save_ascii_pssm: bool,
+    /// The run writes the query's Bioseq with its descriptors: the input PSSM (`-out_pssm`
+    /// without `-save_pssm_after_last_round`, `-save_each_pssm`) or the search strategy
+    /// (`-export_search_strategy`). The modifiers of a defline set descriptors that LOSAT does
+    /// not write, so the run refuses where they would show.
+    pub(crate) descriptors_observed: bool,
 }
 
 // What the PSSM engine reads from `CPsiBlastInputClustalW`: an empty matrix name and a gap cost
@@ -162,9 +167,24 @@ impl MsaScoring<'_> {
     }
 }
 
-/// LOSAT's refusal of what the alignment reader does not read yet.
-fn refused(what: impl std::fmt::Display) -> anyhow::Error {
-    anyhow::anyhow!("-in_msa: {what} is not supported by LOSAT's PSIBLAST yet")
+/// LOSAT's refusal of an alignment that NCBI's reader or its PSSM input takes where the result
+/// is undefined, or that carries what LOSAT does not write: `cause` says what.
+fn refused_cause(cause: &str) -> anyhow::Error {
+    anyhow::anyhow!("-in_msa with this alignment is not supported by LOSAT's PSIBLAST: {cause}")
+}
+
+/// Posts the warnings of the reader (`ERR_POST(Warning << ..)`, prefix `psiblast`) to the
+/// diagnostics stream.
+fn post_warnings(diagnostics: &mut dyn std::io::Write, warnings: &[Vec<u8>]) -> Result<()> {
+    for message in warnings {
+        diagnostics.write_all(&crate::ncbi_exception::post_line(
+            crate::ncbi_exception::Severity::Warning,
+            None,
+            Some("psiblast"),
+            message,
+        ))?;
+    }
+    Ok(())
 }
 
 /// The letters of a Bioseq as NCBIstdaa after `CSeqportUtil::Convert` from IUPACaa
@@ -329,9 +349,13 @@ fn extract_query(rows: &[Vec<u8>], master_index: Option<i32>) -> Result<Vec<u8>>
 /// ```
 fn validate_query(rows: &mut [Vec<u8>], query: &[u8]) -> Result<usize> {
     let masking = crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID[21];
+    // The columns that NCBI looks at and swaps are those of the first row of the file
+    // (`kAligmentLength`); a row of another length is read as far as it goes (where NCBI reads
+    // the end of the string, a NUL, which is no match).
+    let window = rows[0].len();
     let found = rows.iter().position(|row| {
         let mut query_index = 0;
-        for &residue in row.iter() {
+        for &residue in row.iter().take(window) {
             if query_index >= query.len() {
                 break;
             }
@@ -352,14 +376,41 @@ fn validate_query(rows: &mut [Vec<u8>], query: &[u8]) -> Result<usize> {
         query_index == query.len()
     });
     match found {
+        Some(0) => Ok(0),
         Some(index) => {
-            rows.swap(0, index);
+            // NCBI swaps the first `window` letters of the two rows by index: a row with fewer
+            // letters is read and written past its end.
+            if rows[index].len() < window {
+                return Err(refused_cause(SHORT_ROW_SWAPPED));
+            }
+            let (head, tail) = rows.split_at_mut(index);
+            head[0][..window].swap_with_slice(&mut tail[0][..window]);
             Ok(index)
         }
         None => Err(blast_options_error(
             "No sequence in the multiple sequence alignment provided matches the query sequence",
         )),
     }
+}
+
+/// The cause of the refusal of a row that holds the query and is shorter than the first row of the
+/// file: NCBI swaps it with the first row column by column through the first row's length, past
+/// the end of the shorter row's string.
+const SHORT_ROW_SWAPPED: &str = "a row that holds the query is shorter than the first row of the file, and NCBI BLAST+ 2.17.0 swaps the two rows column by column through the first row's length, reading and writing past the shorter row's end";
+
+/// The cause of the refusal of a row shorter than the first row where the first row has a
+/// letter beyond the end of the shorter one: NCBI reads that row's string past its end.
+const SHORT_ROW_READ: &str = "a row of the alignment is shorter than the first row and the first row has a letter past its end, and NCBI BLAST+ 2.17.0 reads the shorter row's string past its end for it";
+
+/// The first row after the swap that has a letter of the first row past the end of its own
+/// string plus one (the string's terminator is a readable NUL, the bytes after it are not).
+fn short_row_read(front: &[u8], others: &[Vec<u8>]) -> bool {
+    others.iter().any(|row| {
+        front
+            .iter()
+            .skip(row.len() + 1)
+            .any(|&residue| residue != b'-')
+    })
 }
 
 /// The rows after `x_ValidateQueryInMsa`'s swap whose first row has exactly the query's letters:
@@ -713,6 +764,10 @@ fn longer_row_above_master(master_index: Option<i32>, row: usize) -> anyhow::Err
     )
 }
 
+/// The cause of the refusal of a modifier that sets more than the title where the run writes the
+/// query's Bioseq with its descriptors.
+const MODIFIER_CONTENT: &str = "a modifier of the query's defline sets a descriptor, a feature or a sequence member (BioSource, MolInfo, comment, publication, protein, strand, topology, ...) that the run would write with the query's Bioseq (-out_pssm without -save_pssm_after_last_round, -save_each_pssm, -export_search_strategy), and LOSAT writes only the title";
+
 /// LOSAT's refusal of a run whose alignment reader reached a state that no input gives (S3 of
 /// the PS6 review: the reader's two preconditions on the Seq-ids, `aln_reader::verify_alignment_info`).
 fn internal_error(what: &str) -> anyhow::Error {
@@ -728,6 +783,7 @@ fn internal_error(what: &str) -> anyhow::Error {
 pub(crate) fn pssm_from_msa(
     input: &MsaInput,
     scoring: &MsaScoring<'_>,
+    diagnostics: &mut dyn std::io::Write,
 ) -> Result<crate::report::serial::pssm::PssmWithParameters> {
     let bytes = crate::algorithm::pssm_search::in_pssm::read_input_argument("in_msa", &input.path)?;
     let alignment: Alignment = match read_alignment(&bytes) {
@@ -740,11 +796,19 @@ pub(crate) fn pssm_from_msa(
         Err(AlnError::InvalidMolType) => {
             return Err(query_error(crate::blastinput::aln_reader::INVALID_MOL_TYPE))
         }
-        Err(AlnError::Unsupported(format)) => {
-            return Err(refused(format!("an alignment file in {format} format")))
+        Err(AlnError::Modifier(failure)) => {
+            post_warnings(diagnostics, &failure.warnings)?;
+            return Err(query_error(&String::from_utf8_lossy(&failure.message)));
+        }
+        Err(AlnError::Undefined(cause)) => return Err(refused_cause(cause)),
+        Err(AlnError::Exception(exception)) => {
+            return Err(anyhow::Error::from(crate::cli::NativeError::exception(
+                &exception,
+            )))
         }
         Err(AlnError::Internal(what)) => return Err(internal_error(what)),
     };
+    post_warnings(diagnostics, &alignment.warnings)?;
     let mut rows = alignment.rows.clone();
     let query = extract_query(&rows, input.master_index)?;
     let front = validate_query(&mut rows, &query)?;
@@ -775,6 +839,9 @@ pub(crate) fn pssm_from_msa(
     let Some(aligned) = QueryRows::new(&rows, &query) else {
         return Err(longer_row_above_master(input.master_index, front + 1));
     };
+    if short_row_read(aligned.front, aligned.others) {
+        return Err(refused_cause(SHORT_ROW_READ));
+    }
     // `Process` before the engine: the query's Bioseq is looked for last, and may stop the run.
     let msa = engine_msa(&aligned);
     let bioseq = query_bioseq(&alignment.bioseqs, &query)
@@ -832,11 +899,23 @@ pub(crate) fn pssm_from_msa(
     //         retval->SetQuery().SetSeq(*query);
     //     }
     // ```
-    // The Bioseq is the alignment's own: its ids, its letters as IUPACaa, no title.
+    // The Bioseq is the alignment's own: its ids, its letters as IUPACaa, its title (the text of the
+    // defline outside its modifiers).
+    if bioseq.is_some_and(|bioseq| bioseq.mol_changed) {
+        return Err(refused_cause(
+            crate::blastinput::aln_reader::MOLECULE_CHANGED,
+        ));
+    }
+    if scoring.descriptors_observed && bioseq.is_some_and(|bioseq| bioseq.modifier_content) {
+        return Err(refused_cause(MODIFIER_CONTENT));
+    }
     let entry = bioseq.map(|bioseq| {
         SeqEntry::Seq(Box::new(PssmQuery {
             ids: bioseq.ids.clone(),
-            descr: None,
+            descr: bioseq
+                .title
+                .clone()
+                .map(|title| vec![Seqdesc::Title(title)]),
             inst: SeqInst::new(
                 ("raw", 2),
                 ("aa", 3),
@@ -860,11 +939,12 @@ pub(crate) fn read_in_msa(
     input: &MsaInput,
     scoring: &MsaScoring<'_>,
     reader: crate::algorithm::pssm_search::in_pssm::PssmReader<'_>,
+    diagnostics: &mut dyn std::io::Write,
 ) -> Result<(
     crate::algorithm::pssm_search::PsiSearch,
     crate::algorithm::pssm_search::in_pssm::InPssmFile,
 )> {
-    let pssm = pssm_from_msa(input, scoring)?;
+    let pssm = pssm_from_msa(input, scoring, diagnostics)?;
     let (mut search, file) = if pssm.pssm.query.is_none() {
         crate::algorithm::pssm_search::in_pssm::psi_search_unset_query(pssm)
     } else {

@@ -257,7 +257,10 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
         panic!()
     };
     assert_eq!(**comment, Value::Str(format!("#\"qz#{long}#").into_bytes()));
-    let messages: Vec<Vec<u8>> = posts.iter().map(|post| post.line(Some("tblastn"))).collect();
+    let messages: Vec<Vec<u8>> = posts
+        .iter()
+        .map(|post| post.line(Some("tblastn")))
+        .collect();
     assert_eq!(
         messages,
         [

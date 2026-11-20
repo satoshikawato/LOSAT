@@ -101,8 +101,9 @@ each of them:
   the header of the file explains them).
 - `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
   inputs are deterministic, so a rebuild changes nothing.
-- `stl_sort/cases.txt`: the permutations that libstdc++'s `std::sort` gives ranges under NCBI's
-  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the port of `CSeq_loc::Add`.
+- `stl_sort/cases.txt`: orders in which C++ `std::sort` leaves ranges under NCBI's
+  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the test of the sort in the port
+  of `CSeq_loc::Add`.
 
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the

@@ -1,4 +1,4 @@
-//! Tests of `CSeq_loc::Add` as ported (`range_set`): libstdc++'s sort, empty and whole ranges,
+//! Tests of `CSeq_loc::Add` as ported (`range_set`): the sort, empty and whole ranges,
 //! the handles that the address orders, `giim` handles. The answers are NCBI's: the review probes
 //! of M4a-1 (`p1`, `p1b`, `p4`, makeblastdb 2.17.0), `tests/seqdb/mask_ids/cases.tsv` and the
 //! `seqloc_*` files of `tests/seqdb/mask_parse` (run end to end in `tests_e2e.rs`).
@@ -61,33 +61,55 @@ fn parse_ranges(text: &str) -> Vec<Range> {
         .collect()
 }
 
-/// `stl_sort` and its heap fallback leave the ranges in the order of libstdc++ (`std::sort`,
-/// `std::partial_sort` over all of them), equivalent empty ranges included
-/// (`tests/seqdb/stl_sort/README.md`). The last two cases reach introsort's depth limit, so
-/// `stl_sort` heap-sorts 97 and 123 of their ranges, empty ones among them.
+/// The Seq-locs that make one group of `x_MergeAndSort` with `ranges` in this order: the ranges
+/// but the last as a packed-int, then the last one (`CSeq_loc_CI` visits them in this order), on
+/// the minus strand when `reverse`.
+fn two_locs(ranges: &[Range], reverse: bool) -> [(ParsedSeqId, Vec<MaskPart>); 2] {
+    let strand = reverse.then_some(NA_STRAND_MINUS);
+    let parts = |ranges: &[Range]| -> Vec<MaskPart> {
+        ranges
+            .iter()
+            .map(|r| iv(r.from, r.to_open.wrapping_sub(1), strand))
+            .collect()
+    };
+    let (first, last) = ranges.split_at(ranges.len() - 1);
+    [(lid(1), parts(first)), (lid(1), parts(last))]
+}
+
+/// `tests/seqdb/stl_sort/cases.txt` holds the order in which a C++ `std::sort` leaves ranges
+/// under NCBI's `CRange_Less` / `CRange_ReverseLess` (`CASE`, then `SORTED`; README there).
+/// Rust's stable sort puts every range where that order has it, except among the empty ranges,
+/// which neither comparator orders; and the ranges written to the database from the case are
+/// those written from that order (an input already sorted keeps its order).
 #[test]
-fn stl_sort_gives_libstdcxx_s_permutations() {
+fn the_sort_writes_the_ranges_of_the_observed_permutations() {
     let text = include_str!("../../../tests/seqdb/stl_sort/cases.txt");
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len() % 3, 0);
     let mut cases = 0;
-    for triple in lines.chunks(3) {
-        let mut head = triple[0].splitn(4, ' ');
-        assert_eq!(head.next(), Some("CASE"));
-        let reverse = head.next() == Some("1");
-        let n: usize = head.next().unwrap().parse().unwrap();
-        let input = parse_ranges(head.next().unwrap());
+    for (i, line) in lines.iter().enumerate() {
+        let Some(case) = line.strip_prefix("CASE ") else {
+            continue;
+        };
+        let mut words = case.splitn(3, ' ');
+        let reverse = words.next() == Some("1");
+        let n: usize = words.next().unwrap().parse().unwrap();
+        let input = parse_ranges(words.next().unwrap());
         assert_eq!(input.len(), n);
-        let less = |a: &Range, b: &Range| range_less(a, b, reverse);
+        let observed = parse_ranges(lines[i + 1].strip_prefix("SORTED").unwrap());
         let mut sorted = input.clone();
-        stl_sort(&mut sorted, &less);
+        sorted.sort_by(|a, b| range_order(a, b, reverse));
+        assert_eq!(sorted.len(), observed.len());
+        for (k, (got, want)) in sorted.iter().zip(&observed).enumerate() {
+            assert!(
+                got == want || (got.is_empty() && want.is_empty()),
+                "case {cases}, position {k}: {got:?} where the observed order has {want:?}"
+            );
+        }
         assert_eq!(
-            sorted,
-            parse_ranges(triple[1].strip_prefix("SORTED").unwrap())
+            offsets(&two_locs(&input, reverse), &[lid(1)]),
+            offsets(&two_locs(&observed, reverse), &[lid(1)]),
+            "case {cases}"
         );
-        let mut heap = input.clone();
-        heap_sort(&mut heap, &less);
-        assert_eq!(heap, parse_ranges(triple[2].strip_prefix("HEAP").unwrap()));
         cases += 1;
     }
     assert_eq!(cases, 8);

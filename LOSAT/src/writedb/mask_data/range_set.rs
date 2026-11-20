@@ -12,9 +12,13 @@
 //! (`Range`): empty ranges (`to < from`, and `to` = 4294967295 whose open end wraps to 0) and the
 //! whole range (`0..4294967295`) take part in the sort and the merge exactly as in NCBI, an empty
 //! result becomes an `empty` Seq-loc that the final `CSeq_loc_CI` skips, a whole one a `whole`
-//! Seq-loc that the writer's bounds check then refuses as NCBI's does. The sort is libstdc++'s
-//! `std::sort` (`stl_sort`), because the order in which it leaves equivalent empty ranges can
-//! change the merge.
+//! Seq-loc that the writer's bounds check then refuses as NCBI's does. The sort is Rust's stable
+//! sort (`range_order`). The ranges that neither `CRange_Less` nor `CRange_ReverseLess` orders are
+//! two whole ranges, two equal ranges, or two empty ranges; only empty ones can differ, and their
+//! order can change the merge. The stable sort keeps them in the order they came, which is the
+//! order of makeblastdb 2.17.0 in a group of up to 16 ranges. In a group of 17 ranges or more with
+//! two or more different empty ranges, NCBI leaves them in the order of its C++ library's sort and
+//! the ranges written can differ from NCBI's (line LIB-S, item S3).
 //!
 //! Handles of `giim` Seq-ids are kept in a list per number, as NCBI's `CSeq_id_Giim_Tree`
 //! (seq_id_tree.hpp:966-967, seq_id_tree.cpp:2926-2964): a Seq-id finds the first stored handle of
@@ -281,6 +285,20 @@ fn range_less(rg1: &Range, rg2: &Range, reverse: bool) -> bool {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4283-4322 (`CRange_Less` and
+// `CRange_ReverseLess`, quoted above `range_less`).
+/// `range_less` as an `Ordering` for `slice::sort_by`: `Equal` for two ranges that neither
+/// precedes, which are two whole ranges, two equal ranges, or two empty ones of any positions.
+fn range_order(rg1: &Range, rg2: &Range, reverse: bool) -> std::cmp::Ordering {
+    if range_less(rg1, rg2, reverse) {
+        std::cmp::Ordering::Less
+    } else if range_less(rg2, rg1, reverse) {
+        std::cmp::Ordering::Greater
+    } else {
+        std::cmp::Ordering::Equal
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4333-4389
 // ```c++
 // static
@@ -358,179 +376,6 @@ fn merge_ranges(rg1: &mut Range, rg2: Range, reverse: bool) -> bool {
         return true;
     }
     false
-}
-
-// libstdc++ (GCC 8.5): bits/stl_algo.h (GCC 8.5 built makeblastdb 2.17.0: `strings makeblastdb`
-// = "GCC: (GNU) 8.5.0 20210514 (Red Hat 8.5.0-26)")
-// libstdc++ (GCC 8.5): bits/stl_heap.h (__make_heap, __adjust_heap, __push_heap, __pop_heap,
-// __sort_heap), and bits/stl_algo.h (__heap_select)
-/// `std::sort` of libstdc++ (introsort): the same permutation as NCBI's `sort(..)`, also of
-/// elements that compare equivalent and differ (two empty ranges).
-fn stl_sort<T: Copy>(v: &mut [T], less: &impl Fn(&T, &T) -> bool) {
-    if v.is_empty() {
-        return;
-    }
-    let depth = 2 * (usize::BITS - 1 - v.len().leading_zeros()) as usize;
-    introsort_loop(v, 0, v.len(), depth, less);
-    // `__final_insertion_sort`.
-    if v.len() > STL_THRESHOLD {
-        insertion_sort(&mut v[..STL_THRESHOLD], less);
-        for i in STL_THRESHOLD..v.len() {
-            unguarded_linear_insert(v, i, less);
-        }
-    } else {
-        insertion_sort(v, less);
-    }
-}
-
-const STL_THRESHOLD: usize = 16;
-
-fn introsort_loop<T: Copy>(
-    v: &mut [T],
-    first: usize,
-    mut last: usize,
-    mut depth: usize,
-    less: &impl Fn(&T, &T) -> bool,
-) {
-    while last - first > STL_THRESHOLD {
-        if depth == 0 {
-            heap_sort(&mut v[first..last], less);
-            return;
-        }
-        depth -= 1;
-        let mid = first + (last - first) / 2;
-        move_median_to_first(v, first, first + 1, mid, last - 1, less);
-        let cut = unguarded_partition(v, first + 1, last, first, less);
-        introsort_loop(v, cut, last, depth, less);
-        last = cut;
-    }
-}
-
-fn move_median_to_first<T: Copy>(
-    v: &mut [T],
-    result: usize,
-    a: usize,
-    b: usize,
-    c: usize,
-    less: &impl Fn(&T, &T) -> bool,
-) {
-    let pick = if less(&v[a], &v[b]) {
-        if less(&v[b], &v[c]) {
-            b
-        } else if less(&v[a], &v[c]) {
-            c
-        } else {
-            a
-        }
-    } else if less(&v[a], &v[c]) {
-        a
-    } else if less(&v[b], &v[c]) {
-        c
-    } else {
-        b
-    };
-    v.swap(result, pick);
-}
-
-fn unguarded_partition<T: Copy>(
-    v: &mut [T],
-    mut first: usize,
-    mut last: usize,
-    pivot: usize,
-    less: &impl Fn(&T, &T) -> bool,
-) -> usize {
-    loop {
-        while less(&v[first], &v[pivot]) {
-            first += 1;
-        }
-        last -= 1;
-        while less(&v[pivot], &v[last]) {
-            last -= 1;
-        }
-        if first >= last {
-            return first;
-        }
-        v.swap(first, last);
-        first += 1;
-    }
-}
-
-fn insertion_sort<T: Copy>(v: &mut [T], less: &impl Fn(&T, &T) -> bool) {
-    for i in 1..v.len() {
-        if less(&v[i], &v[0]) {
-            let val = v[i];
-            v.copy_within(0..i, 1);
-            v[0] = val;
-        } else {
-            unguarded_linear_insert(v, i, less);
-        }
-    }
-}
-
-fn unguarded_linear_insert<T: Copy>(v: &mut [T], mut last: usize, less: &impl Fn(&T, &T) -> bool) {
-    let val = v[last];
-    while less(&val, &v[last - 1]) {
-        v[last] = v[last - 1];
-        last -= 1;
-    }
-    v[last] = val;
-}
-
-/// `__partial_sort(first, last, last)`: `__heap_select` (a heap of all of it) and `__sort_heap`.
-fn heap_sort<T: Copy>(v: &mut [T], less: &impl Fn(&T, &T) -> bool) {
-    let len = v.len();
-    if len >= 2 {
-        let mut parent = (len - 2) / 2;
-        loop {
-            let value = v[parent];
-            adjust_heap(v, parent, len, value, less);
-            if parent == 0 {
-                break;
-            }
-            parent -= 1;
-        }
-    }
-    let mut last = len;
-    while last > 1 {
-        last -= 1;
-        let value = v[last];
-        v[last] = v[0];
-        adjust_heap(&mut v[..last], 0, last, value, less);
-    }
-}
-
-fn adjust_heap<T: Copy>(
-    v: &mut [T],
-    mut hole: usize,
-    len: usize,
-    value: T,
-    less: &impl Fn(&T, &T) -> bool,
-) {
-    let top = hole;
-    let mut second = hole;
-    while len > 0 && second < (len - 1) / 2 {
-        second = 2 * (second + 1);
-        if less(&v[second], &v[second - 1]) {
-            second -= 1;
-        }
-        v[hole] = v[second];
-        hole = second;
-    }
-    if len & 1 == 0 && len >= 2 && second == (len - 2) / 2 {
-        second = 2 * (second + 1);
-        v[hole] = v[second - 1];
-        hole = second - 1;
-    }
-    // `__push_heap`.
-    while hole > top {
-        let parent = (hole - 1) / 2;
-        if !less(&v[parent], &value) {
-            break;
-        }
-        v[hole] = v[parent];
-        hole = parent;
-    }
-    v[hole] = value;
 }
 
 /// What `CSeq_id_Handle::GetHandle` makes of a Seq-id.
@@ -952,7 +797,20 @@ fn add_locs(tree: &mut GiimTree, l1: &Loc, l2: &Loc) -> Loc {
                     reverse: false,
                 });
             } else {
-                stl_sort(ranges, &|a: &Range, b: &Range| range_less(a, b, reverse));
+                // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4565-4572
+                // ```c++
+                //         if ( (flags & CSeq_loc::fSort) != 0 ) {
+                //             if ( !IsReverse(default_strand) ) {
+                //                 sort(ranges.begin(), ranges.end(), CRange_Less());
+                //             }
+                //             else {
+                //                 sort(ranges.begin(), ranges.end(), CRange_ReverseLess());
+                //             }
+                //         }
+                // ```
+                // Rust's stable sort: ranges that `range_less` does not order keep the order in
+                // which `CSeq_loc_CI` gave them (module documentation).
+                ranges.sort_by(|a, b| range_order(a, b, reverse));
                 let id = id_index[index];
                 let mut push = |rg: Range| {
                     pushed.push(if rg.is_whole() {

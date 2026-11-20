@@ -2593,7 +2593,7 @@ mod tests {
                 num_positives: stats.1,
                 report_num_ident: stats.0,
                 report_num_positives: stats.1,
-                report_mismatches: stats.3,
+                report_mismatches: i64::try_from(stats.3).unwrap(),
                 align_length: stats.2,
                 mismatches: stats.3,
                 gap_opens: stats.4,

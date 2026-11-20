@@ -239,6 +239,42 @@ impl NcbiException {
         self.chain().iter().all(|e| !e.site.file.is_empty())
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:47-61
+    // ```c++
+    // void CSerialException::AddFrameInfo(string frame_info)
+    // {
+    //     if (!frame_info.empty() && !m_FrameStack.empty()) {
+    //         m_FrameStack.insert(0,1,'.');
+    //     }
+    //     m_FrameStack = frame_info + m_FrameStack;
+    // }
+    //
+    // void CSerialException::ReportExtra(ostream& out) const
+    // {
+    //     if ( !m_FrameStack.empty() ) {
+    //         out << " at " << m_FrameStack;
+    //     }
+    // }
+    // ```
+    /// `CSerialException::AddFrameInfo(frame_info)`, which the object stack's `END_OBJECT_FRAME`
+    /// calls with `GetFrameName()` of each frame a `CSerialException` leaves: the frame stack is
+    /// the extra text of the exception's report (`ReportExtra`, ` at <stack>`; a
+    /// `CSerialException` has no other). `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in
+    /// the new exception and freezes a copy in its predecessor, as `AddBacklog` clones it.
+    pub(crate) fn add_frame_info(&mut self, frame_info: &str) {
+        if frame_info.is_empty() {
+            return;
+        }
+        let stack = match self.extra.take() {
+            Some(extra) => {
+                let stack = extra.strip_prefix(" at ").unwrap_or(&extra);
+                format!(" at {frame_info}.{stack}")
+            }
+            None => format!(" at {frame_info}"),
+        };
+        self.extra = Some(stack);
+    }
+
     /// `GetMsg()`: the message, without the place or the extra text.
     pub fn get_msg(&self) -> &str {
         &self.message

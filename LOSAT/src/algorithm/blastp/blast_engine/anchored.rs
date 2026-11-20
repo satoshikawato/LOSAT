@@ -3,8 +3,9 @@
 //!
 //! - Letters: the searched letters as the rows decode them (`ncbistdaa_to_ascii` of the query's
 //!   unmasked context, `query_nomask_sequence`, and of the subject's residues), with an O that the
-//!   search read as X shown as O (`displayed_letter`); a section's positions are the records', the
-//!   searched letters start at the `-query_loc` or `-subject_loc` interval.
+//!   search read as X shown as O (`displayed_letter`) and a PSSM query's Bioseq letters as they are
+//!   (lower-case iupacaa: `ShownQueries`, `ShownLetters::shown`); a section's positions are the
+//!   records', the searched letters start at the `-query_loc` or `-subject_loc` interval.
 //! - Labels: `x_FillSeqid` of the Bioseq's Seq-ids (`query_anchored::fill_seqid`): a record read
 //!   with `-parse_deflines` by its ids, else its local id (`Query_N`, `Subject_N`); a database
 //!   sequence by its parsed Seq-ids (`ParsedSubject::anchored_label`), else by its OID.
@@ -14,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{displayed_letter, query_nomask_sequence, ShownSubjects};
+use super::{displayed_letter, query_nomask_sequence, ShownLetters, ShownQueries, ShownSubjects};
 use crate::algorithm::blastp::encoding::{ncbistdaa_to_ascii, EncodedProtein};
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -27,7 +28,8 @@ use crate::report::query_anchored::{
 /// What the sections of a BLASTP report read (module doc).
 pub(super) struct AnchoredSequences<'a> {
     pub(super) contexts: &'a [QueryContext],
-    pub(super) query_records: &'a [FastaRecord],
+    /// The query records (their letters, with a PSSM query's Bioseq letters, and their labels).
+    pub(super) queries: ShownQueries<'a>,
     pub(super) query_placements: &'a Placements,
     /// The encoded subjects by subject index (a database's by rank), with their sentinels.
     pub(super) subjects: &'a [EncodedProtein],
@@ -60,7 +62,7 @@ impl ReportSequences for AnchoredSequences<'_> {
     fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
         self.listed_ordinals.is_none()
             && match (
-                self.query_records.get(q_idx),
+                self.queries.records.get(q_idx),
                 self.subject_records.get(s_idx as usize),
             ) {
                 (Some(query), Some(subject)) => subject_is_query_record(query, subject),
@@ -72,16 +74,14 @@ impl ReportSequences for AnchoredSequences<'_> {
         let shift = self.query_placements.offset(q_idx);
         let letters = query_nomask_sequence(&self.contexts[q_idx]);
         let input = self
-            .query_records
-            .get(q_idx)
-            .map_or(&[][..], |record| record.seq());
+            .queries
+            .letters(q_idx)
+            .unwrap_or(ShownLetters::Ascii(&[]));
         for position in from as usize - shift..=to as usize - shift {
             let Some(&residue) = letters.get(position) else {
                 break;
             };
-            let letter =
-                displayed_letter(ncbistdaa_to_ascii(residue), input.get(position).copied());
-            out.push(letter as u8);
+            out.push(input.shown(ncbistdaa_to_ascii(residue), position) as u8);
         }
     }
 
@@ -102,7 +102,7 @@ impl ReportSequences for AnchoredSequences<'_> {
     }
 
     fn query_label(&self, q_idx: usize, out: &mut Vec<u8>) {
-        record_label(&self.query_records[q_idx], self.show_gis, out);
+        record_label(&self.queries.records[q_idx], self.show_gis, out);
     }
 
     fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>) {

@@ -173,8 +173,7 @@ impl MaskWriter {
             MaskWriter::Fasta { hard_masking } => {
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
-                fasta_letters(seq.iupac, mask, *hard_masking, &mut text);
-                out.write_all(&text)?;
+                fasta_letters(seq.iupac, mask, *hard_masking, text, out)?;
             }
             MaskWriter::SeqLoc(serial) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:63-90
@@ -564,7 +563,17 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
 ///
 ///         if( accumulator.length() ) os << accumulator << "\n";
 /// ```
-fn fasta_letters(iupac: &[u8], mask: &[(u32, u32)], hard_masking: bool, out: &mut Vec<u8>) {
+/// `text` is the definition line; it and the lines go to `out` a block of lines at a time
+/// (NCBI writes each line to its buffered stream), so the text of a record is never held
+/// whole.
+fn fasta_letters(
+    iupac: &[u8],
+    mask: &[(u32, u32)],
+    hard_masking: bool,
+    mut text: Vec<u8>,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    const BLOCK: usize = 1 << 16;
     let masked = |letter: u8| {
         if hard_masking {
             b'N'
@@ -591,16 +600,21 @@ fn fasta_letters(iupac: &[u8], mask: &[(u32, u32)], hard_masking: bool, out: &mu
                 }
             }
         }
-        out.push(letter);
+        text.push(letter);
         line += 1;
         if line == 60 {
-            out.push(b'\n');
+            text.push(b'\n');
             line = 0;
+            if text.len() >= BLOCK {
+                out.write_all(&text)?;
+                text.clear();
+            }
         }
     }
     if line > 0 {
-        out.push(b'\n');
+        text.push(b'\n');
     }
+    out.write_all(&text)
 }
 
 #[cfg(test)]
@@ -614,10 +628,17 @@ mod tests {
         // its letter 3 is masked; a third interval right after is reached only at its own
         // positions.
         let mut out = Vec::new();
-        fasta_letters(b"ACGTACGT", &[(0, 1), (3, 3), (4, 5)], false, &mut out);
+        fasta_letters(
+            b"ACGTACGT",
+            &[(0, 1), (3, 3), (4, 5)],
+            false,
+            Vec::new(),
+            &mut out,
+        )
+        .unwrap();
         assert_eq!(out, b"acGtacGT\n");
         let mut out = Vec::new();
-        fasta_letters(&[b'A'; 61], &[(59, 60)], true, &mut out);
+        fasta_letters(&[b'A'; 61], &[(59, 60)], true, Vec::new(), &mut out).unwrap();
         assert_eq!(&out[..], [&[b'A'; 59][..], b"N\nN\n"].concat());
     }
 }

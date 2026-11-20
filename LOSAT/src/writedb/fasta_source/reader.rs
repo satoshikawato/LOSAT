@@ -802,6 +802,17 @@ impl<R: Read> FastaReader<R> {
         std::mem::take(&mut self.state.masks)
     }
 
+    /// The residues (IUPACna, upper case) that the record `read_one_seq` returned last was
+    /// packed from when it is a `SeqInst::Raw` of NCBI2na or NCBI4na data, which the reader
+    /// keeps until it reads the next record (a delta takes them along as its `residues`).
+    /// They are handed over with their buffer, so that a masking program holds its letters
+    /// without a second copy of the sequence; the next record is read into a buffer of the
+    /// same capacity, as before.
+    pub(crate) fn take_raw_residues(&mut self) -> Vec<u8> {
+        let capacity = self.state.seq_data.len();
+        std::mem::replace(&mut self.state.seq_data, Vec::with_capacity(capacity))
+    }
+
     /// `GetLineReader().AtEOF()`.
     pub(crate) fn at_eof(&self) -> bool {
         self.lines.at_eof()

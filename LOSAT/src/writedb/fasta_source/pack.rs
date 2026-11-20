@@ -414,7 +414,7 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
 /// The NCBI2na code of the unambiguous IUPACna letters (`CIupacnaTo2na`'s rows `A`: 0,
 /// `C`: 1, `G`: 2, `T` and `U`: 3; the table has the code shifted to each of the four
 /// places of a byte). Only these letters reach an NCBI2na segment.
-const fn ncbi2na_code(residue: u8) -> u8 {
+pub(crate) const fn ncbi2na_code(residue: u8) -> u8 {
     match residue {
         b'C' => 1,
         b'G' => 2,
@@ -437,7 +437,7 @@ const fn ncbi2na_code(residue: u8) -> u8 {
 ///     0xf0,0xf,  0x10,0x1,  0xe0,0xe,  0x20,0x2,
 ///     0xd0,0xd,  0xf0,0xf,  0xf0,0xf,  0x40,0x4,
 /// ```
-const fn ncbi4na_code(residue: u8) -> u8 {
+pub(crate) const fn ncbi4na_code(residue: u8) -> u8 {
     match residue.to_ascii_uppercase() {
         b'A' => 1,
         b'C' => 2,

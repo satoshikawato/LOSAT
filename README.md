@@ -58,7 +58,17 @@ The [v0.2.0 release](https://github.com/satoshikawato/LOSAT/releases) has one ar
 | WASI serial | `wasm32-wasip1` | `.tar.gz` | `losat.wasm` |
 | WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
 
-The macOS and Windows programs are not code-signed; [Installation](docs/manual/src/installation.md) says how to run them. LOSAT is not on crates.io, PyPI, npm, Homebrew or Docker Hub: Bioconda is its only package channel, and the Rust library and the Python package are used from this repository.
+The macOS and Windows programs are not code-signed; [Installation](docs/manual/src/installation.md) says how to run them.
+
+### crates.io
+
+With Rust 1.92 or later:
+
+```bash
+cargo install --locked losat
+```
+
+`--locked` builds with the dependency versions of the release build.
 
 ### Build from source
 
@@ -146,8 +156,8 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 ## Libraries and WebAssembly
 
-- **Rust (`losat`):** `losat::api` runs a search on FASTA records in memory or on a BLAST database and returns the command line's reports byte for byte, plus one typed record per HSP. See [LOSAT/README.md](LOSAT/README.md) and the [Rust library page](docs/manual/src/libraries/rust.md).
-- **Python (`pylosat`):** searches from Python, with the hits as an Arrow table for pandas or Polars. See [python/README.md](python/README.md) and the [Python page](docs/manual/src/libraries/python.md).
+- **Rust (`losat`):** `losat::api` runs a search on FASTA records in memory or on a BLAST database and returns the command line's reports byte for byte, plus one typed record per HSP. Add it with `cargo add losat`. See [LOSAT/README.md](LOSAT/README.md) and the [Rust library page](docs/manual/src/libraries/rust.md).
+- **Python (`pylosat`):** searches from Python, with the hits as an Arrow table for pandas or Polars. Install it with `pip install pylosat`. See [python/README.md](python/README.md) and the [Python page](docs/manual/src/libraries/python.md).
 - **WebAssembly:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and LOSAT Web runs on it; `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md) and the [WebAssembly page](docs/manual/src/libraries/webassembly.md).
 
 ---

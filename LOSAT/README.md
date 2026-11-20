@@ -29,11 +29,15 @@ Options that need NCBI's servers (`-remote`, `-entrez_query`) or GI lists (`-gil
 
 ## Installing the command line
 
-LOSAT v0.2.0 is published on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x86_64, WASI serial and threads, and this source crate) and on [Bioconda](https://anaconda.org/bioconda/losat) (Linux and macOS). It is not on crates.io.
+LOSAT v0.2.0 is published on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x86_64, WASI serial and threads, and this source crate), on [crates.io](https://crates.io/crates/losat) and on [Bioconda](https://anaconda.org/bioconda/losat) (Linux and macOS).
 
 ```bash
 conda install -c bioconda -c conda-forge losat
+# or, with Rust 1.92 or later:
+cargo install --locked losat
 ```
+
+`--locked` builds with the dependency versions of the release build.
 
 To build it from source, with Rust 1.92 or later:
 
@@ -53,11 +57,11 @@ losat psiblast -query query.faa -db proteins -num_iterations 3 -outfmt 6
 
 ## Using `losat` as a Rust library
 
-The crate is not on crates.io. Depend on the repository's `LOSAT/` directory by git or by path:
+Add the crate with `cargo add losat`, or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-losat = { git = "https://github.com/satoshikawato/LOSAT.git", tag = "v0.2.0" }
+losat = "0.2"
 ```
 
 The library is the module `losat::api`. Every other module is the command line or the engine: hidden from the documentation and outside the compatibility promise. A search runs in your process with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP (`HspRecord`) and the statistics of each query (`QueryStats`):

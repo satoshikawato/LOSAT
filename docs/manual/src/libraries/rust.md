@@ -6,11 +6,11 @@ The crate `losat` holds both the `losat` command line and a library. The library
 
 ## Adding `losat` to your project
 
-The crate is not on crates.io. Depend on the repository's `LOSAT/` directory by git or by path:
+The crate is on [crates.io](https://crates.io/crates/losat). Add it with `cargo add losat`, or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-losat = { git = "https://github.com/satoshikawato/LOSAT.git", tag = "v0.2.0" }
+losat = "0.2"
 # or, with a clone of the repository next to your project:
 # losat = { path = "../LOSAT/LOSAT" }
 ```

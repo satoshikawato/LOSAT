@@ -4,7 +4,13 @@
 
 ## Installation
 
-`pylosat` is not on PyPI. Build a wheel from the repository with [maturin](https://www.maturin.rs/). You need Rust 1.92 or later ([rustup](https://rustup.rs/)).
+```bash
+pip install pylosat
+```
+
+[PyPI](https://pypi.org/project/pylosat/) has wheels for CPython 3.10 and later on Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds `pylosat` from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
+
+To build a wheel from the repository instead, use [maturin](https://www.maturin.rs/):
 
 ```bash
 git clone https://github.com/satoshikawato/LOSAT.git
@@ -15,8 +21,6 @@ pip install target/wheels/pylosat-*.whl
 ```
 
 For development, `maturin develop` builds the extension into the active virtual environment.
-
-The repository's [Python wheels workflow](https://github.com/satoshikawato/LOSAT/actions/workflows/python-wheels.yml) also builds a wheel for each platform of the release binaries (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x64), installs it and checks one search against the command line's output. A run keeps its wheels for 7 days.
 
 ## Quick start
 

@@ -32,9 +32,9 @@ On the release test set, LOSAT's output is the same as NCBI BLAST+ 2.17.0's, byt
 
 ## Where to get it
 
-LOSAT v0.2.0 is published in two places: pre-built files for Linux, macOS, Windows and WASI on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases), and packages for Linux and macOS on [Bioconda](https://anaconda.org/bioconda/losat). See [Installation](installation.md).
+LOSAT v0.2.0 is published as pre-built files for Linux, macOS, Windows and WASI on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases), as packages for Linux and macOS on [Bioconda](https://anaconda.org/bioconda/losat), and as the crate `losat` on [crates.io](https://crates.io/crates/losat), which `cargo install` builds. See [Installation](installation.md).
 
-The Rust library (`losat::api`), the Python binding (`pylosat`) and the WebAssembly engine for web pages are in the same repository. They are not published on crates.io, PyPI or npm; [Using LOSAT as a library](library.md) shows how to use them from the repository.
+The Rust library (`losat::api`) is the same crate, and the Python binding `pylosat` is on [PyPI](https://pypi.org/project/pylosat/). The WebAssembly engine for web pages is built from the repository. See [Using LOSAT as a library](library.md).
 
 ## What is not in v0.2.0
 

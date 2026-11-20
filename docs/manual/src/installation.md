@@ -1,6 +1,6 @@
 # Installation
 
-LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioconda, download a pre-built file from the GitHub release page, or build it from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. In v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI.
+LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioconda, download a pre-built file from the GitHub release page, or build it with `cargo` from crates.io or from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. In v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI.
 
 ## Where LOSAT is published
 
@@ -8,9 +8,11 @@ LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioco
 |:---|:---|
 | [Bioconda](https://anaconda.org/bioconda/losat) | `losat` for Linux (x86_64, aarch64) and macOS (Intel, Apple silicon) |
 | [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) | `losat` for Linux, macOS and Windows, the two WASI modules, and the source crate |
-| This repository | Build `losat` from source; the Rust library, the Python binding `pylosat` and the WebAssembly engine for web pages |
+| [crates.io](https://crates.io/crates/losat) | The crate `losat`: `cargo install --locked losat` builds the command, and Rust programs use it as a library |
+| [PyPI](https://pypi.org/project/pylosat/) | The Python binding `pylosat` |
+| This repository | Build `losat` from source; the WebAssembly engine for web pages |
 
-LOSAT is not published on crates.io, Homebrew, PyPI, Docker Hub or npm. Bioconda is the only package-manager channel.
+LOSAT is not published on Homebrew, Docker Hub or npm.
 
 ## Bioconda
 
@@ -108,7 +110,15 @@ gh attestation verify LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz --repo satoshi
 
 ## Build from source
 
-You need the [Rust toolchain](https://rustup.rs/) (Rust 1.92 or later; the repository pins 1.92.0). LOSAT is not on crates.io, so `cargo` builds it from the repository:
+You need the [Rust toolchain](https://rustup.rs/) (Rust 1.92 or later; the repository pins 1.92.0). `cargo` builds LOSAT from crates.io:
+
+```bash
+cargo install --locked losat
+```
+
+`--locked` builds with the dependency versions of the release build; without it, Cargo picks the newest compatible versions. The program goes to `~/.cargo/bin`.
+
+To build it from the repository:
 
 ```bash
 git clone https://github.com/satoshikawato/LOSAT.git
@@ -120,11 +130,9 @@ The program is `target/release/losat` (`target\release\losat.exe` on Windows). I
 
 ## The libraries
 
-The libraries are used from this repository; none of them is published on a package registry.
-
-- **Rust.** Depend on the crate `losat` in the repository's `LOSAT/` folder, by path or by git. See [Rust (`losat`)](libraries/rust.md).
-- **Python.** Build `pylosat` from the repository's `python/` folder (Python 3.10 or later). See [Python (`pylosat`)](libraries/python.md).
-- **Web pages.** The WebAssembly engine for the browser is in `web/packages/losat`. See [WebAssembly and Browser](libraries/webassembly.md).
+- **Rust.** Add the crate `losat` from crates.io with `cargo add losat`. See [Rust (`losat`)](libraries/rust.md).
+- **Python.** `pip install pylosat` (Python 3.10 or later). See [Python (`pylosat`)](libraries/python.md).
+- **Web pages.** The WebAssembly engine for the browser is built from `web/packages/losat` in this repository; it is not on npm. See [WebAssembly and Browser](libraries/webassembly.md).
 
 ## The WASI files
 

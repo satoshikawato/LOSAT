@@ -14,12 +14,12 @@ You can run LOSAT searches from your own program instead of the command line. Fr
 
 ## Availability in v0.2.0
 
-The v0.2.0 release files on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) and the [Bioconda](https://anaconda.org/bioconda/losat) package hold the `losat` command line. The libraries are not release files, and none of them is on crates.io, PyPI or npm. Use them from the [repository](https://github.com/satoshikawato/LOSAT):
+The v0.2.0 release files on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) and the [Bioconda](https://anaconda.org/bioconda/losat) package hold the `losat` command line. The Rust crate and the Python package are on their package registries; the npm package is built from the [repository](https://github.com/satoshikawato/LOSAT):
 
 | Interface | How to get it |
 |:---|:---|
-| Rust crate `losat` | Depend on the repository's `LOSAT/` directory by path or by git. |
-| Python package `pylosat` | Build a wheel from the repository's `python/` directory. |
-| npm package `losat` | Build it from the repository's `web/packages/losat/` directory. |
+| Rust crate `losat` | From [crates.io](https://crates.io/crates/losat): `cargo add losat`. |
+| Python package `pylosat` | From [PyPI](https://pypi.org/project/pylosat/): `pip install pylosat`. |
+| npm package `losat` | Not on npm. Build it from the repository's `web/packages/losat/` directory. |
 
 Each page says how.

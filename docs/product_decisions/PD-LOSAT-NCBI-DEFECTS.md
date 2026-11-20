@@ -1566,13 +1566,14 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   (`Blast_RedoOneMatchSmithWaterman`), with composition-based statistics 0 to 3. A window of two or
   more preliminary HSPs in which a score of 0 is significant (in e-value mode, `-sum_stats false`
   or a `-max_intron_length` of 1 to 4, when the query's effective search space times K is below
-  `-evalue`; with sum statistics only where the cutoff score is 0 or below, which no probe has
-  reached: with `-dbsize 1` NCBI's redo of the same matches ends with rows, rows `db.x4b.cut0.*`)
-  makes NCBI's round loop reach the score of 0: where the query's first letter scores the
-  window's first subject letter (after SEG) above 0, by the scores of the matrix that the
-  composition-based statistics give (tks_M's subjects never end with 2 and fail with 0 and 1, rows
-  `db.x4b.rej.endless.6` and `db.x4b.end.c*`), NCBI never ends, and
-  LOSAT refuses (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI
+  `-evalue`; with sum statistics, the default, where the redo's cutoff score is 0 or below, which
+  a large `-evalue` gives with `-subject` and with `-db`: rows `db.x4b.sp.*`, `-evalue 1e4`, where
+  LOSAT redoes the matches in parallel at more than one thread; `-dbsize 1` does not, rows
+  `db.x4b.cut0.*`) makes NCBI's round loop reach the score of 0: where the query's first letter
+  scores the window's first subject letter (after SEG) above 0, by the scores of the matrix that
+  the composition-based statistics give (tks_M's subjects never end with 2 and fail with 0 and 1,
+  rows `db.x4b.rej.endless.6`, `db.x4b.end.c*` and `db.x4b.sp.end.*`), NCBI never ends, and LOSAT
+  refuses (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI
   BLAST+ 2.17.0 ... is not supported by LOSAT's TBLASTN"; probes `tbn.fail.*`, `tbn.endless.*` of
   line RG X4b's survey, NCBI still running at 120 s); otherwise the match's redo fails and frees the
   alignments of its earlier windows too, a failed last match fails the batch's traceback (`BLAST
@@ -1597,9 +1598,9 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   `db.tbn.inpssm.rej.swtback`).
   Fixture rows `db.x4b.fail.*`, `db.x4b.dbfail.*` and `db.x4b.rej.*`;
   `LOSAT/tests/tblastn_sw_tback.rs`; crafted inputs `LOSAT/tests/fasta/x4b` (X4's proteins
-  back-translated) and the databases `LOSAT/tests/db_search/x4b` (`make_x4b.py`). With `-db` and sum statistics
-  (the default) the cutoff score is NCBI's floor of 1 (`BLAST_Cutoffs` from `new_cutoff = 1`,
-  SeqDB's shortest length 10): no score of 0 is significant there, and the redo makes every local
+  back-translated) and the databases `LOSAT/tests/db_search/x4b` (`make_x4b.py`). With `-db`, sum
+  statistics and the default `-evalue` the cutoff score of the linking is NCBI's floor of 1
+  (`BLAST_Cutoffs` from `new_cutoff = 1`, SeqDB's shortest length 10): the redo makes every local
   alignment down to that score, slow but finite: LOSAT gives NCBI's output (rows `db.x4b.cut.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version

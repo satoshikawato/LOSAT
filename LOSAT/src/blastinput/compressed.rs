@@ -1069,49 +1069,6 @@ const BZIP2_WINDOW: usize = 8 * 1024;
 /// streams after it (`PD-LOSAT-NCBI-DEFECTS`, makeblastdb exception; line GZ, DECISIONS 9).
 ///
 /// bzip2 0.6.1 reference: src/bufread.rs:178-221 (`impl<R: BufRead> Read for BzDecoder<R>`)
-/// ```text
-///         loop {
-///             if self.done && !self.multi {
-///                 return Ok(0);
-///             }
-///             let (read, consumed, remaining, ret);
-///             {
-///                 let input = self.obj.fill_buf()?;
-///                 if self.done {
-///                     assert!(self.multi);
-///                     if input.is_empty() {
-///                         // beyond last stream in multi-stream case
-///                         return Ok(0);
-///                     } else {
-///                         // previous stream ended, more data follows => create new decompressor
-///                         self.data = Decompress::new(false);
-///                         self.done = false;
-///                     }
-///                 }
-///                 let before_out = self.data.total_out();
-///                 let before_in = self.data.total_in();
-///                 ret = self.data.decompress(input, buf);
-///                 read = (self.data.total_out() - before_out) as usize;
-///                 consumed = (self.data.total_in() - before_in) as usize;
-///                 remaining = input.len() - consumed;
-///             }
-///             self.obj.consume(consumed);
-///
-///             let ret = ret.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-///             if ret == Status::StreamEnd {
-///                 self.done = true;
-///             } else if consumed == 0 && remaining == 0 && read == 0 {
-///                 return Err(io::Error::new(
-///                     io::ErrorKind::UnexpectedEof,
-///                     "decompression not finished but EOF reached",
-///                 ));
-///             }
-///
-///             if read > 0 || buf.is_empty() {
-///                 return Ok(read);
-///             }
-///         }
-/// ```
 struct Bzip2Streams {
     data: bzip2::Decompress,
     /// The stream ended (`done`): a new one starts where more input follows.
@@ -1260,11 +1217,6 @@ struct ZstdFrames {
     /// second time, with the `reset` of a decoder that has its state, which reserves what every
     /// later frame reserves. Every frame and input, no size rule.
     /// ruzstd 0.9.1 reference: src/decoding/frame_decoder.rs:200-210 (`FrameDecoder::reset`:
-    /// ```text
-    /// let state = match &mut self.state {
-    ///     Some(s) => { s.reset(source, self.max_window_size)?; s }
-    ///     None => { self.state = Some(FrameDecoderState::new(source, self.max_window_size)?); ... }
-    /// ```
     /// ), 103-119 (`FrameDecoderState::new`: `DecoderScratch::new(window_size)`, whose
     /// `DecodeBuffer::new` reserves nothing, src/decoding/decode_buffer.rs:35-44), 121-134
     /// (`FrameDecoderState::reset`: `decoder_scratch.reset(window_size)`), decode_buffer.rs:46-49

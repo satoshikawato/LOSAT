@@ -1029,7 +1029,7 @@ mod tests {
         let native = || -> Result<()> {
             Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: x\n".to_string(),
+                message: "BLAST engine error: x\n".into(),
             }
             .into())
         };
@@ -1067,7 +1067,7 @@ mod tests {
         let native = || -> Result<()> {
             Err(crate::cli::NativeError {
                 exit: 255,
-                message: "Error: x\n".to_string(),
+                message: "Error: x\n".into(),
             }
             .into())
         };
@@ -1124,7 +1124,7 @@ mod tests {
         let native = || -> Result<()> {
             Err(crate::cli::NativeError {
                 exit: 255,
-                message: "Error: x\n".to_string(),
+                message: "Error: x\n".into(),
             }
             .into())
         };
@@ -1251,6 +1251,7 @@ mod tests {
                 "Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `{}'\n",
                 missing.display()
             )
+            .as_bytes()
         );
         // The null device as the strategy file and as `-out`: nothing written there is kept.
         #[cfg(unix)]

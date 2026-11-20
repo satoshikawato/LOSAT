@@ -297,7 +297,9 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
         Some(text) => {
             let site = crate::seqdb::throw_site(&text)
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
-            BdbError::Ncbi(NcbiException::new(site, text))
+            // `NcbiException` holds its message as text: a name that is not UTF-8 reads as
+            // U+FFFD here (open item of the ripple: `NcbiException::message` as bytes).
+            BdbError::Ncbi(NcbiException::new(site, String::from_utf8_lossy(&text)))
         }
         None => BdbError::Refused(
             crate::algorithm::common::database::refusal(&error.to_string(), program).to_string(),

@@ -181,8 +181,7 @@ jobs:
       - name: Build exact native release artifact
         run: cd LOSAT && cargo build --release --locked
 
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
+      # Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (a long-double product)
       # The shipped binary holds FMA instructions and references to fma only where LOSAT's one
       # mul_add emulates that line (docs/agents/diagnostics.md, "Floating-point contract").
       - name: Floating-point contract of the artifact

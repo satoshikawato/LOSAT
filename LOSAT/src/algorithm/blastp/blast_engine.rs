@@ -10986,12 +10986,12 @@ enum UngappedSetupFailure {
 /// (BLASTX refuses the same subject, `blastx::database::too_long`). The refusal belongs to the
 /// first batch with a valid context, as the reader's errors do.
 fn ungapped_setup_failure(
-    args: &ResolvedBlastpArgs,
-    query_records: &[FastaRecord],
+    call_in: &call_setup::CallSetup<'_, '_>,
     query_batches: &[seq_range::RangedBatch],
     query_valid: &[bool],
     subject_source: BlastpSubjectSource<'_>,
 ) -> Option<UngappedSetupFailure> {
+    let args = call_in.args;
     if args.unknown_matrix {
         if let Some(first) = query_batches
             .iter()
@@ -11003,7 +11003,7 @@ fn ungapped_setup_failure(
                     file,
                     "BLASTP",
                 ),
-                None => unknown_matrix_message(&query_records[first.searched.clone()]),
+                None => unknown_matrix_message(&call_in.query_records[first.searched.clone()]),
             }));
         }
     }
@@ -11290,8 +11290,7 @@ fn run_call(
     // An ungapped search's failures before the search of its first query batch
     // (`ungapped_setup_failure`): NCBI's error of a `-matrix` that the score block cannot load,
     // and LOSAT's refusal of a subject over NCBI's part length.
-    let failure =
-        ungapped_setup_failure(&args, query_records, &query_batches, &query_valid, subject_source);
+    let failure = ungapped_setup_failure(&call_in, &query_batches, &query_valid, subject_source);
     if let Some(failure) = failure {
         return Err(match failure {
             UngappedSetupFailure::Engine(text) => setup_error(outputs, true, "", &text),

@@ -259,7 +259,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 assert!(output.stdout.is_empty(), "{label}: standard output");
                 assert!(stderr.starts_with("error: "), "{label}: {stderr}");
             } else {
-                let want_out = frozen(&case.name, "out").unwrap_or_default();
+                let want_out = crate::outfmt11_blastx::expected_losat_bytes(
+                    frozen(&case.name, "out").unwrap_or_default(),
+                );
                 assert!(
                     output.stdout == want_out,
                     "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
@@ -281,7 +283,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 } else {
                     stderr
                 };
-                let want_err = frozen(&case.name, "err").unwrap_or_default();
+                let want_err = crate::outfmt11_blastx::expected_losat_bytes(
+                    frozen(&case.name, "err").unwrap_or_default(),
+                );
                 assert_eq!(
                     stderr,
                     String::from_utf8_lossy(&want_err),

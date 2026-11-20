@@ -3271,7 +3271,7 @@ pub(crate) fn library_subject(
     });
     crate::api::local_blast::ReportedSubject {
         oid: db.oid(ordinal).get(),
-        id: std::sync::Arc::from(String::from_utf8_lossy(&id)),
+        id: crate::api::Id::new(&id),
         length,
     }
 }

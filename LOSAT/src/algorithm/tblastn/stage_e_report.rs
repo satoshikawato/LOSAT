@@ -2163,6 +2163,7 @@ mod tests {
                 &query_seqs,
                 &subject_seqs,
                 LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: Some(&seg),
                     soft_masking: false,
                     mask_lowercase: false,

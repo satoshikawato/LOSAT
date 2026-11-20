@@ -446,7 +446,7 @@ the same lines, in another order where the argv asks for format 0 to 4.
 Version 5 (line WQA's D14, 2026-11-20) adds stream 11 and the *start* field `prints`: an argv with a
 help or version word, which version 4 refused (the parser's refusal of `-version`, line RG E3-2; the
 application refused the help words), prints the CLI's text on stream 11, searches nothing, and its `run`
-takes no input handles. `-xmlhelp` stays refused by the parser, as in version 4 (line RG E2x-1). A host of version 4 does not know stream 11 and would show such a
-run as a search without output, so the change is incompatible: the application refuses a module of
-version 4, and a host of version 4 refuses a module of version 5. Runs without these words give the
-streams of version 4.
+takes no input handles. `-xmlhelp` stays refused by the parser, as in version 4 (line RG E2x-1). A host
+of version 4 does not know stream 11 and would show such a run as a search without output, so the change
+is incompatible: the application refuses a module of version 4, and a host of version 4 refuses a module
+of version 5. Runs without these words give the streams of version 4.

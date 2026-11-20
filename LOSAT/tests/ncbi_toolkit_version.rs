@@ -308,8 +308,8 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                     assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
                     let upper = program.to_ascii_uppercase();
                     let refusal = match matches!(program, "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx") {
-                        true => format!("the NCBI C++ Toolkit option {word} runs on the command line and in the Web engine's ABI v2 of LOSAT's {upper} only: the library API and the Web engine's ABI v1 do not write NCBI's version text"),
-                        false => format!("the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"),
+                        true => format!("the option {word} runs on the command line and in the Web engine's ABI v2 of LOSAT's {upper} only: the library API and the Web engine's ABI v1 do not write NCBI's version text"),
+                        false => format!("the option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"),
                     };
                     assert!(stderr.contains(&refusal), "{program} {words:?}: {stderr}");
                 }

@@ -1501,7 +1501,7 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(extra).toHaveAccessibleName('Additional options');
   // The engine reads the words as the command line does, and says what it does not read.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   // The CLI's options that a search in the browser cannot have (WA-FM-04), and -xmlhelp, whose XML only the command line

@@ -1363,9 +1363,13 @@ fn a_16_report_posts_its_control_characters_and_its_exception_as_ncbi_writes_the
     assert!(out[..cut].ends_with(b"<title>s1 a"));
     assert_eq!(posts[0].at, cut);
     let post = String::from_utf8(posts[0].text.clone()).unwrap();
-    assert!(post.starts_with("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n"), "{post}");
+    // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+    let first = crate::wording::losat_text("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n");
+    assert!(post.starts_with(&*first), "{post}");
     assert!(
-        post.ends_with("Object type= BlastOutput2 (m_Pos = 0)\n\n"),
+        post.ends_with(&*crate::wording::losat_text(
+            "Object type= BlastOutput2 (m_Pos = 0)\n\n"
+        )),
         "{post}"
     );
 }

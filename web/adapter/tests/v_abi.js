@@ -824,7 +824,7 @@ function checkPrints(reactor, native) {
     const argv = [program, ...inputs, "-evalue", "1", "-xmlhelp", "-num_threads", "1"];
     const label = argv.join(" ");
     assert.equal(start(argv).prints, null, `${label}: start prints nothing`);
-    const refusal = `error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's ${program.toUpperCase()} only: ` +
+    const refusal = `error: the option -xmlhelp runs on the command line of LOSAT's ${program.toUpperCase()} only: ` +
       "the library API and the Web engine do not write NCBI's XML description of the arguments";
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, `${label}: validate fails`);

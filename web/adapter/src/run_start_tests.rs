@@ -19,6 +19,14 @@ const SEARCHES: [(&str, &str, &str); 5] = [
 /// NCBI's report of a registry file with the line `[x`, which ends the program (exit status 2).
 const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
 
+/// Two of [`SECTION_REPORT`] (NCBI's text), in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8),
+/// without the last line feed.
+fn section_reports() -> String {
+    losat::web_adapter::losat_text(&SECTION_REPORT.repeat(2))
+        .trim_end()
+        .to_string()
+}
+
 fn input(name: &str) -> Vec<u8> {
     let root = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -274,7 +282,7 @@ fn the_conffile_is_a_registered_registry_file() {
         }
         let mut words = plain_words.clone();
         words.extend(["-conffile", "e1w3a_bad.ini"]);
-        let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+        let report = section_reports();
         assert_eq!(validate(&words).unwrap_err(), report, "{program}");
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
@@ -288,10 +296,12 @@ fn the_conffile_is_a_registered_registry_file() {
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
         assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
-        let file = match program {
+        // NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8).
+        let file = losat::web_adapter::losat_text(&match program {
             "tblastx" => SECTION_REPORT.repeat(2),
             _ => SECTION_REPORT.to_string(),
-        };
+        })
+        .into_owned();
         assert_eq!(
             run_files(&streams),
             Some(vec![("run.log".to_string(), file)]),
@@ -425,7 +435,7 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
         run_files(&streams),
         Some(vec![(
             "run.log".to_string(),
-            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string()
+            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n".to_string()
         )])
     );
 }
@@ -571,7 +581,7 @@ fn a_dry_run_does_not_read_the_outfmt() {
 #[test]
 fn a_leading_dot_slash_names_the_same_registry_file() {
     let _registered = Registered::new("./e1w3a_dot.ini", b"[x\n");
-    let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+    let report = section_reports();
     for name in ["e1w3a_dot.ini", "./e1w3a_dot.ini", "././e1w3a_dot.ini"] {
         let words = argv("blastp", &["-conffile", name]);
         assert_eq!(validate(&words).unwrap_err(), report, "{name}");
@@ -679,7 +689,7 @@ fn help_and_version_words_print_the_command_lines_text() {
         assert!(printing_run(&refused).0.is_err(), "{program}");
         let xml = argv(program, &["-evalue", "1", "-xmlhelp"]);
         let refusal = format!(
-            "error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's XML description of the arguments",
+            "error: the option -xmlhelp runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's XML description of the arguments",
             program.to_ascii_uppercase()
         );
         assert_eq!(validate(&xml).unwrap_err().trim_end(), refusal, "{program}");

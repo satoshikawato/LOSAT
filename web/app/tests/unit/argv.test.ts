@@ -274,7 +274,7 @@ describe('refusedFields', () => {
   });
   it('names "Additional options" for the options typed there, also those of the form', () => {
     expect(fields('-evalue is set in the form: Expect threshold', '-evalue abc')).toEqual({ extra: true, flags: [] });
-    expect(fields("error: unknown option or argument '-foo'; use -help for CLI v2 syntax", '-qcov_hsp_perc 50 -foo')).toEqual({
+    expect(fields("error: unknown option or argument '-foo'; use -help to list the options", '-qcov_hsp_perc 50 -foo')).toEqual({
       extra: true,
       flags: ['-help'],
     });
@@ -296,13 +296,13 @@ describe('refusedFields', () => {
   it('names "Additional options" for a word typed there that is not an option name', () => {
     expect(fields('--help is not available in the browser', '--help')).toEqual({ extra: true, flags: [] });
     expect(fields('--help is not available in the browser', '-strand plus')).toEqual({ extra: false, flags: [] });
-    expect(fields("error: unknown option or argument 'evalue'; use -help for CLI v2 syntax", 'evalue 1e-5')).toEqual({
+    expect(fields("error: unknown option or argument 'evalue'; use -help to list the options", 'evalue 1e-5')).toEqual({
       extra: true,
       flags: ['-help'],
     });
     expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
     // The engine quotes the whole word, with its =value.
-    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help for CLI v2 syntax", '--evalue=1e-5')).toEqual({
+    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help to list the options", '--evalue=1e-5')).toEqual({
       extra: true,
       flags: ['-help'],
     });

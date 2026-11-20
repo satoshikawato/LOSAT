@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::error::Error;
+use super::id::Id;
 use super::input::{check_archive_inputs, is_protein, Inputs, Role};
 use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
@@ -142,11 +143,16 @@ pub struct HspRecord {
     /// those of the round before, each round's in the order of its own hit list.
     pub round: u32,
     /// The query's id (`qaccver`): the first word of its title, its generated `Query_N` without a
-    /// title, and with `-parse_deflines` the accession and version of its id. A byte that is not
-    /// UTF-8 shows as U+FFFD here and as itself in the reports. The HSPs of a query share it.
-    pub query_id: Arc<str>,
-    /// The subject's id (`saccver`), by the same rules. The HSPs of a subject share it.
-    pub subject_id: Arc<str>,
+    /// title, and with `-parse_deflines` the accession and version of its id; the bytes of the
+    /// reports, also those that are not UTF-8 ([`Id`]). Cloning is cheap; it does not copy the
+    /// bytes.
+    pub query_id: Id,
+    /// The subject's id (`saccver`), by the same rules; for a database, the `saccver` of the
+    /// sequence. Where NCBI writes no `saccver` for the subject (its lookup fails: a title whose
+    /// encoding it cannot tell, or `-parse_deflines` ids that LOSAT refuses), the id by the
+    /// query's rules; for a database sequence, the first word of its title. Cloning is cheap; it
+    /// does not copy the bytes.
+    pub subject_id: Id,
     /// The raw alignment score (`score`).
     pub raw_score: i32,
     /// The bit score (`bitscore`), not rounded.
@@ -1291,16 +1297,11 @@ pub(super) fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
 //     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 //     "evalue bitscore";
 // ```
-// `shown_id` and `subject_tabular_id` are the first two columns of the default report.
+// `shown_id` and `subject_tabular_id` are the first two columns of the default report, whose
+// bytes `Id` keeps (`api::id`).
 /// The id of a record, read once: many HSPs show it.
-fn shared_id(
-    ids: &mut [Option<Arc<str>>],
-    index: usize,
-    read: impl FnOnce() -> Vec<u8>,
-) -> Arc<str> {
-    ids[index]
-        .get_or_insert_with(|| Arc::from(String::from_utf8_lossy(&read())))
-        .clone()
+fn shared_id(ids: &mut [Option<Id>], index: usize, read: impl FnOnce() -> Vec<u8>) -> Id {
+    ids[index].get_or_insert_with(|| Id::new(&read())).clone()
 }
 
 /// The HSP records of the final hit list of a search of `inputs`. `qlen` is the record's length

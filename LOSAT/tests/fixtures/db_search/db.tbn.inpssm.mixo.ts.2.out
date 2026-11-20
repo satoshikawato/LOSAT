@@ -1,0 +1,98 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide slices of two shrimp viruses
+           5 sequences; 33,385 total letters
+
+
+
+Query= BDT61857.1 innexin [Penaeus monodon majanivirus A]
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block       415     2e-134
+v_slice LvMJNV 21001-39000 with ambiguity codes                       23.8    0.23  
+m_minus MelaMJNV 59001-62000 with ambiguity codes                     19.6    4.5   
+
+
+
+Query_1  1      MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPISCVYD  60
+0        933    MASLGLLSTLRGILQGKRNADIENIMSKLHYRVTTTVLFSFCLIVTTNTLVGDPI       1097
+0        1243                                                          SCIVD  1257
+0        696                                      SSTLFGMCIK*KKNTLI           746
+0        7733                                 FRNNIKTIFSYCII                  7692
+2        1477                                               ITTTTVVYSKTRCVID  1430
+2        2071                                               ITTTTVVYSKTRCVID  2024
+2        1282                                               ITTTTVVYSKTRCVID  1235
+2        14698                       IENILSK--YIVPLRDVFHMC                    14754
+1        1029   VAST*CTSXFMGIIHNSNKTIIENIMSQLYYTFYSFNF*SYNYSILTFYL-GDRIKXI    1208
+                                          \                                 
+                                          |                                 
+                                        YSC
+
+Query_1  61     SGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAISSPGIGthnlsdpvtyhayyqwvpfm  120
+0        1258   RTNPKLSDKVINTYCWIHTTFTIPNRIYKERGKLHFPGISNYNRVDTITYHAYYQWVPFM  1536
+                                                  \                         
+                                                  |                         
+                  SFTFIFLCIYKTFDVFYFAVVYIIFVLFLILDT
+0        7546                HCYLFSSFTCP                                      7514
+2        10324                                           YNLISRL*YHHYHYYQLFF  10380
+2        1429   RTN                                                           1421
+2        2023   *TN                                                           2015
+2        1234   *TN                                                           1226
+
+Query_1  121    lfiqgllfyaphyiwktweggrmqsitadlsvpilnkedqokrvnqladylqnslwnnnt  180
+0        1640       GLMFYAPHYFWKTLEGGRLQXIVTDFSTPIFNSEERRKRIKQLADYLQNSLWXNNT  1807
+0        1537   LFLQVIISL**HY                                                 1575
+0        6693                                                             NN  6698
+0        1227         MYYYYHYYW                                               1201
+2        6971                    LRGTCIKKLDYQYNIPIYVLKFI*ITIQQITDLLGSLFWFNSI  6843
+2        10381  SYL                                                           10389
+
+Query_1  181    yalkylfcqclslvncivnmVLMNKFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPR  240
+0        1808   YVIKYLICEFLYLLNCIINIVLIDKFLNGMFITYGTDVLSYNEVTDHENKIHPMIALFPR  1987
+0        6699   KDINNVTCDCNFVINCRLSL                                          6758
+0        1329                                                              R  1327
+2        6842   CLINFSF                                                       6822
+
+Query_1  241    VTKCSMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFILLISLSILVFFFHLAVFA  300
+0        1988   MXKCSMNMYGSSGSIERHDFLCVLAVNVVNEKIXLIMWFWLFFLISMSILVCIFYLIVFI  2167
+0        1326   NSKCSMN-----PTISIDNLIT*LGISAINDEIYIYMYYYY                     1213
+                                               \                            
+                                               |                            
+                                              TA
+
+Query_1  301    VPVIRRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTEL  354
+0        2168   FPIMRRLYLLILLGSNKKVNVVIQTFNQMGDIFILSLLXKNIDSQYLELLVTEL  2329
+
+
+Lambda      K        H        a         alpha
+   0.324    0.138    0.425    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3517992
+
+
+  Database: nucleotide slices of two shrimp viruses
+    Posted date:  Oct 15, 2026  10:35 PM
+  Number of letters in database: 33,385
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

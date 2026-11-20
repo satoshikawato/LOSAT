@@ -2697,7 +2697,7 @@ pub fn post_native_error(error: &anyhow::Error) {
 }
 
 #[cfg(test)]
-mod readme_refusals_tests;
+mod manual_refusals_tests;
 
 #[cfg(all(test, unix))]
 mod tests {

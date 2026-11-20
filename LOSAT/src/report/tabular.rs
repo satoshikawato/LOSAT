@@ -1899,6 +1899,11 @@ pub struct TabularHsp<'a> {
     /// alignment of the engines; `false` only for `-subject`'s mapped row of BLASTX
     /// (`blastx::empty_rows::MappedAlignment`), whose `-` past the query's end fills its segment.
     pub end_gaps: bool,
+    /// The columns (0-based, sorted) of `rows` whose `-` is a residue, the query's and the
+    /// subject's: a PSSM query's gap residue, a database's stored gap character
+    /// (`pairwise::PairwiseHit::query_stored_gaps`, `subject_stored_gaps`), which is no end gap
+    /// (`end_gap_span`).
+    pub stored_gaps: [&'a [u32]; 2],
     /// `qcovhsp` (the integer of NCBI's `hsp_percent_coverage`).
     pub qcovhsp: i32,
 }
@@ -2421,12 +2426,18 @@ impl<'a> TabularWriter<'a> {
                 QueryEnd => push_num(out, hsp.q_end),
                 SubjectStart => push_num(out, hsp.s_start),
                 SubjectEnd => push_num(out, hsp.s_end),
-                QuerySeq => {
-                    push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.0), hsp.end_gaps)
-                }
-                SubjectSeq => {
-                    push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.1), hsp.end_gaps)
-                }
+                QuerySeq => push_alignment_row(
+                    out,
+                    hsp.rows.map_or(&[][..], |rows| rows.0),
+                    hsp.end_gaps,
+                    hsp.stored_gaps[0],
+                ),
+                SubjectSeq => push_alignment_row(
+                    out,
+                    hsp.rows.map_or(&[][..], |rows| rows.1),
+                    hsp.end_gaps,
+                    hsp.stored_gaps[1],
+                ),
                 Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
                 BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
                 Score => push_num(out, hsp.score),
@@ -2456,7 +2467,7 @@ impl<'a> TabularWriter<'a> {
                 SubjectFrame => push_num(out, frames(hsp).1),
                 Btop => {
                     if let Some((qrow, srow)) = hsp.rows {
-                        write_btop(out, qrow, srow, hsp.end_gaps);
+                        write_btop(out, qrow, srow, hsp.end_gaps, hsp.stored_gaps);
                     }
                 }
                 SubjectTaxId | SubjectTaxIds | SubjectSciName | SubjectCommonName
@@ -2808,14 +2819,21 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
 /// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos', and
 /// rows whose `-` fill a segment, `end_gaps` false: `TabularHsp::end_gaps`) take the columns as
-/// they are; `end_gap_span` stops at each row's first letter from each end.
-pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8], end_gaps: bool) {
+/// they are; `end_gap_span` stops at each row's first letter from each end, or at its first `-`
+/// that is a residue (`stored`, the query's and the subject's: `TabularHsp::stored_gaps`).
+pub fn write_btop(
+    out: &mut Vec<u8>,
+    qrow: &[u8],
+    srow: &[u8],
+    end_gaps: bool,
+    stored: [&[u32]; 2],
+) {
     let columns = qrow.iter().copied().zip(srow.iter().copied());
     if !end_gaps {
         write_btop_columns(out, columns);
         return;
     }
-    let (q_span, s_span) = (end_gap_span(qrow, |_| false), end_gap_span(srow, |_| false));
+    let (q_span, s_span) = (end_gap_span(qrow, stored[0]), end_gap_span(srow, stored[1]));
     if q_span == (0, qrow.len()) && s_span == (0, srow.len()) {
         write_btop_columns(out, columns);
     } else {
@@ -2868,11 +2886,11 @@ fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
 //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
 // ```
 /// `qseq` or `sseq`: the row with `-` for its inner gaps and a space (NCBI's end character, which
-/// the tabular writer does not set) for its end gaps (`end_gap_span`), where it has some
-/// (`end_gaps`, `TabularHsp::end_gaps`).
-fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], end_gaps: bool) {
+/// the tabular writer does not set) for its end gaps (`end_gap_span`, whose `-` is no residue of
+/// `stored`: `TabularHsp::stored_gaps`), where it has some (`end_gaps`, `TabularHsp::end_gaps`).
+fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], end_gaps: bool, stored: &[u32]) {
     let span = if end_gaps {
-        end_gap_span(row, |_| false)
+        end_gap_span(row, stored)
     } else {
         (0, row.len())
     };
@@ -3188,6 +3206,7 @@ mod tests {
                 s_frame: 1,
                 rows: None,
                 end_gaps: true,
+                stored_gaps: [&[], &[]],
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
@@ -3385,6 +3404,7 @@ mod tests {
                 s_frame: 1,
                 rows,
                 end_gaps: true,
+                stored_gaps: [&[], &[]],
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
@@ -3481,6 +3501,7 @@ mod tests {
             s_frame: 1,
             rows: None,
             end_gaps: true,
+            stored_gaps: [&[], &[]],
             qcovhsp: 100,
         };
         let mut out = Vec::new();
@@ -3526,6 +3547,7 @@ mod tests {
             s_frame: 1,
             rows: None,
             end_gaps: true,
+            stored_gaps: [&[], &[]],
             qcovhsp: 50,
         };
         let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
@@ -4028,7 +4050,7 @@ mod tests {
     #[test]
     fn btop_counts_runs() {
         let mut out = Vec::new();
-        write_btop(&mut out, b"ACGT-A", b"ACCTTA", true);
+        write_btop(&mut out, b"ACGT-A", b"ACCTTA", true, [&[], &[]]);
         assert_eq!(out, b"2GC1-T1");
     }
 
@@ -4037,24 +4059,36 @@ mod tests {
     #[test]
     fn end_gaps_are_spaces_in_the_rows_and_btop() {
         let mut out = Vec::new();
-        push_alignment_row(&mut out, b"---AC-DE--", true);
+        push_alignment_row(&mut out, b"---AC-DE--", true, &[]);
         assert_eq!(out, b"   AC-DE  ");
         out.clear();
-        push_alignment_row(&mut out, b"MKV-L", true);
+        push_alignment_row(&mut out, b"MKV-L", true, &[]);
         assert_eq!(out, b"MKV-L");
         out.clear();
-        write_btop(&mut out, b"MQLAC-D", b"---ACKD", true);
+        write_btop(&mut out, b"MQLAC-D", b"---ACKD", true, [&[], &[]]);
         assert_eq!(out, b"M Q L 2-K1");
         out.clear();
-        write_btop(&mut out, b"AC-DKK", b"ACGD--", true);
+        write_btop(&mut out, b"AC-DKK", b"ACGD--", true, [&[], &[]]);
         assert_eq!(out, b"2-G1K K ");
         // Rows whose `-` fill a segment (BLASTX's mapped row past a query's end, db.x2g.bx.s1o.subj.6w
         // and .10: NCBI's `TCGGCATGGCTG-` and BTOP `...-X`).
         out.clear();
-        push_alignment_row(&mut out, b"TCG-", false);
+        push_alignment_row(&mut out, b"TCG-", false, &[]);
         assert_eq!(out, b"TCG-");
         out.clear();
-        write_btop(&mut out, b"TCG-", b"TANX", false);
+        write_btop(&mut out, b"TCG-", b"TANX", false, [&[], &[]]);
         assert_eq!(out, b"1CAGN-X");
+        // A `-` that is a residue (a PSSM query's gap residue, a database's stored gap
+        // character) is no end gap (M4a-1c LG probe `ts_std0first.f2`: NCBI's qseq `-ASLG...`
+        // and BTOP `-M23...` for a query whose first residue is the gap residue).
+        out.clear();
+        push_alignment_row(&mut out, b"-ASL-", true, &[0]);
+        assert_eq!(out, b"-ASL ");
+        out.clear();
+        write_btop(&mut out, b"-ASL", b"MASL", true, [&[0], &[]]);
+        assert_eq!(out, b"-M3");
+        out.clear();
+        write_btop(&mut out, b"MASLK", b"MASL-", true, [&[], &[4]]);
+        assert_eq!(out, b"4K-");
     }
 }

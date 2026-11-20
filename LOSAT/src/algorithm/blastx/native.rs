@@ -733,7 +733,8 @@ fn run_inner(
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
             bail!(
-                "unsupported BLASTX query input for -outfmt {}: use a regular file",
+                "unsupported {} query input for -outfmt {}: use a regular file",
+                program.upper,
                 choice.number
             );
         }

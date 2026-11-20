@@ -146,11 +146,15 @@ pub(super) fn check_freq_ratio_file(
     }
     args.comp_based_stats.mode =
         crate::algorithm::blastp::args::BlastpCompositionMode::NoCompositionBasedStats;
-    writeln!(
-        diagnostics,
-        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.",
+    // One post of two lines: the archive saves it as one message (`ERR_POST(Warning << msg)`).
+    let warning = format!(
+        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.\n",
         failed.join(", ")
-    )?;
+    );
+    match &args.archive {
+        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
+        None => diagnostics.write_all(warning.as_bytes())?,
+    }
     Ok(())
 }
 

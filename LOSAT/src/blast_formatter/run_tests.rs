@@ -146,11 +146,12 @@ fn a_rid_is_refused_as_remote_is() {
             "{line:?}"
         );
     }
-    // The arguments are checked first, and `-dryrun` ends the run before `Run`.
+    // The arguments are checked first (NCBI's bytes: row `rid_archive` of
+    // `LOSAT/tests/blast_formatter`), and `-dryrun` ends the run before `Run`.
     let (status, _, err) = run_words(&["-rid", "X", "-archive", "a"], b"");
     assert_eq!(status, 1);
     assert!(
-        err.ends_with("Error: Argument \"rid\". Incompatible with argument:  `archive'\n"),
+        err.contains("\nError: Argument \"rid\". Incompatible with argument:  `archive'\n"),
         "{err}"
     );
     assert_eq!(

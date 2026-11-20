@@ -1006,7 +1006,7 @@ fn searches(
                 .map(|choice| choice.number)
                 .map_err(|error| {
                     log.post(&error);
-                    Error::Argv(format!("{error:#}").into())
+                    Error::Argv(super::error::chain_bytes(&error))
                 })
         })
         .collect::<Result<_, _>>()?;

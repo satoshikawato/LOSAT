@@ -117,7 +117,7 @@ const CASES: [Case; 2] = [
     Case {
         program: "rpsblast",
         query: "tests/fasta/rps/xoj.faa",
-        options: &["-evalue", "1e-5"],
+        options: &[],
         archive: "db_search/db.rps.of11.xojd.out",
         xml: "db_search/db.rps.of5.xojd.out",
         stem: "prot",

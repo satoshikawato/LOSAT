@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn options_of_later_items_are_refused() {
-        for extra in [&["-outfmt", "5"][..], &["-outfmt", "1"]] {
+        for extra in [&["-outfmt", "8"][..], &["-outfmt", "1"]] {
             let error = parse(extra).unwrap().into_blastp_args().unwrap_err();
             assert!(
                 error

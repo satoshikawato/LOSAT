@@ -509,12 +509,12 @@ mod tests {
     fn options_of_later_items_are_refused() {
         for (extra, text) in [
             (
-                &["-outfmt", "5"][..],
-                "output format 5 is not supported by LOSAT's RPSTBLASTN",
+                &["-outfmt", "8"][..],
+                "output format 8 is not supported by LOSAT's RPSTBLASTN",
             ),
             (
-                &["-outfmt", "11"],
-                "output format 11 is not supported by LOSAT's RPSTBLASTN",
+                &["-outfmt", "12"],
+                "output format 12 is not supported by LOSAT's RPSTBLASTN",
             ),
             (
                 &["-outfmt", "20"],

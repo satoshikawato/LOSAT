@@ -2099,6 +2099,38 @@ makeblastdb -in tc.fna -dbtype nucl -out edge9 -title "edge masks 9" -blastdb_ve
 makeblastdb -in tr.fna -dbtype nucl -out edge10 -title "edge masks 10" -blastdb_version 4 -mask_data edge_tr.asnt,edge_trn.asnt
 ```
 
+## `dbmaskp/`: database masks of BLASTP and BLASTX searches (line NP, series M, M4b)
+
+Rows `db.pmask.*` (`blastp.pmask.tsv`, `blastx.pmask.tsv`: `-db_soft_mask`, `-db_hard_mask`). The inputs are the probe
+inputs of the M4b survey (`ncbi-parity-20261019/M/m4b/probe/in`, written by its `scripts/gen.py`, seed 20261120):
+`prot.faa` (seven proteins: `p1` with a Q block and an SG block, `p2` random, `p3` with an EK head and a K tail, `p4`
+all GS, `p5` random for the hand masks, `p6` a homolog of `p1`, `p7` with a PA block), `proth.faa` (the same without
+`p4`, whose seg mask covers it whole), the protein queries `qp.faa` (`qp_all.fa`) and the nucleotide queries `qx.fna`
+(`bx_all.fa`), and the hand masks of `p5` `edge_*.asnt` (`pedge_*.asnt`, ASN.1 text, `local id 5`, algorithm seg).
+Made with NCBI BLAST+ 2.17.0 from `dbmaskp/` (`BLAST_USAGE_REPORT=false`; the script is
+`ncbi-parity-20261019/M/m4b/ws/fixtures.sh`):
+
+```
+segmasker -in prot.faa -infmt fasta -outfmt maskinfo_asn1_bin -out seg.asnb
+segmasker -in prot.faa -infmt fasta -outfmt maskinfo_asn1_bin -window 8 -locut 1.8 -hicut 2.1 -out seg8.asnb
+segmasker -in proth.faa -infmt fasta -outfmt maskinfo_asn1_bin -out segh.asnb
+segmasker -in proth.faa -infmt fasta -outfmt maskinfo_asn1_bin -window 8 -locut 1.8 -hicut 2.1 -out segh8.asnb
+makeblastdb -in prot.faa -dbtype prot -out ps5 -title "seg masks v5" -mask_data seg.asnb,seg8.asnb
+makeblastdb -in proth.faa -dbtype prot -out ph5 -title "seg masks v5 without p4" -mask_data segh.asnb,segh8.asnb
+makeblastdb -in proth.faa -dbtype prot -out ph4 -title "seg masks v4 without p4" -blastdb_version 4 -mask_data segh.asnb,segh8.asnb
+makeblastdb -in proth.faa -dbtype prot -out phmv -title "seg masks, volumes" -max_file_sz 600B -mask_data segh.asnb
+for c in mid head adjacent gap2 tiny neartail two_tail tail unsorted; do
+  makeblastdb -in prot.faa -dbtype prot -out pe_$c -title "edge $c" -mask_data edge_$c.asnt
+done
+rm -f *.pjs
+```
+
+`ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
+(several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's
+refusal of a mask that runs to the end (the Owner's question Q1 of M4b); `ph5`, `ph4` and `phmv` are the hard-mask
+databases. `pe_tail` (a masked tail) and `pe_unsorted` (masks out of order) are refused too, and `pe_tiny` (masks of one
+and two letters) with `-window_size 0`, where a piece between two masks is shorter than the word.
+
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 
 `title_bad` (version 4, nucleotide): the records of `tests/fasta/outfmt11/arch_s.fna` and `arch_tbn_s.fna`, built by NCBI

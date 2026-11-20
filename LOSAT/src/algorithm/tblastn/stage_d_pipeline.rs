@@ -1127,7 +1127,8 @@ impl SetupEngineError {
     /// `BLASTERR_SUBJECT_LENGTH_INVALID` (`run_local_search_with_pool`, blast_setup.c:969-980):
     /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
     /// (env parity probe f_probe of 2026-11-12).
-    pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self("The average subject length is too short");
+    pub(crate) const SUBJECT_LENGTH_INVALID: Self =
+        Self(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
 
     /// `BlastHitSavingParametersNew`'s status 1 (`stats::setup::hit_saving_parameters_fail`):
     /// sum statistics with a setup subject length that is not positive, the average of a negative

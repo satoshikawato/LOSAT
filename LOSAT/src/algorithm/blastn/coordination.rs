@@ -382,6 +382,21 @@ fn task_defaults(task: &str) -> TaskDefaults {
             template_type: DiscWordType::Coding,
             template_length: 0,
         },
+        // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:365-370
+        // ```c++
+        //         }else if ( !NStr::CompareNocase(task, "rmblastn") )
+        //         {
+        //             // -RMH- This blastn only supports full matrix scoring.
+        //             opts->SetMatchReward(0);
+        //             opts->SetMismatchPenalty(0);
+        //         }
+        // ```
+        // The blastn handle with reward 0 and penalty 0 (matrix-only scoring).
+        "rmblastn" => TaskDefaults {
+            reward: 0,
+            penalty: 0,
+            ..task_defaults("blastn")
+        },
         _ => TaskDefaults {
             word_size: 11,
             reward: 2,
@@ -1659,6 +1674,54 @@ mod tests {
             40
         );
         assert_eq!(determine_window_size(&blastn_args(&["-task", "blastn"])), 0);
+    }
+
+    #[test]
+    fn rmblastn_is_blastn_with_matrix_only_scoring() {
+        // NCBI blast_options_handle.cpp:365-370: rmblastn is the blastn handle with reward 0 and
+        // penalty 0; blast_setup.c:359-368: the engine then scores with BLAST_REWARD and
+        // BLAST_PENALTY (1/-3) while the options keep 0/0.
+        assert_eq!(engine_scoring_pair(0, 0), (true, 1, -3));
+        assert_eq!(engine_scoring_pair(2, -3), (false, 2, -3));
+        assert_eq!(engine_scoring_pair(0, -2), (false, 0, -2));
+        let blastn = configure_task(&blastn_args(&["-task", "blastn"]));
+        for words in [
+            &["-task", "rmblastn"][..],
+            &["-task", "blastn", "-reward", "0", "-penalty", "0"],
+        ] {
+            let args = blastn_args(words);
+            let config = configure_task(&args);
+            assert_eq!((config.reward, config.penalty), (0, 0), "{words:?}");
+            assert!(config.matrix_only, "{words:?}");
+            assert_eq!((config.score_reward, config.score_penalty), (1, -3));
+            assert_eq!(
+                (
+                    config.effective_word_size,
+                    config.gap_open,
+                    config.gap_extend
+                ),
+                (11, 5, 2)
+            );
+            assert!(config.use_dp);
+            assert_eq!(
+                (
+                    config.x_drop_ungapped,
+                    config.x_drop_gapped,
+                    config.x_drop_final
+                ),
+                (20.0, 30.0, 100.0)
+            );
+            assert_eq!(
+                (config.min_diag_separation, config.window_size),
+                (blastn.min_diag_separation, blastn.window_size)
+            );
+            assert_eq!(determine_evalue(&args), 10.0);
+        }
+        assert!(task_dust_by_default("rmblastn"));
+        assert!(!task_uses_megablast_chunks("rmblastn"));
+        // The other tasks keep the option pair as the engine's.
+        assert!(!blastn.matrix_only);
+        assert_eq!((blastn.score_reward, blastn.score_penalty), (2, -3));
     }
 
     #[test]

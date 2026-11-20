@@ -293,10 +293,16 @@ mod tests {
             .unwrap();
         assert_eq!(
             task.choices,
-            ["megablast", "dc-megablast", "blastn", "blastn-short"]
+            [
+                "megablast",
+                "dc-megablast",
+                "blastn",
+                "blastn-short",
+                "rmblastn"
+            ]
         );
-        // NCBI's rmblastn stays a refusal and is not offered.
-        assert!(!parses(Program::Blastn, "rmblastn"));
+        // NCBI's rmblastn (blastn with reward 0 and penalty 0) is offered and parses.
+        assert!(parses(Program::Blastn, "rmblastn"));
     }
 
     #[test]

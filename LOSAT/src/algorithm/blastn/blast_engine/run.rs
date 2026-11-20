@@ -99,7 +99,7 @@ use crate::blastinput::seq_range::{
 };
 use crate::report::diag_log::Posts;
 use crate::report::pairwise::{
-    write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
+    write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnIntro, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
 use crate::report::query_warnings::{query_warning, QueryReads};
@@ -6522,6 +6522,9 @@ struct BlastnReportInputs<'a> {
     /// `-strand minus`, else 0 (`context 2 * q + first_context`).
     first_context: usize,
     megablast: bool,
+    /// Matrix-only scoring (reward 0 and penalty 0, `TaskConfig::matrix_only`): the outfmt 0
+    /// report shows raw scores only (`BlastnIntro`).
+    matrix_only: bool,
     reward: i32,
     penalty: i32,
     gap_open: i32,
@@ -6718,7 +6721,10 @@ fn blastn_pairwise_report(
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.to_string(),
-        megablast: report.megablast,
+        intro: BlastnIntro {
+            megablast: report.megablast,
+            matrix_only: report.matrix_only,
+        },
         database_name: subject_title.to_string(),
         database_num_sequences: report.shown_num_seqs(),
         database_total_letters: report.shown_total_letters(),
@@ -9695,7 +9701,7 @@ fn database_search_error(
     error: anyhow::Error,
     first_batch: bool,
     outputs: BatchOutputs<'_, '_>,
-    megablast: bool,
+    intro: BlastnIntro,
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     let error = match error.downcast::<database::PreliminaryReadError>() {
@@ -9709,7 +9715,7 @@ fn database_search_error(
         return ErrorAfterInvalidBatches(error).into();
     }
     let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
-    match write_pairwise_prologs(outputs, output_formats, megablast, shown, false) {
+    match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {
         Ok(()) => error,
         Err(write_error) => write_error,
     }
@@ -10083,6 +10089,7 @@ fn ungapped_reap_query_coverage(
 
 /// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
 /// "no NCBI UB / overflow"): a context of 2^30 letters or more, or a search space beyond `Int8`.
+/// The word cutoff of an ungapped search and of matrix-only scoring (`batch_setup::batch_cutoffs`).
 fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
     let what = match limit {
         ungapped::CutoffLimit::QueryLength => {
@@ -10092,7 +10099,9 @@ fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
             "an average subject length whose ungapped word cutoff search space overflows NCBI BLAST+'s 64-bit int"
         }
     };
-    anyhow::anyhow!("{what} is not supported by LOSAT's BLASTN with -ungapped")
+    anyhow::anyhow!(
+        "{what} is not supported by LOSAT's BLASTN with -ungapped or with reward 0 and penalty 0 (matrix-only scoring)"
+    )
 }
 
 /// What the query batches search (`search_query_batch`): the prepared subject set, or the
@@ -10482,7 +10491,7 @@ fn run_in_pool(
         }
         _ => scopes,
     });
-    let megablast = args.task == "megablast";
+    let intro = blastn_intro(&args);
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c
     //         formatter.PrintProlog();
@@ -10493,14 +10502,14 @@ fn run_in_pool(
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
     // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
     // before any query is read or searched.
-    write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
+    write_pairwise_prologs(outputs, &output_formats, intro, &shown, true)?;
     // The mixer's `CHUNK_SIZE` and then `BATCH_SIZE` are read here, after the prolog and before
     // the first batch: a value that NCBI cannot convert stops the run with its exception
     // (`query_batching_from_environment`), as a batch size of 0 does below.
     let (mut batching, mut overlap_error) = match batching {
         Ok(batching) => batching,
         Err(error) => {
-            write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
+            write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
             return Err(error);
         }
     };
@@ -10571,7 +10580,7 @@ fn run_in_pool(
     // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
     // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
     if batching.batch_size == 0 {
-        write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
+        write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
             message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
@@ -11957,13 +11966,24 @@ fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputForm
     }
 }
 
+/// What the outfmt 0 report of the search introduces (`BlastnIntro`, with its NCBI reference):
+/// megablast's reference, and matrix-only scoring from the option values of reward and penalty
+/// (NCBI's `m_DisableKAStats`, set for every task of the BLASTN application).
+fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
+    let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
+    BlastnIntro {
+        megablast: args.task == "megablast",
+        matrix_only: reward == 0 && penalty == 0,
+    }
+}
+
 /// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before the
 /// search (`before_search`) or, for a run that stops before any report, the prolog of the
 /// others (`prolog_with_report`: the file sinks of outfmt 0 and every sink of outfmt 15 and 16).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
-    megablast: bool,
+    intro: BlastnIntro,
     shown: &ShownSubjects,
     before_search: bool,
 ) -> Result<()> {
@@ -11994,7 +12014,7 @@ fn write_pairwise_prologs(
             _ => false,
         };
         if writes_prolog {
-            write_format_prolog(format, output_format, megablast, shown)?;
+            write_format_prolog(format, output_format, intro, shown)?;
         }
     }
     Ok(())
@@ -12005,7 +12025,7 @@ fn write_pairwise_prologs(
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,
-    megablast: bool,
+    intro: BlastnIntro,
     shown: &ShownSubjects,
 ) -> Result<()> {
     if output_format.is_pairwise() {
@@ -12013,7 +12033,7 @@ fn write_format_prolog(
         write_blastn_pairwise_prolog(
             &mut writer,
             crate::NCBI_BLAST_VERSION,
-            megablast,
+            intro,
             &shown.name,
             // Printed for a subject set only (a database prints `database`).
             i64::from(shown.num_seqs),
@@ -12075,7 +12095,7 @@ fn write_before_failed_batch(
         write_pairwise_prologs(
             outputs,
             output_formats,
-            args.task == "megablast",
+            blastn_intro(args),
             subjects.shown,
             false,
         )
@@ -12383,6 +12403,7 @@ fn write_reports_untimed(
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
+        matrix_only: config.matrix_only,
         reward: config.reward,
         penalty: config.penalty,
         gap_open: config.gap_open,
@@ -13066,7 +13087,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
     let diag_mask = diag_array_length - 1;
 
-    let megablast = args.task == "megablast";
+    let intro = blastn_intro(args);
     // Whether NCBI searches the batch chunk by chunk when it has a valid context (a gapped
     // search, `search_query_chunks`): each chunk's set-up then checks the subjects
     // (`ContextInputs::split`).
@@ -13100,7 +13121,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             split,
             subjects,
             seq_data: &seq_data,
-            megablast,
+            intro,
             shown: &shown,
         },
         reborrow_outputs(&mut outputs),
@@ -13558,7 +13579,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 error,
                 first_batch,
                 reborrow_outputs(&mut outputs),
-                megablast,
+                intro,
                 &shown,
             )
         })?;
@@ -13573,7 +13594,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             error,
             first_batch,
             reborrow_outputs(&mut outputs),
-            megablast,
+            intro,
             &shown,
         ));
     }
@@ -13616,7 +13637,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 error,
                 first_batch,
                 reborrow_outputs(&mut outputs),
-                megablast,
+                intro,
                 &shown,
             )
         })?;

@@ -480,48 +480,100 @@ struct XCarry {
     results: XWindowResults,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
-/// The carried matches whose heap test, deferred by their job, is TRUE for certain at its replay,
-/// with the test's E-value and score: the first (the replay answered it TRUE), and each whose
-/// query's heap, as the replay left it, holds fewer lists than its threshold minus the carried
-/// matches of the query before it that may insert one (those with alignments, those continued, and
-/// those whose deferred test is not certain; a match ended before its window, one with no
-/// alignment, and one whose test is FALSE for certain insert none). A test that the heap without
-/// its side effect answers FALSE stays FALSE (`x_sw_heap_test`), so that match inserts none.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276,329-400
+/// The carried matches whose heap test, deferred by their job, is TRUE at its replay, with the
+/// test's E-value and score. The first one's test the replay answered TRUE. A query's heap changes
+/// only by the inserts of its own matches, so the tests after it are known query by query:
+/// - in a query after the stopped match's, the query's carried matches are replayed ahead as
+///   `x_replay` will replay them, on a copy of its heap without the alignments
+///   (`BlastCompoHeap::keys`): a result with alignments is inserted where the heap's test says so,
+///   and a deferred test is asked of the copy (FALSE: the match inserts nothing). This holds up to
+///   the query's first TRUE, its first match that the early termination test may end at its
+///   replay (`end_above`), or a redo that would end the search there;
+/// - after that, and in the stopped match's query, a test is TRUE for certain where the heap (the
+///   copy, or the heap as the replay left it) holds fewer lists than its threshold minus the
+///   matches since that may insert one: those with alignments, those continued, and those whose
+///   deferred test the heap without its side effect does not answer FALSE (a FALSE stays FALSE,
+///   `x_sw_heap_test`). A match ended before its window inserts none.
+/// A match that the early termination test may end is not continued (its continuation could be
+/// computed in vain); nor is any match after a redo that would end the search.
 fn x_sw_continued(
     carry: &XCarry,
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
+    end_above: &[Option<f64>],
 ) -> Vec<(usize, (f64, i32))> {
     let mut continued = Vec::new();
     let mut query = None;
+    // The query's heap replayed ahead (copied at its first match replayed so), exact while
+    // `exact`; after that the count of the matches that may insert a list.
+    let mut ahead: Option<BlastCompoHeap> = None;
+    let mut exact = false;
     let mut may_insert = 0usize;
     for (index, (&matched, computed)) in carry.matches.iter().zip(&carry.results).enumerate() {
-        if query != Some(matched.q_idx) {
-            query = Some(matched.q_idx);
+        let q_idx = matched.q_idx;
+        if query != Some(q_idx) {
+            query = Some(q_idx);
+            ahead = None;
+            exact = index > 0;
             may_insert = 0;
         }
         let Some(computed) = computed else {
             continue;
         };
-        let heap = &heaps[matched.q_idx];
+        if index == 0 {
+            let test = computed
+                .deferred
+                .expect("the stopped match's test was deferred");
+            continued.push((index, test));
+            may_insert = 1;
+            continue;
+        }
+        let local_match = x_local_match(lists, matched);
+        let inserts = match &computed.result {
+            Ok(postprocessed) => postprocessed.hsp_list.is_some(),
+            Err(error) if error.is::<SwRedoFailed>() => false,
+            // The replay ends the search here (or the early termination test ends the match).
+            Err(_) => break,
+        };
+        let may_end = end_above[q_idx].is_some_and(|above| local_match.best_evalue > above);
+        if exact && !may_end {
+            let heap = ahead.get_or_insert_with(|| heaps[q_idx].keys());
+            match (computed.deferred, &computed.result) {
+                (Some((evalue, score)), _) => {
+                    if heap.would_insert(evalue, score, local_match.oid) {
+                        continued.push((index, (evalue, score)));
+                        exact = false;
+                        may_insert = 1;
+                    }
+                }
+                (None, Ok(postprocessed)) if inserts => {
+                    let (evalue, score) = (postprocessed.best_evalue, postprocessed.best_score);
+                    if heap.would_insert(evalue, score, local_match.oid) {
+                        let keys = BlastpHspList {
+                            oid: local_match.oid,
+                            query_index: local_match.query_index,
+                            hsps: Vec::new(),
+                            best_evalue: evalue,
+                        };
+                        heap.insert(keys, evalue, score, local_match.oid);
+                    }
+                }
+                (None, _) => {}
+            }
+            continue;
+        }
+        exact = false;
+        let heap = ahead.as_ref().unwrap_or(&heaps[q_idx]);
         match computed.deferred {
-            Some(test) if index == 0 || heap.n.saturating_add(may_insert) < heap.heap_threshold => {
+            Some(test) if !may_end && heap.n.saturating_add(may_insert) < heap.heap_threshold => {
                 continued.push((index, test));
                 may_insert += 1;
             }
             Some((evalue, score)) => {
-                let oid = x_local_match(lists, matched).oid;
-                may_insert += usize::from(heap.would_insert_view(evalue, score, oid));
+                may_insert += usize::from(heap.would_insert_view(evalue, score, local_match.oid));
             }
-            None => {
-                may_insert += usize::from(
-                    computed
-                        .result
-                        .as_ref()
-                        .is_ok_and(|result| result.hsp_list.is_some()),
-                );
-            }
+            None => may_insert += usize::from(inserts),
         }
     }
     continued
@@ -674,7 +726,7 @@ fn x_window<const SW: bool>(
             .ended
             .extend(carry.results.iter().map(|computed| computed.is_none()));
         window.carried = carry.matches.len();
-        window.continued = x_sw_continued(carry, lists, heaps);
+        window.continued = x_sw_continued(carry, lists, heaps, end_above);
         window
             .jobs
             .extend(window.continued.iter().map(|&(index, _)| index..index + 1));
@@ -3793,6 +3845,25 @@ mod tests {
                 "jobs {jobs}"
             );
         }
+        // Two queries, each a match that inserts its list and a better one whose deferred test
+        // is TRUE. At the stop in the first query, the second query's carried matches are
+        // replayed ahead on a copy of its heap: its test is TRUE there, so both continuations run
+        // in the second window.
+        let cases = vec![vec![sw_case(0.5, SwKind::Kept), sw_case(0.4, SwKind::Kept)]; 2];
+        let limits = XWindowLimits {
+            jobs: 8,
+            at_risk_jobs: 8,
+        };
+        let mut heaps = heaps_of(2, 1);
+        let (counts, computed) = sw_drive(&mut lists(), &cases, &mut heaps, &alone(2), limits);
+        let counts = counts.expect("no error");
+        let mut model = heaps_of(2, 1);
+        sw_one_thread(&lists(), &cases, &mut model, &alone(2)).expect("no error");
+        assert_eq!(heap_contents(&heaps), heap_contents(&model));
+        assert_eq!(
+            (counts.turned, counts.continued, counts.windows, computed),
+            (Some(0), 2, 2, 6)
+        );
     }
 
     /// A continuation is replayed before the end of its batch: its redo sets the batch's status

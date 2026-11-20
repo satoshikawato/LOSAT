@@ -1022,6 +1022,38 @@ impl BlastCompoHeap {
         compo_heap_record_compare(root, &record)
     }
 
+    // No NCBI counterpart: a copy for looking ahead; NCBI's heap has none.
+    /// A copy of the heap whose records keep their keys (E-value, score, subject index) but not
+    /// their alignments. `would_insert` and `insert` read and order only the keys, so the copy
+    /// answers and changes as the heap would under the same calls. The parallel redo's windows
+    /// replay a query's carried matches ahead on it (`x_redo_par.rs`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(crate) fn keys(&self) -> Self {
+        let keys = |records: &Vec<BlastCompoHeapRecord>| {
+            records
+                .iter()
+                .map(|record| BlastCompoHeapRecord {
+                    best_evalue: record.best_evalue,
+                    best_score: record.best_score,
+                    subject_index: record.subject_index,
+                    hsplist: None,
+                })
+                .collect()
+        };
+        Self {
+            n: self.n,
+            heap_threshold: self.heap_threshold,
+            ecutoff: self.ecutoff,
+            worst_evalue: self.worst_evalue,
+            array: self.array.as_ref().map(keys),
+            heap_array: self.heap_array.as_ref().map(keys),
+            x_ends_early: self.x_ends_early,
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:294-352
     // ```c
     // int

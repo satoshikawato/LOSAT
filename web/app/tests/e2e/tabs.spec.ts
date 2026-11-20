@@ -105,34 +105,42 @@ test('Search and Results, the results views and the output formats are tabs that
 });
 
 // Line WQA, W-2 (2026-11-20): in the random walk at 320 px, WebKit's press on the Search tab came
-// as the run on the Results tab ended, and the tab stayed unchosen. While the results were read,
-// "Reading the results…" stood for the run's status, the page became shorter than where it was
-// scrolled to, and the browser moved it up by as much (106 px there): the release came on what had
-// been under the tab, so the press was no click (a click goes where the press and the release both
-// were). Chromium and Firefox lost it the same way.
-test('the page does not move while a run’s results are read: a press on the Search tab then is a click', async ({ page }) => {
-  test.skip(BUILD_HAS_ENGINE, "the FakeEngine's runs wait on the page's timers, which the test holds");
+// as the run on the Results tab ended, and the tab stayed unchosen. The page became shorter than
+// where it was scrolled to ("Reading the results…" for a moment in place of the run's status), the
+// browser moved it up by as much (106 px there), and the release came on what had been under the
+// tab: a click goes where the press and the release both were. A cancelled or failed run, whose
+// message is shorter than its status, and another run chosen did the same, in every browser. The
+// page now keeps its height from a press until its click (ui/press-hold.ts).
+
+/** Opens a page of 320 px for a run held in progress (the FakeEngine's phases wait on the page's timers). */
+async function heldRun(page: Page): Promise<void> {
   await page.setViewportSize({ width: 320, height: 480 });
   await page.clock.install();
   await openSearch(page);
   await program(page, 'blastp');
   await paste(page, 'query', `>q1\n${PROTEIN}\n`);
   await paste(page, 'subject', `>s1\n${PROTEIN}\n>s2\n${PROTEIN}\n`);
-  // The run stays in progress until the clock goes on.
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
-  await submit(page);
-  await expect(page.getByTestId('run-status')).toBeVisible();
-  // A window in which the page, scrolled to its end (the run's status), still shows the tabs: it
-  // is scrolled half as far as the tabs are from the top.
-  const status = await page.evaluate(() => ({
-    height: document.documentElement.scrollHeight,
-    tab: document.querySelector('[data-testid="tab-search"]')!.getBoundingClientRect().top + window.scrollY,
-  }));
-  await page.setViewportSize({ width: 320, height: status.height - Math.round(status.tab / 2) });
-  const scrolled = await page.evaluate(() => {
-    window.scrollTo(0, document.documentElement.scrollHeight);
-    // The page is laid out after each change, as a browser may do between any two of them: a
-    // state that lasts only until the next change moves the page all the same.
+}
+
+/**
+ * Presses the Search tab while `change` makes the page shorter, then releases: the page has not
+ * moved under the press, and the press was a click. The page is scrolled `scrollY`, or to its end;
+ * it is laid out after each change, as a browser may do between any two of them, so a state that
+ * lasts only until the next change moves the page all the same.
+ */
+async function pressSearchDuring(page: Page, change: () => Promise<void>, scrollY?: number): Promise<void> {
+  if (scrollY === undefined) {
+    // A window in which the page, scrolled to its end, still shows the tabs: scrolled half as far
+    // as the tabs are from the top.
+    const now = await page.evaluate(() => ({
+      height: document.documentElement.scrollHeight,
+      tab: document.querySelector('[data-testid="tab-search"]')!.getBoundingClientRect().top + window.scrollY,
+    }));
+    await page.setViewportSize({ width: 320, height: now.height - Math.round(now.tab / 2) });
+  }
+  const scrolled = await page.evaluate((y) => {
+    window.scrollTo(0, y ?? document.documentElement.scrollHeight);
     const seen = new Set<number>();
     (window as unknown as { seenScroll: Set<number> }).seenScroll = seen;
     new MutationObserver(() => {
@@ -140,16 +148,65 @@ test('the page does not move while a run’s results are read: a press on the Se
       seen.add(window.scrollY);
     }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     return window.scrollY;
-  });
+  }, scrollY);
   expect(scrolled).toBeGreaterThan(0);
   const tab = page.getByTestId('tab-search');
   const box = (await tab.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.clock.resume();
-  await waitStatus(page, 1, 'completed');
-  await expect(page.getByTestId('results-view-hits')).toBeVisible();
+  await change();
   expect(await page.evaluate(() => [...(window as unknown as { seenScroll: Set<number> }).seenScroll])).toEqual([scrolled]);
   await page.mouse.up();
   await expect(tab).toHaveAttribute('aria-selected', 'true');
+}
+
+test('a press on the Search tab while a run’s results are read is a click: the page does not move', async ({ page }) => {
+  test.skip(BUILD_HAS_ENGINE, "the FakeEngine's runs wait on the page's timers, which the test holds");
+  await heldRun(page);
+  await submit(page);
+  await expect(page.getByTestId('run-status')).toBeVisible();
+  await pressSearchDuring(page, async () => {
+    await page.clock.resume();
+    await waitStatus(page, 1, 'completed');
+    await expect(page.getByTestId('results-view-hits')).toBeVisible();
+  });
+});
+
+test('a press on the Search tab while the run is cancelled is a click: its shorter message does not move the page', async ({ page }) => {
+  test.skip(BUILD_HAS_ENGINE, "the FakeEngine's runs wait on the page's timers, which the test holds");
+  await heldRun(page);
+  await submit(page);
+  await expect(page.getByTestId('run-status')).toBeVisible();
+  await pressSearchDuring(page, async () => {
+    await page.getByTestId('run-status-cancel').focus();
+    await page.keyboard.press('Enter');
+    await page.clock.resume();
+    await waitStatus(page, 1, 'cancelled');
+    await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
+  });
+});
+
+test('a press on the Search tab while another run is shown is a click: the shorter page does not move', async ({ page }) => {
+  test.skip(BUILD_HAS_ENGINE, "the FakeEngine's runs wait on the page's timers, which the test holds");
+  await heldRun(page);
+  await submit(page);
+  await page.getByTestId('run-status-cancel').click();
+  await page.getByTestId('tab-search').click();
+  await submit(page);
+  await page.clock.resume();
+  await waitStatus(page, 1, 'cancelled');
+  await waitStatus(page, 2, 'completed');
+  await expect(page.getByTestId('results-view-hits')).toBeVisible();
+  // The results of run 2 are taller than the window; run 1 shows one line in their place.
+  await page.setViewportSize({ width: 320, height: 1000 });
+  const tab = await page.getByTestId('tab-search').evaluate((element) => element.getBoundingClientRect().top + window.scrollY);
+  const run1 = await page.getByTestId('run-1-option').getAttribute('value');
+  await pressSearchDuring(
+    page,
+    async () => {
+      await page.getByTestId('results-run').selectOption(run1!);
+      await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
+    },
+    Math.round(tab / 2),
+  );
 });

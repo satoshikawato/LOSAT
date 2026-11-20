@@ -10,6 +10,7 @@ import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
 import LiveAnnouncer from './LiveAnnouncer.vue';
 import LosatLogo from './LosatLogo.vue';
+import { holdWhilePressed } from './press-hold';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
@@ -129,6 +130,10 @@ async function arrived(): Promise<void> {
 }
 const onPopState = () => void arrived();
 
+/** The main area keeps its height from a press until its click, so the page does not move under the press (press-hold.ts). */
+const mainArea = ref<HTMLElement>();
+let stopHold: () => void = () => undefined;
+
 // A file dropped outside an input's drop zone would make the browser open it in place of
 // the application (and end the searches of this tab).
 const keep = (event: DragEvent) => {
@@ -138,11 +143,13 @@ onMounted(() => {
   window.addEventListener('dragover', keep);
   window.addEventListener('drop', keep);
   window.addEventListener('popstate', onPopState);
+  stopHold = holdWhilePressed(() => mainArea.value);
 });
 onUnmounted(() => {
   window.removeEventListener('dragover', keep);
   window.removeEventListener('drop', keep);
   window.removeEventListener('popstate', onPopState);
+  stopHold();
 });
 </script>
 
@@ -160,7 +167,7 @@ onUnmounted(() => {
   <nav aria-label="Main">
     <TabList ref="mainTabs" v-model="tab" class="main-tabs" label="Main" :tabs="MAIN_TABS" />
   </nav>
-  <main class="layout">
+  <main ref="mainArea" class="layout">
     <section class="primary">
       <!-- The search form stays mounted, so the next search keeps its edits while results are viewed. -->
       <SearchPanel

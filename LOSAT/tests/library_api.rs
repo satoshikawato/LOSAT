@@ -465,8 +465,8 @@ fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
     let fields: Vec<&str> = row.split('\t').collect();
     assert_eq!(fields.len(), 21, "{context}: {row}");
     assert_eq!(
-        (&*hsp.query_id, &*hsp.subject_id),
-        (fields[18], fields[19]),
+        (hsp.query_id.as_bytes(), hsp.subject_id.as_bytes()),
+        (fields[18].as_bytes(), fields[19].as_bytes()),
         "{context}: the ids of {row}"
     );
     assert_eq!(
@@ -1128,7 +1128,10 @@ fn parsed_ids_show_as_on_the_command_line() {
         let shown: Vec<String> = outcome
             .hsps
             .iter()
-            .map(|hsp| format!("{}\t{}", hsp.query_id, hsp.subject_id))
+            .map(|hsp| {
+                let (query, subject) = (hsp.query_id.to_str(), hsp.subject_id.to_str());
+                format!("{}\t{}", query.unwrap(), subject.unwrap())
+            })
             .collect();
         assert_eq!(shown, ids, "{program:?}");
         for (position, outfmt) in formats.iter().enumerate() {
@@ -1152,6 +1155,124 @@ fn parsed_ids_show_as_on_the_command_line() {
         assert!(run_batches(&search, plain).is_err());
         let _ = std::fs::remove_file(&query_path);
         let _ = std::fs::remove_file(&subject_path);
+    }
+}
+
+/// The search of `program` with `options` on the FASTA bytes `query` and `subject`: its
+/// `-outfmt 6` report is the command line's, and each HSP's ids are the bytes of its row's first
+/// two columns (`Report::spans`) and those of `query_ids[q_idx]` and `subject_ids[s_idx]`. Returns
+/// the query and subject numbers of the HSPs.
+fn ids_of_the_rows(
+    program: Program,
+    options: &'static [&'static str],
+    (query, subject): (&[u8], &[u8]),
+    (query_ids, subject_ids): (&[&[u8]], &[&[u8]]),
+) -> std::collections::BTreeSet<(usize, usize)> {
+    let context = format!("{program} {options:?}");
+    let (query_path, subject_path) = (temp_path("bytes_q.fa"), temp_path("bytes_s.fa"));
+    std::fs::write(&query_path, query).unwrap();
+    std::fs::write(&subject_path, subject).unwrap();
+    let case = Case {
+        program,
+        query: "",
+        subject: "",
+        options,
+        formats: &[],
+    };
+    let search = validate(program, options).unwrap();
+    let (queries, subjects) = read_inputs(&search, query, subject).unwrap();
+    let outcome = run_collect(&search, Inputs::new(&queries, &subjects), &["6"]).unwrap();
+    let report = &outcome.reports[0];
+    let (cli, _) = cli(&case, &query_path, &subject_path, "6");
+    assert!(
+        report.bytes == cli,
+        "{context}: the report is the command line's"
+    );
+    let mut pairs = std::collections::BTreeSet::new();
+    for hsp in &outcome.hsps {
+        let row = &report.bytes[report.spans[hsp.index].clone().unwrap()];
+        let columns: Vec<&[u8]> = row.split(|&byte| byte == b'\t').collect();
+        assert_eq!(hsp.query_id, columns[0], "{context}");
+        assert_eq!(hsp.subject_id, columns[1], "{context}");
+        assert_eq!(hsp.query_id, query_ids[hsp.q_idx], "{context}");
+        assert_eq!(hsp.subject_id, subject_ids[hsp.s_idx], "{context}");
+        pairs.insert((hsp.q_idx, hsp.s_idx));
+    }
+    let _ = std::fs::remove_file(&query_path);
+    let _ = std::fs::remove_file(&subject_path);
+    pairs
+}
+
+/// FASTA records of `ids`, each with the title `title` and the letters that `program` reads for
+/// `role`.
+fn records_of(program: Program, role: Role, ids: &[&[u8]], title: &[u8]) -> Vec<u8> {
+    let mut fasta = Vec::new();
+    for id in ids {
+        fasta.extend_from_slice(b">");
+        fasta.extend_from_slice(id);
+        fasta.extend_from_slice(title);
+        fasta.extend_from_slice(b"\n");
+        fasta.extend_from_slice(letters_of(program, role).as_bytes());
+        fasta.extend_from_slice(b"\n");
+    }
+    fasta
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
+// ```c++
+// void CBlastTabularInfo::x_PrintQueryAccessionVersion()
+// {
+//     m_Ostream << s_GetSeqIdListString(m_QueryId, eAccVersion);
+// }
+// ```
+// The ids are bytes (`std::string`) that the report writes as they are.
+/// Titles whose first word holds bytes that are not UTF-8 (Latin-1's `é`, 0xE9; a continuation
+/// byte alone, 0x80; 0xFF) or UTF-8's own letters of two and three bytes (`é`, `€`): in every
+/// program, each record's id is the bytes of its column in the `-outfmt 6` row of the same run
+/// (`Report::spans`), which is the command line's row.
+#[test]
+fn the_ids_are_the_bytes_of_the_tabular_report() {
+    let query_ids: [&[u8]; 2] = [b"q\xE9", "q\u{e9}".as_bytes()];
+    let subject_ids: [&[u8]; 2] = [b"s\x80\xFF", "s\u{e9}\u{20ac}".as_bytes()];
+    for program in Program::ALL {
+        let query = records_of(program, Role::Query, &query_ids, b" a title");
+        let subject = records_of(program, Role::Subject, &subject_ids, b" a title");
+        let pairs = ids_of_the_rows(program, &[], (&query, &subject), (&query_ids, &subject_ids));
+        assert_eq!(pairs.len(), 4, "{program}: every query hits every subject");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:77-86
+// ```c++
+// struct CSeq_id_find_pred
+// {
+//     const char* kSymbols;
+//     bool operator()(const char ch)
+//     {
+//         if (ch<32 || ch>127) // non-ASCII is not allowed
+//             return true;
+//         return strchr(kSymbols, ch) != 0;
+//     }
+// };
+// ```
+/// With `-parse_deflines`, an id with a byte that is not ASCII (`lcl|q\xE9`, `gb|AB\xE9001.1|`)
+/// stops before it, and the rest of the word goes to the title: NCBI BLAST+ 2.17.0 writes `q` and
+/// `AB` in `qaccver` for these deflines (blastp, probed on 2026-11-20), and so does LOSAT in every
+/// program, in the records too.
+#[test]
+fn a_parsed_id_stops_before_a_byte_that_is_not_ascii() {
+    let deflines: [&[u8]; 2] = [b"lcl|q\xE9", b"gb|AB\xE9001.1|"];
+    let (query_ids, subject_ids): ([&[u8]; 2], [&[u8]; 1]) = ([b"q", b"AB"], [b"s1"]);
+    for program in Program::ALL {
+        let query = records_of(program, Role::Query, &deflines, b" t");
+        let subject = records_of(program, Role::Subject, &[b"s1"], b" t");
+        let pairs = ids_of_the_rows(
+            program,
+            &["-parse_deflines"],
+            (&query, &subject),
+            (&query_ids, &subject_ids),
+        );
+        assert_eq!(pairs.len(), 2, "{program}: both queries hit the subject");
     }
 }
 

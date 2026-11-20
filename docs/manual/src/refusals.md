@@ -577,8 +577,8 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 | Option or input | What happens |
 | :--- | :--- |
 | `-mk_counts`, `-convert` | Refused. LOSAT does not make or convert counts files yet. |
-| `-ids` or `-exclude_ids` with `-text_match F` (and `-infmt blastdb`) | Refused. NCBI matches the ids as Seq-ids, and its messages for an id it cannot read name its build. |
-| An `-ids` or `-exclude_ids` file with an empty id (an empty line, `>`, `\|` or `>\|`) | Refused. NCBI writes outside its list of ids and crashes. |
+| `-ids` or `-exclude_ids` with `-text_match F` (and `-infmt blastdb`) | Refused. LOSAT does not match ids as Seq-ids yet. |
+| An `-ids` or `-exclude_ids` file with an empty id (a line that starts with a space or a tab, `>`, `\|` or `>\|`) | Refused. NCBI writes outside its list of ids and crashes. |
 | A counts file whose `##pct:` line holds a word that NCBI reads as a number with the C++ runtime, such as `inf` or `0x10`, with a `-t_*_pct` option | Refused. Plain decimal numbers are read as NCBI reads them. |
 | An `ascii` counts file with units of 17 letters or more | Refused. NCBI's result is undefined. |
 | A FASTA record or database sequence of 4,294,967,296 letters or more | Refused. NCBI counts positions in 32 bits. |

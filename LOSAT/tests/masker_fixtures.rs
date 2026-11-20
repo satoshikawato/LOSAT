@@ -482,6 +482,25 @@ fn dustmasker_posts_where_ncbi_does_in_one_file() {
     }
 }
 
+/// windowmasker writes the FASTA reader's warnings between records (post level Warning) while
+/// earlier records' output may still be in NCBI's stdout buffer: in one file (`2>&1`) each
+/// warning falls where NCBI's does (`ncbi/<name>.merged`, make_fixtures.py's `MERGED`).
+#[test]
+fn windowmasker_posts_where_ncbi_does_in_one_file() {
+    for binary in [
+        PathBuf::from(env!("CARGO_BIN_EXE_losat")),
+        example_binary("library_command_line"),
+    ] {
+        let (ran, differ) = merged_rows_that_differ(&binary, "windowmasker");
+        assert!(ran >= 6, "{ran} rows with a merged stream");
+        assert!(
+            differ.is_empty(),
+            "{}: rows whose merged stream differs from NCBI's: {differ:?}",
+            binary.display()
+        );
+    }
+}
+
 // The rows that Windows answers as a missing file (`expected`) are the ones whose `-in` NCBI
 // read as a directory on Linux, and their standard output on Linux is that of the missing file
 // (a writer that wrote something before the failed read, or as the program ended, would write it

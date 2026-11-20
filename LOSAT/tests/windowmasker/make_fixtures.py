@@ -15,6 +15,12 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Rows whose standard output and error NCBI also writes into one file (`2>&1`, a run of its
+# own): ncbi/<name>.merged. The reader's warnings come between records, so where they fall among
+# the output's bytes shows NCBI's stdout buffer (`cerr` is tied to `cout`).
+MERGED = {"r_letters", "r_letters_fasta", "r_letters_slb", "r_gap_fasta_ps", "r_gap_mi",
+          "d_letters_fasta"}
+
 
 def environment():
     env = {k: v for k, v in os.environ.items()
@@ -67,6 +73,15 @@ def main():
             with open(os.path.join(out_dir, f"{name}.{ext}"), "wb") as f:
                 f.write(data)
         print(f"{name}\t{status}\t{len(r.stdout)}\t{len(err)}")
+        if name in MERGED:
+            source = open(os.path.join(HERE, stdin), "rb") if stdin else subprocess.DEVNULL
+            with open(os.path.join(out_dir, f"{name}.merged"), "wb") as one:
+                subprocess.run([windowmasker] + words, cwd=HERE, env=env, stdin=source,
+                               stdout=one, stderr=one, timeout=600)
+            with open(os.path.join(out_dir, f"{name}.merged"), "rb") as f:
+                merged = f.read().replace(HERE.encode(), b"@CWD@")
+            with open(os.path.join(out_dir, f"{name}.merged"), "wb") as f:
+                f.write(merged)
     return 0
 
 

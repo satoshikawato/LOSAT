@@ -71,6 +71,7 @@ def main():
     write("ids_b.txt", "rec2\nP12345|ABC_HUMAN\n\nNC_000099.1|\n")
     write("ids_tab.txt", "rec8\tcomment\nBK000001.1\n")
     write("ids_crlf.txt", "rec1\r\nrec4\r\n".encode(), "wb")
+    write("ids_cr.txt", "rec1\rrec4\n".encode(), "wb")
     write("ids_none.txt", "nosuchid\n")
     write("ids_db.txt", "AB000001.1\nrec1\nNC_000099.1\n")
     # Counts files: garbage, empty, and the ascii counts of mg1655_u9 without their ##pct lines.

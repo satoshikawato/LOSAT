@@ -489,6 +489,9 @@ rpstblastn.3v.st5k.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini3v+tests/db_search/r
 rpsblast.3v.l2p63.q649	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l2p63rps3v.pal}	-query tests/fasta/rps/q649.faa -db l2p63rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.3v.l2p63.tk	rpstblastn	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l2p63rps3v.pal}	-query tests/fasta/rps/tkcut570.fna -db l2p63rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.3v.l0.dbsize.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l0rps3v.pal}	-query tests/fasta/rps/q40.faa -db l0rps3v -comp_based_stats 0 -dbsize 100000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.sumf	tblastx	-	-query tests/fasta/outfmt0/x3_q20.fna -subject tests/fasta/outfmt0/x3_s20.fna -sum_stats false -evalue 1e-30 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.intron100	tblastx	-	-query tests/fasta/outfmt0/x3_q20.fna -subject tests/fasta/outfmt0/x3_s20.fna -max_intron_length 100 -evalue 1e-30 -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+tblastx.db.sumf	tblastx	-	-query tests/db_search/xslice_q.fna -db tests/db_search/xslice -sum_stats false -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.d3.c10_user	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c10_user.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.db.in_pssm.d3.c10_user	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c10_user.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.d3.c11_delay	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c11_delay.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

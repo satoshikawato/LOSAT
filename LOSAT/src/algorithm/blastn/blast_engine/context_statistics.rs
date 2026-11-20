@@ -23,8 +23,10 @@ use super::{
     QueryContext, SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::scoring::{
-    check_greedy_gap_costs, context_blocks, context_blocks_ungapped, karlin_error,
+    check_greedy_gap_costs, check_greedy_matrix_only, context_blocks, context_blocks_ungapped,
+    karlin_error,
 };
+use crate::report::pairwise::BlastnIntro;
 use anyhow::Result;
 
 /// What `context_statistics` reads: the batch's contexts with the ungapped blocks of their
@@ -46,7 +48,8 @@ pub(super) struct ContextInputs<'a> {
     pub(super) split: bool,
     pub(super) subjects: SubjectSource<'a>,
     pub(super) seq_data: &'a SequenceData<'a>,
-    pub(super) megablast: bool,
+    /// What the outfmt 0 prolog of an error introduces.
+    pub(super) intro: BlastnIntro,
     pub(super) shown: &'a ShownSubjects,
 }
 
@@ -132,7 +135,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
         query_lengths,
         batching,
         first_batch,
-        megablast,
+        intro,
         shown,
         ..
     } = inputs;
@@ -208,7 +211,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
                 if prolog_with_report(format, output_format) {
-                    write_format_prolog(format, output_format, megablast, shown)?;
+                    write_format_prolog(format, output_format, intro, shown)?;
                 }
             }
             return Err(karlin_error(&message, empty_queries));
@@ -239,7 +242,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         split,
         subjects,
         seq_data,
-        megablast,
+        intro,
         shown,
         ..
     } = inputs;
@@ -337,7 +340,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                     database::PreliminaryReadError("Database memory map file error").into(),
                     first_batch,
                     outputs,
-                    megablast,
+                    intro,
                     shown,
                 ));
             }
@@ -367,7 +370,8 @@ fn effective_search_spaces<const UNGAPPED: bool>(
             let error = anyhow::Error::from(crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: The average subject length is too short\n"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             });
             // A batch after the first: the batches before had no valid query (one with a
             // valid query would have raised the error), and NCBI has written their reports
@@ -376,7 +380,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                 return Err(ErrorAfterInvalidBatches(error).into());
             }
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
-            write_pairwise_prologs(outputs, output_formats, megablast, shown, false)?;
+            write_pairwise_prologs(outputs, output_formats, intro, shown, false)?;
             return Err(error);
         }
     }
@@ -384,6 +388,13 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // with no valid context, NCBI extends nothing.
     if any_valid_context && !UNGAPPED {
         check_greedy_gap_costs(args)?;
+    }
+    // Matrix-only scoring with the greedy extension, where NCBI divides by zero or does not end
+    // (`check_greedy_matrix_only`): NCBI meets it in the greedy set-up of `BLAST_GapAlignSetUp`
+    // (`s_BlastGreedyAlignMemAlloc`), which it reaches with a valid context only, for an ungapped
+    // search too.
+    if any_valid_context {
+        check_greedy_matrix_only(args, UNGAPPED)?;
     }
     let search_karlin: Vec<ContextKarlin> = {
         let fallback = context_karlin

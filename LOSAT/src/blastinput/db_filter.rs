@@ -469,7 +469,7 @@ impl DbFilterArgs {
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,
-            message: format!("BLAST Database error: {text}\n"),
+            message: format!("BLAST Database error: {text}\n").into(),
         })?;
         for line in cerr {
             warnings.write_all(line.as_bytes())?;

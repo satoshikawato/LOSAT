@@ -18,7 +18,10 @@ fn native(error: &anyhow::Error) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .expect("a NativeError");
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPssmOptions {
@@ -29,6 +32,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
         in_pssm: None,
+        in_msa: None,
         versions: Default::default(),
         check_scope: Default::default(),
         rounds: None,

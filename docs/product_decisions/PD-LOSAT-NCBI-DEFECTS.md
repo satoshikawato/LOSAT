@@ -878,10 +878,9 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     goes to `s_HitlistEvaluateAndPurge` (`:3675-3683`): the context of the next query of the batch.
     For the last query of a batch, and so for every search of one query, that is the element after
     the array's end (`calloc(last_context + 1, 32)`, `blast_query_info.c:77-79`): the three values
-    are heap bytes. In our runs of NCBI BLAST+ 2.17.0 the report of one query changed from run to
-    run (10 runs: 7 gave one output, 3 gave three others; the e-value of the first row was 0.38 in
-    some and 8.17e-17 in another), and of 89 queries in 6 batches only last queries of a batch
-    changed between runs and thread counts. LOSAT adjusts the last query of a batch with that
+    are heap bytes. In our runs of NCBI BLAST+ 2.17.0 (the evidence below) the report of one query
+    alone took 7 forms in 40 runs at 1 and 4 threads, and that of a query whose hit list fills 3
+    forms in 10 runs. LOSAT adjusts the last query of a batch with that
     query's own three values, which the step's parameter is documented to hold ("info about this
     query context", `blast_kappa.c:126-127`), and redoes every match of it. That result is
     NCBI's: in NCBI's search of the batch's queries with a copy of the last query after it in the

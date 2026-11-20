@@ -1486,6 +1486,9 @@ fn x_redo_windows<const SW: bool>(
         expand.start(&matches);
     }
     let mut counts = XCounts::default();
+    if SW {
+        counts.turned = Some(0);
+    }
     let mut start = Some(XMatch {
         q_idx: 0,
         position: 0,
@@ -1552,7 +1555,7 @@ fn x_redo_windows<const SW: bool>(
                     .collect();
             }
             let replay_start = timing.then(Instant::now);
-            let replayed = x_replay::<SW>(
+            let replayed = match x_replay::<SW>(
                 &window.matches,
                 results,
                 lists,
@@ -1560,7 +1563,10 @@ fn x_redo_windows<const SW: bool>(
                 query_batches,
                 &mut sw_batch,
                 &mut carry,
-            )?;
+            ) {
+                Ok(replayed) => replayed,
+                Err(error) => return Err(x_timing_at_error(timing, &counts, error)),
+            };
             counts.skipped += replayed.skipped;
             counts.wasted += replayed.wasted;
             if SW {
@@ -1601,10 +1607,21 @@ fn x_redo_windows<const SW: bool>(
     // The end of the last batch that the replay reached (the one-thread loop checks its status
     // at the batch's last query; nothing after its last match changes it).
     if SW {
-        sw_batch.end(heaps)?;
-        counts.turned.get_or_insert(0);
+        if let Err(error) = sw_batch.end(heaps) {
+            return Err(x_timing_at_error(timing, &counts, error));
+        }
     }
     Ok(counts)
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// A redo that ends in `error` prints its counters up to there (with `timing`): the search
+/// prints them only after a redo that ends.
+fn x_timing_at_error(timing: bool, counts: &XCounts, error: anyhow::Error) -> anyhow::Error {
+    if timing {
+        x_print_timing(counts);
+    }
+    error
 }
 
 /// The redo of a search: windows of jobs computed on the pool and replayed in stream order into

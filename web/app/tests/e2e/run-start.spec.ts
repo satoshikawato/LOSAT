@@ -175,6 +175,11 @@ test('a -logfile name with a directory makes a file of that name, and /dev/stder
     await page.getByTestId('param-extra').fill(`-logfile ${name}`);
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await submit(page);
+    // The press starts run 1 (before D11 it was refused with the sentence about the -logfile name).
+    const message = page.getByTestId('search-message');
+    await expect(page.getByTestId('run-1-option').or(message).first()).toBeAttached();
+    const refusal = (await message.count()) > 0 ? await message.textContent() : '';
+    expect(await page.getByTestId('run-1-option').count(), `-logfile ${name}: the press is refused: ${refusal}`).toBe(1);
     await waitStatus(page, 1, 'completed');
     await chooseRun(page, 1);
     const warning = `Warning: [${id}] Examining 5 or more matches is recommended\n`;

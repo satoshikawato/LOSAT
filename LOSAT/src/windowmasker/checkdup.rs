@@ -58,11 +58,7 @@ impl DupTable {
                 .push((seqnum, self.next_offset));
             self.next_offset += SAMPLE_SKIP;
         }
-        self.next_offset = if self.next_offset <= data_len {
-            0
-        } else {
-            self.next_offset - data_len
-        };
+        self.next_offset = self.next_offset.saturating_sub(data_len);
     }
 }
 

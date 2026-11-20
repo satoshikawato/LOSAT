@@ -32,7 +32,7 @@ pub use gen_counts::{generate, GenCountsSettings, GenError, GenomeSource, DEFAUL
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
-pub use ostat::{convert_counts, CountsFormat, CountsWriter, FinalizeError, StatAlgoVersion};
+pub use ostat::{convert_counts, CountsFormat, CountsWriter, FinalizeError};
 pub use pct::PctSettings;
 pub use taxid::taxid_stat_file;
 
@@ -177,7 +177,7 @@ impl fmt::Display for WinMaskError {
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
             Self::PctLine { line } => write!(
                 f,
-                "the percentage line '{line}' of the counts file is not one that WindowMasker writes (counts of digits, then decimal percentages), so LOSAT does not read it for the -t_*_pct settings"
+                "the percentage line '{line}' of the counts file is not one that WindowMasker writes (counts of digits, then decimal percentages), so LOSAT does not read it"
             ),
         }
     }

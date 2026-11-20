@@ -119,13 +119,15 @@ pub enum FinalizeError {
     Ncbi(NcbiException),
     /// What LOSAT does not reproduce: the reason, a noun phrase.
     Refused(String),
-    /// A failed write of the output.
-    Io(io::Error),
+    /// A write of the standard output that found the pipe closed (the only error that the
+    /// output streams return: a named file loses what does not reach it, as NCBI's `ofstream`
+    /// does).
+    ClosedPipe,
 }
 
 impl From<io::Error> for FinalizeError {
-    fn from(error: io::Error) -> Self {
-        FinalizeError::Io(error)
+    fn from(_: io::Error) -> Self {
+        FinalizeError::ClosedPipe
     }
 }
 
@@ -496,6 +498,7 @@ fn write_words(out: &mut dyn Write, words: &[u32]) -> io::Result<()> {
 /// secondary table `vt`, the key of `k` bits at `roff` bits from the right, `bc` bits of the
 /// number of collisions in each word of the table `ht`, and the cache bit array of the
 /// optimized binary format.
+#[derive(Debug)]
 struct OptTables {
     m: u32,
     k: u8,

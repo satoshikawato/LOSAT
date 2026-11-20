@@ -98,7 +98,7 @@ fn finalize(writer: CountsWriter, sink: &mut Sink<'_>, diag: &mut Diag) -> Resul
         .map_err(|error| match error {
             FinalizeError::Ncbi(exception) => Failure::Ncbi(exception),
             FinalizeError::Refused(what) => Failure::Refused(unsupported(&what)),
-            FinalizeError::Io(_) => Failure::ClosedPipe,
+            FinalizeError::ClosedPipe => Failure::ClosedPipe,
         })
 }
 

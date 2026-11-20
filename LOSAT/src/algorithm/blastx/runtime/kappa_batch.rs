@@ -251,7 +251,7 @@ impl Runtime<'_> {
                     .enumerate()
                     .map(|(position, list)| {
                         !CompoHeap::early(list.best_evalue, heaps)
-                            && !marks.excluded(match_index + position)
+                            && !(SW && marks.excluded(match_index + position))
                     })
                     .collect();
                 let (options, subjects, db_length) = (self.options, self.subjects, self.db_length);

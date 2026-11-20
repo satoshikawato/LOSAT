@@ -774,10 +774,11 @@ pub(crate) fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
 /// query context `context` past the batch's `queries` heaps (PD-LOSAT-NCBI-DEFECTS 1.59, rule 3),
 /// after the reports of the batches before. NCBI's redo indexes its array of the batch's heaps
 /// (one per query) by the window's query context (six per query) before the first alignment of
-/// the window's context: a context at or past the batch's query count reads past the array,
-/// whose bytes NCBI never wrote, and NCBI crashes or writes rows that change with the run's
-/// memory (`MALLOC_PERTURB_`), the options and the thread count (line RG X4b's survey, 2.5). A
-/// context below it reads another query's heap of the batch, which LOSAT reproduces.
+/// the window's context: a context at or past the batch's query count reads past the array
+/// into NCBI's other allocations, and NCBI crashes (at every thread count above 1), fails the
+/// batch or goes on with what lies there, which changes with the options and the run's memory
+/// (line RG X4b's survey, 2.5; item X4b-2's probe 3). A context below it reads another query's
+/// heap of the batch, which LOSAT reproduces.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3601-3622
@@ -785,7 +786,7 @@ pub(crate) fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
 #[inline(never)]
 pub(crate) fn sw_heap_past(context: usize, queries: usize) -> anyhow::Error {
     ErrorAfterBatchReports(anyhow::anyhow!(
-        "a query batch whose Smith-Waterman redo (-use_sw_tback) in e-value mode reaches a match in frame {} of the batch's query {}, for which NCBI BLAST+ 2.17.0's blastx reads past its list of the batch's {queries} queries (it crashes or writes rows that change from run to run), is not supported by LOSAT's BLASTX",
+        "a query batch whose Smith-Waterman redo (-use_sw_tback) in e-value mode reaches a match in frame {} of the batch's query {}, for which NCBI BLAST+ 2.17.0's blastx reads past its list of the batch's {queries} queries (it crashes, fails or goes on with what lies there), is not supported by LOSAT's BLASTX",
         ["+1", "+2", "+3", "-1", "-2", "-3"][context % 6],
         context / 6 + 1,
     ))

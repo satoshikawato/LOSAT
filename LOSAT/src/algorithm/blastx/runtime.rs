@@ -2395,7 +2395,7 @@ fn finalize_redone(
         options,
         subject.len() as i32,
         db_length,
-        if options.composition != 0 { 32.0 } else { 1.0 },
+        super::kappa::redo_scale(options),
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
     // ```c++

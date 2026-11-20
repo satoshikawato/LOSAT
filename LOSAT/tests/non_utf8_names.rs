@@ -1,8 +1,8 @@
 //! Names and words that are not UTF-8 on the command line (line LIB-B): a file name of
 //! `-query`, `-subject` or `-out` of BLASTX and RPSTBLASTN, a word of a text seqid list, the names
 //! that `blastdbcmd -list` finds, a directory of `NCBI_CONFIG_PATH` and the LMDB file named in a
-//! version 5 volume, each with the byte 0xE9 (`é` of Latin-1). NCBI BLAST+ 2.17.0 keeps such a
-//! name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
+//! version 5 volume (missing, and listed by `blastdbcmd -metadata`), each with the byte 0xE9
+//! (`é` of Latin-1). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
@@ -214,6 +214,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 20, "the cases of cases.tsv");
+    assert_eq!(ran, 21, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

@@ -2373,13 +2373,13 @@ impl SeqDb {
     /// `GetLMDBFileNames`: the LMDB file of each run of volumes of a version 5 database that
     /// name the same one, in the order of the volumes (a file twice when two runs name it);
     /// none for version 4. The files are not read.
-    pub fn lmdb_file_names(&self) -> Vec<String> {
+    pub fn lmdb_file_names(&self) -> Vec<PathBuf> {
         if !self.is_version5() {
             return Vec::new();
         }
         self.lmdb_groups()
             .into_iter()
-            .map(|(path, _)| path.to_string_lossy().into_owned())
+            .map(|(path, _)| path)
             .collect()
     }
 

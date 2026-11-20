@@ -1453,6 +1453,11 @@ fn check_ncbi_options(
 ) -> Result<(Option<SequenceRange>, ReportCounts)> {
     use crate::blastinput::app::{formatting_handler_check, options_error, Program};
     args.seg_spec()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1975-1991 (the
+    // query options handler reads the strand before the range)
+    // The command line's parser has checked the value, a caller of `run_local` has not: a value
+    // other than `both`, `plus` and `minus` is the parser's argument error.
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // ```c++
     //     // set the sequence range
@@ -1771,7 +1776,8 @@ fn search_cli(
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
-            .with_parse_deflines(args.parse_deflines),
+            .with_parse_deflines(args.parse_deflines)
+            .with_strand(&args.strand),
     );
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
@@ -5238,7 +5244,10 @@ fn search_query_batch<S: TbxScore>(
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
     // NCBI uses average over ALL contexts including zero-length (frame restriction via strand)
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
-    let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
+    let avg_query_length = compute_avg_query_length_ncbi(
+        &query_nucl_lengths,
+        crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand).searched(),
+    );
 
     let t_search_start = Instant::now();
     let scan_ns = AtomicU64::new(0);

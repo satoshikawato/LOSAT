@@ -422,7 +422,7 @@ impl<'a> Walk<'a> {
     }
 }
 
-/// The components that `Walk::step` takes on this thread (the test of `log_name`'s cost).
+// The components that `Walk::step` takes on this thread (the test of `log_name`'s cost).
 #[cfg(test)]
 thread_local! {
     static WALK_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -772,7 +772,8 @@ mod tests {
     /// A name of 4 KB is read in time linear in its length (review 3 M1, line WQA's D11 round 5,
     /// 2026-11-21: resolving each of its directories again from `/` took about a minute in LOSAT
     /// Web's serial engine): the walk takes each component a few times, not once per directory
-    /// before it.
+    /// before it. The 2047 bytes that NCBI keeps of each name made absolute are a directory of it,
+    /// so the messages stay on `cerr`, as on the command line.
     #[test]
     fn a_long_log_name_is_read_in_linear_time() {
         for name in [
@@ -782,7 +783,7 @@ mod tests {
             assert!(name.len() < 4096);
             WALK_STEPS.with(|steps| steps.set(0));
             let started = std::time::Instant::now();
-            assert_eq!(log_name(name.as_bytes()), LogName::File);
+            assert_eq!(log_name(name.as_bytes()), LogName::Unopened);
             let steps = WALK_STEPS.with(std::cell::Cell::get);
             assert!(steps < 4 * name.len(), "{steps} steps");
             assert!(started.elapsed() < std::time::Duration::from_secs(5));

@@ -256,8 +256,9 @@ fn read_outfmt(
         0 => None,
         6 | 7 => words_follow.then_some(outfmt),
         // The query-anchored formats (every program's, line RG T3) without the words after the
-        // number, which the CLI drops (`FormatChoice::normalized`) and the engine's library
-        // refuses after 0 to 4, as a field list.
+        // number, which NCBI and the CLI drop (`FormatChoice::normalized`). The engine's library
+        // drops them as well (`parse_formatting_string`; BLASTP's since line RG F/d36), so this
+        // only gives the output one spelling of its number.
         1..=4 => Some(choice.normalized()),
         _ => Some(outfmt),
     };

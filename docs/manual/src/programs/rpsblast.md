@@ -59,7 +59,7 @@ The output is the same at every `-num_threads` value. It is the output of NCBI's
 
 ## Output
 
-Supported `-outfmt` values: 0, 6, 7 and 10. Formats 6, 7 and 10 take a custom field list and `delim=`. Subjects in the report are profile IDs such as `CDD:103`. As in NCBI's `rpsblast`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
+Supported `-outfmt` values: 0, 6, 7 and 10. Formats 6, 7 and 10 take a custom field list. As in NCBI's `rpsblast`, `delim=` is read and checked but the columns keep their tab or comma. Subjects in the report are profile IDs such as `CDD:103`. As in NCBI's `rpsblast`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
 
 LOSAT's `rpsblast` does not write `-outfmt 11` (BLAST archive) in v0.2.0, the input that [rpsbproc](rpsbproc.md) reads.
 

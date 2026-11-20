@@ -1053,6 +1053,8 @@ pub fn run(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         "TBLASTX",
+        &args.outfmt,
+        crate::blastinput::app::Program::Tblastx,
     )?;
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     let format = crate::blastinput::app::report_format(

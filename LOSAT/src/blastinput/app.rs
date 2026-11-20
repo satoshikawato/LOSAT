@@ -696,6 +696,22 @@ pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<
     formatting_handler_check(choice, program).is_err() || xinclude_check_for(choice, out).is_err()
 }
 
+/// Whether NCBI's run of `program` with the `-outfmt` value `outfmt` and `-out` `out` ends with its
+/// own error of the format before it writes a search strategy or a PSSM file: a value that its
+/// parser refuses (`parse_formatting_string`, read in `SetOptions` right after the strategy file is
+/// created) or one that `ncbi_refuses_format` holds for (the formatting handler, then the formatter
+/// set-up, which come before `SaveSearchStrategy` and psiblast's PSSM files in every application:
+/// blastn_app.cpp:255 before :282, blastp_app.cpp:250 before :262, blastx_app.cpp:251 before
+/// :264, tblastn_app.cpp:267 before :280/:307, tblastx_app.cpp:170 before :181,
+/// psiblast_app.cpp:503 before :517/:548 (`DoIterations`: :340, :385), rpsblast_app.cpp:188
+/// before :199, rpstblastn_app.cpp:185 before :196). LOSAT's refusals of such a file on a report
+/// stream (`strategy::create_strategy_file`, `psiblast::pssm::check_pssm_files`) then wait for
+/// NCBI's error, which comes at its place (line RG F/d36 review 2 SF1).
+pub fn ncbi_stops_at_format(outfmt: &str, program: Program, out: Option<&Path>) -> bool {
+    parse_formatting_string(outfmt)
+        .map_or(true, |choice| ncbi_refuses_format(&choice, program, out))
+}
+
 /// A `-seg` value as NCBI's filtering handler reads it, with NCBI's errors. Every locut and
 /// hicut that `NStr::StringToDouble` reads is taken, an infinity or NaN too: the query filter
 /// keeps the default for one that is not above 0 (NaN included, `SegSpec::params`), SEG
@@ -1484,6 +1500,36 @@ mod tests {
         );
         for number in (0..=12).chain(15..=21) {
             assert!(xinclude_check(&choice(number)).is_ok());
+        }
+    }
+
+    /// LOSAT's refusals of a search strategy or a PSSM file on a report stream wait for NCBI's
+    /// error of the format wherever NCBI stops at it before it writes them: a value its parser
+    /// refuses, a format of another program, a delimiter that a field uses, and 13 or 14 without
+    /// a file name (line RG F/d36 review 2 SF1).
+    #[test]
+    fn ncbi_stops_at_its_format_errors_before_it_writes_a_strategy() {
+        let file = Some(Path::new("o.xml"));
+        let dash = Some(Path::new("-"));
+        for (outfmt, program, out, stops) in [
+            ("6", Program::Blastp, None, false),
+            ("14", Program::Blastp, None, true),
+            ("13", Program::Tblastx, dash, true),
+            ("14", Program::Blastx, file, false),
+            ("17", Program::Blastp, None, true),
+            ("17", Program::Blastn, None, false),
+            ("19", Program::Blastn, None, true),
+            ("21", Program::Tblastn, file, true),
+            ("10 delim=; qseqid staxids", Program::Blastp, None, true),
+            ("10 delim=@ qseqid staxids", Program::Blastp, None, false),
+            ("99", Program::Blastn, None, true),
+            ("x", Program::Blastx, file, true),
+        ] {
+            assert_eq!(
+                ncbi_stops_at_format(outfmt, program, out),
+                stops,
+                "{outfmt} {program:?} {out:?}"
+            );
         }
     }
 

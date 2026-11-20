@@ -60,7 +60,7 @@ The output is the same at every `-num_threads` value. It is the output of NCBI's
 
 ## Output
 
-Supported `-outfmt` values: 0, 1, 2, 3, 4, 6, 7 and 10. Formats 6, 7 and 10 take a custom field list and `delim=`, including the frame fields such as `qframe`. The reports are those of [blastx](blastx.md), with frames, nucleotide coordinates and NCBI's `RPSTBLASTN` header lines. As in NCBI's `rpstblastn`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
+Supported `-outfmt` values: 0, 1, 2, 3, 4, 6, 7 and 10. Formats 6, 7 and 10 take a custom field list, including the frame fields such as `qframe`. As in NCBI's `rpstblastn`, `delim=` is read and checked but the columns keep their tab or comma. The reports are those of [blastx](blastx.md), with frames, nucleotide coordinates and NCBI's `RPSTBLASTN` header lines. As in NCBI's `rpstblastn`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
 
 LOSAT's `rpstblastn` does not write `-outfmt 11` (BLAST archive) in v0.2.0.
 

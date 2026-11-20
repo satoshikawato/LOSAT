@@ -206,20 +206,32 @@ impl std::fmt::Debug for StrategyExport {
 /// (`-`) or the same file as the standard output or `-out`: NCBI writes each request to the
 /// output's stream before the batch's report (`-`), or to a second stream on the same file,
 /// whose bytes then replace or are replaced by the report's as the two buffers are flushed.
-pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<std::fs::File> {
+/// Where NCBI's run ends with its own error of the format first (`format_error_first`,
+/// `app::ncbi_stops_at_format`) it writes no request, so there is nothing to refuse: the file is
+/// created as NCBI creates it (`-`: none, NCBI's is the standard output) and the run goes on to
+/// NCBI's error. `None`: no strategy is written.
+pub fn create_strategy_file(
+    path: &Path,
+    out: Option<&Path>,
+    label: &str,
+    format_error_first: bool,
+) -> Result<Option<std::fs::File>> {
     if path.as_os_str() == "-" {
+        if format_error_first {
+            return Ok(None);
+        }
         anyhow::bail!(
             "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
         );
     }
     let file = std::fs::File::create(path)
         .map_err(|_| crate::cli::inaccessible("export_search_strategy", path))?;
-    if is_same_as_output(&file, path, out) {
+    if !format_error_first && is_same_as_output(&file, path, out) {
         anyhow::bail!(
             "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
         );
     }
-    Ok(file)
+    Ok(Some(file))
 }
 
 /// Whether the created strategy `file` is the file of `-out` (which exists then: NCBI creates
@@ -293,23 +305,24 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
 }
 
 /// The strategy file of a run's `-export_search_strategy` argument (`path`), created where NCBI
-/// creates it (`create_strategy_file`), or `None` without the argument. A file name that is not
-/// UTF-8 is refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names
-/// the program in a refusal.
+/// creates it (`create_strategy_file`), or `None` without the argument (or where NCBI's error of
+/// the format comes first and the file is the standard output). A file name that is not UTF-8 is
+/// refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names the
+/// program in a refusal; `outfmt` and `program` are the run's `-outfmt` value and the program
+/// whose formatting flags NCBI reads it with (`app::ncbi_stops_at_format`).
 pub fn open_strategy_file(
     path: Option<&Path>,
     out: Option<&Path>,
     label: &str,
+    outfmt: &str,
+    program: crate::blastinput::app::Program,
 ) -> Result<Option<std::fs::File>> {
-    path.map(|path| {
-        crate::blastinput::input_files::check_utf8_file_name(
-            path,
-            "export_search_strategy",
-            label,
-        )?;
-        create_strategy_file(path, out, label)
-    })
-    .transpose()
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    crate::blastinput::input_files::check_utf8_file_name(path, "export_search_strategy", label)?;
+    let format_error_first = crate::blastinput::app::ncbi_stops_at_format(outfmt, program, out);
+    create_strategy_file(path, out, label, format_error_first)
 }
 
 impl StrategyExport {
@@ -1222,8 +1235,8 @@ mod tests {
         }
     }
 
-    /// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's
-    /// argument error.
+    /// `-` and a file that is also `-out` are refused unless NCBI's error of the format comes
+    /// first; a path that cannot be created is NCBI's argument error.
     #[test]
     fn the_file_is_created_or_refused() {
         let dir = crate::utils::test_dir::temp_dir().join(format!(
@@ -1233,16 +1246,26 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.asn");
         std::fs::write(&path, b"old").unwrap();
-        drop(create_strategy_file(&path, None, "BLASTP").unwrap());
+        drop(create_strategy_file(&path, None, "BLASTP", false).unwrap());
         assert_eq!(std::fs::read(&path).unwrap(), b"");
-        let refusal = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap_err();
+        let refusal = create_strategy_file(Path::new("-"), None, "BLASTP", false).unwrap_err();
         assert!(refusal.to_string().contains("standard output"), "{refusal}");
-        let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap_err();
+        let same = create_strategy_file(&path, Some(&path), "BLASTP", false).unwrap_err();
         assert!(same.to_string().contains("also the output"), "{same}");
         let other = dir.join("o.txt");
-        drop(create_strategy_file(&path, Some(&other), "BLASTP").unwrap());
+        drop(create_strategy_file(&path, Some(&other), "BLASTP", false).unwrap());
+        // NCBI's error of the format comes first: nothing to refuse, the file is created (`-`:
+        // none).
+        std::fs::write(&path, b"old").unwrap();
+        assert!(create_strategy_file(Path::new("-"), None, "BLASTP", true)
+            .unwrap()
+            .is_none());
+        assert!(create_strategy_file(&path, Some(&path), "BLASTP", true)
+            .unwrap()
+            .is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
         let missing = dir.join("no_such_dir").join("x");
-        let error = create_strategy_file(&missing, None, "BLASTP").unwrap_err();
+        let error = create_strategy_file(&missing, None, "BLASTP", true).unwrap_err();
         let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
         assert_eq!(native.exit, 1);
         assert_eq!(
@@ -1259,6 +1282,7 @@ mod tests {
                 Path::new("/dev/null"),
                 Some(Path::new("/dev/null")),
                 "BLASTP",
+                false,
             )
             .unwrap(),
         );

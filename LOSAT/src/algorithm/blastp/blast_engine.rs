@@ -5463,6 +5463,8 @@ pub fn run(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         args.app.name(),
+        &args.outfmt,
+        app::Program::Blastp,
     )?;
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
@@ -6139,20 +6141,23 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
+    // The XInclude formats fail only on standard output; to a file they take its name as the
+    // base of their side files.
+    let choice_to_standard_output = resolved
+        .out
+        .as_deref()
+        .is_none_or(|path| path.as_os_str() == "-");
+    let xinclude = choice_to_standard_output.then_some(&choice);
     // The refusal of a PSSM file that LOSAT cannot write as NCBI does (one of the report
     // streams, a named pipe) comes before the first byte (`check_psiblast_pssm_files`). (A query
     // title with a byte that NCBI's stream replaces is written as NCBI writes it:
     // `pssm::file_posts`.)
-    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args))?;
+    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args), xinclude)?;
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
         QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
     };
-    let choice_to_standard_output = resolved
-        .out
-        .as_deref()
-        .is_none_or(|path| path.as_os_str() == "-");
     search(
         resolved,
         &records,
@@ -6161,9 +6166,7 @@ fn search_cli(
         database.as_ref(),
         "",
         outputs,
-        // The XInclude formats fail only on standard output; to a file they take its name as
-        // the base of their side files.
-        choice_to_standard_output.then_some(&choice),
+        xinclude,
     )
 }
 
@@ -6339,12 +6342,11 @@ fn search_pssm_query(
                 .map(|choice| choice.number)
         })
         .collect::<Result<Vec<i32>>>()?;
-    // An XInclude format without a file name (`xinclude`, which `xinclude_check` refuses; the
-    // command line hands over its choice whenever it writes to standard output) ends the run with
-    // NCBI's error where the formatter is made (below, psiblast_app.cpp:503), before the prolog
-    // and the search: LOSAT's refusals of the search's reports wait for it (NCBI 2.17.0, line RG
-    // F/d36 probe ps.pssm.o14: `Please provide a file name for outfmt 14.`).
-    if xinclude.is_none_or(|choice| crate::blastinput::app::xinclude_check(choice).is_ok()) {
+    // An XInclude format without a file name ends the run with NCBI's error where the formatter
+    // is made (below, psiblast_app.cpp:503), before the prolog and the search: LOSAT's refusals of
+    // the search's reports wait for it (`xinclude_error_comes`; NCBI 2.17.0, line RG F/d36 probe
+    // ps.pssm.o14: `Please provide a file name for outfmt 14.`).
+    if !xinclude_error_comes(xinclude) {
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
@@ -6370,12 +6372,12 @@ fn search_pssm_query(
     record.warnings = psi.annot.posts.text();
     let records = vec![record];
     // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's
-    // (`check_psiblast_pssm_files`).
+    // (`check_psiblast_pssm_files`: not where NCBI's error of the format comes first).
     if let Some(request) = resolved
         .psi_rounds
         .as_deref()
         .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
-        .filter(|_| searches)
+        .filter(|_| searches && !xinclude_error_comes(xinclude))
     {
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
@@ -6418,12 +6420,19 @@ fn pssm_query(args: &BlastpArgs) -> bool {
 /// command line reads from a file that is not empty (no records: the file of `Query is Empty!`,
 /// before the queries are read). `scope` says which queries the check covers: the call's
 /// `records`, or the run's in the first of the library's query batches (none in the later ones).
+/// Where the run ends with NCBI's error of an XInclude format without a file name (`xinclude`,
+/// `xinclude_error_comes`) NCBI writes no PSSM file (its formatter is made before `DoIterations`,
+/// psiblast_app.cpp:503 before :517, `app::ncbi_stops_at_format`), so nothing is refused.
 fn check_psiblast_pssm_files(
     resolved: &ResolvedBlastpArgs,
     records: &[FastaRecord],
     scope: &crate::algorithm::psiblast::pssm::PssmCheckScope,
+    xinclude: Option<&crate::blastinput::app::FormatChoice>,
 ) -> Result<()> {
     use crate::algorithm::psiblast::pssm::PssmCheckScope;
+    if xinclude_error_comes(xinclude) {
+        return Ok(());
+    }
     let queries = match scope {
         PssmCheckScope::Call => records.len(),
         PssmCheckScope::Run { queries } => *queries,
@@ -6445,6 +6454,15 @@ fn check_psiblast_pssm_files(
         )?;
     }
     Ok(())
+}
+
+/// Whether the run ends with NCBI's error of the XInclude format `xinclude` (13 or 14 without a file
+/// name, which `search` gives where NCBI makes its formatter, `xinclude_check`): LOSAT's refusals of
+/// what NCBI writes only after that point (psiblast's PSSM files, `-in_pssm`'s options) wait for
+/// it. The command line hands over its choice whenever it writes to standard output, the records'
+/// entries their first format without a file (`xinclude_format`).
+fn xinclude_error_comes(xinclude: Option<&crate::blastinput::app::FormatChoice>) -> bool {
+    xinclude.is_some_and(|choice| crate::blastinput::app::xinclude_check(choice).is_err())
 }
 
 /// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
@@ -6528,7 +6546,7 @@ fn run_local_formats(
         );
     }
     if !query_records.is_empty() {
-        check_psiblast_pssm_files(&args, query_records, &scope)?;
+        check_psiblast_pssm_files(&args, query_records, &scope, xinclude.as_ref())?;
     }
     search(
         args,
@@ -6627,7 +6645,12 @@ fn search_database(
         );
     }
     if !query_records.is_empty() {
-        check_psiblast_pssm_files(&resolved, query_records, &pssm_check_scope(&args))?;
+        check_psiblast_pssm_files(
+            &resolved,
+            query_records,
+            &pssm_check_scope(&args),
+            xinclude.as_ref(),
+        )?;
     }
     search(
         resolved,

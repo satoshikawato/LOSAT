@@ -124,6 +124,8 @@ impl TblastnArgs {
             args.export_search_strategy.as_deref(),
             args.out.as_deref(),
             "TBLASTN",
+            &args.outfmt,
+            app::Program::Tblastn,
         )?;
         let choice = app::parse_formatting_string(&args.outfmt)?;
         let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
@@ -961,7 +963,7 @@ fn search_cli(
 /// then the messages of NCBI's object manager about the query's annotations and its exception
 /// (`PsiSearch::write_annot_posts`, `annot_abort`), the formatter's set-up of the subjects (a
 /// subject without letters) and the XInclude formats without a file, as for a FASTA query
-/// (`before_prolog`, `xinclude_checks`).
+/// (`before_prolog`, `ReportOutputs::xinclude_check`).
 ///
 /// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
 /// `-parse_deflines` its ids join `scope`, the scope of the `-subject` records (`IdScope::
@@ -983,10 +985,10 @@ fn search_pssm_query(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // An XInclude format without a file name ends the run with NCBI's error before the search
-    // (`xinclude_checks` below): LOSAT's refusals of the search's reports wait for it (NCBI
+    // (`ReportOutputs::xinclude_check` below): LOSAT's refusals of the search's reports wait for it (NCBI
     // 2.17.0, line RG F/d36 probes tbnp.o13, tbnp.o14: `Please provide a file name for outfmt
     // 14.`).
-    if xinclude_checks(outputs, args.out.as_deref()).is_ok() {
+    if outputs.xinclude_check(args.out.as_deref()).is_ok() {
         for &outfmt in outfmts {
             super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
         }
@@ -1010,7 +1012,7 @@ fn search_pssm_query(
         "tblastn",
         outputs.diagnostics,
     )?;
-    xinclude_checks(outputs, args.out.as_deref())?;
+    outputs.xinclude_check(args.out.as_deref())?;
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.pssm_query(&records[0]);
     }
@@ -1163,19 +1165,6 @@ fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) ->
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270 (quoted at `search_cli`)
-/// The XInclude formats written without a file fail after the formatter is made (after
-/// `Query is Empty!` and `before_prolog`), as the command line's `-outfmt` (`search_cli`).
-fn xinclude_checks(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    for format in &outputs.formats {
-        crate::blastinput::app::xinclude_check_for(
-            &crate::blastinput::app::parse_formatting_string(format.outfmt)?,
-            format.side_out(out),
-        )?;
-    }
-    Ok(())
-}
-
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
 /// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
 /// `FormatOutput::side_out`).
@@ -1185,7 +1174,8 @@ fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> R
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
-        // the XInclude formats without a file come after `Query is Empty!` (`xinclude_checks`).
+        // the XInclude formats without a file come after `Query is Empty!`
+        // (`ReportOutputs::xinclude_check`).
         if app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
         }
@@ -1294,7 +1284,7 @@ fn search_database(
         return Ok(());
     }
     let batch_size = before_prolog(&[], None, outputs.diagnostics)?;
-    xinclude_checks(outputs, args.out.as_deref())?;
+    outputs.xinclude_check(args.out.as_deref())?;
     search(
         &args,
         resolved,
@@ -1376,7 +1366,7 @@ fn run_local_formats(
     }
     // The caller owns the records: their letters are read in place.
     let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
-    xinclude_checks(outputs, args.out.as_deref())?;
+    outputs.xinclude_check(args.out.as_deref())?;
     search(
         &args,
         resolved,

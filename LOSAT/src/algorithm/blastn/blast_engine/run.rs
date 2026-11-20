@@ -8041,6 +8041,8 @@ pub fn run(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         "BLASTN",
+        &args.outfmt,
+        crate::blastinput::app::Program::Blastn,
     )?;
     let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
@@ -9448,12 +9450,7 @@ fn search(
     // ```
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file takes the file name as the base of its side files).
-    for format in &outputs.formats {
-        app::xinclude_check_for(
-            &app::parse_formatting_string(format.outfmt)?,
-            format.side_out(args.out.as_deref()),
-        )?;
-    }
+    outputs.xinclude_check(args.out.as_deref())?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI

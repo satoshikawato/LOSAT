@@ -7,8 +7,16 @@
   `"06 std"`, `+7`, `00`), as the command line already did; `rpsblast` and `rpstblastn -outfmt "20 delim=; qseqid
   staxids"` stop with NCBI's error for a delimiter that the fields use, not with LOSAT's refusal of outfmt 20 (line RG,
   series F, D-36 review 1).
-- `blastp` and `psiblast` through the library run `-outfmt 0` to `4` with words after the number (`"0 std"`,
-  `"0 delim=@"`, `"00 qseqid"`, `"1 qseqid"`) and drop the words, as NCBI BLAST+ 2.17.0 and LOSAT's command line do,
-  instead of refusing them. `psiblast`, `rpsblast` and PSI-TBLASTN (`tblastn -in_pssm`) with `-outfmt 13` or `14` and
-  no `-out` file now stop with NCBI's `Please provide a file name for outfmt 14.`, in NCBI's order, instead of LOSAT's
-  refusal of the format (line RG, series F, D-36 review 1b).
+- Through the library, `blastp` runs `-outfmt 0` to `4` and `psiblast` runs `-outfmt 0` with words after the number
+  (`"0 std"`, `"0 delim=@"`, `"00 qseqid"`, `"1 qseqid"`) and drop the words, as NCBI BLAST+ 2.17.0 and LOSAT's command
+  line do, instead of refusing them (`psiblast`'s `1` to `4` stay refused, with or without words). `psiblast`,
+  `rpsblast` and PSI-TBLASTN (`tblastn -in_pssm`) with `-outfmt 13` or `14` and no `-out` file now stop with NCBI's
+  `Please provide a file name for outfmt 14.`, in NCBI's order, instead of LOSAT's refusal of the format (line RG,
+  series F, D-36 review 1b).
+- With `-outfmt 13` or `14` and no `-out` file, or another `-outfmt` value that NCBI BLAST+ 2.17.0 stops at (`17`
+  outside `blastn`, `19`, `21`, a delimiter that the fields use, a number it cannot read), every search program stops
+  with NCBI's error even when the run also sends its search strategy (`-export_search_strategy -` or `/dev/stdout`) or
+  `psiblast`'s PSSM (`-out_pssm`, `-out_ascii_pssm`) to the standard output, instead of LOSAT's refusal of that file:
+  NCBI never writes them. `blastx` through the library gives NCBI's `Please provide a file name for outfmt 13.` for
+  13 and 14 without a receiver of their side files, as its command line and the other programs' library do, instead
+  of LOSAT's own refusal (line RG, series F, D-36 review 2).

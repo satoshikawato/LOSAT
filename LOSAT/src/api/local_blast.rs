@@ -706,6 +706,21 @@ impl ReportOutputs<'_> {
         open_out(&mut self.formats)
     }
 
+    /// NCBI's error of an XInclude format (13, 14) whose side files have no file name to go by
+    /// (`FormatOutput::side_out` of the run's `-out` `out`: no `api::run_to_file` file and no
+    /// receiver of them), for each requested format in turn (`blastinput::app::xinclude_check_for`,
+    /// the one check of the command line and the library). Each program's entry calls it where its
+    /// command line makes the formatter: after `Query is Empty!` and the subjects' warnings.
+    pub(crate) fn xinclude_check(&self, out: Option<&std::path::Path>) -> anyhow::Result<()> {
+        for format in &self.formats {
+            crate::blastinput::app::xinclude_check_for(
+                &crate::blastinput::app::parse_formatting_string(format.outfmt)?,
+                format.side_out(out),
+            )?;
+        }
+        Ok(())
+    }
+
     /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
     /// psiblast write without fetching the report's sequences ahead
     /// (`blastinput::app::check_search_environment`); a call without formats (hit records

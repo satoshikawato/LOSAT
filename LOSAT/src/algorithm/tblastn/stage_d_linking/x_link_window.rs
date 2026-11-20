@@ -555,6 +555,12 @@ mod tests {
             (300, 3, 900),
             (1_500, 1, 122),
             (1_500, 2, 41),
+            // `-max_intron_length` 5 to 7 and 8 to 10 (gaps of 1 and 2 letters) and a gap longer
+            // than every subject here (`core::link_hsps::translated_longest_intron`; the lists
+            // place up to six pieces a gap apart, which stays within `i32` for this value).
+            (300, 2, 1),
+            (1_500, 1, 2),
+            (300, 1, 100_000_000),
         ] {
             for round in 0..4 {
                 let link = LocalLinkParameters {

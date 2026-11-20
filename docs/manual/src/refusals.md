@@ -257,7 +257,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | A hit list size of 2^31 - 50 or more | Refused, as in `blastp`. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
-| `-max_intron_length` other than 0 with sum statistics (the default, and `-sum_stats true` with `-in_pssm`) | Refused. Without sum statistics NCBI does not use the option, and neither does LOSAT. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback | Refused. NCBI crashes. |
 | `-in_pssm` | See the next section. |
 

@@ -956,11 +956,13 @@ impl HardMaskShape {
                 if chunk.full_range && chunk.length < frame_len {
                     // The plus frames' ranges are in the order of the masks, the minus frames'
                     // in reverse; the chunk's range ends where its mask starts.
-                    let mask = if frame > 0 {
-                        masks[chunk.range]
+                    // (A chunk of the last range never ends before the frame's end.)
+                    let index = if frame > 0 {
+                        chunk.range
                     } else {
-                        masks[masks.len() - 1 - chunk.range]
+                        (masks.len() - 1).saturating_sub(chunk.range)
                     };
+                    let mask = masks[index.min(masks.len() - 1)];
                     found = Some(HardMaskShape::FrameTailMask {
                         frame,
                         start: mask.0,

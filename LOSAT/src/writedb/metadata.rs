@@ -467,21 +467,6 @@ fn file_length(path: impl AsRef<Path>) -> Option<i64> {
 // `file.GetDir() + file.GetBase()` is the LMDB file's path without its extension. A file
 // the earlier database of the same name left (a `<db>.pjs` that the removal of a database
 // of several volumes does not take) is listed and counted as NCBI lists it.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1301-1305
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1208-1212
-/// The `user_path` of `-metadata_output_prefix`, which makeblastdb and blastdbcmd read alike: the
-/// value with the path separator added when it is not empty and does not end with one, and
-/// empty without the option. makeblastdb 2.17.0 writes the value's bytes as they are (`x`,
-/// `/data/blast/`, a quote, a backslash, a tab, UTF-8) before each name of `files`, and an empty
-/// value adds nothing (line RG item D3a probes `P_*`).
-pub(crate) fn metadata_user_path(prefix: Option<&str>) -> String {
-    let mut user_path = prefix.unwrap_or("").to_string();
-    if !user_path.is_empty() && !user_path.ends_with(std::path::MAIN_SEPARATOR) {
-        user_path.push(std::path::MAIN_SEPARATOR);
-    }
-    user_path
-}
-
 /// `x_GetDBFilesMetaData`: the bytes of the database's files, the bytes of its index
 /// and sequence files, and the sorted names of its files, each after `user_path`. An LMDB
 /// file's name is the bytes of the volume's header (`lmdb_file_names`), which need not be
@@ -537,6 +522,21 @@ pub(crate) fn db_files_metadata(
     }
     db_files.sort();
     (disk_bytes, cached_bytes, db_files)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1301-1305
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1208-1212
+/// The `user_path` of `-metadata_output_prefix`, which makeblastdb and blastdbcmd read alike: the
+/// value with the path separator added when it is not empty and does not end with one, and
+/// empty without the option. makeblastdb 2.17.0 writes the value before each name of `files`
+/// (`x`, `/data/blast/`, a quote, a backslash, a tab, UTF-8, escaped as the JSON of every
+/// string), and an empty value adds nothing (line RG item D3a probes `P_*`).
+pub(crate) fn metadata_user_path(prefix: Option<&str>) -> String {
+    let mut user_path = prefix.unwrap_or("").to_string();
+    if !user_path.is_empty() && !user_path.ends_with(std::path::MAIN_SEPARATOR) {
+        user_path.push(std::path::MAIN_SEPARATOR);
+    }
+    user_path
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1734

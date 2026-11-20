@@ -3617,6 +3617,7 @@ mod tests {
                 out: Some(name.clone()),
                 blastdb_version: 4,
                 max_file_sz: max_file_sz.to_string(),
+                metadata_output_prefix: None,
                 logfile: None,
                 parse_seqids: false,
                 hash_index: false,

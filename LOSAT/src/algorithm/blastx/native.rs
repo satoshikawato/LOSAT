@@ -1614,7 +1614,12 @@ pub(super) fn reported_batch(
         crate::report::db_subject::FormatThrow::of_run([asks.throw]),
     );
     super::x_timing::run(XRun::Titles, x_t);
-    let reported = reported.map_err(reported_error)?;
+    let mut reported = reported.map_err(reported_error)?;
+    // `-db_soft_mask` and `-db_hard_mask`: the rows of outfmt 0 to 4 show the stored masks in
+    // lower case.
+    if let Some(mask) = options.db_mask.as_ref().filter(|_| asks.pairwise) {
+        reported.show_db_masks(database, mask.id)?;
+    }
     if let Some(scopes) = query_scopes {
         reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
     }

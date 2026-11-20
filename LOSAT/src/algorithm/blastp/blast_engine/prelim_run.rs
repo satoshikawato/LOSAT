@@ -102,6 +102,9 @@ pub(super) struct PrelimRun<'a> {
     pub(super) prelim_hitlist_size: usize,
     pub(super) prelim_evalue: f64,
     pub(super) subject_space_overflow: &'a SubjectSpaceOverflow,
+    // `-db_soft_mask` and `-db_hard_mask`: the masking whose first read error of the masks ends a
+    // database's blocks as a read error of its sequences (`db_masked.rs`).
+    pub(super) db_masking: Option<&'a super::db_masked::BlastpDbMasking<'a>>,
     // The shape of the scan's tables.
     pub(super) window: i32,
     pub(super) diag_mask: i32,
@@ -204,6 +207,7 @@ where
         prelim_hitlist_size,
         prelim_evalue,
         subject_space_overflow,
+        db_masking,
         window,
         diag_mask,
         offset_array_size,
@@ -492,36 +496,45 @@ where
                 }
             };
         }
-        if per_subject {
+        let searched = if per_subject {
             search_database_blocks!(process_own_subject)
         } else {
             search_database_blocks!(process_subject)
-        }
-        .map_err(|error| {
-            // A sequence file that cannot be read: NCBI's error of the batch's
-            // preliminary search (`database::PreliminaryReadError`). EXPERIMENT
-            // (LOSAT_X_BPQBLOCK): a block of the preliminary stage hands it to the search of all
-            // queries, whose batches and reports it is (`x_blocks`).
-            match error.downcast::<database::PreliminaryReadError>() {
-                Ok(read_error) if x_block_call => anyhow::Error::new(read_error),
-                Ok(read_error) => preliminary_search_error(
-                    args,
-                    query_records,
-                    subject_source,
-                    subject_label,
-                    outputs,
-                    blastp_parallel_pool,
-                    ranges,
-                    reports,
-                    query_batches,
-                    query_batch_skipped,
-                    query_chunk,
-                    database.name(),
-                    read_error.0,
-                ),
-                Err(other) => other,
-            }
-        })?;
+        };
+        // `-db_soft_mask` and `-db_hard_mask`: the first read error of the masks by ordinal id
+        // (`db_masked.rs`), a read error of the preliminary stage as the sequences' are.
+        searched
+            .and_then(
+                |()| match db_masking.and_then(|masking| masking.take_error()) {
+                    Some(error) => Err(error),
+                    None => Ok(()),
+                },
+            )
+            .map_err(|error| {
+                // A sequence file that cannot be read: NCBI's error of the batch's
+                // preliminary search (`database::PreliminaryReadError`). EXPERIMENT
+                // (LOSAT_X_BPQBLOCK): a block of the preliminary stage hands it to the search of all
+                // queries, whose batches and reports it is (`x_blocks`).
+                match error.downcast::<database::PreliminaryReadError>() {
+                    Ok(read_error) if x_block_call => anyhow::Error::new(read_error),
+                    Ok(read_error) => preliminary_search_error(
+                        args,
+                        query_records,
+                        subject_source,
+                        subject_label,
+                        outputs,
+                        blastp_parallel_pool,
+                        ranges,
+                        reports,
+                        query_batches,
+                        query_batch_skipped,
+                        query_chunk,
+                        database.name(),
+                        read_error.0,
+                    ),
+                    Err(other) => other,
+                }
+            })?;
         subject_space_overflow.check()?;
         if let Some(timing) = timing.as_ref() {
             BlastpTiming::record_call(

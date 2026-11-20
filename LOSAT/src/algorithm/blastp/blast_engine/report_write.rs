@@ -875,6 +875,23 @@ pub(super) fn write_pairwise(
             Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
             None => std::borrow::Cow::Owned(rows_of(window.clone())?),
         };
+        // `-db_soft_mask` and `-db_hard_mask`: the subjects' stored masks that meet the
+        // query's HSPs with them, shown in lower case as `-lcase_masking` shows a FASTA
+        // subject's (`x_soft_subject::x_db_subject_masks`).
+        let db_subject_masks = match (
+            args.db_mask_resolved.as_ref(),
+            database,
+            listed_subjects.as_ref(),
+        ) {
+            (Some(mask), Some(database), Some(listed)) => Some(x_soft_subject::x_db_subject_masks(
+                &rows,
+                database.seqdb(),
+                &listed.ordinals,
+                mask.id,
+                args.app.name(),
+            )?),
+            _ => None,
+        };
         // Outfmt 1 to 4: the sections read the sequences and their masks
         // (`anchored`), not the rows' letters.
         let anchored_sequences =
@@ -901,7 +918,7 @@ pub(super) fn write_pairwise(
                             ranges.subject_placements,
                         )
                     } else {
-                        Default::default()
+                        db_subject_masks.clone().unwrap_or_default()
                     },
                 }
             });
@@ -916,6 +933,10 @@ pub(super) fn write_pairwise(
                     subject_records,
                     ranges.subject_placements,
                 ));
+            }
+            if let Some(masks) = db_subject_masks.as_ref() {
+                rows =
+                    std::borrow::Cow::Owned(x_soft_subject::lower_case_subject_rows(&rows, masks));
             }
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the

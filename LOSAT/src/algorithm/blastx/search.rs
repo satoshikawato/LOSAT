@@ -1306,6 +1306,10 @@ fn x_compute_chunk(
     Ok(Some((params, results)))
 }
 
+// `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the search of a masked database sequence.
+#[path = "search_db_masked.rs"]
+mod db_masked;
+
 struct SubjectComputation {
     raw: Vec<PreliminaryHsp>,
     purged: Vec<PreliminaryHsp>,
@@ -1463,6 +1467,24 @@ fn compute_subject_scored(
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
+    // `-db_soft_mask` and `-db_hard_mask` (`search_db_masked.rs`): one test of the options per
+    // subject on the default path.
+    if let Some(mask) =
+        crate::algorithm::common::db_mask_search::SearchMask::of(options.db_mask.as_ref())
+    {
+        return db_masked::compute_masked_subject(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+            mask,
+        );
+    }
     if options.scoring == crate::config::ScoringMatrix::Blosum62 {
         compute_subject(
             subjects,
@@ -1675,14 +1697,60 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // x_seed_diag.rs). A `-subject` with lower-case letters (`-lcase_masking`) is scanned over its
     // scan ranges by the reference word finder (x_soft_subject.rs). The tests compare both with
     // the reference word finder (`seed::word_finder_bx`).
-    let initial = if let Some(ranges) = super::x_soft_subject::x_subject_scan_ranges(subjects, oid)
-    {
+    let scan_ranges = super::x_soft_subject::x_subject_scan_ranges(subjects, oid);
+    let (raw, purged) = subject_hits_with(
+        scoring,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        &x_buffer,
+        x_lead,
+        scan_ranges.as_deref(),
+        x_containment,
+        &mut containment,
+    )?;
+    #[cfg(feature = "blastx-worker-probe")]
+    worker_probe("finish", oid);
+    Ok(SubjectComputation {
+        raw,
+        purged,
+        containment,
+        prepared_link,
+    })
+}
+
+/// The preliminary HSPs of a subject (`compute_subject_with`) or of a hard chunk of a database
+/// sequence (`x_db_mask.rs`): its word finder over the whole subject or over `ranges`, its
+/// gapped or ungapped extensions, and the list before (`raw`) and after the purge of the HSPs
+/// with common endpoints and the sort by score (`purged`). `x_buffer` is the subject's residues
+/// and the sentinel after them, and with `x_lead` the sentinel before them too.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn subject_hits_with<S: super::seed::BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    x_buffer: &[u8],
+    x_lead: bool,
+    ranges: Option<&[(i32, i32)]>,
+    x_containment: bool,
+    containment: &mut Vec<(PreliminaryHsp, bool)>,
+) -> Result<(Vec<PreliminaryHsp>, Vec<PreliminaryHsp>)> {
+    let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
+    let initial = if let Some(ranges) = ranges {
         super::x_soft_subject::x_word_finder(
-            scoring, batch, params, options, encoded, lookup, diagonals, &ranges, None,
+            scoring, batch, params, options, encoded, lookup, diagonals, ranges, None,
         )?
     } else {
         let x_sent = if x_lead {
-            super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, &x_buffer)
+            super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, x_buffer)
         } else {
             None
         };
@@ -1753,14 +1821,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     } else {
         sort_by_score(&mut purged);
     }
-    #[cfg(feature = "blastx-worker-probe")]
-    worker_probe("finish", oid);
-    Ok(SubjectComputation {
-        raw,
-        purged,
-        containment,
-        prepared_link,
-    })
+    Ok((raw, purged))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664

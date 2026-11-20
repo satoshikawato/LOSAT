@@ -10,6 +10,8 @@ use std::collections::HashMap;
 
 use super::super::x_seed_fused::x_test_hit;
 use super::BlastpRuntimeLookup;
+use crate::algorithm::common::database::database_error_of;
+use crate::algorithm::common::db_mask_search::{shown_subject_masks, SubjectMasks};
 use crate::algorithm::common::masks::lowercase_runs;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -20,6 +22,7 @@ use crate::algorithm::tblastx::lookup::{
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::pairwise::PairwiseHit;
+use crate::seqdb::SeqDb;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:817-826
 // ```c++
@@ -450,7 +453,8 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 /// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters
 /// (the end is one past the HSP): with `-subject_loc` the two coordinates differ by the interval's
 /// start, so a run is kept by where it would lie in the interval and shown where it lies in the
-/// record. A `-db` subject has no records here and no masks. The outfmt 0 rows show them
+/// record. A `-db` subject has no records here: a masked database search's masks are
+/// [`x_db_subject_masks`]'s. The outfmt 0 rows show them
 /// ([`x_masked_subject_rows`]), the query-anchored reports map them to their columns
 /// (`report::query_anchored`).
 #[cold]
@@ -498,6 +502,59 @@ pub(super) fn x_masked_subject_rows(
     placements: &Placements,
 ) -> Vec<PairwiseHit> {
     let masks = x_subject_masks(hits, subject_records, placements);
+    lower_case_subject_rows(hits, &masks)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1586-1601 and
+// c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:109-139
+// A masked database search's subject masks of each query's hits: the stored masks of the
+// search's algorithm that meet the closed range of one of the query's HSPs with the subject.
+/// The subject masks of each query's hits in a database search with `-db_soft_mask` or
+/// `-db_hard_mask` (by (query, rank), as [`x_subject_masks`] gives those of a FASTA set): the
+/// stored masks of the algorithm `algo_id` of the subject of each rank (`ordinals[rank]`) that
+/// [`shown_subject_masks`] keeps, as inclusive runs.
+#[cold]
+#[inline(never)]
+pub(super) fn x_db_subject_masks(
+    hits: &[PairwiseHit],
+    db: &SeqDb,
+    ordinals: &[u32],
+    algo_id: i32,
+    program: &str,
+) -> anyhow::Result<HashMap<(u32, u32), Vec<(i32, i32)>>> {
+    let mut hsp_ranges: HashMap<(u32, u32), Vec<(usize, usize)>> = HashMap::new();
+    for hit in hits {
+        hsp_ranges
+            .entry((hit.hit.q_idx, hit.hit.s_idx))
+            .or_default()
+            .push((hit.hit.s_start - 1, hit.hit.s_end));
+    }
+    let mut reader = SubjectMasks::with_window(1);
+    let mut shown = HashMap::new();
+    for (key, ranges) in hsp_ranges {
+        let Some(&ordinal) = ordinals.get(key.1 as usize) else {
+            continue;
+        };
+        let stored = reader.of(db, ordinal, algo_id, database_error_of, program)?;
+        let runs: Vec<(i32, i32)> = shown_subject_masks(stored, &ranges)
+            .into_iter()
+            .map(|(start, end)| (start as i32, end as i32 - 1))
+            .collect();
+        if !runs.is_empty() {
+            shown.insert(key, runs);
+        }
+    }
+    Ok(shown)
+}
+
+/// The outfmt 0 copies of `hits` with each subject row's letters in the runs `masks` of its query
+/// and subject (inclusive, in the subject's coordinates) in lower case.
+#[cold]
+#[inline(never)]
+pub(super) fn lower_case_subject_rows(
+    hits: &[PairwiseHit],
+    masks: &HashMap<(u32, u32), Vec<(i32, i32)>>,
+) -> Vec<PairwiseHit> {
     let mut hits = hits.to_vec();
     for hit in &mut hits {
         let Some(runs) = masks.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {

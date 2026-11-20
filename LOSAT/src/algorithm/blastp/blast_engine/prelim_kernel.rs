@@ -67,7 +67,7 @@ use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::extension::{
     extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
 };
-use crate::algorithm::blastp::gapalign::BlastpGappedAlignmentMode;
+use crate::algorithm::blastp::gapalign::{BlastpGappedAlignmentMode, BlastpPreliminaryHsp};
 use crate::algorithm::blastp::hsp::reap_hsplist_by_evalue;
 use crate::algorithm::blastp::kappa::{blastp_trace_hsp_target, blastp_trace_matches_pair};
 use crate::algorithm::blastp::x_seed_fused::XContextTable;
@@ -152,6 +152,24 @@ impl BlastpPrelimKernel<'_> {
         subject: BlastpSubjectRef<'_>,
         subject_result: &mut BlastpSubjectResult,
         values: &BlastpPrelimValues<'_>,
+    ) {
+        self.search_subject_in::<false>(scratch, s_idx, subject, subject_result, values, None);
+    }
+
+    /// [`Self::search_subject`] with the scan ranges `db_soft` of a database sequence with
+    /// `-db_soft_mask` (`None`: those of `-lcase_masking`'s subjects, if any), and, with `CHUNK`,
+    /// for one hard chunk of a sequence with `-db_hard_mask` (`db_masked.rs`): the chunk's HSPs
+    /// are left in the scratch's HSP list (`gapped_subject`), sorted by score, for the merge of
+    /// the sequence's chunks. Inlined into each caller, so that `search_subject` keeps its code.
+    #[inline(always)]
+    pub(super) fn search_subject_in<const CHUNK: bool>(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject: BlastpSubjectRef<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        db_soft: Option<&[(i32, i32)]>,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -242,9 +260,14 @@ impl BlastpPrelimKernel<'_> {
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
         // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
-        let x_soft = x_soft_subjects
-            .and_then(|all| all.get(s_idx))
-            .filter(|ranges| !ranges.is_empty());
+        // `-db_soft_mask`: a database sequence's scan ranges (`db_masked.rs`).
+        let x_soft = match db_soft {
+            Some(ranges) => Some(ranges),
+            None => x_soft_subjects
+                .and_then(|all| all.get(s_idx))
+                .filter(|ranges| !ranges.is_empty())
+                .map(Vec::as_slice),
+        };
         // The subject scan and the two-hit test in one loop (a search with a window).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-505,509
         // ```c
@@ -888,7 +911,7 @@ impl BlastpPrelimKernel<'_> {
             values,
             word_cutoff_scores,
         };
-        self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps);
+        self.gapped_subject::<CHUNK>(scratch, s_idx, scanned, subject_result, init_hsps);
     }
 
     /// The gapped half of the kernel for one subject with letters (`search_subject`'s last statement,
@@ -904,7 +927,7 @@ impl BlastpPrelimKernel<'_> {
     ///         BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
     ///         BLAST_SequenceBlk* subject,
     /// ```
-    fn gapped_subject(
+    fn gapped_subject<const CHUNK: bool>(
         &self,
         scratch: &mut BlastpSubjectScratch,
         s_idx: usize,
@@ -921,8 +944,6 @@ impl BlastpPrelimKernel<'_> {
             context_lookup_bounds,
             concatenated_query,
             x_drop_gapped,
-            gapped_params,
-            gapped_gumbel,
             x_trace_query_base,
             timing_enabled,
             timing,
@@ -1454,15 +1475,60 @@ impl BlastpPrelimKernel<'_> {
                 endpoint_duplicates_purged,
             );
         }
+        // The subject's HSP lists per query (`subject_lists`); a hard chunk's HSPs stay in the
+        // list for the merge of the sequence's chunks (`db_masked.rs`).
+        if !CHUNK {
+            self.subject_lists(
+                scratch,
+                s_idx,
+                subject.aa_len,
+                values,
+                &mut preliminary_hsp_list,
+                subject_result,
+            );
+        }
+        scratch.restricted_align_array = restricted_align_array;
+        scratch.restricted_align_array.clear();
+        scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
+        scratch.preliminary_hsp_counts_by_query.clear();
+        scratch.preliminary_hsp_list = preliminary_hsp_list;
+    }
+
+    /// The HSP lists per query of a subject of `subject_len` letters from its HSPs
+    /// `preliminary_hsp_list` (purged and sorted by score; drained), with the E-values of the
+    /// statistics `values` and the reap by the preliminary E-value, into `subject_result`: the end
+    /// of `gapped_subject`, and of the merge of a hard-masked sequence's chunks (`db_masked.rs`),
+    /// whose statistics are those of the whole sequence.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
+    /// After the chunks of a subject, the E-values of its HSPs with the subject's length and the
+    /// reap by the preliminary E-value.
+    #[inline(always)]
+    pub(super) fn subject_lists(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_len: usize,
+        values: &BlastpPrelimValues<'_>,
+        preliminary_hsp_list: &mut Vec<BlastpPreliminaryHsp>,
+        subject_result: &mut BlastpSubjectResult,
+    ) {
+        let Self {
+            query_ids,
+            contexts,
+            gapped_params,
+            gapped_gumbel,
+            ..
+        } = *self;
         if x_hits_flat::x_bphitsflat() {
             x_hits_flat::x_lists_by_query(
-                &mut preliminary_hsp_list,
+                preliminary_hsp_list,
                 contexts,
                 query_ids.len(),
                 &mut scratch.x_hits_order,
                 &mut scratch.x_hits_starts,
                 s_idx as u32,
-                subject.aa_len,
+                subject_len,
                 gapped_params,
                 gapped_gumbel.as_ref(),
                 values.search_spaces,
@@ -1474,7 +1540,7 @@ impl BlastpPrelimKernel<'_> {
             let mut preliminary_hits_by_query =
                 std::mem::take(&mut scratch.preliminary_hits_by_query);
             split_preliminary_hits_by_query_into(
-                &mut preliminary_hsp_list,
+                preliminary_hsp_list,
                 contexts,
                 query_ids.len(),
                 &mut preliminary_hits_by_query,
@@ -1496,7 +1562,7 @@ impl BlastpPrelimKernel<'_> {
                     s_idx as u32,
                     q_idx as u32,
                     ctx.aa_len,
-                    subject.aa_len,
+                    subject_len,
                     gapped_params,
                     gapped_gumbel.as_ref(),
                     &values.search_spaces[q_idx],
@@ -1535,10 +1601,5 @@ impl BlastpPrelimKernel<'_> {
             }
             scratch.preliminary_hits_by_query = preliminary_hits_by_query;
         }
-        scratch.restricted_align_array = restricted_align_array;
-        scratch.restricted_align_array.clear();
-        scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
-        scratch.preliminary_hsp_counts_by_query.clear();
-        scratch.preliminary_hsp_list = preliminary_hsp_list;
     }
 }

@@ -1667,6 +1667,16 @@ impl SequenceBlock {
         )
     }
 
+    /// The residues of protein `i`, to be changed in place: the copy that a fetch after the
+    /// preliminary stage of a search with `-db_hard_mask` masks
+    /// (`algorithm::common::db_mask_search::mask_protein_letters`).
+    pub fn protein_mut(&mut self, i: usize) -> &mut [u8] {
+        self.expect(SeqType::Protein);
+        let lo = (u64::from(self.seq_offsets[i]) - self.data_start) as usize;
+        let hi = (u64::from(self.seq_offsets[i + 1]) - 1 - self.data_start) as usize;
+        &mut self.data[lo..hi]
+    }
+
     /// Protein `i` with the sentinel byte (NUL in a well-formed volume)
     /// before and after its residues, as NCBI's buffer has them.
     pub fn protein_with_sentinels(&self, i: usize) -> &[u8] {

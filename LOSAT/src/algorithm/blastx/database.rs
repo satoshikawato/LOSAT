@@ -1218,6 +1218,34 @@ impl ReportedSubjects {
         &self.records
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1586-1601 and
+    // c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:109-139
+    // A masked database search's report shows in lower case the stored masks of the search's
+    // algorithm that meet the closed range from one of the query's HSPs' subject offset to its
+    // end (one past its last letter).
+    /// With `-db_soft_mask` or `-db_hard_mask` of the algorithm `algo_id`: each record's
+    /// lower-case runs become the stored masks of its sequence (inclusive, sorted, overlapping and
+    /// touching masks joined), which the pairwise report and the query-anchored sections keep
+    /// where they meet the closed range of one of the query's HSPs with the subject
+    /// (`x_soft_subject::x_subject_masks`, `x_masked_subject_rows`: a row's letter in a kept run
+    /// is a letter in any run). The records' letters stay those stored.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn show_db_masks(&mut self, database: &BlastxDatabase, algo_id: i32) -> Result<()> {
+        let mut reader = crate::algorithm::common::db_mask_search::SubjectMasks::with_window(1);
+        for (record, &ordinal) in self.records.iter_mut().zip(&self.ordinals) {
+            let stored = reader.of(
+                &database.db,
+                ordinal,
+                algo_id,
+                shared::database_error_of,
+                database.program,
+            )?;
+            record.lowercase_masks = lower_case_runs(stored, record.sequence.len());
+        }
+        Ok(())
+    }
+
     /// The ordinal id of rank `rank`.
     pub(crate) fn ordinal(&self, rank: usize) -> u32 {
         self.ordinals[rank]
@@ -1345,6 +1373,26 @@ impl ReportedSubjects {
             })
             .collect()
     }
+}
+
+/// The stored masks `stored` (`[start, end)`) of a sequence of `length` letters as lower-case
+/// runs: inclusive, clipped to the letters, sorted, and the overlapping and touching ones joined.
+fn lower_case_runs(stored: &[(u32, u32)], length: usize) -> Vec<(i32, i32)> {
+    let mut masks: Vec<(usize, usize)> = stored
+        .iter()
+        .map(|&(start, end)| (start as usize, (end as usize).min(length)))
+        .filter(|&(start, end)| start < end)
+        .collect();
+    masks.sort_unstable();
+    let mut runs: Vec<(i32, i32)> = Vec::with_capacity(masks.len());
+    for (start, end) in masks {
+        let (start, last) = (start as i32, end as i32 - 1);
+        match runs.last_mut() {
+            Some(run) if start <= run.1 + 1 => run.1 = run.1.max(last),
+            _ => runs.push((start, last)),
+        }
+    }
+    runs
 }
 
 #[cfg(test)]

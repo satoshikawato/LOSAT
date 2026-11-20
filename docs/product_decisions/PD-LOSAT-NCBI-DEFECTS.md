@@ -1546,18 +1546,18 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     up to 65535 stays in the vector as NCBI keeps it; a row of the index that reaches it (its bit,
     or a count of set bits up to a row in or past it) is refused where NCBI's answer differs
     between its builds of BitMagic, as it then depends on the machine NCBI was built for:
-    BitMagic's search of a GAP block is SSE2 or SSE4.2 code on x86-64 (`bmsse2.h:1638-1642`,
-    `bmsse4.h:2260-2264`; NCBI's configure adds `-msse4.2` there) and scalar code elsewhere
-    (`bmfunc.h:1835-1955`), which find a block's bits the same way only where its ends increase,
-    and the SSE builds count such a block modulo 2^16 per lane. LOSAT runs each build's search and
-    count and answers where they agree (a count past several such blocks by each build's own
-    sum); rows that do not reach the block are answered. A bit that the decoding sets in such a
-    block (`gap_set_value`) may leave each build a different block: LOSAT then decodes the data
-    once for each build and answers each row where the three builds' vectors agree; the data is
-    refused only where the builds' decodings end differently (one throws and another does not, or
-    the size or the bytes read differ) or where one of them reaches an event above (line RG item
-    Q-BM, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07). A
-    `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
+    BitMagic's search of a GAP block is SSE2 or SSE4.2 code on x86-64 (BitMagic 8.0.1:
+    `bmsse2.h:1638-1642`, `bmsse4.h:2260-2264`; NCBI's configure adds `-msse4.2` there) and scalar
+    code elsewhere (BitMagic 8.0.1: `bmfunc.h:1835-1955`), which find a block's bits the same way
+    only where its ends increase, and the SSE builds count such a block modulo 2^16 per lane. LOSAT
+    runs each build's search and count and answers where they agree (a count past several such
+    blocks by each build's own sum); rows that do not reach the block are answered. A bit that the
+    decoding sets in such a block (`gap_set_value`) may leave each build a different block: LOSAT
+    then decodes the data once for each build and answers each row where the three builds' vectors
+    agree; the data is refused only where the builds' decodings end differently (one throws and
+    another does not, or the size or the bytes read differ) or where one of them reaches an event
+    above (line RG item Q-BM, Owner-delegated, standing instruction 2026-09-29, restated
+    2026-10-07). A `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
 
   The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
   tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line

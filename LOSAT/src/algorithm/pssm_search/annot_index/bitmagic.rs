@@ -111,8 +111,8 @@ const fn refuse(rule: Rule) -> Fail {
 
 /// One of NCBI's builds of BitMagic, by the code that it runs on a GAP block (`gap_bfind`,
 /// `gap_test_unr`, `gap_bit_count_unr`): scalar off x86-64, SSE2 on x86-64, SSE4.2 where NCBI's
-/// configure adds `-msse4.2` (configure.ac:2285-2330, ncbiconf_impl.h:326-338, bmdef.h:46-55,
-/// bmsimd.h:55-66). NCBI's tree defines no other SIMD form of these functions.
+/// configure adds `-msse4.2` (configure.ac:2285-2330, ncbiconf_impl.h:326-338; BitMagic 8.0.1:
+/// bmdef.h:46-55, bmsimd.h:55-66). NCBI's tree defines no other SIMD form of these functions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Build {
     Scalar,
@@ -204,7 +204,7 @@ impl BitVector {
         self.size
     }
 
-    /// `bvector<>::get_bit(n)` (bm.h:3604-3631) of NCBI's three builds.
+    /// `bvector<>::get_bit(n)` (BitMagic 8.0.1: bm.h:3604-3631) of NCBI's three builds.
     pub(crate) fn get_bit(&self, n: u32) -> Result<bool, Fail> {
         match &self.builds {
             Builds::One(one) => one.get_bit(n, &BUILDS),
@@ -214,8 +214,8 @@ impl BitVector {
         }
     }
 
-    /// `bvector<>::count_range(0, n)` (bm.h:3244-3254) of NCBI's three builds: the set bits of
-    /// `[0, n]`.
+    /// `bvector<>::count_range(0, n)` (BitMagic 8.0.1: bm.h:3244-3254) of NCBI's three builds:
+    /// the set bits of `[0, n]`.
     pub(crate) fn count_to(&self, n: u32) -> Result<u64, Fail> {
         match &self.builds {
             Builds::One(one) => one.count_to(n, &BUILDS),
@@ -1733,8 +1733,8 @@ fn gap_bfind_sse42(gap: &[u16], pos: u32, step16: usize) -> Result<usize, Fail> 
     })
 }
 
-/// `gap_test_unr(buf, pos)` (bmfunc.h:1943-1955) of `build`: `gap_test`, `sse2_gap_test`,
-/// `sse42_gap_test`.
+/// `gap_test_unr(buf, pos)` (BitMagic 8.0.1: bmfunc.h:1943-1955) of `build`: `gap_test`,
+/// `sse2_gap_test`, `sse42_gap_test`.
 fn gap_test(gap: &[u16], pos: u32, build: Build) -> Result<u16, Fail> {
     match build {
         Build::Scalar => gap_test_scalar(gap, pos),
@@ -1743,8 +1743,8 @@ fn gap_test(gap: &[u16], pos: u32, build: Build) -> Result<u16, Fail> {
     }
 }
 
-/// `gap_bfind(buf, pos, &is_set)` of `build` (`VECT_GAP_BFIND`, bmfunc.h:1840-1841): the entry
-/// of the run that holds `pos`.
+/// `gap_bfind(buf, pos, &is_set)` of `build` (`VECT_GAP_BFIND`, BitMagic 8.0.1:
+/// bmfunc.h:1840-1841): the entry of the run that holds `pos`.
 fn gap_bfind(gap: &[u16], pos: u32, build: Build) -> Result<usize, Fail> {
     match build {
         Build::Scalar => gap_bfind_scalar(gap, pos),
@@ -2187,21 +2187,21 @@ fn gap_set_at(gap: &mut Arr, val: u16, pos: u16, curr: usize) -> Result<u16, Fai
     Ok(end)
 }
 
-/// `gap_set_value(val, buf, pos)` as NCBI's builds run it, whose `gap_bfind` is `VECT_GAP_BFIND`
-/// in the SIMD ones (bmfunc.h:1840-1841): `build`'s, or with `None` all three's, where the block
-/// as they leave it is kept where they leave it the same, else `Rule::GapSearch` (each build then
-/// holds its own block: `decode_to_end` decodes the data once for each).
+/// `gap_set_value(val, buf, pos)` as NCBI's builds run it, whose `gap_bfind` is `VECT_GAP_BFIND` in
+/// the SIMD ones (BitMagic 8.0.1: bmfunc.h:1840-1841): `build`'s, or with `None` all three's, where
+/// the block as they leave it is kept where they leave it the same, else `Rule::GapSearch` (each
+/// build then holds its own block: `decode_to_end` decodes the data once for each).
 ///
-/// On a GAP block that is one (`valid`: ends that increase up to 65535 at the header's last
-/// index) the three builds' searches find the same entry, the first at or above `pos`:
-/// `gap_bfind`'s binary steps (bmfunc.h:1835-1886) keep that entry within `[start, end]` and its
+/// On a GAP block that is one (`valid`: ends that increase up to 65535 at the header's last index)
+/// the three builds' searches find the same entry, the first at or above `pos`: `gap_bfind`'s
+/// binary steps (BitMagic 8.0.1: bmfunc.h:1835-1886) keep that entry within `[start, end]` and its
 /// scan stops at it; `sse2_gap_bfind` (bmsse2.h:1444-1499) and `sse42_gap_bfind`
 /// (bmsse4.h:1389-1455) take the same binary steps and then the first lane at or above `pos`, or
-/// the count of such lanes, of increasing entries, which is that entry. So one search runs
-/// there, a binary search for that entry (the scalar build's where the buffer holds fewer
-/// entries than the header names). `gap_set_value` leaves a GAP block that is one while its last index fits
-/// the header's 13 bits (a block of the vector stays below 1280 entries by its level), so
-/// `valid` holds for the later bits of the block.
+/// the count of such lanes, of increasing entries, which is that entry. So one search runs there, a
+/// binary search for that entry (the scalar build's where the buffer holds fewer entries than the
+/// header names). `gap_set_value` leaves a GAP block that is one while its last index fits the
+/// header's 13 bits (a block of the vector stays below 1280 entries by its level), so `valid` holds
+/// for the later bits of the block.
 fn gap_set_value(
     gap: &mut Arr,
     val: bool,
@@ -2425,9 +2425,9 @@ impl Store {
         let slot = self.slot(nb);
         let Some(Slot::Gap(gap, valid)) = slot else {
             match slot {
-                // `gap_set_all(allocate_gap_block(0), gap_max_bits, 0)` (level 0, one run of 0s), in
-                // which `gap_set_value` makes the run of the one bit: `[head, p - 1, p, 65535]` or
-                // the forms of p = 0 and p = 65535, far below level 0's limit
+                // `gap_set_all(allocate_gap_block(0), gap_max_bits, 0)` (level 0, one run of 0s),
+                // in which `gap_set_value` makes the run of the one bit: `[head, p - 1, p, 65535]`
+                // or the forms of p = 0 and p = 65535, far below level 0's limit
                 None => *slot = Some(Slot::Gap(gap_of_runs(&[(p, p)]), true)),
                 Some(Slot::Poison(rule)) => return Err(refuse(*rule)),
                 Some(Slot::Bits(block)) => set_bit(block, u32::from(p)),
@@ -2436,7 +2436,8 @@ impl Store {
             return Ok(());
         };
         // `gap_block_set_no_ret`: `gap_set_value` in the block's own buffer, then
-        // `extend_gap_block` past the level's limit (`gap_limit`, bmfunc.h:1744-1748)
+        // `extend_gap_block` past the level's limit
+        // (`gap_limit`, BitMagic 8.0.1: bmfunc.h:1744-1748)
         let head = gap_at(gap, 0)?;
         let cap = GAP_LEVELS[usize::from(gap_level(head))];
         let mut buf = Arr::of_block(std::mem::take(gap), cap);

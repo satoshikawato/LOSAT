@@ -2404,6 +2404,7 @@
      "-num_descriptions": "500",
      "-seg": "12 2.2 2.5",
      "-soft_masking": "false",
+     "-sum_stats": "true",
      "-threshold": "13",
      "-window_size": "40",
      "-word_size": "3",

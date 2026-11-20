@@ -127,9 +127,8 @@ impl Runtime<'_> {
         }
         x_timing::end(XEnd::Read, x_t);
         // `-use_sw_tback`: the lists that NCBI's fetch excludes (a `-negative_seqidlist` that keeps
-        // a subject without a line), by their place in the stream, the batch's status, and
-        // whether the redo reads the heaps (e-value mode).
-        let (marks, reads_heaps, do_link_hsps) = if SW {
+        // a subject without a line), by their place in the stream, and the batch's status.
+        let (marks, do_link_hsps) = if SW {
             let excluded = self
                 .subjects
                 .seqdb()
@@ -140,10 +139,14 @@ impl Runtime<'_> {
             .map_err(|failed| {
                 crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
             })?;
-            (marks, !state.do_link_hsps(), state.do_link_hsps())
+            (marks, state.do_link_hsps())
         } else {
-            (FetchMarks::default(), false, false)
+            (FetchMarks::default(), false)
         };
+        // Whether the Smith-Waterman redo reads the heaps of the batch (e-value mode), so that
+        // a match's outcome depends on the matches before it: no speculation then.
+        #[cfg(feature = "parallel")]
+        let reads_heaps = SW && !do_link_hsps;
         let mut sw_status = SwBatchStatus::default();
         // Redo the matches of one batch on the search pool before walking them in stream order.
         // A match is a function of its own HSP list and of the matrix left by the match before

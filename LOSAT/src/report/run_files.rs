@@ -772,18 +772,19 @@ mod tests {
     /// A name of 4 KB is read in time linear in its length (review 3 M1, line WQA's D11 round 5,
     /// 2026-11-21: resolving each of its directories again from `/` took about a minute in LOSAT
     /// Web's serial engine): the walk takes each component a few times, not once per directory
-    /// before it. The 2047 bytes that NCBI keeps of each name made absolute are a directory of it,
-    /// so the messages stay on `cerr`, as on the command line.
+    /// before it. The 2047 bytes that NCBI keeps of the first name made absolute are a directory of
+    /// it, so its messages stay on `cerr`; the second's `..` resolve before the cut, and it names a
+    /// file. Both as on the command line.
     #[test]
     fn a_long_log_name_is_read_in_linear_time() {
-        for name in [
-            format!("{}run.log", "a/".repeat(2040)),
-            format!("{}run.log", "../".repeat(1360)),
+        for (name, read) in [
+            (format!("{}run.log", "a/".repeat(2040)), LogName::Unopened),
+            (format!("{}run.log", "../".repeat(1360)), LogName::File),
         ] {
             assert!(name.len() < 4096);
             WALK_STEPS.with(|steps| steps.set(0));
             let started = std::time::Instant::now();
-            assert_eq!(log_name(name.as_bytes()), LogName::Unopened);
+            assert_eq!(log_name(name.as_bytes()), read);
             let steps = WALK_STEPS.with(std::cell::Cell::get);
             assert!(steps < 4 * name.len(), "{steps} steps");
             assert!(started.elapsed() < std::time::Duration::from_secs(5));

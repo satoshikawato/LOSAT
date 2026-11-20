@@ -681,7 +681,7 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
     }
 }
 
-// PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits (review C of line RG
+// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of line RG
 // D1a-4, SF1): `PutInt8` of
 // -2^63, which NCBI's `COStreamBuffer` writes as `-0` (a signed overflow, strbuffer.cpp:1002-1010),
 // is its digits in both encoders of the archive and of the reports' XML.

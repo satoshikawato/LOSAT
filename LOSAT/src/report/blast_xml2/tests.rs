@@ -378,7 +378,7 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
         };
         assert!(refused(&overflow), "{kind:?}");
         // NCBI's serial XML (outfmt 14 and 16) prints INT64_MIN as `-0`, its JSON the digits:
-        // LOSAT writes the digits in every format (PD-LOSAT-NCBI-DEFECTS approved exception 16,
+        // LOSAT writes the digits in every format (PD-LOSAT-NCBI-DEFECTS approved exception 17,
         // Int8 -2^63 written as digits).
         assert!(!refused(&int64_min), "{kind:?}");
         // A call that writes no report (a run without a query) prints no count.
@@ -647,7 +647,7 @@ fn one_hsp_named(
     String::from_utf8(out).unwrap()
 }
 
-// PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits (review C of line RG
+// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of line RG
 // D1a-4, SF1): XML2's
 // `db-len` of exactly -2^63, NCBI's `-0` in its serial XML (outfmt 14, 16; probe q17b of review
 // C), is written as its digits, as NCBI's JSON writes it (outfmt 13, 15).

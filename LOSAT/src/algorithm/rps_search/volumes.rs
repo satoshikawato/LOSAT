@@ -437,7 +437,7 @@ impl RpsUnits {
     /// requests after the first hold it (the first is written before the first batch's set-up);
     /// a `D` of exactly -2^63 (an alias file's `LENGTH` or `STATS_TOTLEN` of 2^63), which NCBI's
     /// serial writer prints as `-0` (a signed overflow), is written as its digits
-    /// (PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits: the Owner's
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits: the Owner's
     /// answer to D1a-3's Q1, A, of 2026-11-17, DECISIONS OQ-1117 of line RG).
     pub(crate) fn strategy_db_length(&self) -> Option<i64> {
         self.adjusted.map(|(length, _)| length)
@@ -1495,7 +1495,7 @@ mod tests {
 
     /// The strategy's `DbLength`: `D` of any sign where `x_AdjustDbSize` runs, -2^63 too, which the
     /// requests write as its digits where NCBI writes `-0` (PD-LOSAT-NCBI-DEFECTS approved
-    /// exception 16, Int8 -2^63 written as digits; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
+    /// exception 17, Int8 -2^63 written as digits; NCBI's `big-integer -0` of probe r2_3v_l2p63#2 of line RG D1a-4's review A;
     /// the request's bytes: `report::archive::strategy`'s test
     /// `a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits`).
     #[test]

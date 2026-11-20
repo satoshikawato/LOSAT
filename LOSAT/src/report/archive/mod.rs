@@ -1406,7 +1406,7 @@ mod tests {
         assert!(sink.is_empty());
     }
 
-    /// PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits (review C of
+    /// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of
     /// line RG D1a-4, SF1): an archive
     /// whose request holds a big integer of -2^63 (`-dbsize -9223372036854775808`), which NCBI's
     /// ASN.1 text and XML archives write as `-0` (probes q6, q10b of review C), is written with its

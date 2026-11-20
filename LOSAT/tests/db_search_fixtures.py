@@ -46,6 +46,39 @@ LOSAT/tests/db_search (README.md there says how they were built).
   and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
   that the stack limit, the environment and the stack's random start move; its output with a stack large enough
   is the expectation (PD-LOSAT-NCBI-DEFECTS exception 15). `check` runs LOSAT with the caller's limit.
+- a `ncbi` row whose `covers` cell has `ncbi-copies: PATH [NAME=VALUE ...]` (up to a ` | ` or the end; a "copy row",
+  `copies_cell`): the expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place
+  of the row's query file. In PATH each query that ends a query batch of LOSAT's run (`query_batches`) is followed by
+  a copy of itself (its residues under an id that starts with `COPY`: `>COPY`, `>COPY2`), and only the copies end the
+  oracle run's batches (`copy_oracle_problems` checks both files). With unified P-values (`blastp -comp_based_stats
+  1u`, `2u`, `3u`) NCBI BLAST+ 2.17.0 adjusts a query's E-values with the values of the next query of its batch and,
+  for a batch's last query, with bytes past its array that change from run to run; in the oracle run each original
+  query's next query is itself or its copy, so its report is NCBI's with its own values where LOSAT's run has no next
+  query. The `NAME=VALUE` words (BATCH_SIZE, CHUNK_SIZE or OVERLAP_CHUNK_SIZE: `COPY_ENV_NAMES`) are the oracle
+  run's environment in place of the row's own words of those names. Each batch of both runs is searched in one
+  chunk (`query_chunks`: the copy would move the split of a longer batch, and the split can change the preliminary
+  hits). `freeze` runs NCBI
+  `-num_threads 1` on PATH, which must exit 0 with a stderr that names no copy (`COPY`: a warning of the arguments,
+  such as NCBI's advice to examine 5 or more matches under a smaller hit list, is the row's own and is frozen as
+  <row_id>.err), keeps its whole stdout unchanged as <row_id>.copies.out (the evidence) and writes as <row_id>.out
+  (with the row's hash and size cells; rc 0) the cut of it by a fixed rule per output format
+  (`cut_copies`): outfmt 6, the lines whose first field starts with `COPY`; outfmt 7, each copy's block (its `# BLASTP
+  2.17.0+` line up to the next such line or the final line), and the number of the final line `# BLAST processed N
+  queries` lowered by the copies (the one NCBI byte that the rule rewrites); outfmt 0, each copy's report (its `Query=
+  COPY` line up to the next `Query= ` line or, for the last query, up to the final `  Database: ` block); outfmt 5, the
+  copy's `<Iteration>` element, a copy that is the oracle file's last query only (the iteration numbers of later
+  queries would change). The copies' own reports are a batch's last query's, which change from run to run: a later
+  freeze keeps the frozen whole output when its cut is the new run's cut. A copy row is a BLASTP row of outfmt 0, 5, 6
+  or 7 with the default fields; the loader refuses any other. A hit list that fills does not limit a copy row
+  (`-max_target_seqs`, `-num_descriptions` and `-num_alignments` are allowed): NCBI's composition-based redo takes the
+  matches in the order of their queries and ends the remaining ones early (`BlastCompo_EarlyTermination`) only while
+  the list of every query of the batch is full, and the lists of the queries after the one in work are still empty.
+  So in the oracle run no match of an original query is ended early (its copy, or another query, follows it); only
+  the copy's matches can be, and the copy's report is cut out. LOSAT ends no match early with unified P-values
+  (`BlastCompoHeap::without_early_end`), so the cut is its expectation also where a list fills. `freeze` prints the
+  number of subjects of each query of the oracle output (`subjects_per_query`). `check` cuts the frozen whole output
+  again, fails the row when that differs from <row_id>.out, and compares LOSAT's run of the row's own query file with
+  <row_id>.out as for any `ncbi` row.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -60,9 +93,10 @@ LOSAT/tests/db_search (README.md there says how they were built).
   NCBI's run of a near input that writes the bytes LOSAT writes before it refuses: an input that fails at
   the same step where NCBI crashes on the row's own (line RG item X4: the failed batch of a
   Smith-Waterman redo), or the query batches before the batch that LOSAT refuses and NCBI searches on
-  (X4: the negative CHUNK_SIZE pair whose chunks leave gaps). `freeze` runs nothing for such a row and
-  copies ROW_ID's stdout columns, `check` reads ROW_ID's frozen stdout (`frozen_id`), and the row keeps
-  its own rc and stderr (LOSAT's).
+  (X4: the negative CHUNK_SIZE pair whose chunks leave gaps; X5: a copy row whose query file holds the
+  batches that LOSAT writes before it refuses, where NCBI's own run of the row reads past its array
+  there). `freeze` runs nothing for such a row and copies ROW_ID's stdout columns, `check` reads
+  ROW_ID's frozen stdout (`frozen_id`), and the row keeps its own rc and stderr (LOSAT's).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -471,6 +505,365 @@ def frozen_id(row: dict[str, str]) -> str:
     return near_row_id(row) or row["row_id"]
 
 
+# Copy rows (`ncbi-copies:`): NCBI's run on a query file in which each query that ends a query batch of LOSAT's run
+# is followed by a copy of itself, cut to the reports of the original queries.
+COPY_PREFIX = "COPY"
+COPY_OUTFMTS = ("0", "5", "6", "7")
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88, 135-137
+#     char* batch_sz_str = getenv("BATCH_SIZE");
+#     if (batch_sz_str) {
+#         retval = NStr::StringToInt(batch_sz_str);
+#     case eBlastp:
+#     default:
+#         retval = 10000;
+BLASTP_BATCH_SIZE = 10000
+# A full hit list does not limit a copy row. The composition-based redo ends the remaining matches early only while
+# the heap of every query of the batch is full (below), and it takes the matches in the order of their queries
+# (blast_hspstream.c:289-319), so the heaps of the queries after the one in work are still empty: in the oracle run no
+# match of an original query is ended early, only the copy's can be (the batch's last query), and its report is cut
+# out. LOSAT ends no match early with unified P-values (`BlastCompoHeap::without_early_end`).
+# NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1565-1566, 1575-1577
+#     for (i = 0;  i < numQueries;  i++) {
+#         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
+#         } else {
+#             return FALSE;
+#         }
+# The query chunks of a BLASTP batch: CHUNK_SIZE (else 10000) and OVERLAP_CHUNK_SIZE (else 100) residues.
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61, 91-93
+#     char* chunk_sz_str = getenv("CHUNK_SIZE");
+#     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+#         retval = NStr::StringToInt(chunk_sz_str);
+#         case eBlastp:
+#         default:
+#             retval = 10000;
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-57
+#     size_t retval = 100;
+#     // used for experimentation purposes
+#     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
+#     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
+#         retval = NStr::StringToInt(overlap_sz_str);
+BLASTP_CHUNK_SIZE = 10000
+QUERY_CHUNK_OVERLAP = 100
+# The variables that a copy row's oracle run may set in place of the row's own: only those that place the queries in
+# batches and chunks (another variable would give the oracle conditions that the row's LOSAT run does not have).
+COPY_ENV_NAMES = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE")
+
+
+def copies_cell(row: dict[str, str]) -> tuple[str, dict[str, str]] | None:
+    """The oracle query file of a copy row (`ncbi-copies: PATH [NAME=VALUE ...]` in its covers cell, up to a ` | `
+    or the end; PATH relative to LOSAT/) and the variables of the oracle run that replace the row's own; None for
+    another row."""
+    _, marker, rest = row["covers"].partition("ncbi-copies: ")
+    if not marker:
+        return None
+    words = rest.split(" | ")[0].split()
+    if not words or not all(is_env_token(word) and word.split("=", 1)[0] in COPY_ENV_NAMES for word in words[1:]):
+        raise SystemExit(f"{row['row_id']}: ncbi-copies takes a path and NAME=VALUE words of {', '.join(COPY_ENV_NAMES)}")
+    return words[0], dict(word.split("=", 1) for word in words[1:])
+
+
+def fasta_records(path: Path) -> list[tuple[str, str]]:
+    """The records of a FASTA file: each defline without its `>`, and its residues without white space."""
+    records: list[tuple[str, str]] = []
+    for line in path.read_text().splitlines():
+        if line.startswith(">"):
+            records.append((line[1:], ""))
+        elif line.strip():
+            if not records:
+                raise SystemExit(f"{path}: letters before the first defline")
+            records[-1] = (records[-1][0], records[-1][1] + "".join(line.split()))
+    return records
+
+
+def record_id(defline: str) -> str:
+    """The id of a record: the first word of its defline."""
+    return (defline.split() or [""])[0]
+
+
+def is_copy(name: str | bytes) -> bool:
+    """Whether a query id (or a line that starts with it) is a copy's: it starts with `COPY`."""
+    return name.startswith(COPY_PREFIX.encode() if isinstance(name, bytes) else COPY_PREFIX)
+
+
+def query_batches(lengths: list[int], batch_size: int) -> list[list[int]]:
+    """NCBI's query batches of a query file (the indexes of its queries): a batch takes queries while the sum of
+    their lengths is below `batch_size`; the query that brings it to `batch_size` or more is the batch's last.
+
+    NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140, 163, 170
+        while (size_read < GetBatchSize()) {
+                size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
+            retval->AddQuery(q);"""
+    batches: list[list[int]] = []
+    current: list[int] = []
+    size = 0
+    for index, length in enumerate(lengths):
+        current.append(index)
+        size += length
+        if size >= batch_size:
+            batches.append(current)
+            current, size = [], 0
+    return batches + [current] if current else batches
+
+
+def batch_size(env: dict[str, str]) -> int:
+    """BLASTP's query batch size in an environment: BATCH_SIZE, else 10000."""
+    return int(env.get("BATCH_SIZE", BLASTP_BATCH_SIZE))
+
+
+def query_chunks(length: int, env: dict[str, str]) -> int:
+    """The number of chunks in which NCBI searches a BLASTP query batch of `length` residues in an environment:
+    `length` // (CHUNK_SIZE - OVERLAP_CHUNK_SIZE) when CHUNK_SIZE is the larger (each a blank value or none: 10000,
+    100), and 1 when that is 1 or less (19,799 residues and fewer by default).
+
+    NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:124-131
+        if ((*chunk_size) > overlap_size) {
+           num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
+        }
+
+        // Only one chunk, just return;
+        if (num_chunks <= 1) {
+           *chunk_size = concatenated_query_length;
+           return 1;"""
+    chunk, overlap = (int(env.get(name, "").strip() or default) for name, default in
+                      (("CHUNK_SIZE", BLASTP_CHUNK_SIZE), ("OVERLAP_CHUNK_SIZE", QUERY_CHUNK_OVERLAP)))
+    return max(length // (chunk - overlap) if chunk > overlap else 0, 1)
+
+
+def copy_oracle_problems(row: dict[str, str]) -> list[str]:
+    """Why the oracle file of a copy row cannot stand for its query file (an empty list when it can): the row is a
+    BLASTP `ncbi` row of outfmt 0, 5, 6 or 7 with the default fields and a query file of its own; no query id of the
+    row starts with `COPY`; the oracle's records without the copies are the row's records (deflines and residues);
+    each copy has a new id and the residues of the original query before it; each batch of the oracle run (its
+    BATCH_SIZE: the row's, replaced by the cell's words) ends with a copy and holds no other, and without its copy is
+    a batch of LOSAT's run; each batch of both runs is searched in one chunk (`query_chunks`, with the run's
+    CHUNK_SIZE and OVERLAP_CHUNK_SIZE); with outfmt 5 the one copy is the last query. The lengths are the residues of
+    the FASTA records (`fasta_records`), which are NCBI's lengths for plain FASTA files of letters only."""
+    oracle_path, words = copies_cell(row)
+    problems = []
+    if row["program"] != "blastp" or row["kind"] != "ncbi":
+        problems.append("a copy row is a blastp ncbi row")
+    if row["outfmt"] not in COPY_OUTFMTS:
+        problems.append(f"outfmt {row['outfmt']!r} has no cut rule (0, 5, 6 or 7 with the default fields)")
+    if near_row_id(row) or under_valgrind(row) or xinclude.wants_files(row) or xinclude.wants_pssm(row):
+        problems.append("a copy row is not ncbi-near, ncbi-valgrind or a row with files")
+    if row["query"].startswith(("stdin:", "pssm:", "pssm-gz:")):
+        return problems + ["a copy row reads its query from a FASTA file"]
+    originals = fasta_records(ENGINE / row["query"])
+    oracle = fasta_records(ENGINE / oracle_path)
+    if any(is_copy(record_id(defline)) for defline, _ in originals):
+        problems.append(f"a query id of {row['query']} starts with {COPY_PREFIX}")
+    copies = [index for index, (defline, _) in enumerate(oracle) if is_copy(record_id(defline))]
+    if [record for record in oracle if not is_copy(record_id(record[0]))] != originals:
+        problems.append(f"the queries of {oracle_path} without the copies are not those of {row['query']}")
+    if len({record_id(oracle[index][0]) for index in copies}) != len(copies):
+        problems.append("two copies have one id")
+    for index in copies:
+        if index == 0 or index - 1 in copies or oracle[index][1] != oracle[index - 1][1]:
+            problems.append(f"the copy {record_id(oracle[index][0])} does not follow a query with its residues")
+    original_index = {index: number for number, index in
+                      enumerate(index for index in range(len(oracle)) if index not in copies)}
+    env = row_env(row, {})
+    own = query_batches([len(residues) for _, residues in originals], batch_size(env))
+    batches = query_batches([len(residues) for _, residues in oracle], batch_size({**env, **words}))
+    for batch in batches:
+        if batch[-1] not in copies or any(index in copies for index in batch[:-1]):
+            problems.append(f"the oracle batch of queries {batch} does not end with its one copy")
+    if [[original_index[index] for index in batch if index not in copies] for batch in batches] != own:
+        problems.append(f"the oracle batches without the copies are not LOSAT's batches {own}")
+    for run, records, run_batches, run_env in (("oracle", oracle, batches, {**env, **words}),
+                                               ("LOSAT", originals, own, env)):
+        for batch in run_batches:
+            length = sum(len(records[index][1]) for index in batch)
+            if query_chunks(length, run_env) > 1:
+                problems.append(f"the {run} batch of queries {batch} ({length} residues) is searched in "
+                                f"{query_chunks(length, run_env)} chunks; a copy row's batches are searched in one")
+    if row["outfmt"] == "5" and copies != [len(oracle) - 1]:
+        problems.append("with outfmt 5 the one copy is the oracle's last query")
+    return problems
+
+
+def copy_count(row: dict[str, str]) -> int:
+    """The number of copies in a copy row's oracle file."""
+    return sum(is_copy(record_id(defline)) for defline, _ in fasta_records(ENGINE / copies_cell(row)[0]))
+
+
+def output_lines(data: bytes) -> list[bytes]:
+    """The lines of an output, each with its newline (the last without one when the output does not end with it)."""
+    parts = data.split(b"\n")
+    return [part + b"\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+_PROCESSED = re.compile(rb"# BLAST processed (\d+) queries\n")
+_QUERY_DEF = b"  <Iteration_query-def>"
+
+
+def outfmt7_blocks(lines: list[bytes]) -> list[list[bytes]]:
+    """The query blocks of an outfmt 7 document (each from its program line, the document's first line, to the next
+    one), without the final line `# BLAST processed N queries`, whose N must be their number."""
+    final = _PROCESSED.fullmatch(lines[-1]) if lines else None
+    if final is None:
+        raise ValueError("outfmt 7 without its final line '# BLAST processed N queries'")
+    starts = [index for index, line in enumerate(lines[:-1]) if line == lines[0]]
+    blocks = [lines[start:end] for start, end in zip(starts, starts[1:] + [len(lines) - 1])]
+    if int(final.group(1)) != len(blocks) or any(not block[1:2] or not block[1].startswith(b"# Query: ")
+                                                 for block in blocks):
+        raise ValueError(f"outfmt 7: {len(blocks)} blocks with a '# Query: ' line, final line {lines[-1]!r}")
+    return blocks
+
+
+def outfmt0_reports(lines: list[bytes]) -> list[tuple[int, int]]:
+    """The line ranges of the query reports of an outfmt 0 document: each from its `Query= ` line to the next one
+    or, for the last, to the document's final `  Database: ` block."""
+    starts = [index for index, line in enumerate(lines) if line.startswith(b"Query= ")]
+    footers = [index for index, line in enumerate(lines) if line.startswith(b"  Database: ")]
+    if not starts or not footers or footers[-1] < starts[-1]:
+        raise ValueError("outfmt 0 without 'Query= ' lines before a final '  Database: ' block")
+    return list(zip(starts, starts[1:] + [footers[-1]]))
+
+
+def outfmt5_iterations(lines: list[bytes]) -> list[tuple[int, int]]:
+    """The line ranges of the `<Iteration>` elements of an outfmt 5 document, each with its end line."""
+    starts = [index for index, line in enumerate(lines) if line == b"<Iteration>\n"]
+    ends = [index + 1 for index, line in enumerate(lines) if line == b"</Iteration>\n"]
+    if not starts or len(starts) != len(ends) or any(not start < end for start, end in zip(starts, ends)):
+        raise ValueError("outfmt 5 without whole <Iteration> elements")
+    return list(zip(starts, ends))
+
+
+def iteration_is_copy(lines: list[bytes]) -> bool:
+    """Whether an outfmt 5 `<Iteration>` element (its lines) is a copy's: its `<Iteration_query-def>` starts with
+    `COPY` (an element without one is refused)."""
+    names = [line[len(_QUERY_DEF):] for line in lines if line.startswith(_QUERY_DEF)]
+    if len(names) != 1:
+        raise ValueError("an outfmt 5 <Iteration> without one <Iteration_query-def>")
+    return is_copy(names[0])
+
+
+def cut_copies(data: bytes, outfmt: str, copies: int) -> bytes:
+    """NCBI's whole output `data` of a copy row's oracle run without the reports of its `copies` copies (queries
+    whose id starts with `COPY`), by the rule of the output format (`copy_oracle_problems` allows 0, 5, 6 and 7):
+
+    - 6: the lines whose first field starts with `COPY` are left out.
+    - 7: each copy's block (`outfmt7_blocks`) is left out, and the final line `# BLAST processed N queries` gets
+      the number of the blocks kept: the one byte of NCBI's that a rule writes.
+    - 0: each copy's report (`outfmt0_reports`: its `Query= COPY` line up to the next `Query= ` line or, for the
+      last query, up to the final `  Database: ` block) is left out.
+    - 5: the last `<Iteration>` element, which must be the copy's and the only copy's, is left out.
+
+    ValueError where the output does not have that shape or another number of copies."""
+    lines = output_lines(data)
+    if outfmt == "6":
+        return b"".join(line for line in lines if not is_copy(line.split(b"\t", 1)[0]))
+    if outfmt == "7":
+        blocks = outfmt7_blocks(lines)
+        kept = [block for block in blocks if not is_copy(block[1][len(b"# Query: "):])]
+        if len(blocks) - len(kept) != copies:
+            raise ValueError(f"outfmt 7: {len(blocks) - len(kept)} copy blocks for {copies} copies")
+        return b"".join(line for block in kept for line in block) + b"# BLAST processed %d queries\n" % len(kept)
+    if outfmt == "0":
+        dropped = [(start, end) for start, end in outfmt0_reports(lines) if is_copy(lines[start][len(b"Query= "):])]
+        if len(dropped) != copies:
+            raise ValueError(f"outfmt 0: {len(dropped)} copy reports for {copies} copies")
+        return b"".join(line for index, line in enumerate(lines)
+                        if not any(start <= index < end for start, end in dropped))
+    if outfmt == "5":
+        iterations = outfmt5_iterations(lines)
+        flags = [iteration_is_copy(lines[start:end]) for start, end in iterations]
+        if copies != 1 or flags != [False] * (len(flags) - 1) + [True]:
+            raise ValueError(f"outfmt 5: the copy must be the last of {len(flags)} iterations and the only one")
+        start, end = iterations[-1]
+        return b"".join(lines[:start] + lines[end:])
+    raise ValueError(f"no cut rule for outfmt {outfmt!r}")
+
+
+def subjects_per_query(data: bytes, outfmt: str) -> list[int]:
+    """The number of subjects in each query's report of an output of outfmt 0, 5, 6 or 7 (the copies' included):
+    the distinct second fields of a query's rows (6, 7), the lines of its description table (0), its `<Hit>`
+    elements (5)."""
+    lines = output_lines(data)
+    if outfmt in ("6", "7"):
+        blocks = ([[line for line in block if not line.startswith(b"#")] for block in outfmt7_blocks(lines)]
+                  if outfmt == "7" else [lines])
+        counts: dict[tuple[int, bytes], set[bytes]] = {}
+        for number, block in enumerate(blocks):
+            for line in block:
+                fields = line.split(b"\t")
+                counts.setdefault((number, fields[0]), set()).add(fields[1] if len(fields) > 1 else b"")
+        return [len(subjects) for subjects in counts.values()]
+    if outfmt == "0":
+        result = []
+        for start, end in outfmt0_reports(lines):
+            table = [index for index in range(start, end)
+                     if lines[index].startswith(b"Sequences producing significant alignments:")]
+            count = 0
+            if table:
+                index = table[0] + 2
+                while index < end and lines[index].strip():
+                    count, index = count + 1, index + 1
+            result.append(count)
+        return result
+    if outfmt == "5":
+        return [sum(line == b"<Hit>\n" for line in lines[start:end]) for start, end in outfmt5_iterations(lines)]
+    raise ValueError(f"no subject count for outfmt {outfmt!r}")
+
+
+def copy_row_problems(row: dict[str, str]) -> list[str]:
+    """The problems of a copy row's frozen files (`check` and the manifest's test): those of its oracle file
+    (`copy_oracle_problems`), and a cut of the frozen whole output <row_id>.copies.out that is not <row_id>.out."""
+    problems = copy_oracle_problems(row)
+    whole = FROZEN / f"{row['row_id']}.copies.out"
+    if not whole.is_file():
+        return problems + [f"no frozen {whole.name}"]
+    try:
+        cut = cut_copies(whole.read_bytes(), row["outfmt"], copy_count(row))
+    except ValueError as error:
+        return problems + [f"{whole.name}: {error}"]
+    expected = FROZEN / f"{row['row_id']}.out"
+    if not expected.is_file() or cut != expected.read_bytes():
+        problems.append(f"the cut of {whole.name} is not {expected.name}")
+    return problems
+
+
+def freeze_copies(row: dict[str, str], ncbi_bin: str, env: dict[str, str]) -> None:
+    """`freeze` of a copy row: NCBI `-num_threads 1` on the oracle file with the oracle's variables (exit 0 and a
+    stderr that names no copy, else the freeze stops), its whole stdout as <row_id>.copies.out, its cut
+    (`cut_copies`) as <row_id>.out and its stderr, a warning of the arguments that NCBI writes for the row's own
+    query file too, as <row_id>.err, with the row's cells (rc 0); it prints the number of subjects of each query of
+    the whole output (`subjects_per_query`, the copies' included), which shows a full hit list."""
+    problems = copy_oracle_problems(row)
+    if problems:
+        raise SystemExit(f"{row['row_id']}: " + "; ".join(problems))
+    oracle_path, words = copies_cell(row)
+    command = [str(Path(ncbi_bin) / row["program"]), *search_argv({**row, "query": oracle_path}), "-num_threads", "1"]
+    run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env={**row_env(row, env), **words})
+    if run.returncode != 0 or COPY_PREFIX.encode() in run.stderr:
+        raise SystemExit(f"{row['row_id']}: NCBI's oracle run exited {run.returncode} with stderr "
+                         f"{run.stderr.decode(errors='replace')[:200]!r}; a copy row needs exit 0 and a stderr that "
+                         f"names no copy")
+    try:
+        out = cut_copies(run.stdout, row["outfmt"], copy_count(row))
+    except ValueError as error:
+        raise SystemExit(f"{row['row_id']}: {error}") from None
+    # The copies' own reports are those of a batch's last query, which NCBI computes with bytes past its array
+    # that change from run to run: a frozen whole output whose cut is this run's cut is kept as it is.
+    whole = FROZEN / f"{row['row_id']}.copies.out"
+    try:
+        kept = whole.is_file() and cut_copies(whole.read_bytes(), row["outfmt"], copy_count(row)) == out
+    except ValueError:
+        kept = False
+    if not kept:
+        whole.write_bytes(run.stdout)
+    (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+    if run.stderr:
+        (FROZEN / f"{row['row_id']}.err").write_bytes(run.stderr)
+    else:
+        (FROZEN / f"{row['row_id']}.err").unlink(missing_ok=True)
+    row.update(rc="0", stdout_sha256=sha256(out), stdout_bytes=str(len(out)),
+               stderr_sha256=sha256(run.stderr) if run.stderr else "")
+    print(f"{row['row_id']}\tcopies={oracle_path}\twhole={len(run.stdout)}{' (frozen whole kept)' if kept else ''}"
+          f"\tstdout={len(out)}\tsubjects={subjects_per_query(run.stdout, row['outfmt'])}")
+
+
 def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:
     """The `preexec_fn` of `freeze`'s NCBI run of `row`: with `ncbi-stack: unlimited` in its covers cell, the run's
     stack limit is its hard limit (`RLIMIT_STACK` infinity by default, as `prlimit --stack=unlimited`); else None,
@@ -522,6 +915,9 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         if row["kind"] != "ncbi" or near_row_id(row):
             continue
+        if copies_cell(row) is not None:
+            freeze_copies(row, args.ncbi_bin, env)
+            continue
         if under_valgrind(row):
             if not args.valgrind:
                 print(f"{row['row_id']}\tkept: frozen from NCBI under valgrind (freeze it with --valgrind)")
@@ -570,7 +966,7 @@ def freeze(args: argparse.Namespace) -> int:
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     # The rows whose expectation is a near input's NCBI run (`near_row_id`) take that row's columns, after it
-    # is frozen (it may come later in the file).
+    # is frozen (it may come later in the file); a rejection row takes its stdout columns only.
     by_id = {row["row_id"]: row for row in rows}
     for row in rows:
         near = near_row_id(row)
@@ -693,7 +1089,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
             and run.stderr.startswith(b"BLAST query error:") and run.stderr in expected_err_losat:
         return "library-input-error", ""
-    problems = []
+    # A copy row's expectation is the cut of its frozen whole NCBI output (`copy_row_problems`).
+    problems = copy_row_problems(row) if copies_cell(row) is not None else []
     if files:
         problems += xinclude.problems(written, row, FROZEN, first_difference)
     elif sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):

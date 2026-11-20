@@ -267,7 +267,7 @@ where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases
 `Int8` (outfmt 0 to 5 and 13 to 16) and their numbers of sequences summed past `int` (outfmt 5).
 A summed length of exactly 2^63 (NCBI's Int8 -2^63), which NCBI's serial writer prints as `-0` in
 BLAST XML and XML2 (outfmt 5, 14, 16), the strategy and the archive, is written as
-`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 16, Int8 -2^63 written as digits,
+`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits,
 the Owner's answer Q1 = A of
 2026-11-17 to D1a-3's question, DECISIONS OQ-1117 of line RG; refused before). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
@@ -333,7 +333,7 @@ where a query is searched: SIGFPE; a run without a valid query is reported as NC
 round 3, review C MF1; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
 first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
 `STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
-`-9223372036854775808` (approved exception 16, Int8 -2^63 written as digits; with one query batch
+`-9223372036854775808` (approved exception 17, Int8 -2^63 written as digits; with one query batch
 NCBI's only request holds no
 `DbLength`: fix round 1, review A MF4; refused until fix round 2). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over

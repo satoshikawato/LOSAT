@@ -12,6 +12,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::OnceLock;
 
+use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::blast_seg::{SegMasker, SegParams};
@@ -27,6 +28,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
     BlastRedoRangeResult, EMatrixAdjustRule, XSubjectComposition,
 };
+use crate::stats::search_space::SearchSpace;
 use crate::stats::{blast_spouge_stoe, e_to_p, p_to_e, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
@@ -283,6 +285,145 @@ pub(crate) struct BlastpKappaQueryWorkspace {
     pub redo_query_info: BlastCompoQueryInfo,
     pub query_length: i32,
     pub length_adjustment: i32,
+    /// What the adjustment of the query's E-values with a composition P-value reads
+    /// ([`evalue_adjust_contexts`]): not the query's own values, in general.
+    pub evalue_adjust_context: EvalueAdjustContext,
+}
+
+/// The three values of `queryInfo->contexts[context_index]` that NCBI's redo reads when it
+/// adjusts a query's E-values with a composition P-value (the unified P-values of
+/// `-comp_based_stats 1u`, `2u` and `3u`; `adjust_evalues_for_composition`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct EvalueAdjustContext {
+    pub query_length: i32,
+    pub length_adjustment: i32,
+    pub eff_searchsp: f64,
+}
+
+/// What LOSAT's refusal of unified P-values names ([`evalue_adjust_contexts`]): the program
+/// ("... are not supported by LOSAT's BLASTP") and each query's id as the reports show it.
+#[derive(Clone, Copy)]
+pub(crate) struct UnifiedPRefusal<'a> {
+    pub program: &'a str,
+    pub query_ids: &'a [std::sync::Arc<[u8]>],
+}
+
+/// LOSAT's refusal of unified P-values for query `query`, whose E-values NCBI adjusts with the
+/// search space 0 of the query after it ([`evalue_adjust_contexts`]).
+fn unified_p_without_search_space(refusal: UnifiedPRefusal<'_>, query: usize) -> anyhow::Error {
+    let id = |q: usize| String::from_utf8_lossy(&refusal.query_ids[q]).into_owned();
+    anyhow::anyhow!(
+        "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {} for query {}, which is followed in its query batch by a query without a search space ({}: no residue that can be scored, and -searchsp is not given or is 0): NCBI BLAST+ 2.17.0 adjusts a query's e-values with the search space of the next query",
+        refusal.program,
+        id(query),
+        id(query + 1)
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3542-3543,3590-3592,3675-3683
+// ```c
+//                 query_index = localMatch->query_index;
+//                 context_index = query_index * numFrames;
+// ...
+//                 for (frame_index = 0;
+//                         frame_index < numFrames;
+//                         frame_index++, context_index++) {
+// ...
+//                 *pStatusCode =
+//                         s_HitlistEvaluateAndPurge(&best_score, &best_evalue,
+//                                 hsp_list,
+//                                 seqSrc,
+//                                 matchingSeq.length,
+//                                 program_number,
+//                                 queryInfo, context_index,
+//                                 sbp, hitParams,
+//                                 pvalueForThisPair, LambdaRatio,
+//                                 matchingSeq.index);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:773-784,846-847
+// ```c
+//       Int4 length_adjustment = 0; /* length adjustment for current iteration. */
+//       Int4 query_length;   /* length of an individual query sequence */
+//
+//       /* Effective search space for a given sequence/strand/frame */
+//       Int8 effective_search_space =
+//           s_GetEffectiveSearchSpaceForContext(eff_len_options, index,
+//                                               blast_message);
+//
+//       kbp = kbp_ptr[index];
+//
+//       if (query_info->contexts[index].is_valid &&
+//           ((query_length = query_info->contexts[index].query_length) > 0) ) {
+// ...
+//       query_info->contexts[index].eff_searchsp = effective_search_space;
+//       query_info->contexts[index].length_adjustment = length_adjustment;
+// ```
+/// Each query's [`EvalueAdjustContext`], in query order: what NCBI's
+/// `&queryInfo->contexts[context_index]` holds when the redo adjusts the query's E-values with a
+/// composition P-value.
+///
+/// NCBI passes the context index after the loop over the query's frames has advanced it, so for
+/// BLASTP (one frame) the context is the NEXT query's of the query batch (`query_batches`, each
+/// query's batch as a range: `kappa_query_batches`): its length, its length adjustment and its
+/// effective search space. For a query that is not valid the length adjustment is 0 and the
+/// search space is the `-searchsp` value (0 when not given). Reproduced (PD-LOSAT-NCBI-DEFECTS
+/// rule 2).
+///
+/// For the last query of a batch NCBI reads past the batch's contexts (heap bytes: its reports
+/// differ from run to run). LOSAT reads the query's own context there, which is what NCBI
+/// reads for that query when a copy of it follows in the same batch and the batch is searched
+/// in the same chunks (the exception of PD-LOSAT-NCBI-DEFECTS for unified P-values; the redo
+/// also ends no match early then, `ResolvedBlastpArgs::redone_match_heap`).
+///
+/// A next query whose effective search space is 0 makes NCBI's scale infinite: NCBI reports
+/// every E-value of the query before it as 0, an alignment whose E-value was 0 without an
+/// E-value (the product of 0 and infinity is not a number), and drops a match of such alignments
+/// only. With unified P-values that batch is refused (`refuse` is `Some`; the error is a
+/// `HeaderReadError` of the batch's first query, so the reports of the batches before are
+/// written first, and its text names the two queries).
+pub(crate) fn evalue_adjust_contexts(
+    contexts: &[QueryContext],
+    search_spaces: &[SearchSpace],
+    query_batches: &[std::ops::Range<usize>],
+    options_searchsp: i64,
+    refuse: Option<UnifiedPRefusal<'_>>,
+) -> Result<Vec<EvalueAdjustContext>> {
+    let context_of = |q_idx: usize| {
+        let ctx = &contexts[q_idx];
+        if ctx.is_valid && ctx.aa_len > 0 {
+            EvalueAdjustContext {
+                query_length: ctx.aa_len as i32,
+                length_adjustment: search_spaces[q_idx].length_adjustment as i32,
+                eff_searchsp: search_spaces[q_idx].effective_space,
+            }
+        } else {
+            EvalueAdjustContext {
+                query_length: ctx.aa_len as i32,
+                length_adjustment: 0,
+                eff_searchsp: options_searchsp as f64,
+            }
+        }
+    };
+    let mut adjust_contexts = Vec::with_capacity(contexts.len());
+    for (q_idx, ctx) in contexts.iter().enumerate() {
+        let batch = &query_batches[q_idx];
+        if q_idx + 1 < batch.end {
+            let next = context_of(q_idx + 1);
+            if let Some(refusal) = refuse {
+                if ctx.is_valid && ctx.aa_len > 0 && next.eff_searchsp == 0.0 {
+                    return Err(crate::algorithm::common::database::HeaderReadError {
+                        query: batch.start,
+                        error: unified_p_without_search_space(refusal, q_idx),
+                    }
+                    .into());
+                }
+            }
+            adjust_contexts.push(next);
+        } else {
+            adjust_contexts.push(context_of(q_idx));
+        }
+    }
+    Ok(adjust_contexts)
 }
 
 #[derive(Clone)]
@@ -1365,6 +1506,7 @@ pub(crate) fn build_query_workspace(
     query_length: i32,
     length_adjustment: i32,
     effective_space: f64,
+    evalue_adjust_context: EvalueAdjustContext,
 ) -> BlastpKappaQueryWorkspace {
     let redo_query_info = BlastCompoQueryInfo {
         origin: 0,
@@ -1377,6 +1519,7 @@ pub(crate) fn build_query_workspace(
         redo_query_info,
         query_length,
         length_adjustment,
+        evalue_adjust_context,
     }
 }
 
@@ -1693,25 +1836,30 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:135-193
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:147-158
 // ```c
-// static void
-// s_AdjustEvaluesForComposition(BlastHSPList *hsp_list, double comp_p_value,
-//                               ..., Int4 subject_length,
-//                               const BlastContextInfo * query_context,
-//                               ...)
-// {
+//     /* True length of the query */
+//     int query_length =      query_context->query_length;
+//     /* Length adjustment to compensate for edge effects */
+//     int length_adjustment = query_context->length_adjustment;
+//
+//     /* Effective lengths of the query, subject, and database */
 //     double query_eff   = MAX((query_length - length_adjustment), 1);
 //     double subject_eff = MAX((subject_length - length_adjustment), 1.0);
 //     double dblen_eff = (double) query_context->eff_searchsp / query_eff;
+//
+//     /* Scale factor to convert the database E-value to the sequence E-value */
 //     double db_to_sequence_scale = subject_eff / dblen_eff;
-//     ...
-// }
 // ```
+/// `s_AdjustEvaluesForComposition`: the E-values of a match's HSPs combined with the composition
+/// P-value of the pair. `query_context` is what NCBI's `query_context` holds
+/// ([`evalue_adjust_contexts`]: the next query's values, or the query's own for the last query
+/// of a batch); its effective search space is above 0 (a batch where it is 0 is refused), so the
+/// scale is finite and above 0.
 fn adjust_evalues_for_composition(
     hsp_list: &mut BlastpHspList,
     comp_p_value: f64,
-    query_workspace: &BlastpKappaQueryWorkspace,
+    query_context: &EvalueAdjustContext,
     subject_length: i32,
     lambda_ratio: f64,
 ) {
@@ -1724,17 +1872,10 @@ fn adjust_evalues_for_composition(
     // (void) subject_id;
     // ```
     let _ = lambda_ratio;
-    let query_eff =
-        (query_workspace.query_length - query_workspace.length_adjustment).max(1) as f64;
-    let subject_eff = (subject_length - query_workspace.length_adjustment).max(1) as f64;
-    let dblen_eff = query_workspace.redo_query_info.eff_search_space / query_eff;
-    if !(dblen_eff.is_finite() && dblen_eff > 0.0) {
-        return;
-    }
+    let query_eff = (query_context.query_length - query_context.length_adjustment).max(1) as f64;
+    let subject_eff = ((subject_length - query_context.length_adjustment) as f64).max(1.0);
+    let dblen_eff = query_context.eff_searchsp / query_eff;
     let db_to_sequence_scale = subject_eff / dblen_eff;
-    if !(db_to_sequence_scale.is_finite() && db_to_sequence_scale > 0.0) {
-        return;
-    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:172-176
     // ```c
@@ -1869,7 +2010,7 @@ fn evaluate_and_purge(
         adjust_evalues_for_composition(
             hsp_list,
             comp_p_value,
-            query_workspace,
+            &query_workspace.evalue_adjust_context,
             subject_length,
             lambda_ratio.unwrap_or(1.0),
         );
@@ -2693,9 +2834,24 @@ mod tests {
         );
     }
 
+    /// A context of the query's own values (the last query of a batch).
+    fn own_context(
+        query_length: i32,
+        length_adjustment: i32,
+        eff_searchsp: f64,
+    ) -> EvalueAdjustContext {
+        EvalueAdjustContext {
+            query_length,
+            length_adjustment,
+            eff_searchsp,
+        }
+    }
+
     #[test]
     fn test_adjust_evalues_for_composition_matches_ncbi_sequence_scaling() {
-        let query_workspace = build_query_workspace(&[1u8; 100], 100, 10, 9000.0);
+        // The context is not the query's own (a query of 100 letters, adjustment 10, space
+        // 9000): the adjustment reads the context's three values only.
+        let context = own_context(70, 20, 6000.0);
         let mut hsp_list = BlastpHspList {
             oid: 0,
             query_index: 0,
@@ -2704,18 +2860,171 @@ mod tests {
         };
         hsp_list.hsps[0].e_value = 2.5;
 
-        adjust_evalues_for_composition(&mut hsp_list, 0.25, &query_workspace, 40, 1.0);
+        adjust_evalues_for_composition(&mut hsp_list, 0.25, &context, 40, 1.0);
 
-        let query_eff = 90.0;
-        let subject_eff = 30.0;
-        let db_to_sequence_scale =
-            subject_eff / (query_workspace.redo_query_info.eff_search_space / query_eff);
+        let query_eff = 50.0;
+        let subject_eff = 20.0;
+        let db_to_sequence_scale = subject_eff / (6000.0 / query_eff);
         let expected = p_to_e(blast_overall_p_value(
             0.25,
             e_to_p(2.5 * db_to_sequence_scale),
         )) / db_to_sequence_scale;
         assert!((hsp_list.hsps[0].e_value - expected).abs() < 1e-12);
         assert!((hsp_list.best_evalue - expected).abs() < 1e-12);
+    }
+
+    /// A query context of `aa_len` letters (the other fields are not read by
+    /// `evalue_adjust_contexts`).
+    fn adjust_test_context(q_idx: u32, aa_len: usize, is_valid: bool) -> QueryContext {
+        QueryContext {
+            q_idx,
+            frame: 0,
+            aa_seq: Vec::new(),
+            aa_seq_nomask: None,
+            aa_len,
+            orig_len: aa_len,
+            frame_base: 0,
+            is_valid,
+            karlin_params: KarlinParams::default(),
+        }
+    }
+
+    fn adjust_test_space(effective_space: f64, length_adjustment: i64) -> SearchSpace {
+        SearchSpace {
+            effective_space,
+            length_adjustment,
+        }
+    }
+
+    fn adjust_test_ids(count: usize) -> Vec<std::sync::Arc<[u8]>> {
+        (0..count)
+            .map(|q| std::sync::Arc::from(format!("id{q}").into_bytes()))
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3543,3590-3592,3680
+    // (quoted at `evalue_adjust_contexts`): two batches of two queries. The first query of a
+    // batch reads the second's values, the last query of a batch its own.
+    #[test]
+    fn evalue_adjust_contexts_are_the_next_querys_of_the_batch_or_the_querys_own() {
+        let contexts = [
+            adjust_test_context(0, 100, true),
+            adjust_test_context(1, 200, true),
+            adjust_test_context(2, 300, true),
+            adjust_test_context(3, 400, true),
+        ];
+        let spaces = [
+            adjust_test_space(1000.0, 10),
+            adjust_test_space(2000.0, 20),
+            adjust_test_space(3000.0, 30),
+            adjust_test_space(4000.0, 40),
+        ];
+        let batches = [0..2, 0..2, 2..4, 2..4];
+        let ids = adjust_test_ids(4);
+        let blastp = UnifiedPRefusal {
+            program: "BLASTP",
+            query_ids: &ids,
+        };
+        for refuse in [None, Some(blastp)] {
+            let adjust = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, refuse)
+                .expect("every next query has a search space");
+            assert_eq!(
+                adjust,
+                [
+                    own_context(200, 20, 2000.0),
+                    own_context(200, 20, 2000.0),
+                    own_context(400, 40, 4000.0),
+                    own_context(400, 40, 4000.0),
+                ]
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:773-784,846-847 (quoted at
+    // `evalue_adjust_contexts`): a next query that is not valid keeps a length adjustment of 0
+    // and the options' search space. With `-searchsp` that is the given space; without it the
+    // space is 0, which unified P-values refuse (the error is the batch's, and its text names
+    // the query and the one after it) and a search without them never reads.
+    #[test]
+    fn evalue_adjust_contexts_of_a_next_query_that_is_not_valid() {
+        let contexts = [
+            adjust_test_context(0, 50, true),
+            adjust_test_context(1, 100, true),
+            adjust_test_context(2, 20, false),
+            adjust_test_context(3, 0, true),
+        ];
+        // LOSAT's spaces do not read the validity: the producer must not take these values.
+        let spaces = [
+            adjust_test_space(500.0, 5),
+            adjust_test_space(1000.0, 10),
+            adjust_test_space(777.0, 7),
+            adjust_test_space(888.0, 8),
+        ];
+        let batches = [0..1, 1..4, 1..4, 1..4];
+        let ids = adjust_test_ids(4);
+        let blastp = Some(UnifiedPRefusal {
+            program: "BLASTP",
+            query_ids: &ids,
+        });
+        let given = evalue_adjust_contexts(&contexts, &spaces, &batches, 123_456, blastp)
+            .expect("-searchsp gives the next query a search space");
+        assert_eq!(
+            given,
+            [
+                own_context(50, 5, 500.0),
+                own_context(20, 0, 123_456.0),
+                own_context(0, 0, 123_456.0),
+                own_context(0, 0, 123_456.0),
+            ]
+        );
+        let plain = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, None)
+            .expect("no refusal without unified P-values");
+        assert_eq!(plain[1], own_context(20, 0, 0.0));
+        let error = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, blastp)
+            .expect_err("the valid query 1 is followed by a query without a search space");
+        let failure = error
+            .downcast::<crate::algorithm::common::database::HeaderReadError>()
+            .expect("the batch's error");
+        assert_eq!(failure.query, 1);
+        let text = failure.to_string();
+        assert!(text.contains("are not supported by LOSAT's BLASTP for query id1, which"));
+        assert!(text.contains("(id2: no residue that can be scored"));
+        // A query that is not valid itself has no match to adjust: queries 2 and 3 alone in a
+        // batch after query 1's batch are not refused.
+        let batches = [0..1, 1..2, 2..4, 2..4];
+        evalue_adjust_contexts(&contexts, &spaces, &batches, 0, blastp)
+            .expect("the query before the one without a search space has no match");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:153-154 (quoted at
+    // `adjust_evalues_for_composition`): both effective lengths are at least 1.
+    #[test]
+    fn test_adjust_evalues_for_composition_keeps_effective_lengths_of_one() {
+        // The context's adjustment (150) is above its length (100) and the subject's (40).
+        let context = own_context(100, 150, 6000.0);
+        let mut hsp_list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: vec![
+                BlastpHsp::from_hit(make_hit(80, 1, 20, 5, 24)),
+                BlastpHsp::from_hit(make_hit(40, 30, 40, 26, 36)),
+            ],
+            best_evalue: f64::MAX,
+        };
+        hsp_list.hsps[0].e_value = 0.0;
+        hsp_list.hsps[1].e_value = 3.0;
+
+        adjust_evalues_for_composition(&mut hsp_list, 0.5, &context, 40, 1.0);
+
+        let db_to_sequence_scale = 1.0 / (6000.0 / 1.0);
+        let expected = p_to_e(blast_overall_p_value(
+            0.5,
+            e_to_p(3.0 * db_to_sequence_scale),
+        )) / db_to_sequence_scale;
+        // An E-value of 0 stays 0 (NCBI prints 0.0).
+        assert_eq!(hsp_list.hsps[0].e_value, 0.0);
+        assert_eq!(hsp_list.hsps[1].e_value, expected);
+        assert_eq!(hsp_list.best_evalue, 0.0);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-116
@@ -2777,7 +3086,8 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_workspace = build_query_workspace(&[1u8; 100], 100, 0, 100000.0);
+        let query_workspace =
+            build_query_workspace(&[1u8; 100], 100, 0, 100000.0, own_context(100, 0, 100000.0));
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
@@ -2827,7 +3137,8 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_workspace = build_query_workspace(&[1u8; 100], 100, 0, 100000.0);
+        let query_workspace =
+            build_query_workspace(&[1u8; 100], 100, 0, 100000.0, own_context(100, 0, 100000.0));
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,

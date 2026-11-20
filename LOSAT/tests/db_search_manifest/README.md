@@ -35,8 +35,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   residues under an id that starts with `COPY`: `>COPY`, `>COPY2`), and only the copies end the oracle run's batches
   (a batch takes queries while the sum of their lengths is below BATCH_SIZE, 10000 for BLASTP; the query that brings it
   there ends it); so each original's report is NCBI's with its own values. The `NAME=VALUE` words set the oracle run's
-  environment in place of the row's words of those names (BATCH_SIZE). The loader checks both files
-  (`copy_oracle_problems`). `freeze` runs NCBI `-num_threads 1` on PATH (exit 0 and an empty stderr, or it stops), keeps
+  environment in place of the row's words of those names (BATCH_SIZE). Each batch of both runs is searched in one
+  chunk: NCBI splits a batch of L residues into L / (CHUNK_SIZE - OVERLAP_CHUNK_SIZE) chunks when that is 2 or more
+  (10000 and 100 by default, so from 19,800 residues), the copy would move the split, and the split can change the
+  preliminary hits. The loader checks both files (`copy_oracle_problems`). `freeze` runs NCBI `-num_threads 1` on PATH (exit 0 and an empty stderr, or it stops), keeps
   the whole stdout unchanged as `<row_id>.copies.out` and writes as `<row_id>.out` (and the row's cells; rc 0, no
   stderr) the cut of it by a fixed rule (`cut_copies`):
   - outfmt 6: the lines whose first field (the query id) starts with `COPY` are left out;
@@ -53,11 +55,13 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   frozen `<row_id>.copies.out` when its cut is the new run's cut (so a freeze of an unchanged expectation leaves the
   files as they are).
 
-  A copy row must not be used where a query's hit list can fill: once every list of a batch is full, NCBI's
-  composition-based redo may stop early by a test over all the batch's lists (`BlastCompo_EarlyTermination`), the
-  copies' lists with their undefined values included. A copy row takes no `-max_target_seqs`, `-num_descriptions` or
-  `-num_alignments`, and `freeze` stops when a query of the oracle output has 500 subjects (the default hit list) or
-  more. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
+  A hit list that fills does not limit a copy row (`-max_target_seqs`, `-num_descriptions` and `-num_alignments` are
+  allowed). NCBI's composition-based redo takes the matches in the order of their queries and ends the remaining ones
+  early (`BlastCompo_EarlyTermination`) only while the list of every query of the batch is full; the lists of the
+  queries after the one in work are still empty. So in the oracle run no match of an original query is ended early,
+  only the copy's matches can be, and the copy's report is cut out. LOSAT ends no match early with unified P-values,
+  so the cut is its expectation also where a list fills. `freeze` prints the number of subjects of each query of the
+  oracle output. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
   run of the row's own query file with `<row_id>.out` as for any `ncbi` row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
   (to a ` | ` or the end); the hash columns are empty. A rejection that comes after reports has a non-empty

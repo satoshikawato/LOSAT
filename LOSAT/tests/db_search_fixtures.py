@@ -55,7 +55,9 @@ LOSAT/tests/db_search (README.md there says how they were built).
   for a batch's last query, with bytes past its array that change from run to run; in the oracle run each original
   query's next query is itself or its copy, so its report is NCBI's with its own values where LOSAT's run has no next
   query. The `NAME=VALUE` words (names of `ENV_NAMES`, BATCH_SIZE in practice) are the oracle run's environment in
-  place of the row's own words of those names. `freeze` runs NCBI `-num_threads 1` on PATH, which must exit 0 with an
+  place of the row's own words of those names. Each batch of both runs is searched in one chunk (`query_chunks`: the
+  copy would move the split of a longer batch, and the split can change the preliminary hits). `freeze` runs NCBI
+  `-num_threads 1` on PATH, which must exit 0 with an
   empty stderr, keeps its whole stdout unchanged as <row_id>.copies.out (the evidence) and writes as <row_id>.out
   (with the row's hash and size cells; rc 0, no stderr) the cut of it by a fixed rule per output format
   (`cut_copies`): outfmt 6, the lines whose first field starts with `COPY`; outfmt 7, each copy's block (its `# BLASTP
@@ -65,13 +67,16 @@ LOSAT/tests/db_search (README.md there says how they were built).
   copy's `<Iteration>` element, a copy that is the oracle file's last query only (the iteration numbers of later
   queries would change). The copies' own reports are a batch's last query's, which change from run to run: a later
   freeze keeps the frozen whole output when its cut is the new run's cut. A copy row is a BLASTP row of outfmt 0, 5, 6
-  or 7 with the default fields; the loader refuses any other. A copy row must not be used where a query's hit list can
-  fill: once every list of a batch is full, NCBI's composition-based redo may stop early by a test over all the
-  batch's lists, the copies' with their undefined values included, so the oracle's reports of the originals could
-  differ from NCBI's with their own values. A copy row takes no -max_target_seqs, -num_descriptions or
-  -num_alignments, and `freeze` stops when a query of the oracle output has 500 subjects (the default hit list) or
-  more (`subjects_per_query`). `check` cuts the frozen whole output again, fails the row when that differs from
-  <row_id>.out, and compares LOSAT's run of the row's own query file with <row_id>.out as for any `ncbi` row.
+  or 7 with the default fields; the loader refuses any other. A hit list that fills does not limit a copy row
+  (`-max_target_seqs`, `-num_descriptions` and `-num_alignments` are allowed): NCBI's composition-based redo takes the
+  matches in the order of their queries and ends the remaining ones early (`BlastCompo_EarlyTermination`) only while
+  the list of every query of the batch is full, and the lists of the queries after the one in work are still empty.
+  So in the oracle run no match of an original query is ended early (its copy, or another query, follows it); only
+  the copy's matches can be, and the copy's report is cut out. LOSAT ends no match early with unified P-values
+  (`BlastCompoHeap::without_early_end`), so the cut is its expectation also where a list fills. `freeze` prints the
+  number of subjects of each query of the oracle output (`subjects_per_query`). `check` cuts the frozen whole output
+  again, fails the row when that differs from <row_id>.out, and compares LOSAT's run of the row's own query file with
+  <row_id>.out as for any `ncbi` row.
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
   ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
@@ -501,16 +506,33 @@ COPY_OUTFMTS = ("0", "5", "6", "7")
 #     default:
 #         retval = 10000;
 BLASTP_BATCH_SIZE = 10000
-# The hit list of a BLASTP search without a limit: 500 subjects. Once every query's list of a batch is full, the
-# composition-based redo may stop by a test over all the batch's lists, the copy's included, whose values are
-# undefined: a copy row is evidence only where no query's list fills, and takes no hit-list limit.
-# NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1567-1569, 1576-1577
+# A full hit list does not limit a copy row. The composition-based redo ends the remaining matches early only while
+# the heap of every query of the batch is full (below), and it takes the matches in the order of their queries
+# (blast_hspstream.c:289-319), so the heaps of the queries after the one in work are still empty: in the oracle run no
+# match of an original query is ended early, only the copy's can be (the batch's last query), and its report is cut
+# out. LOSAT ends no match early with unified P-values (`BlastCompoHeap::without_early_end`).
+# NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1565-1566, 1575-1577
 #     for (i = 0;  i < numQueries;  i++) {
 #         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
 #         } else {
 #             return FALSE;
-HITLIST_SIZE = 500
-HITLIST_OPTIONS = ("-max_target_seqs", "-num_descriptions", "-num_alignments")
+#         }
+# The query chunks of a BLASTP batch: CHUNK_SIZE (else 10000) and OVERLAP_CHUNK_SIZE (else 100) residues.
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61, 91-93
+#     char* chunk_sz_str = getenv("CHUNK_SIZE");
+#     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+#         retval = NStr::StringToInt(chunk_sz_str);
+#         case eBlastp:
+#         default:
+#             retval = 10000;
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-57
+#     size_t retval = 100;
+#     // used for experimentation purposes
+#     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
+#     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
+#         retval = NStr::StringToInt(overlap_sz_str);
+BLASTP_CHUNK_SIZE = 10000
+QUERY_CHUNK_OVERLAP = 100
 
 
 def copies_cell(row: dict[str, str]) -> tuple[str, dict[str, str]] | None:
@@ -574,13 +596,34 @@ def batch_size(env: dict[str, str]) -> int:
     return int(env.get("BATCH_SIZE", BLASTP_BATCH_SIZE))
 
 
+def query_chunks(length: int, env: dict[str, str]) -> int:
+    """The number of chunks in which NCBI searches a BLASTP query batch of `length` residues in an environment:
+    `length` // (CHUNK_SIZE - OVERLAP_CHUNK_SIZE) when CHUNK_SIZE is the larger (each a blank value or none: 10000,
+    100), and 1 when that is 1 or less (19,799 residues and fewer by default).
+
+    NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:124-131
+        if ((*chunk_size) > overlap_size) {
+           num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
+        }
+
+        // Only one chunk, just return;
+        if (num_chunks <= 1) {
+           *chunk_size = concatenated_query_length;
+           return 1;"""
+    chunk, overlap = (int(env.get(name, "").strip() or default) for name, default in
+                      (("CHUNK_SIZE", BLASTP_CHUNK_SIZE), ("OVERLAP_CHUNK_SIZE", QUERY_CHUNK_OVERLAP)))
+    return max(length // (chunk - overlap) if chunk > overlap else 0, 1)
+
+
 def copy_oracle_problems(row: dict[str, str]) -> list[str]:
     """Why the oracle file of a copy row cannot stand for its query file (an empty list when it can): the row is a
-    BLASTP `ncbi` row of outfmt 0, 5, 6 or 7 with the default fields, no hit-list limit and a query file of its own;
-    no query id of the row starts with `COPY`; the oracle's records without the copies are the row's records
-    (deflines and residues); each copy has a new id and the residues of the original query before it; each batch of
-    the oracle run (its BATCH_SIZE: the row's, replaced by the cell's words) ends with a copy and holds no other,
-    and without its copy is a batch of LOSAT's run; with outfmt 5 the one copy is the last query."""
+    BLASTP `ncbi` row of outfmt 0, 5, 6 or 7 with the default fields and a query file of its own; no query id of the
+    row starts with `COPY`; the oracle's records without the copies are the row's records (deflines and residues);
+    each copy has a new id and the residues of the original query before it; each batch of the oracle run (its
+    BATCH_SIZE: the row's, replaced by the cell's words) ends with a copy and holds no other, and without its copy is
+    a batch of LOSAT's run; each batch of both runs is searched in one chunk (`query_chunks`, with the run's
+    CHUNK_SIZE and OVERLAP_CHUNK_SIZE); with outfmt 5 the one copy is the last query. The lengths are the residues of
+    the FASTA records (`fasta_records`), which are NCBI's lengths for plain FASTA files of letters only."""
     oracle_path, words = copies_cell(row)
     problems = []
     if row["program"] != "blastp" or row["kind"] != "ncbi":
@@ -589,8 +632,6 @@ def copy_oracle_problems(row: dict[str, str]) -> list[str]:
         problems.append(f"outfmt {row['outfmt']!r} has no cut rule (0, 5, 6 or 7 with the default fields)")
     if near_row_id(row) or under_valgrind(row) or xinclude.wants_files(row) or xinclude.wants_pssm(row):
         problems.append("a copy row is not ncbi-near, ncbi-valgrind or a row with files")
-    if any(token in HITLIST_OPTIONS for token in extra_tokens(row)):
-        problems.append(f"a copy row takes no hit-list limit ({', '.join(HITLIST_OPTIONS)})")
     if row["query"].startswith(("stdin:", "pssm:", "pssm-gz:")):
         return problems + ["a copy row reads its query from a FASTA file"]
     originals = fasta_records(ENGINE / row["query"])
@@ -615,6 +656,13 @@ def copy_oracle_problems(row: dict[str, str]) -> list[str]:
             problems.append(f"the oracle batch of queries {batch} does not end with its one copy")
     if [[original_index[index] for index in batch if index not in copies] for batch in batches] != own:
         problems.append(f"the oracle batches without the copies are not LOSAT's batches {own}")
+    for run, records, run_batches, run_env in (("oracle", oracle, batches, {**env, **words}),
+                                               ("LOSAT", originals, own, env)):
+        for batch in run_batches:
+            length = sum(len(records[index][1]) for index in batch)
+            if query_chunks(length, run_env) > 1:
+                problems.append(f"the {run} batch of queries {batch} ({length} residues) is searched in "
+                                f"{query_chunks(length, run_env)} chunks; a copy row's batches are searched in one")
     if row["outfmt"] == "5" and copies != [len(oracle) - 1]:
         problems.append("with outfmt 5 the one copy is the oracle's last query")
     return problems
@@ -763,9 +811,10 @@ def copy_row_problems(row: dict[str, str]) -> list[str]:
 
 
 def freeze_copies(row: dict[str, str], ncbi_bin: str, env: dict[str, str]) -> None:
-    """`freeze` of a copy row: NCBI `-num_threads 1` on the oracle file with the oracle's variables (exit 0, no
-    stderr, no query with a full hit list, else the freeze stops), its whole stdout as <row_id>.copies.out and its
-    cut (`cut_copies`) as <row_id>.out with the row's cells (rc 0, no stderr)."""
+    """`freeze` of a copy row: NCBI `-num_threads 1` on the oracle file with the oracle's variables (exit 0 and no
+    stderr, else the freeze stops), its whole stdout as <row_id>.copies.out and its cut (`cut_copies`) as
+    <row_id>.out with the row's cells (rc 0, no stderr); it prints the number of subjects of each query of the whole
+    output (`subjects_per_query`, the copies' included), which shows a full hit list."""
     problems = copy_oracle_problems(row)
     if problems:
         raise SystemExit(f"{row['row_id']}: " + "; ".join(problems))
@@ -775,9 +824,6 @@ def freeze_copies(row: dict[str, str], ncbi_bin: str, env: dict[str, str]) -> No
     if run.returncode != 0 or run.stderr:
         raise SystemExit(f"{row['row_id']}: NCBI's oracle run exited {run.returncode} with stderr "
                          f"{run.stderr.decode(errors='replace')[:200]!r}; a copy row needs exit 0 and no stderr")
-    if max(subjects_per_query(run.stdout, row["outfmt"]), default=0) >= HITLIST_SIZE:
-        raise SystemExit(f"{row['row_id']}: a query of the oracle run has {HITLIST_SIZE} subjects or more (a full "
-                         "hit list, where the copies' undefined values may stop the redo): not a copy row's input")
     try:
         out = cut_copies(run.stdout, row["outfmt"], copy_count(row))
     except ValueError as error:
@@ -795,7 +841,7 @@ def freeze_copies(row: dict[str, str], ncbi_bin: str, env: dict[str, str]) -> No
     (FROZEN / f"{row['row_id']}.err").unlink(missing_ok=True)
     row.update(rc="0", stdout_sha256=sha256(out), stdout_bytes=str(len(out)), stderr_sha256="")
     print(f"{row['row_id']}\tcopies={oracle_path}\twhole={len(run.stdout)}{' (frozen whole kept)' if kept else ''}"
-          f"\tstdout={len(out)}")
+          f"\tstdout={len(out)}\tsubjects={subjects_per_query(run.stdout, row['outfmt'])}")
 
 
 def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:

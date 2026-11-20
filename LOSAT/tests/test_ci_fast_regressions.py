@@ -409,8 +409,12 @@ class CopyRowTests(unittest.TestCase):
             self.assertEqual(db_fixtures.copy_oracle_problems(two), [])
             # Without the oracle's own BATCH_SIZE each query is alone in its batch, and the copies too.
             self.assertTrue(db_fixtures.copy_oracle_problems({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'}"}))
+            # A hit-list limit is allowed: NCBI's redo ends no match of a query that another query follows.
+            for limit, outfmt in (("-max_target_seqs 1", "6"), ("-num_descriptions 1 -num_alignments 1", "0")):
+                self.assertEqual(db_fixtures.copy_oracle_problems(self.oracle_row(
+                    tmp, [a, b], [a, b, copy_b], extra_args=f"{limit} -comp_based_stats 2u", outfmt=outfmt)), [], limit)
             # A batch-ending query without its copy, a copy of other residues or before its query, a copy row of
-            # outfmt 5 whose copy is not last, another program, format, kind or a hit-list limit.
+            # outfmt 5 whose copy is not last, another program, format or kind.
             wrong = [
                 self.oracle_row(tmp, [a, b], [a, b]),
                 self.oracle_row(tmp, [a, b], [a, b, copy_a]),
@@ -421,7 +425,6 @@ class CopyRowTests(unittest.TestCase):
                 self.oracle_row(tmp, [a, b], [a, b, copy_b], program="psiblast"),
                 self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt="6 qseqid sseqid"),
                 self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt="11"),
-                self.oracle_row(tmp, [a, b], [a, b, copy_b], extra_args="-max_target_seqs 5"),
                 self.oracle_row(tmp, [a, ">B other\nWWWW\n"], [a, b, copy_b]),
                 self.oracle_row(tmp, [a, copy_b], [a, copy_b, ">COPY2\nWWWW\n"]),
             ]
@@ -429,6 +432,39 @@ class CopyRowTests(unittest.TestCase):
                 self.assertTrue(db_fixtures.copy_oracle_problems(row), (row["query"], row["outfmt"], row["program"]))
             with self.assertRaises(SystemExit):
                 db_fixtures.copies_cell({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'} -evalue 1"})
+
+    def test_query_chunks_follow_ncbis_split(self):
+        self.assertEqual(db_fixtures.query_chunks(19799, {}), 1)
+        self.assertEqual(db_fixtures.query_chunks(19800, {}), 2)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "200"}), 2)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "180"}), 3)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "350"}), 1)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "150", "OVERLAP_CHUNK_SIZE": "50"}), 2)
+        # A chunk size not above the overlap, or a blank value (the default), splits nothing.
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "100"}), 1)
+        self.assertEqual(db_fixtures.query_chunks(19800, {"CHUNK_SIZE": " "}), 2)
+
+    def test_a_copy_stays_in_its_batch_and_each_batch_is_searched_in_one_chunk(self):
+        a, b, copy_b = ">A a protein\nMKVLA\nGG\n", ">B\nWWWW\n", ">COPY\nWWWW\n"
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            # [A, B] is one batch of LOSAT's run (11 residues); with BATCH_SIZE=11 for the oracle the batch ends at B
+            # and the copy leaves it.
+            self.assertEqual(db_fixtures.copy_oracle_problems(self.oracle_row(tmp, [a, b], [a, b, copy_b])), [])
+            leaves = db_fixtures.copy_oracle_problems(self.oracle_row(tmp, [a, b], [a, b, copy_b], words=" BATCH_SIZE=11"))
+            self.assertTrue(any("does not end with its one copy" in problem for problem in leaves), leaves)
+            # CHUNK_SIZE=106 (6 residues a chunk beside the overlap of 100): LOSAT's batch of 11 residues is one chunk,
+            # the oracle's of 15 two; the oracle's own CHUNK_SIZE=200 keeps it in one.
+            row = self.oracle_row(tmp, [a, b], [a, b, copy_b], extra_args="CHUNK_SIZE=106 -comp_based_stats 2u")
+            self.assertEqual(db_fixtures.copy_oracle_problems(row),
+                             ["the oracle batch of queries [0, 1, 2] (15 residues) is searched in 2 chunks; a copy "
+                              "row's batches are searched in one"])
+            self.assertEqual(db_fixtures.copy_oracle_problems({**row, "covers": f"ncbi-copies: {tmp / 'o.faa'} "
+                                                                                 "CHUNK_SIZE=200"}), [])
+            # CHUNK_SIZE=105: LOSAT's own batch of 11 residues is split too.
+            both = db_fixtures.copy_oracle_problems({**row, "extra_args": "CHUNK_SIZE=105 -comp_based_stats 2u"})
+            self.assertEqual([problem.split(" (")[0] for problem in both],
+                             ["the oracle batch of queries [0, 1, 2]", "the LOSAT batch of queries [0, 1]"])
 
     @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
     def test_freeze_keeps_the_whole_output_and_writes_its_cut(self):

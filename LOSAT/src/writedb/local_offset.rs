@@ -16,8 +16,10 @@
 //! - A zone file with leap seconds (tzdata's `right/` zones) gives the time less its leap seconds,
 //!   as glibc's does: LOSAT reads the file's table of leap seconds itself (RFC 8536 §3.2), which
 //!   jiff does not use.
-//! - A zone that jiff cannot read is UTC, as is an instant outside jiff's range. The forms of `TZ`
-//!   that glibc reads and jiff does not are in `docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md`.
+//! - A zone that jiff cannot read is UTC, as is an instant outside jiff's range. Where glibc's
+//!   time is another (forms of `TZ` that glibc reads and jiff does not, rules whose change falls
+//!   in another year in UTC, zone files that break RFC 8536) is in
+//!   `docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md`.
 
 /// How far the local time of an instant is from UTC (`local_utc_offset`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -119,19 +121,7 @@ fn zone_of(tz: Option<&std::ffi::OsStr>, tzdir: Option<&std::ffi::OsStr>) -> Opt
 /// The zone of the zone file at `path`, or `None` where it is not one that jiff reads.
 #[cfg(not(windows))]
 fn zone_file(path: &std::path::Path) -> Option<Zone> {
-    use std::io::Read;
-    // A zone file is a few kilobytes; the bound keeps a device (`TZ=/dev/zero`) from being read
-    // without end.
-    const MAX_ZONE_FILE: u64 = 1 << 20;
-    let mut data = Vec::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(MAX_ZONE_FILE + 1)
-        .read_to_end(&mut data)
-        .ok()?;
-    if data.len() as u64 > MAX_ZONE_FILE {
-        return None;
-    }
+    let data = read_tzif(std::fs::File::open(path).ok()?)?;
     let zone = TimeZone::tzif("localtime", &data).ok()?;
     Some(Zone {
         zone,
@@ -139,37 +129,87 @@ fn zone_file(path: &std::path::Path) -> Option<Zone> {
     })
 }
 
-/// The leap-second records of TZif data that jiff has read (RFC 8536 §3): those of the data
-/// block of version 2 and later (64-bit instants) when there is one, else of the version 1 block.
+/// The length of a TZif header: "TZif", the version, 15 bytes, and the counts isutcnt, isstdcnt,
+/// leapcnt, timecnt, typecnt and charcnt (32-bit big-endian; RFC 8536 §3.1).
+#[cfg(not(windows))]
+const HEADER: usize = 44;
+
+/// The counts of the TZif header at the start of `header`.
+#[cfg(not(windows))]
+fn counts(header: &[u8]) -> Option<[usize; 6]> {
+    let mut counts = [0; 6];
+    for (i, count) in counts.iter_mut().enumerate() {
+        let bytes = header.get(20 + 4 * i..24 + 4 * i)?;
+        *count = usize::try_from(u32::from_be_bytes(bytes.try_into().ok()?)).ok()?;
+    }
+    Some(counts)
+}
+
+/// The length of a header and its data block (RFC 8536 §3.2): transition times (`time_size`
+/// bytes each), their type indices (1 byte), the local time types (6 bytes), the designations,
+/// the leap-second records (an instant of `time_size` bytes and a 32-bit correction) and the
+/// standard/wall and UT/local indicators (1 byte each).
+#[cfg(not(windows))]
+fn block_len(counts: [usize; 6], time_size: usize) -> Option<usize> {
+    let [isut, isstd, leap, time, types, chars] = counts;
+    [
+        time.checked_mul(time_size + 1)?,
+        types.checked_mul(6)?,
+        chars,
+        leap.checked_mul(time_size + 4)?,
+        isstd,
+        isut,
+    ]
+    .into_iter()
+    .try_fold(HEADER, usize::checked_add)
+}
+
+/// The TZif data at the start of `file`, as far as its headers say (RFC 8536 §3): the first header
+/// and block, and for every version but 0 (as glibc and jiff read them) the second header and
+/// block and the footer. A file that does not start with "TZif" is read no further
+/// (`TZ=/dev/zero`), a block only as far as the file goes, and the footer, a `TZ` string between
+/// two newlines, up to 64 KiB (jiff reads past the footer no further).
+#[cfg(not(windows))]
+fn read_tzif(mut file: std::fs::File) -> Option<Vec<u8>> {
+    use std::io::Read;
+    const FOOTER: u64 = 1 << 16;
+    let mut read = |data: &mut Vec<u8>, len: usize| -> Option<()> {
+        let got = (&mut file)
+            .take(u64::try_from(len).ok()?)
+            .read_to_end(data)
+            .ok()?;
+        (got == len).then_some(())
+    };
+    let mut data = Vec::new();
+    read(&mut data, HEADER)?;
+    if !data.starts_with(b"TZif") {
+        return None;
+    }
+    let len = block_len(counts(&data)?, 4)?;
+    read(&mut data, len - HEADER)?;
+    if data[4] == 0 {
+        return Some(data);
+    }
+    let second = data.len();
+    read(&mut data, HEADER)?;
+    let len = block_len(counts(&data[second..])?, 8)?;
+    read(&mut data, len - HEADER)?;
+    file.take(FOOTER).read_to_end(&mut data).ok()?;
+    Some(data)
+}
+
+/// The leap-second records of TZif data that jiff has read (RFC 8536 §3): those of the second
+/// data block (64-bit instants) for every version but 0, else of the first block.
 #[cfg(not(windows))]
 fn leap_seconds(data: &[u8]) -> Option<Vec<(i64, i64)>> {
-    // The header: "TZif", the version, 15 bytes, and the counts isutcnt, isstdcnt, leapcnt,
-    // timecnt, typecnt and charcnt (32-bit big-endian).
-    fn counts(block: &[u8]) -> Option<[usize; 6]> {
-        let mut counts = [0; 6];
-        for (i, count) in counts.iter_mut().enumerate() {
-            let bytes = block.get(20 + 4 * i..24 + 4 * i)?;
-            *count = u32::from_be_bytes(bytes.try_into().ok()?) as usize;
-        }
-        Some(counts)
-    }
-    // A data block: transition times (`time_size` bytes each), their type indices (1 byte), the
-    // local time types (6 bytes), the designations, then the leap-second records (an instant of
-    // `time_size` bytes and a 32-bit correction).
-    fn block_len(counts: [usize; 6], time_size: usize) -> usize {
-        let [isut, isstd, leap, time, types, chars] = counts;
-        44 + time * (time_size + 1) + types * 6 + chars + leap * (time_size + 4) + isstd + isut
-    }
-    let v1 = counts(data)?;
-    let (block, time_size) = if *data.get(4)? >= b'2' {
-        (data.get(block_len(v1, 4)..)?, 8)
+    let (block, time_size) = if *data.get(4)? != 0 {
+        (data.get(block_len(counts(data)?, 4)?..)?, 8)
     } else {
         (data, 4)
     };
-    let counts = counts(block)?;
-    let [_, _, leap, time, types, chars] = counts;
-    let start = 44 + time * (time_size + 1) + types * 6 + chars;
-    let records = block.get(start..start + leap * (time_size + 4))?;
+    let [_, _, leap, time, types, chars] = counts(block)?;
+    let start = block_len([0, 0, 0, time, types, chars], time_size)?;
+    let records = block.get(start..start.checked_add(leap.checked_mul(time_size + 4)?)?)?;
     Some(
         records
             .chunks_exact(time_size + 4)
@@ -211,8 +251,9 @@ mod tests {
     enum Differs {
         /// LOSAT's time is UTC at every instant.
         Utc,
-        /// jiff reads the rule otherwise than glibc.
-        Jiff,
+        /// jiff reads the rule otherwise than glibc: at `instants` instants of the vectors LOSAT's
+        /// offset is `offset` and not glibc's.
+        Jiff { offset: i64, instants: usize },
     }
 
     /// The forms that glibc reads otherwise than LOSAT (docs/product_decisions/
@@ -229,7 +270,43 @@ mod tests {
         ("EST5EDT,J0,J300", Differs::Utc),
         ("EST5EDT,366,300", Differs::Utc),
         ("EST5EDT,M3.2.0/168,M11.1.0", Differs::Utc),
-        ("XXX-24YYY,0/0,J365/25", Differs::Jiff),
+        // A change that falls in another year in UTC than in local time, which jiff keeps in its
+        // year in UTC (glibc puts it where the rule says).
+        (
+            "XXX-24YYY,0/0,J365/25",
+            Differs::Jiff {
+                offset: 90000,
+                instants: 13,
+            },
+        ),
+        (
+            "AAA-9BBB,0,365",
+            Differs::Jiff {
+                offset: 36000,
+                instants: 2,
+            },
+        ),
+        (
+            "AAA-9BBB,0/0,J365/25",
+            Differs::Jiff {
+                offset: 36000,
+                instants: 2,
+            },
+        ),
+        (
+            "AAA-9BBB,J60,365",
+            Differs::Jiff {
+                offset: 36000,
+                instants: 14,
+            },
+        ),
+        (
+            "AAA1BBB,J60,365/-3",
+            Differs::Jiff {
+                offset: 0,
+                instants: 14,
+            },
+        ),
         // Two signs.
         ("AAA--8", Differs::Utc),
         ("JST--9", Differs::Utc),
@@ -241,7 +318,8 @@ mod tests {
         ("EST5EDT,M3.2,M11.1.0", Differs::Utc),
         ("EST5EDT,,M11.1.0", Differs::Utc),
         ("EST5EDT,m3.2.0,m11.1.0", Differs::Utc),
-        // Daylight time without a rule or a zone file of the name (glibc: the United States').
+        // Daylight time without a rule (glibc: the rules of the zone file `posixrules` under
+        // `TZDIR`, or without it those of the United States since 2007).
         ("EST5EDT4", Differs::Utc),
         ("XXX5YYY", Differs::Utc),
         ("XXX5YYY4", Differs::Utc),
@@ -333,7 +411,12 @@ mod tests {
                 Some(format!("{tz:?} is glibc's time: drop it from DIFFERING"))
             }
             Some(Differs::Utc) if losat.iter().all(Option::is_none) => None,
-            Some(Differs::Jiff) if losat.iter().all(Option::is_some) => None,
+            Some(Differs::Jiff { offset, instants })
+                if unequal.len() == instants
+                    && unequal.iter().all(|&(_, _, l)| l == Some((offset, false))) =>
+            {
+                None
+            }
             Some(differs) => Some(format!("{tz:?} is not {differs:?}: LOSAT {losat:?}")),
         }
     }
@@ -351,6 +434,28 @@ mod tests {
                 vectors.iter().any(|(tz, _, _)| tz == form),
                 "{form:?} of DIFFERING is not a form of the vectors"
             );
+        }
+    }
+
+    /// The files that glibc reads by default, which the vectors cannot name: `/etc/localtime`
+    /// with `TZ` unset, and a zone name under `/usr/share/zoneinfo` with `TZDIR` unset or empty
+    /// (where the host has these files; else both sides are UTC).
+    #[test]
+    fn the_default_files_are_glibcs() {
+        let offsets = |zone: Option<Zone>| -> Vec<Option<LocalOffset>> {
+            [0, 1_767_225_600, 1_785_000_000]
+                .iter()
+                .map(|&t| zone.as_ref().and_then(|zone| zone.offset_at(t)))
+                .collect()
+        };
+        assert_eq!(
+            offsets(zone_of(None, Some(OsStr::new("/nonexistent")))),
+            offsets(zone_file("/etc/localtime".as_ref()))
+        );
+        let tokyo = offsets(zone_file("/usr/share/zoneinfo/Asia/Tokyo".as_ref()));
+        for tzdir in [None, Some(""), Some("/usr/share/zoneinfo")] {
+            let zone = zone_of(Some(OsStr::new("Asia/Tokyo")), tzdir.map(OsStr::new));
+            assert_eq!(offsets(zone), tokyo, "TZDIR={tzdir:?}");
         }
     }
 }

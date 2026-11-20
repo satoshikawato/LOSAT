@@ -80,7 +80,9 @@ POSIX = [
     "XXX1:2", "XXX-5:3", "XXX5YYY4:3,M3.2.0,M11.1.0",
     "JST-9 ", "JST-9:", "JST-9,", "JST-9junk", "EST5EDT,M3.2.0,M11.1.0 ", "EST5EDT,M3.2.0,M11.1.0,M12.1.0",
     "EST5EDT,M13.2.0,M11.1.0", "EST5EDT,M3.6.0,M11.1.0", "EST5EDT,M3.2.7,M11.1.0", "EST5EDT,J0,J300", "EST5EDT,366,300",
-    "EST5EDT,m3.2.0,m11.1.0", "EST5EDT,M3.2.0/168,M11.1.0", "XXX-24YYY,0/0,J365/25",
+    "EST5EDT,m3.2.0,m11.1.0", "EST5EDT,M3.2.0/168,M11.1.0",
+    # Rules whose change falls in another year in UTC than in local time (jiff keeps it in its UTC year).
+    "XXX-24YYY,0/0,J365/25", "AAA-9BBB,0,365", "AAA-9BBB,0/0,J365/25", "AAA-9BBB,J60,365", "AAA1BBB,J60,365/-3",
     # Forms that glibc reads as UTC too.
     "", ":", "::", " ", "AB", "ABC", "garbage", "Asia/Nonexistent", "日本-9", "Tokyo Standard Time", "<+09>", "JST",
 ]
@@ -97,7 +99,8 @@ FILES = [
     ("v1/America/New_York", "{dir}"), ("v1/Australia/Lord_Howe", "{dir}"), ("fat/America/New_York", "{dir}"),
     ("v4/America/New_York", "{dir}"), ("v4/Pacific/Easter", "{dir}"),
     ("leap/Asia/Tokyo", "{dir}"), ("leap/America/New_York", "{dir}"), ("leap/Europe/London", "{dir}"),
-    ("v1/leap/Asia/Tokyo", "{dir}"), ("leap/negative", "{dir}"),
+    ("v1/leap/Asia/Tokyo", "{dir}"), ("leap/negative", "{dir}"), ("ver1/leap/Asia/Tokyo", "{dir}"),
+    ("tail/Asia/Tokyo", "{dir}"),
 ] + [(f"slim/{zone}", "{dir}") for zone in SLIM]
 
 
@@ -107,7 +110,8 @@ def make_zones(zic: str, tzdata: Path, leapseconds: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         for kind, options in [("slim", ["-b", "slim"]), ("fat", ["-b", "fat"]),
-                              ("leap", ["-b", "fat", "-L", str(leapseconds)])]:
+                              ("leap", ["-b", "fat", "-L", str(leapseconds)]),
+                              ("leapslim", ["-b", "slim", "-L", str(leapseconds)])]:
             subprocess.run([zic, "-d", str(tmp / kind), *options, str(tzdata)], check=True, stderr=subprocess.DEVNULL)
 
         def put(name: str, data: bytes) -> None:
@@ -144,6 +148,13 @@ def make_zones(zic: str, tzdata: Path, leapseconds: Path) -> None:
         data = bytearray(read("leap", "Asia/Tokyo")[:v1_block(read("leap", "Asia/Tokyo"))])
         data[4] = 0
         put("v1/leap/Asia/Tokyo", bytes(data))
+        # Version '1' (no version of RFC 8536): glibc and jiff read the second block, which alone has the
+        # leap seconds of a slim file.
+        data = bytearray(read("leapslim", "Asia/Tokyo"))
+        data[4] = data[v1_block(data) + 4] = ord("1")
+        put("ver1/leap/Asia/Tokyo", bytes(data))
+        # A zone file followed by more than a MiB of zeros, which glibc does not read.
+        put("tail/Asia/Tokyo", read("slim", "Asia/Tokyo") + bytes((1 << 20) + 1))
         # Leap seconds that tzdata has never had: one taken away (1996) between two added.
         (tmp / "negative.zi").write_text("Zone negative 9:00 - JST\n")
         (tmp / "negative.leap").write_text("Leap 1972 Jun 30 23:59:60 + S\nLeap 1996 Jun 30 23:59:58 - S\n"
@@ -210,6 +221,9 @@ def check(forms: list[tuple[str, str]], rows: list[str]) -> int:
     for line in VECTORS.read_text(encoding="utf-8").splitlines():
         if not line.startswith("#"):
             _, tz, tzdir, row = line.split("\t")
+            if (tz, tzdir) in vectors:
+                print(f"a second row of TZ={tz!r} TZDIR={tzdir!r}")
+                return 1
             vectors[(tz, tzdir)] = row
     unequal = [form for form, row in zip(forms, rows) if vectors.pop(form, None) != row]
     for tz, tzdir in unequal + list(vectors):

@@ -11,7 +11,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 
 | Kind | Program | What it does |
 |:---|:---|:---|
-| Search | [`blastn`](programs/blastn.md) | Nucleotide query against nucleotide subjects. Tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short`. |
+| Search | [`blastn`](programs/blastn.md) | Nucleotide query against nucleotide subjects. Tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short`, `rmblastn`. |
 | Search | [`blastp`](programs/blastp.md) | Protein query against protein subjects. Tasks `blastp` (default), `blastp-fast`, `blastp-short`. |
 | Search | [`blastx`](programs/blastx.md) | Translated nucleotide query against protein subjects. Tasks `blastx` (default), `blastx-fast`. |
 | Search | [`tblastn`](programs/tblastn.md) | Protein query against translated nucleotide subjects. Tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm`. |
@@ -41,7 +41,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`;
-- `psiblast -in_msa` (with `-msa_master_idx` and `-ignore_msa_master`) and `-phi_pattern`;
+- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
 - the `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write;
 - `-html`.

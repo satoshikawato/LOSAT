@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.55
+- Version: 1.56
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -204,7 +204,11 @@
   questions = Q-X5); the rule-2 rejection of a batch in which a query is followed by a query
   without a search space, Owner-delegated (standing instruction 2026-09-29, restated 2026-10-07)
   and part of the option A that the Owner chose; numbered after 1.53, line RG item X4);
-  1.55 2026-11-20 (psiblast and tblastn `-in_pssm`, line RG item Q-BM: the BitMagic data of a
+  1.55 2026-11-20 (BLASTN, line RG item X6: reward 0 and penalty 0, NCBI's matrix-only scoring
+  of `-task rmblastn`, now runs; the explicit rejection of it with the greedy extension of
+  `-task megablast`, where NCBI divides by zero or does not finish, rule 3; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.54, line RG item X5);
+  1.56 2026-11-20 (psiblast and tblastn `-in_pssm`, line RG item Q-BM: the BitMagic data of a
   Seq-table of the PSSM query's annotations decoded as NCBI's object manager decodes it, with
   NCBI's exception `BM::Invalid serialization format`; the rule-2 rejection of well-formed BitMagic
   data removed and the rule-3 rejection narrowed to the streams that NCBI reads past, runs with
@@ -213,8 +217,8 @@
   (「推奨通り」, Q-BM). A GAP block that is not one is decoded, and a row of the index that reaches
   it answered, where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic agree, and refused under
   rule 3 only where they differ, as NCBI's result then depends on the machine it was built for
-  (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); numbered after 1.54, line
-  RG item X5)
+  (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); numbered after 1.55, line
+  RG item X6)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1198,6 +1202,15 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
+- Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
+  extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
+  and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
+  SIGFPE, exit status 136, also with `-ungapped`); with other gap costs the greedy alignment
+  converts an infinite quotient to `Int4` (`greedy_align.c:981`, undefined behaviour) and does
+  not finish on pairs of 60-100 kb. LOSAT refuses it where it checks the greedy gap costs (a
+  batch with a valid query), so a batch of invalid queries ends with NCBI's warning as in NCBI.
+  It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
+  greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
   wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise
@@ -1714,7 +1727,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     allocations succeed or fail by the machine's memory (10,000,000 rows take NCBI 1.4 GB,
     100,000,000 rows end in `BLAST ran out of memory`);
   - BitMagic data of a Seq-table that NCBI decodes (`bit-bvector` values, a `bit-set-bvector`'s
-    sparse index; since version 1.55, line RG item Q-BM, LOSAT decodes it as NCBI does) in a
+    sparse index; since version 1.56, line RG item Q-BM, LOSAT decodes it as NCBI does) in a
     stream that NCBI reads past (empty or cut data, a big-endian array whose length moves NCBI's
     position past the data), that dereferences NCBI's null reference vector (an XOR block), that
     runs undefined behaviour or writes past BitMagic's blocks or buffers (an Elias gamma code of
@@ -1751,7 +1764,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided
   by the Owner on 2026-11-16 (「推奨通り」): Q1 to Q3 refuse their cases, as built, and Q-BM ports BitMagic
-  (line RG item Q-BM, version 1.55). Not a rule-3 item but a refusal: the XML and JSON
+  (line RG item Q-BM, version 1.56). Not a rule-3 item but a refusal: the XML and JSON
   reports of an untitled query whose annotations hold features (NCBI's definition line reads them;
   not ported). Since line RG item D3-2 LOSAT writes NCBI's ASN.1 text of the values it reads: the
   annotation's text that NCBI prints after its `Failed to parse location of` message (1204.6) is
@@ -1952,7 +1965,7 @@ would port. The last two entries are not of these. The last (version 1.54, line 
 so itself. The one before it (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
 2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
-Version 1.45's rejection of well-formed BitMagic data was removed in version 1.55: line RG item
+Version 1.45's rejection of well-formed BitMagic data was removed in version 1.56: line RG item
 Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通り」, Q-BM):
 
 - A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
@@ -2083,7 +2096,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT
   rejected them before Session S07+++b.
 - psiblast and tblastn `-in_pssm`, the BitMagic data of a Seq-table of the PSSM query's
-  annotations (version 1.55, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
+  annotations (version 1.56, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
   (「推奨通り」, Q-BM) to port it): `bit-bvector` values and a `bit-set-bvector`'s sparse index are
   decoded where NCBI's object manager decodes them, at the first value read
   (`CBVector_data::GetBitVector`: `bm::deserialize` of BitMagic 8.0.1 (Apache-2.0, bundled in NCBI BLAST+) in

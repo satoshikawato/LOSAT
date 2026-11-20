@@ -47,7 +47,7 @@ use std::io::{BufReader, Read, Write};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_exception::{err_post_x, err_post_x_bytes, NcbiException};
 
-use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
+use archive::{ArchiveInput, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
 use blastxml::XmlStream;
 use data::{CddData, DataError, DataFiles};
@@ -1274,7 +1274,7 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
         run_sessions(
             &mut report,
             &header,
-            ArchiveStream::new(input, &[first]),
+            ArchiveInput::new(input, &[first]),
             &data,
             args.mode(),
             args.show_families,
@@ -1430,7 +1430,7 @@ fn value_variant(value: &ParamValue) -> &'static str {
 fn run_sessions<R: Read>(
     report: &mut Report,
     header: &[u8],
-    mut stream: ArchiveStream<R>,
+    mut stream: ArchiveInput<R>,
     data: &CddData,
     mode: DataMode,
     show_families: bool,

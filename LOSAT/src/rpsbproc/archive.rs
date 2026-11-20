@@ -282,6 +282,42 @@ pub(crate) struct ArchiveStream<R: Read> {
     done: bool,
 }
 
+/// An [`ArchiveStream`] that [`next_archive`](Self::next_archive) moves into its own frame for
+/// each object, so the reader's fields lie next to the parser's frames.
+///
+/// The parser reads every byte through the reader's fields (position, buffer, base) and stores
+/// to its own stack slots between those reads. When a field and a slot that was just stored to
+/// are a multiple of 4 KiB apart, the processor holds the load back until the store's address is
+/// fully known (4K aliasing). Left where the caller keeps it, the reader lies above the frames of
+/// the session loop, so the distance changed with any edit to those frames and an archive's time
+/// with it, by up to 2 %. In the frame just above the parser, the distance depends on the parser's
+/// frames only.
+pub(crate) struct ArchiveInput<R: Read> {
+    stream: Option<ArchiveStream<R>>,
+}
+
+impl<R: Read> ArchiveInput<R> {
+    /// [`ArchiveStream::new`].
+    pub(crate) fn new(input: R, first: &[u8]) -> Self {
+        ArchiveInput {
+            stream: Some(ArchiveStream::new(input, first)),
+        }
+    }
+
+    /// [`ArchiveStream::next_archive`], read with the stream in this function's frame (never
+    /// inlined: in the caller, it would lie in the caller's frame again).
+    #[inline(never)]
+    pub(crate) fn next_archive(&mut self) -> std::result::Result<Option<Archive>, AsnTextError> {
+        let mut stream = self
+            .stream
+            .take()
+            .expect("next_archive puts the stream back after each object");
+        let next = stream.next_archive();
+        self.stream = Some(stream);
+        next
+    }
+}
+
 /// The `Blast4-request-body` variants.
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:76-98
 // ```text

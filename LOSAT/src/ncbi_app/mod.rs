@@ -243,11 +243,9 @@ impl Diag<'_> {
         for message in error.messages.iter().map(String::as_str).chain(backlog) {
             self.post(&format!("Error: {message}"));
         }
-        self.post(&format!(
-            "Error:  (CArgException::{}) {}",
-            error.code,
-            error.message()
-        ));
+        // NCBI's `Error:  (CArgException::<code>) <message>`, in LOSAT's words (`crate::wording`:
+        // without the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+        self.post(&format!("Error:  {}", error.message()));
         1
     }
 }

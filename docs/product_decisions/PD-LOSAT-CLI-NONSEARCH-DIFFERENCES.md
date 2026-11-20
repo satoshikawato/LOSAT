@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.21
+- Version: 1.22
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -37,7 +37,8 @@
   NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
-  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-20 (exception 11:
+  messages in LOSAT's words; the Owner's instruction of 2026-11-20, line NW, NW DECISIONS 1, 5, 6)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -225,6 +226,36 @@ BLAST+.
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
+11. **Messages in LOSAT's words** (version 1.22, 2026-11-20). The Owner, 2026-11-20 (verbatim):
+   「てかメッセージとかで「BLAST+のマニュアルを参照してください」とかNCBIの文言がそのまま出てきてるやつ、全部LOSATに直しといて」;
+   the prefixes stay (the Owner's 「すべて推奨通り」 to keeping `BLAST query/options error:` and its
+   siblings, the same day). Where NCBI's messages name NCBI's product or show the internals of
+   NCBI's C++ Toolkit, LOSAT's say it in LOSAT's words, in standard error, in the library's and the
+   Web engine's errors and in an archive's messages (`Blast4-error.message`):
+   - the footer of the query, input, filtering, scoring, formatting, strategy, archive and
+     `blastdbcmd` taxonomy errors, `Please refer to the BLAST+ user manual.`, reads
+     `Please refer to the LOSAT user manual.`;
+   - an exception report (`CException::what()`, NCBI's `NCBI C++ Exception:` and one
+     `T0 "<NCBI's build tree>/<file>", line <n>: Error: (<class>::<code>) <function>() - <message>`
+     line for each exception of the chain) keeps the messages only: the first after the text
+     before the report, each further one on its own line with NCBI's indentation; a post of an
+     exception (`Error: (<class>::<code>) <message>`) drops the class and code, and inside a line
+     (`Application's initialization failed (<class>::<code>) <message>`) they become `: `;
+     `(m_Pos = <n>)` reads `(position <n>)`;
+   - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option
+     -logfile`, and LOSAT Web's notices no longer call the running program BLAST+.
+   The error category prefixes (`BLAST query/options error:`, `BLAST engine error:`,
+   `BLAST Database error:`, `BLAST options error:`), NCBI's diagnostic codes such as `(106.15)`,
+   the message bodies (also where they name an NCBI function, such as
+   `CSeq_align::GetSeqRange(): Row is empty`), every error condition, exit status and search
+   result, `-version`, `-help` and `-xmlhelp` stay NCBI's. LOSAT's refusals that name
+   `NCBI BLAST+` speak of NCBI's program and stay. One producer: `LOSAT/src/wording.rs`
+   (`USER_MANUAL_FOOTER`; `losat_text`, which `ncbi_exception::NcbiException` applies to the
+   report it builds as NCBI's, as do its posts, `post_line_in`). The comparisons with NCBI's
+   freezes apply the same function to the freeze (`losat_output_bytes`; AGENTS.md rule 8).
+   Release-notes sentence: Error messages refer to the LOSAT user manual and no longer show NCBI's
+   C++ exception reports (source paths, class names); the `BLAST ... error:` prefixes and exit
+   statuses are unchanged.
 
 ## Decided handling that is not an exception
 

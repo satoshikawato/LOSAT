@@ -4,12 +4,13 @@
 use super::*;
 
 /// The text of a conversion error as rpsbproc reports it (the first of its two lines, after
-/// `Error: (CStringException::eConvert) `).
+/// `Error: `; NCBI's `Error: (CStringException::eConvert) ` in LOSAT's words, compared with
+/// `losat_text` of NCBI's text).
 fn message(e: NcbiException) -> String {
     let report = e.report_default_ex(106, 15, "Application's initialization failed");
     let first = report.lines().next().unwrap();
     first
-        .strip_prefix("Error: (CStringException::eConvert) ")
+        .strip_prefix("Error: ")
         .unwrap()
         .to_string()
 }
@@ -23,62 +24,62 @@ fn message(e: NcbiException) -> String {
 fn conversions_fail_with_ncbis_messages() {
     assert_eq!(
         message(string_to_uint(b"12x").unwrap_err()),
-        "Cannot convert string '12x' to Uint8 (m_Pos = 2)"
+        crate::wording::losat_text("Cannot convert string '12x' to Uint8 (m_Pos = 2)")
     );
     assert_eq!(
         message(string_to_uint(b"abc").unwrap_err()),
-        "Cannot convert string 'abc' to Uint8 (m_Pos = 0)"
+        crate::wording::losat_text("Cannot convert string 'abc' to Uint8 (m_Pos = 0)")
     );
     assert_eq!(
         message(string_to_double(b"abc").unwrap_err()),
-        "Cannot convert string 'abc' to double (m_Pos = 0)"
+        crate::wording::losat_text("Cannot convert string 'abc' to double (m_Pos = 0)")
     );
     assert_eq!(
         message(string_to_int(b"x", 0).unwrap_err()),
-        "Cannot convert string 'x' to Int8 (m_Pos = 0)"
+        crate::wording::losat_text("Cannot convert string 'x' to Int8 (m_Pos = 0)")
     );
     // ncbistr.cpp:876-918, 646-655 (quoted at `ncbi_str::string_to_uint8`, `string_to_uint`).
     assert_eq!(string_to_uint(b"+42"), Ok(42));
     assert_eq!(
         message(string_to_uint(b"").unwrap_err()),
-        "Cannot convert string '' to Uint8 (m_Pos = 0)"
+        crate::wording::losat_text("Cannot convert string '' to Uint8 (m_Pos = 0)")
     );
     assert_eq!(
         message(string_to_uint(b"+").unwrap_err()),
-        "Cannot convert string '+' to Uint8 (m_Pos = 1)"
+        crate::wording::losat_text("Cannot convert string '+' to Uint8 (m_Pos = 1)")
     );
     assert_eq!(
         message(string_to_uint(b"4294967296").unwrap_err()),
-        "Cannot convert string '4294967296' to unsigned int, overflow (m_Pos = 0)"
+        crate::wording::losat_text("Cannot convert string '4294967296' to unsigned int, overflow (m_Pos = 0)")
     );
     assert_eq!(
         message(string_to_uint(b"18446744073709551616").unwrap_err()),
-        "Cannot convert string '18446744073709551616' to Uint8 (m_Pos = 19)"
+        crate::wording::losat_text("Cannot convert string '18446744073709551616' to Uint8 (m_Pos = 19)")
     );
     // ncbistr.cpp:798-873, 635-643 (quoted at `ncbi_str::string_to_int8`, `string_to_int`).
     assert_eq!(string_to_int(b"-17", 0), Ok(-17));
     assert_eq!(
         message(string_to_int(b"12 ", 0).unwrap_err()),
-        "Cannot convert string '12 ' to Int8 (m_Pos = 2)"
+        crate::wording::losat_text("Cannot convert string '12 ' to Int8 (m_Pos = 2)")
     );
     assert_eq!(
         message(string_to_int(b"2147483648", 0).unwrap_err()),
-        "Cannot convert string '2147483648' to int, overflow (m_Pos = 0)"
+        crate::wording::losat_text("Cannot convert string '2147483648' to int, overflow (m_Pos = 0)")
     );
     assert_eq!(
         message(string_to_int(b"9223372036854775808", 0).unwrap_err()),
-        "Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)"
+        crate::wording::losat_text("Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)")
     );
     // ncbistr.cpp:1312-1375, 1386-1403 (quoted at `ncbi_str::string_to_double`).
     assert_eq!(string_to_double(b"55.5"), Ok(55.5));
     assert_eq!(string_to_double(b"-1e3"), Ok(-1000.0));
     assert_eq!(
         message(string_to_double(b"12.5\r").unwrap_err()),
-        "Cannot convert string '12.5\\r' to double (m_Pos = 4)"
+        crate::wording::losat_text("Cannot convert string '12.5\\r' to double (m_Pos = 4)")
     );
     assert_eq!(
         message(string_to_double(b"1e").unwrap_err()),
-        "Cannot convert string '1e' to double (m_Pos = 1)"
+        crate::wording::losat_text("Cannot convert string '1e' to double (m_Pos = 1)")
     );
     // glibc's `strtod` reads the hexadecimal form; `0x` alone is the number 0 that ends before
     // the `x` (NCBI's rpsbproc read `0x10` as 16 and `0X1p3` as 8 and refused `0x` at position
@@ -87,7 +88,7 @@ fn conversions_fail_with_ncbis_messages() {
     assert_eq!(string_to_double(b"0X1p3"), Ok(8.0));
     assert_eq!(
         message(string_to_double(b"0x").unwrap_err()),
-        "Cannot convert string '0x' to double (m_Pos = 1)"
+        crate::wording::losat_text("Cannot convert string '0x' to double (m_Pos = 1)")
     );
 }
 
@@ -281,7 +282,7 @@ fn short_accessions_and_blank_lines_load_as_ncbi() {
         match CddData::load(&fixture_files(dir.to_str().unwrap())) {
             Err(DataError::Conversion(error)) => assert_eq!(
                 message(error),
-                "Cannot convert string '' to Uint8 (m_Pos = 0)"
+                crate::wording::losat_text("Cannot convert string '' to Uint8 (m_Pos = 0)")
             ),
             other => panic!("{other:?}"),
         }

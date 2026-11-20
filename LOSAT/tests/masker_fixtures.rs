@@ -325,7 +325,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
         let expected = if help.is_some_and(|given| given == "-xmlhelp") {
             refused += 1;
             let text = format!(
-                "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
+                "Error: the option -xmlhelp runs on the command line of \
                  LOSAT's {refusal_name} only: the library API and the Web engine do not write \
                  NCBI's XML description of the arguments\n"
             );

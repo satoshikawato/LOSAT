@@ -547,7 +547,7 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
             assert_eq!(library.status.code(), Some(1), "{program}");
             assert!(
                 text(&library.stderr).contains(
-                    "the NCBI C++ Toolkit option -version runs on the command line of LOSAT's"
+                    "the option -version runs on the command line of LOSAT's"
                 ) && text(&library.stderr).contains(
                     "the library API and the Web engine do not write NCBI's version text"
                 ),

@@ -280,8 +280,15 @@ impl NcbiException {
         self.what_in(NCBI_BUILD_ROOT)
     }
 
-    /// [`NcbiException::what`] of the build whose tree is `root` ([`build_root`]).
+    /// [`NcbiException::what`] of the build whose tree is `root` ([`build_root`]), in LOSAT's
+    /// words: the messages of the chain, without NCBI's header and places
+    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
     pub fn what_in(&self, root: &str) -> String {
+        crate::wording::losat_text(&self.ncbi_what_in(root)).into_owned()
+    }
+
+    /// NCBI's text of [`NcbiException::what_in`], which LOSAT's maps.
+    fn ncbi_what_in(&self, root: &str) -> String {
         let mut os = String::from("NCBI C++ Exception:\n");
         for e in self.chain().iter().rev() {
             os.push_str("    ");
@@ -325,9 +332,12 @@ impl NcbiException {
     // ```
     /// `s_GetExceptionText`: the message and the extra text of the class (the text of each
     /// exception of a chain that NCBI's diagnostics post, `ncbi_app::args`).
+    /// In LOSAT's words (`crate::wording::losat_text`: the position as `(position <n>)`).
     pub(crate) fn text(&self) -> String {
         match &self.extra {
-            Some(extra) => format!("{} ({extra})", self.message),
+            Some(extra) => {
+                crate::wording::losat_text(&format!("{} ({extra})", self.message)).into_owned()
+            }
             None => self.message.clone(),
         }
     }
@@ -443,8 +453,15 @@ impl NcbiException {
     /// `NCBI_USE_ERRCODE_X` is `err_code`, as an application with NCBI's default diagnostic
     /// flags posts it: `Error: (<class>::<code>) <message>` for each exception of the chain,
     /// oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
-    /// <message>` of the newest, each line ending with a line feed.
+    /// <message>` of the newest, each line ending with a line feed; in LOSAT's words
+    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
     pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
+        crate::wording::losat_text(&self.ncbi_report_default_ex(err_code, err_subcode, title))
+            .into_owned()
+    }
+
+    /// NCBI's text of [`Self::report_default_ex`].
+    fn ncbi_report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
         let mut out = String::new();
         for e in self.chain().iter().rev() {
             out.push_str(&post_error(e.site.kind, &e.text()));
@@ -673,7 +690,9 @@ pub(crate) fn post_line_in(
         line.extend_from_slice(message);
     }
     line.push(b'\n');
-    line
+    // LOSAT's words: an exception's class and code (`id`) and NCBI's exception reports are left
+    // out (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+    crate::wording::losat_bytes(&line).into_owned()
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697
@@ -941,7 +960,9 @@ mod tests {
         assert_eq!(e.site(), site);
         assert_eq!(
             e.what(),
-            "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp\", line 870: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '-1x' to Int8 (m_Pos = 2)\n"
+            crate::wording::losat_text(
+                "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp\", line 870: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '-1x' to Int8 (m_Pos = 2)\n",
+            )
         );
     }
 
@@ -974,7 +995,9 @@ mod tests {
         );
         assert_eq!(
             factory.what(),
-            "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n"
+            crate::wording::losat_text(
+                "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n",
+            )
         );
     }
 
@@ -992,7 +1015,9 @@ mod tests {
         let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
         assert_eq!(
             e.report_default_ex(106, 15, "Application's initialization failed"),
-            "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n"
+            crate::wording::losat_text(
+                "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n",
+            )
         );
         let outer = NcbiException::new(site, "first").rethrow(
             ThrowSite {
@@ -1003,7 +1028,9 @@ mod tests {
         );
         assert_eq!(
             outer.report_default_ex(106, 15, "T"),
-            "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n"
+            crate::wording::losat_text(
+                "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n",
+            )
         );
     }
 
@@ -1022,7 +1049,9 @@ mod tests {
         let e = NcbiException::with_pos(site, "Cannot convert string '' to Uint8", 0);
         assert_eq!(
             e.report_default_ex(106, 15, "Application's initialization failed"),
-            "Error: (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\nError: (106.15) Application's initialization failed (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\n"
+            crate::wording::losat_text(
+                "Error: (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\nError: (106.15) Application's initialization failed (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\n",
+            )
         );
         let e = NcbiException::new(
             ThrowSite::generated("CInvalidChoiceSelection::eFail"),
@@ -1030,55 +1059,13 @@ mod tests {
         );
         assert_eq!(
             e.report_default_ex(106, 16, "Application's execution failed"),
-            "Error: (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\nError: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\n"
+            crate::wording::losat_text(
+                "Error: (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\nError: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\n",
+            )
         );
     }
 
     /// The source files of the crate below `dir`, with their paths.
-    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                rust_files(&path, out);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                out.push(path);
-            }
-        }
-    }
-
-    /// The lines of `text` that are code outside the tests: comment lines and the top-level
-    /// `#[cfg(test)] mod name { ... }` blocks are left out (rustfmt puts the closing brace of a
-    /// top-level module at the start of a line).
-    fn code_lines(text: &str) -> Vec<(usize, &str)> {
-        let mut lines = Vec::new();
-        let mut in_tests = false;
-        let mut after_cfg_test = false;
-        for (number, line) in text.lines().enumerate() {
-            if in_tests {
-                in_tests = line != "}";
-                continue;
-            }
-            if line == "#[cfg(test)]" {
-                after_cfg_test = true;
-                continue;
-            }
-            if after_cfg_test {
-                if line.starts_with("#[") {
-                    continue;
-                }
-                after_cfg_test = false;
-                if line.starts_with("mod ") && line.ends_with('{') {
-                    in_tests = true;
-                    continue;
-                }
-            }
-            if !line.trim_start().starts_with("//") {
-                lines.push((number + 1, line));
-            }
-        }
-        lines
-    }
-
     // The text of an exception report has one owner: a second format string for it (as four
     // modules had until 2026-11-08: winmask, the Seq-id parser, the taxid map and the seqid list
     // filter) fails here. Test files (`tests.rs`, `*_tests.rs`, files under a `tests/` directory)
@@ -1087,6 +1074,7 @@ mod tests {
     // together with `concat!` or from pieces is not caught.
     #[test]
     fn exception_reports_are_formatted_only_here() {
+        use crate::wording::tests::{code_lines, rust_files};
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
         rust_files(&src, &mut files);
@@ -1122,22 +1110,6 @@ mod tests {
             offenders.is_empty(),
             "format an NCBI exception report with ncbi_exception::NcbiException:\n{}",
             offenders.join("\n")
-        );
-    }
-
-    #[test]
-    fn code_lines_leave_out_comments_and_test_modules() {
-        let text =
-            "fn a() {}\n// \"NCBI C++ Exception:\\n\"\n#[cfg(test)]\n#[path = \"x.rs\"]\nmod x;\n\
-                    fn b() {}\n#[cfg(test)]\nmod tests {\n    fn c() {}\n}\nfn d() {}\n";
-        assert_eq!(
-            code_lines(text),
-            [
-                (1, "fn a() {}"),
-                (5, "mod x;"),
-                (6, "fn b() {}"),
-                (11, "fn d() {}")
-            ]
         );
     }
 }

@@ -1023,7 +1023,7 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '3');
   // The notice counts the subjects whose alignments are linked, and says that the search has a hit list of its own.
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
-  await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (BLAST+'s -num_alignments: 3).");
+  await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (-num_alignments: 3).");
   await expect(partial).toContainText('Its search has a hit list of its own (500 subjects per query)');
   await expect(partial).toContainText("a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it");
   // The one-search notice reads "shows the alignments of 2 subjects"; the rule above says "shows the alignments of exactly".

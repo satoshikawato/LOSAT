@@ -1195,22 +1195,25 @@ impl ObjectOStream<'_> {
     /// `~CObjectOStream`.
     fn destroy(&mut self, err: &mut dyn Write) {
         if let Err(exc) = self.close(err) {
-            let _ = writeln!(
+            post(
                 err,
-                "Error: ({}) [makeblastdb] {}",
-                exc.predecessor.type_and_code(),
-                exc.predecessor.msg
+                &format!(
+                    "Error: ({}) [makeblastdb] {}",
+                    exc.predecessor.type_and_code(),
+                    exc.predecessor.msg
+                ),
             );
-            let _ = writeln!(
+            post(
                 err,
-                "Error: (CSerialException::eIoError) [makeblastdb] {}",
-                exc.msg
+                &format!("Error: ({SERIAL_IO_ERROR}) [makeblastdb] {}", exc.msg),
             );
-            let _ = writeln!(
+            post(
                 err,
-                "Error: (802.4) [makeblastdb] Cannot close serializing output stream \
-                 (CSerialException::eIoError) {}",
-                exc.msg
+                &format!(
+                    "Error: (802.4) [makeblastdb] Cannot close serializing output stream \
+                     ({SERIAL_IO_ERROR}) {}",
+                    exc.msg
+                ),
             );
         }
         self.destroy_buffer(err);
@@ -1235,20 +1238,29 @@ impl ObjectOStream<'_> {
     /// `~COStreamBuffer` (a member of the object stream, destroyed after its body).
     fn destroy_buffer(&mut self, err: &mut dyn Write) {
         if let Err(exc) = self.output.close() {
-            let _ = writeln!(
+            post(
                 err,
-                "Error: ({}) [makeblastdb] {}",
-                exc.type_and_code(),
-                exc.msg
+                &format!("Error: ({}) [makeblastdb] {}", exc.type_and_code(), exc.msg),
             );
-            let _ = writeln!(
+            post(
                 err,
-                "Error: (205.2) [makeblastdb] ~COStreamBuffer: exception while closing ({}) {}",
-                exc.type_and_code(),
-                exc.msg
+                &format!(
+                    "Error: (205.2) [makeblastdb] ~COStreamBuffer: exception while closing ({}) {}",
+                    exc.type_and_code(),
+                    exc.msg
+                ),
             );
         }
     }
+}
+
+/// `GetType()::GetErrCodeString()` of the serial stream's error of a failed close.
+const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
+
+/// Writes the diagnostic line `line` in LOSAT's words (`crate::wording::losat_text`: without the
+/// exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+fn post(err: &mut dyn Write, line: &str) {
+    let _ = writeln!(err, "{}", crate::wording::losat_text(line));
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1306-1318
@@ -1526,9 +1538,10 @@ mod tests {
         let small = metadata(1, 3);
         let at = small.to_json().len() - 1;
         let (_, err, escaped) = written(&tmp.db(), &small);
+        // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
             err,
-            format!(
+            crate::wording::losat_text(&format!(
                 "Error: (802.5) [makeblastdb] CObjectOStream: error at byte {at}: stack is empty: \
                  cannot close output stream\n\
                  Error: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\n\
@@ -1536,7 +1549,7 @@ mod tests {
                  stream\n\
                  Error: (802.4) [makeblastdb] Cannot close serializing output stream \
                  (CSerialException::eIoError) byte {at}: cannot close output stream\n"
-            )
+            ))
         );
         assert_eq!(escaped, Some("COStreamBuffer::Flush: failed"));
         let (_, err, escaped) = written(&tmp.db(), &metadata(130, 3));

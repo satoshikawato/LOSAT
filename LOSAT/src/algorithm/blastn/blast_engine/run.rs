@@ -8367,9 +8367,13 @@ fn read_cli_subjects(
     keep_deflines: bool,
 ) -> Result<CliSubjects> {
     let Some(subject_path) = args.subject.as_deref() else {
+        // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
         return Err(crate::cli::NativeError {
             exit: 1,
-            message: "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the BLAST+ user manual.\n".to_string(),
+            message: format!(
+                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                crate::wording::USER_MANUAL_FOOTER
+            ),
         }
         .into());
     };
@@ -15203,7 +15207,8 @@ mod tests {
             (
                 1,
                 format!(
-                    "BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
+                    "BLAST query/options error: {text}\n{}\n",
+                    crate::wording::USER_MANUAL_FOOTER
                 ),
             )
         };

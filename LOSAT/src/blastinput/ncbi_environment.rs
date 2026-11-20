@@ -1052,8 +1052,11 @@ fn conf_file_path(
         // ends the program with this report (exit status 2), `c.ini` loads no file.
         if !files.opens(path) {
             let message = format!("Registry file \"{text}\" cannot be opened");
+            // NCBI's `Error: (CAppException::eNoRegistry) <message>` and `... initialization failed
+            // (CAppException::eNoRegistry) <message>`, in LOSAT's words (`crate::wording`: without
+            // the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
             return Err(ConfFile::CannotOpen(format!(
-                "Error: (CAppException::eNoRegistry) {message}\nError: (106.15) Application's initialization failed (CAppException::eNoRegistry) {message}\n"
+                "Error: {message}\nError: (106.15) Application's initialization failed: {message}\n"
             )));
         }
         return Ok(Some(path.to_path_buf()));

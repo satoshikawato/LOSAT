@@ -440,7 +440,7 @@ fn outfmt_13_and_14_to_standard_output_ask_for_a_file_name() {
             assert!(output.stdout.is_empty());
             assert_eq!(
                 String::from_utf8_lossy(&output.stderr),
-                format!("BLAST query/options error: Please provide a file name for outfmt {number}.\nPlease refer to the BLAST+ user manual.\n"),
+                format!("BLAST query/options error: Please provide a file name for outfmt {number}.\nPlease refer to the LOSAT user manual.\n"),
                 "{format} {out:?}"
             );
         }

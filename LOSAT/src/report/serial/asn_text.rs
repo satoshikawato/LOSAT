@@ -802,6 +802,23 @@ impl Encoder for AsnTextEncoder<'_> {
     }
 }
 
+/// The line `line` (its bytes from the start of the line to where a VisibleString starts) and the
+/// string `value` after it, as the encoder writes them (`write_string`, with the wraps of
+/// `put_eol_at_word_end`, which may also break the line before the opening quote): for
+/// `crate::wording::losat_output_bytes`, which writes an archive's message again in LOSAT's words.
+/// `value` holds visible bytes only (it was read from such a string).
+pub(crate) fn visible_string_line(line: &[u8], value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(line.len() + value.len() + 8);
+    let mut enc = AsnTextEncoder::new(&mut out);
+    // The end of the line before: the wrap looks back to it, as in the document.
+    enc.out.push(b'\n');
+    enc.out.extend_from_slice(line);
+    enc.line_length = line.len();
+    enc.write_string::<CHECK>(value);
+    debug_assert!(enc.error.is_none());
+    out.split_off(1)
+}
+
 /// `write_string`'s handling of a byte that NCBI's stream replaces in a VisibleString: the error
 /// `NonVisibleChar` (`visible_str`), `#` and its record (`visible_str_replacing`), or the byte
 /// as it is (`utf8_str`, `eFNP_Allow`).

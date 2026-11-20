@@ -2771,7 +2771,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         assert_eq!(
             message(error),
             "BLAST query/options error: Query input doesn't start with a defline or comment, \
-             line 2\0\nPlease refer to the BLAST+ user manual.",
+             line 2\0\nPlease refer to the LOSAT user manual.",
             "{program:?}"
         );
         // The subjects are read first: a bad query and a bad subject end with the subjects' error.
@@ -2779,7 +2779,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         assert_eq!(
             message(error),
             "BLAST query/options error: Query input doesn't start with a defline or comment, \
-             line 2\0\nPlease refer to the BLAST+ user manual.",
+             line 2\0\nPlease refer to the LOSAT user manual.",
             "{program:?}"
         );
         let error =

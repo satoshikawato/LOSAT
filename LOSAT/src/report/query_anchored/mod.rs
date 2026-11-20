@@ -1394,6 +1394,15 @@ impl HspMasks {
         fill_row_loc_list(letters, residue, seq_range, plus, width, masks, list);
         self.frames[row] = frame;
     }
+
+    /// Puts row `row`'s masked letters of the whole row `letters` in lower case (`output_seq`
+    /// of every column, without `html`): the rows of the hit records that the library API and
+    /// the Web adapter hand out show their masks so.
+    pub(crate) fn lower_row(&self, row: usize, letters: &mut [u8]) {
+        if let Some((list, frame)) = self.row(row) {
+            lower_masked(letters, 0, list, frame);
+        }
+    }
 }
 
 /// `x_FillLocList` (`fill_loc_list`) of one row of an HSP's own alignment of two rows (outfmt 0,

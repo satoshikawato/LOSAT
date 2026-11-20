@@ -272,11 +272,11 @@ fn compare(
     got: (i32, String, String),
 ) -> Vec<String> {
     let dir = fixtures();
+    // makeblastdb's messages in LOSAT's words (`losat::wording`, the one mapping of the freeze).
     let expected = |ext: &str| {
-        String::from_utf8_lossy(
-            &std::fs::read(dir.join("expected").join(format!("{}.{ext}", case.name))).unwrap(),
-        )
-        .into_owned()
+        let frozen =
+            std::fs::read(dir.join("expected").join(format!("{}.{ext}", case.name))).unwrap();
+        String::from_utf8_lossy(&losat::wording::losat_output_bytes(&frozen)).into_owned()
     };
     let mut out = Vec::new();
     let want_rc: i32 = expected("rc").trim().parse().unwrap();
@@ -307,7 +307,11 @@ fn compare(
         false => Vec::new(),
     };
     for rel in kept_files {
-        let want = masked_file(&rel, std::fs::read(kept.join(&rel)).unwrap(), c);
+        let mut frozen = std::fs::read(kept.join(&rel)).unwrap();
+        if rel == "log.txt" {
+            frozen = losat::wording::losat_output_bytes(&frozen).into_owned();
+        }
+        let want = masked_file(&rel, frozen, c);
         match std::fs::read(case_dir.join(&rel)) {
             Ok(bytes) => {
                 let got = masked_file(&rel, bytes, c);

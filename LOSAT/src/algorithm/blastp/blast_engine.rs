@@ -5923,11 +5923,15 @@ fn open_search_database(
                 )?;
             }
             // rpsblast: what the application and each batch's RPS set-up set in the options
-            // handle, which the search strategy's requests hold.
-            if let (Some(rps), Some(strategy)) =
-                (resolved.rps_search.as_deref(), args.strategy.as_ref())
-            {
-                rps_hooks::note_strategy_sets(strategy, rps, resolved, &database)?;
+            // handle, which the requests of the archive and of the search strategy hold.
+            if let (Some(rps), Some(handle)) = (
+                resolved.rps_search.as_deref(),
+                args.archive
+                    .as_ref()
+                    .map(crate::report::archive::ArchiveHandle::options)
+                    .or_else(|| args.strategy.as_ref().map(|strategy| strategy.options())),
+            ) {
+                rps_hooks::note_handle_sets(handle, rps, resolved, &database)?;
             }
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
@@ -12191,6 +12195,7 @@ fn run_call(
         context: &context,
         call_batches: &call_batches,
         filtered_empty,
+        rps_multi_volume,
         xml_matrix_failure,
         xml_only_xml2,
         x_rows_pool,

@@ -910,7 +910,14 @@ fn query_text(
     search_skipped: bool,
     filtered_empty: bool,
     has_hits: bool,
+    merged_volumes: bool,
 ) -> Result<QueryText> {
+    // RPSTBLASTN's results of several volumes keep no warning (`report::query_warning`).
+    let messages = if merged_volumes {
+        Vec::new()
+    } else {
+        query_messages(query, search_skipped, filtered_empty)
+    };
     names::query_text(
         program,
         query.internal_id.as_bytes(),
@@ -918,7 +925,7 @@ fn query_text(
         query.believed(),
         &query.title,
         false,
-        &query_messages(query, search_skipped, filtered_empty),
+        &messages,
         has_hits,
     )
     .map_err(|error| anyhow::Error::new(XmlRefusal(error.to_string())))
@@ -1104,7 +1111,15 @@ pub(super) fn scan_queries(
             check?;
         }
         for (index, query) in batch.iter().enumerate() {
-            let check = query_text(options.program().upper, query, false, false, true).map(drop);
+            let check = query_text(
+                options.program().upper,
+                query,
+                false,
+                false,
+                true,
+                options.merged_volumes(),
+            )
+            .map(drop);
             if holds_back && index + 1 == batch.len() {
                 held = Some(check);
             } else {
@@ -1379,6 +1394,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 batch.search_skipped,
                 options.filtered_empty,
                 has_hits,
+                options.merged_volumes(),
             )?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                 if let std::collections::hash_map::Entry::Vacant(slot) =

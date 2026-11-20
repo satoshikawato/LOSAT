@@ -132,6 +132,8 @@ pub(super) struct ReportView<'a> {
     pub(super) context: &'a ReportContext,
     pub(super) call_batches: &'a archive::CallBatches<'a>,
     pub(super) filtered_empty: bool,
+    /// rpsblast over several volumes (`prelim_run::PrelimRun::rps_multi_volume`).
+    pub(super) rps_multi_volume: bool,
     pub(super) xml_matrix_failure: Option<XmlMatrixFailure>,
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
@@ -361,6 +363,7 @@ pub(super) fn write_xml(
         hit_loads,
         pairwise_hits,
         filtered_empty,
+        rps_multi_volume,
         xml_matrix_failure,
         xml_only_xml2,
         ..
@@ -466,6 +469,11 @@ pub(super) fn write_xml(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
+            // rpsblast over several volumes keeps no warning in the merged results
+            // (`query_warning_lines`).
+            if rps_multi_volume {
+                return Vec::new();
+            }
             crate::report::query_warnings::query_messages(
                 record.seq(),
                 query_valid[q_idx],

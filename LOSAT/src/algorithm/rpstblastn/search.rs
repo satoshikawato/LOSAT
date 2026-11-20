@@ -73,8 +73,8 @@ pub(crate) struct TranslatedRpsSearch {
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
     /// The volumes' matrix and gap costs as their set-up read them (`RpsVolumeSetup::costs`), for
-    /// the search strategy's requests (`handle_sets`); set by `for_database` of a run that writes
-    /// one.
+    /// the requests of the archive and of the search strategy (`handle_sets`); set by `for_database`
+    /// of a run that writes one.
     pub(crate) costs: Option<(String, i32, i32)>,
     /// The set-up that checked the volumes in `for_database` (series PR, item PS12m): the run
     /// maps them again for each batch with it (`RpsVolumeSetup::reopen`), which knows the volumes
@@ -87,7 +87,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         &self,
         options: &ResolvedOptions,
         database: Option<&BlastxDatabase>,
-        strategy: bool,
+        requests: bool,
     ) -> Result<Arc<dyn RpsTblastnSearch>> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -113,9 +113,9 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         if !faulty_files {
             self.check_options()?;
         }
-        // The volumes' costs are read for the search strategy's requests only (`handle_sets`;
+        // The volumes' costs are read for the archive's and the search strategy's requests only (`handle_sets`;
         // after volume files that failed NCBI's checks, `costs` opens the first volume's again).
-        let costs = strategy.then(|| setup.costs(volumes.first())).flatten();
+        let costs = requests.then(|| setup.costs(volumes.first())).flatten();
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
             costs,

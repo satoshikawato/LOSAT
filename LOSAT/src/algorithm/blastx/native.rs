@@ -900,12 +900,16 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        let search = search.for_database(&options, database.as_ref(), strategy.is_some())?;
-        // What each batch's RPS set-up writes into the options handle, which the search strategy's
-        // later requests hold (`OptionsHandle::pass`): the search for the database knows its
-        // volumes' costs.
-        if let Some(strategy) = &strategy {
-            strategy.options().set_search_sets(
+        let handle = archive
+            .as_ref()
+            .map(crate::report::archive::ArchiveHandle::options)
+            .or_else(|| strategy.as_ref().map(|strategy| strategy.options()));
+        let search = search.for_database(&options, database.as_ref(), handle.is_some())?;
+        // What each batch's RPS set-up writes into the options handle, which the requests of the
+        // archive and of the search strategy hold (`OptionsHandle::pass`): the search for the
+        // database knows its volumes' costs.
+        if let Some(handle) = handle {
+            handle.set_search_sets(
                 Vec::new(),
                 search.handle_sets(database.as_ref(), args.searchsp, args.dbsize),
             )?;

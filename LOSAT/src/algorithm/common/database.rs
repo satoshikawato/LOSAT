@@ -471,18 +471,22 @@ pub(crate) const STATISTICS_COUNT_ZERO: &str = "the statistics count 0 sequences
 /// `OLD_FSC`, BLASTX also with `-ungapped`) `BLAST_GapAlignSetUp`'s shortest subject length is the
 /// total over the count, and NCBI BLAST+ 2.17.0 crashes there (SIGFPE, DECISIONS 14 of line RG; an
 /// alias file's `LENGTH` 100 alone over a volume of no OID, probe p4c_dn_nB of D1a-2). NCBI makes
-/// that division only in the setup of a query batch with a valid context (`CLocalBlast::Run` stops
-/// a batch whose `CheckInternalData`, `BlastScoreBlkCheck`, finds none): a total that is not
-/// positive counts 1, so the count is 0 only of a positive total. The one test of every program
+/// that division only in the setup of a search with a valid context (`CLocalBlast::Run` stops a
+/// query batch whose `CheckInternalData`, `BlastScoreBlkCheck`, finds none; PSI-BLAST's rounds:
+/// `blastp::blast_engine::call_setup::setup_fails`), before it reads a sequence: a total that is
+/// not positive counts 1, so the count is 0 only of a positive total. The one test of every program
 /// (`check_setup_count`).
 pub(crate) fn setup_count_refused(setup_total: i64, setup_count: i32, gumbel: bool) -> bool {
     !gumbel && setup_total > 0 && setup_count == 0
 }
 
 /// LOSAT's refusal of `setup_count_refused` for `program`, which each program makes where NCBI's
-/// setup meets the division: in the setup of the first query batch (or query chunk, or RPS unit)
-/// with a valid context, after what NCBI writes before that batch. A run whose queries are all
-/// invalid is reported as NCBI reports it (exit 0; D1a-5 of line RG, DECISIONS D1a4-12).
+/// setup meets the division: in the setup of the first query batch (or query chunk, RPS unit or
+/// PSI-BLAST round) with a valid context. BLASTN, TBLASTX, TBLASTN and RPSTBLASTN write the
+/// reports of the batches before it (NCBI's output before its crash in the tabular formats; in the
+/// others the crash cuts NCBI's buffered output short), BLASTP, PSI-BLAST and RPSBLAST refuse
+/// before any output. A run whose queries are all invalid is reported as NCBI reports it (exit 0;
+/// D1a-5 of line RG, DECISIONS D1a4-12).
 pub(crate) fn check_setup_count(
     setup_total: i64,
     setup_count: i32,

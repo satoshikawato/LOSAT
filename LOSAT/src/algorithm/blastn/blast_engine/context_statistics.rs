@@ -367,8 +367,9 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
         // A count of 0 (of a positive total) is the division by 0 where NCBI crashes, LOSAT's
         // refusal (`common::database::check_setup_count`, D1a-5 of line RG) at this batch, after
-        // what NCBI writes before it, as the error below; a run whose batches have no valid
-        // context does not reach it and is reported as NCBI's. Else
+        // the reports of the batches before (NCBI's output before its crash in the tabular
+        // formats), as the error below; a run whose batches have no valid context does not reach
+        // it and is reported as NCBI's. Else
         // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a
         // negative `NSEQ` passes; one of 2^31 fails).
         let setup_error = crate::algorithm::common::database::check_setup_count(

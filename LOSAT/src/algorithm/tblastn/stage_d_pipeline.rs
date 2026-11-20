@@ -1147,11 +1147,11 @@ impl std::error::Error for SetupEngineError {}
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-301
 /// LOSAT's refusal of a batch's setup where NCBI's crashes (`common::database::check_setup_count`:
 /// the statistics' count of 0 without the Gumbel block). NCBI writes the reports of each batch
-/// before the next is searched, so its output before the crash holds those of the batches before
-/// (NCBI 2.17.0, D1a-5 of line RG: `OLD_FSC=1 BATCH_SIZE=1` over `NSEQ 0`, two queries without
-/// letters to search then a valid one, the 152 bytes of their outfmt 7 reports without the last
-/// line): `tblastn_app::batch_failure` makes the refusal after them, as an engine error of the
-/// batch.
+/// before the next is searched, so its tabular output before the crash holds those of the batches
+/// before (NCBI 2.17.0, D1a-5 of line RG: `OLD_FSC=1 BATCH_SIZE=1` over `NSEQ 0`, two queries
+/// without letters to search then a valid one, the 152 bytes of their outfmt 7 reports without the
+/// last line; the crash cuts the buffered output of the other formats short):
+/// `tblastn_app::batch_failure` makes the refusal after them, as an engine error of the batch.
 #[derive(Debug)]
 pub(crate) struct SetupRefusal(pub(crate) anyhow::Error);
 

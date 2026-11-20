@@ -348,16 +348,18 @@ volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without th
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
 also with `-ungapped`), where NCBI divides by zero (SIGFPE) as a query is searched. A run of
 queries without a valid one, which NCBI reports without dividing, is reported as NCBI's by
-BLASTX (its own check in the batch's setup) and, since fix round 3 of D1a-4, by BLASTP and
+BLASTX and, since fix round 3 of D1a-4, by BLASTP and
 PSI-BLAST (rows `db.ak.bp.nseq0.oldfsc.allx.7`, `db.ak.bp.nseq0.ssp.allx.7` and
 `db.ak.ps.nseq0.oldfsc.allx.7`) and, since D1a-5 of line RG, by BLASTN, TBLASTN and TBLASTX (rows
 `db.ak.bn.nseq0.alln.*`, `db.ak.tbx.nseq0.alln.*`, `db.ak.tbn.nseq0.oldfsc.allx.*` and
 `db.ak.tbn.nseq0.ssp.allx.7`; they refused it at the database's open, probe e8 of fix round 3 of
 D1a-4). Every program makes the refusal with one test (`common::database::check_setup_count`) in
 the setup of the first query batch (BLASTN: or query chunk) with a valid context, where NCBI
-divides: BLASTN, TBLASTX and TBLASTN after the reports of the batches before (NCBI writes them
-before it crashes in the next batch: 150 and 152 bytes of outfmt 7 with `BATCH_SIZE=1`, two queries
-without letters to search then a valid one), BLASTP and PSI-BLAST before any output. With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+divides, before it reads a sequence (also over a volume without its `.nsq`): BLASTN, TBLASTX and
+TBLASTN after the reports of the batches before (NCBI's output before its crash in the next batch
+in the tabular formats: 150 and 152 bytes of outfmt 7 with `BATCH_SIZE=1`, two queries without
+letters to search then a valid one; the crash cuts NCBI's buffered output of the other formats
+short), BLASTP and PSI-BLAST before any output. With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 

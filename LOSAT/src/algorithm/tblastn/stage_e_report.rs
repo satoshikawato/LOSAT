@@ -1475,6 +1475,7 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
+                    masks: None,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'

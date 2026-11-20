@@ -3452,45 +3452,50 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 //                     }
 // ```
-/// The outfmt 0 rows `hits` with the columns of their query rows that a SEG mask of
-/// `masks` (`query_record_masks`) covers in lowercase. A mask that covers the whole query is
-/// not shown; a mask position outside the aligned range is the first or last column
-/// (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
-fn mask_query_rows(hits: &mut [PairwiseHit], masks: &[Vec<(i32, i32)>]) {
+/// The masks of the outfmt 0 rows of `hits` (`PairwiseHit::masks`): a query row's SEG masks of
+/// `query_masks` (`query_record_masks`), a subject row's lower-case runs of `subject_masks`
+/// (`-lcase_masking`, `x_soft_subject::x_subject_masks`), at the columns of `x_FillLocList`
+/// (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range is the row's
+/// first or last residue), which `x_OutputSeq` puts in lower case when it writes the row. The
+/// hits' letters stay as they are (upper case: the library API's records).
+fn set_row_masks(
+    hits: &mut [PairwiseHit],
+    query_masks: Option<&[Vec<(i32, i32)>]>,
+    subject_masks: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
+) {
     for hit in hits {
-        let query_masks = &masks[hit.hit.q_idx as usize];
-        if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
-            let mut bytes = std::mem::take(row).into_bytes();
-            // The 0-based query position of each column that holds a residue.
-            let first = hit.hit.q_start as i32 - 1;
-            let last = hit.hit.q_end as i32 - 1;
-            let mut columns = Vec::with_capacity(bytes.len());
-            for (column, &residue) in bytes.iter().enumerate() {
-                if residue != b'-' {
-                    columns.push(column);
-                }
-            }
-            let width = bytes.len();
-            let column_of = |position: i32| -> usize {
-                if position < first {
-                    0
-                } else if position > last {
-                    width - 1
-                } else {
-                    columns[(position - first) as usize]
-                }
-            };
-            for &(from, to) in query_masks {
-                if to < first || from > last {
-                    continue;
-                }
-                let (start, stop) = (column_of(from), column_of(to));
-                for residue in &mut bytes[start..=stop] {
-                    *residue = residue.to_ascii_lowercase();
-                }
-            }
-            *row = String::from_utf8(bytes).expect("ASCII alignment row");
+        let mut masks = crate::report::query_anchored::HspMasks::default();
+        let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
+        if let Some(row) = hit.query_seq.as_deref().filter(|_| !query.is_empty()) {
+            let row = row.as_bytes();
+            masks.set_row(
+                0,
+                0,
+                row,
+                |column| row[column] != b'-',
+                (hit.hit.q_start as u32 - 1, hit.hit.q_end as u32 - 1),
+                true,
+                1,
+                query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
         }
+        let runs = subject_masks.get(&(hit.hit.q_idx, hit.hit.s_idx));
+        if let Some((row, runs)) = hit.subject_seq.as_deref().zip(runs) {
+            let row = row.as_bytes();
+            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
+            let stored = &hit.subject_stored_gaps;
+            masks.set_row(
+                1,
+                0,
+                row,
+                |column| row[column] != b'-' || stored.contains(&(column as u32)),
+                (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+                true,
+                1,
+                runs.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+        }
+        hit.masks = (!masks.is_empty()).then(|| Box::new(masks));
     }
 }
 
@@ -4239,6 +4244,7 @@ fn build_pairwise_hits(
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
             // (`recount_shown_identities`).
             seqalign_num_ident,
+            masks: None,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the

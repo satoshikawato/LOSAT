@@ -66,7 +66,7 @@ pub(super) fn x_subject_scan_ranges(records: &[FastaRecord]) -> Vec<Vec<(i32, i3
 }
 
 /// Makes `FastaRecord::cut` keep each record's whole letters (`archive_letters`) as well for a
-/// `-subject_loc`: the outfmt 0 rows show the runs of the whole record ([`x_masked_subject_rows`]).
+/// `-subject_loc`: the outfmt 0 rows show the runs of the whole record (`set_row_masks`).
 pub(super) fn x_keep_whole_letters(records: &mut [FastaRecord]) {
     for record in records {
         record.source.get_or_insert_with(Default::default);
@@ -451,7 +451,7 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 /// (the end is one past the HSP): with `-subject_loc` the two coordinates differ by the interval's
 /// start, so a run is kept by where it would lie in the interval and shown where it lies in the
 /// record. A `-db` subject has no records here and no masks. The outfmt 0 rows show them
-/// ([`x_masked_subject_rows`]), the query-anchored reports map them to their columns
+/// (`set_row_masks`), the query-anchored reports map them to their columns
 /// (`report::query_anchored`).
 #[cold]
 #[inline(never)]
@@ -486,44 +486,6 @@ pub(super) fn x_subject_masks(
             (!runs.is_empty()).then_some((key, runs))
         })
         .collect()
-}
-
-/// The outfmt 0 copies of `hits` with each subject row's masked letters in lower case: the runs
-/// of [`x_subject_masks`] of the row's query and subject that hold its letters.
-#[cold]
-#[inline(never)]
-pub(super) fn x_masked_subject_rows(
-    hits: &[PairwiseHit],
-    subject_records: &[FastaRecord],
-    placements: &Placements,
-) -> Vec<PairwiseHit> {
-    let masks = x_subject_masks(hits, subject_records, placements);
-    let mut hits = hits.to_vec();
-    for hit in &mut hits {
-        let Some(runs) = masks.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
-            continue;
-        };
-        let Some(row) = hit.subject_seq.as_mut() else {
-            continue;
-        };
-        let mut bytes = std::mem::take(row).into_bytes();
-        let mut position = hit.hit.s_start as i32 - 1;
-        for (column, letter) in bytes.iter_mut().enumerate() {
-            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
-            if *letter == b'-' && !hit.subject_stored_gaps.contains(&(column as u32)) {
-                continue;
-            }
-            if runs
-                .iter()
-                .any(|&(from, to)| from <= position && position <= to)
-            {
-                letter.make_ascii_lowercase();
-            }
-            position += 1;
-        }
-        *row = String::from_utf8(bytes).expect("ASCII alignment row");
-    }
-    hits
 }
 
 #[cfg(test)]

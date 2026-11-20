@@ -17,7 +17,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `query_record_masks`,
-//! `mask_query_rows`, `blastp_scan_mode_definition`, `write_blastp_tabular_hit_lists`) and its
+//! `set_row_masks`, `blastp_scan_mode_definition`, `write_blastp_tabular_hit_lists`) and its
 //! sibling modules `anchored`, `database`, `psi_round`, `pssm_hooks`, `query_rows` and
 //! `x_soft_subject`.
 
@@ -29,8 +29,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, mask_query_rows, psi_round, pssm_hooks,
-    query_record_masks, query_rows, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
+    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_record_masks,
+    query_rows, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
     BlastpReport, BlastpReports, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
@@ -905,18 +905,14 @@ pub(super) fn write_pairwise(
                     },
                 }
             });
-        if anchored_sequences.is_none() {
-            if let Some(masks) = query_masks.as_deref() {
-                mask_query_rows(rows.to_mut(), masks);
-            }
+        if anchored_sequences.is_none() && (query_masks.is_some() || args.lcase_masking) {
             // `-lcase_masking`: the subject rows show their records' lower case too.
-            if args.lcase_masking {
-                rows = std::borrow::Cow::Owned(x_soft_subject::x_masked_subject_rows(
-                    &rows,
-                    subject_records,
-                    ranges.subject_placements,
-                ));
-            }
+            let subject_masks = if args.lcase_masking {
+                x_soft_subject::x_subject_masks(&rows, subject_records, ranges.subject_placements)
+            } else {
+                Default::default()
+            };
+            set_row_masks(rows.to_mut(), query_masks.as_deref(), &subject_masks);
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
         // epilog.

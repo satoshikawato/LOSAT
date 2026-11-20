@@ -1352,6 +1352,143 @@ fn fill_loc_list(
     list
 }
 
+/// The masks of an outfmt 0 HSP's two rows, the query's and the subject's
+/// (`alnRoInfo->masked_regions[row]`): each row's `x_FillLocList` list (`fill_row_loc_list`, in
+/// the masks' order, not merged, each with its frame) and the row's frame (`x_OutputSeq`'s
+/// `frame`), which `output_seq` reads. A `PairwiseHit` holds one only when a mask meets a row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HspMasks {
+    lists: [Vec<(i64, i64, i8)>; 2],
+    frames: [i8; 2],
+}
+
+impl HspMasks {
+    /// Row `row`'s list and frame for `output_seq`; `None` when no mask meets the row.
+    #[inline(always)]
+    pub(crate) fn row(&self, row: usize) -> Option<(&[(i64, i64, i8)], i8)> {
+        let list = &self.lists[row];
+        (!list.is_empty()).then_some((&list[..], self.frames[row]))
+    }
+
+    /// Whether no mask meets either row.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.lists.iter().all(Vec::is_empty)
+    }
+
+    /// Sets row `row`'s list to the masks `masks` (`fill_row_loc_list` of the row `letters`) and
+    /// its frame to `frame`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn set_row(
+        &mut self,
+        row: usize,
+        frame: i8,
+        letters: &[u8],
+        residue: impl Fn(usize) -> bool,
+        seq_range: (u32, u32),
+        plus: bool,
+        width: u32,
+        masks: impl IntoIterator<Item = Mask>,
+    ) {
+        let list = &mut self.lists[row];
+        list.clear();
+        fill_row_loc_list(letters, residue, seq_range, plus, width, masks, list);
+        self.frames[row] = frame;
+    }
+}
+
+/// `x_FillLocList` (`fill_loc_list`) of one row of an HSP's own alignment of two rows (outfmt 0,
+/// `HspAlnVec`), from the row's letters: `letters` are its columns, `residue(column)` says
+/// whether a column holds a residue (not a gap), `seq_range` is its first and last position
+/// (`GetSeqStart`, `GetSeqStop`: 0-based, in the masks' coordinates; nucleotides for a row of
+/// width 3, three a residue), `plus` its strand. A mask that meets the range goes to the
+/// columns of its two ends (`GetAlnPosFromSeqPos` with `eBackwards` and `try_reverse_dir`: the
+/// column of the residue that holds the position, or of the row's first or last residue for a
+/// position outside the row); masks that miss the row are left out. The same columns as
+/// `fill_loc_list` gives over the HSP's `CAlnMap` (unit test
+/// `tests_t4a1::row_loc_list_matches_fill_loc_list`), without making the map: a row of a pairwise
+/// alignment holds its positions without a break, so a position's residue is its count from the
+/// row's first position.
+pub(crate) fn fill_row_loc_list(
+    letters: &[u8],
+    residue: impl Fn(usize) -> bool,
+    seq_range: (u32, u32),
+    plus: bool,
+    width: u32,
+    masks: impl IntoIterator<Item = Mask>,
+    out: &mut Vec<(i64, i64, i8)>,
+) {
+    let (lo, hi) = seq_range;
+    let mut columns: Vec<u32> = Vec::new();
+    for (from, to, frame) in masks {
+        if to < lo || from > hi {
+            continue;
+        }
+        if columns.is_empty() {
+            columns.extend((0..letters.len() as u32).filter(|&c| residue(c as usize)));
+            if columns.is_empty() {
+                return;
+            }
+        }
+        let last = columns.len() - 1;
+        let column = |pos: u32| -> i64 {
+            let index = if plus {
+                if pos < lo {
+                    0
+                } else {
+                    ((pos - lo) / width) as usize
+                }
+            } else if pos > hi {
+                0
+            } else {
+                ((hi - pos) / width) as usize
+            };
+            i64::from(columns[index.min(last)])
+        };
+        let (first, end) = if plus { (from, to) } else { (to, from) };
+        out.push((column(first), column(end), frame));
+    }
+}
+
+/// `x_OutputSeq`'s lower case (quoted at `output_seq`) of the letters `letters` of the columns
+/// from `start` on: the columns of the masks of `masks` with the row's frame `row_frame`.
+#[inline]
+fn lower_masked(letters: &mut [u8], start: i64, masks: &[(i64, i64, i8)], row_frame: i8) {
+    let len = letters.len() as i64;
+    for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
+        let lo = from.max(start);
+        let hi = to.min(start + len - 1);
+        let mut column = lo;
+        while column <= hi {
+            if let Some(letter) = letters.get_mut((column - start) as usize) {
+                letter.make_ascii_lowercase();
+            }
+            column += 1;
+        }
+    }
+}
+
+/// `x_OutputSeq` of an outfmt 0 row's line (`report::pairwise::write_hsp_rows`) written to
+/// `writer`: `output_seq` in `buffer`, or, for a row that no mask meets (`masks` `None`), its
+/// letters as they are, what `output_seq` makes of them.
+#[inline(always)]
+pub(crate) fn write_output_seq<W: io::Write + ?Sized>(
+    writer: &mut W,
+    buffer: &mut Vec<u8>,
+    sequence: &[u8],
+    start: usize,
+    len: usize,
+    masks: Option<(&[(i64, i64, i8)], i8)>,
+    html: bool,
+) -> io::Result<()> {
+    if masks.is_none() {
+        let end = (start + len).min(sequence.len());
+        return writer.write_all(&sequence[start.min(end)..end]);
+    }
+    buffer.clear();
+    output_seq(buffer, sequence, start, len, masks, html);
+    writer.write_all(buffer)
+}
+
 /// `x_DisplayRowData`: the lines of `line_length` columns.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1435-1451
@@ -1689,18 +1826,10 @@ fn output_seq(
     let Some((masks, row_frame)) = masks else {
         return;
     };
+    lower_masked(&mut out[first..], start as i64, masks, row_frame);
     let mut spans = Vec::new();
-    for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
-        let lo = from.max(start as i64);
-        let hi = to.min(start as i64 + len as i64 - 1);
-        let mut column = lo;
-        while column <= hi {
-            if let Some(letter) = out.get_mut(first + (column - start as i64) as usize) {
-                letter.make_ascii_lowercase();
-            }
-            column += 1;
-        }
-        if html {
+    if html {
+        for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
             if let Some(span) = mask_span(from, to, start as i64, len as i64) {
                 spans.push(span);
             }
@@ -2168,5 +2297,7 @@ mod tests_t3c;
 mod tests_t3c_self;
 #[cfg(test)]
 mod tests_t4a0;
+#[cfg(test)]
+mod tests_t4a1;
 #[cfg(test)]
 mod tests_x2g;

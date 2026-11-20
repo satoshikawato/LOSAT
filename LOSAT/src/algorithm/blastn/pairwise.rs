@@ -302,6 +302,7 @@ impl Rows<'_> {
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
                 // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
+                masks: None,
             });
         }
         Ok(())

@@ -283,6 +283,9 @@ pub struct PairwiseHit {
     /// TBLASTX's rows translated by the display's tables count others. Every count is at least
     /// 0, so every Seq-align carries it.
     pub(crate) seqalign_num_ident: usize,
+    /// The masks of the rows that outfmt 0 shows (`query_anchored::HspMasks`, the columns of
+    /// `x_FillLocList`); `None` when no mask meets the HSP's rows.
+    pub(crate) masks: Option<Box<super::query_anchored::HspMasks>>,
 }
 
 impl PairwiseHit {
@@ -453,6 +456,7 @@ impl From<Hit> for PairwiseHit {
             sum_n: None,
             subject_stored_gaps: Vec::new(),
             seqalign_num_ident,
+            masks: None,
         }
     }
 }
@@ -1274,7 +1278,15 @@ pub fn write_alignment<W: Write>(
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(writer, h, qseq, sseq, &hit.subject_stored_gaps, config)?;
+        write_alignment_with_sequences(
+            writer,
+            h,
+            qseq,
+            sseq,
+            &hit.subject_stored_gaps,
+            hit.masks.as_deref(),
+            config,
+        )?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -1304,6 +1316,7 @@ fn write_alignment_with_sequences<W: Write>(
     query_seq: &str,
     subject_seq: &str,
     subject_stored_gaps: &[u32],
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let line_len = config.line_length;
@@ -1396,7 +1409,7 @@ fn write_alignment_with_sequences<W: Write>(
     // ```
     // A row is written on a line that meets its columns between its end gaps
     // (`rowRng = m_AV->GetSeqAlnRange(row)`, showalign.cpp:1272; `write_hsp_rows`), the middle
-    // line with the query's; its end gaps are NCBI's end character (`write_row_chars`).
+    // line with the query's; its end gaps are NCBI's end character (`row_string`).
     write_hsp_rows(
         writer,
         |segments| {
@@ -1408,15 +1421,12 @@ fn write_alignment_with_sequences<W: Write>(
         },
         [1, 1],
         line_len,
-        q_chars.len(),
+        [
+            &row_string(query_seq, &q_chars, query_span),
+            &row_string(subject_seq, &s_chars, subject_span),
+        ],
+        masks,
         max_start_len,
-        |writer, row, columns| {
-            if row == 0 {
-                write_row_chars(writer, &q_chars, columns, query_span)
-            } else {
-                write_row_chars(writer, &s_chars, columns, subject_span)
-            }
-        },
         write_middle,
     )
 }
@@ -1428,6 +1438,7 @@ thread_local! {
     static HSP_ROWS: std::cell::RefCell<(
         super::serial::seqalign::Segments,
         super::query_anchored::HspAlnVec,
+        Vec<u8>,
     )> = std::cell::RefCell::default();
 }
 
@@ -1438,9 +1449,10 @@ const ROW_LABELS: [&str; 2] = ["Query", "Sbjct"];
 /// middle line, the subject row and a blank line. The rows' coordinates come from the HSP's
 /// `CAlnVec` (`query_anchored::HspAlnVec`) of its Seq-align's segments, which `segments_of` makes
 /// (the producer of the program, `report::serial::seqalign`, as the query-anchored reports'
-/// `section_hsps`), of row widths `widths` (`HspStrands::no_widths`: none); `columns` is the
-/// number of columns of the rows' letters, `write_letters(writer, row, columns)` writes a row's
-/// letters of a line and `write_middle(writer, columns)` the middle line's. `width` is the width
+/// `section_hsps`), of row widths `widths` (`HspStrands::no_widths`: none); `letters` are the rows'
+/// letters (NCBI's row strings: an end gap is the end character, a space), a line of a row
+/// written through `x_OutputSeq` (`query_anchored::write_output_seq`) with the row's masks of
+/// `masks`, and `write_middle(writer, columns)` writes the middle line's. `width` is the width
 /// of the coordinates (`maxStartLen`, `coordinate_width`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1435-1438,1452-1453
@@ -1496,12 +1508,13 @@ fn write_hsp_rows<W: Write>(
     ) -> super::query_anchored::HspStrands,
     widths: [u32; 2],
     line_length: usize,
-    columns: usize,
+    letters: [&[u8]; 2],
+    masks: Option<&super::query_anchored::HspMasks>,
     width: usize,
-    mut write_letters: impl FnMut(&mut W, usize, std::ops::Range<usize>) -> io::Result<()>,
     mut write_middle: impl FnMut(&mut W, std::ops::Range<usize>) -> io::Result<()>,
 ) -> io::Result<()> {
-    HSP_ROWS.with_borrow_mut(|(segments, rows)| {
+    let columns = letters[0].len();
+    HSP_ROWS.with_borrow_mut(|(segments, rows, buffer)| {
         let strands = segments_of(segments);
         let widths = if strands.no_widths { [1, 1] } else { widths };
         rows.set(
@@ -1535,7 +1548,17 @@ fn write_hsp_rows<W: Write>(
                     aln_start,
                     prev_stop[row],
                     width,
-                    |writer| write_letters(writer, row, line.clone()),
+                    |writer| {
+                        super::query_anchored::write_output_seq(
+                            writer,
+                            buffer,
+                            letters[row],
+                            aln_start,
+                            line.len(),
+                            masks.and_then(|masks| masks.row(row)),
+                            false,
+                        )
+                    },
                 )?;
                 if row == 0 {
                     write_spaces(writer, label.len() + 2 + width + 2)?;
@@ -1676,7 +1699,7 @@ impl RowLetter for u8 {
     }
 }
 
-/// Writes `letters` (a chunk of a row kept as `char`s, `write_row_chars`, or a middle line,
+/// Writes `letters` (a middle line,
 /// `write_alignment_with_sequences` and `write_protein_middle`) a buffer of 256 bytes at a time
 /// (written when a letter of the most bytes might not fit), in its caller's loop.
 #[inline(always)]
@@ -1803,27 +1826,26 @@ fn write_wrapped<W: Write>(writer: &mut W, text: &[u8]) -> io::Result<()> {
     writer.write_all(&text[from..])
 }
 
-/// Writes the columns `columns` of the row `row` kept as `char`s, its end gaps (the columns
-/// outside `span`, `end_gap_span`) as NCBI's end character, a space.
-fn write_row_chars<W: Write>(
-    writer: &mut W,
-    row: &[char],
-    columns: std::ops::Range<usize>,
+/// The row `row` (`text`, its `char`s `chars`) as NCBI's row string (`GetWholeAlnSeqString`):
+/// its end gaps (the columns outside `span`, `end_gap_span`) the end character, a space. A row
+/// of ASCII letters without end gaps is its text as it is.
+fn row_string<'a>(
+    text: &'a str,
+    chars: &[char],
     span: (usize, usize),
-) -> io::Result<()> {
-    if span.0 <= columns.start && columns.end <= span.1 {
-        return write_buffered(writer, row[columns].iter().copied());
+) -> std::borrow::Cow<'a, [u8]> {
+    if text.is_ascii() && span == (0, chars.len()) {
+        return std::borrow::Cow::Borrowed(text.as_bytes());
     }
-    write_buffered(
-        writer,
-        columns.map(|column| {
-            if column < span.0 || column >= span.1 {
-                ' '
-            } else {
-                row[column]
-            }
-        }),
-    )
+    let mut row = String::with_capacity(text.len());
+    for (column, &letter) in chars.iter().enumerate() {
+        row.push(if column < span.0 || column >= span.1 {
+            ' '
+        } else {
+            letter
+        });
+    }
+    std::borrow::Cow::Owned(row.into_bytes())
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
@@ -5151,9 +5173,9 @@ fn write_tblastx_alignment<W: Write>(
         |segments| tblastx_row_segments(hit, query_length, segments),
         [3, 3],
         config.line_length,
-        q.len(),
+        [q, s],
+        hit.masks.as_deref(),
         width,
-        |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
     )
 }
@@ -6118,7 +6140,7 @@ mod tests {
                 ..PairwiseConfig::default()
             };
             let mut output = Vec::new();
-            write_alignment_with_sequences(&mut output, &hit, "ACDeF", "ACDEW", &[], &config)
+            write_alignment_with_sequences(&mut output, &hit, "ACDeF", "ACDEW", &[], None, &config)
                 .unwrap();
             String::from_utf8(output).unwrap()
         };
@@ -6159,7 +6181,7 @@ mod tests {
             ..PairwiseConfig::default()
         };
         let mut output = Vec::new();
-        write_alignment_with_sequences(&mut output, &hit, "MQ", "MQ", &[], &config).unwrap();
+        write_alignment_with_sequences(&mut output, &hit, "MQ", "MQ", &[], None, &config).unwrap();
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "Query     M  \n          M\nSbjct     M  \n\nQuery  2  Q  2\n          Q\nSbjct  2  Q  2\n\n"
@@ -6312,6 +6334,7 @@ mod tests {
                     "MRKVL",
                     "MRKVL",
                     &[],
+                    None,
                     &PairwiseConfig {
                         program: "blastp".into(),
                         ..config(line_length)
@@ -6361,6 +6384,7 @@ mod tests {
                 &letters,
                 &letters,
                 &[],
+                None,
                 &PairwiseConfig {
                     line_length,
                     program: "blastp".into(),
@@ -7190,9 +7214,9 @@ fn write_tblastn_alignment<W: Write>(
         |segments| tblastn_row_segments(hit, segments),
         [1, 3],
         config.line_length,
-        q.len(),
+        [q, s],
+        hit.masks.as_deref(),
         width,
-        |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
     )
 }
@@ -7988,9 +8012,9 @@ fn write_blastx_alignment(
         |segments| blastx_row_segments(hit, segments),
         [3, 1],
         config.line_length,
-        q.len(),
+        [q, s],
+        hit.masks.as_deref(),
         width,
-        |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, true),
     )
 }
@@ -8107,7 +8131,7 @@ mod tblastx_tests {
             ..PairwiseConfig::default()
         };
         let mut out = Vec::new();
-        write_alignment_with_sequences(&mut out, &hit, query, subject, &[], &config).unwrap();
+        write_alignment_with_sequences(&mut out, &hit, query, subject, &[], None, &config).unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -8196,6 +8220,7 @@ mod tblastx_tests {
             sum_n: Some(sum_n),
             subject_stored_gaps: Vec::new(),
             seqalign_num_ident: 60,
+            masks: None,
         }
     }
 

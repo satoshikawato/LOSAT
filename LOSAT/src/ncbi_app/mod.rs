@@ -243,11 +243,9 @@ impl Diag<'_> {
         for message in error.messages.iter().map(String::as_str).chain(backlog) {
             self.post(&format!("Error: {message}"));
         }
-        self.post(&format!(
-            "Error:  (CArgException::{}) {}",
-            error.code,
-            error.message()
-        ));
+        // NCBI's `Error:  (CArgException::<code>) <message>`, in LOSAT's words (`crate::wording`:
+        // without the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
+        self.post(&format!("Error:  {}", error.message()));
         1
     }
 }
@@ -535,12 +533,13 @@ mod tests {
         assert_eq!(diag.run_arg_exception(error), 1);
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
-            format!(
+            // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+            crate::wording::losat_text(&format!(
                 "USAGE\n  p [-h]\n\nUse '-help' to print detailed descriptions of command line \
                  arguments\n{}\n\nError: Argument \"in\". X\nError: Application's execution \
                  failed\nError:  (CArgException::eNoFile) Argument \"in\". X\n",
                 "=".repeat(72)
-            )
+            ))
         );
         // `eNoValue` prints no usage.
         let mut stderr = Vec::new();
@@ -552,8 +551,10 @@ mod tests {
         diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
-            "Error: m\nError: Application's execution failed\nError:  (CArgException::eNoValue) \
-             m\n"
+            crate::wording::losat_text(
+                "Error: m\nError: Application's execution failed\nError:  (CArgException::eNoValue) \
+                 m\n"
+            )
         );
     }
 }

@@ -23,8 +23,14 @@ const NUCLEOTIDES: &[u8] =
     b"ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTGGAAGAACGCCTGGGC";
 
 /// NCBI's report of a registry file with the line `[x`, which ends the program (exit status 2),
-/// and its replay (`tests/ncbi_toolkit_file_options.rs`).
-const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+/// and its replay (`tests/ncbi_toolkit_file_options.rs`); LOSAT writes it in its own words
+/// (`crate::wording::losat_text`).
+const NCBI_SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+
+/// [`NCBI_SECTION_REPORT`] in LOSAT's words.
+fn section_report() -> String {
+    crate::wording::losat_text(NCBI_SECTION_REPORT).into_owned()
+}
 
 /// The warning of `-max_target_seqs 1` (NCBI BLAST+ 2.17.0, probe `log_warn`).
 fn few_matches(program: &str) -> String {
@@ -371,7 +377,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     }
     // A malformed file.
     std::fs::write(&conffile, "[x\n").unwrap();
-    let report = Error::Search(SECTION_REPORT.repeat(2).trim_end().to_string());
+    let report = Error::Search(section_report().repeat(2).trim_end().to_string());
     assert_eq!(run_collect(&with(&[]), inputs, &["6"]), Err(report.clone()));
     assert_eq!(
         run_collect(&with(&["-dryrun"]), inputs, &["6"]),
@@ -733,7 +739,7 @@ fn a_callers_start_reads_its_files_and_hands_over_the_log() {
     use crate::blastinput::ncbi_environment::ApplicationStart;
     use crate::report::run_files::RunFiles;
     use std::io::Write as _;
-    let report = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    let report = section_report();
     let files = Files(vec![("./good.ini", b"[BLAST]\n"), ("./bad.ini", b"[x\n")]);
     let start = |program: &str, words: &[&str], kept: &std::sync::Arc<Kept>| {
         let mut stderr = Vec::new();

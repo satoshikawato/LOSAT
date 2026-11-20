@@ -284,7 +284,7 @@ test('the file of -logfile of TBLASTX holds what the CLI writes for the run\'s o
   const warnings = page.getByTestId('run-diagnostics');
   await expect(warnings).toBeVisible();
   expect(await warnings.evaluate((element) => element.textContent ?? '')).toBe(
-    'Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n',
+    'Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n',
   );
 });
 
@@ -335,7 +335,7 @@ test("TBLASTX with -logfile: the outputs that could not be written point to wher
       alignments: '0',
       extra: '-logfile run.log',
       kind: 'no-tabular-hits',
-      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error, ${warnings}), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.`,
+      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (the "No hits are being saved" error, ${warnings}), so this run has no HSP records; outfmt 0 is still written.`,
       place: warnings,
       file: '',
       diagnostics: 'No hits are being saved',
@@ -357,7 +357,7 @@ test("TBLASTX with -logfile: the outputs that could not be written point to wher
       alignments: '0',
       extra: '-logfile /dev/null',
       kind: 'no-tabular-hits',
-      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error, ${nowhere}), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.`,
+      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (the "No hits are being saved" error, ${nowhere}), so this run has no HSP records; outfmt 0 is still written.`,
       place: nowhere,
       file: undefined,
       diagnostics: undefined,
@@ -515,7 +515,7 @@ test('the file that -conffile names is chosen in the form and read under that na
   await page.getByTestId('param-conffile-file').setInputFiles({ name: 'broken.ini', mimeType: 'text/plain', buffer: Buffer.from('[x\n') });
   await expect(page.getByTestId('param-conffile-name')).toHaveText('broken.ini (3 bytes)');
   await expect(validation).toHaveAttribute('data-state', 'invalid');
-  await expect(validation).toContainText("Error: (CRegistryException::eSection) Invalid registry section (']' is missing)");
+  await expect(validation).toContainText("Error: Invalid registry section (']' is missing)");
 
   // A good file of another name: the search reads it as settings.ini.
   const settings = '[BLAST]\n';

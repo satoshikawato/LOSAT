@@ -688,9 +688,10 @@ fn reader_report(error: &WinMaskError) -> String {
         .unwrap_or_else(|| panic!("no report: {error}"))
 }
 
+/// NCBI's report in LOSAT's words (`crate::wording::losat_text`).
 fn rethrown_report(thrown: &str) -> String {
     let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
-    format!("NCBI C++ Exception:\n    T0 \"{root}/{thrown}\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n")
+    crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"{root}/{thrown}\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n")).into_owned()
 }
 
 #[test]
@@ -961,7 +962,7 @@ fn the_masker_checks_the_unit_size_of_an_ascii_file() {
     let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
     assert_eq!(
         reader_report(&error),
-        format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker.cpp\", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)\n")
+        crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker.cpp\", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)\n"))
     );
     assert_eq!(
         SeqMasker::new(counts("255"), &params).err().unwrap(),

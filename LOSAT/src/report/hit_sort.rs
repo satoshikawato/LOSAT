@@ -9,7 +9,10 @@
 //! weak orders or that reorder the compared hits' HSPs (`sort_query_hits`). The steps were taken
 //! from the outputs of `std::list::sort` built with g++ 13 for comparators of the same shapes, on
 //! lists of 0 to 300 elements with many ties (the order of equal totals with `>=`; which hits'
-//! HSPs end sorted).
+//! HSPs end sorted). NCBI's percent-identity comparators are strict weak orders of a list unless
+//! an HSP has no identities; on a list that they order in a cycle, NCBI's order is the one of its
+//! C++ library's merge procedure, and LOSAT's is described at `sort_hsps_by_percent_identity` and
+//! `sort_hits_by_percent_identity`.
 
 use std::cmp::Ordering;
 
@@ -736,6 +739,11 @@ pub(crate) fn total_score(hsps: &[HspScores], order: &[usize]) -> f64 {
     order.iter().fold(0.0, |total, &k| total + hsps[k].bits)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3074-3075
+// ```c++
+//     if (hit_sort == eTotalScore) {
+//         seqalign_hit_list.sort(SortHitByTotalScoreDescending);
+// ```
 /// `seqalign_hit_list.sort(SortHitByTotalScoreDescending)` of the hits `order` (in the search's
 /// order), each with its HSPs in `orders`: the higher total first. The comparator's `>=` holds
 /// both ways for equal totals; `std::list::sort` with it ends equal totals in the reverse of their

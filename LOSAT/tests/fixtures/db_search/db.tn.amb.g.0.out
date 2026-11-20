@@ -1,0 +1,71 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+           1 sequences; 244 total letters
+
+
+
+Query= amb_q
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+amb_s                                                                 122     1e-43
+
+
+> amb_s
+Length=244
+
+ Score = 122 bits (307),  Expect = 1e-43, Method: Compositional matrix adjust.
+ Identities = 77/80 (96%), Positives = 78/80 (98%), Gaps = 0/80 (0%)
+ Frame = +3
+
+Query  1    MFPCDVENWCTHCDQQDIDVxcweiwcwwpwicVFLQFVEBLVGEWWHNEVDWCYHSVQM  60
+            MFPCDVENWCTHCDQQDIDV CWEIWCWWP ICVFLQFVEBLVGEWWHNEVDWCYHSVQM
+Sbjct  3    MFPCDVENWCTHCDQQDIDVBCWEIWCWWP*ICVFLQFVEBLVGEWWHNEVDWCYHSVQM  182
+
+Query  61   ZWRNLIGIDWDTSMRLYDET  80
+            ZWRNLIGIDW+TSMRLYDET
+Sbjct  183  ZWRNLIGIDWBTSMRLYDET  242
+
+
+ Score =  9.6 bits (13),  Expect = 9.4, Method: Compositional matrix adjust.
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -1
+
+Query  45  EWWH  48
+           +W H
+Sbjct  40  QWVH  29
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.140    0.543    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5256
+
+
+  Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 244
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

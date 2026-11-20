@@ -1,0 +1,63 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+           1 sequences; 244 total letters
+
+
+
+Query= amb_q
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+amb_s                                                                 124     2e-47  2
+
+
+> amb_s
+Length=244
+
+ Score = 124 bits (257),  Expect(2) = 2e-47
+ Identities = 46/47 (98%), Positives = 47/47 (100%), Gaps = 0/47 (0%)
+ Frame = +3
+
+Query  34   VFLQFVEBLVGEWWHNEVDWCYHSVQMZWRNLIGIDWDTSMRLYDET  80
+            VFLQFVEBLVGEWWHNEVDWCYHSVQMZWRNLIGIDW+TSMRLYDET
+Sbjct  102  VFLQFVEBLVGEWWHNEVDWCYHSVQMZWRNLIGIDWBTSMRLYDET  242
+
+
+ Score = 62.3 bits (126),  Expect(2) = 2e-47
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  1   MFPCDVENWCTHCDQQDIDV  20
+           MFPCDVENWCTHCDQQDIDV
+Sbjct  3   MFPCDVENWCTHCDQQDIDV  62
+
+
+
+Lambda      K        H
+   0.327    0.140    0.543 
+
+
+Effective search space used: 4692
+
+
+  Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 244
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

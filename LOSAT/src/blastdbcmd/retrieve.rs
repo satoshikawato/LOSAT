@@ -1081,7 +1081,7 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
     let simplified = seqdb_simplify_accession(id.as_bytes()).map_err(|error| {
         Stop::NcbiBytes(match error {
             SimplifyError::SeqId(error) => error.message,
-            SimplifyError::Exception(message) => message.into_bytes(),
+            SimplifyError::Exception(message) => message,
         })
     })?;
     lookup

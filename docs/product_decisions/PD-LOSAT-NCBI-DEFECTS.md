@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.59
+- Version: 1.60
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -230,7 +230,18 @@
   serial writer prints as `-0`, written as `-9223372036854775808`; the rule-3 refusal of that one
   value removed; numbered after the D1a-4 entry at each of its merges of dev; exception 16 until
   dev's exception 16 of line RG item X5, version 1.54, came first);
-  1.58 2026-11-21 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
+  1.58 2026-11-20 (psiblast and tblastn `-in_pssm`, line RG item Q-BM: the BitMagic data of a
+  Seq-table of the PSSM query's annotations decoded as NCBI's object manager decodes it, with
+  NCBI's exception `BM::Invalid serialization format`; the rule-2 rejection of well-formed BitMagic
+  data removed and the rule-3 rejection narrowed to the streams that NCBI reads past, runs with
+  undefined behaviour or a write past BitMagic's blocks or buffers, or decodes from memory it did
+  not write; porting the data and refusing its broken streams decided by the Owner on 2026-11-16
+  (「推奨通り」, Q-BM). A GAP block that is not one is decoded, and a row of the index that reaches
+  it answered, where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic agree, and refused under
+  rule 3 only where they differ, as NCBI's result then depends on the machine it was built for
+  (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); numbered after 1.57, line
+  RG's approved exception 17);
+  1.59 2026-11-21 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
   a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first query holds
   a redone match, on which NCBI's clean-up crashes, extended from BLASTP to TBLASTN, rule 3,
   within the class of 1.30, after the reports of the query batches before; a subject excluded
@@ -238,15 +249,15 @@
   NCBI fails, crashes, does not end or writes rows that change from run to run, refused at the
   first match the redo reaches instead of before the search; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.55, line RG item X6, then after
-  1.56 and 1.57, line RG item D1a-4, at the merge of dev)
-  1.59 2026-11-21 (BLASTX `-use_sw_tback`, line RG item X4b-2: the explicit rejections of 1.53
-  and 1.58, a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first
+  1.56 and 1.57, line RG item D1a-4, and after 1.58, line RG item Q-BM, at the merges of dev)
+  1.60 2026-11-21 (BLASTX `-use_sw_tback`, line RG item X4b-2: the explicit rejections of 1.53
+  and 1.59, a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first
   query holds a redone match, extended to BLASTX, rule 3, within the class of 1.30, after the
   reports of the query batches before; two new explicit rejections, rule 3: the heap test of
   NCBI's redo in e-value mode that reads past its array of the batch's heaps, and `-ungapped
   -comp_based_stats 0 -use_sw_tback`, on which NCBI crashes at every query batch it searches;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; a placeholder number
-  until the pull request, numbered after 1.58, line RG item X4b-1)
+  until the pull request, numbered after 1.59, line RG item X4b-1)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1683,7 +1694,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   `db.x4.sw.fail.h_anchor.*`; `db.x4.sw.fail.f.6` and `db.x4.sw.fail.g.6`, whose first query holds
   none, end in `Traceback failed`).
 
-- TBLASTN `-use_sw_tback` (version 1.58, 2026-11-21, line RG item X4b-1, Owner-delegated, standing
+- TBLASTN `-use_sw_tback` (version 1.59, 2026-11-21, line RG item X4b-1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of 1.53; P2,
   P3: the same match body and round loop as BLASTP's,
   `core::composition_adjustment::smith_waterman_match`): TBLASTN's redo of a match holds the
@@ -1738,15 +1749,15 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   local alignment down to that score, slow but finite: LOSAT gives NCBI's output (rows
   `db.x4b.cut.*`).
 
-- BLASTX `-use_sw_tback` (version 1.59, 2026-11-21, line RG item X4b-2, Owner-delegated, standing
+- BLASTX `-use_sw_tback` (version 1.60, 2026-11-21, line RG item X4b-2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the endless redo and the failed batch within the
-  class of 1.30 and the rules of 1.53 and 1.58; two new rule-3 rejections, line decision X4b-0 (c);
+  class of 1.30 and the rules of 1.53 and 1.59; two new rule-3 rejections, line decision X4b-0 (c);
   P2, P3: the same match body and round loop as BLASTP's and TBLASTN's,
   `core::composition_adjustment::smith_waterman_match`, with the windows of the query's frames):
   NCBI redoes each frame of a match on its own, with the Karlin block of the frame's query context
   and one array of heaps of redone matches per batch, one heap per query
   (`blast_kappa.c:3601-3622`), with composition-based statistics 0 to 3 (0: scale 1 and the
-  unadjusted matrix). The endless redo and the failed batch behave as in 1.58: LOSAT refuses a
+  unadjusted matrix). The endless redo and the failed batch behave as in 1.59: LOSAT refuses a
   match whose redo NCBI never ends (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does
   not end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's BLASTX"; tks_M back-translated
   against X4's endless subjects, rows `db.x4b2.rej.endless.*`; with `-dbsize 1` and sum statistics
@@ -1756,7 +1767,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   `db.x4b2.dbsize1.*`) and refuses the batch where its first query holds a redone match, on whose
   clean-up NCBI crashes (`blast_kappa.c:3795-3802`; exit 1, "... with which NCBI BLAST+ 2.17.0's
   blastx crashes, is not supported by LOSAT's BLASTX"; rows `db.x4b2.rej.crash.*`). A subject that
-  NCBI's fetch excludes clears the batch's status as in 1.58 (rows `db.x4b2.excl.*`). New in
+  NCBI's fetch excludes clears the batch's status as in 1.59 (rows `db.x4b2.excl.*`). New in
   BLASTX: in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4, with which
   NCBI turns sum statistics off in a gapped search, `blast_parameters.c:793-805`) NCBI tests a window against the heap that its query
   context indexes in the batch's array of heaps (`redo_alignment.c:1465-1474`), and a BLASTX query
@@ -1856,9 +1867,33 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     allocations succeed or fail by the machine's memory (10,000,000 rows take NCBI 1.4 GB,
     100,000,000 rows end in `BLAST ran out of memory`);
   - BitMagic data of a Seq-table that NCBI decodes (`bit-bvector` values, a `bit-set-bvector`'s
-    sparse index) in a stream that NCBI reads past or crashes on (well-formed data, which NCBI
-    decodes deterministically, is a rule-2 rejection below). A `bit-bvector`'s size, which NCBI
-    reads without a decode, is NCBI's;
+    sparse index; since version 1.58, line RG item Q-BM, LOSAT decodes it as NCBI does) in a
+    stream that NCBI reads past (empty or cut data, a big-endian array whose length moves NCBI's
+    position past the data), that dereferences NCBI's null reference vector (an XOR block), that
+    runs undefined behaviour or writes past BitMagic's blocks or buffers (an Elias gamma code of
+    32 or more zeros, `bit_scan_reverse32(0)` in the interpolative decoder, an interpolative value,
+    a run or a bit interval past its block, a run of a GAP block that ends before it starts where
+    `or_bit_block` shifts by 32 bits or writes past the block, an index past BitMagic's arrays, a
+    GAP block of length 0, a window of no words), that reads entries of BitMagic's
+    work arrays that this decoding has not written (an empty little-endian id list that no earlier
+    list wrote the first entry for, run lengths that no array wrote); line RG D3-1 `bm/SPEC.md`
+    §3.3 and §5.2 and line RG item Q-BM. A stream is refused at the first such event; up to it
+    LOSAT decodes as NCBI does, NCBI's exception included. A GAP block whose ends do not increase
+    up to 65535 stays in the vector as NCBI keeps it; a row of the index that reaches it (its bit,
+    or a count of set bits up to a row in or past it) is refused where NCBI's answer differs
+    between its builds of BitMagic, as it then depends on the machine NCBI was built for:
+    BitMagic's search of a GAP block is SSE2 or SSE4.2 code on x86-64 (BitMagic 8.0.1:
+    `bmsse2.h:1638-1642`, `bmsse4.h:2260-2264`; NCBI's configure adds `-msse4.2` there) and scalar
+    code elsewhere (BitMagic 8.0.1: `bmfunc.h:1835-1955`), which find a block's bits the same way
+    only where its ends increase, and the SSE builds count such a block modulo 2^16 per lane. LOSAT
+    runs each build's search and count and answers where they agree (a count past several such
+    blocks by each build's own sum); rows that do not reach the block are answered. A bit that the
+    decoding sets in such a block (`gap_set_value`) may leave each build a different block: LOSAT
+    then decodes the data once for each build and answers each row where the three builds' vectors
+    agree; the data is refused only where the builds' decodings end differently (one throws and
+    another does not, or the size or the bytes read differ) or where one of them reaches an event
+    above (line RG item Q-BM, Owner-delegated, standing instruction 2026-09-29, restated
+    2026-10-07). A `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's;
 
   The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
   tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line
@@ -1869,7 +1904,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided
   by the Owner on 2026-11-16 (「推奨通り」): Q1 to Q3 refuse their cases, as built, and Q-BM ports BitMagic
-  in a later item (refused until then, below). Not a rule-3 item but a refusal: the XML and JSON
+  (line RG item Q-BM, version 1.58). Not a rule-3 item but a refusal: the XML and JSON
   reports of an untitled query whose annotations hold features (NCBI's definition line reads them;
   not ported). Since line RG item D3-2 LOSAT writes NCBI's ASN.1 text of the values it reads: the
   annotation's text that NCBI prints after its `Failed to parse location of` message (1204.6) is
@@ -2189,13 +2224,12 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last three entries are not of these. The last (version 1.54, line RG item X5) says
-so itself. The two before it (version 1.45, line RG item D3-1) are not either: they concern a
-PSSM query's annotations and Seq-ids, not a database; they are Owner-delegated (standing instruction
-2026-09-29, restated 2026-10-07), not under the acceptance of 2026-11-02; they have no row in
-PD-LOSAT-DATABASE-SEARCH; and the first of the two is a refusal until a port lands, which the Owner
-decided on
-2026-11-16 (「推奨通り」, Q-BM):
+would port. The last two entries are not of these. The last (version 1.54, line RG item X5) says
+so itself. The one before it (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
+query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
+2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
+Version 1.45's rejection of well-formed BitMagic data was removed in version 1.58: line RG item
+Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通り」, Q-BM):
 
 - A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
   where NCBI exits 0: it writes `Unknown` or the id alone.
@@ -2217,13 +2251,6 @@ decided on
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- psiblast and tblastn `-in_pssm` (version 1.45, line RG item D3-1, Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07): well-formed BitMagic data of a Seq-table of the
-  PSSM query's annotations that NCBI's object manager decodes (`bit-bvector` values, a
-  `bit-set-bvector`'s sparse index). NCBI's decode is deterministic; LOSAT refuses it ("a PSSM
-  query whose annot has ... is not supported") until that port lands: the Owner decided on 2026-11-16 (「推奨通り」, Q-BM) to
-  port BitMagic in a later item. Streams that NCBI reads past or crashes on are rule-3
-  rejections (above).
 - psiblast and tblastn `-in_pssm` with `-subject` (version 1.45, line RG item D3-1,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): a Seq-id twice in the
   PSSM query's entry whose `duplicate Bioseq id` message may spell a subject record's Seq-id (NCBI
@@ -2331,3 +2358,18 @@ decided on
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT
   rejected them before Session S07+++b.
+- psiblast and tblastn `-in_pssm`, the BitMagic data of a Seq-table of the PSSM query's
+  annotations (version 1.58, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
+  (「推奨通り」, Q-BM) to port it): `bit-bvector` values and a `bit-set-bvector`'s sparse index are
+  decoded where NCBI's object manager decodes them, at the first value read
+  (`CBVector_data::GetBitVector`: `bm::deserialize` of BitMagic 8.0.1 (Apache-2.0, bundled in NCBI BLAST+) in
+  NCBI's 32-bit build, ported in LOSAT with its notice and licence text in
+  THIRD_PARTY_NOTICES, section 10 (BitMagic)), with
+  the tokens in NCBI's order and NCBI's checks: its `std::logic_error` `BM::Invalid serialization
+  format` ends the run with `Error: BM::Invalid serialization format` and exit status 255 where
+  the index reads the value, and is the `NCBI_CATCH` message of the `Sorted, max length` and
+  `Seq-table location` columns (`Error: [<program>] [Bad '<column>' column] Exception: ...`),
+  after which the run goes on. A stream that reaches one of the events of the rule-3 rejection
+  (above) is refused at that event; a GAP block that is not one is decoded, and its rows answered,
+  where NCBI's scalar, SSE2 and SSE4.2 builds agree and refused (rule 3) where they differ.
+  Version 1.45 refused all such data.

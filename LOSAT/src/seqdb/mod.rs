@@ -763,16 +763,38 @@ pub struct SeqLocation {
     id: u32,
 }
 
-/// A database resolved without opening its volumes
+/// A database resolved with only the headers of its volumes read
 /// ([`SeqDb::locate_one_name_metadata`]).
 #[derive(Debug)]
 pub(crate) struct LocatedDatabase {
     /// `GetTitle()`.
     pub title: Vec<u8>,
+    /// `GetDate()`, or the exception of the `CTime` that NCBI's `GetDBMetaData` builds from it.
+    pub date: Result<String, date::DateError>,
+    /// Whether every volume names an LMDB file: a version 5 database.
+    pub version5: bool,
     /// The volume paths without extension, in NCBI's order.
     pub volumes: Vec<String>,
+    /// The number of sequences and the total length that the header of each volume holds,
+    /// in the order of `volumes`.
+    pub volume_totals: Vec<(u32, u64)>,
     /// The alias files (paths with extension), sorted.
     pub alias_files: Vec<String>,
+}
+
+/// Why [`SeqDb::locate_one_name_metadata`] gives no database.
+#[derive(Debug)]
+pub(crate) enum LocateError {
+    /// NCBI's `CSeqDB` throws this.
+    Database(SeqDbError),
+    /// NCBI's reads of the index file at this path leave its mapping, and its process faults.
+    NcbiCrashes(PathBuf),
+}
+
+impl From<SeqDbError> for LocateError {
+    fn from(error: SeqDbError) -> Self {
+        LocateError::Database(error)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:377-391
@@ -1019,6 +1041,79 @@ fn fix_string(s: &[u8]) -> &[u8] {
         Some(at) => &s[..at],
         None => s,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:217-233
+// ```c++
+// 	bool version5 = true;
+// 	for(int i=0; i < volSet.GetNumVols(); i++) {
+// 		const CSeqDBVol * vol = volSet.GetVol(i);
+// 		string vol_lmdb_name = vol->GetLMDBFileName();
+// 		if(vol_lmdb_name == kEmptyStr) {
+// 			version5 = false;
+// 			if ((!m_LMDBEntrySet.empty())|| (!lmdb_vol_names.empty())) {
+// 				m_LMDBEntrySet.clear();
+// 				NCBI_THROW(CSeqDBException, eVersionErr, "DB list contains both Version 4 and Version 5 dbs");
+// 			}
+// 			continue;
+// 		}
+//
+// 		if(version5 == false) {
+// 			m_LMDBEntrySet.clear();
+// 			NCBI_THROW(CSeqDBException, eVersionErr, "DB list contains both Version 4 and Version 5 dbs");
+// 		}
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
+// ```c++
+//         CFile tf(fname);
+// 		Uint8 readMapSize = (tf.GetLength()/10000 + 1) *10000;
+//         if (!tf.Exists()) {
+//             NCBI_THROW( CSeqDBException, eFileErr, "File " + fname + " not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.");
+//         }
+// ```
+// NCBI opens the LMDB file of a version 5 database when it opens the
+// database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
+// volume list with the volumes: `lmdb_entries`.
+/// The checks of `CSeqDBLMDBSet`'s constructor on the volumes' `bases` (paths without
+/// extension) and the names of the LMDB files their indexes hold: a version 4 volume among
+/// version 5 ones (or the other way round), and an LMDB file that is not there. A volume is
+/// version 5 when its index names an LMDB file.
+fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbError> {
+    let names_lmdb = |name: &Option<&[u8]>| name.is_some_and(|name| !name.is_empty());
+    if let Some((_, first)) = volumes.first() {
+        let version5 = names_lmdb(first);
+        if let Some((other, _)) = volumes
+            .iter()
+            .find(|(_, name)| names_lmdb(name) != version5)
+        {
+            return Err(SeqDbError::Format {
+                path: other.clone(),
+                message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
+            });
+        }
+    }
+    for (base, name) in volumes {
+        if !names_lmdb(name) {
+            continue;
+        }
+        // The name's bytes, as the volume's header holds them (probe R8 of line LIB-B: a
+        // name that is not UTF-8).
+        let lmdb_name = name.unwrap_or_default();
+        let lmdb_path = base.with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
+        if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
+            return Err(SeqDbError::NotFound(
+                [
+                    b"File ".as_slice(),
+                    &crate::utils::os_bytes::path_bytes(&lmdb_path),
+                    b" not found. If you renamed any BLAST database files, please use \
+                      original file names, and makeblastdb to rename the database. If you \
+                      deleted any BLAST database files, you need to recreate the database.",
+                ]
+                .concat(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl SeqDb {
@@ -1295,27 +1390,73 @@ impl SeqDb {
     // ```c++
     // 	m->SetDescription(GetTitle());
     // ```
-    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does, without
-    /// opening its volumes (the alias files are read and the index file of every volume they name
-    /// is located), and returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
-    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which `volume_title` gives
-    /// for a volume path), the volume paths and the paths of the alias files
-    /// (`FindVolumePaths(paths, alias, true)`). No volume file is read, so the cost does not grow
-    /// with the number of sequences. `search` is the search path that the message of a database
-    /// which is not there names; only `name` itself is looked for.
+    /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does and reads
+    /// the header of each volume's index file as NCBI's constructor of `CSeqDB` reads it
+    /// ([`IndexFile::read_mapped_header`]: a file that ends early reads as zeros to the end of
+    /// its page), without opening the other files of the volumes and without reading the
+    /// offset arrays: the cost does not grow with the number of sequences. Returns what
+    /// `CSeqDB::GetDBMetaData` reads of the opened database: the title (`GetTitle`: the alias
+    /// files' `TITLE`, else the volumes' titles), the date, the volume paths with their totals
+    /// and the paths of the alias files (`FindVolumePaths(paths, alias, true)`). `search` is
+    /// the search path that the message of a database which is not there names; only `name`
+    /// itself is looked for.
     pub(crate) fn locate_one_name_metadata(
         name: &str,
         seqtype: SeqType,
         search: &SearchPath,
-        volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
-    ) -> Result<LocatedDatabase, SeqDbError> {
+    ) -> Result<LocatedDatabase, LocateError> {
         let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
+        let mut headers = Vec::with_capacity(tree.volumes.len());
+        for volume_name in &tree.volumes {
+            let index_path = volume::with_extension(Path::new(volume_name), seqtype, "in");
+            let file = file::DbFile::open(&index_path)?;
+            match index::IndexFile::read_mapped_header(&file, seqtype) {
+                Ok(header) => headers.push(header),
+                Err(index::MappedHeaderError::Database(error)) => return Err(error.into()),
+                Err(index::MappedHeaderError::PastMapping) => {
+                    return Err(LocateError::NcbiCrashes(index_path))
+                }
+            }
+        }
+        let bases: Vec<(PathBuf, Option<&[u8]>)> = tree
+            .volumes
+            .iter()
+            .zip(&headers)
+            .map(|(name, header)| (PathBuf::from(name), header.lmdb_file.as_deref()))
+            .collect();
+        check_lmdb_names(&bases)?;
         let mut title = Vec::new();
-        alias::walk_title(&tree.root, volume_title, &mut title);
+        alias::walk_title(
+            &tree.root,
+            &|volume_name| {
+                tree.volumes
+                    .iter()
+                    .position(|name| name == volume_name)
+                    .map(|at| headers[at].title.clone())
+            },
+            &mut title,
+        );
+        let title = fix_string(&title).to_vec();
+        let dates: Vec<String> = headers
+            .iter()
+            .map(|header| String::from_utf8_lossy(fix_string(&header.date)).into_owned())
+            .collect();
+        let date_refs: Vec<&str> = dates.iter().map(String::as_str).collect();
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
         Ok(LocatedDatabase {
             title,
+            date: date::database_date(&date_refs),
+            version5: headers.first().is_some_and(|header| {
+                header
+                    .lmdb_file
+                    .as_ref()
+                    .is_some_and(|name| !name.is_empty())
+            }),
+            volume_totals: headers
+                .iter()
+                .map(|header| (header.num_oids, header.volume_length))
+                .collect(),
             volumes: tree.volumes,
             alias_files: alias_files.into_iter().collect(),
         })
@@ -1428,58 +1569,16 @@ impl SeqDb {
         // 			NCBI_THROW(CSeqDBException, eVersionErr, "DB list contains both Version 4 and Version 5 dbs");
         // 		}
         // ```
-        // A volume counts as version 5 when its index names an LMDB file.
-        let names_lmdb = |volume: &Volume| {
-            volume
-                .index()
-                .lmdb_file
-                .as_ref()
-                .is_some_and(|name| !name.is_empty())
-        };
-        if let Some(first) = volumes.first() {
-            let version5 = names_lmdb(first);
-            if let Some(other) = volumes.iter().find(|volume| names_lmdb(volume) != version5) {
-                return Err(SeqDbError::Format {
-                    path: other.base().to_path_buf(),
-                    message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
-                });
-            }
-        }
-
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
-        // ```c++
-        //         CFile tf(fname);
-        // 		Uint8 readMapSize = (tf.GetLength()/10000 + 1) *10000;
-        //         if (!tf.Exists()) {
-        //             NCBI_THROW( CSeqDBException, eFileErr, "File " + fname + " not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.");
-        //         }
-        // ```
-        // NCBI opens the LMDB file of a version 5 database when it opens the
-        // database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
-        // volume list with the volumes: below, `lmdb_entries`.
-        for volume in &volumes {
-            if !names_lmdb(volume) {
-                continue;
-            }
-            // The name's bytes, as the volume's header holds them (probe R8 of line LIB-B: a
-            // name that is not UTF-8).
-            let lmdb_name = volume.index().lmdb_file.as_deref().unwrap_or_default();
-            let lmdb_path = volume
-                .base()
-                .with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
-            if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
-                return Err(SeqDbError::NotFound(
-                    [
-                        b"File ".as_slice(),
-                        &crate::utils::os_bytes::path_bytes(&lmdb_path),
-                        b" not found. If you renamed any BLAST database files, please use \
-                          original file names, and makeblastdb to rename the database. If you \
-                          deleted any BLAST database files, you need to recreate the database.",
-                    ]
-                    .concat(),
-                ));
-            }
-        }
+        let bases: Vec<(PathBuf, Option<&[u8]>)> = volumes
+            .iter()
+            .map(|volume| {
+                (
+                    volume.base().to_path_buf(),
+                    volume.index().lmdb_file.as_deref(),
+                )
+            })
+            .collect();
+        check_lmdb_names(&bases)?;
 
         let mut title = Vec::new();
         alias::walk_title(

@@ -10,7 +10,7 @@ use super::build_db::BuildDatabase;
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::mask_data::process::{process_mask_data, MaskDataOptions};
-use super::metadata::{db_files_metadata, last_updated, write_metadata_file, DbMetadata};
+use super::metadata::{db_files_metadata, write_metadata_file, DbMetadata};
 use super::platform::Platform;
 use super::taxid_set::{TaxIdMapError, TaxIdSet};
 use super::time::LocalTime;
@@ -21,7 +21,8 @@ use crate::blastinput::ncbi_environment::{
     diag_target, ApplicationSettings, DiagStream, DiagTarget,
 };
 use crate::ncbi_str::string_to_uint8_data_size;
-use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::seqdb::date::iso8601_date_time_exception;
+use crate::seqdb::{LocateError, SearchPath, SeqDb, SeqDbError, SeqType, NCBI_CRASHES_ON_IT};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
 // ```c++
@@ -319,7 +320,17 @@ impl std::fmt::Display for MakedbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MakedbError::Build(error) => error.fmt(f),
-            MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
+            // NCBI prints `e.GetMsg()` of the `CSeqDBException`; the text of an error that is
+            // NCBI's own is what `SeqDbError::ncbi_message` gives (the file's path is not part
+            // of it), and any other is LOSAT's refusal in its own words.
+            MakedbError::Database(error) => match error.ncbi_message() {
+                Some(text) => write!(
+                    f,
+                    "BLAST Database error: {}",
+                    String::from_utf8_lossy(&text)
+                ),
+                None => write!(f, "BLAST Database error: {error}"),
+            },
             MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
             MakedbError::Output(message) => write!(f, "BLAST failed to write output: {message}"),
             MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
@@ -1157,10 +1168,8 @@ fn build_database_with_log(
         &mut db,
         &names,
         from_stdin.then_some(stdin_map),
-        title,
         is_protein,
         registry_blastdb,
-        now,
         stdin,
         err,
     );
@@ -1195,10 +1204,8 @@ fn add_input_and_close(
     db: &mut BuildDatabase<'_>,
     names: &[&str],
     from_stdin: Option<Option<bool>>,
-    title: &str,
     is_protein: bool,
     registry_blastdb: Option<&str>,
-    now: &LocalTime,
     stdin: &mut dyn Read,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
@@ -1325,7 +1332,7 @@ fn add_input_and_close(
         db.end_build(false, &mut warn)
     };
     if closed? {
-        open_new_database(db, title, is_protein, registry_blastdb, now, err)?;
+        open_new_database(db, is_protein, registry_blastdb, err)?;
     }
     Ok(())
 }
@@ -1355,18 +1362,26 @@ fn add_input_and_close(
 // database of the same name that `DeleteBlastDb` could not resolve and
 // therefore left in place, which now hides the new single volume, and an
 // index file or alias file that is not a file (one that could not be created
-// or renamed, a link to a device: `CFile::Exists` asks for a regular file).
+// or renamed, a link to a device: `CFile::Exists` asks for a regular file), or
+// an index file that a failed write left short (below).
 // The other files of a volume are not opened then: one that is missing is
 // left out of the metadata (`db_files_metadata`). LOSAT
 // resolves the database here for that outcome and for the values of the
-// metadata, and it only resolves: the alias files are read and every volume is
-// located, but no volume is opened. The volumes were written a moment ago, and
+// metadata: the alias files are read, every volume is located and the header of
+// its index file is read as NCBI's reader reads it (`SeqDb::locate_one_name_metadata`),
+// but no volume is opened. The volumes were written a moment ago, and
 // LOSAT's reader holds the index of an open volume in memory (12 bytes for each
 // sequence). So the error `CSeqDB` gives for more volumes than the process may
 // hold open files ("Too many open files, please raise the open file limit",
-// exit status 2 after a complete build) is not reproduced. The totals of the
-// metadata are those of the volumes written that the database resolves to (what
-// the reader would read from their index files), and their date is the build's.
+// exit status 2 after a complete build) is not reproduced. The totals, the
+// title, the date and the version of the metadata are those the headers hold,
+// which are the writer's unless an index file's write failed: NCBI's reader
+// takes a file that ends early to be zeros up to the end of its last page
+// (a missing string is empty, a missing count is 0, a missing version is not 4
+// or 5 and ends the build with "Not a valid version 4 or 5 database."), and a
+// file of no bytes, or a read past its last page, is a fault of NCBI's
+// process (killed by SIGSEGV, no metadata file): LOSAT refuses those ("NCBI
+// crashes on it"; the files of the build stay as NCBI leaves them).
 //
 // The path is one database name (`SeqDb::locate_one_name_metadata`), which
 // departs from NCBI on purpose: `CSeqDB` splits the name at spaces and double
@@ -1379,10 +1394,8 @@ fn add_input_and_close(
 /// database and writes its metadata file.
 fn open_new_database(
     db: &BuildDatabase<'_>,
-    title: &str,
     is_protein: bool,
     registry_blastdb: Option<&str>,
-    now: &LocalTime,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     let new_db = db.output_dbname();
@@ -1396,12 +1409,16 @@ fn open_new_database(
     // of the application settings that the callers of `run_with` read before the build; a value
     // that LOSAT does not read is left out).
     let search = SearchPath::from_environment(registry_blastdb).map_err(MakedbError::Database)?;
-    let located = SeqDb::locate_one_name_metadata(new_db, seqtype, &search, &|_| {
-        Some(title.as_bytes().to_vec())
-    })
-    .map_err(MakedbError::Database)?;
-    let output_db = db.output_db();
-    let version = output_db.version();
+    let located = match SeqDb::locate_one_name_metadata(new_db, seqtype, &search) {
+        Ok(located) => located,
+        Err(LocateError::Database(error)) => return Err(MakedbError::Database(error)),
+        Err(LocateError::NcbiCrashes(path)) => {
+            return Err(MakedbError::Unsupported(format!(
+                "{}: the index file ends where NCBI's reader reads past its mapping {NCBI_CRASHES_ON_IT}",
+                path.display()
+            )))
+        }
+    };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1649-1656
     // ```c++
     //     case CSeqDB::eFilteredAll:
@@ -1433,20 +1450,9 @@ fn open_new_database(
     // ```
     // The totals are those of the volumes `CSeqDB` opened: the ones the alias file names (a
     // cut alias file names fewer than the writer made), or the one volume. Each volume's
-    // count and length are the ones its index file holds in its header, which are the writer's
-    // (`volume_totals`); no volume is opened. A volume the resolution finds that the writer did
-    // not make (one of the same name in the current directory, found first) adds nothing. The
-    // names are compared as paths (by their components: the separators of Windows).
-    let written: std::collections::HashMap<std::path::PathBuf, (u32, u64)> = output_db
-        .volume_totals()
-        .into_iter()
-        .map(|(name, oids, letters)| (std::path::PathBuf::from(name), (oids, letters)))
-        .collect();
-    let totals: Vec<(u32, u64)> = located
-        .volumes
-        .iter()
-        .filter_map(|path| written.get(std::path::Path::new(path)).copied())
-        .collect();
+    // count and length are the ones its index file holds in its header
+    // (`LocatedDatabase::volume_totals`); no volume is opened.
+    let totals = &located.volume_totals;
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1705-1747
     // ```c++
     // 	GetTotals(CSeqDB::eFilteredAll, &num_seqs, &total_length, true);
@@ -1490,7 +1496,22 @@ fn open_new_database(
         Some(off) => &new_db[off + 1..],
         None => new_db,
     };
-    let lmdb: Vec<std::path::PathBuf> = (version == DbVersion::V5)
+    let version5 = located.version5;
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1732
+    // ```c++
+    // 	CTimeFormat timeFmt = CTimeFormat::GetPredefined(CTimeFormat::eISO8601_DateTimeSec);
+    // 	CTime date(GetDate(), kBlastDbDateFormat);
+    // 	m->SetLast_updated(date.AsString(timeFmt));
+    // ```
+    // The date is the one the volumes' indexes hold; `CTime` throws where a date that a failed
+    // write cut short does not read, and makeblastdb ends with the exception (exit status
+    // 255), after the files of the build were written.
+    let last_updated = match &located.date {
+        Ok(date) => iso8601_date_time_exception(date),
+        Err(error) => Err(error.exception.clone()),
+    }
+    .map_err(|exception| MakedbError::Build(WriteDbError::Exception(exception)))?;
+    let lmdb: Vec<std::path::PathBuf> = version5
         .then(|| build_lmdb_file_name(new_db, is_protein).into())
         .into_iter()
         .collect();
@@ -1504,7 +1525,7 @@ fn open_new_database(
     let metadata = DbMetadata {
         dbname: dbname.as_bytes().to_vec(),
         dbtype: if is_protein { "Protein" } else { "Nucleotide" },
-        db_version: version.number(),
+        db_version: if version5 { 5 } else { 4 },
         description: located.title,
         number_of_letters: totals.iter().map(|(_, letters)| letters).sum(),
         // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.def:11-12
@@ -1515,10 +1536,10 @@ fn open_new_database(
         // NCBI's `GetDBMetaData` counts in an `int num_seqs` (seqdb.cpp:1707), which a
         // database of more than 2^31 - 1 sequences would overflow; LOSAT sums in `Int8`.
         number_of_sequences: totals.iter().map(|(oids, _)| i64::from(*oids)).sum(),
-        last_updated: last_updated(now),
+        last_updated,
         number_of_volumes: located.volumes.len() as i32,
-        number_of_taxids: (version == DbVersion::V5)
-            .then(|| output_db.db_tax_ids())
+        number_of_taxids: version5
+            .then(|| db.output_db().db_tax_ids())
             .filter(|tax_ids| {
                 tax_ids.len() > 1 || (tax_ids.len() == 1 && tax_ids.first() != Some(&0))
             })

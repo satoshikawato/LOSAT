@@ -524,23 +524,6 @@ pub(crate) fn db_files_metadata(
     (disk_bytes, cached_bytes, db_files)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1734
-// ```c++
-// 	CTimeFormat timeFmt = CTimeFormat::GetPredefined(CTimeFormat::eISO8601_DateTimeSec);
-// 	CTime date(GetDate(), kBlastDbDateFormat);
-// 	m->SetLast_updated(date.AsString(timeFmt));
-// ```
-// `kBlastDbDateFormat` is "b d, Y  H:m P" (seqdbcommon.hpp), the form of the date the
-// writer stores, and the ISO 8601 form is "Y-M-DTh:m:s". The stored date has no
-// seconds, so they are 00. The volumes of one build share their date.
-/// `last-updated`: the date of the index files in ISO 8601 form.
-pub(crate) fn last_updated(now: &super::time::LocalTime) -> String {
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:00",
-        now.year, now.month, now.day, now.hour, now.minute
-    )
-}
-
 /// `CIOException::EErrCode` of the serializer's buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IoErrCode {
@@ -1394,20 +1377,6 @@ mod tests {
             escaped(b"a\x1bb\x7f\xff\x00c"),
             b"\"a\\u001Bb\x7f\xff\"".to_vec()
         );
-    }
-
-    #[test]
-    fn the_date_is_iso_8601_without_seconds() {
-        let at = |hour, minute| super::super::time::LocalTime {
-            year: 2026,
-            month: 3,
-            day: 9,
-            hour,
-            minute,
-            second: 41,
-        };
-        assert_eq!(last_updated(&at(0, 5)), "2026-03-09T00:05:00");
-        assert_eq!(last_updated(&at(23, 59)), "2026-03-09T23:59:00");
     }
 
     /// A directory of its own under the system's temporary directory.
